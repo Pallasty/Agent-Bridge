@@ -816,6 +816,12 @@
       border-color: #5cc8c8;
       background: #13131d;
     }
+    #panel .neighbor-link.active {
+      color: #ffffff;
+      border-color: #a87cff;
+      border-left-color: #a87cff;
+      background: #171525;
+    }
     #panel .region-node-link:hover {
       border-color: #a87cff;
     }
@@ -846,6 +852,118 @@
     }
     #panel .region-node-score {
       color: #a87cff;
+    }
+    #panel .relation-detail {
+      margin-top: 8px;
+      padding: 10px;
+      background: #101018;
+      border: 1px solid #2a2a35;
+      border-left: 2px solid #a87cff;
+      border-radius: 4px;
+    }
+    #panel .relation-detail-header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+    #panel .relation-detail-title {
+      min-width: 0;
+      color: #e8e8ee;
+      font-size: 11px;
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #panel .relation-detail-kind {
+      color: #6a6a78;
+      font-size: 9px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    #panel .relation-detail-meta {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 5px;
+      margin-bottom: 8px;
+    }
+    #panel .relation-detail-stat {
+      min-width: 0;
+      padding: 6px 7px;
+      background: #0d0d14;
+      border: 1px solid #1f1f2a;
+      border-radius: 3px;
+    }
+    #panel .relation-detail-stat .label {
+      display: block;
+      color: #5a5a68;
+      font-size: 8px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 3px;
+    }
+    #panel .relation-detail-stat .value {
+      display: block;
+      color: #d8d8e2;
+      font-size: 10px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+    #panel .relation-edge-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-bottom: 9px;
+    }
+    #panel .relation-edge-row {
+      display: grid;
+      grid-template-columns: 74px minmax(0, 1fr) 48px;
+      gap: 7px;
+      align-items: center;
+      color: #9a9aa8;
+      font-size: 10px;
+    }
+    #panel .relation-edge-row .edge-type {
+      color: #5cc8c8;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #panel .relation-edge-row .edge-direction {
+      color: #6a6a78;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #panel .relation-edge-row .edge-weight {
+      color: #a87cff;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    #panel .relation-detail-actions {
+      display: flex;
+      justify-content: flex-end;
+    }
+    #panel .relation-detail-actions button {
+      background: #16242a;
+      border: 1px solid #4a8b9c;
+      color: #aef0f0;
+      padding: 5px 10px;
+      font-size: 10px;
+      border-radius: 3px;
+      cursor: pointer;
+      letter-spacing: 0.05em;
+      font-family: inherit;
+      transition: color 120ms, border-color 120ms, background 120ms;
+    }
+    #panel .relation-detail-actions button:hover {
+      color: #ffffff;
+      border-color: #5cc8c8;
+      background: #1e3037;
     }
     #panel .source-row {
       display: grid;
@@ -2333,6 +2451,7 @@ const state = {
   regionNodeSort: "rank",
   neighborFilter: "all",
   neighborSort: "weight",
+  relationDetailKey: null,
   // ζ-13: degree info computed once per loadGraph, consumed by both the
   // footer badge and buildCy's per-node hub/orphan marker. Stashed here
   // (rather than recomputed twice) so the two surfaces can't drift.
@@ -3048,6 +3167,7 @@ function syncRegionToFocusedNode(id) {
 
 function focusOnNode(id) {
   state.focused = id;
+  state.relationDetailKey = null;
   syncRegionToFocusedNode(id);
   document.getElementById("focus-hint").textContent =
     "focus: " + id + " · click background to release";
@@ -3063,6 +3183,7 @@ function focusOnNode(id) {
 
 function clearFocus() {
   state.focused = null;
+  state.relationDetailKey = null;
   document.getElementById("focus-hint").textContent = "";
   applyVisualState();
   renderBreadcrumb();
@@ -3083,9 +3204,20 @@ function workbenchNeighborRows(memory, graphNode) {
       kind: other.data("kind") || "unknown",
       weight: 0,
       types: new Set(),
+      edges: [],
     };
-    existing.weight = Math.max(existing.weight, edge.data("weight") || 0);
-    existing.types.add(edge.data("type") || "edge");
+    const source = edge.source().id();
+    const target = edge.target().id();
+    const type = edge.data("type") || "edge";
+    const weight = edge.data("weight") || 0;
+    const direction = source === graphNode.id()
+      ? "outbound"
+      : target === graphNode.id()
+        ? "inbound"
+        : "linked";
+    existing.weight = Math.max(existing.weight, weight);
+    existing.types.add(type);
+    existing.edges.push({ source, target, type, weight, direction });
     byKey.set(key, existing);
   });
 
@@ -3213,7 +3345,8 @@ function renderWorkbenchNeighbors(memory, graphNode) {
   return `<div id="workbench-neighbors" class="neighbor-list">` + rows.map(row => {
     const typeList = Array.from(row.types).sort().join(", ");
     const weight = row.weight > 0 ? row.weight.toFixed(2) : "link";
-    return `<button type="button" class="neighbor-link" data-neighbor-key="${escapeHTML(row.key)}">
+    const active = state.relationDetailKey === row.key ? " active" : "";
+    return `<button type="button" class="neighbor-link${active}" data-neighbor-key="${escapeHTML(row.key)}" data-relation-detail-key="${escapeHTML(row.key)}">
       <span class="neighbor-main">
         <span class="neighbor-label" title="${escapeHTML(row.key)}">${escapeHTML(row.label)}</span>
         <span class="neighbor-meta">${escapeHTML(row.kind)} · ${escapeHTML(typeList)}</span>
@@ -3223,11 +3356,80 @@ function renderWorkbenchNeighbors(memory, graphNode) {
   }).join("") + `</div>`;
 }
 
+function renderWorkbenchRelationDetail(memory, graphNode, selectedKey) {
+  if (!selectedKey) return "";
+  const row = workbenchNeighborRows(memory, graphNode).find(r => r.key === selectedKey);
+  if (!row) {
+    return `<div id="workbench-relation-detail" class="relation-detail" data-relation-detail-key="${escapeHTML(selectedKey)}">
+      <div class="relation-detail-header">
+        <span class="relation-detail-title">${escapeHTML(selectedKey)}</span>
+        <span class="relation-detail-kind">hidden</span>
+      </div>
+      <div class="relation-edge-list">
+        <div class="relation-edge-row">
+          <span class="edge-type">not visible</span>
+          <span class="edge-direction">adjust filters to inspect this relation</span>
+          <span class="edge-weight">n/a</span>
+        </div>
+      </div>
+    </div>`;
+  }
+  const typeList = Array.from(row.types).sort().join(", ");
+  const directions = Array.from(new Set(row.edges.map(e => e.direction))).sort().join(" + ");
+  const edgeCount = row.edges.length;
+  const strongest = row.edges
+    .slice()
+    .sort((a, b) => b.weight - a.weight || a.type.localeCompare(b.type))[0];
+  const strongestWeight = strongest && strongest.weight > 0
+    ? strongest.weight.toFixed(2)
+    : "link";
+  const edgeRows = row.edges
+    .slice()
+    .sort((a, b) => b.weight - a.weight || a.type.localeCompare(b.type))
+    .slice(0, 4)
+    .map(edge => {
+      const weight = edge.weight > 0 ? edge.weight.toFixed(2) : "link";
+      const path = `${edge.source} → ${edge.target}`;
+      return `<div class="relation-edge-row">
+        <span class="edge-type" title="${escapeHTML(edge.type)}">${escapeHTML(edge.type)}</span>
+        <span class="edge-direction" title="${escapeHTML(path)}">${escapeHTML(edge.direction)}</span>
+        <span class="edge-weight">${escapeHTML(weight)}</span>
+      </div>`;
+    }).join("");
+  return `<div id="workbench-relation-detail" class="relation-detail" data-relation-detail-key="${escapeHTML(row.key)}">
+    <div class="relation-detail-header">
+      <span class="relation-detail-title" title="${escapeHTML(row.key)}">${escapeHTML(row.label || row.key)}</span>
+      <span class="relation-detail-kind">${escapeHTML(row.kind)} · ${edgeCount} edge${edgeCount === 1 ? "" : "s"}</span>
+    </div>
+    <div class="relation-detail-meta">
+      <div class="relation-detail-stat">
+        <span class="label">types</span>
+        <span class="value" title="${escapeHTML(typeList)}">${escapeHTML(typeList || "edge")}</span>
+      </div>
+      <div class="relation-detail-stat">
+        <span class="label">shape</span>
+        <span class="value">${escapeHTML(directions || "linked")}</span>
+      </div>
+      <div class="relation-detail-stat">
+        <span class="label">strongest</span>
+        <span class="value">${escapeHTML(strongestWeight)}</span>
+      </div>
+    </div>
+    <div class="relation-edge-list">
+      ${edgeRows || `<div class="relation-edge-row"><span class="edge-type">edge</span><span class="edge-direction">linked</span><span class="edge-weight">n/a</span></div>`}
+    </div>
+    <div class="relation-detail-actions">
+      <button type="button" data-open-neighbor-key="${escapeHTML(row.key)}">open node</button>
+    </div>
+  </div>`;
+}
+
 function renderWorkbenchNeighborSection(memory, graphNode) {
   return `<div class="workbench-section" id="workbench-neighbor-section">
     <div class="workbench-section-title">Neighbors</div>
     ${renderWorkbenchNeighborControls()}
     ${renderWorkbenchNeighbors(memory, graphNode)}
+    ${renderWorkbenchRelationDetail(memory, graphNode, state.relationDetailKey)}
   </div>`;
 }
 
@@ -3381,6 +3583,7 @@ function showRegionWorkbench(regionId) {
   const panel = document.getElementById("panel");
   const region = state.atlasRegions.find(r => r.id === regionId);
   if (!panel || !region) return;
+  state.relationDetailKey = null;
   document.body.classList.add("workbench-open");
   panel.classList.remove("hidden");
   if (state.cy) state.cy.resize();
@@ -3552,6 +3755,7 @@ async function showSidePanel(id) {
 
 function jumpToWorkbenchNeighbor(key) {
   if (!key) return;
+  state.relationDetailKey = null;
   focusOnNode(key);
   showSidePanel(key);
   saveViewState();
@@ -3559,6 +3763,7 @@ function jumpToWorkbenchNeighbor(key) {
 
 function jumpToRegionNode(key) {
   if (!key) return;
+  state.relationDetailKey = null;
   focusOnNode(key);
   showSidePanel(key);
   saveViewState();
@@ -3607,6 +3812,7 @@ function bindWorkbenchNeighborActions(panel, memory) {
       const filter = btn.dataset.neighborFilter;
       if (!VALID_NEIGHBOR_FILTERS.has(filter)) return;
       state.neighborFilter = filter;
+      state.relationDetailKey = null;
       refreshWorkbenchNeighborSection(panel, memory);
       saveViewState();
     });
@@ -3622,7 +3828,18 @@ function bindWorkbenchNeighborActions(panel, memory) {
   });
   panel.querySelectorAll(".neighbor-link").forEach(btn => {
     btn.addEventListener("click", () => {
-      const key = btn.dataset.neighborKey;
+      const key = btn.dataset.relationDetailKey || btn.dataset.neighborKey;
+      if (!key) return;
+      state.relationDetailKey = key;
+      refreshWorkbenchNeighborSection(panel, memory);
+      const detail = panel.querySelector("#workbench-relation-detail");
+      if (detail) detail.scrollIntoView({ block: "nearest", inline: "nearest" });
+      saveViewState();
+    });
+  });
+  panel.querySelectorAll("[data-open-neighbor-key]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const key = btn.dataset.openNeighborKey;
       jumpToWorkbenchNeighbor(key);
     });
   });

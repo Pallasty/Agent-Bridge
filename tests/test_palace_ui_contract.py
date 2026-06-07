@@ -152,6 +152,19 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("strongest neighbor", html)
         self.assertIn("renderWorkbenchRelationSummary(m, graphNode)", html)
 
+    def test_neighbor_relation_detail_drills_into_edges(self):
+        html = palace_html()
+
+        self.assertIn("relationDetailKey: null", html)
+        self.assertIn("function renderWorkbenchRelationDetail(memory, graphNode, selectedKey)", html)
+        self.assertIn('id="workbench-relation-detail"', html)
+        self.assertIn("relation-detail", html)
+        self.assertIn("data-relation-detail-key", html)
+        self.assertIn("data-open-neighbor-key", html)
+        self.assertIn("state.relationDetailKey = key;", html)
+        self.assertIn("jumpToWorkbenchNeighbor(key);", html)
+        self.assertIn("open node", html)
+
 
 if __name__ == "__main__":
     unittest.main()
