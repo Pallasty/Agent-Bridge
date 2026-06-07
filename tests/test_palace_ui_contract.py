@@ -223,6 +223,16 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("visibleCount", html)
         self.assertIn("matchCount", html)
 
+    def test_graph_layout_spreads_dense_regions_and_reports_overlap(self):
+        html = palace_html()
+
+        self.assertIn("function seededGraphPositions(data)", html)
+        self.assertIn("function palaceLayoutOptions(data)", html)
+        self.assertIn("function relaxNodeOverlaps(cy", html)
+        self.assertIn("lastLayoutOverlapCount", html)
+        self.assertIn("layoutstop", html)
+        self.assertIn("overlap", html)
+
 
 if __name__ == "__main__":
     unittest.main()
