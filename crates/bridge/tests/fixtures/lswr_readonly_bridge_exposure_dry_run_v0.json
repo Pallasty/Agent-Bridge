@@ -1,0 +1,64 @@
+{
+  "schema": "agent_bridge.lswr.readonly_bridge_wrapper_exposure_dry_run.v0",
+  "descriptor_schema": "agent_bridge.lswr.readonly_bridge_wrapper_descriptor.v0",
+  "wrapper_name": "lswr_readonly_bridge_display",
+  "requested_tool_name": "lswr_readonly_bridge_display",
+  "requested_profile": "all",
+  "verdict": "accepted",
+  "applies_registry_change": false,
+  "checks": [
+    {
+      "check": "descriptor_state",
+      "verdict": "passed",
+      "required": true,
+      "evidence": "schema=agent_bridge.lswr.readonly_bridge_wrapper_descriptor.v0, state=descriptor_only, mcp_registry_change=false, requires_separate_registry_change=true"
+    },
+    {
+      "check": "registry_mode",
+      "verdict": "passed",
+      "required": true,
+      "evidence": "registry_change_mode=dry_run_only, applies_registry_change=false"
+    },
+    {
+      "check": "tool_name",
+      "verdict": "passed",
+      "required": true,
+      "evidence": "requested=lswr_readonly_bridge_display, descriptor=lswr_readonly_bridge_display, candidate=lswr_readonly_bridge_display"
+    },
+    {
+      "check": "profile_gate",
+      "verdict": "passed",
+      "required": true,
+      "evidence": "requested=all, minimum_after_registry=all, codex_essential_status=not_exposed"
+    },
+    {
+      "check": "schema_contract",
+      "verdict": "passed",
+      "required": true,
+      "evidence": "input=agent_bridge.lswr.readonly_bridge_report_packet.v0, required_input=agent_bridge.lswr.readonly_bridge_report_packet.v0, output=agent_bridge.lswr.readonly_bridge_display_model.v0, required_output=agent_bridge.lswr.readonly_bridge_display_model.v0"
+    },
+    {
+      "check": "input_safety",
+      "verdict": "passed",
+      "required": true,
+      "evidence": "mode=explicit_report_packet_payload, explicit_payload=true, host_path=false, live_runtime=false, gui_capture=false"
+    },
+    {
+      "check": "mutation_safety",
+      "verdict": "passed",
+      "required": true,
+      "evidence": "mutation=false, patch=false, action=false, invoke=false"
+    },
+    {
+      "check": "acceptance_guard",
+      "verdict": "passed",
+      "required": true,
+      "evidence": "requires_wrapper_ready=true, overall=accepted, status_tone=success, all_gate_verdict=passed"
+    }
+  ],
+  "guidance": [
+    "Dry-run request is compatible with the read-only wrapper descriptor.",
+    "No registry mutation was applied; open a separate MCP registration slice before exposing a real tool.",
+    "Keep live runtime, GUI capture, host path reads, and mutation affordances outside the wrapper."
+  ]
+}
