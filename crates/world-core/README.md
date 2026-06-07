@@ -66,16 +66,23 @@ The in-memory ledger is deliberately small. It can currently read back:
 - one event by event id;
 - events by event type;
 - events by entity, action, rollback group, or participant;
+- a neutral `world.events.query` envelope over matching event records;
 - verification records by verdict;
 - verification evidence by action id;
 - feedback by source event or action;
-- rollback records by action.
+- rollback records by action;
 - a neutral `world.evidence.query` envelope over matching events and
   verification records.
 
 This is enough for the P8 web prototype fixture and the first adapter-facing API
 examples. More query helpers should be added only when a concrete adapter or
 review surface needs them.
+
+`EventQuery` applies all supplied filters together. It can filter by event id,
+related event id, event type, world id, branch id, entity id, action id,
+participant id, rollback group, adapter, and embedded verification verdict. The
+response carries matched events and summary counts without binding the query to
+MCP, storage, streaming, or a renderer.
 
 `EvidenceQuery` applies all supplied filters together. It can filter by event
 id, action id, entity id, participant id, rollback group, verdict, method, and

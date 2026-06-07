@@ -1,3 +1,4 @@
+use crate::event_query::{EventQuery, EventQueryResponse};
 use crate::evidence_query::{EvidenceQuery, EvidenceQueryResponse};
 use crate::ids::{ActionId, EntityId, EventId, ParticipantId, RollbackGroupId};
 use crate::model::{Event, Feedback, RollbackRecord};
@@ -90,6 +91,16 @@ impl WorldLedger {
             .iter()
             .filter(|event| event.event_type == event_type)
             .collect()
+    }
+
+    pub fn query_events(&self, query: &EventQuery) -> EventQueryResponse {
+        let events = self
+            .events
+            .iter()
+            .filter(|event| query.filters.matches_event(event))
+            .cloned()
+            .collect();
+        EventQueryResponse::new(query, events)
     }
 
     pub fn query_events_by_entity(&self, entity_id: &EntityId) -> Vec<&Event> {
