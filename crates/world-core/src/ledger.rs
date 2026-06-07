@@ -1,6 +1,6 @@
-use crate::ids::{ActionId, RollbackGroupId};
+use crate::ids::{ActionId, EntityId, EventId, ParticipantId, RollbackGroupId};
 use crate::model::{Event, Feedback, RollbackRecord};
-use crate::verification::{validate_verification, Result, Verification, WorldCoreError};
+use crate::verification::{validate_verification, Result, Verdict, Verification, WorldCoreError};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
@@ -80,6 +80,10 @@ impl WorldLedger {
             .ok_or_else(|| WorldCoreError::RollbackGroupNotFound(group_id.to_string()))
     }
 
+    pub fn event_by_id(&self, event_id: &EventId) -> Option<&Event> {
+        self.events.iter().find(|event| &event.event_id == event_id)
+    }
+
     pub fn query_events_by_type(&self, event_type: &str) -> Vec<&Event> {
         self.events
             .iter()
@@ -87,10 +91,66 @@ impl WorldLedger {
             .collect()
     }
 
+    pub fn query_events_by_entity(&self, entity_id: &EntityId) -> Vec<&Event> {
+        self.events
+            .iter()
+            .filter(|event| event.refs.entities.iter().any(|id| id == entity_id))
+            .collect()
+    }
+
+    pub fn query_events_by_action(&self, action_id: &ActionId) -> Vec<&Event> {
+        self.events
+            .iter()
+            .filter(|event| event.refs.actions.iter().any(|id| id == action_id))
+            .collect()
+    }
+
+    pub fn query_events_by_rollback_group(&self, group_id: &RollbackGroupId) -> Vec<&Event> {
+        self.events
+            .iter()
+            .filter(|event| event.refs.rollback_groups.iter().any(|id| id == group_id))
+            .collect()
+    }
+
+    pub fn query_events_by_participant(&self, participant_id: &ParticipantId) -> Vec<&Event> {
+        self.events
+            .iter()
+            .filter(|event| &event.source.participant_id == participant_id)
+            .collect()
+    }
+
+    pub fn query_verifications_by_verdict(&self, verdict: Verdict) -> Vec<&Verification> {
+        self.verifications
+            .iter()
+            .filter(|verification| verification.verdict == verdict)
+            .collect()
+    }
+
     pub fn query_evidence_by_action(&self, action_id: &ActionId) -> Vec<&Verification> {
         self.verifications
             .iter()
             .filter(|verification| verification.action_id.as_ref() == Some(action_id))
+            .collect()
+    }
+
+    pub fn query_feedback_by_source_event(&self, event_id: &EventId) -> Vec<&Feedback> {
+        self.feedback
+            .iter()
+            .filter(|feedback| &feedback.source_event_id == event_id)
+            .collect()
+    }
+
+    pub fn query_feedback_by_action(&self, action_id: &ActionId) -> Vec<&Feedback> {
+        self.feedback
+            .iter()
+            .filter(|feedback| feedback.target.actions.iter().any(|id| id == action_id))
+            .collect()
+    }
+
+    pub fn query_rollbacks_by_action(&self, action_id: &ActionId) -> Vec<&RollbackRecord> {
+        self.rollback_groups
+            .values()
+            .filter(|record| record.actions.iter().any(|id| id == action_id))
             .collect()
     }
 }
