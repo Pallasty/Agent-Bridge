@@ -73,6 +73,7 @@ pub fn world_envelope_to_present_packet(
         .unwrap_or_else(|| json!({}));
     let selected_entities = selected_entities(envelope, &request);
     let patch_result = patch_result(envelope);
+    let expected_effect = expected_effect(envelope, &request);
     let action_result = envelope
         .get("action_result")
         .cloned()
@@ -104,6 +105,7 @@ pub fn world_envelope_to_present_packet(
             "verify": verify,
             "selected_entities": selected_entities,
             "patch_result": patch_result,
+            "expected_effect": expected_effect,
             "action_result": action_result,
             "source_reason": reason,
             "raw_host_response_present": raw_host_response_present,
@@ -356,6 +358,22 @@ fn patch_result(envelope: &Value) -> Value {
         }
     }
     Value::Null
+}
+
+fn expected_effect(envelope: &Value, request: &Value) -> Value {
+    for path in [
+        &["expected_effect"][..],
+        &["host_response", "expected_effect"][..],
+        &["host_response", "world.patch", "expected_effect"][..],
+        &["host_response", "world", "patch", "expected_effect"][..],
+    ] {
+        if let Some(v) = get_path(envelope, path) {
+            return v.clone();
+        }
+    }
+    get_path(request, &["world.patch", "expected_effect"])
+        .cloned()
+        .unwrap_or(Value::Null)
 }
 
 fn selected_entities(envelope: &Value, request: &Value) -> Value {
@@ -776,6 +794,72 @@ mod tests {
             packet["machine_payload"]["source_reason"],
             "render_frozen_after_patch"
         );
+    }
+
+    #[test]
+    fn world_patch_expected_effect_failure_is_preserved_in_machine_payload() {
+        let envelope = json!({
+            "schema": WORLD_TOOL_SCHEMA,
+            "ok": true,
+            "verified": false,
+            "reason": "expected_effect_clause_failed",
+            "request": {
+                "request_id": "f4-expected-effect",
+                "world.patch": {
+                    "op": "move",
+                    "entity": "bath",
+                    "args": {"cell": [8, 0]},
+                    "expected_effect": {
+                        "target": "bath",
+                        "metric": "screen_area",
+                        "to_op": ">=",
+                        "to_value": 0.25
+                    }
+                },
+                "world.visibility.query": {"entities": ["bath"]}
+            },
+            "world.patch": {
+                "requested": true,
+                "applied": true,
+                "op": "move",
+                "entity": "bath"
+            },
+            "expected_effect": {
+                "verified": false,
+                "reason": "expected_effect_clause_failed",
+                "clauses": [{
+                    "target": "bath",
+                    "metric": "screen_area",
+                    "to_op": ">=",
+                    "to_value": 0.25,
+                    "actual": 0.12,
+                    "verified": false,
+                    "reason": "expected_effect_clause_failed"
+                }]
+            },
+            "verify": {
+                "method": "live_viewport_pixel_coverage",
+                "verified_to": null,
+                "evidence": {"host_reason": "expected_effect_clause_failed"}
+            }
+        });
+        let packet = world_envelope_to_present_packet("world_patch", &envelope, opts());
+        assert_eq!(packet["verdict"], "not_verified");
+        assert_eq!(packet["reason"], "expected_effect_clause_failed");
+        assert_eq!(
+            packet["machine_payload"]["expected_effect"]["verified"],
+            false
+        );
+        assert_eq!(
+            packet["machine_payload"]["expected_effect"]["clauses"][0]["actual"],
+            json!(0.12)
+        );
+        assert_eq!(packet["machine_payload"]["patch_result"]["applied"], true);
+        assert_eq!(
+            packet["human_readable"]["warnings"],
+            json!(["expected_effect_clause_failed"])
+        );
+        assert!(packet["provenance"]["verified_to"].is_null());
     }
 
     #[test]
