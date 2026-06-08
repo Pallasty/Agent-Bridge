@@ -540,6 +540,54 @@ mod tests {
         PresentPacketOptions::new(GENERATED_AT).with_commit(COMMIT)
     }
 
+    fn expected_effect_failure_envelope() -> Value {
+        json!({
+            "schema": WORLD_TOOL_SCHEMA,
+            "ok": true,
+            "verified": false,
+            "reason": "expected_effect_clause_failed",
+            "request": {
+                "request_id": "f4-expected-effect",
+                "world.patch": {
+                    "op": "move",
+                    "entity": "bath",
+                    "args": {"cell": [8, 0]},
+                    "expected_effect": {
+                        "target": "bath",
+                        "metric": "screen_area",
+                        "to_op": ">=",
+                        "to_value": 0.25
+                    }
+                },
+                "world.visibility.query": {"entities": ["bath"]}
+            },
+            "world.patch": {
+                "requested": true,
+                "applied": true,
+                "op": "move",
+                "entity": "bath"
+            },
+            "expected_effect": {
+                "verified": false,
+                "reason": "expected_effect_clause_failed",
+                "clauses": [{
+                    "target": "bath",
+                    "metric": "screen_area",
+                    "to_op": ">=",
+                    "to_value": 0.25,
+                    "actual": 0.12,
+                    "verified": false,
+                    "reason": "expected_effect_clause_failed"
+                }]
+            },
+            "verify": {
+                "method": "live_viewport_pixel_coverage",
+                "verified_to": null,
+                "evidence": {"host_reason": "expected_effect_clause_failed"}
+            }
+        })
+    }
+
     #[test]
     fn verified_visibility_maps_to_verified_packet() {
         let envelope = json!({
@@ -798,51 +846,7 @@ mod tests {
 
     #[test]
     fn world_patch_expected_effect_failure_is_preserved_in_machine_payload() {
-        let envelope = json!({
-            "schema": WORLD_TOOL_SCHEMA,
-            "ok": true,
-            "verified": false,
-            "reason": "expected_effect_clause_failed",
-            "request": {
-                "request_id": "f4-expected-effect",
-                "world.patch": {
-                    "op": "move",
-                    "entity": "bath",
-                    "args": {"cell": [8, 0]},
-                    "expected_effect": {
-                        "target": "bath",
-                        "metric": "screen_area",
-                        "to_op": ">=",
-                        "to_value": 0.25
-                    }
-                },
-                "world.visibility.query": {"entities": ["bath"]}
-            },
-            "world.patch": {
-                "requested": true,
-                "applied": true,
-                "op": "move",
-                "entity": "bath"
-            },
-            "expected_effect": {
-                "verified": false,
-                "reason": "expected_effect_clause_failed",
-                "clauses": [{
-                    "target": "bath",
-                    "metric": "screen_area",
-                    "to_op": ">=",
-                    "to_value": 0.25,
-                    "actual": 0.12,
-                    "verified": false,
-                    "reason": "expected_effect_clause_failed"
-                }]
-            },
-            "verify": {
-                "method": "live_viewport_pixel_coverage",
-                "verified_to": null,
-                "evidence": {"host_reason": "expected_effect_clause_failed"}
-            }
-        });
+        let envelope = expected_effect_failure_envelope();
         let packet = world_envelope_to_present_packet("world_patch", &envelope, opts());
         assert_eq!(packet["verdict"], "not_verified");
         assert_eq!(packet["reason"], "expected_effect_clause_failed");
@@ -860,6 +864,54 @@ mod tests {
             json!(["expected_effect_clause_failed"])
         );
         assert!(packet["provenance"]["verified_to"].is_null());
+    }
+
+    #[test]
+    fn review_artifact_preserves_expected_effect_failure_for_present_compatibility() {
+        let envelope = expected_effect_failure_envelope();
+        let packet = world_envelope_to_present_packet("world_patch", &envelope, opts());
+        let args = present_packet_review_args(&packet, false);
+        assert_eq!(args["kind"], "html");
+        assert_eq!(args["payload"]["verdict"], "not_verified");
+        assert_eq!(args["payload"]["reason"], "expected_effect_clause_failed");
+        assert_eq!(
+            args["payload"]["machine_payload"]["expected_effect"]["verified"],
+            false
+        );
+        assert!(args["payload"]["provenance"]["verified_to"].is_null());
+        assert_eq!(args["payload"]["ingestion"]["allowed"], false);
+        assert_eq!(args["provenance"]["verdict"], "not_verified");
+        assert_eq!(
+            args["provenance"]["reason"],
+            "expected_effect_clause_failed"
+        );
+
+        let html = crate::present::build_html(
+            crate::present::PresentKind::Html,
+            args["artifact"].as_str().expect("artifact"),
+            args["title"].as_str(),
+            Some(&args["payload"]),
+            Some(&args["provenance"]),
+        );
+        let payload = crate::present::extract_ab_payload(&html).expect("payload");
+        let region = crate::present::render_region(&html).expect("render region");
+        assert_eq!(payload["verdict"], "not_verified");
+        assert_eq!(payload["reason"], "expected_effect_clause_failed");
+        assert_eq!(
+            payload["machine_payload"]["expected_effect"]["verified"],
+            false
+        );
+        assert_eq!(
+            payload["machine_payload"]["expected_effect"]["clauses"][0]["actual"],
+            json!(0.12)
+        );
+        assert!(payload["provenance"]["verified_to"].is_null());
+        assert_eq!(payload["ingestion"]["allowed"], false);
+        assert!(region.contains("Unconfirmed"));
+        assert!(region.contains("expected_effect_clause_failed"));
+        assert!(region.contains("Ingestion blocked"));
+        assert!(!region.contains("verified successfully"));
+        assert!(!region.contains("World patch verified"));
     }
 
     #[test]
