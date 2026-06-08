@@ -2696,6 +2696,33 @@ function computeAtlasRegions(data) {
     .slice(0, 18);
 }
 
+function computeAtlasDistrictAnchors(data, degInfo) {
+  const anchors = new Map();
+  const scores = new Map();
+  const districtRegionIds = new Set((state.atlasRegions || []).map(r => r.id));
+  for (const n of (data.nodes || [])) {
+    const region = atlasRegionForNode(n);
+    if (districtRegionIds.size && !districtRegionIds.has(region)) continue;
+    const degree = (degInfo && degInfo.degreeMap && degInfo.degreeMap[n.id]) || 0;
+    const access = n.access || 0;
+    const importance = n.importance || 0.5;
+    const score = degree * 4 + Math.log1p(access) * 3 + importance * 10;
+    const current = scores.get(region);
+    if (!current || score > current.score || (score === current.score && String(n.id).localeCompare(current.id) < 0)) {
+      scores.set(region, { id: n.id, score });
+      anchors.set(region, n.id);
+    }
+  }
+  return anchors;
+}
+
+function isAtlasDistrictOverview() {
+  return state.viewPreset === "overview" &&
+    !state.activeRegion &&
+    !state.focused &&
+    state.search.trim() === "";
+}
+
 function renderBreadcrumb() {
   const el = document.getElementById("breadcrumb");
   if (!el) return;
@@ -2782,11 +2809,23 @@ function zoomToAtlasRegion(regionId) {
   }
 }
 
+function panAtlasOverviewAwayFromPanels() {
+  if (!state.cy || !isAtlasDistrictOverview()) return;
+  const atlasPanel = document.getElementById("atlas-panel");
+  const leftInset = atlasPanel ? atlasPanel.getBoundingClientRect().right : 0;
+  if (!Number.isFinite(leftInset) || leftInset <= 0) return;
+  const shift = clampNumber(leftInset * 0.48, 120, 190);
+  const pan = state.cy.pan();
+  state.cy.animate({ pan: { x: pan.x + shift, y: pan.y }, duration: 180, easing: "ease-out" });
+}
+
 function zoomToVisibleGraph() {
   if (!state.cy) return;
-  const visible = state.cy.nodes().not(".faded");
+  const visible = state.cy.nodes().filter(n => !n.hasClass("faded") && !n.hasClass("atlas-detail-muted"));
   if (visible.length > 0) {
-    state.cy.animate({ fit: { eles: visible, padding: 70 }, duration: 360, easing: "ease-out" });
+    const atlasOverview = isAtlasDistrictOverview();
+    state.cy.animate({ fit: { eles: visible, padding: atlasOverview ? 110 : 70 }, duration: 360, easing: "ease-out" });
+    if (atlasOverview) window.setTimeout(panAtlasOverviewAwayFromPanels, 390);
   }
 }
 
@@ -3462,6 +3501,9 @@ function runPalaceLayout(data) {
 }
 
 function labelForZoom(node, zoom) {
+  if (isAtlasDistrictOverview() && node.data("atlasDistrictAnchor")) {
+    return node.data("districtLabel") || node.data("label") || node.id();
+  }
   const d = node.data();
   const label = d.label || d.id || "";
   if (!label) return "";
@@ -3506,6 +3548,10 @@ function updateZoomScaledNodeMetrics() {
       const displayLabel = labelForZoom(node, zoom);
       node.data("displayLabel", displayLabel);
       node.data("labelOpacity", displayLabel ? 1 : 0);
+      node.data("districtLabelSize", clampNumber(11 / zoom, 11, 11 / 0.15));
+      node.data("districtLabelMarginY", clampNumber(12 / zoom, 12, 12 / 0.15));
+      node.data("districtLabelOutlineWidth", clampNumber(2 / zoom, 2, 2 / 0.15));
+      node.data("districtLabelMaxWidth", clampNumber(180 / zoom, 180, 180 / 0.15));
     });
   });
 }
@@ -3526,9 +3572,11 @@ function buildCy(data) {
   // compute if buildCy is ever called outside that path (defensive).
   const degInfo = state.degrees || computeDegrees(data);
   const seededPositions = seededGraphPositions(data);
+  const districtAnchors = computeAtlasDistrictAnchors(data, degInfo);
 
   const elements = [
     ...data.nodes.map(n => {
+      const region = atlasRegionForNode(n);
       const access = n.access || 0;
       const lastAccessed = n.last_accessed || 0;
       const ageSecs = lastAccessed > 0 ? (nowSecs - lastAccessed) : Number.MAX_SAFE_INTEGER;
@@ -3545,6 +3593,7 @@ function buildCy(data) {
       const halo = haloPad(access);
       const screenGlyphSize = nodeGlyphScreenSizeFromSize(size);
       const screenHaloPad = nodeHaloScreenPadFromPad(halo);
+      const atlasDistrictAnchor = districtAnchors.get(region) === n.id ? 1 : 0;
       return {
         data: {
           id: n.id,
@@ -3558,13 +3607,19 @@ function buildCy(data) {
           displaySize: screenGlyphSize,
           displayLabel: n.label || n.id,
           labelOpacity: 1,
+          districtLabelSize: 11,
+          districtLabelMarginY: 12,
+          districtLabelOutlineWidth: 2,
+          districtLabelMaxWidth: 180,
           haloPad: halo,
           screenHaloPad,
           displayHaloPad: screenHaloPad,
           haloOp: haloOp(access),
           source: n.source || "sqlite",
           tags: n.tags || [],
-          region: atlasRegionForNode(n),
+          region,
+          districtLabel: atlasLabel(region),
+          atlasDistrictAnchor,
           fresh,
           stale,
           orphan,
@@ -3653,6 +3708,37 @@ function buildCy(data) {
         "border-width": 3,
         "border-opacity": 0.95,
       }},
+      { selector: "node.atlas-detail-muted", style: {
+        "display": "none",
+        "opacity": 0.18,
+        "text-opacity": 0,
+        "overlay-opacity": 0.02,
+        "z-index": 1,
+      }},
+      { selector: "node.atlas-district-anchor", style: {
+        "opacity": 1,
+        "border-style": "solid",
+        "border-color": "data(color)",
+        "border-width": 3,
+        "border-opacity": 1,
+        "label": "data(districtLabel)",
+        "text-opacity": 1,
+        "color": "#e4e4e8",
+        "font-size": "data(districtLabelSize)",
+        "font-weight": "bold",
+        "text-margin-y": "data(districtLabelMarginY)",
+        "text-max-width": "data(districtLabelMaxWidth)",
+        "text-wrap": "wrap",
+        "text-justification": "center",
+        "text-outline-color": "#080911",
+        "text-outline-width": "data(districtLabelOutlineWidth)",
+        "text-background-color": "#080911",
+        "text-background-opacity": 0.72,
+        "text-background-padding": 2,
+        "overlay-padding": 5,
+        "overlay-opacity": 0.18,
+        "z-index": 700,
+      }},
       { selector: "node.faded", style: {
         "opacity": 0.08, "text-opacity": 0,
       }},
@@ -3729,6 +3815,11 @@ function buildCy(data) {
         "width":   "mapData(weight, 0.2, 0.9, 0.5, 1.6)",
       }},
       { selector: "edge.faded", style: { "opacity": 0.04 }},
+      { selector: "edge.atlas-detail-muted", style: {
+        "display": "none",
+        "opacity": 0.025,
+        "width": 0.35,
+      }},
       { selector: "edge.focus-edge", style: {
         "line-color": "#9a9aa8", "opacity": 0.85, "width": 2,
       }},
@@ -3752,6 +3843,10 @@ function buildCy(data) {
   updateZoomScaledNodeMetrics();
   state.cy.on("zoom", scheduleZoomScaledNodeMetrics);
   state.cy.on("tap", "node", (evt) => {
+    if (isAtlasDistrictOverview() && evt.target.data("atlasDistrictAnchor")) {
+      selectAtlasRegion(evt.target.data("region"));
+      return;
+    }
     const id = evt.target.id();
     focusOnNode(id);
     showSidePanel(id);
@@ -3906,14 +4001,14 @@ function graphViewportStats() {
   if (!state.cy) return base;
   const nodes = state.cy.nodes();
   const edges = state.cy.edges();
-  const visibleNodes = nodes.filter(n => !n.hasClass("faded"));
+  const visibleNodes = nodes.filter(n => !n.hasClass("faded") && !n.hasClass("atlas-detail-muted"));
   const screenOverlap = countScreenNodeOverlaps(visibleNodes);
   state.lastScreenOverlapCount = screenOverlap.count;
   state.lastScreenOverlapRatio = screenOverlap.ratio;
   return {
     totalCount: nodes.length,
     visibleCount: visibleNodes.length,
-    edgeVisibleCount: edges.filter(e => !e.hasClass("faded")).length,
+    edgeVisibleCount: edges.filter(e => !e.hasClass("faded") && !e.hasClass("atlas-detail-muted")).length,
     matchCount: nodes.filter(n => n.hasClass("match") && !n.hasClass("faded")).length,
     visualMs: state.lastVisualPassMs,
     overlapCount: state.lastLayoutOverlapCount,
@@ -3948,15 +4043,19 @@ function renderViewHealth(stats) {
 // overrides (focus-center / focus-neighbor / focus-edge / faded).
 function applyVisualState() {
   if (!state.cy) {
+    document.body.classList.remove("atlas-district-overview");
     renderViewHealth(graphViewportStats());
     return;
   }
   const visualStartedAt = performance.now();
   const cy = state.cy;
   const term = state.search.trim().toLowerCase();
+  const atlasOverview = isAtlasDistrictOverview();
+  document.body.classList.toggle("atlas-district-overview", atlasOverview);
+  updateZoomScaledNodeMetrics();
 
   // Reset classes.
-  cy.elements().removeClass("faded match focus-center focus-neighbor focus-edge");
+  cy.elements().removeClass("faded match focus-center focus-neighbor focus-edge atlas-detail-muted atlas-district-anchor");
 
   // Filter-fade: nodes failing source/kind get .faded.
   cy.nodes().forEach(n => {
@@ -3994,6 +4093,16 @@ function applyVisualState() {
       if (e.source().hasClass("faded") || e.target().hasClass("faded")) {
         e.addClass("faded");
       }
+    });
+  }
+
+  if (atlasOverview) {
+    cy.nodes().not(".faded").forEach(n => {
+      if (n.data("atlasDistrictAnchor")) n.addClass("atlas-district-anchor");
+      else n.addClass("atlas-detail-muted");
+    });
+    cy.edges().not(".faded").forEach(e => {
+      e.addClass("atlas-detail-muted");
     });
   }
 
