@@ -2246,6 +2246,14 @@
     #footer .view-health.good { color: #5cc89a; }
     #footer .view-health.warn { color: #c8a96a; }
     #footer .view-health.slow { color: #d88080; }
+    #footer .semantic-bus {
+      color: #4a4a55;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      white-space: nowrap;
+    }
+    #footer .semantic-bus.ok { color: #5cc89a; }
+    #footer .semantic-bus.changed { color: #c8a96a; }
+    #footer .semantic-bus.error { color: #d88080; }
   </style>
 </head>
 <body>
@@ -2392,6 +2400,7 @@
   <div id="footer">
     <span>circles = sqlite · rounded squares = markdown · cyan dotted = co-activation</span>
     <span class="embedding-stats" id="embedding-stats" title="embedding backend distribution across active memories"></span>
+    <span id="semantic-bus" class="semantic-bus" title="semantic system bus read-only graph diff"></span>
     <span id="view-health" class="view-health" title="visible graph state and last visual refresh cost"></span>
     <span class="hint" id="focus-hint"></span>
   </div>
@@ -3013,6 +3022,84 @@ async function loadEmbeddingStats() {
   }
 }
 
+const PALACE_SEMANTIC_BASELINE_KEY = "palace.semantic-bus-baseline:v1";
+
+function readSemanticBusBaseline() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PALACE_SEMANTIC_BASELINE_KEY) || "{}") || {};
+    return {
+      nodes: Number.isFinite(raw.nodes) ? raw.nodes : null,
+      edges: Number.isFinite(raw.edges) ? raw.edges : null,
+      orphan_nodes: Number.isFinite(raw.orphan_nodes) ? raw.orphan_nodes : null,
+      hub_nodes: Number.isFinite(raw.hub_nodes) ? raw.hub_nodes : null,
+    };
+  } catch (e) {
+    return { nodes: null, edges: null, orphan_nodes: null, hub_nodes: null };
+  }
+}
+
+function writeSemanticBusBaseline(current) {
+  if (!current || typeof current !== "object") return;
+  try {
+    localStorage.setItem(PALACE_SEMANTIC_BASELINE_KEY, JSON.stringify({
+      nodes: Number(current.nodes) || 0,
+      edges: Number(current.edges) || 0,
+      orphan_nodes: Number(current.orphan_nodes) || 0,
+      hub_nodes: Number(current.hub_nodes) || 0,
+      observed_at: Math.floor(Date.now() / 1000),
+    }));
+  } catch (e) {
+    // localStorage is an optional read-only diff baseline.
+  }
+}
+
+function signedDelta(n) {
+  const value = Number(n) || 0;
+  if (value === 0) return "0";
+  return value > 0 ? `+${value}` : `${value}`;
+}
+
+// SSB-2 — read-only Palace semantic bus pilot. The server emits semantic
+// objects/events/diff/verification/presentation; this footer keeps only a
+// compact human pulse and stores the next baseline in localStorage.
+async function loadSemanticBusStats() {
+  const el = document.getElementById("semantic-bus");
+  if (!el) return;
+  const baseline = readSemanticBusBaseline();
+  const params = new URLSearchParams();
+  if (state.includeSkills) params.set("all", "1");
+  if (baseline.nodes != null) params.set("baseline_nodes", String(baseline.nodes));
+  if (baseline.edges != null) params.set("baseline_edges", String(baseline.edges));
+  if (baseline.orphan_nodes != null) params.set("baseline_orphans", String(baseline.orphan_nodes));
+  if (baseline.hub_nodes != null) params.set("baseline_hubs", String(baseline.hub_nodes));
+  const url = `/api/semantic-events${params.toString() ? "?" + params.toString() : ""}`;
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const j = await r.json();
+    const current = j && j.diff && j.diff.current ? j.diff.current : {};
+    const delta = j && j.diff && j.diff.delta ? j.diff.delta : {};
+    const events = Array.isArray(j.events) ? j.events.length : 0;
+    const objects = Array.isArray(j.semantic_objects) ? j.semantic_objects.length : 0;
+    const verified = j && j.verification && j.verification.verdict === "verified";
+    const changed = !!(j && j.diff && j.diff.changed);
+    const stateLabel = verified ? (changed ? "changed" : "verified") : "unverified";
+    el.textContent =
+      `bus:${stateLabel} · obj:${objects} · evt:${events} · ` +
+      `dn:${signedDelta(delta.nodes)} de:${signedDelta(delta.edges)} ` +
+      `do:${signedDelta(delta.orphan_nodes)} dh:${signedDelta(delta.hub_nodes)}`;
+    el.title =
+      `Semantic bus ${stateLabel}: ${current.nodes || 0} nodes, ${current.edges || 0} edges, ` +
+      `${current.orphan_nodes || 0} orphans, ${current.hub_nodes || 0} hubs`;
+    el.className = `semantic-bus ${verified ? (changed ? "changed" : "ok") : "error"}`;
+    writeSemanticBusBaseline(current);
+  } catch (e) {
+    el.textContent = "bus:error";
+    el.title = `semantic bus fetch failed: ${e && e.message ? e.message : e}`;
+    el.className = "semantic-bus error";
+  }
+}
+
 async function loadGraph() {
   const url = state.includeSkills ? "/api/graph?all=1" : "/api/graph";
   let data;
@@ -3074,6 +3161,7 @@ async function loadGraph() {
     ? ` · <span style="color:#7a7a85" title="no explicit edges — candidates for memory_link_orphans or archive">${state.degrees.orphanCount} orphans</span>`
     : "";
   document.getElementById("stats").innerHTML = baseLabel + freshBadge + staleBadge + hubBadge + orphanBadge;
+  await loadSemanticBusStats();
 
   // C8: stale-review button reflects staleCount. has-stale = clickable;
   // empty = dim affordance (still visible so users learn the entry point).

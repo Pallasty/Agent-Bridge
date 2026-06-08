@@ -51,8 +51,9 @@ use axum::{
 };
 use serde::{de, Deserialize};
 use serde_json::{json, Value};
-use std::collections::{HashSet, VecDeque};
+use std::collections::{hash_map::DefaultHasher, HashSet, VecDeque};
 use std::fs;
+use std::hash::{Hash, Hasher};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -115,6 +116,7 @@ pub async fn run(
         .route("/", get(index))
         .route("/healthz", get(healthz))
         .route("/api/graph", get(api_graph))
+        .route("/api/semantic-events", get(api_semantic_events))
         .route("/api/memory/:key", get(api_memory))
         .route("/api/annotate", post(api_annotate))
         .route("/api/reports", get(api_reports))
@@ -332,6 +334,13 @@ async fn api_graph(
     State(s): State<AppState>,
     Query(q): Query<GraphQuery>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
+    build_graph_snapshot(&s, q.all).await.map(Json)
+}
+
+async fn build_graph_snapshot(
+    s: &AppState,
+    include_catalog: bool,
+) -> Result<Value, (StatusCode, String)> {
     // ── sqlite layer ────────────────────────────────────────────────────
     let nodes = s
         .store
@@ -357,7 +366,7 @@ async fn api_graph(
     let active_all: Vec<_> = nodes
         .into_iter()
         .filter(|m| m.status == "active")
-        .filter(|m| q.all || m.kind != "skill")
+        .filter(|m| include_catalog || m.kind != "skill")
         .collect();
     const CATALOG_KINDS: &[&str] = &["skill"];
     let (catalog_nodes, working_nodes): (Vec<_>, Vec<_>) = active_all
@@ -547,7 +556,7 @@ async fn api_graph(
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
 
-    Ok(Json(json!({
+    Ok(json!({
         "nodes": nodes_json,
         "edges": edges_json,
         "now":   now_secs,
@@ -558,7 +567,288 @@ async fn api_graph(
             "markdown_edges": md_edges.len(),
             "coact_edges":    coact_edges.len(),
         }
-    })))
+    }))
+}
+
+#[derive(Deserialize, Default)]
+struct SemanticEventsQuery {
+    /// `?all=1` mirrors `/api/graph?all=1`.
+    #[serde(default)]
+    #[serde(deserialize_with = "deserialize_boolish")]
+    all: bool,
+    /// Optional client-provided previous counts. The endpoint stays read-only:
+    /// callers that want a diff carry their own baseline, typically via
+    /// localStorage or an external monitor.
+    #[serde(default)]
+    baseline_nodes: Option<i64>,
+    #[serde(default)]
+    baseline_edges: Option<i64>,
+    #[serde(default)]
+    baseline_orphans: Option<i64>,
+    #[serde(default)]
+    baseline_hubs: Option<i64>,
+}
+
+async fn api_semantic_events(
+    State(s): State<AppState>,
+    Query(q): Query<SemanticEventsQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let graph = build_graph_snapshot(&s, q.all).await?;
+    Ok(Json(build_palace_semantic_events(&graph, &q)))
+}
+
+fn vi64(v: &Value) -> Option<i64> {
+    v.as_i64().or_else(|| v.as_u64().and_then(|n| i64::try_from(n).ok()))
+}
+
+fn palace_graph_stats(graph: &Value) -> Value {
+    let nodes = graph
+        .get("nodes")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let edges = graph
+        .get("edges")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let now_secs = vi64(graph.get("now").unwrap_or(&Value::Null)).unwrap_or(0);
+    let mut degree_keys: HashSet<String> = nodes
+        .iter()
+        .filter_map(|n| n.get("id").and_then(Value::as_str).map(str::to_string))
+        .collect();
+    let mut degree_map = std::collections::HashMap::<String, i64>::new();
+    for key in &degree_keys {
+        degree_map.insert(key.clone(), 0);
+    }
+
+    let mut coactivation_edges = 0i64;
+    let mut explicit_edges = 0i64;
+    for e in &edges {
+        let edge_type = e.get("type").and_then(Value::as_str).unwrap_or("untyped");
+        if edge_type == "coactivation" {
+            coactivation_edges += 1;
+            continue;
+        }
+        explicit_edges += 1;
+        let Some(source) = e.get("source").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(target) = e.get("target").and_then(Value::as_str) else {
+            continue;
+        };
+        if degree_keys.contains(source) {
+            *degree_map.entry(source.to_string()).or_insert(0) += 1;
+        }
+        if degree_keys.contains(target) {
+            *degree_map.entry(target.to_string()).or_insert(0) += 1;
+        }
+    }
+    degree_keys.clear();
+
+    let mut sqlite_nodes = 0i64;
+    let mut markdown_nodes = 0i64;
+    let mut fresh_nodes = 0i64;
+    let mut stale_nodes = 0i64;
+    const FRESH_WINDOW_SECS: i64 = 3600;
+    const STALE_WINDOW_SECS: i64 = 7 * 24 * 3600;
+    for n in &nodes {
+        match n.get("source").and_then(Value::as_str).unwrap_or("") {
+            "sqlite" => sqlite_nodes += 1,
+            "markdown" => markdown_nodes += 1,
+            _ => {}
+        }
+        let last_accessed = vi64(n.get("last_accessed").unwrap_or(&Value::Null)).unwrap_or(0);
+        if last_accessed > 0 {
+            let age = now_secs.saturating_sub(last_accessed);
+            if age < FRESH_WINDOW_SECS {
+                fresh_nodes += 1;
+            }
+            if age > STALE_WINDOW_SECS {
+                stale_nodes += 1;
+            }
+        }
+    }
+
+    let connected: Vec<i64> = degree_map.values().copied().filter(|d| *d > 0).collect();
+    let orphan_nodes = degree_map.values().filter(|d| **d == 0).count() as i64;
+    let mut sorted = connected.clone();
+    sorted.sort_unstable();
+    let p95_idx = sorted.len().saturating_sub(1).min(sorted.len() * 95 / 100);
+    let p95 = sorted.get(p95_idx).copied().unwrap_or(0);
+    let hub_threshold = 5.max(p95);
+    let enable_hubs = connected.len() >= 20;
+    let hub_nodes = if enable_hubs {
+        degree_map.values().filter(|d| **d >= hub_threshold).count() as i64
+    } else {
+        0
+    };
+    let node_count = nodes.len() as i64;
+    let edge_count = edges.len() as i64;
+    let connected_ratio = if node_count > 0 {
+        (node_count - orphan_nodes) as f64 / node_count as f64
+    } else {
+        0.0
+    };
+    let explicit_density = explicit_edges as f64 / node_count.max(1) as f64;
+
+    json!({
+        "nodes": node_count,
+        "edges": edge_count,
+        "sqlite_nodes": sqlite_nodes,
+        "markdown_nodes": markdown_nodes,
+        "explicit_edges": explicit_edges,
+        "coactivation_edges": coactivation_edges,
+        "orphan_nodes": orphan_nodes,
+        "hub_nodes": hub_nodes,
+        "fresh_nodes": fresh_nodes,
+        "stale_nodes": stale_nodes,
+        "hub_threshold": hub_threshold,
+        "connected_ratio": (connected_ratio * 1000.0).round() / 1000.0,
+        "explicit_density": (explicit_density * 1000.0).round() / 1000.0,
+    })
+}
+
+fn semantic_hash(value: &Value) -> String {
+    let mut hasher = DefaultHasher::new();
+    serde_json::to_string(value)
+        .unwrap_or_else(|_| value.to_string())
+        .hash(&mut hasher);
+    format!("read_only_default_hasher:{:016x}", hasher.finish())
+}
+
+fn delta_json(current: &Value, baseline: &Value, key: &str) -> Value {
+    let cur = vi64(current.get(key).unwrap_or(&Value::Null)).unwrap_or(0);
+    let base = vi64(baseline.get(key).unwrap_or(&Value::Null)).unwrap_or(cur);
+    json!(cur - base)
+}
+
+fn build_palace_semantic_events(graph: &Value, q: &SemanticEventsQuery) -> Value {
+    let now_secs = vi64(graph.get("now").unwrap_or(&Value::Null)).unwrap_or(0);
+    let current = palace_graph_stats(graph);
+    let baseline = json!({
+        "nodes": q.baseline_nodes.unwrap_or_else(|| vi64(current.get("nodes").unwrap_or(&Value::Null)).unwrap_or(0)),
+        "edges": q.baseline_edges.unwrap_or_else(|| vi64(current.get("edges").unwrap_or(&Value::Null)).unwrap_or(0)),
+        "orphan_nodes": q.baseline_orphans.unwrap_or_else(|| vi64(current.get("orphan_nodes").unwrap_or(&Value::Null)).unwrap_or(0)),
+        "hub_nodes": q.baseline_hubs.unwrap_or_else(|| vi64(current.get("hub_nodes").unwrap_or(&Value::Null)).unwrap_or(0)),
+    });
+    let delta = json!({
+        "nodes": delta_json(&current, &baseline, "nodes"),
+        "edges": delta_json(&current, &baseline, "edges"),
+        "orphan_nodes": delta_json(&current, &baseline, "orphan_nodes"),
+        "hub_nodes": delta_json(&current, &baseline, "hub_nodes"),
+    });
+    let changed = delta
+        .as_object()
+        .map(|m| m.values().any(|v| vi64(v).unwrap_or(0) != 0))
+        .unwrap_or(false);
+    let event_id = format!("evt-palace-graph-observed-{now_secs}");
+    let diff_event_id = format!("evt-palace-graph-diff-{now_secs}");
+    let object_id = "palace:memory-graph";
+    let current_hash = semantic_hash(&current);
+
+    json!({
+        "schema": "agent_bridge.semantic_bus.palace_diff.v0",
+        "source_adapter": "palace.memory_graph",
+        "observed_at": now_secs,
+        "semantic_objects": [
+            {
+                "schema": "agent_bridge.semantic_bus.object.v0",
+                "object_id": object_id,
+                "object_type": "palace.memory_graph",
+                "source_adapter": "palace.memory_graph",
+                "label": "Palace memory graph",
+                "state": current,
+                "relations": [
+                    { "type": "source_layer", "target": "palace:memory-source:sqlite" },
+                    { "type": "source_layer", "target": "palace:memory-source:markdown" },
+                    { "type": "edge_layer", "target": "palace:edge-layer:coactivation" }
+                ],
+                "confidence": 1.0,
+                "observed_at": now_secs,
+                "provenance": {
+                    "endpoint": "/api/semantic-events",
+                    "graph_endpoint": "/api/graph",
+                    "hash": current_hash
+                }
+            }
+        ],
+        "events": [
+            {
+                "event_id": event_id,
+                "ts": now_secs,
+                "source": "palace",
+                "actor": "palace_viewer",
+                "project": null,
+                "event_type": "palace.graph.observed",
+                "subject_id": object_id,
+                "payload_json": current,
+                "source_event_ids": [],
+                "prev_hash": null,
+                "hash": current_hash
+            },
+            {
+                "event_id": diff_event_id,
+                "ts": now_secs,
+                "source": "palace",
+                "actor": "palace_viewer",
+                "project": null,
+                "event_type": if changed { "palace.graph.diff.changed" } else { "palace.graph.diff.unchanged" },
+                "subject_id": object_id,
+                "payload_json": {
+                    "baseline": baseline,
+                    "current": current,
+                    "delta": delta,
+                    "changed": changed
+                },
+                "source_event_ids": [event_id],
+                "prev_hash": null,
+                "hash": semantic_hash(&json!({ "current": current, "delta": delta, "changed": changed }))
+            }
+        ],
+        "diff": {
+            "baseline": baseline,
+            "current": current,
+            "delta": delta,
+            "changed": changed
+        },
+        "verification": {
+            "verdict": "verified",
+            "reason": "palace_graph_snapshot_normalized",
+            "method": "server_side_graph_builder",
+            "evidence": {
+                "raw_nodes": graph.get("nodes").and_then(Value::as_array).map(Vec::len).unwrap_or(0),
+                "raw_edges": graph.get("edges").and_then(Value::as_array).map(Vec::len).unwrap_or(0),
+                "stats": graph.get("stats").cloned().unwrap_or(Value::Null)
+            },
+            "verified_to": "semantic_objects/events/diff",
+            "recover": "proceed",
+            "raw_available": true
+        },
+        "presentation": {
+            "presentation_id": format!("present-palace-graph-{now_secs}"),
+            "source_event_ids": [event_id, diff_event_id],
+            "human_summary": if changed { "Palace graph changed relative to caller baseline." } else { "Palace graph matches caller baseline." },
+            "machine_payload": {
+                "object_id": object_id,
+                "diff": {
+                    "nodes": delta_json(&current, &baseline, "nodes"),
+                    "edges": delta_json(&current, &baseline, "edges"),
+                    "orphan_nodes": delta_json(&current, &baseline, "orphan_nodes"),
+                    "hub_nodes": delta_json(&current, &baseline, "hub_nodes")
+                }
+            },
+            "ingestion": {
+                "suggested_kind": "observation",
+                "write_policy": "read_only_no_auto_memory_write"
+            },
+            "artifact": {
+                "type": "http_json",
+                "href": "/api/semantic-events"
+            },
+            "created_at": now_secs
+        }
+    })
 }
 
 // ── Single-memory endpoint ───────────────────────────────────────────────
@@ -1979,6 +2269,96 @@ mod tests {
         assert!(!q.all);
         let q: GraphQuery = serde_json::from_value(json!({})).unwrap();
         assert!(!q.all);
+    }
+
+    #[test]
+    fn semantic_events_report_palace_graph_diff() {
+        let graph = json!({
+            "now": 700000,
+            "nodes": [
+                {
+                    "id": "a",
+                    "kind": "lesson",
+                    "label": "a",
+                    "source": "sqlite",
+                    "last_accessed": 699990,
+                    "tags": []
+                },
+                {
+                    "id": "b",
+                    "kind": "decision",
+                    "label": "b",
+                    "source": "sqlite",
+                    "last_accessed": 1,
+                    "tags": []
+                },
+                {
+                    "id": "c",
+                    "kind": "project",
+                    "label": "c",
+                    "source": "markdown",
+                    "last_accessed": 0,
+                    "tags": []
+                }
+            ],
+            "edges": [
+                { "source": "a", "target": "b", "type": "references", "weight": 0.7 },
+                { "source": "b", "target": "c", "type": "coactivation", "weight": 0.2 }
+            ],
+            "stats": {
+                "sqlite_nodes": 2,
+                "markdown_nodes": 1,
+                "sqlite_edges": 1,
+                "markdown_edges": 0,
+                "coact_edges": 1
+            }
+        });
+        let q: SemanticEventsQuery = serde_json::from_value(json!({
+            "baseline_nodes": 2,
+            "baseline_edges": 1,
+            "baseline_orphans": 0,
+            "baseline_hubs": 0
+        }))
+        .unwrap();
+
+        let report = build_palace_semantic_events(&graph, &q);
+        assert_eq!(
+            report["schema"],
+            "agent_bridge.semantic_bus.palace_diff.v0"
+        );
+        assert_eq!(report["verification"]["verdict"], "verified");
+        assert_eq!(
+            report["verification"]["verified_to"],
+            "semantic_objects/events/diff"
+        );
+        assert_eq!(
+            report["semantic_objects"][0]["schema"],
+            "agent_bridge.semantic_bus.object.v0"
+        );
+        assert_eq!(
+            report["semantic_objects"][0]["object_id"],
+            "palace:memory-graph"
+        );
+        assert_eq!(report["diff"]["changed"], true);
+        assert_eq!(report["diff"]["delta"]["nodes"], 1);
+        assert_eq!(report["diff"]["delta"]["edges"], 1);
+        assert_eq!(report["diff"]["current"]["sqlite_nodes"], 2);
+        assert_eq!(report["diff"]["current"]["markdown_nodes"], 1);
+        assert_eq!(report["diff"]["current"]["explicit_edges"], 1);
+        assert_eq!(report["diff"]["current"]["coactivation_edges"], 1);
+        assert_eq!(report["diff"]["current"]["orphan_nodes"], 1);
+        assert_eq!(report["diff"]["current"]["fresh_nodes"], 1);
+        assert_eq!(report["diff"]["current"]["stale_nodes"], 1);
+        assert_eq!(report["events"][0]["event_type"], "palace.graph.observed");
+        assert_eq!(report["events"][1]["event_type"], "palace.graph.diff.changed");
+        assert_eq!(
+            report["events"][1]["source_event_ids"][0],
+            report["events"][0]["event_id"]
+        );
+        assert_eq!(
+            report["presentation"]["ingestion"]["write_policy"],
+            "read_only_no_auto_memory_write"
+        );
     }
 
     #[test]

@@ -1,0 +1,115 @@
+{
+  "schema": "agent_bridge.semantic_bus.fixture.v0",
+  "fixture_id": "linux_desktop_snapshot_state",
+  "adapter_contract": {
+    "schema": "agent_bridge.semantic_bus.adapter_conformance.v0",
+    "adapter_family": "linux_desktop",
+    "tool": "desktop_snapshot",
+    "read_only": true,
+    "broad_host_mutation": false,
+    "mutation_surface": "none",
+    "channels": [
+      "sway_tree",
+      "atspi"
+    ],
+    "fallback_order": [
+      "sway_tree",
+      "atspi",
+      "vision_grounding_ocr"
+    ],
+    "isolation": "read_only_observation",
+    "notes": "Primary Linux desktop state should come from compositor and AT-SPI semantics before pixels."
+  },
+  "semantic_object": {
+    "schema": "agent_bridge.semantic_bus.object.v0",
+    "object_id": "desktop:linux:sway:window:zenity-dialog",
+    "object_type": "desktop.window",
+    "source_adapter": "linux.sway.atspi",
+    "label": "AB semantic fixture",
+    "state": {
+      "app_id": "zenity",
+      "title": "AB semantic fixture",
+      "visible": true,
+      "focused": false,
+      "role": "application"
+    },
+    "relations": [
+      {
+        "type": "contains",
+        "target": "desktop:linux:atspi:button:invokeok"
+      }
+    ],
+    "confidence": 0.96,
+    "observed_at": "2026-06-07T11:00:00Z",
+    "provenance": {
+      "tool": "desktop_snapshot",
+      "schema": "desktop_snapshot/v0.5"
+    }
+  },
+  "affordances": [
+    {
+      "affordance_id": "desktop:linux:sway:window:zenity-dialog:verify-focus",
+      "object_id": "desktop:linux:sway:window:zenity-dialog",
+      "action_type": "desktop.verify",
+      "args_schema": {
+        "expect": "focus_is",
+        "win_app_id": "zenity",
+        "win_title": "AB semantic fixture"
+      },
+      "risk_level": "low",
+      "requires_gate": false,
+      "expected_effect": "re-observes focus/window state without mutating the desktop"
+    }
+  ],
+  "events": [
+    {
+      "event_id": "evt-linux-desktop-snapshot-window-observed",
+      "ts": "2026-06-07T11:00:00Z",
+      "source": "desktop_snapshot",
+      "actor": "agent",
+      "project": "agent-bridge",
+      "event_type": "object.observed",
+      "subject_id": "desktop:linux:sway:window:zenity-dialog",
+      "payload_json": {
+        "channels": [
+          "sway_tree",
+          "atspi"
+        ],
+        "app_id": "zenity"
+      },
+      "source_event_ids": [],
+      "prev_hash": null,
+      "hash": "fixture"
+    }
+  ],
+  "verification": {
+    "verdict": "verified",
+    "reason": null,
+    "method": "desktop_snapshot.semantic_tree",
+    "evidence": {
+      "window_present": true,
+      "atspi_present": true,
+      "screenshot_required": false
+    },
+    "verified_to": "desktop_snapshot/v0.5:sway_tree+atspi",
+    "recover": "proceed",
+    "raw_available": true
+  },
+  "presentation": {
+    "presentation_id": "present-linux-desktop-snapshot-state",
+    "source_event_ids": [
+      "evt-linux-desktop-snapshot-window-observed"
+    ],
+    "human_summary": "Linux desktop state is represented as a semantic window object from sway and AT-SPI.",
+    "machine_payload": {
+      "object_id": "desktop:linux:sway:window:zenity-dialog",
+      "adapter_contract": "agent_bridge.semantic_bus.adapter_conformance.v0"
+    },
+    "ingestion": {
+      "allowed": false,
+      "reason": "fixture_only"
+    },
+    "artifact": null,
+    "created_at": "2026-06-07T11:00:00Z"
+  }
+}

@@ -73,6 +73,10 @@ pub fn world_envelope_to_present_packet(
         .unwrap_or_else(|| json!({}));
     let selected_entities = selected_entities(envelope, &request);
     let patch_result = patch_result(envelope);
+    let action_result = envelope
+        .get("action_result")
+        .cloned()
+        .unwrap_or(Value::Null);
     let raw_host_response_present = envelope
         .get("host_response")
         .map(|v| !v.is_null())
@@ -100,6 +104,7 @@ pub fn world_envelope_to_present_packet(
             "verify": verify,
             "selected_entities": selected_entities,
             "patch_result": patch_result,
+            "action_result": action_result,
             "source_reason": reason,
             "raw_host_response_present": raw_host_response_present,
         },

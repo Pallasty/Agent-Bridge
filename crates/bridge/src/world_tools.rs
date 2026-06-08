@@ -7,7 +7,7 @@
 use ab_core::Result;
 use ab_mcp::{McpTool, ToolContext, ToolResult, ToolSchema};
 use async_trait::async_trait;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -15,6 +15,9 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpStream;
 
 const WORLD_PRESENT_SCHEMA: &str = "agent_bridge.world_present.v0";
+const WORLD_TOOL_SCHEMA: &str = "agent_bridge.world_tool.v0";
+const ACTION_RESULT_SCHEMA: &str = "agent_bridge.semantic_bus.action_result.v0";
+const LSWR_ADAPTER: &str = "lswr.onsen";
 const DEFAULT_HOST: &str = "127.0.0.1";
 const DEFAULT_PORT: u16 = 37691;
 const HOST_ADDR_ENV: &str = "ONSEN_LSWR_HOST_ADDR";
@@ -165,11 +168,12 @@ fn build_query_request(args: &Value, default_entities: Option<Vec<String>>) -> O
     let mut request = serde_json::Map::new();
     request.insert(
         "request_id".to_string(),
-        json!(args
-            .get("request_id")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-            .unwrap_or_else(|| request_id("ab-world-query"))),
+        json!(
+            args.get("request_id")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| request_id("ab-world-query"))
+        ),
     );
     request.insert(
         "world.visibility.query".to_string(),
@@ -204,11 +208,12 @@ fn build_patch_request(args: &Value) -> std::result::Result<Value, String> {
     let mut request = serde_json::Map::new();
     request.insert(
         "request_id".to_string(),
-        json!(args
-            .get("request_id")
-            .and_then(Value::as_str)
-            .map(str::to_string)
-            .unwrap_or_else(|| request_id("ab-world-patch"))),
+        json!(
+            args.get("request_id")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| request_id("ab-world-patch"))
+        ),
     );
     request.insert(
         "world.patch".to_string(),
@@ -226,7 +231,11 @@ fn build_patch_request(args: &Value) -> std::result::Result<Value, String> {
     Ok(Value::Object(request))
 }
 
-async fn call_world_host(endpoint: &WorldEndpoint, request: &Value) -> Value {
+async fn call_world_host_with_tool(
+    endpoint: &WorldEndpoint,
+    request: &Value,
+    world_tool: &str,
+) -> Value {
     let timeout_dur = Duration::from_millis(endpoint.timeout_ms);
     let mut stream = match tokio::time::timeout(
         timeout_dur,
@@ -236,71 +245,101 @@ async fn call_world_host(endpoint: &WorldEndpoint, request: &Value) -> Value {
     {
         Ok(Ok(s)) => s,
         Ok(Err(e)) => {
-            return not_verified_envelope(
+            return not_verified_envelope_with_tool(
                 "world_host_unreachable",
                 endpoint,
                 request,
                 Some(e.to_string()),
-            )
+                world_tool,
+            );
         }
         Err(_) => {
-            return not_verified_envelope("world_host_timeout", endpoint, request, None);
+            return not_verified_envelope_with_tool(
+                "world_host_timeout",
+                endpoint,
+                request,
+                None,
+                world_tool,
+            );
         }
     };
 
     let line = match serde_json::to_string(request) {
         Ok(s) => format!("{s}\n"),
         Err(e) => {
-            return not_verified_envelope(
+            return not_verified_envelope_with_tool(
                 "world_request_malformed",
                 endpoint,
                 request,
                 Some(e.to_string()),
-            )
+                world_tool,
+            );
         }
     };
     match tokio::time::timeout(timeout_dur, stream.write_all(line.as_bytes())).await {
         Ok(Ok(())) => {}
         Ok(Err(e)) => {
-            return not_verified_envelope(
+            return not_verified_envelope_with_tool(
                 "world_host_unreachable",
                 endpoint,
                 request,
                 Some(e.to_string()),
-            )
+                world_tool,
+            );
         }
-        Err(_) => return not_verified_envelope("world_host_timeout", endpoint, request, None),
+        Err(_) => {
+            return not_verified_envelope_with_tool(
+                "world_host_timeout",
+                endpoint,
+                request,
+                None,
+                world_tool,
+            );
+        }
     }
 
     let mut reader = BufReader::new(stream);
     let mut response_line = String::new();
     match tokio::time::timeout(timeout_dur, reader.read_line(&mut response_line)).await {
         Ok(Ok(0)) => {
-            return not_verified_envelope(
+            return not_verified_envelope_with_tool(
                 "world_host_malformed_response",
                 endpoint,
                 request,
                 Some("empty response".to_string()),
-            )
+                world_tool,
+            );
         }
         Ok(Ok(_)) => {}
         Ok(Err(e)) => {
-            return not_verified_envelope(
+            return not_verified_envelope_with_tool(
                 "world_host_unreachable",
                 endpoint,
                 request,
                 Some(e.to_string()),
-            )
+                world_tool,
+            );
         }
-        Err(_) => return not_verified_envelope("world_host_timeout", endpoint, request, None),
+        Err(_) => {
+            return not_verified_envelope_with_tool(
+                "world_host_timeout",
+                endpoint,
+                request,
+                None,
+                world_tool,
+            );
+        }
     }
     match serde_json::from_str::<Value>(response_line.trim()) {
-        Ok(host_response) => wrap_host_response(endpoint, request, host_response),
-        Err(e) => not_verified_envelope(
+        Ok(host_response) => {
+            wrap_host_response_with_tool(endpoint, request, host_response, world_tool)
+        }
+        Err(e) => not_verified_envelope_with_tool(
             "world_host_malformed_response",
             endpoint,
             request,
             Some(e.to_string()),
+            world_tool,
         ),
     }
 }
@@ -395,11 +434,18 @@ fn verify_block(verified: bool, host_response: Option<&Value>, reason: Value) ->
     })
 }
 
-fn wrap_host_response(endpoint: &WorldEndpoint, request: &Value, host_response: Value) -> Value {
+fn wrap_host_response_with_tool(
+    endpoint: &WorldEndpoint,
+    request: &Value,
+    host_response: Value,
+    world_tool: &str,
+) -> Value {
     let verified = host_verified(&host_response);
     let reason = host_reason(&host_response);
+    let verify = verify_block(verified, Some(&host_response), reason.clone());
+    let action_result = action_result_block(world_tool, request, verified, &reason, true);
     json!({
-        "schema": "agent_bridge.world_tool.v0",
+        "schema": WORLD_TOOL_SCHEMA,
         "ok": host_response.get("ok").and_then(Value::as_bool).unwrap_or(verified),
         "verified": verified,
         "reason": reason,
@@ -409,19 +455,23 @@ fn wrap_host_response(endpoint: &WorldEndpoint, request: &Value, host_response: 
             "timeout_ms": endpoint.timeout_ms,
         },
         "request": request,
-        "verify": verify_block(verified, Some(&host_response), host_reason(&host_response)),
+        "verify": verify,
+        "action_result": action_result,
         "host_response": host_response,
     })
 }
 
-fn not_verified_envelope(
+fn not_verified_envelope_with_tool(
     reason: &str,
     endpoint: &WorldEndpoint,
     request: &Value,
     detail: Option<String>,
+    world_tool: &str,
 ) -> Value {
+    let reason_value = json!(reason);
+    let action_result = action_result_block(world_tool, request, false, &reason_value, false);
     json!({
-        "schema": "agent_bridge.world_tool.v0",
+        "schema": WORLD_TOOL_SCHEMA,
         "ok": false,
         "verified": false,
         "reason": reason,
@@ -433,7 +483,84 @@ fn not_verified_envelope(
         },
         "request": request,
         "verify": verify_block(false, None, json!(reason)),
+        "action_result": action_result,
         "host_response": Value::Null,
+    })
+}
+
+fn request_id_from_request(request: &Value) -> String {
+    request
+        .get("request_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("unknown")
+        .to_string()
+}
+
+fn action_type_for_world_tool(world_tool: &str) -> &'static str {
+    match world_tool {
+        "world_patch" => "world.patch",
+        "world_visibility_query" => "world.visibility.query",
+        "world_query" => "world.query",
+        _ => "world.unknown",
+    }
+}
+
+fn action_verdict(verified: bool, reason: &Value) -> &'static str {
+    if verified {
+        return "verified";
+    }
+    match reason.as_str() {
+        Some("world_host_non_loopback_rejected")
+        | Some("world_patch_invalid")
+        | Some("world_patch_blocked") => "blocked",
+        _ => "not_verified",
+    }
+}
+
+fn action_recover(verdict: &str) -> &'static str {
+    match verdict {
+        "verified" => "proceed",
+        "blocked" => "replan",
+        _ => "inspect_host_or_visibility_evidence",
+    }
+}
+
+fn subject_id_for_request(request: &Value) -> String {
+    get_path(request, &["world.patch", "entity"])
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|entity| format!("lswr:onsen:entity:{entity}"))
+        .unwrap_or_else(|| "lswr:onsen:world".to_string())
+}
+
+fn action_result_block(
+    world_tool: &str,
+    request: &Value,
+    verified: bool,
+    reason: &Value,
+    raw_available: bool,
+) -> Value {
+    let request_id = request_id_from_request(request);
+    let verdict = action_verdict(verified, reason);
+    json!({
+        "schema": ACTION_RESULT_SCHEMA,
+        "source_schema": WORLD_TOOL_SCHEMA,
+        "adapter": LSWR_ADAPTER,
+        "world_tool": world_tool,
+        "action_type": action_type_for_world_tool(world_tool),
+        "action_id": format!("lswr:{world_tool}:{request_id}:result"),
+        "request_id": request_id,
+        "subject_id": subject_id_for_request(request),
+        "event_ids": [format!("evt-lswr-{world_tool}-{request_id}")],
+        "verdict": verdict,
+        "reason": reason,
+        "verified_to": if verified { json!(VERIFIED_TO) } else { Value::Null },
+        "verification_method": VERIFY_METHOD,
+        "recover": action_recover(verdict),
+        "raw_available": raw_available,
     })
 }
 
@@ -443,12 +570,24 @@ enum WorldEndpointOrEnvelope {
 }
 
 trait EndpointEnvelope {
-    fn as_not_verified(self, reason: &str, request: &Value) -> WorldEndpointOrEnvelope;
+    fn as_not_verified(
+        self,
+        reason: &str,
+        request: &Value,
+        world_tool: &str,
+    ) -> WorldEndpointOrEnvelope;
 }
 
 impl EndpointEnvelope for WorldEndpoint {
-    fn as_not_verified(self, reason: &str, request: &Value) -> WorldEndpointOrEnvelope {
-        WorldEndpointOrEnvelope::Envelope(not_verified_envelope(reason, &self, request, None))
+    fn as_not_verified(
+        self,
+        reason: &str,
+        request: &Value,
+        world_tool: &str,
+    ) -> WorldEndpointOrEnvelope {
+        WorldEndpointOrEnvelope::Envelope(not_verified_envelope_with_tool(
+            reason, &self, request, None, world_tool,
+        ))
     }
 }
 
@@ -458,7 +597,11 @@ impl From<WorldEndpoint> for WorldEndpointOrEnvelope {
     }
 }
 
-fn endpoint_or_envelope(args: &Value, request: &Value) -> WorldEndpointOrEnvelope {
+fn endpoint_or_envelope(
+    args: &Value,
+    request: &Value,
+    world_tool: &str,
+) -> WorldEndpointOrEnvelope {
     match WorldEndpoint::from_args(args) {
         Ok(endpoint) => endpoint.into(),
         Err(reason) => {
@@ -471,18 +614,24 @@ fn endpoint_or_envelope(args: &Value, request: &Value) -> WorldEndpointOrEnvelop
                 port: DEFAULT_PORT,
                 timeout_ms: DEFAULT_TIMEOUT_MS,
             };
-            endpoint.as_not_verified(&reason, request)
+            endpoint.as_not_verified(&reason, request, world_tool)
         }
     }
 }
 
-async fn execute_with_endpoint(args: Value, request: Value) -> Result<ToolResult> {
+async fn execute_with_endpoint(
+    args: Value,
+    request: Value,
+    world_tool: &'static str,
+) -> Result<ToolResult> {
     let include_raw = args
         .get("include_raw")
         .and_then(Value::as_bool)
         .unwrap_or(true);
-    let mut result = match endpoint_or_envelope(&args, &request) {
-        WorldEndpointOrEnvelope::Endpoint(endpoint) => call_world_host(&endpoint, &request).await,
+    let mut result = match endpoint_or_envelope(&args, &request, world_tool) {
+        WorldEndpointOrEnvelope::Endpoint(endpoint) => {
+            call_world_host_with_tool(&endpoint, &request, world_tool).await
+        }
         WorldEndpointOrEnvelope::Envelope(envelope) => envelope,
     };
     if !include_raw {
@@ -505,6 +654,13 @@ fn endpoint_schema_props() -> Value {
 fn infer_world_tool(args: &Value, envelope: &Value) -> String {
     if let Some(tool) = args
         .get("world_tool")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return tool.to_string();
+    }
+    if let Some(tool) = get_path(envelope, &["action_result", "world_tool"])
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|s| !s.is_empty())
@@ -770,7 +926,7 @@ impl McpTool for WorldQueryTool {
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
         let request = build_query_request(&args, Some(vec!["bath".to_string()]))
             .expect("world_query has a default entity");
-        execute_with_endpoint(args, request).await
+        execute_with_endpoint(args, request, "world_query").await
     }
 }
 
@@ -824,7 +980,7 @@ impl McpTool for WorldVisibilityQueryTool {
                 "entities is required for world_visibility_query",
             ));
         };
-        execute_with_endpoint(args, request).await
+        execute_with_endpoint(args, request, "world_visibility_query").await
     }
 }
 
@@ -888,7 +1044,7 @@ impl McpTool for WorldPatchTool {
             Ok(r) => r,
             Err(e) => return Ok(ToolResult::error(e)),
         };
-        execute_with_endpoint(args, request).await
+        execute_with_endpoint(args, request, "world_patch").await
     }
 }
 
@@ -992,6 +1148,22 @@ mod tests {
         std::env::remove_var(HOST_ADDR_ENV);
         std::env::remove_var(HOST_PORT_ENV);
         std::env::remove_var(ONSEN_HOST_PORT_ENV);
+    }
+
+    async fn spawn_one_response_host(response: Value) -> u16 {
+        let listener = TcpListener::bind((DEFAULT_HOST, 0)).await.expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let response_line = serde_json::to_string(&response).expect("response json");
+        tokio::spawn(async move {
+            let (socket, _) = listener.accept().await.expect("accept");
+            let mut reader = BufReader::new(socket);
+            let mut request_line = String::new();
+            let _ = reader.read_line(&mut request_line).await;
+            let mut socket = reader.into_inner();
+            let _ = socket.write_all(response_line.as_bytes()).await;
+            let _ = socket.write_all(b"\n").await;
+        });
+        port
     }
 
     #[tokio::test]
@@ -1181,6 +1353,131 @@ mod tests {
         assert_eq!(req["world.visibility.query"]["entities"], json!(["bath"]));
     }
 
+    #[tokio::test]
+    async fn world_tool_envelope_includes_action_result_without_raw_host_response() {
+        let port = spawn_one_response_host(json!({
+            "ok": true,
+            "verified": true,
+            "render": {"source": "live_root_viewport_texture"},
+            "flicker": {"frames": 1},
+            "world.patch": {"accepted": true, "entity": "bath", "op": "move"},
+            "world.visibility.query": {
+                "after": {
+                    "entities": [{
+                        "id": "bath",
+                        "screen_area": 0.12,
+                        "bounds_screen_area": 0.2,
+                        "occluded": false
+                    }]
+                }
+            }
+        }))
+        .await;
+
+        let out = WorldPatchTool::new()
+            .execute(
+                json!({
+                    "request_id": "ssb3-patch",
+                    "op": "move",
+                    "entity": "bath",
+                    "args": {"cell": [8, 0]},
+                    "host": DEFAULT_HOST,
+                    "port": port,
+                    "include_raw": false
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        assert!(!out.is_error);
+        let payload = result_text_as_json(&out);
+        assert_eq!(payload["schema"], WORLD_TOOL_SCHEMA);
+        assert!(payload.get("host_response").is_none());
+        assert_eq!(payload["verified"], true);
+        assert_eq!(payload["action_result"]["schema"], ACTION_RESULT_SCHEMA);
+        assert_eq!(payload["action_result"]["source_schema"], WORLD_TOOL_SCHEMA);
+        assert_eq!(payload["action_result"]["adapter"], LSWR_ADAPTER);
+        assert_eq!(payload["action_result"]["world_tool"], "world_patch");
+        assert_eq!(payload["action_result"]["action_type"], "world.patch");
+        assert_eq!(
+            payload["action_result"]["action_id"],
+            "lswr:world_patch:ssb3-patch:result"
+        );
+        assert_eq!(
+            payload["action_result"]["subject_id"],
+            "lswr:onsen:entity:bath"
+        );
+        assert_eq!(
+            payload["action_result"]["event_ids"],
+            json!(["evt-lswr-world_patch-ssb3-patch"])
+        );
+        assert_eq!(payload["action_result"]["verdict"], "verified");
+        assert_eq!(payload["action_result"]["verified_to"], VERIFIED_TO);
+        assert_eq!(
+            payload["action_result"]["verification_method"],
+            VERIFY_METHOD
+        );
+        assert_eq!(payload["action_result"]["recover"], "proceed");
+        assert_eq!(payload["action_result"]["raw_available"], true);
+
+        let present = WorldPresentTool::new()
+            .execute(
+                json!({
+                    "envelope": payload,
+                    "generated_at": "2026-06-07T00:00:00Z"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("present");
+        let present_payload = result_text_as_json(&present);
+        assert_eq!(present_payload["world_tool"], "world_patch");
+        assert_eq!(
+            present_payload["packet"]["machine_payload"]["action_result"]["schema"],
+            ACTION_RESULT_SCHEMA
+        );
+        assert_eq!(
+            present_payload["packet"]["machine_payload"]["action_result"]["verdict"],
+            "verified"
+        );
+    }
+
+    #[tokio::test]
+    async fn blocked_world_action_result_is_not_laundered() {
+        let out = WorldVisibilityQueryTool::new()
+            .execute(
+                json!({
+                    "request_id": "ssb3-blocked",
+                    "entities": ["bath"],
+                    "host": "192.168.1.5"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        assert!(!out.is_error);
+        let payload = result_text_as_json(&out);
+        assert_eq!(payload["schema"], WORLD_TOOL_SCHEMA);
+        assert_eq!(payload["verified"], false);
+        assert_eq!(payload["reason"], "world_host_non_loopback_rejected");
+        assert_eq!(
+            payload["action_result"]["world_tool"],
+            "world_visibility_query"
+        );
+        assert_eq!(
+            payload["action_result"]["action_type"],
+            "world.visibility.query"
+        );
+        assert_eq!(payload["action_result"]["verdict"], "blocked");
+        assert!(payload["action_result"]["verified_to"].is_null());
+        assert_eq!(payload["action_result"]["recover"], "replan");
+        assert_eq!(payload["action_result"]["raw_available"], false);
+        assert_eq!(
+            payload["action_result"]["event_ids"],
+            json!(["evt-lswr-world_visibility_query-ssb3-blocked"])
+        );
+    }
+
     #[test]
     fn verified_to_is_only_set_when_host_verified() {
         let ep = WorldEndpoint {
@@ -1189,7 +1486,7 @@ mod tests {
             timeout_ms: DEFAULT_TIMEOUT_MS,
         };
         let req = json!({"request_id":"r1"});
-        let good = wrap_host_response(
+        let good = wrap_host_response_with_tool(
             &ep,
             &req,
             json!({
@@ -1199,9 +1496,15 @@ mod tests {
                 "flicker": {"frames": 2},
                 "world.visibility.query": {"after": {"entities": [{"screen_area": 0.1}]}}
             }),
+            "world_query",
         );
         assert_eq!(good["verify"]["verified_to"], VERIFIED_TO);
-        let bad = wrap_host_response(&ep, &req, json!({"ok": true, "verified": false}));
+        let bad = wrap_host_response_with_tool(
+            &ep,
+            &req,
+            json!({"ok": true, "verified": false}),
+            "world_query",
+        );
         assert!(bad["verify"]["verified_to"].is_null());
     }
 
@@ -1213,7 +1516,7 @@ mod tests {
             timeout_ms: DEFAULT_TIMEOUT_MS,
         };
         let req = json!({"request_id":"nested-reason"});
-        let mut result = wrap_host_response(
+        let mut result = wrap_host_response_with_tool(
             &ep,
             &req,
             json!({
@@ -1231,6 +1534,7 @@ mod tests {
                     }
                 }
             }),
+            "world_query",
         );
         assert_eq!(result["reason"], "pixel_coverage_zero");
         assert_eq!(
@@ -1244,7 +1548,7 @@ mod tests {
             "pixel_coverage_zero"
         );
 
-        let nested_pixel_reason = wrap_host_response(
+        let nested_pixel_reason = wrap_host_response_with_tool(
             &ep,
             &req,
             json!({
@@ -1260,6 +1564,7 @@ mod tests {
                     }
                 }
             }),
+            "world_query",
         );
         assert_eq!(nested_pixel_reason["reason"], "pixel_coverage_zero");
     }
@@ -1277,7 +1582,8 @@ mod tests {
             port,
             timeout_ms: 1_000,
         };
-        let result = call_world_host(&ep, &json!({"request_id":"bad"})).await;
+        let result =
+            call_world_host_with_tool(&ep, &json!({"request_id":"bad"}), "world_query").await;
         assert_eq!(result["verified"], false);
         assert_eq!(result["reason"], "world_host_malformed_response");
     }
@@ -1292,7 +1598,8 @@ mod tests {
             port,
             timeout_ms: 1_000,
         };
-        let result = call_world_host(&ep, &json!({"request_id":"down"})).await;
+        let result =
+            call_world_host_with_tool(&ep, &json!({"request_id":"down"}), "world_query").await;
         assert_eq!(result["verified"], false);
         assert_eq!(result["reason"], "world_host_unreachable");
     }
@@ -1310,7 +1617,8 @@ mod tests {
             port,
             timeout_ms: MIN_TIMEOUT_MS,
         };
-        let result = call_world_host(&ep, &json!({"request_id":"timeout"})).await;
+        let result =
+            call_world_host_with_tool(&ep, &json!({"request_id":"timeout"}), "world_query").await;
         assert_eq!(result["verified"], false);
         assert_eq!(result["reason"], "world_host_timeout");
     }

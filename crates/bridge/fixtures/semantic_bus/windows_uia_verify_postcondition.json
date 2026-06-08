@@ -1,0 +1,137 @@
+{
+  "schema": "agent_bridge.semantic_bus.fixture.v0",
+  "fixture_id": "windows_uia_verify_postcondition",
+  "adapter_contract": {
+    "schema": "agent_bridge.semantic_bus.adapter_conformance.v0",
+    "adapter_family": "windows_desktop",
+    "tool": "desktop_verify",
+    "read_only": true,
+    "broad_host_mutation": false,
+    "mutation_surface": "none",
+    "channels": [
+      "uia",
+      "hwnd"
+    ],
+    "fallback_order": [
+      "uia",
+      "hwnd",
+      "vision_grounding_ocr"
+    ],
+    "isolation": "read_only_polling_respects_session_and_integrity_boundaries",
+    "notes": "Windows verification should poll UIA/HWND state and return the shared recover vocabulary."
+  },
+  "semantic_object": {
+    "schema": "agent_bridge.semantic_bus.object.v0",
+    "object_id": "desktop:windows:verify:accessible:5150:approve-enabled",
+    "object_type": "desktop.verify.target.accessible",
+    "source_adapter": "windows.uia.verify",
+    "label": "Approve enabled postcondition",
+    "state": {
+      "platform": {
+        "automation_id": "ApproveButton",
+        "runtime_id_hash": "runtime-approve-fixture",
+        "hwnd": "0x00070A2E"
+      },
+      "selector": {
+        "platform": "windows",
+        "object_id": "desktop:windows:accessible:5150:runtime:approve",
+        "role": "button",
+        "name": "Approve",
+        "state": "enabled"
+      },
+      "expect": "state_is",
+      "source_verdict": "verified",
+      "recover": "proceed",
+      "held_after_ms": 140,
+      "polls": 2
+    },
+    "relations": [
+      {
+        "type": "verified_after",
+        "target": "desktop:windows:accessible:5150:runtime:approve"
+      }
+    ],
+    "confidence": 0.9,
+    "observed_at": "2026-06-07T12:03:00Z",
+    "provenance": {
+      "tool": "desktop_verify",
+      "schema": "agent_bridge.semantic_bus.desktop_verify.v0",
+      "platform_schema": "windows.uia.verify.fixture"
+    }
+  },
+  "affordances": [
+    {
+      "affordance_id": "desktop:windows:verify:accessible:5150:approve-enabled:reverify",
+      "object_id": "desktop:windows:verify:accessible:5150:approve-enabled",
+      "action_type": "desktop.verify",
+      "args_schema": {
+        "platform": "windows",
+        "expect": "state_is",
+        "object_id": "desktop:windows:accessible:5150:runtime:approve",
+        "role": "button",
+        "name": "Approve",
+        "state": "enabled",
+        "windows": {
+          "automation_id": "ApproveButton",
+          "runtime_id_hash": "runtime-approve-fixture",
+          "hwnd": "0x00070A2E"
+        }
+      },
+      "risk_level": "low",
+      "requires_gate": false,
+      "expected_effect": "re-observes the same UIA postcondition without mutating the desktop"
+    }
+  ],
+  "events": [
+    {
+      "event_id": "evt-windows-uia-verify-postcondition",
+      "ts": "2026-06-07T12:03:00Z",
+      "source": "desktop_verify",
+      "actor": "agent",
+      "project": "agent-bridge",
+      "event_type": "desktop.verify.completed",
+      "subject_id": "desktop:windows:verify:accessible:5150:approve-enabled",
+      "payload_json": {
+        "expect": "state_is",
+        "source_verdict": "verified",
+        "recover": "proceed"
+      },
+      "source_event_ids": [
+        "evt-windows-uia-snapshot-button-observed"
+      ],
+      "prev_hash": null,
+      "hash": "fixture"
+    }
+  ],
+  "verification": {
+    "verdict": "verified",
+    "reason": null,
+    "method": "windows.uia.verify.polling",
+    "evidence": {
+      "expect": "state_is",
+      "property": "IsEnabled",
+      "held_after_ms": 140,
+      "ui_access": "available"
+    },
+    "verified_to": "desktop:windows:accessible:5150:runtime:approve:state_is:enabled",
+    "recover": "proceed",
+    "raw_available": true
+  },
+  "presentation": {
+    "presentation_id": "present-windows-uia-verify-postcondition",
+    "source_event_ids": [
+      "evt-windows-uia-verify-postcondition"
+    ],
+    "human_summary": "Windows UIA verifier confirms a shared SSB postcondition and recover hint.",
+    "machine_payload": {
+      "object_id": "desktop:windows:verify:accessible:5150:approve-enabled",
+      "recover": "proceed"
+    },
+    "ingestion": {
+      "allowed": false,
+      "reason": "fixture_only"
+    },
+    "artifact": null,
+    "created_at": "2026-06-07T12:03:00Z"
+  }
+}
