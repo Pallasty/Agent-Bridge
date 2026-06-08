@@ -2859,6 +2859,8 @@ const state = {
   contentReaderMode: "scan",
   lastVisualPassMs: 0,
   lastLayoutOverlapCount: 0,
+  lastScreenOverlapCount: 0,
+  lastScreenOverlapRatio: 0,
   zoomMetricsRaf: 0,
   // ζ-13: degree info computed once per loadGraph, consumed by both the
   // footer badge and buildCy's per-node hub/orphan marker. Stashed here
@@ -3221,10 +3223,18 @@ const FRESH_WINDOW_SECS = 3600;
 const STALE_WINDOW_SECS = 7 * 24 * 3600;
 
 const GRAPH_LAYOUT_GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
+const ATLAS_REGION_RADIUS_SCALE = 64;
+const ATLAS_REGION_Y_SCALE = 0.68;
+const REGION_SHELL_BASE_SPACING = 68;
+const REGION_SHELL_DENSITY_SPACING = 2.5;
+const REGION_SHELL_MAX_SPACING = 108;
+const REGION_SHELL_Y_SCALE = 0.78;
+const GRAPH_VERTICAL_COMPRESSION = 0.94;
 const NODE_GLYPH_SCREEN_SCALE = 0.28;
 const NODE_GLYPH_SCREEN_MIN = 5;
 const NODE_GLYPH_SCREEN_MAX = 14;
 const NODE_GLYPH_MODEL_MIN = 1;
+const SCREEN_OVERLAP_PADDING = 1.5;
 const LABEL_SHOW_ANCHOR_ZOOM = 0.42;
 const LABEL_SHOW_ALL_ZOOM = 0.82;
 
@@ -3251,7 +3261,7 @@ function seededGraphPositions(data) {
   const positions = new Map();
   const regionCount = Math.max(1, regions.length);
   const totalNodes = Math.max(1, nodes.length);
-  const atlasRadius = regionCount <= 1 ? 0 : clampNumber(Math.sqrt(totalNodes) * 58, 520, 1700);
+  const atlasRadius = regionCount <= 1 ? 0 : clampNumber(Math.sqrt(totalNodes) * ATLAS_REGION_RADIUS_SCALE, 560, 2100);
 
   regions.forEach(([regionId, group], regionIdx) => {
     const regionAngle = -Math.PI / 2 + (regionIdx / regionCount) * Math.PI * 2;
@@ -3259,7 +3269,7 @@ function seededGraphPositions(data) {
       ? { x: 0, y: 0 }
       : {
           x: Math.cos(regionAngle) * atlasRadius,
-          y: Math.sin(regionAngle) * atlasRadius,
+          y: Math.sin(regionAngle) * atlasRadius * ATLAS_REGION_Y_SCALE,
         };
     const sorted = group.slice().sort((a, b) => {
       const ad = degreeMap[a.id] || 0;
@@ -3268,12 +3278,17 @@ function seededGraphPositions(data) {
         (b.access || 0) - (a.access || 0) ||
         String(a.id).localeCompare(String(b.id));
     });
+    const shellSpacing = clampNumber(
+      REGION_SHELL_BASE_SPACING + Math.sqrt(group.length) * REGION_SHELL_DENSITY_SPACING,
+      REGION_SHELL_BASE_SPACING,
+      REGION_SHELL_MAX_SPACING
+    );
     sorted.forEach((n, idx) => {
       const localAngle = idx * GRAPH_LAYOUT_GOLDEN_ANGLE + regionAngle * 0.35;
-      const shellRadius = idx === 0 ? 0 : Math.sqrt(idx) * 58 + (idx % 5) * 4;
+      const shellRadius = idx === 0 ? 0 : Math.sqrt(idx) * shellSpacing + (idx % 5) * 6;
       positions.set(n.id, {
         x: center.x + Math.cos(localAngle) * shellRadius,
-        y: center.y + Math.sin(localAngle) * shellRadius,
+        y: center.y + Math.sin(localAngle) * shellRadius * REGION_SHELL_Y_SCALE,
       });
     });
   });
@@ -3286,19 +3301,19 @@ function palaceLayoutOptions(data) {
   const scale = Math.sqrt(count);
   return {
     name: "cose",
-    idealEdgeLength: clampNumber(100 + scale * 4.2, 130, 220),
-    nodeOverlap: clampNumber(44 + scale * 0.9, 52, 72),
+    idealEdgeLength: clampNumber(115 + scale * 4.5, 145, 250),
+    nodeOverlap: clampNumber(72 + scale * 0.8, 78, 108),
     refresh: 24,
     fit: true,
-    padding: 86,
+    padding: 96,
     randomize: false,
-    componentSpacing: clampNumber(120 + scale * 4.5, 150, 260),
-    nodeRepulsion: Math.round(clampNumber(650000 + count * 3000, 900000, 2600000)),
+    componentSpacing: clampNumber(150 + scale * 5, 180, 320),
+    nodeRepulsion: Math.round(clampNumber(780000 + count * 3200, 1000000, 3000000)),
     edgeElasticity: 80,
     nestingFactor: 5,
-    gravity: clampNumber(42 - scale * 0.65, 18, 36),
-    numIter: Math.round(clampNumber(1000 + count * 1.6, 1400, 2400)),
-    initialTemp: clampNumber(260 + scale * 8, 320, 520),
+    gravity: clampNumber(36 - scale * 0.5, 14, 32),
+    numIter: Math.round(clampNumber(1100 + count * 1.6, 1400, 2400)),
+    initialTemp: clampNumber(260 + scale * 8, 340, 560),
     coolingFactor: 0.94,
     minTemp: 1.0,
   };
@@ -3327,6 +3342,50 @@ function countNodeOverlaps(nodes, padding = 2) {
     }
   }
   return count;
+}
+
+function graphScreenNodeRadius(node) {
+  const glyph = Number(node.data("screenGlyphSize")) || nodeGlyphScreenSize(node);
+  const halo = Number(node.data("screenHaloPad")) || nodeHaloScreenPad(node);
+  return glyph / 2 + halo;
+}
+
+function countScreenNodeOverlaps(nodes, padding = SCREEN_OVERLAP_PADDING) {
+  const list = Array.isArray(nodes) ? nodes : nodes.toArray();
+  let count = 0;
+  let pairs = 0;
+  for (let i = 0; i < list.length; i++) {
+    const a = list[i];
+    const ap = a.renderedPosition();
+    const ar = graphScreenNodeRadius(a);
+    for (let j = i + 1; j < list.length; j++) {
+      const b = list[j];
+      const bp = b.renderedPosition();
+      const wanted = ar + graphScreenNodeRadius(b) + padding;
+      const dx = bp.x - ap.x;
+      const dy = bp.y - ap.y;
+      pairs += 1;
+      if (dx * dx + dy * dy < wanted * wanted) count += 1;
+    }
+  }
+  return {
+    count,
+    ratio: pairs > 0 ? count / pairs : 0,
+  };
+}
+
+function compressGraphVerticalRange(cy, scale = GRAPH_VERTICAL_COMPRESSION) {
+  if (!cy) return;
+  const nodes = cy.nodes().toArray();
+  if (nodes.length < 2) return;
+  const centerY = nodes.reduce((sum, node) => sum + node.position().y, 0) / nodes.length;
+  nodes.forEach(node => {
+    const pos = node.position();
+    node.position({
+      x: pos.x,
+      y: centerY + (pos.y - centerY) * scale,
+    });
+  });
 }
 
 function relaxNodeOverlaps(cy, options = {}) {
@@ -3388,6 +3447,7 @@ function runPalaceLayout(data) {
   const cy = state.cy;
   const layout = cy.layout(palaceLayoutOptions(data));
   layout.on("layoutstop", () => {
+    compressGraphVerticalRange(cy);
     relaxNodeOverlaps(cy);
     if (state.focused && cy.getElementById(state.focused).length > 0) {
       cy.center(cy.getElementById(state.focused));
@@ -3455,6 +3515,7 @@ function scheduleZoomScaledNodeMetrics() {
   state.zoomMetricsRaf = requestAnimationFrame(() => {
     state.zoomMetricsRaf = 0;
     updateZoomScaledNodeMetrics();
+    renderViewHealth(graphViewportStats());
   });
 }
 
@@ -3839,17 +3900,25 @@ function graphViewportStats() {
     matchCount: 0,
     visualMs: state.lastVisualPassMs,
     overlapCount: state.lastLayoutOverlapCount,
+    screenOverlapCount: state.lastScreenOverlapCount,
+    screenOverlapRatio: state.lastScreenOverlapRatio,
   };
   if (!state.cy) return base;
   const nodes = state.cy.nodes();
   const edges = state.cy.edges();
+  const visibleNodes = nodes.filter(n => !n.hasClass("faded"));
+  const screenOverlap = countScreenNodeOverlaps(visibleNodes);
+  state.lastScreenOverlapCount = screenOverlap.count;
+  state.lastScreenOverlapRatio = screenOverlap.ratio;
   return {
     totalCount: nodes.length,
-    visibleCount: nodes.filter(n => !n.hasClass("faded")).length,
+    visibleCount: visibleNodes.length,
     edgeVisibleCount: edges.filter(e => !e.hasClass("faded")).length,
     matchCount: nodes.filter(n => n.hasClass("match") && !n.hasClass("faded")).length,
     visualMs: state.lastVisualPassMs,
     overlapCount: state.lastLayoutOverlapCount,
+    screenOverlapCount: screenOverlap.count,
+    screenOverlapRatio: screenOverlap.ratio,
   };
 }
 
@@ -3860,11 +3929,16 @@ function renderViewHealth(stats) {
   const visualMs = Number.isFinite(s.visualMs) ? s.visualMs : 0;
   const msLabel = visualMs < 10 ? visualMs.toFixed(1) : Math.round(visualMs).toString();
   const overlapCount = Math.max(0, s.overlapCount || 0);
-  const tier = overlapCount > 0 || visualMs > 32 ? "slow" : visualMs > 16 ? "warn" : "good";
+  const screenOverlapCount = Math.max(0, s.screenOverlapCount || 0);
+  const screenOverlapRatio = Number.isFinite(s.screenOverlapRatio) ? s.screenOverlapRatio : 0;
+  const overlapLimit = Math.max(8, Math.floor((s.visibleCount || 0) * 0.05));
+  const tier = overlapCount > 0 || screenOverlapCount > overlapLimit || visualMs > 32 ? "slow" : visualMs > 16 ? "warn" : "good";
   const matchText = s.matchCount > 0 ? ` · match:${s.matchCount}` : "";
   const overlapText = overlapCount > 0 ? ` · overlap:${overlapCount}` : "";
-  el.textContent = `view:${s.visibleCount}/${s.totalCount}${matchText}${overlapText} · ${msLabel}ms`;
-  el.title = `${s.visibleCount} visible nodes · ${s.edgeVisibleCount} visible edges · ${s.matchCount} search matches · ${overlapCount} remaining overlaps · ${msLabel}ms visual pass`;
+  const screenOverlapText = screenOverlapCount > 0 ? ` · screen-overlap:${screenOverlapCount}` : "";
+  const screenRatioText = screenOverlapRatio > 0 ? ` (${(screenOverlapRatio * 100).toFixed(2)}%)` : "";
+  el.textContent = `view:${s.visibleCount}/${s.totalCount}${matchText}${overlapText}${screenOverlapText} · ${msLabel}ms`;
+  el.title = `${s.visibleCount} visible nodes · ${s.edgeVisibleCount} visible edges · ${s.matchCount} search matches · ${overlapCount} layout overlaps · ${screenOverlapCount} screen-overlap pairs${screenRatioText} · ${msLabel}ms visual pass`;
   el.className = `view-health ${tier}`;
 }
 
