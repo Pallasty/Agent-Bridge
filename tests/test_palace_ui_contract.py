@@ -111,6 +111,49 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("showSidePanel(key);", html)
         self.assertIn("saveViewState();", html)
 
+    def test_atlas_overview_declutters_to_district_anchors(self):
+        html = palace_html()
+
+        self.assertIn("function isAtlasDistrictOverview()", html)
+        self.assertIn("function computeAtlasDistrictAnchors(data, degInfo)", html)
+        self.assertIn("function panAtlasOverviewAwayFromPanels()", html)
+        self.assertIn("atlasDistrictAnchor", html)
+        self.assertIn("districtLabel", html)
+        self.assertIn("node.atlas-district-anchor", html)
+        self.assertIn("node.atlas-detail-muted", html)
+        self.assertIn("edge.atlas-detail-muted", html)
+        self.assertIn("atlas-district-overview", html)
+        self.assertIn("const districtRegionIds = new Set((state.atlasRegions || []).map(r => r.id));", html)
+        self.assertIn("if (districtRegionIds.size && !districtRegionIds.has(region)) continue;", html)
+        self.assertIn("districtLabelSize", html)
+        self.assertIn("districtLabelOutlineWidth", html)
+        self.assertIn("districtLabelMaxWidth", html)
+        self.assertIn('"display": "none"', html)
+        self.assertIn('"font-size": "data(districtLabelSize)"', html)
+        self.assertIn('"text-max-width": "data(districtLabelMaxWidth)"', html)
+        self.assertIn('"text-outline-width": "data(districtLabelOutlineWidth)"', html)
+        self.assertIn("if (atlasOverview) window.setTimeout(panAtlasOverviewAwayFromPanels, 390);", html)
+        self.assertIn('n.addClass("atlas-district-anchor")', html)
+        self.assertIn('n.addClass("atlas-detail-muted")', html)
+        self.assertIn('e.addClass("atlas-detail-muted")', html)
+        self.assertIn('if (isAtlasDistrictOverview() && evt.target.data("atlasDistrictAnchor"))', html)
+        self.assertIn('selectAtlasRegion(evt.target.data("region"));', html)
+
+    def test_region_drilldown_restores_node_detail_from_atlas_overview(self):
+        html = palace_html()
+
+        self.assertIn('state.viewPreset === "overview"', html)
+        self.assertIn("!state.activeRegion", html)
+        self.assertIn("!state.focused", html)
+        self.assertIn('state.search.trim() === ""', html)
+        self.assertIn("updateZoomScaledNodeMetrics();", html)
+        self.assertIn('cy.elements().removeClass("faded match focus-center focus-neighbor focus-edge atlas-detail-muted atlas-district-anchor")', html)
+        self.assertIn('const visible = state.cy.nodes().filter(n => !n.hasClass("faded") && !n.hasClass("atlas-detail-muted"));', html)
+        self.assertIn('!n.hasClass("faded") && !n.hasClass("atlas-detail-muted")', html)
+        self.assertIn('!e.hasClass("faded") && !e.hasClass("atlas-detail-muted")', html)
+        self.assertIn("labelForZoom(node, zoom)", html)
+        self.assertIn("return node.data(\"districtLabel\") || node.data(\"label\") || node.id();", html)
+
     def test_region_workbench_filters_and_sorts_nodes(self):
         html = palace_html()
 
