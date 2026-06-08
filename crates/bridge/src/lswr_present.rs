@@ -915,6 +915,73 @@ mod tests {
     }
 
     #[test]
+    fn decision_acknowledgement_does_not_launder_failed_world_claim() {
+        let envelope = expected_effect_failure_envelope();
+        let packet = world_envelope_to_present_packet("world_patch", &envelope, opts());
+
+        for decision in ["approved", "rejected"] {
+            let approval = json!({
+                "artifact_id": format!("approval-f4-{decision}"),
+                "action_tool": "present_await_decision",
+                "kind": "approval",
+                "verify_status": "rendered_ok",
+                "embody_status": "not_applicable",
+                "interactive_status": "not_applicable",
+                "verify_method": "human_decision",
+                "decision": decision,
+                "token_match": true,
+                "source_world_tool": packet["world_tool"].clone(),
+                "source_world_verdict": packet["verdict"].clone(),
+                "source_world_reason": packet["reason"].clone(),
+                "source_world_verified_to": packet["provenance"]["verified_to"].clone(),
+                "source_world_ingestion_allowed": packet["ingestion"]["allowed"].clone(),
+            });
+
+            let (eligible, reason) = crate::present::outcome_gate(
+                approval["verify_status"].as_str().expect("verify_status"),
+                approval["embody_status"].as_str(),
+                approval["interactive_status"].as_str(),
+                approval["decision"].as_str(),
+            );
+            assert!(
+                eligible,
+                "{decision} should be a verified decision outcome: {reason}"
+            );
+            assert_eq!(approval["source_world_tool"], "world_patch");
+            assert_eq!(approval["source_world_verdict"], "not_verified");
+            assert_eq!(
+                approval["source_world_reason"],
+                "expected_effect_clause_failed"
+            );
+            assert!(approval["source_world_verified_to"].is_null());
+            assert_eq!(approval["source_world_ingestion_allowed"], false);
+        }
+
+        for decision in ["timed_out", "dead", "pending"] {
+            let (eligible, reason) = crate::present::outcome_gate(
+                "rendered_ok",
+                Some("not_applicable"),
+                Some("not_applicable"),
+                Some(decision),
+            );
+            assert!(
+                !eligible,
+                "{decision} must not become a verified decision outcome"
+            );
+            assert!(reason.contains(&format!("decision={decision}")));
+        }
+
+        assert_eq!(packet["verdict"], "not_verified");
+        assert_eq!(packet["reason"], "expected_effect_clause_failed");
+        assert_eq!(
+            packet["machine_payload"]["expected_effect"]["verified"],
+            false
+        );
+        assert!(packet["provenance"]["verified_to"].is_null());
+        assert_eq!(packet["ingestion"]["allowed"], false);
+    }
+
+    #[test]
     fn review_artifact_wraps_with_present_dual_encoding() {
         let envelope = json!({
             "schema": WORLD_TOOL_SCHEMA,
