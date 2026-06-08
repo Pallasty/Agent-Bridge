@@ -3347,9 +3347,9 @@ const REGION_SHELL_DENSITY_SPACING = 2.5;
 const REGION_SHELL_MAX_SPACING = 108;
 const REGION_SHELL_Y_SCALE = 0.78;
 const GRAPH_VERTICAL_COMPRESSION = 0.94;
-const NODE_GLYPH_SCREEN_SCALE = 0.28;
-const NODE_GLYPH_SCREEN_MIN = 5;
-const NODE_GLYPH_SCREEN_MAX = 14;
+const NODE_GLYPH_SCREEN_SCALE = 0.14;
+const NODE_GLYPH_SCREEN_MIN = 3;
+const NODE_GLYPH_SCREEN_MAX = 7;
 const NODE_GLYPH_MODEL_MIN = 1;
 const SCREEN_OVERLAP_PADDING = 1.5;
 const LABEL_SHOW_ANCHOR_ZOOM = 0.42;
@@ -3835,6 +3835,15 @@ function buildCy(data) {
         "label": "data(label)", "text-opacity": 1,
         "color": "#e0e0ec", "z-index": 998, "opacity": 1,
       }},
+      { selector: "node.relation-focus-node", style: {
+        "border-width": 3,
+        "border-color": "#a87cff",
+        "border-opacity": 1,
+        "overlay-color": "#a87cff",
+        "overlay-padding": 8,
+        "overlay-opacity": 0.24,
+        "z-index": 1000,
+      }},
       { selector: "node:selected", style: {
         "border-width": 2.5, "border-color": "#ffffff", "border-opacity": 1,
       }},
@@ -3901,6 +3910,12 @@ function buildCy(data) {
       }},
       { selector: "edge.focus-edge", style: {
         "line-color": "#9a9aa8", "opacity": 0.85, "width": 2,
+      }},
+      { selector: "edge.relation-focus-edge", style: {
+        "line-color": "#a87cff",
+        "opacity": 1,
+        "width": 3,
+        "z-index": 1001,
       }},
       // Freshly-sedimented node: cytoscape's overlay-* gives a soft
       // cyan ring that telegraphs "this is where your canvas-save
@@ -4136,6 +4151,7 @@ function applyVisualState() {
 
   // Reset classes.
   cy.elements().removeClass("faded match focus-center focus-neighbor focus-edge atlas-detail-muted atlas-district-anchor");
+  clearRelationFocus();
 
   // Filter-fade: nodes failing source/kind get .faded.
   cy.nodes().forEach(n => {
@@ -4198,11 +4214,39 @@ function applyVisualState() {
       node.addClass("focus-center");
       ego.nodes().not(node).addClass("focus-neighbor");
       ego.edges().addClass("focus-edge");
+      if (state.relationDetailKey) applyRelationFocus(state.focused, state.relationDetailKey);
     }
   }
   state.lastVisualPassMs = Math.max(0, performance.now() - visualStartedAt);
   renderViewHealth(graphViewportStats());
   renderSearchNavigator();
+}
+
+function clearRelationFocus() {
+  const cy = state.cy;
+  if (!cy) return;
+  cy.elements().removeClass("relation-focus-node relation-focus-edge");
+}
+
+function applyRelationFocus(memoryKey, neighborKey) {
+  const cy = state.cy;
+  if (!cy || !memoryKey || !neighborKey) return;
+  clearRelationFocus();
+  const center = cy.getElementById(memoryKey);
+  const neighbor = cy.getElementById(neighborKey);
+  if (!center || !neighbor || center.length === 0 || neighbor.length === 0) return;
+  center.addClass("relation-focus-node");
+  neighbor.addClass("relation-focus-node");
+  center.connectedEdges().forEach(edge => {
+    const sourceId = edge.source().id();
+    const targetId = edge.target().id();
+    const linksPair =
+      (sourceId === memoryKey && targetId === neighborKey) ||
+      (sourceId === neighborKey && targetId === memoryKey);
+    if (!linksPair) return;
+    edge.removeClass("faded atlas-detail-muted");
+    edge.addClass("relation-focus-edge");
+  });
 }
 
 function syncRegionToFocusedNode(id) {
@@ -5280,6 +5324,7 @@ function bindWorkbenchNeighborActions(panel, memory) {
       if (!VALID_NEIGHBOR_FILTERS.has(filter)) return;
       state.neighborFilter = filter;
       state.relationDetailKey = null;
+      clearRelationFocus();
       refreshWorkbenchNeighborSection(panel, memory);
       saveViewState();
     });
@@ -5298,6 +5343,7 @@ function bindWorkbenchNeighborActions(panel, memory) {
       const key = btn.dataset.relationDetailKey || btn.dataset.neighborKey;
       if (!key) return;
       state.relationDetailKey = key;
+      applyRelationFocus(memory.key, key);
       refreshWorkbenchNeighborSection(panel, memory);
       const detail = panel.querySelector("#workbench-relation-detail");
       if (detail) detail.scrollIntoView({ block: "nearest", inline: "nearest" });

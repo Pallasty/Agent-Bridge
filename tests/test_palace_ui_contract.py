@@ -219,6 +219,15 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn('"overlay-color": "#ffffff"', html)
         self.assertIn('"overlay-opacity": 0.34', html)
 
+    def test_node_glyphs_use_half_scale_screen_size(self):
+        html = palace_html()
+
+        self.assertIn("const NODE_GLYPH_SCREEN_SCALE = 0.14;", html)
+        self.assertIn("const NODE_GLYPH_SCREEN_MIN = 3;", html)
+        self.assertIn("const NODE_GLYPH_SCREEN_MAX = 7;", html)
+        self.assertIn("nodeGlyphScreenSizeFromSize(size)", html)
+        self.assertIn('"width": "data(displaySize)", "height": "data(displaySize)"', html)
+
     def test_neighbor_relation_detail_drills_into_edges(self):
         html = palace_html()
 
@@ -231,6 +240,19 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("state.relationDetailKey = key;", html)
         self.assertIn("jumpToWorkbenchNeighbor(key);", html)
         self.assertIn("open node", html)
+
+    def test_neighbor_relation_selection_highlights_graph_path(self):
+        html = palace_html()
+
+        self.assertIn("function applyRelationFocus(memoryKey, neighborKey)", html)
+        self.assertIn("function clearRelationFocus()", html)
+        self.assertIn("relation-focus-node", html)
+        self.assertIn("relation-focus-edge", html)
+        self.assertIn('cy.elements().removeClass("relation-focus-node relation-focus-edge")', html)
+        self.assertIn('edge.addClass("relation-focus-edge")', html)
+        self.assertIn('neighbor.addClass("relation-focus-node")', html)
+        self.assertIn("applyRelationFocus(memory.key, key);", html)
+        self.assertIn("clearRelationFocus();", html)
 
     def test_node_workbench_content_reader_has_scan_and_full_modes(self):
         html = palace_html()
