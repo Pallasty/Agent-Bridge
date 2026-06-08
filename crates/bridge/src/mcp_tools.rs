@@ -10230,6 +10230,98 @@ impl McpTool for PresentOutcomesTool {
     }
 }
 
+/// LSWR Step E2: READ-ONLY admission projection over Step D present artifacts.
+///
+/// Reads persisted `present` HTML artifacts, filters to dual-encoded LSWR Step D
+/// packets, applies the pure Step E1 classifier, and reports class/reason
+/// counts. Writes nothing and never calls the #94 ingestion path.
+pub struct LswrOutcomeAdmissionsTool {
+    _hub: Hub,
+}
+impl LswrOutcomeAdmissionsTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { _hub: hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for LswrOutcomeAdmissionsTool {
+    fn name(&self) -> &'static str {
+        "lswr_outcome_admissions"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "LSWR Step E2: READ-ONLY projection over persisted Step D present \
+                 artifacts. Scans the present() artifact directory for HTML artifacts carrying \
+                 `agent_bridge.lswr.present_packet.v0`, applies the pure Step E admission \
+                 classifier, and reports training_eligible/audit_only/rejected counts + reasons. \
+                 Writes nothing, calls no memory tools, and never invokes present_outcomes_ingest."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "window_secs": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 31536000,
+                        "default": 86400,
+                        "description": "Look-back window over present artifacts by provenance timestamp."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 200,
+                        "description": "Max HTML artifacts scanned (most-recent-first before timestamp filtering)."
+                    },
+                    "eligible_only": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "When true, return only training_eligible admissions while summary counts still cover all scanned LSWR artifacts."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let window_secs = args
+            .get("window_secs")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(86_400)
+            .clamp(60, 31_536_000);
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(200)
+            .clamp(1, 500) as usize;
+        let eligible_only = args
+            .get("eligible_only")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let now = dispatch_now_secs();
+        let cutoff = now.saturating_sub(window_secs).max(0) as u64;
+        let dir = crate::present::presentations_dir();
+        let artifacts: Vec<_> = crate::present::list_artifacts(&dir, limit, Some("html"))
+            .into_iter()
+            .filter(|a| a.ts.map_or(true, |t| t >= cutoff))
+            .collect();
+        let mut projection = crate::lswr_outcome_admission::outcome_admissions_projection(
+            &artifacts,
+            eligible_only,
+            now.max(0) as u64,
+            window_secs as u64,
+        );
+        if let Some(obj) = projection.as_object_mut() {
+            obj.insert("dir".into(), json!(dir.display().to_string()));
+            obj.insert("limit".into(), json!(limit));
+        }
+        Ok(ToolResult::json_text(&projection))
+    }
+}
+
 // ── Output-expression lane Slice B (v0) ───────────────────────────────────
 // Two tools: a read-only outcome→memory drift projection (always-on, zero
 // risk, zero owner coordination), and an opt-in, dry-run-default, capped
@@ -35893,6 +35985,14 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Niche,
         Arc::new(PresentOutcomesTool::new(hub.clone())),
     );
+    // LSWR Step E2: read-only admission projection over Step D present artifacts.
+    // Niche (opt-in), no memory writes or ingestion calls.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(LswrOutcomeAdmissionsTool::new(hub.clone())),
+    );
     // Slice B (v0): read-only outcome→memory drift projection. Reports which
     // verified outcomes are/aren't represented in memory (tamper-evident chain);
     // writes nothing, non-mutating probe. Niche (opt-in).
@@ -42181,6 +42281,9 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         // Slice A present_outcomes is the same Niche opt-in shape.
         assert!(all.includes(Tier::Niche, "present_outcomes"));
         assert!(!std_p.includes(Tier::Niche, "present_outcomes"));
+        // LSWR Step E2 admission projection is also Niche/all only.
+        assert!(all.includes(Tier::Niche, "lswr_outcome_admissions"));
+        assert!(!std_p.includes(Tier::Niche, "lswr_outcome_admissions"));
         // Audio embodiment present_voice is the same Niche opt-in shape.
         assert!(all.includes(Tier::Niche, "present_voice"));
         assert!(!std_p.includes(Tier::Niche, "present_voice"));
@@ -42201,6 +42304,7 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         assert!(!std_p.includes(Tier::Niche, "lswr_readonly_bridge_display"));
         let codex_essential = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         assert!(!codex_essential.includes(Tier::Niche, "lswr_readonly_bridge_display"));
+        assert!(!codex_essential.includes(Tier::Niche, "lswr_outcome_admissions"));
         let schemas = build_registry_with_policy(Hub::builder().build(), all).list();
         assert!(
             schemas.iter().any(|s| s.name == "present"),
@@ -42217,6 +42321,12 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         assert!(
             schemas.iter().any(|s| s.name == "present_outcomes"),
             "present_outcomes must register under the all profile"
+        );
+        assert!(
+            schemas
+                .iter()
+                .any(|s| s.name == "lswr_outcome_admissions"),
+            "lswr_outcome_admissions must register under the all profile"
         );
         assert!(
             schemas.iter().any(|s| s.name == "present_voice"),
@@ -42246,6 +42356,19 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
                 .iter()
                 .any(|s| s.name == "lswr_readonly_bridge_display"),
             "lswr_readonly_bridge_display must stay out of standard"
+        );
+        assert!(
+            !standard_schemas
+                .iter()
+                .any(|s| s.name == "lswr_outcome_admissions"),
+            "lswr_outcome_admissions must stay out of standard"
+        );
+        let codex_schemas = build_registry_with_policy(Hub::builder().build(), codex_essential).list();
+        assert!(
+            !codex_schemas
+                .iter()
+                .any(|s| s.name == "lswr_outcome_admissions"),
+            "lswr_outcome_admissions must stay out of codex-essential"
         );
     }
 
