@@ -10812,6 +10812,30 @@ impl McpTool for BrowserClickTool {
         } else {
             b.click(&page, sel).await
         };
+        // SSB Phase-1 typed event spine: emit a verify-first semantic event AT
+        // ACTION TIME. The verdict records whether the click was confirmed
+        // actionable (Verified), determined inert/failed (NotVerified — the
+        // anti-laundering signal), or merely dispatched without readback
+        // (Unknown). Best-effort: a telemetry write must never fail the click.
+        let (ok, err_msg) = match &outcome {
+            Ok(()) => (true, String::new()),
+            Err(e) => (false, e.to_string()),
+        };
+        if let Some(store) = &self.hub.store {
+            let verdict = crate::semantic_event::classify_click(is_ref, ok, &err_msg);
+            let ev = crate::semantic_event::SemanticEvent {
+                ts: dispatch_now_secs(),
+                actor: "mcp".to_string(),
+                source: "browser".to_string(),
+                action: "click".to_string(),
+                target: Some(sel.to_string()),
+                verdict,
+                facts: json!({ "selector": sel, "is_ref": is_ref, "page": page.as_str() }),
+            };
+            if let Err(e) = store.record_semantic_event(ev.to_record()).await {
+                tracing::debug!(error = %e, "record_semantic_event (browser_click) failed");
+            }
+        }
         match outcome {
             Ok(()) => Ok(ToolResult::text(format!("clicked {sel}"))),
             Err(e) => Ok(ToolResult::error(format!("browser: {e}"))),
@@ -22005,10 +22029,15 @@ impl McpTool for EventSpineSnapshotTool {
             Ok(rows) => rows,
             Err(e) => return Ok(ToolResult::error(format!("list_sessions: {e}"))),
         };
+        let semantic_events = match store.recent_semantic_events(window_secs, fetch_limit).await {
+            Ok(rows) => rows,
+            Err(e) => return Ok(ToolResult::error(format!("recent_semantic_events: {e}"))),
+        };
         let snapshot = crate::event_spine::mcp_event_spine_snapshot(
             &calls,
             &errors,
             &sessions,
+            &semantic_events,
             window_secs,
             limit,
             dispatch_now_secs(),

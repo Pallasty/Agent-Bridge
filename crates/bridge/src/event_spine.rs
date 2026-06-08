@@ -5,7 +5,7 @@
 //! agent session lifecycle rows) so callers can inspect whether telemetry can
 //! support replay/explainability before we persist a unified event table.
 
-use ab_store::{McpToolCallRow, McpToolErrorRecord, StoredSession};
+use ab_store::{McpToolCallRow, McpToolErrorRecord, SemanticEventRecord, StoredSession};
 use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -72,6 +72,7 @@ pub fn mcp_event_spine_snapshot(
     calls: &[McpToolCallRow],
     errors: &[McpToolErrorRecord],
     sessions: &[StoredSession],
+    semantic_events: &[SemanticEventRecord],
     window_secs: i64,
     limit: usize,
     generated_at: i64,
@@ -81,6 +82,48 @@ pub fn mcp_event_spine_snapshot(
     let cutoff = generated_at.saturating_sub(window_secs);
 
     let mut raw = Vec::new();
+    // Produced semantic events (SSB Phase 1) — a REAL producer source, unlike
+    // the derived telemetry below. The verify-first verdict drives `ok`:
+    // verified=Some(true), not_verified=Some(false), unknown=None, so the hash
+    // chain preserves the honesty distinction (a no-op is never an `ok` event).
+    for (idx, ev) in semantic_events.iter().enumerate() {
+        if ev.ts < cutoff {
+            continue;
+        }
+        let ok = match ev.verdict_status.as_str() {
+            "verified" => Some(true),
+            "not_verified" => Some(false),
+            _ => None,
+        };
+        let evidence: Value = ev
+            .evidence
+            .as_deref()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or(Value::Null);
+        let facts: Value =
+            serde_json::from_str(&ev.facts).unwrap_or_else(|_| json!({ "raw": ev.facts }));
+        raw.push(RawEvent {
+            ts: ev.ts,
+            source: "semantic_events",
+            source_index: idx,
+            kind: "semantic_event",
+            label: match &ev.target {
+                Some(t) => format!("{}:{} {}", ev.source, ev.action, t),
+                None => format!("{}:{}", ev.source, ev.action),
+            },
+            ok,
+            facts: json!({
+                "actor": ev.actor,
+                "adapter": ev.source,
+                "action": ev.action,
+                "target": ev.target,
+                "verdict_status": ev.verdict_status,
+                "verdict_method": ev.verdict_method,
+                "evidence": evidence,
+                "facts": facts,
+            }),
+        });
+    }
     for (idx, call) in calls.iter().enumerate() {
         if call.ts < cutoff {
             continue;
@@ -391,6 +434,7 @@ mod tests {
                 "spawn kilo: No such file or directory",
             )],
             &[],
+            &[],
             60,
             10,
             120,
@@ -428,6 +472,7 @@ mod tests {
             ],
             &[],
             &[],
+            &[],
             60,
             1,
             120,
@@ -453,6 +498,7 @@ mod tests {
                 Some(103),
                 Some(1),
             )],
+            &[],
             60,
             10,
             120,
@@ -477,6 +523,7 @@ mod tests {
             &[call(70, "old_tool", true), call(80, "middle_tool", true)],
             &[],
             &[session("ses-recent", "kilo", 110, Some(115), Some(1))],
+            &[],
             60,
             1,
             120,
@@ -496,5 +543,58 @@ mod tests {
         assert!(!preview.contains("sk-live-secret"));
         assert!(!preview.contains("abc123"));
         assert!(preview.contains("***redacted***"));
+    }
+
+    fn sem(ts: i64, action: &str, target: &str, verdict_status: &str) -> SemanticEventRecord {
+        SemanticEventRecord {
+            ts,
+            actor: "mcp".to_string(),
+            source: "browser".to_string(),
+            action: action.to_string(),
+            target: Some(target.to_string()),
+            verdict_status: verdict_status.to_string(),
+            verdict_method: "test".to_string(),
+            evidence: None,
+            facts: "{\"selector\":\"@e5\"}".to_string(),
+        }
+    }
+
+    #[test]
+    fn semantic_events_project_with_verdict_ok_and_join_chain() {
+        let snapshot = mcp_event_spine_snapshot(
+            &[call(100, "memory_search", true)],
+            &[],
+            &[],
+            &[
+                sem(101, "click", "@e5", "verified"),
+                sem(102, "click", "@e9", "not_verified"),
+                sem(103, "click", "@e1", "unknown"),
+            ],
+            60,
+            10,
+            120,
+        );
+
+        // All three produced events are present alongside the telemetry call.
+        assert_eq!(snapshot.event_count, 4);
+        let sem_events: Vec<&EventSpineEvent> = snapshot
+            .events
+            .iter()
+            .filter(|e| e.source == "semantic_events")
+            .collect();
+        assert_eq!(sem_events.len(), 3);
+        // Verify-first verdict drives ok: verified=Some(true),
+        // not_verified=Some(false) (a no-op is NEVER an ok event), unknown=None.
+        assert_eq!(sem_events[0].ok, Some(true));
+        assert_eq!(sem_events[1].ok, Some(false));
+        assert_eq!(sem_events[2].ok, None);
+        assert_eq!(sem_events[0].kind, "semantic_event");
+        assert_eq!(sem_events[1].facts["verdict_status"], "not_verified");
+        // The produced events are part of the verified hash chain.
+        assert!(snapshot.integrity.verified);
+        assert!(verify_event_chain(
+            &snapshot.events,
+            &snapshot.integrity.chain_head
+        ));
     }
 }

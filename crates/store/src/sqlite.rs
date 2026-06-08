@@ -644,6 +644,28 @@ BEGIN
 END;
 "#;
 
+// v34: SSB Phase-1 typed event spine — a durable, append-only log of PRODUCED
+// semantic events (vs the read-only event_spine projection over telemetry).
+// Each row carries a verify-first verdict so "no green laundering" is a recorded
+// mechanism: an inert action is stored verdict_status='not_verified', never as a
+// silent success. Node-local telemetry (NOT exported in memory sync).
+const SCHEMA_V34: &str = r#"
+CREATE TABLE IF NOT EXISTS semantic_events (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts             INTEGER NOT NULL,
+    actor          TEXT    NOT NULL,
+    source         TEXT    NOT NULL,
+    action         TEXT    NOT NULL,
+    target         TEXT,
+    verdict_status TEXT    NOT NULL,
+    verdict_method TEXT    NOT NULL,
+    evidence       TEXT,
+    facts          TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_semantic_events_ts ON semantic_events(ts DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_semantic_events_source ON semantic_events(source, ts DESC);
+"#;
+
 /// Default database path.
 ///
 /// Linux: `$XDG_DATA_HOME/agent-bridge/state.db` → `~/.local/share/agent-bridge/state.db`.
@@ -1343,6 +1365,21 @@ impl SqliteStore {
                     )?;
                 }
                 let _ = c.execute("UPDATE schema_meta SET value='33' WHERE key='version'", []);
+            }
+
+            // ── v34: SSB Phase-1 typed event spine — durable append-only log of
+            // produced semantic events with verify-first verdicts. Additive +
+            // idempotent (CREATE TABLE/INDEX IF NOT EXISTS).
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "33".to_string());
+            if cur.as_str() == "33" {
+                c.execute_batch(SCHEMA_V34)?;
+                let _ = c.execute("UPDATE schema_meta SET value='34' WHERE key='version'", []);
             }
             Ok(())
         })
@@ -2340,6 +2377,78 @@ impl StateStore for SqliteStore {
             })
             .await
             .map_err(|e| Error::Backend(format!("recent_mcp_tool_errors: {e}")))?;
+        Ok(rows)
+    }
+
+    async fn record_semantic_event(&self, event: crate::SemanticEventRecord) -> Result<()> {
+        self.conn
+            .call(move |c| -> RusqliteResult<()> {
+                c.execute(
+                    "INSERT INTO semantic_events
+                       (ts, actor, source, action, target, verdict_status,
+                        verdict_method, evidence, facts)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    params![
+                        event.ts,
+                        event.actor,
+                        event.source,
+                        event.action,
+                        event.target,
+                        event.verdict_status,
+                        event.verdict_method,
+                        event.evidence,
+                        event.facts,
+                    ],
+                )?;
+                // FIFO ring cap so the producer log stays bounded.
+                c.execute(
+                    "DELETE FROM semantic_events
+                      WHERE id <= (SELECT MAX(id) FROM semantic_events) - ?1",
+                    params![crate::SEMANTIC_EVENT_RING_CAP],
+                )?;
+                Ok(())
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("record_semantic_event: {e}")))?;
+        Ok(())
+    }
+
+    async fn recent_semantic_events(
+        &self,
+        window_secs: i64,
+        limit: u32,
+    ) -> Result<Vec<crate::SemanticEventRecord>> {
+        let limit = limit.min(500).max(1) as i64;
+        let cutoff = now_secs().saturating_sub(window_secs.clamp(60, 31_536_000));
+        let rows = self
+            .conn
+            .call(move |c| -> RusqliteResult<Vec<crate::SemanticEventRecord>> {
+                let mut stmt = c.prepare(
+                    "SELECT ts, actor, source, action, target, verdict_status,
+                            verdict_method, evidence, facts
+                       FROM semantic_events
+                      WHERE ts >= ?1
+                      ORDER BY ts DESC, id DESC LIMIT ?2",
+                )?;
+                let rows = stmt
+                    .query_map(params![cutoff, limit], |row| {
+                        Ok(crate::SemanticEventRecord {
+                            ts: row.get(0)?,
+                            actor: row.get(1)?,
+                            source: row.get(2)?,
+                            action: row.get(3)?,
+                            target: row.get(4)?,
+                            verdict_status: row.get(5)?,
+                            verdict_method: row.get(6)?,
+                            evidence: row.get(7)?,
+                            facts: row.get(8)?,
+                        })
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("recent_semantic_events: {e}")))?;
         Ok(rows)
     }
 
@@ -14529,7 +14638,7 @@ mod tests {
             .await
             .expect("inspect migrated rows");
 
-        assert_eq!(version, "33"); // v33 = last_decayed_at (F5); latest after all migrations
+        assert_eq!(version, "34"); // v34 = semantic_events (SSB Phase 1); latest after all migrations
         assert_eq!(bad_count, 0);
         assert_eq!(mem_created, 1_779_641_229_i64);
         assert_eq!(post_created, 1_779_641_229_i64);
@@ -18106,7 +18215,7 @@ mod tests {
         let v = store.schema_meta_version().await.expect("query");
         assert_eq!(
             v.as_deref(),
-            Some("33"),
+            Some("34"),
             "if schema bumped, update both this assertion and S5 docs"
         );
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;

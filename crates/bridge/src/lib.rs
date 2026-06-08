@@ -23,6 +23,7 @@ pub mod curate;
 pub mod daemon_http;
 pub mod dream_replay;
 pub mod event_spine;
+pub mod semantic_event;
 pub mod github_api;
 pub mod gitlab_api;
 pub mod hub;

@@ -132,8 +132,40 @@ pub struct McpToolCallRow {
     pub result_size: Option<u32>,
 }
 
+/// A produced (not derived) semantic event — SSB Phase-1 typed event spine.
+///
+/// Unlike [`event_spine`] derivations over telemetry rows, these are emitted by
+/// a real producer AT ACTION TIME and carry a verify-first verdict, so the
+/// "no green laundering" invariant is recorded as a mechanism: an action that
+/// would be inert is stored with `verdict_status='not_verified'`, never as a
+/// silent success. Append-only + node-local (not exported in memory sync).
+#[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
+pub struct SemanticEventRecord {
+    pub ts: i64,
+    /// Who produced it (mcp caller / node / session).
+    pub actor: String,
+    /// Adapter / subsystem, e.g. "browser".
+    pub source: String,
+    /// Action verb, e.g. "click".
+    pub action: String,
+    /// Semantic object reference acted on, e.g. "@e5" (None when not applicable).
+    pub target: Option<String>,
+    /// "verified" | "not_verified" | "unknown".
+    pub verdict_status: String,
+    /// How the verdict was reached, e.g. "cdp_actionability_probe".
+    pub verdict_method: String,
+    /// JSON evidence string (None when none).
+    pub evidence: Option<String>,
+    /// JSON facts string.
+    pub facts: String,
+}
+
 /// Max rows retained in `mcp_tool_errors` after each insert (oldest pruned).
 pub const MCP_TOOL_ERROR_RING_CAP: u32 = 100;
+
+/// Cap on `semantic_events` rows after each insert (oldest pruned), keeping the
+/// append-only producer log bounded like the MCP telemetry ring.
+pub const SEMANTIC_EVENT_RING_CAP: i64 = 5_000;
 
 /// Cap on `memory_query_log` rows (Phase 0 memory telemetry). Older rows are
 /// pruned each `record_memory_query` call, FIFO. ~7 days of moderate use at
@@ -1641,6 +1673,23 @@ pub trait StateStore: Send + Sync {
         window_secs: i64,
         limit: u32,
     ) -> Result<Vec<McpToolCallRow>> {
+        let _ = (window_secs, limit);
+        Ok(Vec::new())
+    }
+
+    /// Append a produced semantic event (SSB typed event spine, Phase 1).
+    /// Default impl is a no-op so non-sqlite stores stay compilable.
+    async fn record_semantic_event(&self, event: SemanticEventRecord) -> Result<()> {
+        let _ = event;
+        Ok(())
+    }
+
+    /// Most-recent produced semantic events within `window_secs`, newest first.
+    async fn recent_semantic_events(
+        &self,
+        window_secs: i64,
+        limit: u32,
+    ) -> Result<Vec<SemanticEventRecord>> {
         let _ = (window_secs, limit);
         Ok(Vec::new())
     }
