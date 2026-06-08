@@ -2882,6 +2882,7 @@ function zoomToAtlasRegion(regionId) {
   const target = visibleRegionNodes.length > 0 ? visibleRegionNodes : regionNodes;
   if (target.length > 0) {
     state.cy.animate({ fit: { eles: target, padding: 86 }, duration: 420, easing: "ease-out" });
+    scheduleCrowdSpread("region", 460);
   }
 }
 
@@ -2902,6 +2903,7 @@ function zoomToVisibleGraph() {
     const atlasOverview = isAtlasDistrictOverview();
     state.cy.animate({ fit: { eles: visible, padding: atlasOverview ? 110 : 70 }, duration: 360, easing: "ease-out" });
     if (atlasOverview) window.setTimeout(panAtlasOverviewAwayFromPanels, 390);
+    else scheduleCrowdSpread("fit", 400);
   }
 }
 
@@ -2979,6 +2981,9 @@ const state = {
   lastScreenOverlapCount: 0,
   lastScreenOverlapRatio: 0,
   zoomMetricsRaf: 0,
+  screenCrowdRefitTimer: 0,
+  lastScreenCrowdRefitAt: 0,
+  lastScreenCrowdRefitReason: "",
   // ζ-13: degree info computed once per loadGraph, consumed by both the
   // footer badge and buildCy's per-node hub/orphan marker. Stashed here
   // (rather than recomputed twice) so the two surfaces can't drift.
@@ -3347,11 +3352,13 @@ const REGION_SHELL_DENSITY_SPACING = 2.5;
 const REGION_SHELL_MAX_SPACING = 108;
 const REGION_SHELL_Y_SCALE = 0.78;
 const GRAPH_VERTICAL_COMPRESSION = 0.94;
-const NODE_GLYPH_SCREEN_SCALE = 0.14;
-const NODE_GLYPH_SCREEN_MIN = 3;
-const NODE_GLYPH_SCREEN_MAX = 7;
-const NODE_GLYPH_MODEL_MIN = 1;
-const SCREEN_OVERLAP_PADDING = 1.5;
+const NODE_GLYPH_SCREEN_SCALE = 0.07;
+const NODE_GLYPH_SCREEN_MIN = 2;
+const NODE_GLYPH_SCREEN_MAX = 4;
+const NODE_GLYPH_MODEL_MIN = 0.45;
+const SCREEN_OVERLAP_PADDING = 0.8;
+const SCREEN_OVERLAP_WARN_RATIO = 0.0015;
+const SCREEN_OVERLAP_SLOW_RATIO = 0.004;
 const LABEL_SHOW_ANCHOR_ZOOM = 0.42;
 const LABEL_SHOW_ALL_ZOOM = 0.82;
 
@@ -3464,7 +3471,8 @@ function countNodeOverlaps(nodes, padding = 2) {
 function graphScreenNodeRadius(node) {
   const glyph = Number(node.data("screenGlyphSize")) || nodeGlyphScreenSize(node);
   const halo = Number(node.data("screenHaloPad")) || nodeHaloScreenPad(node);
-  return glyph / 2 + halo;
+  const border = Number(node.data("displayBorderStrong")) || 0;
+  return glyph / 2 + halo + border / 2;
 }
 
 function countScreenNodeOverlaps(nodes, padding = SCREEN_OVERLAP_PADDING) {
@@ -3604,6 +3612,12 @@ function nodeHaloScreenPadFromPad(pad) {
   return clampNumber(halo * NODE_GLYPH_SCREEN_SCALE, 0, NODE_GLYPH_SCREEN_MAX * 0.5);
 }
 
+function screenPxToModel(px, zoom, minModel = 0.18) {
+  const value = Number(px) || 0;
+  if (value <= 0) return 0;
+  return clampNumber(value / zoom, minModel, value / 0.15);
+}
+
 function nodeGlyphScreenSize(node) {
   return nodeGlyphScreenSizeFromSize(node.data("size"));
 }
@@ -3630,6 +3644,13 @@ function updateZoomScaledNodeMetrics() {
       node.data("districtLabelMarginY", clampNumber(12 / zoom, 12, 12 / 0.15));
       node.data("districtLabelOutlineWidth", clampNumber(2 / zoom, 2, 2 / 0.15));
       node.data("districtLabelMaxWidth", clampNumber(180 / zoom, 180, 180 / 0.15));
+      node.data("displayBorderThin", screenPxToModel(0.75, zoom));
+      node.data("displayBorderMedium", screenPxToModel(1.2, zoom));
+      node.data("displayBorderStrong", screenPxToModel(1.8, zoom));
+      node.data("displayFocusHaloPad", screenPxToModel(4, zoom, 0));
+      node.data("displayRelationHaloPad", screenPxToModel(3.5, zoom, 0));
+      node.data("displaySedimentHaloPad", screenPxToModel(7, zoom, 0));
+      node.data("displayDistrictHaloPad", screenPxToModel(3, zoom, 0));
     });
   });
 }
@@ -3689,6 +3710,13 @@ function buildCy(data) {
           districtLabelMarginY: 12,
           districtLabelOutlineWidth: 2,
           districtLabelMaxWidth: 180,
+          displayBorderThin: 0.75,
+          displayBorderMedium: 1.2,
+          displayBorderStrong: 1.8,
+          displayFocusHaloPad: 4,
+          displayRelationHaloPad: 3.5,
+          displaySedimentHaloPad: 7,
+          displayDistrictHaloPad: 3,
           haloPad: halo,
           screenHaloPad,
           displayHaloPad: screenHaloPad,
@@ -3734,7 +3762,7 @@ function buildCy(data) {
         "text-valign": "bottom", "text-halign": "center",
         "text-margin-y": 5, "text-max-width": "140px", "text-wrap": "ellipsis",
         "text-opacity": "data(labelOpacity)",
-        "border-width": 1, "border-color": "#0a0a0f", "border-opacity": 0.7,
+        "border-width": "data(displayBorderThin)", "border-color": "#0a0a0f", "border-opacity": 0.7,
         "opacity": 0.92,
         // C3.5 access-driven halo. Overlay sits behind the node and tinted
         // by its kind color, so attention pattern is visible at a glance.
@@ -3744,7 +3772,7 @@ function buildCy(data) {
       }},
       { selector: "node[source='markdown']", style: {
         "shape": "round-rectangle",
-        "border-width": 2, "border-color": "#e0e0ec", "border-opacity": 0.55,
+        "border-width": "data(displayBorderMedium)", "border-color": "#e0e0ec", "border-opacity": 0.55,
         "opacity": 0.96,
       }},
       // ζ-13 orphan: degree 0 in the explicit graph — structural loner
@@ -3756,7 +3784,7 @@ function buildCy(data) {
       { selector: "node[orphan = 1]", style: {
         "border-style": "dashed",
         "border-color": "#555562",
-        "border-width": 1.5,
+        "border-width": "data(displayBorderMedium)",
         "opacity": 0.62,
       }},
       // C5 freshness: nodes accessed within FRESH_WINDOW_SECS get a cyan
@@ -3764,7 +3792,7 @@ function buildCy(data) {
       // here right now" reads as a single visual concept (recent click + the
       // attention edge it's about to create).
       { selector: "node[fresh = 1]", style: {
-        "border-width": 2, "border-color": "#5cc8c8", "border-opacity": 0.85,
+        "border-width": "data(displayBorderStrong)", "border-color": "#5cc8c8", "border-opacity": 0.85,
       }},
       // C7 staleness: nodes untouched for >STALE_WINDOW_SECS fade out so
       // the attention map shows what the system has stopped breathing
@@ -3783,7 +3811,7 @@ function buildCy(data) {
       { selector: "node[hub = 1]", style: {
         "border-style": "double",
         "border-color": "#c8a96a",
-        "border-width": 3,
+        "border-width": "data(displayBorderStrong)",
         "border-opacity": 0.95,
       }},
       { selector: "node.atlas-detail-muted", style: {
@@ -3797,7 +3825,7 @@ function buildCy(data) {
         "opacity": 1,
         "border-style": "solid",
         "border-color": "data(color)",
-        "border-width": 3,
+        "border-width": "data(displayBorderStrong)",
         "border-opacity": 1,
         "label": "data(districtLabel)",
         "text-opacity": 1,
@@ -3813,7 +3841,7 @@ function buildCy(data) {
         "text-background-color": "#080911",
         "text-background-opacity": 0.72,
         "text-background-padding": 2,
-        "overlay-padding": 5,
+        "overlay-padding": "data(displayDistrictHaloPad)",
         "overlay-opacity": 0.18,
         "z-index": 700,
       }},
@@ -3821,31 +3849,31 @@ function buildCy(data) {
         "opacity": 0.08, "text-opacity": 0,
       }},
       { selector: "node.match", style: {
-        "border-width": 3, "border-color": "#ffe070", "border-opacity": 1,
+        "border-width": "data(displayBorderStrong)", "border-color": "#ffe070", "border-opacity": 1,
         "label": "data(label)", "text-opacity": 1,
         "color": "#ffe070", "z-index": 999,
       }},
       { selector: "node.focus-center", style: {
-        "border-width": 3, "border-color": "#ffffff", "border-opacity": 1,
+        "border-width": "data(displayBorderStrong)", "border-color": "#ffffff", "border-opacity": 1,
         "label": "data(label)", "text-opacity": 1,
         "color": "#ffffff", "font-size": "11px", "z-index": 999, "opacity": 1,
-        "overlay-color": "#ffffff", "overlay-padding": 10, "overlay-opacity": 0.34,
+        "overlay-color": "#ffffff", "overlay-padding": "data(displayFocusHaloPad)", "overlay-opacity": 0.34,
       }},
       { selector: "node.focus-neighbor", style: {
         "label": "data(label)", "text-opacity": 1,
         "color": "#e0e0ec", "z-index": 998, "opacity": 1,
       }},
       { selector: "node.relation-focus-node", style: {
-        "border-width": 3,
+        "border-width": "data(displayBorderStrong)",
         "border-color": "#a87cff",
         "border-opacity": 1,
         "overlay-color": "#a87cff",
-        "overlay-padding": 8,
+        "overlay-padding": "data(displayRelationHaloPad)",
         "overlay-opacity": 0.24,
         "z-index": 1000,
       }},
       { selector: "node:selected", style: {
-        "border-width": 2.5, "border-color": "#ffffff", "border-opacity": 1,
+        "border-width": "data(displayBorderStrong)", "border-color": "#ffffff", "border-opacity": 1,
       }},
       { selector: "edge", style: {
         "width": "mapData(weight, 0, 1, 0.4, 2.5)",
@@ -3922,7 +3950,7 @@ function buildCy(data) {
       // landed". Removed after ~1.5s by the saveCanvas flow.
       { selector: "node.new-sediment", style: {
         "overlay-color": "#5cc8c8",
-        "overlay-padding": 16,
+        "overlay-padding": "data(displaySedimentHaloPad)",
         "overlay-opacity": 0.42,
       }},
     ],
@@ -4112,6 +4140,27 @@ function graphViewportStats() {
   };
 }
 
+function screenOverlapLimit(stats) {
+  const visible = Math.max(0, (stats && stats.visibleCount) || 0);
+  if (visible < 12) return 1;
+  return Math.max(5, Math.floor(visible * 0.025));
+}
+
+function screenOverlapSeverity(stats) {
+  const screenOverlapCount = Math.max(0, (stats && stats.screenOverlapCount) || 0);
+  const screenOverlapRatio = Number.isFinite(stats && stats.screenOverlapRatio)
+    ? stats.screenOverlapRatio
+    : 0;
+  const limit = screenOverlapLimit(stats);
+  if (screenOverlapCount > Math.max(limit * 2, 10) || screenOverlapRatio > SCREEN_OVERLAP_SLOW_RATIO) {
+    return "slow";
+  }
+  if (screenOverlapCount > limit || screenOverlapRatio > SCREEN_OVERLAP_WARN_RATIO) {
+    return "warn";
+  }
+  return "good";
+}
+
 function renderViewHealth(stats) {
   const el = document.getElementById("view-health");
   if (!el) return;
@@ -4121,15 +4170,60 @@ function renderViewHealth(stats) {
   const overlapCount = Math.max(0, s.overlapCount || 0);
   const screenOverlapCount = Math.max(0, s.screenOverlapCount || 0);
   const screenOverlapRatio = Number.isFinite(s.screenOverlapRatio) ? s.screenOverlapRatio : 0;
-  const overlapLimit = Math.max(8, Math.floor((s.visibleCount || 0) * 0.05));
-  const tier = overlapCount > 0 || screenOverlapCount > overlapLimit || visualMs > 32 ? "slow" : visualMs > 16 ? "warn" : "good";
+  const overlapLimit = screenOverlapLimit(s);
+  const overlapSeverity = screenOverlapSeverity(s);
+  const tier = overlapCount > 0 || visualMs > 32 || overlapSeverity === "slow"
+    ? "slow"
+    : visualMs > 16 || overlapSeverity === "warn"
+      ? "warn"
+      : "good";
   const matchText = s.matchCount > 0 ? ` · match:${s.matchCount}` : "";
   const overlapText = overlapCount > 0 ? ` · overlap:${overlapCount}` : "";
-  const screenOverlapText = screenOverlapCount > 0 ? ` · screen-overlap:${screenOverlapCount}` : "";
+  const screenOverlapText = screenOverlapCount > 0
+    ? ` · ${overlapSeverity === "good" ? "touch" : "crowd"}:${screenOverlapCount}/${overlapLimit}`
+    : "";
   const screenRatioText = screenOverlapRatio > 0 ? ` (${(screenOverlapRatio * 100).toFixed(2)}%)` : "";
-  el.textContent = `view:${s.visibleCount}/${s.totalCount}${matchText}${overlapText}${screenOverlapText} · ${msLabel}ms`;
-  el.title = `${s.visibleCount} visible nodes · ${s.edgeVisibleCount} visible edges · ${s.matchCount} search matches · ${overlapCount} layout overlaps · ${screenOverlapCount} screen-overlap pairs${screenRatioText} · ${msLabel}ms visual pass`;
+  const spreadRecently = state.lastScreenCrowdRefitAt > 0 &&
+    (performance.now() - state.lastScreenCrowdRefitAt) < 2500;
+  const spreadText = spreadRecently ? ` · spread:${state.lastScreenCrowdRefitReason || "auto"}` : "";
+  el.textContent = `view:${s.visibleCount}/${s.totalCount}${matchText}${overlapText}${screenOverlapText}${spreadText} · ${msLabel}ms`;
+  el.title = `${s.visibleCount} visible nodes · ${s.edgeVisibleCount} visible edges · ${s.matchCount} search matches · ${overlapCount} layout overlaps · ${screenOverlapCount} screen-overlap pairs${screenRatioText} · limit ${overlapLimit} · glyph ${NODE_GLYPH_SCREEN_MIN}-${NODE_GLYPH_SCREEN_MAX}px · ${msLabel}ms visual pass`;
   el.className = `view-health ${tier}`;
+}
+
+function maybeAutoSpreadCrowdedViewport(reason) {
+  if (!state.cy || state.focused || isAtlasDistrictOverview()) return;
+  const stats = graphViewportStats();
+  if ((stats.visibleCount || 0) < 24) return;
+  if (screenOverlapSeverity(stats) === "good") return;
+  const now = performance.now();
+  if (now - state.lastScreenCrowdRefitAt < 1800) return;
+  const zoom = Number(state.cy.zoom()) || 1;
+  const maxZoom = typeof state.cy.maxZoom === "function" ? state.cy.maxZoom() : 4.0;
+  const factor = stats.screenOverlapRatio > SCREEN_OVERLAP_SLOW_RATIO ? 1.28 : 1.16;
+  const nextZoom = clampNumber(zoom * factor, zoom, maxZoom);
+  if (nextZoom <= zoom + 0.02) return;
+  state.lastScreenCrowdRefitAt = now;
+  state.lastScreenCrowdRefitReason = reason || "auto";
+  state.cy.zoom({
+    level: nextZoom,
+    renderedPosition: {
+      x: state.cy.width() / 2,
+      y: state.cy.height() / 2,
+    },
+  });
+  renderViewHealth(graphViewportStats());
+}
+
+function scheduleCrowdSpread(reason, delay = 430) {
+  if (!state.cy) return;
+  if (state.screenCrowdRefitTimer) {
+    window.clearTimeout(state.screenCrowdRefitTimer);
+  }
+  state.screenCrowdRefitTimer = window.setTimeout(() => {
+    state.screenCrowdRefitTimer = 0;
+    maybeAutoSpreadCrowdedViewport(reason);
+  }, delay);
 }
 
 // ── Visual state machine ────────────────────────────────────────
