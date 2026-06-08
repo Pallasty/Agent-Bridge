@@ -30,6 +30,7 @@ pub mod ide;
 pub mod instinct;
 pub mod llm_client;
 pub mod locks;
+pub mod lswr_outcome_admission;
 pub mod lswr_present;
 pub mod lswr_snapshot_bridge;
 pub mod lswr_snapshot_consumer;
