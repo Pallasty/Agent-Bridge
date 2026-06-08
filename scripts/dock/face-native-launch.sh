@@ -28,6 +28,23 @@ export AB_FACE_H="${AB_FACE_HEIGHT:-520}"
 export AB_FACE_SEG="${AB_FACE_SEGMENT_MS:-86400000}"   # 24h per probe segment; loop re-spawns
 export AB_FACE_OUTPUT="${AB_FACE_OUTPUT:-}"            # Wayland output name (e.g. DP-1); empty = compositor default
 
+# Single-instance lock + supervise-loop pidfile (XDG_RUNTIME_DIR, /tmp fallback).
+AB_FACE_RUNDIR="${XDG_RUNTIME_DIR:-/tmp}"
+AB_FACE_LOCK="$AB_FACE_RUNDIR/ab-face-native.lock"
+AB_FACE_PIDFILE="$AB_FACE_RUNDIR/ab-face-native.pid"
+
+# Atomic single-instance guard: hold an exclusive lock across the whole
+# check-and-spawn. Without it, two near-simultaneous launches can both pass the
+# pgrep liveness check before either spawns its loop (TOCTOU) and end up with
+# two Faces. The lock auto-releases when fd 9 closes on script exit — by then
+# the supervised loop is already detached, so steady-state re-launches are still
+# caught by the pgrep check below.
+exec 9>"$AB_FACE_LOCK"
+if ! flock -n 9; then
+  echo "another face-native-launch is already starting — aborting to avoid a second Face."
+  exit 0
+fi
+
 # already running? (the supervise loop or a probe)
 if pgrep -f "linux-native-transparent" >/dev/null 2>&1; then
   echo "native Face already running."
@@ -53,7 +70,13 @@ setsid bash -c '
     sleep 1
   done
 ' </dev/null >/dev/null 2>&1 &
+AB_FACE_LOOP_PID=$!
 disown
+# Record the supervise loop's PID for a clean, self-safe stop. setsid made it a
+# session/group leader, so its PGID == its PID — killing the group takes down
+# the loop AND the live probe child it spawned.
+printf '%s\n' "$AB_FACE_LOOP_PID" >"$AB_FACE_PIDFILE" 2>/dev/null || true
 
 echo "native Face up (supervised, detached) — anchor=$AB_FACE_ANCHOR ${AB_FACE_W}x${AB_FACE_H} segment=${AB_FACE_SEG}ms"
-echo "  stop with: pkill -f linux-native-transparent  (and pkill -f face-native-launch if the loop persists)"
+echo "  stop with: kill -- -\"\$(cat $AB_FACE_PIDFILE)\"   # kills the whole supervised group (loop + live probe)"
+echo "  (do NOT use 'pkill -f face-native-launch' — the -f pattern matches your own shell's command line and self-kills)"
