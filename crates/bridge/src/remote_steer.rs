@@ -344,7 +344,16 @@ impl Multiplexer for TmuxBackend {
     fn has_cmd(&self, session: &str) -> String {
         // Session-target command: `=` forces exact-name matching (no prefix
         // or fnmatch), so `ab__a__b` never resolves to `ab__a__bc`.
-        format!("{} has-session -t ={}", self.bin, session)
+        //
+        // The `=session` token MUST be single-quoted. On a remote target whose
+        // login shell is zsh (macOS default), an unquoted leading `=` triggers
+        // zsh equals-expansion (`=foo` → path of command `foo`): it fails with
+        // "foo not found", masks the exit code as 0, and tmux never runs — so
+        // `has_session().ok()` reads true for a session that doesn't exist
+        // (launch falsely reports "already live"). Quoting passes the literal
+        // `=session` through to tmux on both zsh and bash/sh. Wet-test found:
+        // bash never expands `=`, so this only bit the real cross-node path.
+        format!("{} has-session -t {}", self.bin, shq(&format!("={session}")))
     }
 
     fn list_cmd(&self) -> String {
@@ -356,7 +365,10 @@ impl Multiplexer for TmuxBackend {
     }
 
     fn kill_cmd(&self, session: &str) -> String {
-        format!("{} kill-session -t ={}", self.bin, session)
+        // Quote `=session` for the same zsh equals-expansion reason as has_cmd;
+        // unquoted, a remote zsh would mangle it and the kill silently no-ops
+        // (exit 0, session left alive as an orphan).
+        format!("{} kill-session -t {}", self.bin, shq(&format!("={session}")))
     }
 }
 
@@ -942,8 +954,13 @@ mod tests {
         assert!(b.send_cmd("ab__p__r", "hi", true).contains("Enter"));
         assert!(!b.send_cmd("ab__p__r", "hi", false).contains("Enter"));
         assert!(b.capture_cmd("ab__p__r", 10).contains("capture-pane -p -t ab__p__r"));
-        assert!(b.has_cmd("ab__p__r").contains("has-session -t =ab__p__r"));
-        assert!(b.kill_cmd("ab__p__r").contains("kill-session -t =ab__p__r"));
+        // `=session` must be SINGLE-QUOTED: an unquoted leading `=` is mangled
+        // by a remote zsh login shell (equals-expansion), which made has_session
+        // read true for absent sessions and kill silently no-op. Regression guard.
+        assert!(b.has_cmd("ab__p__r").contains("has-session -t '=ab__p__r'"));
+        assert!(b.kill_cmd("ab__p__r").contains("kill-session -t '=ab__p__r'"));
+        assert!(!b.has_cmd("ab__p__r").contains("has-session -t =ab__p__r"));
+        assert!(!b.kill_cmd("ab__p__r").contains("kill-session -t =ab__p__r"));
         let launch = b.launch_cmd(
             "ab__p__r",
             "codex resume",
