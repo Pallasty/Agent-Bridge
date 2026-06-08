@@ -209,7 +209,8 @@ Step D policy:
 - `present_outcomes_ingest` must stay manual / dry-run for LSWR world results
   until Step D passes its expression gate.
 - No Step D artifact should set or imply `ingestion.allowed=true` in v0.
-- A later Step E may decide which LSWR outcomes are eligible for #94 ingestion.
+- A later Step E may decide which LSWR outcomes are eligible for #94 ingestion;
+  see [Step E Outcome Ingestion Policy](LIVE_SEMANTIC_WORLD_RUNTIME_STEP_E_OUTCOME_INGESTION_2026_06_08.md).
 
 This keeps expression and learning separate:
 
