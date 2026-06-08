@@ -384,12 +384,49 @@ fn renderer_payload_from_sources_with_aura_io_report(
     let selection = select_renderer_state(scope, projected_avatar, raw_pet);
     let plan = renderer_plan_from_state(&selection.state);
 
+    // Honesty falsifier (observability-only): audit whether the state we're
+    // about to serve to the Face is genuinely grounded, and surface the verdict
+    // in the payload. Logged at debug (the endpoint is polled, so warn would
+    // spam) — the payload `grounding` field is the pull-based signal. Never
+    // enforced: the served `state` is unchanged. Enforcement semantics
+    // (block / scrub / degrade) are deferred to the owner.
+    let grounding = crate::pet_ground::audit_grounding(&selection.state, None, None);
+    if !grounding.is_empty() {
+        tracing::debug!(
+            target: "avatar_grounding",
+            project = %scope.project,
+            count = grounding.len(),
+            "avatar renderer state failed grounding audit (observability-only): {grounding:?}"
+        );
+    }
+    let grounding_violations: Vec<Value> = grounding
+        .iter()
+        .map(|v| {
+            json!({
+                "field": v.field,
+                "issue": match v.issue {
+                    crate::pet_ground::GroundingIssue::Decorative => "decorative",
+                    crate::pet_ground::GroundingIssue::Inconsistent => "inconsistent",
+                    crate::pet_ground::GroundingIssue::UnverifiedClaim => "unverified_claim",
+                    crate::pet_ground::GroundingIssue::Stale => "stale",
+                },
+                "detail": v.detail,
+            })
+        })
+        .collect();
+    let grounding_ok = grounding_violations.is_empty();
+
     json!({
         "surface": "linux_codex_avatar_renderer_state",
         "schema": 1,
         "read_only": true,
         "project": scope.project,
         "cwd": scope.cwd,
+        "grounding": {
+            "ok": grounding_ok,
+            "observability_only": true,
+            "violations": grounding_violations,
+        },
         "selection": {
             "source": selection.source.as_str(),
             "fallback_reason": selection.fallback_reason,
@@ -429,4 +466,44 @@ pub fn renderer_payload_from_sources_with_aura_io_path(
         raw_pet,
         aura_io_report,
     ))
+}
+
+#[cfg(test)]
+mod grounding_wiring_tests {
+    use super::*;
+
+    fn scope() -> RendererScope {
+        RendererScope {
+            project: "agent-bridge".into(),
+            cwd: None,
+        }
+    }
+
+    #[test]
+    fn payload_flags_decorative_state_observability_only() {
+        // `mood` without `mood_source` is a decorative truth-claim — proves the
+        // grounding falsifier is actually wired into the live renderer payload.
+        let projected = json!({ "mood": "cheerful" });
+        let payload = renderer_payload_from_sources(&scope(), Some(&projected), None);
+        let grounding = &payload["grounding"];
+        assert_eq!(grounding["ok"], json!(false));
+        assert_eq!(grounding["observability_only"], json!(true));
+        let violations = grounding["violations"].as_array().expect("violations array");
+        assert!(violations
+            .iter()
+            .any(|v| v["field"] == "mood" && v["issue"] == "decorative"));
+        // Observability-only: the served state is NOT altered/scrubbed.
+        assert_eq!(payload["state"]["mood"], json!("cheerful"));
+    }
+
+    #[test]
+    fn payload_passes_grounded_state() {
+        let projected = json!({ "mood": "cheerful", "mood_source": "event:Stop" });
+        let payload = renderer_payload_from_sources(&scope(), Some(&projected), None);
+        assert_eq!(payload["grounding"]["ok"], json!(true));
+        assert!(payload["grounding"]["violations"]
+            .as_array()
+            .expect("violations array")
+            .is_empty());
+    }
 }
