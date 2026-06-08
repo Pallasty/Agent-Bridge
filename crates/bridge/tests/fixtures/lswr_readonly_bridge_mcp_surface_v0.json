@@ -1,0 +1,176 @@
+{
+  "checks": [
+    {
+      "evidence": "registered profiles match expected all-profile/all-dev exposure only",
+      "label": "profile_matrix",
+      "required": true,
+      "tone": "success",
+      "verdict": "passed"
+    },
+    {
+      "evidence": "profile=all exposes lswr_readonly_bridge_display",
+      "label": "all_profile_visible",
+      "required": true,
+      "tone": "success",
+      "verdict": "passed"
+    },
+    {
+      "evidence": "toolset=all-dev exposes lswr_readonly_bridge_display through all profile",
+      "label": "all_dev_visible",
+      "required": true,
+      "tone": "success",
+      "verdict": "passed"
+    },
+    {
+      "evidence": "standard/default profile hides lswr_readonly_bridge_display",
+      "label": "standard_hidden",
+      "required": true,
+      "tone": "success",
+      "verdict": "passed"
+    },
+    {
+      "evidence": "codex-essential hides lswr_readonly_bridge_display",
+      "label": "codex_essential_hidden",
+      "required": true,
+      "tone": "success",
+      "verdict": "passed"
+    },
+    {
+      "evidence": "all-profile registry includes a schema for the tool",
+      "label": "schema_present",
+      "required": true,
+      "tone": "success",
+      "verdict": "passed"
+    },
+    {
+      "evidence": "schema exposes only required report_packet and denies additional properties",
+      "label": "explicit_packet_only",
+      "required": true,
+      "tone": "success",
+      "verdict": "passed"
+    },
+    {
+      "evidence": "path/live-runtime/gui-capture/mutation inputs are absent from the schema",
+      "label": "forbidden_inputs_absent",
+      "required": true,
+      "tone": "success",
+      "verdict": "passed"
+    }
+  ],
+  "guidance": [
+    "Use this report as post-registry evidence for profile exposure; live MCP clients still need redeploy/reconnect before their tool list changes.",
+    "The wrapper remains all-profile/all-dev only; do not add it to codex-essential extras without a separate acceptance slice.",
+    "Use the P34 tool with an explicit report_packet object, not host paths or live runtime handles."
+  ],
+  "profile_rows": [
+    {
+      "expected_registered": false,
+      "label": "profile-standard",
+      "matches_expected": true,
+      "profile": "standard",
+      "registered": false,
+      "toolset": "profile"
+    },
+    {
+      "expected_registered": true,
+      "label": "profile-all",
+      "matches_expected": true,
+      "profile": "all",
+      "registered": true,
+      "toolset": "profile"
+    },
+    {
+      "expected_registered": false,
+      "label": "codex-essential",
+      "matches_expected": true,
+      "profile": "compact",
+      "registered": false,
+      "toolset": "codex-essential"
+    },
+    {
+      "expected_registered": false,
+      "label": "codex-lean",
+      "matches_expected": true,
+      "profile": "essential",
+      "registered": false,
+      "toolset": "codex-lean"
+    },
+    {
+      "expected_registered": false,
+      "label": "claude-standard",
+      "matches_expected": true,
+      "profile": "standard",
+      "registered": false,
+      "toolset": "claude-standard"
+    },
+    {
+      "expected_registered": false,
+      "label": "gemini-lean",
+      "matches_expected": true,
+      "profile": "essential",
+      "registered": false,
+      "toolset": "gemini-lean"
+    },
+    {
+      "expected_registered": false,
+      "label": "hook-lifecycle",
+      "matches_expected": true,
+      "profile": "standard",
+      "registered": false,
+      "toolset": "hook-lifecycle"
+    },
+    {
+      "expected_registered": true,
+      "label": "all-dev",
+      "matches_expected": true,
+      "profile": "all",
+      "registered": true,
+      "toolset": "all-dev"
+    }
+  ],
+  "report_markdown": "# LSWR Read-Only Bridge MCP Surface\n\nVerdict: `passed`\n\n## Profiles\n\n- `profile-standard`: registered=`false` expected=`false`\n- `profile-all`: registered=`true` expected=`true`\n- `codex-essential`: registered=`false` expected=`false`\n- `codex-lean`: registered=`false` expected=`false`\n- `claude-standard`: registered=`false` expected=`false`\n- `gemini-lean`: registered=`false` expected=`false`\n- `hook-lifecycle`: registered=`false` expected=`false`\n- `all-dev`: registered=`true` expected=`true`\n\n## Checks\n\n- `profile_matrix`: `passed` (success) - registered profiles match expected all-profile/all-dev exposure only\n- `all_profile_visible`: `passed` (success) - profile=all exposes lswr_readonly_bridge_display\n- `all_dev_visible`: `passed` (success) - toolset=all-dev exposes lswr_readonly_bridge_display through all profile\n- `standard_hidden`: `passed` (success) - standard/default profile hides lswr_readonly_bridge_display\n- `codex_essential_hidden`: `passed` (success) - codex-essential hides lswr_readonly_bridge_display\n- `schema_present`: `passed` (success) - all-profile registry includes a schema for the tool\n- `explicit_packet_only`: `passed` (success) - schema exposes only required report_packet and denies additional properties\n- `forbidden_inputs_absent`: `passed` (success) - path/live-runtime/gui-capture/mutation inputs are absent from the schema\n",
+  "safety_boundary": {
+    "adds_additional_mcp_tool": false,
+    "gui_capture": false,
+    "host_path": false,
+    "input_mode": "explicit_report_packet_payload",
+    "live_runtime": false,
+    "mcp_surface_change": "registered_niche_tool_only",
+    "mutation_surface": "none",
+    "read_only": true
+  },
+  "schema": "agent_bridge.lswr.readonly_bridge_display_mcp_surface_report.v0",
+  "tool": "lswr_readonly_bridge_display",
+  "tool_schema": {
+    "additional_properties": false,
+    "description_mentions_explicit": true,
+    "description_mentions_read_only": true,
+    "forbidden_input_keys_absent": true,
+    "input_keys": [
+      "report_packet"
+    ],
+    "input_schema": {
+      "additionalProperties": false,
+      "properties": {
+        "report_packet": {
+          "description": "Explicit agent_bridge.lswr.readonly_bridge_report_packet.v0 payload. Pass the JSON object itself, not a path, URL, live runtime handle, or GUI capture.",
+          "type": "object"
+        }
+      },
+      "required": [
+        "report_packet"
+      ],
+      "type": "object"
+    },
+    "name": "lswr_readonly_bridge_display",
+    "present": true,
+    "required": [
+      "report_packet"
+    ]
+  },
+  "verdict": "passed",
+  "visible_in": [
+    "profile-all",
+    "all-dev"
+  ]
+}

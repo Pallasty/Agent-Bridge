@@ -1,0 +1,44 @@
+{
+  "schema": "agent_bridge.lswr.readonly_bridge_snapshot.v0",
+  "snapshot_schema": "agent_bridge.lswr.ledger_snapshot.v0",
+  "snapshot_sha256": "sha256:5ff171f505327b9d93f01a1dfc44a6159a00f48e6085a5e7a63e5eded6629495",
+  "read_only": true,
+  "mutation_surface": "none",
+  "mcp_tool_registration": false,
+  "affordances": {
+    "snapshot": true,
+    "query": true,
+    "patch": false,
+    "action": false,
+    "invoke": false
+  },
+  "counts": {
+    "actions": 1,
+    "events": 2,
+    "verifications": 1,
+    "feedback": 1,
+    "rollback_records": 1
+  },
+  "query_surfaces": [
+    {
+      "name": "world.actions.query",
+      "schema": "agent_bridge.lswr.action_query.v0"
+    },
+    {
+      "name": "world.events.query",
+      "schema": "agent_bridge.lswr.event_query.v0"
+    },
+    {
+      "name": "world.evidence.query",
+      "schema": "agent_bridge.lswr.evidence_query.v0"
+    },
+    {
+      "name": "world.feedback.query",
+      "schema": "agent_bridge.lswr.feedback_query.v0"
+    },
+    {
+      "name": "world.rollbacks.query",
+      "schema": "agent_bridge.lswr.rollback_query.v0"
+    }
+  ]
+}

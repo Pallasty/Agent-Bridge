@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LSWR Web Prototype</title>
+  </head>
+  <body>
+    <div id="app">
+      <main class="workspace">
+        <section class="scene-pane" aria-label="Semantic world projection">
+          <div id="scene"></div>
+          <div class="hud">
+            <div class="hud-item">
+              <span class="hud-label">World</span>
+              <strong id="world-id">lswr_web_proto_01</strong>
+            </div>
+            <div class="hud-item">
+              <span class="hud-label">Tick</span>
+              <strong id="world-tick">0</strong>
+            </div>
+            <div class="hud-item">
+              <span class="hud-label">Selected</span>
+              <strong id="selected-id">none</strong>
+            </div>
+          </div>
+        </section>
+
+        <aside class="control-pane" aria-label="Structured readback">
+          <section class="toolbar" aria-label="Agent actions">
+            <button id="add-cube" type="button">Add Cube</button>
+            <button id="move-cube" type="button">Move Cube</button>
+            <button id="set-material" type="button">Set Green</button>
+            <button id="force-miss" type="button">Force Miss</button>
+            <button id="blocked-action" type="button">Blocked Move</button>
+            <button id="rollback" type="button">Rollback</button>
+          </section>
+
+          <section class="decision-bar" aria-label="Human decision">
+            <button id="accept-action" type="button">Accept</button>
+            <button id="reject-action" type="button">Reject</button>
+          </section>
+
+          <section class="status-block">
+            <h1>Runtime State</h1>
+            <div id="latest-verdict" class="verdict verified">verified</div>
+            <dl class="state-grid">
+              <div>
+                <dt>Action</dt>
+                <dd id="latest-action">none</dd>
+              </div>
+              <div>
+                <dt>Reason</dt>
+                <dd id="latest-reason">none</dd>
+              </div>
+              <div>
+                <dt>Rollback</dt>
+                <dd id="latest-rollback">none</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section class="status-block">
+            <h2>Events</h2>
+            <ol id="event-list" class="event-list"></ol>
+          </section>
+
+          <section class="status-block readback-block">
+            <h2>Agent Readback</h2>
+            <pre id="readback-json"></pre>
+          </section>
+        </aside>
+      </main>
+    </div>
+    <script type="module" src="/src/app.js"></script>
+  </body>
+</html>

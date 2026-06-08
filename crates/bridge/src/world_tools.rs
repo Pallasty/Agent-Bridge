@@ -204,6 +204,10 @@ fn build_patch_request(args: &Value) -> std::result::Result<Value, String> {
         .cloned()
         .map(Value::Object)
         .unwrap_or_else(|| json!({}));
+    let expected_effect = args
+        .get("expected_effect")
+        .filter(|v| !v.is_null())
+        .cloned();
 
     let mut request = serde_json::Map::new();
     request.insert(
@@ -215,14 +219,14 @@ fn build_patch_request(args: &Value) -> std::result::Result<Value, String> {
                 .unwrap_or_else(|| request_id("ab-world-patch"))
         ),
     );
-    request.insert(
-        "world.patch".to_string(),
-        json!({
-            "op": op,
-            "entity": entity,
-            "args": patch_args,
-        }),
-    );
+    let mut patch = serde_json::Map::new();
+    patch.insert("op".to_string(), json!(op));
+    patch.insert("entity".to_string(), json!(entity));
+    patch.insert("args".to_string(), patch_args);
+    if let Some(expected_effect) = expected_effect {
+        patch.insert("expected_effect".to_string(), expected_effect);
+    }
+    request.insert("world.patch".to_string(), Value::Object(patch));
     request.insert(
         "world.visibility.query".to_string(),
         json!({ "entities": visibility_entities }),
@@ -356,6 +360,8 @@ fn host_reason(host_response: &Value) -> Value {
         &["reason"][..],
         &["error"][..],
         &["render", "reason"][..],
+        &["render_integrity", "reason"][..],
+        &["expected_effect", "reason"][..],
         &["world.visibility.query", "after", "reason"][..],
     ] {
         if let Some(v) = get_path(host_response, path) {
@@ -370,6 +376,32 @@ fn host_reason(host_response: &Value) -> Value {
         }
     }
     Value::Null
+}
+
+fn host_patch_result(host_response: &Value) -> Option<Value> {
+    for path in [
+        &["world.patch"][..],
+        &["world", "patch"][..],
+        &["patch_result"][..],
+    ] {
+        if let Some(v) = get_path(host_response, path) {
+            return Some(v.clone());
+        }
+    }
+    None
+}
+
+fn host_expected_effect_result(host_response: &Value) -> Option<Value> {
+    for path in [
+        &["expected_effect"][..],
+        &["world.patch", "expected_effect"][..],
+        &["world", "patch", "expected_effect"][..],
+    ] {
+        if let Some(v) = get_path(host_response, path) {
+            return Some(v.clone());
+        }
+    }
+    None
 }
 
 fn is_meaningful_reason(value: &Value) -> bool {
@@ -444,7 +476,7 @@ fn wrap_host_response_with_tool(
     let reason = host_reason(&host_response);
     let verify = verify_block(verified, Some(&host_response), reason.clone());
     let action_result = action_result_block(world_tool, request, verified, &reason, true);
-    json!({
+    let mut envelope = json!({
         "schema": WORLD_TOOL_SCHEMA,
         "ok": host_response.get("ok").and_then(Value::as_bool).unwrap_or(verified),
         "verified": verified,
@@ -458,7 +490,21 @@ fn wrap_host_response_with_tool(
         "verify": verify,
         "action_result": action_result,
         "host_response": host_response,
-    })
+    });
+    if let Some(patch_result) = envelope.get("host_response").and_then(host_patch_result) {
+        if let Some(obj) = envelope.as_object_mut() {
+            obj.insert("world.patch".to_string(), patch_result);
+        }
+    }
+    if let Some(expected_effect) = envelope
+        .get("host_response")
+        .and_then(host_expected_effect_result)
+    {
+        if let Some(obj) = envelope.as_object_mut() {
+            obj.insert("expected_effect".to_string(), expected_effect);
+        }
+    }
+    envelope
 }
 
 fn not_verified_envelope_with_tool(
@@ -1013,6 +1059,16 @@ impl McpTool for WorldPatchTool {
             json!({ "type": "object", "description": "Forwarded to host world.patch.args, e.g. {cell:[8,0]}." }),
         );
         props.insert(
+            "expected_effect".to_string(),
+            json!({
+                "description": "Optional falsifiable render-derived clause or clauses forwarded as world.patch.expected_effect. Minimal supported shape: {target, metric, to_op, to_value, from?} or an array of those clauses.",
+                "oneOf": [
+                    {"type": "object"},
+                    {"type": "array", "items": {"type": "object"}}
+                ]
+            }),
+        );
+        props.insert(
             "visibility_entities".to_string(),
             json!({
                 "type": "array",
@@ -1337,11 +1393,21 @@ mod tests {
             "op": "move",
             "entity": "bath",
             "args": { "cell": [8, 0] },
+            "expected_effect": {
+                "target": "entity",
+                "metric": "screen_area",
+                "to_op": ">=",
+                "to_value": 0.01
+            },
             "debug_session": { "enter_operating_shift": true }
         }))
         .expect("request");
         assert_eq!(req["world.patch"]["op"], "move");
         assert_eq!(req["world.patch"]["entity"], "bath");
+        assert_eq!(
+            req["world.patch"]["expected_effect"]["metric"],
+            "screen_area"
+        );
         assert_eq!(req["world.visibility.query"]["entities"], json!(["bath"]));
         assert_eq!(req["debug.session"]["enter_operating_shift"], true);
     }
@@ -1440,6 +1506,224 @@ mod tests {
             present_payload["packet"]["machine_payload"]["action_result"]["verdict"],
             "verified"
         );
+    }
+
+    #[tokio::test]
+    async fn world_patch_applied_but_render_not_verified_stays_unconfirmed_without_raw() {
+        let port = spawn_one_response_host(json!({
+            "ok": true,
+            "verified": false,
+            "render": {"source": "live_root_viewport_texture"},
+            "render_integrity": {
+                "verified": false,
+                "reason": "render_frozen_after_patch",
+                "status": "checked",
+                "model_changed": true,
+                "signature_changed": false
+            },
+            "world.patch": {
+                "requested": true,
+                "applied": true,
+                "op": "move",
+                "entity": "bath",
+                "source": "game_loop_director_live_patch_v0",
+                "model": {"changed": true},
+                "render_refresh": {
+                    "requested": false,
+                    "reason": "debug_freeze_render_after_patch"
+                }
+            },
+            "world.visibility.query": {
+                "after": {
+                    "entities": [{
+                        "id": "bath",
+                        "verified": true,
+                        "screen_area": 0.12,
+                        "bounds_screen_area": 0.2,
+                        "occluded": false
+                    }]
+                }
+            }
+        }))
+        .await;
+
+        let out = WorldPatchTool::new()
+            .execute(
+                json!({
+                    "request_id": "f3-render-frozen",
+                    "op": "move",
+                    "entity": "bath",
+                    "args": {"cell": [8, 0]},
+                    "host": DEFAULT_HOST,
+                    "port": port,
+                    "include_raw": false
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        assert!(!out.is_error);
+        let payload = result_text_as_json(&out);
+        assert_eq!(payload["schema"], WORLD_TOOL_SCHEMA);
+        assert!(payload.get("host_response").is_none());
+        assert_eq!(payload["verified"], false);
+        assert_eq!(payload["reason"], "render_frozen_after_patch");
+        assert_eq!(payload["world.patch"]["applied"], true);
+        assert_eq!(payload["world.patch"]["model"]["changed"], true);
+        assert_eq!(payload["action_result"]["world_tool"], "world_patch");
+        assert_eq!(payload["action_result"]["verdict"], "not_verified");
+        assert_eq!(
+            payload["action_result"]["reason"],
+            "render_frozen_after_patch"
+        );
+        assert!(payload["action_result"]["verified_to"].is_null());
+        assert_eq!(
+            payload["action_result"]["recover"],
+            "inspect_host_or_visibility_evidence"
+        );
+        assert_eq!(
+            payload["verify"]["evidence"]["host_reason"],
+            "render_frozen_after_patch"
+        );
+
+        let present = WorldPresentTool::new()
+            .execute(
+                json!({
+                    "envelope": payload,
+                    "generated_at": "2026-06-08T00:00:00Z"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("present");
+        assert!(!present.is_error);
+        let present_payload = result_text_as_json(&present);
+        assert_eq!(present_payload["world_tool"], "world_patch");
+        assert_eq!(present_payload["verdict"], "not_verified");
+        assert_eq!(present_payload["reason"], "render_frozen_after_patch");
+        assert_eq!(
+            present_payload["packet"]["human_readable"]["changed"],
+            json!(["bath"])
+        );
+        assert_eq!(
+            present_payload["packet"]["human_readable"]["visible"],
+            json!([])
+        );
+        assert!(present_payload["packet"]["provenance"]["verified_to"].is_null());
+        assert_eq!(
+            present_payload["packet"]["machine_payload"]["patch_result"]["applied"],
+            true
+        );
+        assert_eq!(
+            present_payload["packet"]["machine_payload"]["action_result"]["verdict"],
+            "not_verified"
+        );
+    }
+
+    #[tokio::test]
+    async fn world_patch_expected_effect_failure_survives_without_raw() {
+        let port = spawn_one_response_host(json!({
+            "ok": true,
+            "verified": false,
+            "render": {"source": "live_root_viewport_texture"},
+            "expected_effect": {
+                "verified": false,
+                "reason": "expected_effect_clause_failed",
+                "clauses": [{
+                    "target": "bath",
+                    "metric": "screen_area",
+                    "to_op": ">=",
+                    "to_value": 0.25,
+                    "actual": 0.12,
+                    "verified": false,
+                    "reason": "expected_effect_clause_failed"
+                }]
+            },
+            "world.patch": {
+                "requested": true,
+                "applied": true,
+                "op": "move",
+                "entity": "bath",
+                "source": "game_loop_director_live_patch_v0",
+                "model": {"changed": true},
+                "render_refresh": {"requested": true, "reason": ""}
+            },
+            "world.visibility.query": {
+                "after": {
+                    "entities": [{
+                        "id": "bath",
+                        "verified": true,
+                        "screen_area": 0.12,
+                        "bounds_screen_area": 0.2,
+                        "pixel_coverage": {"estimated_changed_pixels": 1200},
+                        "occluded": false
+                    }]
+                }
+            }
+        }))
+        .await;
+
+        let out = WorldPatchTool::new()
+            .execute(
+                json!({
+                    "request_id": "f4-expected-effect",
+                    "op": "move",
+                    "entity": "bath",
+                    "args": {"cell": [8, 0]},
+                    "expected_effect": {
+                        "target": "bath",
+                        "metric": "screen_area",
+                        "to_op": ">=",
+                        "to_value": 0.25
+                    },
+                    "host": DEFAULT_HOST,
+                    "port": port,
+                    "include_raw": false
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        assert!(!out.is_error);
+        let payload = result_text_as_json(&out);
+        assert!(payload.get("host_response").is_none());
+        assert_eq!(payload["verified"], false);
+        assert_eq!(payload["reason"], "expected_effect_clause_failed");
+        assert_eq!(payload["world.patch"]["applied"], true);
+        assert_eq!(payload["expected_effect"]["verified"], false);
+        assert_eq!(
+            payload["expected_effect"]["clauses"][0]["actual"],
+            json!(0.12)
+        );
+        assert_eq!(payload["action_result"]["verdict"], "not_verified");
+        assert_eq!(
+            payload["verify"]["evidence"]["host_reason"],
+            "expected_effect_clause_failed"
+        );
+
+        let present = WorldPresentTool::new()
+            .execute(
+                json!({
+                    "envelope": payload,
+                    "generated_at": "2026-06-08T00:00:00Z"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("present");
+        assert!(!present.is_error);
+        let present_payload = result_text_as_json(&present);
+        assert_eq!(present_payload["verdict"], "not_verified");
+        assert_eq!(present_payload["reason"], "expected_effect_clause_failed");
+        assert_eq!(
+            present_payload["packet"]["machine_payload"]["expected_effect"]["verified"],
+            false
+        );
+        assert_eq!(
+            present_payload["packet"]["machine_payload"]["patch_result"]["applied"],
+            true
+        );
+        assert!(present_payload["packet"]["provenance"]["verified_to"].is_null());
     }
 
     #[tokio::test]

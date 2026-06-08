@@ -73,6 +73,7 @@ pub fn world_envelope_to_present_packet(
         .unwrap_or_else(|| json!({}));
     let selected_entities = selected_entities(envelope, &request);
     let patch_result = patch_result(envelope);
+    let expected_effect = expected_effect(envelope, &request);
     let action_result = envelope
         .get("action_result")
         .cloned()
@@ -104,6 +105,7 @@ pub fn world_envelope_to_present_packet(
             "verify": verify,
             "selected_entities": selected_entities,
             "patch_result": patch_result,
+            "expected_effect": expected_effect,
             "action_result": action_result,
             "source_reason": reason,
             "raw_host_response_present": raw_host_response_present,
@@ -358,6 +360,22 @@ fn patch_result(envelope: &Value) -> Value {
     Value::Null
 }
 
+fn expected_effect(envelope: &Value, request: &Value) -> Value {
+    for path in [
+        &["expected_effect"][..],
+        &["host_response", "expected_effect"][..],
+        &["host_response", "world.patch", "expected_effect"][..],
+        &["host_response", "world", "patch", "expected_effect"][..],
+    ] {
+        if let Some(v) = get_path(envelope, path) {
+            return v.clone();
+        }
+    }
+    get_path(request, &["world.patch", "expected_effect"])
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
 fn selected_entities(envelope: &Value, request: &Value) -> Value {
     let mut entities = Vec::new();
     if let Some(arr) = get_path(
@@ -520,6 +538,54 @@ mod tests {
 
     fn opts() -> PresentPacketOptions<'static> {
         PresentPacketOptions::new(GENERATED_AT).with_commit(COMMIT)
+    }
+
+    fn expected_effect_failure_envelope() -> Value {
+        json!({
+            "schema": WORLD_TOOL_SCHEMA,
+            "ok": true,
+            "verified": false,
+            "reason": "expected_effect_clause_failed",
+            "request": {
+                "request_id": "f4-expected-effect",
+                "world.patch": {
+                    "op": "move",
+                    "entity": "bath",
+                    "args": {"cell": [8, 0]},
+                    "expected_effect": {
+                        "target": "bath",
+                        "metric": "screen_area",
+                        "to_op": ">=",
+                        "to_value": 0.25
+                    }
+                },
+                "world.visibility.query": {"entities": ["bath"]}
+            },
+            "world.patch": {
+                "requested": true,
+                "applied": true,
+                "op": "move",
+                "entity": "bath"
+            },
+            "expected_effect": {
+                "verified": false,
+                "reason": "expected_effect_clause_failed",
+                "clauses": [{
+                    "target": "bath",
+                    "metric": "screen_area",
+                    "to_op": ">=",
+                    "to_value": 0.25,
+                    "actual": 0.12,
+                    "verified": false,
+                    "reason": "expected_effect_clause_failed"
+                }]
+            },
+            "verify": {
+                "method": "live_viewport_pixel_coverage",
+                "verified_to": null,
+                "evidence": {"host_reason": "expected_effect_clause_failed"}
+            }
+        })
     }
 
     #[test]
@@ -718,6 +784,204 @@ mod tests {
     }
 
     #[test]
+    fn world_patch_applied_but_render_unverified_stays_unconfirmed() {
+        let envelope = json!({
+            "schema": WORLD_TOOL_SCHEMA,
+            "ok": true,
+            "verified": false,
+            "reason": "render_frozen_after_patch",
+            "request": {
+                "request_id": "f3-render-frozen",
+                "world.patch": {
+                    "op": "move",
+                    "entity": "bath",
+                    "args": {"cell": [8, 0]}
+                },
+                "world.visibility.query": {"entities": ["bath"]}
+            },
+            "world.patch": {
+                "requested": true,
+                "applied": true,
+                "op": "move",
+                "entity": "bath",
+                "model": {"changed": true},
+                "render_refresh": {
+                    "requested": false,
+                    "reason": "debug_freeze_render_after_patch"
+                }
+            },
+            "action_result": {
+                "schema": "agent_bridge.action_result.v0",
+                "world_tool": "world_patch",
+                "verdict": "not_verified",
+                "reason": "render_frozen_after_patch",
+                "verified_to": null
+            },
+            "verify": {
+                "method": "live_viewport_pixel_coverage",
+                "verified_to": null,
+                "evidence": {"host_reason": "render_frozen_after_patch"}
+            }
+        });
+        let packet = world_envelope_to_present_packet("world_patch", &envelope, opts());
+        assert_eq!(packet["verdict"], "not_verified");
+        assert_eq!(packet["reason"], "render_frozen_after_patch");
+        assert_eq!(packet["human_readable"]["changed"], json!(["bath"]));
+        assert_eq!(packet["human_readable"]["visible"], json!([]));
+        assert_eq!(
+            packet["human_readable"]["warnings"],
+            json!(["render_frozen_after_patch"])
+        );
+        assert!(packet["provenance"]["verified_to"].is_null());
+        assert_eq!(packet["machine_payload"]["patch_result"]["applied"], true);
+        assert_eq!(
+            packet["machine_payload"]["action_result"]["verdict"],
+            "not_verified"
+        );
+        assert_eq!(
+            packet["machine_payload"]["source_reason"],
+            "render_frozen_after_patch"
+        );
+    }
+
+    #[test]
+    fn world_patch_expected_effect_failure_is_preserved_in_machine_payload() {
+        let envelope = expected_effect_failure_envelope();
+        let packet = world_envelope_to_present_packet("world_patch", &envelope, opts());
+        assert_eq!(packet["verdict"], "not_verified");
+        assert_eq!(packet["reason"], "expected_effect_clause_failed");
+        assert_eq!(
+            packet["machine_payload"]["expected_effect"]["verified"],
+            false
+        );
+        assert_eq!(
+            packet["machine_payload"]["expected_effect"]["clauses"][0]["actual"],
+            json!(0.12)
+        );
+        assert_eq!(packet["machine_payload"]["patch_result"]["applied"], true);
+        assert_eq!(
+            packet["human_readable"]["warnings"],
+            json!(["expected_effect_clause_failed"])
+        );
+        assert!(packet["provenance"]["verified_to"].is_null());
+    }
+
+    #[test]
+    fn review_artifact_preserves_expected_effect_failure_for_present_compatibility() {
+        let envelope = expected_effect_failure_envelope();
+        let packet = world_envelope_to_present_packet("world_patch", &envelope, opts());
+        let args = present_packet_review_args(&packet, false);
+        assert_eq!(args["kind"], "html");
+        assert_eq!(args["payload"]["verdict"], "not_verified");
+        assert_eq!(args["payload"]["reason"], "expected_effect_clause_failed");
+        assert_eq!(
+            args["payload"]["machine_payload"]["expected_effect"]["verified"],
+            false
+        );
+        assert!(args["payload"]["provenance"]["verified_to"].is_null());
+        assert_eq!(args["payload"]["ingestion"]["allowed"], false);
+        assert_eq!(args["provenance"]["verdict"], "not_verified");
+        assert_eq!(
+            args["provenance"]["reason"],
+            "expected_effect_clause_failed"
+        );
+
+        let html = crate::present::build_html(
+            crate::present::PresentKind::Html,
+            args["artifact"].as_str().expect("artifact"),
+            args["title"].as_str(),
+            Some(&args["payload"]),
+            Some(&args["provenance"]),
+        );
+        let payload = crate::present::extract_ab_payload(&html).expect("payload");
+        let region = crate::present::render_region(&html).expect("render region");
+        assert_eq!(payload["verdict"], "not_verified");
+        assert_eq!(payload["reason"], "expected_effect_clause_failed");
+        assert_eq!(
+            payload["machine_payload"]["expected_effect"]["verified"],
+            false
+        );
+        assert_eq!(
+            payload["machine_payload"]["expected_effect"]["clauses"][0]["actual"],
+            json!(0.12)
+        );
+        assert!(payload["provenance"]["verified_to"].is_null());
+        assert_eq!(payload["ingestion"]["allowed"], false);
+        assert!(region.contains("Unconfirmed"));
+        assert!(region.contains("expected_effect_clause_failed"));
+        assert!(region.contains("Ingestion blocked"));
+        assert!(!region.contains("verified successfully"));
+        assert!(!region.contains("World patch verified"));
+    }
+
+    #[test]
+    fn decision_acknowledgement_does_not_launder_failed_world_claim() {
+        let envelope = expected_effect_failure_envelope();
+        let packet = world_envelope_to_present_packet("world_patch", &envelope, opts());
+
+        for decision in ["approved", "rejected"] {
+            let approval = json!({
+                "artifact_id": format!("approval-f4-{decision}"),
+                "action_tool": "present_await_decision",
+                "kind": "approval",
+                "verify_status": "rendered_ok",
+                "embody_status": "not_applicable",
+                "interactive_status": "not_applicable",
+                "verify_method": "human_decision",
+                "decision": decision,
+                "token_match": true,
+                "source_world_tool": packet["world_tool"].clone(),
+                "source_world_verdict": packet["verdict"].clone(),
+                "source_world_reason": packet["reason"].clone(),
+                "source_world_verified_to": packet["provenance"]["verified_to"].clone(),
+                "source_world_ingestion_allowed": packet["ingestion"]["allowed"].clone(),
+            });
+
+            let (eligible, reason) = crate::present::outcome_gate(
+                approval["verify_status"].as_str().expect("verify_status"),
+                approval["embody_status"].as_str(),
+                approval["interactive_status"].as_str(),
+                approval["decision"].as_str(),
+            );
+            assert!(
+                eligible,
+                "{decision} should be a verified decision outcome: {reason}"
+            );
+            assert_eq!(approval["source_world_tool"], "world_patch");
+            assert_eq!(approval["source_world_verdict"], "not_verified");
+            assert_eq!(
+                approval["source_world_reason"],
+                "expected_effect_clause_failed"
+            );
+            assert!(approval["source_world_verified_to"].is_null());
+            assert_eq!(approval["source_world_ingestion_allowed"], false);
+        }
+
+        for decision in ["timed_out", "dead", "pending"] {
+            let (eligible, reason) = crate::present::outcome_gate(
+                "rendered_ok",
+                Some("not_applicable"),
+                Some("not_applicable"),
+                Some(decision),
+            );
+            assert!(
+                !eligible,
+                "{decision} must not become a verified decision outcome"
+            );
+            assert!(reason.contains(&format!("decision={decision}")));
+        }
+
+        assert_eq!(packet["verdict"], "not_verified");
+        assert_eq!(packet["reason"], "expected_effect_clause_failed");
+        assert_eq!(
+            packet["machine_payload"]["expected_effect"]["verified"],
+            false
+        );
+        assert!(packet["provenance"]["verified_to"].is_null());
+        assert_eq!(packet["ingestion"]["allowed"], false);
+    }
+
+    #[test]
     fn review_artifact_wraps_with_present_dual_encoding() {
         let envelope = json!({
             "schema": WORLD_TOOL_SCHEMA,
@@ -835,6 +1099,52 @@ mod tests {
         assert_eq!(listed[0].id, file.id);
         assert_eq!(listed[0].kind.as_deref(), Some("html"));
         assert!(listed[0].dual_encoding);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn review_file_gate_preserves_expected_effect_failure_roundtrip() {
+        let envelope = expected_effect_failure_envelope();
+        let packet = world_envelope_to_present_packet("world_patch", &envelope, opts());
+        let dir = std::env::temp_dir().join(format!(
+            "agent-bridge-lswr-review-file-f4-{}-{}",
+            std::process::id(),
+            crate::present::now_unix()
+        ));
+        let file = write_present_packet_review_file(&packet, &dir).expect("write");
+        let html = std::fs::read_to_string(&file.artifact_path).expect("read html");
+        let payload = crate::present::extract_ab_payload(&html).expect("payload");
+        let region = crate::present::render_region(&html).expect("render region");
+        assert_eq!(file.id, present_packet_review_id(&packet));
+        assert!(file.artifact_path.ends_with(format!("{}.html", file.id)));
+        assert!(file.bytes > 0);
+        assert!(file.dual_encoding);
+        assert_eq!(file.static_render_status, "rendered_static");
+        assert_eq!(payload["verdict"], "not_verified");
+        assert_eq!(payload["reason"], "expected_effect_clause_failed");
+        assert_eq!(
+            payload["machine_payload"]["expected_effect"]["verified"],
+            false
+        );
+        assert_eq!(
+            payload["machine_payload"]["expected_effect"]["clauses"][0]["actual"],
+            json!(0.12)
+        );
+        assert!(payload["provenance"]["verified_to"].is_null());
+        assert_eq!(payload["ingestion"]["allowed"], false);
+        assert!(region.contains("Unconfirmed"));
+        assert!(region.contains("expected_effect_clause_failed"));
+        assert!(region.contains("Ingestion blocked"));
+        assert!(!region.contains("verified successfully"));
+        assert!(!region.contains("World patch verified"));
+
+        let listed = crate::present::list_artifacts(&dir, 10, Some("html"));
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, file.id);
+        assert_eq!(listed[0].artifact_path, file.artifact_path.display().to_string());
+        assert_eq!(listed[0].kind.as_deref(), Some("html"));
+        assert!(listed[0].dual_encoding);
+        assert_eq!(listed[0].bytes, html.len() as u64);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
