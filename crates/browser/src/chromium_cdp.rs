@@ -30,7 +30,10 @@ use chromiumoxide::cdp::browser_protocol::dom::{
 use chromiumoxide::cdp::browser_protocol::emulation::{
     SetDeviceMetricsOverrideParams, SetUserAgentOverrideParams,
 };
-use chromiumoxide::cdp::browser_protocol::input::{DispatchKeyEventParams, DispatchKeyEventType};
+use chromiumoxide::cdp::browser_protocol::input::{
+    DispatchKeyEventParams, DispatchKeyEventType, DispatchMouseEventParams, DispatchMouseEventType,
+    MouseButton,
+};
 use chromiumoxide::cdp::browser_protocol::network::{
     EnableParams as NetworkEnableParams, EventLoadingFinished, EventResponseReceived,
     GetResponseBodyParams,
@@ -42,7 +45,9 @@ use chromiumoxide::cdp::browser_protocol::page::{
 use chromiumoxide::cdp::browser_protocol::target::{
     GetTargetsParams, TargetInfo,
 };
-use chromiumoxide::cdp::js_protocol::runtime::{CallFunctionOnParams, EvaluateParams};
+use chromiumoxide::cdp::js_protocol::runtime::{
+    CallFunctionOnParams, EvaluateParams, ReleaseObjectParams,
+};
 use chromiumoxide::cdp::CdpEventMessage;
 use chromiumoxide::keys::{KeyDefinition, USKEYBOARD_LAYOUT};
 use chromiumoxide::page::ScreenshotParams;
@@ -446,19 +451,81 @@ impl BrowserBackend for ChromiumCdpBackend {
         let object_id = resolved.result.object.object_id.ok_or_else(|| {
             Error::Backend(format!("resolveNode {node_ref}: element has no object id"))
         })?;
-        // Scroll into view + real DOM click on the resolved element. Survives
-        // dynamic class names that would break a CSS selector.
+        // Scroll into view, then PROBE (don't act): report viewport-center coords +
+        // checkability. We refuse loudly on detached / disabled / zero-box rather
+        // than letting a DOM .click() silently no-op and report false success.
+        let probe = p
+            .execute(
+                CallFunctionOnParams::builder()
+                    .object_id(object_id.clone())
+                    .function_declaration(
+                        "function(){ this.scrollIntoView({block:'center',inline:'center'}); \
+                         var r=this.getBoundingClientRect(); \
+                         var disabled = !!this.disabled || this.getAttribute('aria-disabled')==='true'; \
+                         return {x:r.x+r.width/2, y:r.y+r.height/2, w:r.width, h:r.height, \
+                         connected:this.isConnected, disabled:disabled}; }",
+                    )
+                    .return_by_value(true)
+                    .build()
+                    .map_err(|e| Error::Backend(format!("callFunctionOn builder: {e}")))?,
+            )
+            .await
+            .map_err(|e| Error::Backend(format!("click_by_ref probe {node_ref}: {e}")))?;
+        // Release the resolved handle so a long-lived page doesn't leak one renderer
+        // object per click (and doesn't pin a detached node).
+        let _ = p.execute(ReleaseObjectParams::new(object_id)).await;
+
+        let v = probe.result.result.value.ok_or_else(|| {
+            Error::Backend(format!("click_by_ref {node_ref}: probe returned no value"))
+        })?;
+        let connected = v.get("connected").and_then(|b| b.as_bool()).unwrap_or(false);
+        let disabled = v.get("disabled").and_then(|b| b.as_bool()).unwrap_or(false);
+        let w = v.get("w").and_then(|n| n.as_f64()).unwrap_or(0.0);
+        let h = v.get("h").and_then(|n| n.as_f64()).unwrap_or(0.0);
+        let x = v.get("x").and_then(|n| n.as_f64()).unwrap_or(0.0);
+        let y = v.get("y").and_then(|n| n.as_f64()).unwrap_or(0.0);
+        if !connected {
+            return Err(Error::InvalidArgument(format!(
+                "ref {node_ref} element is detached from the DOM — re-snapshot the page"
+            )));
+        }
+        if disabled {
+            return Err(Error::InvalidArgument(format!(
+                "ref {node_ref} element is disabled — click refused (it would no-op)"
+            )));
+        }
+        if w <= 0.0 || h <= 0.0 {
+            return Err(Error::InvalidArgument(format!(
+                "ref {node_ref} element has a zero render box (hidden/occluded) — click refused"
+            )));
+        }
+        // Real mouse press+release at the element's viewport center — the same kind
+        // of trusted event the CSS-selector click() path dispatches, so file
+        // inputs / sliders / custom widgets actually fire (DOM .click() would not).
         p.execute(
-            CallFunctionOnParams::builder()
-                .object_id(object_id)
-                .function_declaration(
-                    "function(){ this.scrollIntoView({block:'center',inline:'center'}); this.click(); }",
-                )
+            DispatchMouseEventParams::builder()
+                .r#type(DispatchMouseEventType::MousePressed)
+                .x(x)
+                .y(y)
+                .button(MouseButton::Left)
+                .click_count(1)
                 .build()
-                .map_err(|e| Error::Backend(format!("callFunctionOn builder: {e}")))?,
+                .map_err(|e| Error::Backend(format!("mousePressed builder: {e}")))?,
         )
         .await
-        .map_err(|e| Error::Backend(format!("click_by_ref {node_ref}: {e}")))?;
+        .map_err(|e| Error::Backend(format!("click_by_ref {node_ref} press: {e}")))?;
+        p.execute(
+            DispatchMouseEventParams::builder()
+                .r#type(DispatchMouseEventType::MouseReleased)
+                .x(x)
+                .y(y)
+                .button(MouseButton::Left)
+                .click_count(1)
+                .build()
+                .map_err(|e| Error::Backend(format!("mouseReleased builder: {e}")))?,
+        )
+        .await
+        .map_err(|e| Error::Backend(format!("click_by_ref {node_ref} release: {e}")))?;
         Ok(())
     }
 
@@ -1237,6 +1304,10 @@ impl BrowserBackend for ChromiumCdpBackend {
         p.reload()
             .await
             .map_err(|e| Error::Backend(format!("reload: {e}")))?;
+        // A reload re-issues backend DOM node ids for the new document; drop the
+        // page's @eN ref table so a stale ref becomes a loud "re-snapshot" error
+        // rather than silently clicking the wrong element.
+        self.ref_maps.remove(page.as_str());
         Ok(())
     }
 
@@ -1244,11 +1315,15 @@ impl BrowserBackend for ChromiumCdpBackend {
         // history.back() is async; eval returns before navigation
         // commits. Caller is expected to chase with wait_for if needed.
         self.eval(page, "window.history.back();").await?;
+        // Navigation invalidates this page's @eN refs (new document, new backend ids).
+        self.ref_maps.remove(page.as_str());
         Ok(())
     }
 
     async fn go_forward(&self, page: &PageId) -> Result<()> {
         self.eval(page, "window.history.forward();").await?;
+        // Navigation invalidates this page's @eN refs (new document, new backend ids).
+        self.ref_maps.remove(page.as_str());
         Ok(())
     }
 
@@ -1268,6 +1343,8 @@ impl BrowserBackend for ChromiumCdpBackend {
                 abort.abort();
             }
         }
+        // Drop the page's @eN ref table (otherwise ref_maps accrues dead pages).
+        self.ref_maps.remove(page.as_str());
         if let Some((_, p)) = self.pages.remove(page.as_str()) {
             // `Arc<Page>` may have outstanding references; if we're the last
             // we close cleanly. Either way, ignore close errors on shutdown.

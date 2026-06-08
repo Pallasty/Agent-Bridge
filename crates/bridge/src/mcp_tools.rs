@@ -10798,10 +10798,16 @@ impl McpTool for BrowserClickTool {
         if sel.is_empty() {
             return Ok(ToolResult::error("missing 'selector'"));
         }
-        // An `@eN` value is a stable ref from a prior browser_snapshot; route it
-        // to the ref-based click (resolves the backend DOM node) instead of
-        // treating it as a CSS selector. Same `selector` param — no schema change.
-        let outcome = if sel.starts_with("@e") {
+        // An `@eN` value (literally @e followed by digits) is a stable ref from a
+        // prior browser_snapshot; route it to the ref-based click. Match the exact
+        // ref grammar — not a loose "@e" prefix — so a selector like "@email" or an
+        // attribute selector still goes down the CSS path. (Real CSS selectors never
+        // begin with a literal '@', so backward compat is intact.) No schema change.
+        let is_ref = sel.len() > 2
+            && sel.as_bytes()[0] == b'@'
+            && sel.as_bytes()[1] == b'e'
+            && sel[2..].bytes().all(|c| c.is_ascii_digit());
+        let outcome = if is_ref {
             b.click_by_ref(&page, sel).await
         } else {
             b.click(&page, sel).await
