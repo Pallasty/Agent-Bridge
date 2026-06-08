@@ -911,6 +911,82 @@
     #panel .relation-chip.structural .value { color: #c8c8d2; }
     #panel .relation-chip.coactivation .value { color: #5cc8c8; }
     #panel .relation-chip.strongest .value { color: #a87cff; }
+    #panel .node-dossier {
+      margin: 0 0 14px;
+      padding: 11px 12px;
+      background:
+        linear-gradient(135deg, rgba(92, 200, 200, 0.08), rgba(168, 124, 255, 0.06)),
+        #0f0f16;
+      border: 1px solid #252532;
+      border-left: 2px solid #5cc8c8;
+      border-radius: 5px;
+    }
+    #panel .node-dossier-head {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: start;
+      margin-bottom: 10px;
+    }
+    #panel .node-dossier-title {
+      min-width: 0;
+      color: #f0f0f4;
+      font-size: 12px;
+      font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #panel .node-dossier-signal {
+      color: #5cc8c8;
+      font-size: 9px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    #panel .node-dossier-meta {
+      margin-top: 3px;
+      color: #6a6a78;
+      font-size: 10px;
+      letter-spacing: 0.04em;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #panel .node-dossier-facts {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 6px;
+    }
+    #panel .node-dossier-fact {
+      min-width: 0;
+      padding: 7px 8px;
+      background: #101018;
+      border: 1px solid #1f1f2a;
+      border-radius: 4px;
+    }
+    #panel .node-dossier-fact .label {
+      display: block;
+      color: #5a5a68;
+      font-size: 8px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 3px;
+    }
+    #panel .node-dossier-fact .value {
+      display: block;
+      color: #e8e8ee;
+      font-size: 10px;
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+    #panel .node-dossier-fact.hub .value { color: #ffe070; }
+    #panel .node-dossier-fact.fresh .value { color: #5cc8c8; }
+    #panel .node-dossier-fact.stale .value { color: #c8a96a; }
+    #panel .node-dossier-fact.orphan .value { color: #8a8a9c; }
     #panel .workbench-section {
       margin-top: 15px;
       padding-top: 13px;
@@ -2844,6 +2920,7 @@ function clearAtlasRegion() {
   state.activeRegion = null;
   state.focused = null;
   document.body.classList.remove("workbench-open");
+  document.body.classList.remove("node-detail-lens");
   document.getElementById("panel").classList.add("hidden");
   document.getElementById("focus-hint").textContent = "";
   renderAtlasPanel();
@@ -2857,6 +2934,7 @@ function setViewPreset(preset) {
   state.viewPreset = VALID_VIEW_PRESETS.has(preset) ? preset : "overview";
   state.focused = null;
   document.body.classList.remove("workbench-open");
+  document.body.classList.remove("node-detail-lens");
   document.getElementById("panel").classList.add("hidden");
   syncViewPresetButtons();
   renderBreadcrumb();
@@ -3751,6 +3829,7 @@ function buildCy(data) {
         "border-width": 3, "border-color": "#ffffff", "border-opacity": 1,
         "label": "data(label)", "text-opacity": 1,
         "color": "#ffffff", "font-size": "11px", "z-index": 999, "opacity": 1,
+        "overlay-color": "#ffffff", "overlay-padding": 10, "overlay-opacity": 0.34,
       }},
       { selector: "node.focus-neighbor", style: {
         "label": "data(label)", "text-opacity": 1,
@@ -3856,6 +3935,7 @@ function buildCy(data) {
     if (evt.target === state.cy) {
       clearFocus();
       document.body.classList.remove("workbench-open");
+      document.body.classList.remove("node-detail-lens");
       document.getElementById("panel").classList.add("hidden");
       // Reclaim the space — cy fills the viewport again.
       state.cy.resize();
@@ -4157,6 +4237,7 @@ function focusOnNode(id) {
 function clearFocus() {
   state.focused = null;
   state.relationDetailKey = null;
+  document.body.classList.remove("node-detail-lens");
   document.getElementById("focus-hint").textContent = "";
   applyVisualState();
   renderBreadcrumb();
@@ -4340,6 +4421,64 @@ function summarizeWorkbenchRelations(memory, graphNode) {
     lede = `${memory.kind || "memory"} reads as a ${role} node with ${mix || `${rows.length} linked`} relation${rows.length === 1 ? "" : "s"}.`;
   }
   return { rows, structuralCount, coactivationCount, strongest, role, lede };
+}
+
+function nodeRoleLabel(graphData) {
+  if (!graphData || Object.keys(graphData).length === 0) return "unmapped";
+  if (graphData.hub) return "hub";
+  if (graphData.orphan) return "orphan";
+  if (graphData.stale) return "stale";
+  if (graphData.fresh) return "fresh";
+  return "normal";
+}
+
+function nodeEvidenceRows(memory, graphData, region, relationSummary) {
+  const role = nodeRoleLabel(graphData);
+  const sourceLabel = memory.source === "markdown" ? "markdown" : "sqlite";
+  const degree = graphData.degree || 0;
+  const age = graphData.ageSecs === 0
+    ? "fresh"
+    : graphData.ageSecs && graphData.ageSecs < Number.MAX_SAFE_INTEGER
+      ? relTime(Math.floor(Date.now() / 1000) - graphData.ageSecs)
+      : relTime(memory.updated_at) || "n/a";
+  return [
+    { label: "role", value: role, tone: role },
+    { label: "region", value: region ? region.label : "unmapped", tone: "region" },
+    { label: "kind", value: memory.kind || graphData.kind || "unknown", tone: "kind" },
+    { label: "degree", value: `${degree}`, tone: degree > 0 ? "graph" : "orphan" },
+    { label: "relations", value: `${relationSummary.rows.length}`, tone: relationSummary.rows.length ? "graph" : "orphan" },
+    { label: "last touch", value: age, tone: role },
+    { label: "access", value: `${memory.access_count || graphData.access || 0}`, tone: "access" },
+    { label: "importance", value: `${(memory.importance || graphData.importance || 0).toFixed(2)}`, tone: "importance" },
+    { label: "source", value: sourceLabel, tone: sourceLabel },
+  ];
+}
+
+function renderNodeDossier(memory, graphNode, region) {
+  const graphData = graphNode && graphNode.length > 0 ? graphNode.data() : {};
+  const relationSummary = summarizeWorkbenchRelations(memory, graphNode);
+  const role = nodeRoleLabel(graphData);
+  const evidenceRows = nodeEvidenceRows(memory, graphData, region, relationSummary);
+  const signal = relationSummary.strongest
+    ? `${relationSummary.rows.length} linked · strongest ${relationSummary.strongest.weight > 0 ? relationSummary.strongest.weight.toFixed(2) : "link"}`
+    : `${relationSummary.rows.length} linked`;
+  const title = memory.label || memory.key;
+  const meta = `${memory.kind || graphData.kind || "memory"} · ${region ? region.label : "unmapped"} · ${role}`;
+  return `<div id="workbench-node-dossier" class="node-dossier ${escapeHTML(role)}" data-node-detail-lens="${escapeHTML(memory.key)}">
+    <div class="node-dossier-head">
+      <div>
+        <div class="node-dossier-title" title="${escapeHTML(memory.key)}">${escapeHTML(title)}</div>
+        <div class="node-dossier-meta">${escapeHTML(meta)}</div>
+      </div>
+      <div class="node-dossier-signal">${escapeHTML(signal)}</div>
+    </div>
+    <div class="node-dossier-facts">
+      ${evidenceRows.map(row => `<div class="node-dossier-fact ${escapeHTML(row.tone)}">
+        <span class="label">${escapeHTML(row.label)}</span>
+        <span class="value" title="${escapeHTML(row.value)}">${escapeHTML(row.value)}</span>
+      </div>`).join("")}
+    </div>
+  </div>`;
 }
 
 function renderWorkbenchRelationSummary(memory, graphNode) {
@@ -4901,6 +5040,7 @@ function showRegionWorkbench(regionId) {
   if (!panel || !region) return;
   state.relationDetailKey = null;
   document.body.classList.add("workbench-open");
+  document.body.classList.remove("node-detail-lens");
   panel.classList.remove("hidden");
   if (state.cy) state.cy.resize();
   const explicitEdges = Math.max(0, (region.edgeCount || 0) - (region.coactivationCount || 0));
@@ -4956,6 +5096,8 @@ function showRegionWorkbench(regionId) {
 async function showSidePanel(id) {
   const panel = document.getElementById("panel");
   document.body.classList.add("workbench-open");
+  document.body.classList.add("node-detail-lens");
+  document.body.classList.remove("atlas-district-overview");
   panel.classList.remove("hidden");
   // cytoscape's canvases were sized for the pre-panel viewport. Tell it
   // to re-measure so the new (narrower) cy area fits properly.
@@ -5003,12 +5145,6 @@ async function showSidePanel(id) {
     const graphNode = state.cy ? state.cy.getElementById(m.key) : null;
     const graphData = graphNode && graphNode.length > 0 ? graphNode.data() : {};
     const region = state.atlasRegions.find(r => r.id === graphData.region);
-    const degree = graphData.degree || 0;
-    const age = graphData.ageSecs === 0
-      ? "fresh"
-      : graphData.ageSecs
-        ? relTime(Math.floor(Date.now() / 1000) - graphData.ageSecs)
-        : "n/a";
     panel.innerHTML = `
       <div class="workbench-shell">
         <div class="workbench-header">
@@ -5026,14 +5162,7 @@ async function showSidePanel(id) {
           <button class="tombstone-btn" type="button">🪦 tombstone</button>
         </div>
         <div class="workbench-body">
-          <div class="workbench-grid">
-            <div class="metric"><div class="label">importance</div><div class="value">${(m.importance || 0).toFixed(2)}</div></div>
-            <div class="metric"><div class="label">access</div><div class="value">${m.access_count || 0}</div></div>
-            <div class="metric"><div class="label">degree</div><div class="value">${degree}</div></div>
-            <div class="metric"><div class="label">state</div><div class="value">${graphData.hub ? "hub" : graphData.orphan ? "orphan" : graphData.stale ? "stale" : graphData.fresh ? "fresh" : "normal"}</div></div>
-            <div class="metric"><div class="label">last touch</div><div class="value">${escapeHTML(age)}</div></div>
-            <div class="metric"><div class="label">source</div><div class="value">${sourceLabel}</div></div>
-          </div>
+          ${renderNodeDossier(m, graphNode, region)}
           ${renderWorkbenchRelationSummary(m, graphNode)}
           ${descBlock}
           ${renderWorkbenchNeighborSection(m, graphNode)}
@@ -5227,6 +5356,7 @@ function bindWorkbenchActions(panel, memory) {
         const node = state.cy ? state.cy.$id(memory.key) : null;
         if (node && node.length > 0) state.cy.remove(node);
         document.body.classList.remove("workbench-open");
+        document.body.classList.remove("node-detail-lens");
         panel.classList.add("hidden");
         await loadGraph();
       } catch (e) {
