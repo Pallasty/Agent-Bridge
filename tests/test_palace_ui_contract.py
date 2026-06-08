@@ -200,6 +200,17 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("state.regionNodeFilter = filter;", html)
         self.assertIn("showRegionWorkbench(regionId);", html)
 
+    def test_region_workbench_previews_maintenance_candidates_read_only(self):
+        html = palace_html()
+
+        self.assertIn("function regionMaintenancePreviewRows(regionId)", html)
+        self.assertIn("function renderRegionMaintenancePreview(regionId)", html)
+        self.assertIn('id="region-maintenance-preview"', html)
+        self.assertIn("maintenance-preview-row", html)
+        self.assertIn("data-preview-node-key", html)
+        self.assertIn("state.maintenancePreviewFilter = filter;", html)
+        self.assertIn("read-only", html)
+
     def test_search_surfaces_result_navigation(self):
         html = palace_html()
 
@@ -232,6 +243,44 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("lastLayoutOverlapCount", html)
         self.assertIn("layoutstop", html)
         self.assertIn("overlap", html)
+
+    def test_zoom_keeps_node_glyphs_screen_sized(self):
+        html = palace_html()
+
+        self.assertIn("screenGlyphSize", html)
+        self.assertIn("screenHaloPad", html)
+        self.assertIn("displaySize", html)
+        self.assertIn("displayHaloPad", html)
+        self.assertIn("function nodeGlyphScreenSize(node)", html)
+        self.assertIn("function nodeHaloScreenPad(node)", html)
+        self.assertIn("function updateZoomScaledNodeMetrics()", html)
+        self.assertIn("function scheduleZoomScaledNodeMetrics()", html)
+        self.assertIn('state.cy.on("zoom"', html)
+        self.assertIn("screenGlyphSize / zoom", html)
+        self.assertIn("screenHaloPad / zoom", html)
+        self.assertIn('"width": "data(displaySize)"', html)
+        self.assertIn('"height": "data(displaySize)"', html)
+
+    def test_overview_and_close_zoom_use_the_same_screen_glyph_size(self):
+        html = palace_html()
+
+        self.assertIn("const NODE_GLYPH_SCREEN_SCALE", html)
+        self.assertIn("const NODE_GLYPH_SCREEN_MIN", html)
+        self.assertIn("const NODE_GLYPH_SCREEN_MAX", html)
+        self.assertNotIn("NODE_GLYPH_LOCK_ZOOM", html)
+        self.assertNotIn("glyphMetricZoom(zoom)", html)
+
+    def test_zoom_declutters_labels_until_the_user_moves_closer(self):
+        html = palace_html()
+
+        self.assertIn("const LABEL_SHOW_ANCHOR_ZOOM", html)
+        self.assertIn("const LABEL_SHOW_ALL_ZOOM", html)
+        self.assertIn("function labelForZoom(node, zoom)", html)
+        self.assertIn("displayLabel", html)
+        self.assertIn("labelOpacity", html)
+        self.assertIn('"label": "data(displayLabel)"', html)
+        self.assertIn('"text-opacity": "data(labelOpacity)"', html)
+        self.assertIn('"label": "data(label)"', html)
 
 
 if __name__ == "__main__":
