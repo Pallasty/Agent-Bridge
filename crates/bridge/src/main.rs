@@ -2801,8 +2801,26 @@ fn which_in_path(bin: &str) -> bool {
     std::env::split_paths(&path).any(|p| p.join(bin).is_file())
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    // TD-02: bound the tokio blocking-thread pool. `#[tokio::main]` uses the
+    // default cap of 512, which in practice let blocked `spawn_blocking` tasks
+    // (sqlite / pty / a hung host call) accumulate threads (observed 83 -> 242,
+    // all futex-waiting) and never shed them. A tight cap turns runaway thread
+    // growth into back-pressure — excess blocking work queues instead of minting
+    // an unbounded thread per stuck task. Tunable via env for incident response.
+    let max_blocking = std::env::var("AGENT_BRIDGE_MAX_BLOCKING_THREADS")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or(128);
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .max_blocking_threads(max_blocking)
+        .build()?
+        .block_on(real_main())
+}
+
+async fn real_main() -> Result<()> {
     // Load API tokens from the user's plaintext creds notebook before any
     // worker thread can read env. Self-heals after a `cargo install` that
     // overwrites the shell wrapper. See `creds.rs` for resolution order.
