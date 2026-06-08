@@ -10725,7 +10725,10 @@ impl McpTool for BrowserSnapshotTool {
             name: self.name().into(),
             description: "Return the page's accessibility tree (role/name/value + children). \
                  Far cheaper than a screenshot for letting the agent reason about page \
-                 structure: the same content takes 10–50× fewer tokens than a PNG."
+                 structure: the same content takes 10–50× fewer tokens than a PNG. \
+                 Interactive nodes (button/link/textbox/…) carry a stable \"ref\" like \
+                 \"@e1\" — pass it as browser_click's selector to click by ref instead of \
+                 a brittle CSS selector. Refs are re-numbered on each snapshot."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -10768,12 +10771,15 @@ impl McpTool for BrowserClickTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Click the first DOM element matching the given CSS selector.".into(),
+            description: "Click an element by CSS selector, OR by a stable \"@eN\" ref from \
+                a prior browser_snapshot (e.g. \"@e3\"). Refs resolve to the element's backend \
+                DOM node, so they survive dynamic class names that break CSS selectors."
+                .into(),
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "page":     { "type": "string" },
-                    "selector": { "type": "string", "description": "CSS selector." }
+                    "selector": { "type": "string", "description": "CSS selector, or an \"@eN\" ref from browser_snapshot." }
                 },
                 "required": ["page", "selector"]
             }),
@@ -10792,7 +10798,15 @@ impl McpTool for BrowserClickTool {
         if sel.is_empty() {
             return Ok(ToolResult::error("missing 'selector'"));
         }
-        match b.click(&page, sel).await {
+        // An `@eN` value is a stable ref from a prior browser_snapshot; route it
+        // to the ref-based click (resolves the backend DOM node) instead of
+        // treating it as a CSS selector. Same `selector` param — no schema change.
+        let outcome = if sel.starts_with("@e") {
+            b.click_by_ref(&page, sel).await
+        } else {
+            b.click(&page, sel).await
+        };
+        match outcome {
             Ok(()) => Ok(ToolResult::text(format!("clicked {sel}"))),
             Err(e) => Ok(ToolResult::error(format!("browser: {e}"))),
         }

@@ -20,6 +20,11 @@ pub struct A11yNode {
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
+    /// Stable `@eN` ref assigned to interactive nodes by `snapshot_a11y`, so the
+    /// agent can `browser_click` an element by ref instead of a brittle CSS
+    /// selector. Ephemeral: re-numbered on each snapshot of the same page.
+    #[serde(rename = "ref", default, skip_serializing_if = "Option::is_none")]
+    pub node_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<A11yNode>,
 }
@@ -90,6 +95,18 @@ pub trait BrowserBackend: Send + Sync {
     async fn snapshot_a11y(&self, page: &PageId) -> Result<A11yNode>;
 
     async fn click(&self, page: &PageId, selector: &str) -> Result<()>;
+
+    /// Click an element by the stable `@eN` ref surfaced in the most recent
+    /// [`snapshot_a11y`](BrowserBackend::snapshot_a11y) of this page. Refs are
+    /// ephemeral (re-numbered on each snapshot). CDP-native: resolves the ref to
+    /// its backend DOM node and dispatches a real click, so it survives dynamic
+    /// class names that break CSS selectors. The default impl errors; the CDP
+    /// backend overrides it.
+    async fn click_by_ref(&self, _page: &PageId, _node_ref: &str) -> Result<()> {
+        Err(ab_core::Error::InvalidArgument(
+            "click_by_ref not supported by this backend".into(),
+        ))
+    }
 
     async fn screenshot(&self, page: &PageId) -> Result<Bytes>;
 

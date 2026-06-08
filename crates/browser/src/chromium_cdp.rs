@@ -24,7 +24,9 @@ use ab_core::{Error, PageId, Result};
 use async_trait::async_trait;
 use bytes::Bytes;
 use chromiumoxide::cdp::browser_protocol::accessibility::GetFullAxTreeParams;
-use chromiumoxide::cdp::browser_protocol::dom::SetFileInputFilesParams;
+use chromiumoxide::cdp::browser_protocol::dom::{
+    BackendNodeId, ResolveNodeParams, SetFileInputFilesParams,
+};
 use chromiumoxide::cdp::browser_protocol::emulation::{
     SetDeviceMetricsOverrideParams, SetUserAgentOverrideParams,
 };
@@ -40,7 +42,7 @@ use chromiumoxide::cdp::browser_protocol::page::{
 use chromiumoxide::cdp::browser_protocol::target::{
     GetTargetsParams, TargetInfo,
 };
-use chromiumoxide::cdp::js_protocol::runtime::EvaluateParams;
+use chromiumoxide::cdp::js_protocol::runtime::{CallFunctionOnParams, EvaluateParams};
 use chromiumoxide::cdp::CdpEventMessage;
 use chromiumoxide::keys::{KeyDefinition, USKEYBOARD_LAYOUT};
 use chromiumoxide::page::ScreenshotParams;
@@ -91,6 +93,11 @@ pub struct ChromiumCdpBackend {
     /// per page max; a second `capture_response_start` aborts the prior
     /// pump and replaces the entry.
     captures: Arc<Mutex<HashMap<String, (Arc<CaptureState>, tokio::task::AbortHandle)>>>,
+    /// PageId → map of ephemeral `@eN` refs (assigned by the last
+    /// `snapshot_a11y`) to the element's backend DOM node id, so `click_by_ref`
+    /// can resolve a ref the agent saw in a snapshot back to a real element. A
+    /// fresh snapshot of the same page replaces its entry.
+    ref_maps: Arc<DashMap<String, HashMap<String, i64>>>,
 }
 
 /// Per-page capture state for `capture_response_start` /
@@ -143,6 +150,7 @@ impl ChromiumCdpBackend {
             pages: Arc::new(DashMap::new()),
             pause_waiters: Arc::new(Mutex::new(HashMap::new())),
             captures: Arc::new(Mutex::new(HashMap::new())),
+            ref_maps: Arc::new(DashMap::new()),
         }
     }
 
@@ -394,7 +402,11 @@ impl BrowserBackend for ChromiumCdpBackend {
             .map_err(|e| Error::Backend(format!("getFullAXTree: {e}")))?;
         // `resp.result.nodes` is a flat list of Accessibility.AXNode.
         let nodes = &resp.result.nodes;
-        let tree = build_a11y_tree(nodes);
+        let mut ref_map = HashMap::new();
+        let tree = build_a11y_tree(nodes, &mut ref_map);
+        // Replace this page's ref table so click_by_ref resolves the refs the
+        // agent is about to see (and stale refs from a prior snapshot drop out).
+        self.ref_maps.insert(page.as_str().to_string(), ref_map);
         Ok(tree)
     }
 
@@ -407,6 +419,46 @@ impl BrowserBackend for ChromiumCdpBackend {
         el.click()
             .await
             .map_err(|e| Error::Backend(format!("click {selector}: {e}")))?;
+        Ok(())
+    }
+
+    async fn click_by_ref(&self, page: &PageId, node_ref: &str) -> Result<()> {
+        let p = self.page_handle(page)?;
+        let backend_id = self
+            .ref_maps
+            .get(page.as_str())
+            .and_then(|m| m.get(node_ref).copied())
+            .ok_or_else(|| {
+                Error::InvalidArgument(format!(
+                    "unknown ref {node_ref} — call browser_snapshot first \
+                     (refs are re-numbered each snapshot)"
+                ))
+            })?;
+        // backend node id → live JS object handle.
+        let resolved = p
+            .execute(
+                ResolveNodeParams::builder()
+                    .backend_node_id(BackendNodeId::new(backend_id))
+                    .build(),
+            )
+            .await
+            .map_err(|e| Error::Backend(format!("resolveNode {node_ref}: {e}")))?;
+        let object_id = resolved.result.object.object_id.ok_or_else(|| {
+            Error::Backend(format!("resolveNode {node_ref}: element has no object id"))
+        })?;
+        // Scroll into view + real DOM click on the resolved element. Survives
+        // dynamic class names that would break a CSS selector.
+        p.execute(
+            CallFunctionOnParams::builder()
+                .object_id(object_id)
+                .function_declaration(
+                    "function(){ this.scrollIntoView({block:'center',inline:'center'}); this.click(); }",
+                )
+                .build()
+                .map_err(|e| Error::Backend(format!("callFunctionOn builder: {e}")))?,
+        )
+        .await
+        .map_err(|e| Error::Backend(format!("click_by_ref {node_ref}: {e}")))?;
         Ok(())
     }
 
@@ -1545,20 +1597,51 @@ fn json_eval_result_as_plain_text(v: &serde_json::Value) -> String {
 /// Convert chromiumoxide's flat AXNode list into our nested [`A11yNode`].
 fn build_a11y_tree(
     nodes: &[chromiumoxide::cdp::browser_protocol::accessibility::AxNode],
+    ref_map: &mut HashMap<String, i64>,
 ) -> A11yNode {
-    use std::collections::HashMap;
     let mut by_id: HashMap<String, &chromiumoxide::cdp::browser_protocol::accessibility::AxNode> =
         HashMap::with_capacity(nodes.len());
     for n in nodes {
         by_id.insert(n.node_id.inner().clone(), n);
     }
-    let root = nodes.first().cloned().map(|n| convert(&n, &by_id));
+    let mut counter: u32 = 0;
+    let root = nodes
+        .first()
+        .cloned()
+        .map(|n| convert(&n, &by_id, ref_map, &mut counter));
     root.unwrap_or_else(|| A11yNode {
         role: "root".into(),
         name: None,
         value: None,
+        node_ref: None,
         children: vec![],
     })
+}
+
+/// Interactive AX roles that earn a clickable `@eN` ref. Conservative on
+/// purpose — only roles a human would click or type into — so the ref list
+/// stays short and the pre-order numbering is stable across snapshots.
+fn is_interactive(role: &str) -> bool {
+    matches!(
+        role,
+        "button"
+            | "link"
+            | "textbox"
+            | "searchbox"
+            | "checkbox"
+            | "radio"
+            | "combobox"
+            | "listbox"
+            | "menuitem"
+            | "menuitemcheckbox"
+            | "menuitemradio"
+            | "tab"
+            | "switch"
+            | "slider"
+            | "spinbutton"
+            | "option"
+            | "treeitem"
+    )
 }
 
 fn convert(
@@ -1567,6 +1650,8 @@ fn convert(
         String,
         &chromiumoxide::cdp::browser_protocol::accessibility::AxNode,
     >,
+    ref_map: &mut HashMap<String, i64>,
+    counter: &mut u32,
 ) -> A11yNode {
     let role = node
         .role
@@ -1581,12 +1666,30 @@ fn convert(
         .value
         .as_ref()
         .and_then(|v| ax_value_to_string(&v.value));
+    // A non-ignored interactive node with a backend DOM node id earns a
+    // clickable ref. Assigned pre-order (parent before children) so the
+    // numbering matches reading order. The backend id is the handle
+    // click_by_ref later resolves against.
+    let node_ref = if !node.ignored && is_interactive(&role) {
+        node.backend_dom_node_id.as_ref().map(|b| {
+            *counter += 1;
+            let r = format!("@e{}", *counter);
+            ref_map.insert(r.clone(), *b.inner());
+            r
+        })
+    } else {
+        None
+    };
     let children = node
         .child_ids
         .as_ref()
         .map(|ids| {
             ids.iter()
-                .filter_map(|id| by_id.get(id.inner()).map(|c| convert(c, by_id)))
+                .filter_map(|id| {
+                    by_id
+                        .get(id.inner())
+                        .map(|c| convert(c, by_id, ref_map, counter))
+                })
                 .collect()
         })
         .unwrap_or_default();
@@ -1595,7 +1698,39 @@ fn convert(
         role,
         name,
         value,
+        node_ref,
         children,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_interactive;
+
+    #[test]
+    fn interactive_roles_are_clickable() {
+        for r in [
+            "button", "link", "textbox", "searchbox", "checkbox", "radio", "combobox", "tab",
+            "switch", "option", "menuitem", "treeitem",
+        ] {
+            assert!(is_interactive(r), "{r} should be interactive");
+        }
+    }
+
+    #[test]
+    fn structural_roles_get_no_ref() {
+        for r in [
+            "StaticText",
+            "generic",
+            "paragraph",
+            "image",
+            "heading",
+            "list",
+            "unknown",
+            "RootWebArea",
+        ] {
+            assert!(!is_interactive(r), "{r} should not earn a ref");
+        }
     }
 }
 
