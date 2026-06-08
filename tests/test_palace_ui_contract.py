@@ -244,6 +244,34 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("layoutstop", html)
         self.assertIn("overlap", html)
 
+    def test_graph_reports_screen_space_overlap(self):
+        html = palace_html()
+
+        self.assertIn("lastScreenOverlapCount: 0", html)
+        self.assertIn("lastScreenOverlapRatio: 0", html)
+        self.assertIn("function graphScreenNodeRadius(node)", html)
+        self.assertIn("function countScreenNodeOverlaps(nodes", html)
+        self.assertIn("screenOverlapCount", html)
+        self.assertIn("screenOverlapRatio", html)
+        self.assertIn("screen-overlap", html)
+
+    def test_region_layout_uses_spacious_shells_before_cose(self):
+        html = palace_html()
+
+        self.assertIn("const ATLAS_REGION_RADIUS_SCALE", html)
+        self.assertIn("const ATLAS_REGION_Y_SCALE", html)
+        self.assertIn("const REGION_SHELL_BASE_SPACING", html)
+        self.assertIn("const REGION_SHELL_DENSITY_SPACING", html)
+        self.assertIn("const REGION_SHELL_Y_SCALE", html)
+        self.assertIn("Math.sqrt(group.length) * REGION_SHELL_DENSITY_SPACING", html)
+        self.assertIn("Math.sqrt(idx) * shellSpacing", html)
+        self.assertIn("Math.sin(regionAngle) * atlasRadius * ATLAS_REGION_Y_SCALE", html)
+        self.assertIn("Math.sin(localAngle) * shellRadius * REGION_SHELL_Y_SCALE", html)
+        self.assertIn("const GRAPH_VERTICAL_COMPRESSION", html)
+        self.assertIn("function compressGraphVerticalRange(cy", html)
+        self.assertIn("compressGraphVerticalRange(cy);", html)
+        self.assertIn("nodeOverlap: clampNumber(72 + scale", html)
+
     def test_zoom_keeps_node_glyphs_screen_sized(self):
         html = palace_html()
 
