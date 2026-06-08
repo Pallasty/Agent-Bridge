@@ -2807,12 +2807,15 @@ fn main() -> Result<()> {
     // (sqlite / pty / a hung host call) accumulate threads (observed 83 -> 242,
     // all futex-waiting) and never shed them. A tight cap turns runaway thread
     // growth into back-pressure — excess blocking work queues instead of minting
-    // an unbounded thread per stuck task. Tunable via env for incident response.
+    // an unbounded thread per stuck task. Default 256 sits above the observed
+    // 242 peak (so legit concurrent blocking work isn't starved / self-deadlocked
+    // when a CDP/git/shell call nests further blocking tasks) yet at half the
+    // tokio default, still bounding runaway. Tunable via env for incident response.
     let max_blocking = std::env::var("AGENT_BRIDGE_MAX_BLOCKING_THREADS")
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
         .filter(|n| *n > 0)
-        .unwrap_or(128);
+        .unwrap_or(256);
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .max_blocking_threads(max_blocking)
