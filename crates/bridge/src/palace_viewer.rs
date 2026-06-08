@@ -116,6 +116,7 @@ pub async fn run(
         .route("/", get(index))
         .route("/healthz", get(healthz))
         .route("/api/graph", get(api_graph))
+        .route("/api/orphan-candidates", get(api_orphan_candidates))
         .route("/api/semantic-events", get(api_semantic_events))
         .route("/api/memory/:key", get(api_memory))
         .route("/api/annotate", post(api_annotate))
@@ -179,6 +180,25 @@ struct GraphQuery {
     all: bool,
 }
 
+#[derive(Deserialize, Default)]
+struct OrphanCandidatesQuery {
+    /// Optional Palace atlas region id, e.g. `memory` or `auto-curated`.
+    #[serde(default)]
+    region: Option<String>,
+    /// Top candidate score needed for `status=would_link`.
+    #[serde(default)]
+    threshold: Option<f64>,
+    /// Skip orphan sources whose content is shorter than this many bytes.
+    #[serde(default)]
+    min_content_len: Option<u64>,
+    /// Maximum orphan source rows to inspect.
+    #[serde(default)]
+    max_orphans: Option<u64>,
+    /// Maximum candidate targets returned per orphan.
+    #[serde(default)]
+    candidate_limit: Option<u64>,
+}
+
 fn deserialize_boolish<'de, D>(deserializer: D) -> std::result::Result<bool, D::Error>
 where
     D: de::Deserializer<'de>,
@@ -191,6 +211,364 @@ where
         "" | "1" | "true" | "yes" | "y" | "on" => Ok(true),
         "0" | "false" | "no" | "n" | "off" => Ok(false),
         other => Err(de::Error::custom(format!("invalid boolish value `{other}`"))),
+    }
+}
+
+const PALACE_ORPHAN_SKIP_TAGS: &[&str] = &["auto_curated", "alert", "ttl:7d"];
+const PALACE_ORPHAN_SKIP_KINDS: &[&str] =
+    &["alert", "work_memory", "session_handoff", "snapshot"];
+
+#[derive(Debug, Clone)]
+struct PalaceLinkSuggestion {
+    key: String,
+    kind: String,
+    confidence: f64,
+    reason: String,
+    scope: Option<String>,
+    scope_relation: &'static str,
+    preview: String,
+}
+
+#[derive(Debug, Clone)]
+struct PalaceOrphanCandidatePreviewRow {
+    orphan: MemoryRecord,
+    suggestions: Vec<PalaceLinkSuggestion>,
+}
+
+#[derive(Debug, Default)]
+struct PalaceOrphanCandidatePreview {
+    examined: u64,
+    eligible_orphans: u64,
+    would_link: u64,
+    skipped_low_score: u64,
+    skipped_no_candidates: u64,
+    skipped_blacklisted_orphan: u64,
+    skipped_blacklisted_kind: u64,
+    rows: Vec<PalaceOrphanCandidatePreviewRow>,
+}
+
+fn palace_slug(raw: &str) -> String {
+    let mut out = String::new();
+    let mut pending_dash = false;
+    for c in raw.trim().chars().flat_map(char::to_lowercase) {
+        if c.is_ascii_alphanumeric() {
+            if pending_dash && !out.is_empty() && out.len() < 48 {
+                out.push('-');
+            }
+            pending_dash = false;
+            if out.len() < 48 {
+                out.push(c);
+            }
+        } else if !out.is_empty() {
+            pending_dash = true;
+        }
+        if out.len() >= 48 {
+            break;
+        }
+    }
+    while out.ends_with('-') {
+        out.pop();
+    }
+    out
+}
+
+fn palace_tag_is_useful_for_atlas(tag: &str) -> bool {
+    const STOPWORDS: &[&str] = &[
+        "palace",
+        "auto_curated",
+        "implicit",
+        "session-handoff",
+        "session_handoff",
+        "handoff",
+        "superseded",
+        "verified",
+        "deployed",
+        "shipped",
+    ];
+    let slug = palace_slug(tag);
+    if slug.len() < 3 {
+        return false;
+    }
+    if STOPWORDS.iter().any(|word| *word == slug) {
+        return false;
+    }
+    if slug.starts_with("summarized-at") || slug.starts_with("ttl-") {
+        return false;
+    }
+    if slug.len() >= 4 && slug.as_bytes()[0..2] == *b"20" {
+        return false;
+    }
+    true
+}
+
+fn palace_region_for_memory(mem: &MemoryRecord) -> String {
+    if let Some(tag) = mem.tags.iter().find(|tag| palace_tag_is_useful_for_atlas(tag)) {
+        return palace_slug(tag);
+    }
+
+    let key = mem.key.to_ascii_lowercase();
+    let kind = mem.kind.to_ascii_lowercase();
+    if kind == "session_handoff" || key.contains("handoff") {
+        return "session-handoffs".to_string();
+    }
+
+    const PATTERNS: &[(&str, &str)] = &[
+        ("biocortex", "biocortex"),
+        ("onsen", "onsen-hd"),
+        ("agent-bridge", "agent-bridge"),
+        ("output-lane", "output-lane"),
+        ("present", "present"),
+        ("voice", "voice"),
+        ("memory", "memory"),
+        ("palace", "palace"),
+        ("xiao", "xiao-shu"),
+        ("warp", "warp"),
+        ("desktop", "desktop"),
+        ("nexus", "nexus"),
+        ("skill", "skills"),
+    ];
+    if let Some((_, region)) = PATTERNS
+        .iter()
+        .find(|(needle, _)| key.contains(*needle) || kind.contains(*needle))
+    {
+        return (*region).to_string();
+    }
+    let fallback = palace_slug(if kind.is_empty() {
+        "uncategorized"
+    } else {
+        &kind
+    });
+    if fallback.is_empty() {
+        "uncategorized".to_string()
+    } else {
+        fallback
+    }
+}
+
+fn palace_memory_active(mem: &MemoryRecord) -> bool {
+    mem.status == "active" || mem.status.is_empty()
+}
+
+fn palace_memory_has_any_tag(mem: &MemoryRecord, tags: &[&str]) -> bool {
+    mem.tags.iter().any(|tag| {
+        tags.iter()
+            .any(|skip| tag.eq_ignore_ascii_case(skip) || palace_slug(tag) == palace_slug(skip))
+    })
+}
+
+fn palace_memory_kind_is_any(mem: &MemoryRecord, kinds: &[&str]) -> bool {
+    kinds.iter().any(|kind| mem.kind.eq_ignore_ascii_case(kind))
+}
+
+fn palace_memory_excluded_kind(mem: &MemoryRecord) -> bool {
+    ab_store::COVERAGE_EXCLUDED_KINDS
+        .iter()
+        .any(|kind| mem.kind.eq_ignore_ascii_case(kind))
+        || palace_memory_kind_is_any(mem, PALACE_ORPHAN_SKIP_KINDS)
+}
+
+fn palace_memory_scope_value(mem: &MemoryRecord) -> Option<&str> {
+    mem.scope
+        .as_deref()
+        .map(str::trim)
+        .filter(|scope| !scope.is_empty())
+}
+
+fn palace_memory_scopes_compatible(source: &MemoryRecord, target: &MemoryRecord) -> bool {
+    match (
+        palace_memory_scope_value(source),
+        palace_memory_scope_value(target),
+    ) {
+        (Some(a), Some(b)) => a == b || a == "global" || b == "global",
+        _ => true,
+    }
+}
+
+fn palace_pair_scope_relation(source: &MemoryRecord, target: &MemoryRecord) -> &'static str {
+    match (
+        palace_memory_scope_value(source),
+        palace_memory_scope_value(target),
+    ) {
+        (Some(a), Some(b)) if a == b => "same_scope",
+        (Some("global"), _) | (_, Some("global")) | (None, _) | (_, None) => "global_or_unscoped",
+        _ => "cross_scope",
+    }
+}
+
+fn palace_key_prefix(key: &str) -> &str {
+    key.split(&['_', '-', '/', '.'][..]).next().unwrap_or("")
+}
+
+fn palace_content_tokens(content: &str) -> HashSet<String> {
+    content
+        .split_whitespace()
+        .filter(|token| token.len() >= 4)
+        .map(|token| token.to_ascii_lowercase())
+        .collect()
+}
+
+fn palace_content_preview(content: &str, max_chars: usize) -> String {
+    let total = content.chars().count();
+    let mut preview: String = content.chars().take(max_chars).collect();
+    preview = preview.replace(['\n', '\r'], " ");
+    if total > max_chars {
+        preview.push_str("...");
+    }
+    preview
+}
+
+fn palace_candidate_allowed(source: &MemoryRecord, target: &MemoryRecord) -> bool {
+    source.key != target.key
+        && palace_memory_active(target)
+        && !palace_memory_excluded_kind(target)
+        && !palace_memory_has_any_tag(target, PALACE_ORPHAN_SKIP_TAGS)
+        && palace_memory_scopes_compatible(source, target)
+}
+
+fn compute_palace_link_suggestions(
+    source: &MemoryRecord,
+    candidates: &[MemoryRecord],
+    already_linked: &HashSet<String>,
+    limit: usize,
+) -> Vec<PalaceLinkSuggestion> {
+    let source_prefix = palace_key_prefix(&source.key);
+    let source_tokens = palace_content_tokens(&source.content);
+    let mut scored: Vec<PalaceLinkSuggestion> = candidates
+        .iter()
+        .filter(|mem| mem.key != source.key && !already_linked.contains(&mem.key))
+        .filter_map(|mem| {
+            let mut score = 0.0f64;
+            let mut reasons: Vec<&str> = Vec::new();
+            let tag_overlap = source
+                .tags
+                .iter()
+                .filter(|tag| mem.tags.contains(*tag))
+                .count();
+            if tag_overlap > 0 {
+                score += 0.4 * tag_overlap as f64;
+                reasons.push("tag_overlap");
+            }
+            let target_prefix = palace_key_prefix(&mem.key);
+            if !source_prefix.is_empty() && source_prefix == target_prefix {
+                score += 0.3;
+                reasons.push("same_prefix");
+            }
+            let target_tokens = palace_content_tokens(&mem.content);
+            let intersection = source_tokens
+                .iter()
+                .filter(|token| target_tokens.contains(*token))
+                .count();
+            let union = source_tokens.len() + target_tokens.len() - intersection;
+            if union > 0 && intersection > 2 {
+                let jaccard = intersection as f64 / union as f64;
+                score += jaccard;
+                reasons.push("content_overlap");
+            }
+            if score < 0.1 {
+                return None;
+            }
+            let confidence = (score * 100.0).min(100.0).round() / 100.0;
+            Some(PalaceLinkSuggestion {
+                key: mem.key.clone(),
+                kind: mem.kind.clone(),
+                confidence,
+                reason: reasons.join("+"),
+                scope: mem.scope.clone(),
+                scope_relation: palace_pair_scope_relation(source, mem),
+                preview: palace_content_preview(&mem.content, 120),
+            })
+        })
+        .collect();
+    scored.sort_by(|a, b| {
+        b.confidence
+            .partial_cmp(&a.confidence)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.key.cmp(&b.key))
+    });
+    scored.truncate(limit);
+    scored
+}
+
+#[allow(clippy::too_many_arguments)]
+fn preview_palace_orphan_candidates(
+    all: &[MemoryRecord],
+    keys_with_edges: &HashSet<String>,
+    region: Option<&str>,
+    threshold: f64,
+    min_content_len: usize,
+    max_orphans: usize,
+    candidate_limit: usize,
+) -> PalaceOrphanCandidatePreview {
+    let region = region.map(palace_slug).filter(|slug| !slug.is_empty());
+    let mut preview = PalaceOrphanCandidatePreview::default();
+    let mut orphans: Vec<MemoryRecord> = Vec::new();
+
+    for mem in all {
+        if !palace_memory_active(mem) || palace_memory_excluded_kind(mem) {
+            continue;
+        }
+        if mem.content.len() < min_content_len {
+            continue;
+        }
+        if let Some(region) = region.as_deref() {
+            if palace_region_for_memory(mem) != region {
+                continue;
+            }
+        }
+        preview.examined += 1;
+        if keys_with_edges.contains(&mem.key) {
+            continue;
+        }
+        if palace_memory_has_any_tag(mem, PALACE_ORPHAN_SKIP_TAGS) {
+            preview.skipped_blacklisted_orphan += 1;
+            continue;
+        }
+        if palace_memory_kind_is_any(mem, PALACE_ORPHAN_SKIP_KINDS) {
+            preview.skipped_blacklisted_kind += 1;
+            continue;
+        }
+        orphans.push(mem.clone());
+        if orphans.len() >= max_orphans {
+            break;
+        }
+    }
+
+    preview.eligible_orphans = orphans.len() as u64;
+    for orphan in &orphans {
+        let already_linked = HashSet::new();
+        let candidate_pool: Vec<MemoryRecord> = all
+            .iter()
+            .filter(|candidate| palace_candidate_allowed(orphan, candidate))
+            .cloned()
+            .collect();
+        let suggestions = compute_palace_link_suggestions(
+            orphan,
+            &candidate_pool,
+            &already_linked,
+            candidate_limit,
+        );
+        match suggestions.first() {
+            Some(top) if top.confidence >= threshold => preview.would_link += 1,
+            Some(_) => preview.skipped_low_score += 1,
+            None => preview.skipped_no_candidates += 1,
+        }
+        preview.rows.push(PalaceOrphanCandidatePreviewRow {
+            orphan: orphan.clone(),
+            suggestions,
+        });
+    }
+
+    preview
+}
+
+fn palace_orphan_row_status(
+    row: &PalaceOrphanCandidatePreviewRow,
+    threshold: f64,
+) -> &'static str {
+    match row.suggestions.first() {
+        Some(top) if top.confidence >= threshold => "would_link",
+        Some(_) => "low_score",
+        None => "no_candidates",
     }
 }
 
@@ -335,6 +713,107 @@ async fn api_graph(
     Query(q): Query<GraphQuery>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
     build_graph_snapshot(&s, q.all).await.map(Json)
+}
+
+async fn api_orphan_candidates(
+    State(s): State<AppState>,
+    Query(q): Query<OrphanCandidatesQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let threshold = q.threshold.unwrap_or(0.85).clamp(0.0, 2.0);
+    let min_content_len = q.min_content_len.unwrap_or(50).min(1000) as usize;
+    let max_orphans = q.max_orphans.unwrap_or(12).clamp(1, 100) as usize;
+    let candidate_limit = q.candidate_limit.unwrap_or(3).clamp(1, 10) as usize;
+    let region = q
+        .region
+        .as_deref()
+        .map(str::trim)
+        .filter(|region| !region.is_empty());
+
+    let all = s
+        .store
+        .list_memories(None, MemoryListSort::Recent, STORE_FETCH_LIMIT)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("list_memories: {e}"),
+            )
+        })?;
+
+    let mut keys_with_edges: HashSet<String> = HashSet::new();
+    for mem in &all {
+        if !palace_memory_active(mem) || palace_memory_excluded_kind(mem) {
+            continue;
+        }
+        if let Ok(edges) = s.store.memory_neighbors(&mem.key).await {
+            if !edges.is_empty() {
+                keys_with_edges.insert(mem.key.clone());
+            }
+        }
+    }
+
+    let preview = preview_palace_orphan_candidates(
+        &all,
+        &keys_with_edges,
+        region,
+        threshold,
+        min_content_len,
+        max_orphans,
+        candidate_limit,
+    );
+
+    let rows: Vec<Value> = preview
+        .rows
+        .iter()
+        .map(|row| {
+            let candidates: Vec<Value> = row
+                .suggestions
+                .iter()
+                .map(|candidate| {
+                    json!({
+                        "key": &candidate.key,
+                        "kind": &candidate.kind,
+                        "confidence": candidate.confidence,
+                        "reason": &candidate.reason,
+                        "scope": candidate.scope.as_deref(),
+                        "scope_relation": candidate.scope_relation,
+                        "preview": &candidate.preview,
+                    })
+                })
+                .collect();
+            json!({
+                "orphan": &row.orphan.key,
+                "kind": &row.orphan.kind,
+                "region": palace_region_for_memory(&row.orphan),
+                "scope": row.orphan.scope.as_deref(),
+                "top_confidence": row.suggestions.first().map(|candidate| candidate.confidence),
+                "status": palace_orphan_row_status(row, threshold),
+                "preview": palace_content_preview(&row.orphan.content, 120),
+                "candidates": candidates,
+            })
+        })
+        .collect();
+
+    Ok(Json(json!({
+        "read_only": true,
+        "region": region,
+        "threshold": threshold,
+        "min_content_len": min_content_len,
+        "max_orphans": max_orphans,
+        "candidate_limit": candidate_limit,
+        "skip_tags": PALACE_ORPHAN_SKIP_TAGS,
+        "skip_kinds": PALACE_ORPHAN_SKIP_KINDS,
+        "loaded_records": all.len(),
+        "examined": preview.examined,
+        "eligible_orphans": preview.eligible_orphans,
+        "would_link": preview.would_link,
+        "skipped_low_score": preview.skipped_low_score,
+        "skipped_no_candidates": preview.skipped_no_candidates,
+        "skipped_blacklisted_orphan": preview.skipped_blacklisted_orphan,
+        "skipped_blacklisted_kind": preview.skipped_blacklisted_kind,
+        "rows": rows,
+        "next_step": "Inspect candidate quality before any write-capable hygiene run.",
+    })))
 }
 
 async fn build_graph_snapshot(
@@ -2210,6 +2689,86 @@ fn format_history(history: &[ChatMessage]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_mem(key: &str, kind: &str, content: &str, tags: &[&str]) -> MemoryRecord {
+        MemoryRecord {
+            key: key.to_string(),
+            kind: kind.to_string(),
+            content: content.to_string(),
+            tags: tags.iter().map(|tag| (*tag).to_string()).collect(),
+            related_keys: Vec::new(),
+            scope: None,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".to_string(),
+            trigger_pattern: None,
+            superseded_by: None,
+        }
+    }
+
+    #[test]
+    fn palace_region_for_memory_mirrors_atlas_tags_and_patterns() {
+        let tagged = test_mem("curated_implicit_001", "context", "body", &["auto_curated"]);
+        assert_eq!(palace_region_for_memory(&tagged), "auto-curated");
+
+        let handoff = test_mem("daily_handoff", "session_handoff", "body", &[]);
+        assert_eq!(palace_region_for_memory(&handoff), "session-handoffs");
+
+        let keyed = test_mem("agent-bridge-palace-graph", "lesson", "body", &[]);
+        assert_eq!(palace_region_for_memory(&keyed), "agent-bridge");
+    }
+
+    #[test]
+    fn palace_orphan_preview_skips_blacklisted_orphans_and_targets() {
+        let shared = "memory graph candidate preview health topology orphan repair signal explicit edge classification stable operator review alpha beta gamma";
+        let source = test_mem("memory_orphan", "lesson", shared, &["memory"]);
+        let anchor = test_mem(
+            "memory_anchor",
+            "lesson",
+            "memory graph candidate preview health topology orphan repair signal explicit edge classification stable target beta gamma",
+            &["memory"],
+        );
+        let blacklisted_target = test_mem(
+            "memory_auto_target",
+            "lesson",
+            "memory graph candidate preview health topology orphan repair signal explicit edge classification stable target beta gamma",
+            &["memory", "auto_curated"],
+        );
+        let blacklisted_source = test_mem(
+            "curated_implicit_skip",
+            "context",
+            "memory graph candidate preview health topology orphan repair signal explicit edge classification stable target beta gamma",
+            &["auto_curated"],
+        );
+        let all = vec![source, anchor, blacklisted_target, blacklisted_source];
+        let keys_with_edges = HashSet::from(["memory_anchor".to_string()]);
+
+        let preview = preview_palace_orphan_candidates(
+            &all,
+            &keys_with_edges,
+            None,
+            0.85,
+            20,
+            10,
+            3,
+        );
+
+        assert_eq!(preview.skipped_blacklisted_orphan, 2);
+        assert_eq!(preview.would_link, 1);
+        let row = preview
+            .rows
+            .iter()
+            .find(|row| row.orphan.key == "memory_orphan")
+            .expect("memory_orphan row");
+        assert!(row.suggestions.iter().any(|s| s.key == "memory_anchor"));
+        assert!(!row
+            .suggestions
+            .iter()
+            .any(|s| s.key == "memory_auto_target"));
+    }
 
     #[test]
     fn split_frontmatter_basic() {
