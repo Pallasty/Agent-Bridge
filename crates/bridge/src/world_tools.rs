@@ -356,6 +356,7 @@ fn host_reason(host_response: &Value) -> Value {
         &["reason"][..],
         &["error"][..],
         &["render", "reason"][..],
+        &["render_integrity", "reason"][..],
         &["world.visibility.query", "after", "reason"][..],
     ] {
         if let Some(v) = get_path(host_response, path) {
@@ -370,6 +371,19 @@ fn host_reason(host_response: &Value) -> Value {
         }
     }
     Value::Null
+}
+
+fn host_patch_result(host_response: &Value) -> Option<Value> {
+    for path in [
+        &["world.patch"][..],
+        &["world", "patch"][..],
+        &["patch_result"][..],
+    ] {
+        if let Some(v) = get_path(host_response, path) {
+            return Some(v.clone());
+        }
+    }
+    None
 }
 
 fn is_meaningful_reason(value: &Value) -> bool {
@@ -444,7 +458,7 @@ fn wrap_host_response_with_tool(
     let reason = host_reason(&host_response);
     let verify = verify_block(verified, Some(&host_response), reason.clone());
     let action_result = action_result_block(world_tool, request, verified, &reason, true);
-    json!({
+    let mut envelope = json!({
         "schema": WORLD_TOOL_SCHEMA,
         "ok": host_response.get("ok").and_then(Value::as_bool).unwrap_or(verified),
         "verified": verified,
@@ -458,7 +472,13 @@ fn wrap_host_response_with_tool(
         "verify": verify,
         "action_result": action_result,
         "host_response": host_response,
-    })
+    });
+    if let Some(patch_result) = envelope.get("host_response").and_then(host_patch_result) {
+        if let Some(obj) = envelope.as_object_mut() {
+            obj.insert("world.patch".to_string(), patch_result);
+        }
+    }
+    envelope
 }
 
 fn not_verified_envelope_with_tool(
@@ -1439,6 +1459,118 @@ mod tests {
         assert_eq!(
             present_payload["packet"]["machine_payload"]["action_result"]["verdict"],
             "verified"
+        );
+    }
+
+    #[tokio::test]
+    async fn world_patch_applied_but_render_not_verified_stays_unconfirmed_without_raw() {
+        let port = spawn_one_response_host(json!({
+            "ok": true,
+            "verified": false,
+            "render": {"source": "live_root_viewport_texture"},
+            "render_integrity": {
+                "verified": false,
+                "reason": "render_frozen_after_patch",
+                "status": "checked",
+                "model_changed": true,
+                "signature_changed": false
+            },
+            "world.patch": {
+                "requested": true,
+                "applied": true,
+                "op": "move",
+                "entity": "bath",
+                "source": "game_loop_director_live_patch_v0",
+                "model": {"changed": true},
+                "render_refresh": {
+                    "requested": false,
+                    "reason": "debug_freeze_render_after_patch"
+                }
+            },
+            "world.visibility.query": {
+                "after": {
+                    "entities": [{
+                        "id": "bath",
+                        "verified": true,
+                        "screen_area": 0.12,
+                        "bounds_screen_area": 0.2,
+                        "occluded": false
+                    }]
+                }
+            }
+        }))
+        .await;
+
+        let out = WorldPatchTool::new()
+            .execute(
+                json!({
+                    "request_id": "f3-render-frozen",
+                    "op": "move",
+                    "entity": "bath",
+                    "args": {"cell": [8, 0]},
+                    "host": DEFAULT_HOST,
+                    "port": port,
+                    "include_raw": false
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        assert!(!out.is_error);
+        let payload = result_text_as_json(&out);
+        assert_eq!(payload["schema"], WORLD_TOOL_SCHEMA);
+        assert!(payload.get("host_response").is_none());
+        assert_eq!(payload["verified"], false);
+        assert_eq!(payload["reason"], "render_frozen_after_patch");
+        assert_eq!(payload["world.patch"]["applied"], true);
+        assert_eq!(payload["world.patch"]["model"]["changed"], true);
+        assert_eq!(payload["action_result"]["world_tool"], "world_patch");
+        assert_eq!(payload["action_result"]["verdict"], "not_verified");
+        assert_eq!(
+            payload["action_result"]["reason"],
+            "render_frozen_after_patch"
+        );
+        assert!(payload["action_result"]["verified_to"].is_null());
+        assert_eq!(
+            payload["action_result"]["recover"],
+            "inspect_host_or_visibility_evidence"
+        );
+        assert_eq!(
+            payload["verify"]["evidence"]["host_reason"],
+            "render_frozen_after_patch"
+        );
+
+        let present = WorldPresentTool::new()
+            .execute(
+                json!({
+                    "envelope": payload,
+                    "generated_at": "2026-06-08T00:00:00Z"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("present");
+        assert!(!present.is_error);
+        let present_payload = result_text_as_json(&present);
+        assert_eq!(present_payload["world_tool"], "world_patch");
+        assert_eq!(present_payload["verdict"], "not_verified");
+        assert_eq!(present_payload["reason"], "render_frozen_after_patch");
+        assert_eq!(
+            present_payload["packet"]["human_readable"]["changed"],
+            json!(["bath"])
+        );
+        assert_eq!(
+            present_payload["packet"]["human_readable"]["visible"],
+            json!([])
+        );
+        assert!(present_payload["packet"]["provenance"]["verified_to"].is_null());
+        assert_eq!(
+            present_payload["packet"]["machine_payload"]["patch_result"]["applied"],
+            true
+        );
+        assert_eq!(
+            present_payload["packet"]["machine_payload"]["action_result"]["verdict"],
+            "not_verified"
         );
     }
 

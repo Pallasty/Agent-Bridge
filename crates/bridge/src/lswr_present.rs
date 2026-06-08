@@ -718,6 +718,67 @@ mod tests {
     }
 
     #[test]
+    fn world_patch_applied_but_render_unverified_stays_unconfirmed() {
+        let envelope = json!({
+            "schema": WORLD_TOOL_SCHEMA,
+            "ok": true,
+            "verified": false,
+            "reason": "render_frozen_after_patch",
+            "request": {
+                "request_id": "f3-render-frozen",
+                "world.patch": {
+                    "op": "move",
+                    "entity": "bath",
+                    "args": {"cell": [8, 0]}
+                },
+                "world.visibility.query": {"entities": ["bath"]}
+            },
+            "world.patch": {
+                "requested": true,
+                "applied": true,
+                "op": "move",
+                "entity": "bath",
+                "model": {"changed": true},
+                "render_refresh": {
+                    "requested": false,
+                    "reason": "debug_freeze_render_after_patch"
+                }
+            },
+            "action_result": {
+                "schema": "agent_bridge.action_result.v0",
+                "world_tool": "world_patch",
+                "verdict": "not_verified",
+                "reason": "render_frozen_after_patch",
+                "verified_to": null
+            },
+            "verify": {
+                "method": "live_viewport_pixel_coverage",
+                "verified_to": null,
+                "evidence": {"host_reason": "render_frozen_after_patch"}
+            }
+        });
+        let packet = world_envelope_to_present_packet("world_patch", &envelope, opts());
+        assert_eq!(packet["verdict"], "not_verified");
+        assert_eq!(packet["reason"], "render_frozen_after_patch");
+        assert_eq!(packet["human_readable"]["changed"], json!(["bath"]));
+        assert_eq!(packet["human_readable"]["visible"], json!([]));
+        assert_eq!(
+            packet["human_readable"]["warnings"],
+            json!(["render_frozen_after_patch"])
+        );
+        assert!(packet["provenance"]["verified_to"].is_null());
+        assert_eq!(packet["machine_payload"]["patch_result"]["applied"], true);
+        assert_eq!(
+            packet["machine_payload"]["action_result"]["verdict"],
+            "not_verified"
+        );
+        assert_eq!(
+            packet["machine_payload"]["source_reason"],
+            "render_frozen_after_patch"
+        );
+    }
+
+    #[test]
     fn review_artifact_wraps_with_present_dual_encoding() {
         let envelope = json!({
             "schema": WORLD_TOOL_SCHEMA,
