@@ -28,10 +28,30 @@ export AB_FACE_H="${AB_FACE_HEIGHT:-520}"
 export AB_FACE_SEG="${AB_FACE_SEGMENT_MS:-86400000}"   # 24h per probe segment; loop re-spawns
 export AB_FACE_OUTPUT="${AB_FACE_OUTPUT:-}"            # Wayland output name (e.g. DP-1); empty = compositor default
 
-# Single-instance lock + supervise-loop pidfile (XDG_RUNTIME_DIR, /tmp fallback).
-AB_FACE_RUNDIR="${XDG_RUNTIME_DIR:-/tmp}"
+# Single-instance lock + supervise-loop pidfile. Prefer XDG_RUNTIME_DIR (already
+# user-private); the /tmp fallback is namespaced by uid so it isn't a shared
+# cross-user path masquerading as a single-instance lock.
+AB_FACE_RUNDIR="${XDG_RUNTIME_DIR:-/tmp/ab-face-$(id -u)}"
+mkdir -p "$AB_FACE_RUNDIR" 2>/dev/null || true
 AB_FACE_LOCK="$AB_FACE_RUNDIR/ab-face-native.lock"
 AB_FACE_PIDFILE="$AB_FACE_RUNDIR/ab-face-native.pid"
+
+# `--stop`: self-validating teardown. Only group-kill the recorded PID if it is
+# still alive AND its cmdline is our supervise loop — guards against PID reuse
+# turning a copy-pasted kill into killing an unrelated process group.
+if [ "${1:-}" = "--stop" ]; then
+  pid="$(cat "$AB_FACE_PIDFILE" 2>/dev/null || true)"
+  if [ -n "${pid:-}" ] && kill -0 "$pid" 2>/dev/null \
+     && tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null | grep -q 'linux-native-transparent'; then
+    kill -- "-$pid" 2>/dev/null && echo "native Face stopped (group $pid)."
+  else
+    pkill -f 'linux-native-transparent' 2>/dev/null \
+      && echo "native Face probe(s) killed (no valid loop pid on file)." \
+      || echo "no native Face running."
+  fi
+  rm -f "$AB_FACE_PIDFILE"
+  exit 0
+fi
 
 # Atomic single-instance guard: hold an exclusive lock across the whole
 # check-and-spawn. Without it, two near-simultaneous launches can both pass the
@@ -78,5 +98,5 @@ disown
 printf '%s\n' "$AB_FACE_LOOP_PID" >"$AB_FACE_PIDFILE" 2>/dev/null || true
 
 echo "native Face up (supervised, detached) — anchor=$AB_FACE_ANCHOR ${AB_FACE_W}x${AB_FACE_H} segment=${AB_FACE_SEG}ms"
-echo "  stop with: kill -- -\"\$(cat $AB_FACE_PIDFILE)\"   # kills the whole supervised group (loop + live probe)"
-echo "  (do NOT use 'pkill -f face-native-launch' — the -f pattern matches your own shell's command line and self-kills)"
+echo "  stop with: $0 --stop   # self-validating: group-kills only if the recorded pid is alive AND ours"
+echo "  (do NOT 'pkill -f face-native-launch' — that -f pattern matches your own shell and self-kills)"
