@@ -1036,6 +1036,52 @@ mod tests {
     }
 
     #[test]
+    fn review_file_gate_preserves_expected_effect_failure_roundtrip() {
+        let envelope = expected_effect_failure_envelope();
+        let packet = world_envelope_to_present_packet("world_patch", &envelope, opts());
+        let dir = std::env::temp_dir().join(format!(
+            "agent-bridge-lswr-review-file-f4-{}-{}",
+            std::process::id(),
+            crate::present::now_unix()
+        ));
+        let file = write_present_packet_review_file(&packet, &dir).expect("write");
+        let html = std::fs::read_to_string(&file.artifact_path).expect("read html");
+        let payload = crate::present::extract_ab_payload(&html).expect("payload");
+        let region = crate::present::render_region(&html).expect("render region");
+        assert_eq!(file.id, present_packet_review_id(&packet));
+        assert!(file.artifact_path.ends_with(format!("{}.html", file.id)));
+        assert!(file.bytes > 0);
+        assert!(file.dual_encoding);
+        assert_eq!(file.static_render_status, "rendered_static");
+        assert_eq!(payload["verdict"], "not_verified");
+        assert_eq!(payload["reason"], "expected_effect_clause_failed");
+        assert_eq!(
+            payload["machine_payload"]["expected_effect"]["verified"],
+            false
+        );
+        assert_eq!(
+            payload["machine_payload"]["expected_effect"]["clauses"][0]["actual"],
+            json!(0.12)
+        );
+        assert!(payload["provenance"]["verified_to"].is_null());
+        assert_eq!(payload["ingestion"]["allowed"], false);
+        assert!(region.contains("Unconfirmed"));
+        assert!(region.contains("expected_effect_clause_failed"));
+        assert!(region.contains("Ingestion blocked"));
+        assert!(!region.contains("verified successfully"));
+        assert!(!region.contains("World patch verified"));
+
+        let listed = crate::present::list_artifacts(&dir, 10, Some("html"));
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, file.id);
+        assert_eq!(listed[0].artifact_path, file.artifact_path.display().to_string());
+        assert_eq!(listed[0].kind.as_deref(), Some("html"));
+        assert!(listed[0].dual_encoding);
+        assert_eq!(listed[0].bytes, html.len() as u64);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn review_artifact_keeps_not_verified_human_surface_honest() {
         let envelope = json!({
             "schema": WORLD_TOOL_SCHEMA,
