@@ -195,6 +195,30 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("strongest neighbor", html)
         self.assertIn("renderWorkbenchRelationSummary(m, graphNode)", html)
 
+    def test_node_detail_lens_surfaces_dossier_evidence(self):
+        html = palace_html()
+
+        self.assertIn("function nodeRoleLabel(graphData)", html)
+        self.assertIn("function nodeEvidenceRows(memory, graphData, region, relationSummary)", html)
+        self.assertIn("function renderNodeDossier(memory, graphNode, region)", html)
+        self.assertIn('id="workbench-node-dossier"', html)
+        self.assertIn("node-dossier", html)
+        self.assertIn("node-dossier-facts", html)
+        self.assertIn("node-dossier-signal", html)
+        self.assertIn("data-node-detail-lens", html)
+        self.assertIn("evidenceRows.map", html)
+        self.assertIn("renderNodeDossier(m, graphNode, region)", html)
+
+    def test_node_detail_lens_body_state_is_scoped_to_node_workbench(self):
+        html = palace_html()
+
+        self.assertIn("node-detail-lens", html)
+        self.assertIn('document.body.classList.add("node-detail-lens");', html)
+        self.assertIn('document.body.classList.remove("node-detail-lens");', html)
+        self.assertIn('document.body.classList.remove("atlas-district-overview");', html)
+        self.assertIn('"overlay-color": "#ffffff"', html)
+        self.assertIn('"overlay-opacity": 0.34', html)
+
     def test_neighbor_relation_detail_drills_into_edges(self):
         html = palace_html()
 
