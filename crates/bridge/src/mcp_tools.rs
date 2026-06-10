@@ -44,6 +44,15 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::process::Command as TokioCommand;
 
+use crate::biocortex_shadow::{
+    biocortex_replay_comparison, biocortex_shadow_digest, supported_benchmarks,
+    BioCortexReplayComparisonOptions, BioCortexShadowOptions, BIOCORTEX_CHECKOUT_ENV,
+};
+#[cfg(feature = "biocortex-retrieval-shadow")]
+use crate::biocortex_shadow::{
+    biocortex_retrieval_shadow_report, BioCortexRetrievalCandidate,
+    BioCortexRetrievalShadowOptions,
+};
 use crate::context_budget::{
     budget_recommendation, env_context_window, estimate_tokens_from_text, estimated_usage_tokens,
     resolve_context_window,
@@ -52,6 +61,7 @@ use crate::hub::Hub;
 use crate::ide::{queue_ide_command, read_ide_snapshot, IdeCommandOptions, IdeSnapshotOptions};
 use crate::project::{changes_digest, detect_project, git_topology_preflight, resolve_cwd};
 use crate::security::Cap;
+use crate::seed_substrate as ab_seed_bridge;
 use crate::session_handoff::build_handoff_brief;
 use crate::warp_actions::warp_status_snapshot;
 
@@ -22201,6 +22211,296 @@ impl McpTool for ToolAtlasSnapshotTool {
     }
 }
 
+// ===========================================================================
+//                 mcp_lifecycle_digest - borrowed-patterns status
+// ===========================================================================
+
+pub struct McpLifecycleDigestTool {
+    hub: Hub,
+}
+impl McpLifecycleDigestTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for McpLifecycleDigestTool {
+    fn name(&self) -> &'static str {
+        "mcp_lifecycle_digest"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only lifecycle/status digest for Agent-Bridge MCP. \
+                 Separates stdio MCP/tool-profile readiness, hook/setup readiness, \
+                 recent tool telemetry, and optional daemon-http/Palace runtime health. \
+                 It does not start/stop MCP servers, restart services, or mutate profiles."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "repo_root": {
+                        "type": "string",
+                        "description": "Optional Agent-Bridge checkout root for readiness source checks."
+                    },
+                    "window_secs": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 31536000,
+                        "default": 86400,
+                        "description": "Tool telemetry look-back window."
+                    },
+                    "include_local_install": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Ask readiness_audit to inspect installed hook scripts and setup-state."
+                    },
+                    "include_runtime_health": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Run bounded read-only daemon-http/Palace health GETs. Defaults false so a digest can stay stdio-only."
+                    },
+                    "daemon_http_url": {
+                        "type": "string",
+                        "description": "Base URL for daemon-http when include_runtime_health=true."
+                    },
+                    "palace_url": {
+                        "type": "string",
+                        "description": "Base URL for Palace when include_runtime_health=true."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 100,
+                        "maximum": 30000,
+                        "default": 1000,
+                        "description": "Per-request timeout for optional runtime health checks."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let payload = mcp_lifecycle_digest_payload(&args, &self.hub).await;
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+async fn mcp_lifecycle_digest_payload(args: &Value, hub: &Hub) -> Value {
+    let policy = ToolPolicy::from_env();
+    let window_secs = args
+        .get("window_secs")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(86_400)
+        .clamp(60, 31_536_000);
+    let include_local_install = args
+        .get("include_local_install")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let include_runtime_health = args
+        .get("include_runtime_health")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let current_tool_count = build_registry(hub.clone()).list().len();
+    let scoped_tool_count = build_registry_with_policy(hub.clone(), policy).list().len();
+    let readiness_args = json!({
+        "repo_root": args.get("repo_root").cloned().unwrap_or(Value::Null),
+        "include_local_install": include_local_install,
+    });
+    let readiness = readiness_audit_payload(&readiness_args, hub);
+    let telemetry = mcp_lifecycle_tool_telemetry(hub, window_secs).await;
+    let runtime_health = if include_runtime_health {
+        let mut runtime_args = json!({
+            "timeout_ms": args.get("timeout_ms").cloned().unwrap_or(json!(1000)),
+        });
+        if let Some(v) = args.get("daemon_http_url").cloned() {
+            runtime_args["daemon_http_url"] = v;
+        }
+        if let Some(v) = args.get("palace_url").cloned() {
+            runtime_args["palace_url"] = v;
+        }
+        json!({
+            "checked": true,
+            "payload": semantic_bus_runtime_health_payload(&runtime_args).await,
+        })
+    } else {
+        json!({
+            "checked": false,
+            "reason": "include_runtime_health=false",
+            "note": "MCP stdio/readiness can be healthy even when daemon-http or Palace are not running."
+        })
+    };
+
+    let readiness_status = readiness
+        .get("status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+    let readiness_warnings = readiness
+        .pointer("/summary/warnings")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let runtime_status = runtime_health
+        .pointer("/payload/status")
+        .and_then(|v| v.as_str())
+        .unwrap_or(if include_runtime_health {
+            "unknown"
+        } else {
+            "not_checked"
+        })
+        .to_string();
+    let failing_tool_count = telemetry
+        .pointer("/summary/failing_tool_count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let lifecycle_state = if readiness_warnings == 0 && failing_tool_count == 0 {
+        if include_runtime_health && runtime_status != "ok" {
+            "stdio_ready_runtime_degraded"
+        } else {
+            "ready"
+        }
+    } else {
+        "attention"
+    };
+
+    json!({
+        "schema": "agent_bridge.mcp_lifecycle_digest.v0",
+        "generated_at": dispatch_now_secs(),
+        "read_only": true,
+        "lifecycle_state": lifecycle_state,
+        "summary": {
+            "mcp_stdio_available": true,
+            "toolset": policy.label(),
+            "tool_profile": policy.profile().label(),
+            "current_tool_count": current_tool_count,
+            "scoped_tool_count": scoped_tool_count,
+            "readiness_status": readiness_status,
+            "readiness_warnings": readiness_warnings,
+            "telemetry_window_secs": window_secs,
+            "failing_tool_count": failing_tool_count,
+            "runtime_health_checked": include_runtime_health,
+            "runtime_health_status": runtime_status,
+        },
+        "sections": {
+            "mcp_profile": {
+                "toolset": policy.label(),
+                "tool_profile": policy.profile().label(),
+                "tool_profile_extras": policy.extras(),
+                "toolset_env": std::env::var("AGENT_BRIDGE_TOOLSET").ok(),
+                "tool_profile_env": std::env::var("AGENT_BRIDGE_TOOL_PROFILE").ok(),
+                "client": std::env::var("AGENT_BRIDGE_CLIENT").ok(),
+                "codex_host": std::env::var("AGENT_BRIDGE_CODEX_HOST").ok(),
+                "model": std::env::var("AGENT_BRIDGE_MODEL").ok(),
+                "model_reasoning_effort": std::env::var("AGENT_BRIDGE_MODEL_REASONING_EFFORT").ok(),
+            },
+            "readiness": {
+                "status": readiness_status,
+                "summary": readiness.get("summary").cloned().unwrap_or(Value::Null),
+                "recommendations": readiness.get("recommendations").cloned().unwrap_or(json!([])),
+            },
+            "tool_telemetry": telemetry,
+            "runtime_health": runtime_health,
+        },
+        "recommendations": mcp_lifecycle_recommendations(
+            readiness_warnings,
+            failing_tool_count,
+            include_runtime_health,
+            &runtime_status,
+        ),
+        "note": "Borrowed from Theia-style lifecycle separation: profile/readiness/telemetry/runtime health are reported as separate axes. This tool is observational only."
+    })
+}
+
+async fn mcp_lifecycle_tool_telemetry(hub: &Hub, window_secs: i64) -> Value {
+    let Some(store) = hub.store.as_ref() else {
+        return json!({
+            "status": "unavailable",
+            "reason": "no store configured",
+            "summary": {
+                "current_tool_count": build_registry(hub.clone()).list().len(),
+                "observed_tool_count": 0,
+                "hot_tool_count": 0,
+                "failing_tool_count": 0,
+                "cold_tool_count": 0
+            }
+        });
+    };
+    let current_tools: Vec<String> = build_registry(hub.clone())
+        .list()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
+    let stats_limit = current_tools.len().max(1).min(200) as u32;
+    let stats = match store
+        .mcp_tool_call_stats_filtered(window_secs, stats_limit, McpToolCallFilter::default())
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            return json!({
+                "status": "error",
+                "reason": format!("mcp_tool_call_stats_filtered: {e}"),
+            })
+        }
+    };
+    let recent_errors = match store
+        .recent_mcp_tool_errors(ab_store::MCP_TOOL_ERROR_RING_CAP)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            return json!({
+                "status": "error",
+                "reason": format!("recent_mcp_tool_errors: {e}"),
+            })
+        }
+    };
+    let snapshot = crate::tool_atlas::build_tool_atlas_snapshot(crate::tool_atlas::ToolAtlasInput {
+        generated_at: dispatch_now_secs(),
+        window_secs,
+        current_tools,
+        stats,
+        recent_errors,
+    });
+    let mut payload = crate::tool_atlas::project_tool_atlas_snapshot(
+        &snapshot,
+        crate::tool_atlas::ToolAtlasViewOptions {
+            include_tools: false,
+            limit: 1,
+        },
+    );
+    if let Some(obj) = payload.as_object_mut() {
+        obj.insert("status".to_string(), json!("ok"));
+    }
+    payload
+}
+
+fn mcp_lifecycle_recommendations(
+    readiness_warnings: u64,
+    failing_tool_count: u64,
+    include_runtime_health: bool,
+    runtime_status: &str,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    if readiness_warnings > 0 {
+        out.push("Inspect readiness_audit recommendations before changing MCP tool profiles.".into());
+    }
+    if failing_tool_count > 0 {
+        out.push("Inspect tool_atlas_snapshot or mcp_dispatch_audit for failing MCP tools.".into());
+    }
+    if !include_runtime_health {
+        out.push("Set include_runtime_health=true when diagnosing daemon-http or Palace availability.".into());
+    } else if runtime_status != "ok" {
+        out.push("Treat daemon-http/Palace degradation as runtime health, separate from MCP stdio readiness.".into());
+    }
+    if out.is_empty() {
+        out.push("MCP lifecycle axes look ready in this digest.".into());
+    }
+    out
+}
+
 fn dispatch_window_from_args(args: &Value) -> (i64, i64, &'static str) {
     let window_days = args
         .get("window_days")
@@ -23101,6 +23401,10 @@ fn readiness_tool_surface_rows(hub: &Hub) -> Vec<Value> {
         (
             "tool_atlas_snapshot",
             "tool registry and failure-mode atlas",
+        ),
+        (
+            "mcp_lifecycle_digest",
+            "MCP lifecycle/status digest",
         ),
         ("hook_status", "installed hook health"),
         ("skills_recommend", "skill index retrieval"),
@@ -24541,6 +24845,386 @@ impl McpTool for SubstrateNeighborsTool {
                 },
             }),
         };
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
+//       biocortex_shadow_digest — shadow-only external BioCortex adapter
+// ===========================================================================
+
+/// Read-only BioCortex integration probe. This runs a sanctioned adapter
+/// example from a local `biocortex-rs` checkout and projects its deterministic
+/// `key=value` report into AB JSON. It intentionally does not link BioCortex
+/// into the AB runtime or mutate AB memory/retrieval state.
+pub struct BioCortexShadowDigestTool;
+
+impl BioCortexShadowDigestTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for BioCortexShadowDigestTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for BioCortexShadowDigestTool {
+    fn name(&self) -> &'static str {
+        "biocortex_shadow_digest"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only BioCortex shadow digest. Runs a sanctioned \
+                 local biocortex-rs adapter example via `cargo run --offline` and \
+                 returns AB JSON. Does not link BioCortex into the AB runtime, \
+                 mutate AB memory, or alter retrieval vectors."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "checkout_path": {
+                        "type": "string",
+                        "description": "Optional local biocortex-rs checkout. Defaults to AB_BIOCORTEX_RS, sibling checkout paths, then /tmp/biocortex-rs-ab-eval."
+                    },
+                    "benchmark": {
+                        "type": "string",
+                        "enum": supported_benchmarks(),
+                        "default": "scaled_morphology",
+                        "description": "Adapter benchmark to run."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 600000,
+                        "default": 120000,
+                        "description": "External adapter timeout in milliseconds."
+                    },
+                    "include_raw": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Include raw stdout/stderr from the external adapter."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let checkout = args
+            .get("checkout_path")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from);
+        let benchmark = args
+            .get("benchmark")
+            .and_then(|v| v.as_str())
+            .unwrap_or("scaled_morphology")
+            .to_string();
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(120_000);
+        let include_raw = args
+            .get("include_raw")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let payload = biocortex_shadow_digest(BioCortexShadowOptions {
+            checkout,
+            benchmark,
+            timeout_ms,
+            include_raw,
+            fixture_projection: None,
+        })
+        .await;
+        Ok(ToolResult::json_text(&json!({
+            "checkout_env": BIOCORTEX_CHECKOUT_ENV,
+            "digest": payload,
+        })))
+    }
+}
+
+// ===========================================================================
+//  biocortex_replay_compare — AB fixture projection + BioCortex shadow digest
+// ===========================================================================
+
+/// Read-only comparison between an AB shadow-cortex replay fixture and a
+/// BioCortex sanctioned shadow report. This is not a training bridge: current
+/// BioCortex examples do not consume AB events, and this tool does not change
+/// memory retrieval.
+pub struct BioCortexReplayCompareTool {
+    hub: Hub,
+}
+
+impl BioCortexReplayCompareTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for BioCortexReplayCompareTool {
+    fn name(&self) -> &'static str {
+        "biocortex_replay_compare"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only BioCortex replay comparison. Collects an AB \
+                 shadow-cortex fixture from state.db, projects it into a stable \
+                 replay summary, then runs a sanctioned local biocortex-rs shadow \
+                 adapter side-by-side. BioCortex does not yet consume AB events; \
+                 retrieval vectors and AB memory remain unchanged."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "window_days": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 365,
+                        "default": 7,
+                        "description": "Look-back window for AB shadow-cortex fixture collection."
+                    },
+                    "source": {
+                        "type": "string",
+                        "default": "all",
+                        "description": "Source selector: all | mcp_dispatch | memory | forum | codex."
+                    },
+                    "checkout_path": {
+                        "type": "string",
+                        "description": "Optional local biocortex-rs checkout. Defaults to AB_BIOCORTEX_RS, sibling checkout paths, then /tmp/biocortex-rs-ab-eval."
+                    },
+                    "benchmark": {
+                        "type": "string",
+                        "enum": supported_benchmarks(),
+                        "default": "ab_fixture_projection",
+                        "description": "BioCortex shadow benchmark to run side-by-side."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 600000,
+                        "default": 120000,
+                        "description": "External adapter timeout in milliseconds."
+                    },
+                    "include_raw": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Include raw stdout/stderr from the external BioCortex adapter."
+                    },
+                    "include_events": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Include every projected AB event instead of only a compact preview."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let Some(store) = &self.hub.store else {
+            return Ok(ToolResult::error("no store configured"));
+        };
+        let window_days = args
+            .get("window_days")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as u32)
+            .unwrap_or(7);
+        let source = args
+            .get("source")
+            .and_then(|v| v.as_str())
+            .unwrap_or("all")
+            .to_string();
+        let checkout = args
+            .get("checkout_path")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from);
+        let benchmark = args
+            .get("benchmark")
+            .and_then(|v| v.as_str())
+            .unwrap_or("ab_fixture_projection")
+            .to_string();
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(120_000);
+        let include_raw = args
+            .get("include_raw")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let include_events = args
+            .get("include_events")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let fixture = crate::shadow_cortex::collect_shadow_cortex_fixture(
+            store.as_ref(),
+            crate::shadow_cortex::ShadowCortexOptions {
+                window_days,
+                source,
+            },
+        )
+        .await
+        .map_err(|e| ab_core::Error::Backend(format!("collect shadow-cortex fixture: {e}")))?;
+        let payload = biocortex_replay_comparison(
+            &fixture,
+            BioCortexReplayComparisonOptions {
+                checkout,
+                benchmark,
+                timeout_ms,
+                include_raw,
+                include_events,
+            },
+        )
+        .await;
+        Ok(ToolResult::json_text(&json!({
+            "checkout_env": BIOCORTEX_CHECKOUT_ENV,
+            "comparison": payload,
+        })))
+    }
+}
+
+// ===========================================================================
+//   biocortex_retrieval_shadow — review-only retrieval side-signal report
+// ===========================================================================
+
+/// Review-only BioCortex retrieval side-signal surface. This tool accepts
+/// explicit query/candidate rows and reports advisory BioCortex side-signal
+/// evidence. It does not call `memory_search`, does not mutate AB memory, and
+/// does not change returned retrieval order.
+#[cfg(feature = "biocortex-retrieval-shadow")]
+pub struct BioCortexRetrievalShadowTool;
+
+#[cfg(feature = "biocortex-retrieval-shadow")]
+impl BioCortexRetrievalShadowTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[cfg(feature = "biocortex-retrieval-shadow")]
+impl Default for BioCortexRetrievalShadowTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "biocortex-retrieval-shadow")]
+#[async_trait]
+impl McpTool for BioCortexRetrievalShadowTool {
+    fn name(&self) -> &'static str {
+        "biocortex_retrieval_shadow"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Review-only BioCortex retrieval side-signal report. \
+                 Accepts explicit query/candidate rows, runs the optional \
+                 BioCortex side-signal adapter only when runtime-enabled, and \
+                 returns an advisory report with runtime_adapter_approved=false. \
+                 Does not call memory_search, mutate memory, register an \
+                 EmbeddingBackend, or alter retrieval order."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Query text to evaluate against explicit candidates."
+                    },
+                    "candidates": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "key": { "type": "string" },
+                                "content": { "type": "string" }
+                            },
+                            "required": ["key", "content"]
+                        },
+                        "description": "Explicit candidate rows. The tool never fetches or mutates memory_search results."
+                    },
+                    "expected_key": {
+                        "type": "string",
+                        "description": "Optional expected key for labeled regression reporting."
+                    },
+                    "checkout_path": {
+                        "type": "string",
+                        "description": "Optional local biocortex-rs checkout. Defaults to AB_BIOCORTEX_RS, sibling checkout paths, then /tmp/biocortex-rs-ab-eval."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 600000,
+                        "default": 120000,
+                        "description": "External side-signal adapter timeout in milliseconds."
+                    },
+                    "include_raw": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Include raw stdout/stderr from the external adapter."
+                    }
+                },
+                "required": ["query", "candidates"]
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let query = args
+            .get("query")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let candidates_value = args
+            .get("candidates")
+            .cloned()
+            .unwrap_or_else(|| json!([]));
+        let candidates =
+            serde_json::from_value::<Vec<BioCortexRetrievalCandidate>>(candidates_value)
+                .map_err(|e| ab_core::Error::Backend(format!("parse candidates: {e}")))?;
+        let expected_key = args
+            .get("expected_key")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let checkout = args
+            .get("checkout_path")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from);
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(120_000);
+        let include_raw = args
+            .get("include_raw")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+
+        let payload = biocortex_retrieval_shadow_report(BioCortexRetrievalShadowOptions {
+            query,
+            candidates,
+            expected_key,
+            checkout,
+            timeout_ms,
+            include_raw,
+        })
+        .await;
         Ok(ToolResult::json_text(&payload))
     }
 }
@@ -33008,6 +33692,7 @@ fn codex_lean_tool(tool_name: &str) -> bool {
         tool_name,
         "capabilities"
             | "mcp_dispatch_audit"
+            | "mcp_lifecycle_digest"
             | "readiness_audit"
             | "event_spine_snapshot"
             | "tool_atlas_snapshot"
@@ -33058,6 +33743,7 @@ fn gemini_lean_tool(tool_name: &str) -> bool {
             | "changes_digest"
             | "git_topology_preflight"
             | "mcp_dispatch_audit"
+            | "mcp_lifecycle_digest"
             | "readiness_audit"
             | "event_spine_snapshot"
             | "tool_atlas_snapshot"
@@ -33071,6 +33757,7 @@ fn hook_lifecycle_tool(tool_name: &str) -> bool {
         tool_name,
         "capabilities"
             | "mcp_dispatch_audit"
+            | "mcp_lifecycle_digest"
             | "readiness_audit"
             | "event_spine_snapshot"
             | "tool_atlas_snapshot"
@@ -35242,6 +35929,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Essential,
         Arc::new(ReadinessAuditTool::new(hub.clone())),
     );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(McpLifecycleDigestTool::new(hub.clone())),
+    );
     // IDE bridge stays Niche by default, but Codex Essential allowlists it so
     // IDE-aware Codex sessions can opt into editor context without widening to
     // the whole Standard surface.
@@ -35638,6 +36331,25 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Standard,
         Arc::new(SubstrateNeighborsTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexShadowDigestTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexReplayCompareTool::new(hub.clone())),
+    );
+    #[cfg(feature = "biocortex-retrieval-shadow")]
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexRetrievalShadowTool::new()),
     );
     reg_if(
         &mut reg,
@@ -40420,6 +41132,12 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(tool_rows.iter().any(|row| {
             row["tool"] == "mcp_config_audit" && row["present_all"].as_bool().unwrap_or(false)
         }));
+        assert!(tool_rows.iter().any(|row| {
+            row["tool"] == "mcp_lifecycle_digest"
+                && row["present_all"].as_bool().unwrap_or(false)
+                && row["present_codex_lean"].as_bool().unwrap_or(false)
+                && row["present_gemini_lean"].as_bool().unwrap_or(false)
+        }));
 
         let closed = payload["closed_ecc_paths"]
             .as_array()
@@ -40808,6 +41526,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(p.includes(Tier::Essential, "event_spine_snapshot"));
         assert!(p.includes(Tier::Essential, "readiness_audit"));
         assert!(p.includes(Tier::Essential, "tool_atlas_snapshot"));
+        assert!(p.includes(Tier::Essential, "mcp_lifecycle_digest"));
         assert!(p.includes(Tier::Standard, "memory_compact"));
         assert!(p.includes(Tier::Essential, "pet_state_ritual"));
         assert!(p.includes(Tier::Essential, "work_memory"));
@@ -40825,6 +41544,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(p.includes(Tier::Essential, "event_spine_snapshot"));
         assert!(p.includes(Tier::Essential, "readiness_audit"));
         assert!(p.includes(Tier::Essential, "tool_atlas_snapshot"));
+        assert!(p.includes(Tier::Essential, "mcp_lifecycle_digest"));
         assert!(p.includes(Tier::Essential, "skills_recommend"));
         assert!(p.includes(Tier::Essential, "skills_route"));
         assert!(p.includes(Tier::Essential, "skills_feedback"));
@@ -40890,6 +41610,64 @@ com.example.multiline, , \"Line one\nLine two\"\n";
                 "readiness_audit missing from {label}"
             );
         }
+    }
+
+    #[test]
+    fn registry_exposes_mcp_lifecycle_digest_tool() {
+        for label in [
+            "codex-essential",
+            "codex-lean",
+            "gemini-lean",
+            "hook-lifecycle",
+        ] {
+            let p = ToolPolicy::from_values(Some(label), None, None, None);
+            let schemas = build_registry_with_policy(Hub::builder().build(), p).list();
+            let tool = schemas
+                .iter()
+                .find(|s| s.name == "mcp_lifecycle_digest")
+                .unwrap_or_else(|| panic!("mcp_lifecycle_digest missing from {label}"));
+
+            assert!(tool.description.contains("Read-only"));
+            assert!(tool.description.contains("does not start/stop"));
+            assert!(tool.input_schema["properties"]
+                .get("include_runtime_health")
+                .is_some());
+            assert!(tool.input_schema["properties"].get("restart").is_none());
+            assert!(tool.input_schema["properties"].get("mutate").is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn mcp_lifecycle_digest_defaults_to_stdio_only_runtime_boundary() {
+        let payload = mcp_lifecycle_digest_payload(
+            &json!({
+                "repo_root": env!("CARGO_MANIFEST_DIR"),
+                "window_secs": 60,
+                "include_runtime_health": false
+            }),
+            &Hub::builder().build(),
+        )
+        .await;
+
+        assert_eq!(payload["schema"], "agent_bridge.mcp_lifecycle_digest.v0");
+        assert_eq!(payload["read_only"], json!(true));
+        assert_eq!(payload["summary"]["mcp_stdio_available"], json!(true));
+        assert_eq!(payload["summary"]["runtime_health_checked"], json!(false));
+        assert_eq!(
+            payload["sections"]["runtime_health"]["reason"],
+            "include_runtime_health=false"
+        );
+        assert!(payload["sections"]["mcp_profile"]["tool_profile"].is_string());
+        assert!(payload["sections"]["readiness"]["summary"].is_object());
+        assert!(payload["sections"]["tool_telemetry"]["summary"].is_object());
+        assert!(payload["recommendations"]
+            .as_array()
+            .expect("recommendations")
+            .iter()
+            .any(|v| v
+                .as_str()
+                .unwrap_or("")
+                .contains("include_runtime_health=true")));
     }
 
     #[test]
@@ -44284,6 +45062,89 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert_eq!(t1.name(), t2.name());
         assert_eq!(t2.name(), t3.name());
         assert_eq!(t1.name(), "substrate_neighbors_of");
+    }
+
+    // ── biocortex_shadow_digest MCP tool tests ───────────────────────────
+
+    #[tokio::test]
+    async fn biocortex_shadow_digest_rejects_invalid_benchmark_without_checkout() {
+        let tool = BioCortexShadowDigestTool::new();
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(json!({"benchmark": "not-real"}), &ctx)
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ab_mcp::ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(v["checkout_env"], json!(BIOCORTEX_CHECKOUT_ENV));
+        assert_eq!(v["digest"]["status"], json!("invalid_benchmark"));
+        assert_eq!(v["digest"]["read_only"], json!(true));
+    }
+
+    #[test]
+    fn biocortex_shadow_digest_schema_lists_benchmarks() {
+        let tool = BioCortexShadowDigestTool::new();
+        let schema = tool.schema();
+        assert_eq!(schema.name, "biocortex_shadow_digest");
+        let values = schema
+            .input_schema
+            .pointer("/properties/benchmark/enum")
+            .and_then(|v| v.as_array())
+            .expect("benchmark enum");
+        assert!(values.contains(&json!("scaled_morphology")));
+        assert!(values.contains(&json!("temporal_credit")));
+        assert!(values.contains(&json!("minimal_morphology")));
+    }
+
+    #[test]
+    fn biocortex_replay_compare_schema_keeps_readonly_inputs() {
+        let tool = BioCortexReplayCompareTool::new(Hub::builder().build());
+        let schema = tool.schema();
+        assert_eq!(schema.name, "biocortex_replay_compare");
+        assert!(schema.description.contains("Read-only"));
+        assert!(schema.input_schema["properties"].get("window_days").is_some());
+        assert!(schema.input_schema["properties"].get("source").is_some());
+        assert!(schema.input_schema["properties"].get("include_events").is_some());
+        assert!(schema.input_schema["properties"].get("fixture_path").is_none());
+        assert!(schema.input_schema["properties"].get("mutate").is_none());
+    }
+
+    #[cfg(feature = "biocortex-retrieval-shadow")]
+    #[test]
+    fn biocortex_retrieval_shadow_schema_is_explicit_and_readonly() {
+        let tool = BioCortexRetrievalShadowTool::new();
+        let schema = tool.schema();
+        assert_eq!(schema.name, "biocortex_retrieval_shadow");
+        assert!(schema.description.contains("Review-only"));
+        assert!(schema.description.contains("runtime_adapter_approved=false"));
+        assert!(schema.description.contains("Does not call memory_search"));
+
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required fields");
+        let required = required.iter().filter_map(Value::as_str).collect::<Vec<_>>();
+        assert!(required.contains(&"query"));
+        assert!(required.contains(&"candidates"));
+
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("query").is_some());
+        assert!(props.get("candidates").is_some());
+        assert!(props.get("expected_key").is_some());
+        assert!(props.get("checkout_path").is_some());
+        assert!(props.get("timeout_ms").is_some());
+        assert!(props.get("include_raw").is_some());
+        assert!(props.get("mutate").is_none());
+        assert!(props.get("memory_search").is_none());
+        assert!(props.get("fixture_path").is_none());
     }
 
     // ── C3 S6 — verify_forum_post_write ───────────────────────────────────

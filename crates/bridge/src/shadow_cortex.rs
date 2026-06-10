@@ -1,4 +1,5 @@
-use ab_seed_bridge::{SeedBackend, SubstrateConfig};
+use crate::seed_substrate as ab_seed_bridge;
+use crate::seed_substrate::{SeedBackend, SubstrateConfig};
 use ab_store::embedding::{EmbeddingBackend, HashBackend};
 use ab_store::{IdentityWindow, McpToolCallFilter, McpToolCallStats, MemoryQueryStats, StateStore};
 use anyhow::{anyhow, Result};

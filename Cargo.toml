@@ -11,9 +11,34 @@ members = [
     "crates/mcp",
     "crates/bridge",
     "crates/ab-tts",
-    "crates/seed-bridge",
     "crates/oob-alert",
     "bin/agent-cli",
+]
+
+exclude = [
+    # Legacy AiOT Seed substrate bridge. The AB runtime now uses a disabled
+    # compatibility shim and BioCortex is the active integration direction.
+    # Keep this crate in-tree for historical replay experiments without making
+    # normal workspace commands parse or fetch its remote Seed dependency.
+    "crates/seed-bridge",
+]
+
+default-members = [
+    "crates/core",
+    "crates/world-core",
+    "crates/terminal",
+    "crates/browser",
+    "crates/notifier",
+    "crates/agent",
+    "crates/store",
+    "crates/mcp",
+    "crates/bridge",
+    "crates/ab-tts",
+    "crates/oob-alert",
+    "bin/agent-cli",
+    # `crates/seed-bridge` stays in the workspace for explicit legacy checks,
+    # but is not a default member because it requires the external AiOT
+    # `seed_neuron` checkout when its `legacy-seed` feature is enabled.
 ]
 
 [workspace.package]

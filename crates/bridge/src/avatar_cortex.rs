@@ -13,6 +13,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 
+use crate::seed_substrate as ab_seed_bridge;
+
 const STATUS_EVENT_LIMIT: usize = 500;
 
 pub struct AvatarCortexReplayOptions<'a> {

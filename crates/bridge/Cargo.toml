@@ -13,6 +13,12 @@ license.workspace = true
 # fallback in ab-store keeps memory/embedding APIs functional without ONNX.
 default = ["onnx-embed"]
 onnx-embed = ["ab-store/onnx-embed"]
+linux-native-avatar = ["dep:smithay-client-toolkit", "dep:wayland-client"]
+biocortex-retrieval-shadow = []
+# Reserved marker for legacy Seed substrate UX. The AB runtime no longer links
+# `ab-seed-bridge`; CLI/MCP surfaces report build-time disabled. Build the
+# standalone `crates/seed-bridge` crate for historical replay experiments.
+seed-substrate = []
 
 [dependencies]
 ab-core.workspace = true
@@ -23,7 +29,6 @@ ab-terminal.workspace = true
 ab-browser.workspace = true
 ab-agent.workspace = true
 ab-mcp.workspace = true
-ab-seed-bridge = { path = "../seed-bridge" }
 ab-oob-alert.workspace = true
 base64.workspace = true
 async-trait.workspace = true
@@ -51,8 +56,8 @@ libc = "0.2"
 png = "0.17"
 
 [target.'cfg(target_os = "linux")'.dependencies]
-smithay-client-toolkit = "0.20"
-wayland-client = "0.31"
+smithay-client-toolkit = { version = "0.20", optional = true }
+wayland-client = { version = "0.31", optional = true }
 
 [dev-dependencies]
 tempfile = "3"

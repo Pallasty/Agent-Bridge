@@ -2,6 +2,17 @@ use ab_agent::{
     AgentRuntime, AuggieRuntime, ClaudeCodeRuntime, CodexRuntime, GeminiRuntime,
     GitWorktreeManager, OpenCodeFamilyRuntime, OzAgentRuntime,
 };
+use ab_bridge::biocortex_shadow::{
+    biocortex_replay_comparison, biocortex_shadow_digest, supported_benchmarks,
+    BioCortexReplayComparisonOptions, BioCortexShadowOptions,
+};
+#[cfg(feature = "biocortex-retrieval-shadow")]
+use ab_bridge::biocortex_shadow::{
+    biocortex_retrieval_shadow_report, BioCortexRetrievalCandidate,
+    BioCortexRetrievalShadowOptions,
+};
+use ab_bridge::seed_substrate as ab_seed_bridge;
+use ab_bridge::shadow_cortex as ab_shadow_cortex;
 use ab_bridge::warp_scheme;
 use ab_bridge::{browser_lite, instinct, skills};
 use ab_bridge::{build_registry, default_socket_path, serve, Hub, Router};
@@ -17,6 +28,7 @@ use std::sync::Arc;
 use tracing_subscriber::{prelude::*, EnvFilter};
 
 mod doctor;
+mod seed_substrate;
 mod setup;
 mod shadow_cortex;
 use ab_bridge::sync;
@@ -169,6 +181,15 @@ enum Cmd {
     Substrate {
         #[command(subcommand)]
         op: SubstrateOp,
+    },
+    /// BioCortex shadow integration probes.
+    ///
+    /// Runs sanctioned read-only adapter examples from a local `biocortex-rs`
+    /// checkout and projects their `key=value` report into AB JSON. This does
+    /// not link BioCortex into the AB runtime or mutate AB memory.
+    BioCortex {
+        #[command(subcommand)]
+        op: BioCortexOp,
     },
     /// **呼吸式画布 P1** — Static Palace viewer.
     ///
@@ -2357,6 +2378,98 @@ enum SubstrateOp {
 }
 
 #[derive(Subcommand, Debug)]
+enum BioCortexOp {
+    /// Run a read-only BioCortex shadow adapter and print an AB digest.
+    ShadowDigest {
+        /// Local biocortex-rs checkout. Defaults to AB_BIOCORTEX_RS, sibling
+        /// checkout paths, then /tmp/biocortex-rs-ab-eval.
+        #[arg(long)]
+        checkout: Option<PathBuf>,
+        /// Adapter benchmark: scaled_morphology, temporal_credit, minimal_morphology, or ab_fixture_projection.
+        #[arg(long, default_value = "scaled_morphology")]
+        benchmark: String,
+        /// External adapter timeout in milliseconds.
+        #[arg(long, default_value_t = 120_000)]
+        timeout_ms: u64,
+        /// Include raw stdout/stderr from the external adapter in JSON output.
+        #[arg(long)]
+        include_raw: bool,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Compare an AB shadow-cortex replay fixture with a BioCortex shadow digest.
+    ///
+    /// This is side-by-side evidence only: BioCortex does not yet consume AB
+    /// events, and AB retrieval vectors remain unchanged.
+    ReplayCompare {
+        /// Look-back window in days when collecting a live AB fixture.
+        #[arg(long, default_value_t = 7)]
+        window_days: u32,
+        /// Source selector: all | mcp_dispatch | memory | forum | codex.
+        #[arg(long, default_value = "all")]
+        source: String,
+        /// Write the deterministic AB replay fixture to this JSON path.
+        #[arg(long)]
+        fixture_out: Option<PathBuf>,
+        /// Build the comparison from a previously captured replay fixture.
+        #[arg(long)]
+        fixture_in: Option<PathBuf>,
+        /// Local biocortex-rs checkout. Defaults to AB_BIOCORTEX_RS, sibling
+        /// checkout paths, then /tmp/biocortex-rs-ab-eval.
+        #[arg(long)]
+        checkout: Option<PathBuf>,
+        /// Adapter benchmark: ab_fixture_projection, scaled_morphology, temporal_credit, or minimal_morphology.
+        #[arg(long, default_value = "ab_fixture_projection")]
+        benchmark: String,
+        /// External adapter timeout in milliseconds.
+        #[arg(long, default_value_t = 120_000)]
+        timeout_ms: u64,
+        /// Include raw stdout/stderr from the external adapter in JSON output.
+        #[arg(long)]
+        include_raw: bool,
+        /// Include every projected AB event in JSON output instead of only a preview.
+        #[arg(long)]
+        include_events: bool,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Run a review-only BioCortex retrieval side-signal report.
+    ///
+    /// This command is feature-gated and runtime-gated. It never changes
+    /// `memory_search` order, registers an embedding backend, or writes memory.
+    #[cfg(feature = "biocortex-retrieval-shadow")]
+    RetrievalShadow {
+        /// Query text to evaluate. May also be provided in --input-json.
+        #[arg(long)]
+        query: Option<String>,
+        /// Candidate JSON file: either `{"query": "...", "candidates": [...]}` or a candidate array.
+        #[arg(long)]
+        input_json: Option<PathBuf>,
+        /// Candidate key/content JSON array file, used when --input-json is an array.
+        #[arg(long)]
+        candidates_json: Option<PathBuf>,
+        /// Optional expected key for labeled review/regression reporting.
+        #[arg(long)]
+        expected_key: Option<String>,
+        /// Local biocortex-rs checkout. Defaults to AB_BIOCORTEX_RS, sibling
+        /// checkout paths, then /tmp/biocortex-rs-ab-eval.
+        #[arg(long)]
+        checkout: Option<PathBuf>,
+        /// External side-signal adapter timeout in milliseconds.
+        #[arg(long, default_value_t = 120_000)]
+        timeout_ms: u64,
+        /// Include raw stdout/stderr from the external adapter in JSON output.
+        #[arg(long)]
+        include_raw: bool,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
 enum ShadowCortexFeedbackOp {
     /// Append one accepted/ignored decision to feedback.jsonl.
     Record {
@@ -3933,6 +4046,78 @@ async fn real_main() -> Result<()> {
         };
     }
 
+    // BioCortex is intentionally a shadow-only external adapter. It runs a
+    // local checkout example and never links BioCortex into AB's runtime graph.
+    if let Cmd::BioCortex { op } = &cmd {
+        return match op {
+            BioCortexOp::ShadowDigest {
+                checkout,
+                benchmark,
+                timeout_ms,
+                include_raw,
+                json,
+            } => {
+                run_biocortex_shadow_digest(
+                    checkout.clone(),
+                    benchmark.clone(),
+                    *timeout_ms,
+                    *include_raw,
+                    *json,
+                )
+                .await
+            }
+            BioCortexOp::ReplayCompare {
+                window_days,
+                source,
+                fixture_out,
+                fixture_in,
+                checkout,
+                benchmark,
+                timeout_ms,
+                include_raw,
+                include_events,
+                json,
+            } => {
+                run_biocortex_replay_compare(
+                    *window_days,
+                    source,
+                    fixture_out.as_deref(),
+                    fixture_in.as_deref(),
+                    checkout.clone(),
+                    benchmark.clone(),
+                    *timeout_ms,
+                    *include_raw,
+                    *include_events,
+                    *json,
+                )
+                .await
+            }
+            #[cfg(feature = "biocortex-retrieval-shadow")]
+            BioCortexOp::RetrievalShadow {
+                query,
+                input_json,
+                candidates_json,
+                expected_key,
+                checkout,
+                timeout_ms,
+                include_raw,
+                json,
+            } => {
+                run_biocortex_retrieval_shadow(
+                    query.clone(),
+                    input_json.as_deref(),
+                    candidates_json.as_deref(),
+                    expected_key.clone(),
+                    checkout.clone(),
+                    *timeout_ms,
+                    *include_raw,
+                    *json,
+                )
+                .await
+            }
+        };
+    }
+
     // Dream subcommand: short-lived read-only introspection over state.db.
     if let Cmd::Dream { op } = &cmd {
         return match op {
@@ -4509,6 +4694,7 @@ async fn real_main() -> Result<()> {
         | Cmd::Avatar { .. }
         | Cmd::Dream { .. }
         | Cmd::Substrate { .. }
+        | Cmd::BioCortex { .. }
         | Cmd::Palace { .. }
         | Cmd::ShellInit { .. }
         | Cmd::WorktreeSession { .. }
@@ -7522,6 +7708,287 @@ async fn run_avatar_heartbeat_alert(
         avatar_health_display(payload.get("events_path"), "-")
     );
     Ok(())
+}
+
+async fn run_biocortex_shadow_digest(
+    checkout: Option<PathBuf>,
+    benchmark: String,
+    timeout_ms: u64,
+    include_raw: bool,
+    as_json: bool,
+) -> Result<()> {
+    let payload = biocortex_shadow_digest(BioCortexShadowOptions {
+        checkout,
+        benchmark,
+        timeout_ms,
+        include_raw,
+        fixture_projection: None,
+    })
+    .await;
+
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# BioCortex shadow digest");
+    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
+    println!("status={}", shadow_json_display(payload.get("status"), "-"));
+    println!(
+        "benchmark={} example={}",
+        shadow_json_display(payload.get("benchmark"), "-"),
+        shadow_json_display(payload.get("example"), "-")
+    );
+    if let Some(path) = payload.get("checkout_path") {
+        println!("checkout={}", shadow_json_display(Some(path), "-"));
+    }
+    if let Some(reason) = payload.get("reason").or_else(|| payload.get("error")) {
+        println!("reason={}", shadow_json_display(Some(reason), "-"));
+    }
+
+    let summary = payload.get("summary").unwrap_or(&Value::Null);
+    println!(
+        "verdict={} demonstrated={}",
+        shadow_json_display(summary.get("verdict"), "-"),
+        shadow_json_display(summary.get("demonstrated"), "false")
+    );
+    println!(
+        "demonstrated_keys={}",
+        shadow_json_display(summary.get("demonstrated_keys"), "[]")
+    );
+    println!(
+        "failed_predicates={}",
+        shadow_json_display(summary.get("failed_predicates"), "[]")
+    );
+    println!(
+        "open_limitations={}",
+        shadow_json_display(summary.get("open_limitations"), "[]")
+    );
+    println!("supported_benchmarks={}", supported_benchmarks().join(","));
+
+    let boundary = payload.get("boundary").unwrap_or(&Value::Null);
+    println!(
+        "boundary=shadow_only links_runtime={} mutates_ab_memory={} mutates_retrieval={}",
+        shadow_json_display(boundary.get("links_biocortex_into_ab_runtime"), "false"),
+        shadow_json_display(boundary.get("mutates_ab_memory"), "false"),
+        shadow_json_display(boundary.get("changes_retrieval_vector"), "false")
+    );
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_biocortex_replay_compare(
+    window_days: u32,
+    source: &str,
+    fixture_out: Option<&std::path::Path>,
+    fixture_in: Option<&std::path::Path>,
+    checkout: Option<PathBuf>,
+    benchmark: String,
+    timeout_ms: u64,
+    include_raw: bool,
+    include_events: bool,
+    as_json: bool,
+) -> Result<()> {
+    let db_path = default_db_path();
+    let fixture = if let Some(path) = fixture_in {
+        let body = std::fs::read_to_string(path)
+            .map_err(|e| anyhow::anyhow!("read BioCortex replay fixture at {path:?}: {e}"))?;
+        serde_json::from_str::<ab_shadow_cortex::ShadowCortexReplayFixture>(&body)
+            .map_err(|e| anyhow::anyhow!("parse BioCortex replay fixture at {path:?}: {e}"))?
+    } else {
+        let store = SqliteStore::open(&db_path)
+            .await
+            .map_err(|e| anyhow::anyhow!("open state.db at {db_path:?}: {e}"))?;
+        ab_shadow_cortex::collect_shadow_cortex_fixture(
+            &store,
+            ab_shadow_cortex::ShadowCortexOptions {
+                window_days,
+                source: source.to_string(),
+            },
+        )
+        .await?
+    };
+
+    if let Some(path) = fixture_out {
+        let body = serde_json::to_string_pretty(&fixture)?;
+        std::fs::write(path, body)
+            .map_err(|e| anyhow::anyhow!("write BioCortex replay fixture at {path:?}: {e}"))?;
+    }
+
+    let payload = biocortex_replay_comparison(
+        &fixture,
+        BioCortexReplayComparisonOptions {
+            checkout,
+            benchmark,
+            timeout_ms,
+            include_raw,
+            include_events,
+        },
+    )
+    .await;
+
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    let projection = payload.get("ab_fixture_projection").unwrap_or(&Value::Null);
+    let comparison = payload.get("comparison").unwrap_or(&Value::Null);
+    let digest = payload.get("biocortex_shadow_digest").unwrap_or(&Value::Null);
+    println!("# BioCortex replay comparison");
+    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
+    println!("status={}", shadow_json_display(payload.get("status"), "-"));
+    println!(
+        "fixture_events={} fixture_hash={}",
+        shadow_json_display(projection.get("event_count"), "0"),
+        shadow_json_display(projection.get("fixture_hash"), "-")
+    );
+    println!(
+        "fixture_sources={} recommended_benchmark={}",
+        shadow_json_display(projection.get("sources"), "[]"),
+        shadow_json_display(projection.get("recommended_benchmark"), "-")
+    );
+    println!(
+        "biocortex_status={} benchmark={} demonstrated={}",
+        shadow_json_display(digest.get("status"), "-"),
+        shadow_json_display(digest.get("benchmark"), "-"),
+        shadow_json_display(digest.pointer("/summary/demonstrated"), "false")
+    );
+    println!(
+        "alignment={} consumes_ab_events={} retrieval_mutation={}",
+        shadow_json_display(comparison.get("benchmark_alignment"), "-"),
+        shadow_json_display(comparison.get("current_adapter_consumes_ab_events"), "false"),
+        shadow_json_display(comparison.get("retrieval_mutation"), "false")
+    );
+    println!(
+        "next={}",
+        shadow_json_display(comparison.get("next_step"), "-")
+    );
+    Ok(())
+}
+
+#[cfg(feature = "biocortex-retrieval-shadow")]
+#[allow(clippy::too_many_arguments)]
+async fn run_biocortex_retrieval_shadow(
+    query: Option<String>,
+    input_json: Option<&std::path::Path>,
+    candidates_json: Option<&std::path::Path>,
+    expected_key: Option<String>,
+    checkout: Option<PathBuf>,
+    timeout_ms: u64,
+    include_raw: bool,
+    as_json: bool,
+) -> Result<()> {
+    let mut resolved_query = query;
+    let mut resolved_expected = expected_key;
+    let candidates = if let Some(path) = input_json {
+        let body = std::fs::read_to_string(path)
+            .map_err(|e| anyhow::anyhow!("read BioCortex retrieval input at {path:?}: {e}"))?;
+        let value: Value = serde_json::from_str(&body)
+            .map_err(|e| anyhow::anyhow!("parse BioCortex retrieval input at {path:?}: {e}"))?;
+        if resolved_query.is_none() {
+            resolved_query = value
+                .get("query")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+        }
+        if resolved_expected.is_none() {
+            resolved_expected = value
+                .get("expected_key")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+        }
+        let candidate_value = value
+            .get("candidates")
+            .cloned()
+            .unwrap_or_else(|| value.clone());
+        serde_json::from_value::<Vec<BioCortexRetrievalCandidate>>(candidate_value)
+            .map_err(|e| anyhow::anyhow!("parse candidates in {path:?}: {e}"))?
+    } else if let Some(path) = candidates_json {
+        let body = std::fs::read_to_string(path)
+            .map_err(|e| anyhow::anyhow!("read BioCortex candidates at {path:?}: {e}"))?;
+        serde_json::from_str::<Vec<BioCortexRetrievalCandidate>>(&body)
+            .map_err(|e| anyhow::anyhow!("parse BioCortex candidates at {path:?}: {e}"))?
+    } else {
+        anyhow::bail!("provide --input-json or --candidates-json");
+    };
+    let query = resolved_query
+        .map(|q| q.trim().to_string())
+        .filter(|q| !q.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("provide --query or query in --input-json"))?;
+
+    let payload = biocortex_retrieval_shadow_report(BioCortexRetrievalShadowOptions {
+        query,
+        candidates,
+        expected_key: resolved_expected,
+        checkout,
+        timeout_ms,
+        include_raw,
+    })
+    .await;
+
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# BioCortex retrieval shadow report");
+    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
+    println!("status={}", shadow_json_display(payload.get("status"), "-"));
+    if let Some(reason) = payload.get("reason") {
+        println!("reason={}", shadow_json_display(Some(reason), "-"));
+    }
+    println!(
+        "runtime_adapter_approved={} default_search_order_changed={}",
+        shadow_json_display(payload.get("runtime_adapter_approved"), "false"),
+        shadow_json_display(payload.get("default_search_order_changed"), "false")
+    );
+    println!(
+        "alpha_policy={} alpha={} explicit_alpha={}",
+        shadow_json_display(payload.get("alpha_policy"), "-"),
+        shadow_json_display(payload.get("blend_alpha"), "-"),
+        shadow_json_display(payload.get("explicit_alpha"), "false")
+    );
+    println!(
+        "coverage={} latency_ms={}",
+        shadow_json_display(payload.get("side_signal_coverage"), "0"),
+        shadow_json_display(payload.get("latency_ms"), "-")
+    );
+    println!(
+        "baseline_top={} advisory_top={} expected_regressions={}",
+        shadow_json_display(payload.get("baseline_top_key"), "-"),
+        shadow_json_display(payload.get("advisory_top_key"), "-"),
+        shadow_json_display(payload.get("expected_regressions"), "0")
+    );
+    let gates = payload.get("gates").unwrap_or(&Value::Null);
+    println!(
+        "gates feature_enabled={} runtime_enabled={} operator_disabled={}",
+        shadow_json_display(gates.get("compile_feature_enabled"), "false"),
+        shadow_json_display(gates.get("runtime_enabled"), "false"),
+        shadow_json_display(gates.get("operator_disabled"), "false")
+    );
+    Ok(())
+}
+
+fn shadow_json_display(value: Option<&Value>, default: &str) -> String {
+    match value {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Bool(b)) => b.to_string(),
+        Some(Value::Number(n)) => n.to_string(),
+        Some(Value::Array(items)) => {
+            if items.is_empty() {
+                "[]".to_string()
+            } else {
+                items
+                    .iter()
+                    .map(|v| shadow_json_display(Some(v), "null"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            }
+        }
+        Some(Value::Null) | None => default.to_string(),
+        Some(other) => other.to_string(),
+    }
 }
 
 /// **v22** — Substrate stats CLI. Reads the in-process global installed by

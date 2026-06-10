@@ -613,17 +613,20 @@ pub fn parse_native_anchor(value: &str) -> Option<NativeAnchor> {
     }
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "linux-native-avatar"))]
 pub fn run_native_transparent_probe(opts: NativeTransparentOptions) -> anyhow::Result<()> {
     wayland_probe::run(opts)
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(all(target_os = "linux", feature = "linux-native-avatar")))]
 pub fn run_native_transparent_probe(_opts: NativeTransparentOptions) -> anyhow::Result<()> {
-    anyhow::bail!("native transparent probe is only available on Linux")
+    #[cfg(target_os = "linux")]
+    anyhow::bail!("native transparent probe requires the linux-native-avatar feature on Linux");
+    #[cfg(not(target_os = "linux"))]
+    anyhow::bail!("native transparent probe is only available on Linux");
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "linux-native-avatar"))]
 mod wayland_probe {
     use std::io::{Read, Write};
     use std::net::TcpStream;
