@@ -74,20 +74,44 @@ Known remaining warnings were pre-existing:
 
 ## Post-Push State
 
-After push:
+After the initial BioCortex push:
 
 - Agent-Bridge `master` is aligned with `origin/master`.
 - BioCortex `main` is aligned with `origin/main`.
-- Agent-Bridge has only two intentionally excluded untracked environment
-  scripts:
-  - `scripts/format-data-f2fs-root-stage.sh`
-  - `scripts/setup-sway-workstation.sh`
+- Agent-Bridge had two intentionally excluded untracked environment scripts.
+  `scripts/setup-sway-workstation.sh` was later kept as a reusable workstation
+  setup asset in commit `b5cf291`; the remaining one-off migration script is
+  `scripts/format-data-f2fs-root-stage.sh`.
 - BioCortex working tree is clean.
+
+## Dogfood Follow-Up
+
+The first CLI dogfood run used the first current-corpus row as a demo input.
+The runtime gates worked, but the row was label-ambiguous: the query asked about
+the default runtime dependency graph, so `seed_legacy` naturally ranked above
+`decision_shadow_only`.
+
+The first row was clarified to ask for the read-only shadow telemetry boundary
+without mutating AB memory, `memory_search`, or retrieval vectors. After that
+change:
+
+- the demo query ranks `decision_shadow_only` first in baseline and advisory
+  output;
+- `side_signal_coverage=1.0`;
+- `expected_regressions=0`;
+- `runtime_adapter_approved=false`;
+- `default_search_order_changed=false`.
+
+The current 35-query corpus still passes the `candidate-strong` offline gate:
+
+- MRR delta: `+0.04286`;
+- regressions: `0`;
+- side-signal coverage: `1.0`.
 
 ## Follow-Ups
 
-- Decide whether to keep the two environment scripts, move them to a separate
-  workstation setup branch, or delete them if they were one-off local notes.
+- Leave `scripts/format-data-f2fs-root-stage.sh` for the external cleanup
+  process; it is a one-off migration script.
 - Add a narrow test for the CLI help surface if we want stronger coverage that
   `retrieval-shadow` only appears with the feature enabled.
 - Keep BioCortex retrieval as review-only until a separate approval explicitly
