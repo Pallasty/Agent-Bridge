@@ -20,6 +20,11 @@ Machine-readable fixture:
 
 - `docs/design/fixtures/biocortex-retrieval-opt-in-experiment-plan-2026-06-11.json`
 
+Authorization request packet:
+
+- `docs/design/BIOCORTEX_RETRIEVAL_OPT_IN_AUTHORIZATION_REQUEST_2026_06_11.md`
+- `scripts/prepare-biocortex-retrieval-opt-in-authorization-request.sh`
+
 ## Experiment Shape
 
 The first acceptable experiment is FTS-only and explicit opt-in:

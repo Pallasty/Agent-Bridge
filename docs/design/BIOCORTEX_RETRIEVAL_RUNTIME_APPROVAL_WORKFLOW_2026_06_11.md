@@ -100,10 +100,23 @@ See:
    and its fixture. The plan requests only `opt_in_experiment`; it does not
    request default retrieval influence.
 
-7. Post the generated `forum-post-template.md` to the forum only after a human
+7. Generate an opt-in authorization request bundle only when asking for
+   `opt_in_experiment` implementation permission:
+
+   ```bash
+   scripts/prepare-biocortex-retrieval-opt-in-authorization-request.sh \
+     --runtime-proof-summary /tmp/biocortex-retrieval-runtime-proof/proof-summary.json \
+     --reviewer "<human reviewer>" \
+     --memory-key "<future memory key>" \
+     --forum-decision-post-id "<future forum post id>"
+   ```
+
+   The generated request remains `authorization_state=requested_not_granted`.
+
+8. Post the generated `forum-post-template.md` to the forum only after a human
    reviewer has inspected the packet and any missing evidence.
 
-8. Save the generated `memory-note-template.md` as memory only after the forum
+9. Save the generated `memory-note-template.md` as memory only after the forum
    post id is known.
 
 ## Human Approval Rule

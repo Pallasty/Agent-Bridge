@@ -80,6 +80,23 @@ jq -e '
     and .human_review_boundary.requires_separate_human_decision_before_implementation == true
 ' "$opt_in_plan" >/dev/null
 
+opt_in_auth_template="docs/design/fixtures/biocortex-retrieval-opt-in-authorization-request-template-2026-06-11.json"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_authorization_request.v0"
+    and .status == "template_only"
+    and .approval_state == "not_approved"
+    and .authorization_state == "requested_not_granted"
+    and .request_scope == "opt_in_experiment"
+    and .runtime_adapter_approved == false
+    and .default_search_order_change_allowed == false
+    and .implementation_allowed == false
+    and .writes_approval == false
+    and .current_permissions.may_implement_opt_in_experiment == false
+    and .requested_permission_if_human_authorizes.may_affect_only_explicitly_opted_in_fts_calls == true
+    and (.not_requested | index("default_retrieval_influence_fts"))
+    and (.not_requested | index("runtime_adapter_approved"))
+' "$opt_in_auth_template" >/dev/null
+
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.runtime_approval_packet_preview.v0"
     and .approval_state == "not_approved"
@@ -210,6 +227,36 @@ jq -e '
     and .boundary.calls_memory_search == false
     and .boundary.changes_memory_search_order == false
 ' "$runtime_proof/proof-summary.json" >/dev/null
+
+opt_in_auth_request="$tmpdir/opt-in-authorization-request"
+run scripts/prepare-biocortex-retrieval-opt-in-authorization-request.sh \
+    --out-dir "$opt_in_auth_request" \
+    --reviewer "verify-bundle" \
+    --runtime-proof-summary "$runtime_proof/proof-summary.json" \
+    --memory-key "verify_bundle_memory_placeholder" \
+    --forum-decision-post-id "verify_bundle_forum_placeholder"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_authorization_request.v0"
+    and .status == "request_prepared"
+    and .approval_state == "not_approved"
+    and .authorization_state == "requested_not_granted"
+    and .request_scope == "opt_in_experiment"
+    and .runtime_adapter_approved == false
+    and .default_search_order_change_allowed == false
+    and .implementation_allowed == false
+    and .writes_approval == false
+    and .opt_in_plan.status == "design_only"
+    and .opt_in_plan.experiment.mode == "fts_only"
+    and .evidence.runtime_boundary_proof.default_disabled_status == "runtime_disabled"
+    and .evidence.runtime_boundary_proof.kill_switch_status == "operator_disabled"
+    and .evidence.runtime_boundary_proof.enabled_shadow_status == "ok"
+    and .current_permissions.may_implement_opt_in_experiment == false
+    and .requested_permission_if_human_authorizes.may_affect_only_explicitly_opted_in_fts_calls == true
+    and (.not_requested | index("default_retrieval_influence_fts"))
+    and (.not_requested | index("runtime_adapter_approved"))
+' "$opt_in_auth_request/opt-in-authorization-request.json" >/dev/null
+test -s "$opt_in_auth_request/forum-post-template.md"
+test -s "$opt_in_auth_request/memory-note-template.md"
 
 current_corpus="crates/bridge/tests/fixtures/biocortex_retrieval_gate_corpus.jsonl"
 hard_corpus="crates/bridge/tests/fixtures/biocortex_retrieval_gate_hard_holdout_corpus.jsonl"
