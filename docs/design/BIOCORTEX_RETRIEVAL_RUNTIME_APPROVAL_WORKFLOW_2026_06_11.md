@@ -95,10 +95,15 @@ See:
    and attach mode-specific evidence for the exact affected call site. Contract
    review does not authorize implementation.
 
-6. Post the generated `forum-post-template.md` to the forum only after a human
+6. If the request is only for an opt-in experiment, review
+   `docs/design/BIOCORTEX_RETRIEVAL_OPT_IN_EXPERIMENT_PLAN_2026_06_11.md`
+   and its fixture. The plan requests only `opt_in_experiment`; it does not
+   request default retrieval influence.
+
+7. Post the generated `forum-post-template.md` to the forum only after a human
    reviewer has inspected the packet and any missing evidence.
 
-7. Save the generated `memory-note-template.md` as memory only after the forum
+8. Save the generated `memory-note-template.md` as memory only after the forum
    post id is known.
 
 ## Human Approval Rule

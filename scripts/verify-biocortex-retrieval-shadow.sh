@@ -60,6 +60,26 @@ grep -q 'SqliteStore::memory_search_semantic' "$contract_doc"
 grep -q 'return baseline list' "$contract_doc"
 grep -q 'Authorization for one mode does not imply authorization for another mode' "$contract_doc"
 
+opt_in_plan="docs/design/fixtures/biocortex-retrieval-opt-in-experiment-plan-2026-06-11.json"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0"
+    and .status == "design_only"
+    and .approval_state == "not_approved"
+    and .runtime_adapter_approved == false
+    and .default_search_order_change_allowed == false
+    and .implementation_allowed == false
+    and .requested_human_authorization_scope == "opt_in_experiment"
+    and .requested_default_influence_scope == "none"
+    and .default_memory_search_unchanged == true
+    and .experiment.mode == "fts_only"
+    and .experiment.affected_call_site.function == "SqliteStore::memory_search"
+    and any(.experiment.unaffected_call_sites[]; .function == "SqliteStore::memory_search_hybrid" and .status == "not_authorized_not_modified")
+    and any(.experiment.unaffected_call_sites[]; .function == "SqliteStore::memory_search_semantic" and .status == "not_authorized_not_modified")
+    and .proposed_gates.shadow_enable_is_not_ordering_authorization == true
+    and .fail_open.operator_disable == "return_baseline"
+    and .human_review_boundary.requires_separate_human_decision_before_implementation == true
+' "$opt_in_plan" >/dev/null
+
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.runtime_approval_packet_preview.v0"
     and .approval_state == "not_approved"

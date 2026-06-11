@@ -145,3 +145,8 @@ Authorization for one mode does not imply authorization for another mode.
 Do not implement default retrieval influence yet. The next acceptable work is a
 non-mutating design review packet that references this contract, the runtime
 boundary proof, and a proposed opt-in experiment plan.
+
+The current proposed opt-in experiment plan is:
+
+- `docs/design/BIOCORTEX_RETRIEVAL_OPT_IN_EXPERIMENT_PLAN_2026_06_11.md`
+- `docs/design/fixtures/biocortex-retrieval-opt-in-experiment-plan-2026-06-11.json`

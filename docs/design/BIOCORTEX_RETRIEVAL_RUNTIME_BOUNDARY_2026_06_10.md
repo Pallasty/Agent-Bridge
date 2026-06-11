@@ -224,6 +224,10 @@ of the following:
 - Any future default influence proposal must satisfy
   `docs/design/BIOCORTEX_RETRIEVAL_DEFAULT_INFLUENCE_CONTRACT_2026_06_11.md`.
   The contract is a design gate only; it does not authorize implementation.
+- The current opt-in experiment plan is design-only at
+  `docs/design/BIOCORTEX_RETRIEVAL_OPT_IN_EXPERIMENT_PLAN_2026_06_11.md`.
+  It requests only `opt_in_experiment` review and does not authorize
+  default retrieval influence.
 - Human approval must explicitly say that default retrieval influence is
   allowed. Approval of shadow telemetry, offline gate results, or acceptance
   corpus results does not imply this.

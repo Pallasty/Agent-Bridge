@@ -1,0 +1,102 @@
+{
+  "schema": "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0",
+  "created_at": "2026-06-11T00:00:00Z",
+  "status": "design_only",
+  "approval_state": "not_approved",
+  "runtime_adapter_approved": false,
+  "default_search_order_change_allowed": false,
+  "implementation_allowed": false,
+  "requested_human_authorization_scope": "opt_in_experiment",
+  "requested_default_influence_scope": "none",
+  "default_memory_search_unchanged": true,
+  "experiment": {
+    "name": "biocortex_retrieval_fts_opt_in_experiment",
+    "mode": "fts_only",
+    "affected_call_site": {
+      "file": "crates/store/src/sqlite.rs",
+      "line": 3067,
+      "function": "SqliteStore::memory_search",
+      "status": "not_modified"
+    },
+    "unaffected_call_sites": [
+      {
+        "mode": "hybrid",
+        "file": "crates/store/src/sqlite.rs",
+        "line": 3228,
+        "function": "SqliteStore::memory_search_hybrid",
+        "status": "not_authorized_not_modified"
+      },
+      {
+        "mode": "semantic",
+        "file": "crates/store/src/sqlite.rs",
+        "line": 5585,
+        "function": "SqliteStore::memory_search_semantic",
+        "status": "not_authorized_not_modified"
+      }
+    ],
+    "dataflow": [
+      "run_existing_fts_memory_search_first",
+      "copy_bounded_candidate_key_content_summaries",
+      "run_biocortex_side_signal_with_short_timeout",
+      "join_side_signal_by_candidate_key_only",
+      "return_baseline_unless_feature_runtime_and_per_call_opt_in_are_all_present",
+      "emit_audit_telemetry"
+    ]
+  },
+  "proposed_gates": {
+    "cargo_feature": "biocortex-retrieval-opt-in",
+    "runtime_enable_env": "AB_BIOCORTEX_RETRIEVAL_OPT_IN",
+    "operator_disable_env": "AB_BIOCORTEX_RETRIEVAL_DISABLE",
+    "per_call_scope_required": true,
+    "shadow_enable_is_not_ordering_authorization": true
+  },
+  "fail_open": {
+    "bio_cortex_checkout_absent": "return_baseline",
+    "adapter_error": "return_baseline",
+    "adapter_timeout": "return_baseline",
+    "coverage_below_threshold": "return_baseline",
+    "malformed_side_signal_row": "return_baseline",
+    "missing_per_call_opt_in": "return_baseline",
+    "operator_disable": "return_baseline"
+  },
+  "metrics_required": [
+    "target_corpus",
+    "baseline_top1_mrr_ndcg",
+    "experimental_top1_mrr_ndcg",
+    "regression_count_and_examples",
+    "p50_p95_p99_side_signal_latency",
+    "p50_p95_p99_added_default_path_latency",
+    "fallback_rate_by_reason",
+    "operator_kill_switch_latency"
+  ],
+  "initial_thresholds": {
+    "side_signal_coverage_min": 0.8,
+    "clear_positive_regressions_max": 0,
+    "mrr_delta_required": "> 0",
+    "p95_added_default_path_latency_ms_max": 20,
+    "p99_added_default_path_latency_ms_max": 50
+  },
+  "test_requirements": [
+    "feature_disabled_no_surface",
+    "runtime_enable_unset_returns_baseline",
+    "per_call_opt_in_missing_returns_baseline",
+    "operator_disable_wins_over_enable_and_opt_in",
+    "missing_checkout_returns_baseline",
+    "adapter_error_returns_baseline",
+    "timeout_returns_baseline",
+    "low_coverage_returns_baseline",
+    "malformed_rows_return_baseline",
+    "fts_only_call_site_can_be_affected",
+    "hybrid_and_semantic_unchanged",
+    "audit_telemetry_contains_baseline_experimental_fallback_latency_scope"
+  ],
+  "human_review_boundary": {
+    "can_request_scope": "opt_in_experiment",
+    "does_not_request": [
+      "default_retrieval_influence_fts",
+      "default_retrieval_influence_hybrid",
+      "default_retrieval_influence_semantic"
+    ],
+    "requires_separate_human_decision_before_implementation": true
+  }
+}
