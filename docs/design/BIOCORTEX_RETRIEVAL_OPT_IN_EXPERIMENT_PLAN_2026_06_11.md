@@ -4,15 +4,19 @@ Date: 2026-06-11
 
 ## Status
 
-Design packet only. Not implemented. Not authorized.
+Human authorization recorded for `opt_in_experiment` implementation work only.
+Gate skeleton implemented. Ordering behavior is not implemented and not
+approved.
 
 ```json
 {
   "schema": "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0",
-  "approval_state": "not_approved",
+  "approval_state": "opt_in_implementation_authorized",
   "runtime_adapter_approved": false,
   "default_search_order_change_allowed": false,
-  "implementation_allowed": false
+  "implementation_allowed": true,
+  "gate_skeleton_implemented": true,
+  "ordering_behavior_connected": false
 }
 ```
 
@@ -68,6 +72,21 @@ order influence. A future implementation would need separate gates:
 Both the feature and runtime enable are insufficient without the per-call
 opt-in scope.
 
+## Implementation Progress
+
+Slice 1 landed as a gate skeleton:
+
+- Cargo feature: `biocortex-retrieval-opt-in`;
+- runtime enable env: `AB_BIOCORTEX_RETRIEVAL_OPT_IN`;
+- operator disable env: `AB_BIOCORTEX_RETRIEVAL_DISABLE`;
+- report schema: `agent_bridge.biocortex_retrieval.opt_in_gate.v0`;
+- implementation stage: `gate_skeleton_only`;
+- ordering behavior connected: `false`.
+
+The gate report can say the experiment is ready only when feature, runtime env,
+and per-call opt-in are present and the operator disable is absent. Even in that
+ready state, it still reports `may_change_search_order_now=false`.
+
 ## Fail-Open Rules
 
 The experiment must return the baseline list for:
@@ -109,7 +128,7 @@ Initial pass thresholds:
 
 Future implementation review must include tests proving:
 
-- feature disabled: no opt-in surface exists;
+- feature disabled: gate reports disabled and no ordering behavior exists;
 - runtime enable unset: baseline order is returned;
 - per-call opt-in missing: baseline order is returned;
 - operator disable set: baseline order is returned even when enabled and
@@ -127,5 +146,8 @@ This plan can be reviewed as a request for `opt_in_experiment` authorization.
 It does not request or imply `default_retrieval_influence_fts`, hybrid, or
 semantic authorization.
 
-Until a separate human decision grants `opt_in_experiment`, implementation must
-remain design-only and shadow-only.
+The human decision recorded in
+`BIOCORTEX_RETRIEVAL_OPT_IN_AUTHORIZATION_DECISION_2026_06_11.md` grants only
+implementation work for the opt-in experiment. Runtime adapter approval,
+default retrieval influence, and production/default use still require a
+separate post-implementation review.

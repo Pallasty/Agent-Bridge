@@ -63,11 +63,13 @@ grep -q 'Authorization for one mode does not imply authorization for another mod
 opt_in_plan="docs/design/fixtures/biocortex-retrieval-opt-in-experiment-plan-2026-06-11.json"
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0"
-    and .status == "design_only"
-    and .approval_state == "not_approved"
+    and .status == "gate_skeleton_implemented"
+    and .approval_state == "opt_in_implementation_authorized"
     and .runtime_adapter_approved == false
     and .default_search_order_change_allowed == false
-    and .implementation_allowed == false
+    and .implementation_allowed == true
+    and .gate_skeleton_implemented == true
+    and .ordering_behavior_connected == false
     and .requested_human_authorization_scope == "opt_in_experiment"
     and .requested_default_influence_scope == "none"
     and .default_memory_search_unchanged == true
@@ -76,8 +78,16 @@ jq -e '
     and any(.experiment.unaffected_call_sites[]; .function == "SqliteStore::memory_search_hybrid" and .status == "not_authorized_not_modified")
     and any(.experiment.unaffected_call_sites[]; .function == "SqliteStore::memory_search_semantic" and .status == "not_authorized_not_modified")
     and .proposed_gates.shadow_enable_is_not_ordering_authorization == true
+    and .implemented_gate_skeleton.schema == "agent_bridge.biocortex_retrieval.opt_in_gate.v0"
+    and .implemented_gate_skeleton.feature == "biocortex-retrieval-opt-in"
+    and .implemented_gate_skeleton.runtime_enable_env == "AB_BIOCORTEX_RETRIEVAL_OPT_IN"
+    and .implemented_gate_skeleton.operator_disable_env == "AB_BIOCORTEX_RETRIEVAL_DISABLE"
+    and .implemented_gate_skeleton.ordering_behavior_connected == false
+    and .implemented_gate_skeleton.may_change_search_order_now == false
     and .fail_open.operator_disable == "return_baseline"
-    and .human_review_boundary.requires_separate_human_decision_before_implementation == true
+    and .human_review_boundary.authorization_decision_recorded == true
+    and .human_review_boundary.requires_separate_human_decision_before_implementation == false
+    and .human_review_boundary.requires_post_implementation_review_before_ordering_use == true
 ' "$opt_in_plan" >/dev/null
 
 opt_in_auth_template="docs/design/fixtures/biocortex-retrieval-opt-in-authorization-request-template-2026-06-11.json"
@@ -219,12 +229,16 @@ test -s "$review_bundle/forum-post-template.md"
 test -s "$review_bundle/memory-note-template.md"
 
 run cargo check -p ab-bridge --no-default-features --features biocortex-retrieval-shadow
+run cargo check -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in
 
 run cargo test -p ab-bridge --lib --no-default-features \
     biocortex_shadow::tests::retrieval_ -- --nocapture
 run cargo test -p ab-bridge --lib --no-default-features \
     --features biocortex-retrieval-shadow \
     biocortex_retrieval_shadow_schema_is_explicit_and_readonly -- --nocapture
+run cargo test -p ab-bridge --lib --no-default-features \
+    --features biocortex-retrieval-opt-in \
+    biocortex_shadow::tests::retrieval_opt_in_gate_requires_feature_runtime_and_call_opt_in -- --nocapture
 
 run env AB_BIOCORTEX_RS="$biocortex_rs" CARGO_INCREMENTAL=0 \
     cargo run -p ab-bridge \
@@ -260,19 +274,22 @@ run scripts/prepare-biocortex-retrieval-opt-in-authorization-request.sh \
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.opt_in_authorization_request.v0"
     and .status == "request_prepared"
-    and .approval_state == "not_approved"
-    and .authorization_state == "requested_not_granted"
+    and .approval_state == "opt_in_implementation_authorized"
+    and .authorization_state == "authorized_for_opt_in_implementation"
     and .request_scope == "opt_in_experiment"
     and .runtime_adapter_approved == false
     and .default_search_order_change_allowed == false
-    and .implementation_allowed == false
+    and .implementation_allowed == true
     and .writes_approval == false
-    and .opt_in_plan.status == "design_only"
+    and .opt_in_plan.status == "gate_skeleton_implemented"
+    and .opt_in_plan.implemented_gate_skeleton.ordering_behavior_connected == false
+    and .opt_in_plan.implemented_gate_skeleton.may_change_search_order_now == false
     and .opt_in_plan.experiment.mode == "fts_only"
     and .evidence.runtime_boundary_proof.default_disabled_status == "runtime_disabled"
     and .evidence.runtime_boundary_proof.kill_switch_status == "operator_disabled"
     and .evidence.runtime_boundary_proof.enabled_shadow_status == "ok"
-    and .current_permissions.may_implement_opt_in_experiment == false
+    and .current_permissions.may_implement_opt_in_experiment == true
+    and .current_permissions.may_change_default_retrieval_order == false
     and .requested_permission_if_human_authorizes.may_affect_only_explicitly_opted_in_fts_calls == true
     and (.not_requested | index("default_retrieval_influence_fts"))
     and (.not_requested | index("runtime_adapter_approved"))

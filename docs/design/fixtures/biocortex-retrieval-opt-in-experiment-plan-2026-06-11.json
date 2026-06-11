@@ -1,11 +1,20 @@
 {
   "schema": "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0",
   "created_at": "2026-06-11T00:00:00Z",
-  "status": "design_only",
-  "approval_state": "not_approved",
+  "status": "gate_skeleton_implemented",
+  "approval_state": "opt_in_implementation_authorized",
   "runtime_adapter_approved": false,
   "default_search_order_change_allowed": false,
-  "implementation_allowed": false,
+  "implementation_allowed": true,
+  "gate_skeleton_implemented": true,
+  "ordering_behavior_connected": false,
+  "authorization_decision": {
+    "doc": "docs/design/BIOCORTEX_RETRIEVAL_OPT_IN_AUTHORIZATION_DECISION_2026_06_11.md",
+    "fixture": "docs/design/fixtures/biocortex-retrieval-opt-in-authorization-decision-2026-06-11.json",
+    "authorized_scope": "opt_in_experiment",
+    "runtime_adapter_approved": false,
+    "default_search_order_change_allowed": false
+  },
   "requested_human_authorization_scope": "opt_in_experiment",
   "requested_default_influence_scope": "none",
   "default_memory_search_unchanged": true,
@@ -50,6 +59,17 @@
     "per_call_scope_required": true,
     "shadow_enable_is_not_ordering_authorization": true
   },
+  "implemented_gate_skeleton": {
+    "schema": "agent_bridge.biocortex_retrieval.opt_in_gate.v0",
+    "feature": "biocortex-retrieval-opt-in",
+    "runtime_enable_env": "AB_BIOCORTEX_RETRIEVAL_OPT_IN",
+    "operator_disable_env": "AB_BIOCORTEX_RETRIEVAL_DISABLE",
+    "per_call_opt_in_required": true,
+    "implementation_stage": "gate_skeleton_only",
+    "ordering_behavior_connected": false,
+    "may_change_search_order_now": false,
+    "default_calls_unchanged": true
+  },
   "fail_open": {
     "bio_cortex_checkout_absent": "return_baseline",
     "adapter_error": "return_baseline",
@@ -77,7 +97,7 @@
     "p99_added_default_path_latency_ms_max": 50
   },
   "test_requirements": [
-    "feature_disabled_no_surface",
+    "feature_disabled_gate_reports_disabled_no_ordering_behavior",
     "runtime_enable_unset_returns_baseline",
     "per_call_opt_in_missing_returns_baseline",
     "operator_disable_wins_over_enable_and_opt_in",
@@ -92,11 +112,13 @@
   ],
   "human_review_boundary": {
     "can_request_scope": "opt_in_experiment",
+    "authorization_decision_recorded": true,
     "does_not_request": [
       "default_retrieval_influence_fts",
       "default_retrieval_influence_hybrid",
       "default_retrieval_influence_semantic"
     ],
-    "requires_separate_human_decision_before_implementation": true
+    "requires_separate_human_decision_before_implementation": false,
+    "requires_post_implementation_review_before_ordering_use": true
   }
 }

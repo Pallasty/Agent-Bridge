@@ -7,7 +7,7 @@
 use crate::shadow_cortex::{ShadowCortexEvent, ShadowCortexReplayFixture, SignalScope};
 use ab_store::{cosine_similarity, embedding::default_backend};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Number, Value, json};
+use serde_json::{json, Map, Number, Value};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -20,10 +20,13 @@ pub const BIOCORTEX_RETRIEVAL_SHADOW_SCHEMA: &str =
     "agent_bridge.biocortex_retrieval_shadow_report.v0";
 pub const BIOCORTEX_RETRIEVAL_RUNTIME_APPROVAL_PACKET_SCHEMA: &str =
     "agent_bridge.biocortex_retrieval.runtime_approval_packet_preview.v0";
+pub const BIOCORTEX_RETRIEVAL_OPT_IN_GATE_SCHEMA: &str =
+    "agent_bridge.biocortex_retrieval.opt_in_gate.v0";
 pub const BIOCORTEX_SUBSTRATE_REPLAY_PLAN_SCHEMA: &str =
     "agent_bridge.biocortex_substrate_replay_plan.v0";
 pub const BIOCORTEX_CHECKOUT_ENV: &str = "AB_BIOCORTEX_RS";
 pub const BIOCORTEX_RETRIEVAL_SHADOW_ENABLE_ENV: &str = "AB_BIOCORTEX_RETRIEVAL_SHADOW";
+pub const BIOCORTEX_RETRIEVAL_OPT_IN_ENABLE_ENV: &str = "AB_BIOCORTEX_RETRIEVAL_OPT_IN";
 pub const BIOCORTEX_RETRIEVAL_DISABLE_ENV: &str = "AB_BIOCORTEX_RETRIEVAL_DISABLE";
 
 const DEFAULT_TIMEOUT_MS: u64 = 120_000;
@@ -604,6 +607,50 @@ pub fn biocortex_retrieval_runtime_approval_packet_preview(
         "missing_authorization": missing_authorization,
         "ready_for_human_approval_review": false,
         "review_rule": "Approval requires a separate human decision explicitly allowing default retrieval influence and naming the reviewed implementation commit.",
+    })
+}
+
+pub fn biocortex_retrieval_opt_in_gate_report(per_call_opt_in: bool) -> Value {
+    let compile_feature_enabled = cfg!(feature = "biocortex-retrieval-opt-in");
+    let runtime_enabled = env_truthy(BIOCORTEX_RETRIEVAL_OPT_IN_ENABLE_ENV);
+    let operator_disabled = env_truthy(BIOCORTEX_RETRIEVAL_DISABLE_ENV);
+    let ready_for_explicit_opt_in_experiment =
+        compile_feature_enabled && runtime_enabled && per_call_opt_in && !operator_disabled;
+    let status = if !compile_feature_enabled {
+        "compile_feature_disabled"
+    } else if operator_disabled {
+        "operator_disabled"
+    } else if !runtime_enabled {
+        "runtime_disabled"
+    } else if !per_call_opt_in {
+        "per_call_opt_in_missing"
+    } else {
+        "ready_for_explicit_opt_in_experiment"
+    };
+
+    json!({
+        "schema": BIOCORTEX_RETRIEVAL_OPT_IN_GATE_SCHEMA,
+        "generated_at": now_secs(),
+        "read_only": true,
+        "status": status,
+        "implementation_stage": "gate_skeleton_only",
+        "feature": "biocortex-retrieval-opt-in",
+        "compile_feature_enabled": compile_feature_enabled,
+        "runtime_enable_env": BIOCORTEX_RETRIEVAL_OPT_IN_ENABLE_ENV,
+        "runtime_enabled": runtime_enabled,
+        "per_call_opt_in_required": true,
+        "per_call_opt_in": per_call_opt_in,
+        "operator_disable_env": BIOCORTEX_RETRIEVAL_DISABLE_ENV,
+        "operator_disabled": operator_disabled,
+        "ready_for_explicit_opt_in_experiment": ready_for_explicit_opt_in_experiment,
+        "runtime_adapter_approved": false,
+        "default_search_order_change_allowed": false,
+        "default_calls_unchanged": true,
+        "may_change_search_order_now": false,
+        "ordering_behavior_connected": false,
+        "effective_behavior": "baseline_only_until_ordering_implementation",
+        "authorized_scope": "opt_in_experiment",
+        "boundary": retrieval_boundary_payload(),
     })
 }
 
@@ -1723,12 +1770,10 @@ mod tests {
             projection["replay_feasibility"]["substrate_replay_plan_available"],
             json!(true)
         );
-        assert!(
-            projection["fixture_hash"]
-                .as_str()
-                .unwrap_or_default()
-                .starts_with("sha256:")
-        );
+        assert!(projection["fixture_hash"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("sha256:"));
     }
 
     #[test]
@@ -1884,11 +1929,9 @@ mod tests {
             .as_array()
             .expect("missing paths");
         assert!(missing.iter().any(|path| path == "$.target_host"));
-        assert!(
-            missing
-                .iter()
-                .any(|path| path == "$.ordering_change_design.exact_call_site")
-        );
+        assert!(missing
+            .iter()
+            .any(|path| path == "$.ordering_change_design.exact_call_site"));
         let missing_attestation = packet["missing_attestation"]
             .as_array()
             .expect("missing attestation paths");
@@ -1897,5 +1940,111 @@ mod tests {
             packet["gates"]["compile_feature"],
             json!("biocortex-retrieval-shadow")
         );
+    }
+
+    #[test]
+    fn retrieval_opt_in_gate_requires_feature_runtime_and_call_opt_in() {
+        let _guard = EnvRestore::capture(&[
+            BIOCORTEX_RETRIEVAL_OPT_IN_ENABLE_ENV,
+            BIOCORTEX_RETRIEVAL_DISABLE_ENV,
+        ]);
+        std::env::remove_var(BIOCORTEX_RETRIEVAL_OPT_IN_ENABLE_ENV);
+        std::env::remove_var(BIOCORTEX_RETRIEVAL_DISABLE_ENV);
+
+        let runtime_missing = biocortex_retrieval_opt_in_gate_report(true);
+        assert_eq!(
+            runtime_missing["schema"],
+            json!(BIOCORTEX_RETRIEVAL_OPT_IN_GATE_SCHEMA)
+        );
+        assert_eq!(runtime_missing["read_only"], json!(true));
+        assert_eq!(runtime_missing["runtime_adapter_approved"], json!(false));
+        assert_eq!(
+            runtime_missing["default_search_order_change_allowed"],
+            json!(false)
+        );
+        assert_eq!(runtime_missing["default_calls_unchanged"], json!(true));
+        assert_eq!(runtime_missing["may_change_search_order_now"], json!(false));
+        assert_eq!(runtime_missing["ordering_behavior_connected"], json!(false));
+        assert_eq!(
+            runtime_missing["ready_for_explicit_opt_in_experiment"],
+            json!(false)
+        );
+        if cfg!(feature = "biocortex-retrieval-opt-in") {
+            assert_eq!(runtime_missing["status"], json!("runtime_disabled"));
+        } else {
+            assert_eq!(runtime_missing["status"], json!("compile_feature_disabled"));
+        }
+
+        std::env::set_var(BIOCORTEX_RETRIEVAL_OPT_IN_ENABLE_ENV, "1");
+        let call_opt_in_missing = biocortex_retrieval_opt_in_gate_report(false);
+        if cfg!(feature = "biocortex-retrieval-opt-in") {
+            assert_eq!(
+                call_opt_in_missing["status"],
+                json!("per_call_opt_in_missing")
+            );
+        } else {
+            assert_eq!(
+                call_opt_in_missing["status"],
+                json!("compile_feature_disabled")
+            );
+        }
+        assert_eq!(
+            call_opt_in_missing["ready_for_explicit_opt_in_experiment"],
+            json!(false)
+        );
+
+        let ready = biocortex_retrieval_opt_in_gate_report(true);
+        assert_eq!(ready["may_change_search_order_now"], json!(false));
+        assert_eq!(ready["ordering_behavior_connected"], json!(false));
+        if cfg!(feature = "biocortex-retrieval-opt-in") {
+            assert_eq!(
+                ready["status"],
+                json!("ready_for_explicit_opt_in_experiment")
+            );
+            assert_eq!(ready["ready_for_explicit_opt_in_experiment"], json!(true));
+        } else {
+            assert_eq!(ready["status"], json!("compile_feature_disabled"));
+            assert_eq!(ready["ready_for_explicit_opt_in_experiment"], json!(false));
+        }
+
+        std::env::set_var(BIOCORTEX_RETRIEVAL_DISABLE_ENV, "1");
+        let disabled = biocortex_retrieval_opt_in_gate_report(true);
+        if cfg!(feature = "biocortex-retrieval-opt-in") {
+            assert_eq!(disabled["status"], json!("operator_disabled"));
+        } else {
+            assert_eq!(disabled["status"], json!("compile_feature_disabled"));
+        }
+        assert_eq!(
+            disabled["ready_for_explicit_opt_in_experiment"],
+            json!(false)
+        );
+    }
+
+    struct EnvRestore {
+        values: Vec<(&'static str, Option<std::ffi::OsString>)>,
+    }
+
+    impl EnvRestore {
+        fn capture(keys: &[&'static str]) -> Self {
+            Self {
+                values: keys
+                    .iter()
+                    .copied()
+                    .map(|key| (key, std::env::var_os(key)))
+                    .collect(),
+            }
+        }
+    }
+
+    impl Drop for EnvRestore {
+        fn drop(&mut self) {
+            for (key, value) in self.values.iter().rev() {
+                if let Some(value) = value {
+                    std::env::set_var(key, value);
+                } else {
+                    std::env::remove_var(key);
+                }
+            }
+        }
     }
 }
