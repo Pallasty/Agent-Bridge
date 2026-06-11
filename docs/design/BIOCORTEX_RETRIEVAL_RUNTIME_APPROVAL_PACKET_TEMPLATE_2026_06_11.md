@@ -91,6 +91,8 @@ evidence for every item below:
 - latency evidence for both the side-signal surface and the default
   `memory_search` path;
 - exact call site where any future retrieval ordering would change;
+- default influence contract review against
+  `docs/design/BIOCORTEX_RETRIEVAL_DEFAULT_INFLUENCE_CONTRACT_2026_06_11.md`;
 - fail-open behavior when BioCortex is absent, slow, or errors;
 - rollback command and operator kill switch;
 - forum decision post id and memory key linking the final evidence packet.

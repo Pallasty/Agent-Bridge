@@ -90,10 +90,15 @@ See:
    - `agent_technical_attestation.can_authorize_runtime_influence=false`;
    - `human_authorization.status=not_authorized`.
 
-5. Post the generated `forum-post-template.md` to the forum only after a human
+5. If the request is for any default retrieval influence, review
+   `docs/design/BIOCORTEX_RETRIEVAL_DEFAULT_INFLUENCE_CONTRACT_2026_06_11.md`
+   and attach mode-specific evidence for the exact affected call site. Contract
+   review does not authorize implementation.
+
+6. Post the generated `forum-post-template.md` to the forum only after a human
    reviewer has inspected the packet and any missing evidence.
 
-6. Save the generated `memory-note-template.md` as memory only after the forum
+7. Save the generated `memory-note-template.md` as memory only after the forum
    post id is known.
 
 ## Human Approval Rule

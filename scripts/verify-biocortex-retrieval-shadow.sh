@@ -51,6 +51,15 @@ jq -e '
     and .human_authorization_required.can_be_replaced_by_agent_attestation == false
 ' docs/design/fixtures/biocortex-retrieval-runtime-approval-packet-template.json >/dev/null
 
+contract_doc="docs/design/BIOCORTEX_RETRIEVAL_DEFAULT_INFLUENCE_CONTRACT_2026_06_11.md"
+grep -q '"runtime_adapter_approved": false' "$contract_doc"
+grep -q '"default_search_order_change_allowed": false' "$contract_doc"
+grep -q 'SqliteStore::memory_search' "$contract_doc"
+grep -q 'SqliteStore::memory_search_hybrid' "$contract_doc"
+grep -q 'SqliteStore::memory_search_semantic' "$contract_doc"
+grep -q 'return baseline list' "$contract_doc"
+grep -q 'Authorization for one mode does not imply authorization for another mode' "$contract_doc"
+
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.runtime_approval_packet_preview.v0"
     and .approval_state == "not_approved"

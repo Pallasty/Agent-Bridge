@@ -221,6 +221,9 @@ of the following:
   - latency impact on the default `memory_search` path;
   - rollback command and operator kill switch;
   - forum decision post and memory record linking the evidence packet.
+- Any future default influence proposal must satisfy
+  `docs/design/BIOCORTEX_RETRIEVAL_DEFAULT_INFLUENCE_CONTRACT_2026_06_11.md`.
+  The contract is a design gate only; it does not authorize implementation.
 - Human approval must explicitly say that default retrieval influence is
   allowed. Approval of shadow telemetry, offline gate results, or acceptance
   corpus results does not imply this.
