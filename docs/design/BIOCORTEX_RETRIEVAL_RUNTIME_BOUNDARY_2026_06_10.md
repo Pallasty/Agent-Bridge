@@ -175,6 +175,55 @@ Before any code implementation can be accepted:
 - Forum and memory notes must record the measured p95 latency and any winner
   changes before considering a stronger runtime design.
 
+## Runtime Adapter Approval Checklist
+
+Passing the shadow checks below is necessary but not sufficient for changing
+`runtime_adapter_approved` to true. A future approval packet must include all
+of the following:
+
+- `scripts/verify-biocortex-retrieval-shadow.sh` passes on the target host.
+- The current corpus and hard holdout both pass `candidate-strong` with
+  `side_signal_coverage >= 0.8`, zero regressions, and positive MRR lift.
+- `biocortex_retrieval_shadow_acceptance` passes and keeps exactly one expected
+  ambiguity sentinel unless the fixture is intentionally revised with a matching
+  review note.
+- Live MCP default state still returns `runtime_disabled` without
+  `AB_BIOCORTEX_RETRIEVAL_SHADOW=1`.
+- `AB_BIOCORTEX_RETRIEVAL_DISABLE=1` still forces baseline-only behavior even
+  when the runtime enable flag is set.
+- Any proposed default retrieval influence has a separate design showing:
+  - the exact call site where ordering would change;
+  - the fail-open behavior when BioCortex is absent, slow, or errors;
+  - latency impact on the default `memory_search` path;
+  - rollback command and operator kill switch;
+  - forum decision post and memory record linking the evidence packet.
+- Human approval must explicitly say that default retrieval influence is
+  allowed. Approval of shadow telemetry, offline gate results, or acceptance
+  corpus results does not imply this.
+
+## Verification Command Bundle
+
+Use the checked-in bundle before any stronger runtime discussion:
+
+```bash
+AB_BIOCORTEX_RS=/Data/CascadeProjects/biocortex-rs \
+scripts/verify-biocortex-retrieval-shadow.sh
+```
+
+The bundle runs:
+
+1. no-default `ab-bridge` check without the retrieval-shadow feature;
+2. no-default `ab-bridge` check with `biocortex-retrieval-shadow`;
+3. focused retrieval boundary unit tests;
+4. `biocortex_retrieval_shadow_acceptance`;
+5. BioCortex side-signal generation for the current and hard holdout corpora;
+6. `biocortex_retrieval_gate_eval` on both corpora with
+   `candidate-strong`, asserting pass status, read-only gate state, human-review
+   requirement, full-enough coverage, and zero regressions.
+
+This script is a verification bundle only. It must not be treated as an
+approval writer and it does not alter `memory_search`.
+
 ## Next Step
 
 Implement, if desired, a review-only CLI/MCP surface behind
