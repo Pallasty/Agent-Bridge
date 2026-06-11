@@ -1,7 +1,7 @@
 {
   "schema": "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0",
   "created_at": "2026-06-11T00:00:00Z",
-  "status": "store_contract_implemented",
+  "status": "dry_run_planner_implemented",
   "approval_state": "opt_in_implementation_authorized",
   "runtime_adapter_approved": false,
   "default_search_order_change_allowed": false,
@@ -10,6 +10,7 @@
   "audit_shape_implemented": true,
   "read_only_status_surface_implemented": true,
   "store_contract_implemented": true,
+  "dry_run_planner_implemented": true,
   "ordering_behavior_connected": false,
   "authorization_decision": {
     "doc": "docs/design/BIOCORTEX_RETRIEVAL_OPT_IN_AUTHORIZATION_DECISION_2026_06_11.md",
@@ -117,6 +118,29 @@
     "ordering_behavior_connected": false,
     "may_change_search_order_now": false
   },
+  "implemented_dry_run_planner": {
+    "cli": "agent-bridge bio-cortex retrieval-opt-in-dry-run",
+    "mcp_tool": "biocortex_retrieval_opt_in_dry_run",
+    "schema": "agent_bridge.biocortex_retrieval.opt_in_dry_run_plan.v0",
+    "read_only": true,
+    "dry_run": true,
+    "calls_memory_search": false,
+    "runs_biocortex": false,
+    "registers_embedding_backend": false,
+    "raw_query_included": false,
+    "raw_keys_included": false,
+    "content_included": false,
+    "includes_store_contract": true,
+    "planned_steps": [
+      "baseline_fts_memory_search",
+      "candidate_projection",
+      "biocortex_side_signal",
+      "join_and_score",
+      "return_order"
+    ],
+    "ordering_behavior_connected": false,
+    "may_change_search_order_now": false
+  },
   "fail_open": {
     "bio_cortex_checkout_absent": "return_baseline",
     "adapter_error": "return_baseline",
@@ -160,6 +184,8 @@
     "read_only_status_surface_does_not_echo_query_or_keys",
     "store_contract_requires_fts_per_call_opt_in_baseline_and_ordering_gate",
     "store_contract_response_falls_back_to_baseline_without_side_signal",
+    "dry_run_planner_does_not_call_memory_search_or_biocortex",
+    "dry_run_planner_does_not_echo_query_or_keys",
     "audit_telemetry_contains_baseline_experimental_fallback_latency_scope"
   ],
   "human_review_boundary": {

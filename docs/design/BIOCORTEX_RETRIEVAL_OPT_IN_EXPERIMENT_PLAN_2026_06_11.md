@@ -5,9 +5,9 @@ Date: 2026-06-11
 ## Status
 
 Human authorization recorded for `opt_in_experiment` implementation work only.
-Gate skeleton, audit shape, read-only status surface, and store-level
-request/response contract implemented. Ordering behavior is not implemented
-and not approved.
+Gate skeleton, audit shape, read-only status surface, store-level
+request/response contract, and read-only dry-run planner implemented. Ordering
+behavior is not implemented and not approved.
 
 ```json
 {
@@ -20,6 +20,7 @@ and not approved.
   "audit_shape_implemented": true,
   "read_only_status_surface_implemented": true,
   "store_contract_implemented": true,
+  "dry_run_planner_implemented": true,
   "ordering_behavior_connected": false
 }
 ```
@@ -128,6 +129,22 @@ Slice 4 landed the store-level request/response contract:
 The contract still does not call BioCortex or alter ordering. It gives the
 future ordering implementation a typed boundary it must satisfy before any
 experimental order can be returned.
+
+Slice 5 landed a read-only dry-run planner:
+
+- CLI: `agent-bridge bio-cortex retrieval-opt-in-dry-run`;
+- MCP tool: `biocortex_retrieval_opt_in_dry_run`;
+- planner schema: `agent_bridge.biocortex_retrieval.opt_in_dry_run_plan.v0`;
+- plans baseline FTS search, candidate projection, side-signal, join/score,
+  and return-order steps without executing them;
+- includes the store contract response and fallback reason;
+- reports `calls_memory_search=false`, `runs_biocortex=false`, and
+  `changes_memory_search_order=false`;
+- hashes query and baseline order and never includes raw query text, raw memory
+  keys, or memory content.
+
+The planner is a preview and review surface only. It does not grant runtime
+adapter approval and does not connect ordering behavior.
 
 ## Fail-Open Rules
 

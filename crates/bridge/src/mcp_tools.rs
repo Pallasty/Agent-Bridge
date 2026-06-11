@@ -45,9 +45,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::process::Command as TokioCommand;
 
 use crate::biocortex_shadow::{
-    biocortex_replay_comparison, biocortex_retrieval_opt_in_audit_report, biocortex_shadow_digest,
-    supported_benchmarks, BioCortexReplayComparisonOptions, BioCortexRetrievalOptInAuditOptions,
-    BioCortexShadowOptions, BIOCORTEX_CHECKOUT_ENV,
+    biocortex_replay_comparison, biocortex_retrieval_opt_in_audit_report,
+    biocortex_retrieval_opt_in_dry_run_plan, biocortex_shadow_digest, supported_benchmarks,
+    BioCortexReplayComparisonOptions, BioCortexRetrievalOptInAuditOptions,
+    BioCortexRetrievalOptInDryRunOptions, BioCortexShadowOptions, BIOCORTEX_CHECKOUT_ENV,
 };
 #[cfg(feature = "biocortex-retrieval-shadow")]
 use crate::biocortex_shadow::{
@@ -25220,6 +25221,138 @@ impl McpTool for BioCortexRetrievalOptInStatusTool {
 }
 
 // ===========================================================================
+//  biocortex_retrieval_opt_in_dry_run — read-only future-path planner
+// ===========================================================================
+
+/// Read-only BioCortex retrieval opt-in dry-run planner. This tool reports the
+/// future FTS opt-in ordering path and store-contract fallback decision. It
+/// does not call `memory_search`, run BioCortex, include raw memory content, or
+/// change retrieval order.
+pub struct BioCortexRetrievalOptInDryRunTool;
+
+impl BioCortexRetrievalOptInDryRunTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for BioCortexRetrievalOptInDryRunTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for BioCortexRetrievalOptInDryRunTool {
+    fn name(&self) -> &'static str {
+        "biocortex_retrieval_opt_in_dry_run"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only BioCortex retrieval opt-in dry-run planner. \
+                 Reports the future FTS opt-in ordering path, planned side-signal \
+                 steps, and store-contract fallback decision with hashed query/order \
+                 data only. Does not call memory_search, run BioCortex, mutate \
+                 memory, include raw memory keys/content, register an EmbeddingBackend, \
+                 or alter retrieval order."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "enum": ["fts", "hybrid", "semantic"],
+                        "default": "fts",
+                        "description": "Retrieval mode under review. Only fts is authorized for opt-in work."
+                    },
+                    "per_call_opt_in": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Explicit per-call opt-in bit to evaluate."
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Optional query text. Output includes only a hash."
+                    },
+                    "baseline_keys": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Optional baseline candidate keys. Output includes only count/hash, never raw keys."
+                    },
+                    "baseline_completed": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Whether the baseline memory_search result already exists for this dry run."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 120000,
+                        "description": "Future side-signal adapter timeout in milliseconds."
+                    },
+                    "coverage_threshold": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "default": 0.8,
+                        "description": "Future minimum side-signal coverage threshold."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let mode = args
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("fts")
+            .to_string();
+        let per_call_opt_in = args
+            .get("per_call_opt_in")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let query = args
+            .get("query")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let baseline_keys = args
+            .get("baseline_keys")
+            .cloned()
+            .map(serde_json::from_value::<Vec<String>>)
+            .transpose()
+            .map_err(|e| ab_core::Error::Backend(format!("parse baseline_keys: {e}")))?
+            .unwrap_or_default();
+        let baseline_completed = args
+            .get("baseline_completed")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(120_000);
+        let coverage_threshold = args
+            .get("coverage_threshold")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.8);
+
+        let payload =
+            biocortex_retrieval_opt_in_dry_run_plan(BioCortexRetrievalOptInDryRunOptions {
+                mode,
+                per_call_opt_in,
+                query,
+                baseline_keys,
+                baseline_completed,
+                timeout_ms,
+                coverage_threshold,
+            });
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
 //   biocortex_retrieval_shadow — review-only retrieval side-signal report
 // ===========================================================================
 
@@ -36476,6 +36609,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Standard,
         Arc::new(BioCortexRetrievalOptInStatusTool::new()),
     );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexRetrievalOptInDryRunTool::new()),
+    );
     #[cfg(feature = "biocortex-retrieval-shadow")]
     reg_if(
         &mut reg,
@@ -45315,6 +45454,77 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert_eq!(v["baseline_order"]["content_included"], json!(false));
         assert_eq!(v["fallback"]["baseline_returned"], json!(true));
         assert_eq!(v["fallback"]["reason"], json!("mode_not_authorized"));
+        assert_eq!(v["changes_memory_search_order"], json!(false));
+        assert_eq!(v["ordering_behavior_connected"], json!(false));
+    }
+
+    #[test]
+    fn biocortex_retrieval_opt_in_dry_run_schema_is_readonly() {
+        let tool = BioCortexRetrievalOptInDryRunTool::new();
+        let schema = tool.schema();
+        assert_eq!(schema.name, "biocortex_retrieval_opt_in_dry_run");
+        assert!(schema.description.contains("Read-only"));
+        assert!(schema.description.contains("dry-run planner"));
+        assert!(schema.description.contains("Does not call memory_search"));
+
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("mode").is_some());
+        assert!(props.get("per_call_opt_in").is_some());
+        assert!(props.get("query").is_some());
+        assert!(props.get("baseline_keys").is_some());
+        assert!(props.get("baseline_completed").is_some());
+        assert!(props.get("timeout_ms").is_some());
+        assert!(props.get("coverage_threshold").is_some());
+        assert!(props.get("mutate").is_none());
+        assert!(props.get("memory_search").is_none());
+        assert!(props.get("raw_content").is_none());
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_dry_run_does_not_echo_query_or_keys() {
+        let tool = BioCortexRetrievalOptInDryRunTool::new();
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(
+                json!({
+                    "mode": "semantic",
+                    "per_call_opt_in": true,
+                    "query": "secret dry-run query text",
+                    "baseline_keys": ["secret_dry_key_a", "secret_dry_key_b"],
+                    "timeout_ms": 123,
+                    "coverage_threshold": 0.75
+                }),
+                &ctx,
+            )
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains("secret dry-run query text"));
+        assert!(!text.contains("secret_dry_key_a"));
+        assert!(!text.contains("secret_dry_key_b"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_dry_run_plan.v0")
+        );
+        assert_eq!(v["read_only"], json!(true));
+        assert_eq!(v["dry_run"], json!(true));
+        assert_eq!(v["mode"], json!("semantic"));
+        assert_eq!(v["mode_authorized"], json!(false));
+        assert_eq!(v["baseline_order"]["key_count"], json!(2));
+        assert_eq!(v["baseline_order"]["raw_keys_included"], json!(false));
+        assert_eq!(v["baseline_order"]["content_included"], json!(false));
+        assert_eq!(v["planner_result"]["fallback_reason"], json!("mode_not_authorized"));
+        assert_eq!(v["calls_memory_search"], json!(false));
+        assert_eq!(v["runs_biocortex"], json!(false));
         assert_eq!(v["changes_memory_search_order"], json!(false));
         assert_eq!(v["ordering_behavior_connected"], json!(false));
     }

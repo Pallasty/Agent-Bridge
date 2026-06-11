@@ -173,7 +173,7 @@ jq -e '
     and .default_search_order_change_allowed == false
     and .implementation_allowed == true
     and .writes_approval == false
-    and .opt_in_plan.status == "store_contract_implemented"
+    and .opt_in_plan.status == "dry_run_planner_implemented"
     and .opt_in_plan.approval_state == "opt_in_implementation_authorized"
     and .opt_in_plan.implemented_gate_skeleton.ordering_behavior_connected == false
     and .opt_in_plan.implemented_gate_skeleton.may_change_search_order_now == false
@@ -194,6 +194,17 @@ jq -e '
     and .opt_in_plan.implemented_store_contract.raw_keys_included == false
     and .opt_in_plan.implemented_store_contract.content_included == false
     and .opt_in_plan.implemented_store_contract.ordering_behavior_connected == false
+    and .opt_in_plan.implemented_dry_run_planner.mcp_tool == "biocortex_retrieval_opt_in_dry_run"
+    and .opt_in_plan.implemented_dry_run_planner.schema == "agent_bridge.biocortex_retrieval.opt_in_dry_run_plan.v0"
+    and .opt_in_plan.implemented_dry_run_planner.read_only == true
+    and .opt_in_plan.implemented_dry_run_planner.dry_run == true
+    and .opt_in_plan.implemented_dry_run_planner.calls_memory_search == false
+    and .opt_in_plan.implemented_dry_run_planner.runs_biocortex == false
+    and .opt_in_plan.implemented_dry_run_planner.raw_query_included == false
+    and .opt_in_plan.implemented_dry_run_planner.raw_keys_included == false
+    and .opt_in_plan.implemented_dry_run_planner.content_included == false
+    and .opt_in_plan.implemented_dry_run_planner.includes_store_contract == true
+    and .opt_in_plan.implemented_dry_run_planner.ordering_behavior_connected == false
     and .opt_in_plan.experiment.mode == "fts_only"
     and .opt_in_plan.experiment.affected_call_site.function == "SqliteStore::memory_search"
     and .evidence.runtime_boundary_proof.default_disabled_status == "runtime_disabled"

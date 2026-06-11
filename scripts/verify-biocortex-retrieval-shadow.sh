@@ -63,7 +63,7 @@ grep -q 'Authorization for one mode does not imply authorization for another mod
 opt_in_plan="docs/design/fixtures/biocortex-retrieval-opt-in-experiment-plan-2026-06-11.json"
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0"
-    and .status == "store_contract_implemented"
+    and .status == "dry_run_planner_implemented"
     and .approval_state == "opt_in_implementation_authorized"
     and .runtime_adapter_approved == false
     and .default_search_order_change_allowed == false
@@ -72,6 +72,7 @@ jq -e '
     and .audit_shape_implemented == true
     and .read_only_status_surface_implemented == true
     and .store_contract_implemented == true
+    and .dry_run_planner_implemented == true
     and .ordering_behavior_connected == false
     and .requested_human_authorization_scope == "opt_in_experiment"
     and .requested_default_influence_scope == "none"
@@ -122,6 +123,23 @@ jq -e '
     and .implemented_store_contract.content_included == false
     and .implemented_store_contract.ordering_behavior_connected == false
     and .implemented_store_contract.may_change_search_order_now == false
+    and .implemented_dry_run_planner.cli == "agent-bridge bio-cortex retrieval-opt-in-dry-run"
+    and .implemented_dry_run_planner.mcp_tool == "biocortex_retrieval_opt_in_dry_run"
+    and .implemented_dry_run_planner.schema == "agent_bridge.biocortex_retrieval.opt_in_dry_run_plan.v0"
+    and .implemented_dry_run_planner.read_only == true
+    and .implemented_dry_run_planner.dry_run == true
+    and .implemented_dry_run_planner.calls_memory_search == false
+    and .implemented_dry_run_planner.runs_biocortex == false
+    and .implemented_dry_run_planner.registers_embedding_backend == false
+    and .implemented_dry_run_planner.raw_query_included == false
+    and .implemented_dry_run_planner.raw_keys_included == false
+    and .implemented_dry_run_planner.content_included == false
+    and .implemented_dry_run_planner.includes_store_contract == true
+    and (.implemented_dry_run_planner.planned_steps | index("baseline_fts_memory_search"))
+    and (.implemented_dry_run_planner.planned_steps | index("biocortex_side_signal"))
+    and (.implemented_dry_run_planner.planned_steps | index("return_order"))
+    and .implemented_dry_run_planner.ordering_behavior_connected == false
+    and .implemented_dry_run_planner.may_change_search_order_now == false
     and .fail_open.operator_disable == "return_baseline"
     and .human_review_boundary.authorization_decision_recorded == true
     and .human_review_boundary.requires_separate_human_decision_before_implementation == false
@@ -286,6 +304,8 @@ run cargo test -p ab-bridge --lib --no-default-features \
     opt_in_audit_ -- --nocapture --test-threads=1
 run cargo test -p ab-bridge --lib --no-default-features \
     biocortex_retrieval_opt_in_status_ -- --nocapture
+run cargo test -p ab-bridge --lib --no-default-features \
+    biocortex_retrieval_opt_in_dry_run_ -- --nocapture
 
 opt_in_status_disabled="$tmpdir/opt-in-status-disabled.json"
 run cargo run -p ab-bridge --no-default-features -- \
@@ -356,6 +376,80 @@ if grep -q 'verify ready secret query\|verify_ready_secret_key' "$opt_in_status_
     exit 1
 fi
 
+opt_in_dry_run_disabled="$tmpdir/opt-in-dry-run-disabled.json"
+run cargo run -p ab-bridge --no-default-features -- \
+    bio-cortex retrieval-opt-in-dry-run \
+    --mode semantic \
+    --per-call-opt-in \
+    --query "verify dry secret query text" \
+    --baseline-key verify_dry_secret_key_a \
+    --baseline-key verify_dry_secret_key_b \
+    --timeout-ms 777 \
+    --coverage-threshold 0.75 \
+    --json > "$opt_in_dry_run_disabled"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_dry_run_plan.v0"
+    and .read_only == true
+    and .dry_run == true
+    and .mode == "semantic"
+    and .mode_authorized == false
+    and .baseline_order.key_count == 2
+    and .baseline_order.raw_keys_included == false
+    and .baseline_order.content_included == false
+    and .planner_result.returned_order_source == "baseline"
+    and .planner_result.fallback_reason == "mode_not_authorized"
+    and .planned_side_signal.status == "not_run_dry_run"
+    and .planned_side_signal.timeout_ms == 777
+    and .planned_side_signal.coverage_threshold == 0.75
+    and .store_contract.schema == "agent_bridge.store.memory_search.biocortex_opt_in_contract.v0"
+    and .store_contract.returned_order_source == "baseline"
+    and .store_contract.fallback_reason == "mode_not_authorized"
+    and .store_contract.changes_memory_search_order == false
+    and .calls_memory_search == false
+    and .runs_biocortex == false
+    and .changes_memory_search_order == false
+    and .ordering_behavior_connected == false
+' "$opt_in_dry_run_disabled" >/dev/null
+if grep -q 'verify dry secret query text\|verify_dry_secret_key_a\|verify_dry_secret_key_b' "$opt_in_dry_run_disabled"; then
+    echo "opt-in dry-run leaked raw query/key data" >&2
+    exit 1
+fi
+
+opt_in_dry_run_ready="$tmpdir/opt-in-dry-run-ready.json"
+run env AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
+    cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
+    bio-cortex retrieval-opt-in-dry-run \
+    --mode fts \
+    --per-call-opt-in \
+    --query "verify dry ready query" \
+    --baseline-key verify_dry_ready_key \
+    --json > "$opt_in_dry_run_ready"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_dry_run_plan.v0"
+    and .read_only == true
+    and .dry_run == true
+    and .mode == "fts"
+    and .mode_authorized == true
+    and .gate.status == "ready_for_explicit_opt_in_experiment"
+    and .baseline_order.key_count == 1
+    and .planner_result.returned_order_source == "baseline"
+    and .planner_result.fallback_reason == "ordering_behavior_not_connected"
+    and any(.planner_result.blocking_reasons[]; . == "runtime_adapter_not_approved")
+    and .planned_side_signal.status == "not_run_dry_run"
+    and .store_contract.schema == "agent_bridge.store.memory_search.biocortex_opt_in_contract.v0"
+    and .store_contract.returned_order_source == "baseline"
+    and .store_contract.fallback_reason == "ordering_behavior_not_connected"
+    and .store_contract.changes_memory_search_order == false
+    and .calls_memory_search == false
+    and .runs_biocortex == false
+    and .changes_memory_search_order == false
+    and .ordering_behavior_connected == false
+' "$opt_in_dry_run_ready" >/dev/null
+if grep -q 'verify dry ready query\|verify_dry_ready_key' "$opt_in_dry_run_ready"; then
+    echo "opt-in dry-run ready leaked raw query/key data" >&2
+    exit 1
+fi
+
 run env AB_BIOCORTEX_RS="$biocortex_rs" CARGO_INCREMENTAL=0 \
     cargo run -p ab-bridge \
     --example biocortex_retrieval_shadow_acceptance \
@@ -397,7 +491,7 @@ jq -e '
     and .default_search_order_change_allowed == false
     and .implementation_allowed == true
     and .writes_approval == false
-    and .opt_in_plan.status == "store_contract_implemented"
+    and .opt_in_plan.status == "dry_run_planner_implemented"
     and .opt_in_plan.implemented_gate_skeleton.ordering_behavior_connected == false
     and .opt_in_plan.implemented_gate_skeleton.may_change_search_order_now == false
     and .opt_in_plan.implemented_audit_shape.ordering_behavior_connected == false
@@ -414,6 +508,17 @@ jq -e '
     and .opt_in_plan.implemented_store_contract.raw_keys_included == false
     and .opt_in_plan.implemented_store_contract.content_included == false
     and .opt_in_plan.implemented_store_contract.ordering_behavior_connected == false
+    and .opt_in_plan.implemented_dry_run_planner.mcp_tool == "biocortex_retrieval_opt_in_dry_run"
+    and .opt_in_plan.implemented_dry_run_planner.schema == "agent_bridge.biocortex_retrieval.opt_in_dry_run_plan.v0"
+    and .opt_in_plan.implemented_dry_run_planner.read_only == true
+    and .opt_in_plan.implemented_dry_run_planner.dry_run == true
+    and .opt_in_plan.implemented_dry_run_planner.calls_memory_search == false
+    and .opt_in_plan.implemented_dry_run_planner.runs_biocortex == false
+    and .opt_in_plan.implemented_dry_run_planner.raw_query_included == false
+    and .opt_in_plan.implemented_dry_run_planner.raw_keys_included == false
+    and .opt_in_plan.implemented_dry_run_planner.content_included == false
+    and .opt_in_plan.implemented_dry_run_planner.includes_store_contract == true
+    and .opt_in_plan.implemented_dry_run_planner.ordering_behavior_connected == false
     and .opt_in_plan.experiment.mode == "fts_only"
     and .evidence.runtime_boundary_proof.default_disabled_status == "runtime_disabled"
     and .evidence.runtime_boundary_proof.kill_switch_status == "operator_disabled"

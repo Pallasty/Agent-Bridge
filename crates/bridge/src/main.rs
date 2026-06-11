@@ -4,10 +4,11 @@ use ab_agent::{
 };
 use ab_bridge::biocortex_shadow::{
     biocortex_replay_comparison, biocortex_retrieval_opt_in_audit_report,
+    biocortex_retrieval_opt_in_dry_run_plan,
     biocortex_retrieval_runtime_approval_packet_preview, biocortex_shadow_digest,
     supported_benchmarks, BioCortexReplayComparisonOptions,
     BioCortexRetrievalApprovalPacketOptions, BioCortexRetrievalOptInAuditOptions,
-    BioCortexShadowOptions,
+    BioCortexRetrievalOptInDryRunOptions, BioCortexShadowOptions,
 };
 #[cfg(feature = "biocortex-retrieval-shadow")]
 use ab_bridge::biocortex_shadow::{
@@ -2499,6 +2500,36 @@ enum BioCortexOp {
         #[arg(long)]
         json: bool,
     },
+    /// Plan the future FTS opt-in ordering path without executing it.
+    ///
+    /// This is read-only observability. It does not call `memory_search`, run
+    /// BioCortex, include raw memory keys/content, or change retrieval order.
+    RetrievalOptInDryRun {
+        /// Retrieval mode under review. Only fts is authorized for opt-in work.
+        #[arg(long, default_value = "fts")]
+        mode: String,
+        /// Simulate the explicit per-call opt-in bit.
+        #[arg(long)]
+        per_call_opt_in: bool,
+        /// Optional query text. The output includes only a hash.
+        #[arg(long)]
+        query: Option<String>,
+        /// Optional baseline candidate key. May be repeated; output includes only count/hash.
+        #[arg(long = "baseline-key")]
+        baseline_keys: Vec<String>,
+        /// Whether the baseline memory_search result already exists for this dry run.
+        #[arg(long, default_value_t = true)]
+        baseline_completed: bool,
+        /// Future side-signal adapter timeout in milliseconds.
+        #[arg(long, default_value_t = 120_000)]
+        timeout_ms: u64,
+        /// Future minimum side-signal coverage threshold.
+        #[arg(long, default_value_t = 0.8)]
+        coverage_threshold: f64,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
     /// Preview the future runtime approval packet without approving anything.
     ///
     /// This is a review-preparation packet only. It never runs BioCortex,
@@ -4259,6 +4290,30 @@ async fn real_main() -> Result<()> {
                         side_signal_status: side_signal_status.clone(),
                         fallback_reason: fallback_reason.clone(),
                         latency_ms: *latency_ms,
+                    },
+                    *json,
+                )
+                .await
+            }
+            BioCortexOp::RetrievalOptInDryRun {
+                mode,
+                per_call_opt_in,
+                query,
+                baseline_keys,
+                baseline_completed,
+                timeout_ms,
+                coverage_threshold,
+                json,
+            } => {
+                run_biocortex_retrieval_opt_in_dry_run(
+                    BioCortexRetrievalOptInDryRunOptions {
+                        mode: mode.clone(),
+                        per_call_opt_in: *per_call_opt_in,
+                        query: query.clone(),
+                        baseline_keys: baseline_keys.clone(),
+                        baseline_completed: *baseline_completed,
+                        timeout_ms: *timeout_ms,
+                        coverage_threshold: *coverage_threshold,
                     },
                     *json,
                 )
@@ -8172,6 +8227,58 @@ async fn run_biocortex_retrieval_opt_in_status(
         "ordering_behavior_connected={} may_change_search_order_now={} changes_memory_search_order={}",
         shadow_json_display(payload.get("ordering_behavior_connected"), "false"),
         shadow_json_display(payload.get("may_change_search_order_now"), "false"),
+        shadow_json_display(payload.get("changes_memory_search_order"), "false")
+    );
+    Ok(())
+}
+
+async fn run_biocortex_retrieval_opt_in_dry_run(
+    opts: BioCortexRetrievalOptInDryRunOptions,
+    as_json: bool,
+) -> Result<()> {
+    let payload = biocortex_retrieval_opt_in_dry_run_plan(opts);
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# BioCortex retrieval opt-in dry run");
+    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
+    println!(
+        "mode={} mode_authorized={} dry_run={} implementation_stage={}",
+        shadow_json_display(payload.get("mode"), "-"),
+        shadow_json_display(payload.get("mode_authorized"), "false"),
+        shadow_json_display(payload.get("dry_run"), "true"),
+        shadow_json_display(payload.get("implementation_stage"), "-")
+    );
+    let baseline = payload.get("baseline_order").unwrap_or(&Value::Null);
+    println!(
+        "baseline_completed={} baseline_key_count={} baseline_hash={} raw_keys_included={} content_included={}",
+        shadow_json_display(baseline.get("completed"), "false"),
+        shadow_json_display(baseline.get("key_count"), "0"),
+        shadow_json_display(baseline.get("hash"), "-"),
+        shadow_json_display(baseline.get("raw_keys_included"), "false"),
+        shadow_json_display(baseline.get("content_included"), "false")
+    );
+    let planner = payload.get("planner_result").unwrap_or(&Value::Null);
+    println!(
+        "returned_order={} fallback_reason={} execution_ready={}",
+        shadow_json_display(planner.get("returned_order_source"), "baseline"),
+        shadow_json_display(planner.get("fallback_reason"), "-"),
+        shadow_json_display(planner.get("execution_ready"), "false")
+    );
+    let side_signal = payload.get("planned_side_signal").unwrap_or(&Value::Null);
+    println!(
+        "side_signal_status={} timeout_ms={} coverage_threshold={} runs_biocortex={}",
+        shadow_json_display(side_signal.get("status"), "-"),
+        shadow_json_display(side_signal.get("timeout_ms"), "-"),
+        shadow_json_display(side_signal.get("coverage_threshold"), "-"),
+        shadow_json_display(payload.get("runs_biocortex"), "false")
+    );
+    println!(
+        "calls_memory_search={} ordering_behavior_connected={} changes_memory_search_order={}",
+        shadow_json_display(payload.get("calls_memory_search"), "false"),
+        shadow_json_display(payload.get("ordering_behavior_connected"), "false"),
         shadow_json_display(payload.get("changes_memory_search_order"), "false")
     );
     Ok(())

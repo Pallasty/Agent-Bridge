@@ -24,6 +24,8 @@ pub const BIOCORTEX_RETRIEVAL_OPT_IN_GATE_SCHEMA: &str =
     "agent_bridge.biocortex_retrieval.opt_in_gate.v0";
 pub const BIOCORTEX_RETRIEVAL_OPT_IN_AUDIT_SCHEMA: &str =
     "agent_bridge.biocortex_retrieval.opt_in_call_audit.v0";
+pub const BIOCORTEX_RETRIEVAL_OPT_IN_DRY_RUN_SCHEMA: &str =
+    "agent_bridge.biocortex_retrieval.opt_in_dry_run_plan.v0";
 pub const BIOCORTEX_SUBSTRATE_REPLAY_PLAN_SCHEMA: &str =
     "agent_bridge.biocortex_substrate_replay_plan.v0";
 pub const BIOCORTEX_CHECKOUT_ENV: &str = "AB_BIOCORTEX_RS";
@@ -103,6 +105,17 @@ pub struct BioCortexRetrievalOptInAuditOptions {
     pub latency_ms: Option<f64>,
 }
 
+#[derive(Debug, Clone)]
+pub struct BioCortexRetrievalOptInDryRunOptions {
+    pub mode: String,
+    pub per_call_opt_in: bool,
+    pub query: Option<String>,
+    pub baseline_keys: Vec<String>,
+    pub baseline_completed: bool,
+    pub timeout_ms: u64,
+    pub coverage_threshold: f64,
+}
+
 impl Default for BioCortexShadowOptions {
     fn default() -> Self {
         Self {
@@ -150,6 +163,20 @@ impl Default for BioCortexRetrievalOptInAuditOptions {
             side_signal_status: None,
             fallback_reason: None,
             latency_ms: None,
+        }
+    }
+}
+
+impl Default for BioCortexRetrievalOptInDryRunOptions {
+    fn default() -> Self {
+        Self {
+            mode: "fts".to_string(),
+            per_call_opt_in: false,
+            query: None,
+            baseline_keys: Vec::new(),
+            baseline_completed: true,
+            timeout_ms: DEFAULT_TIMEOUT_MS,
+            coverage_threshold: 0.8,
         }
     }
 }
@@ -814,6 +841,151 @@ pub fn biocortex_retrieval_opt_in_audit_report(opts: BioCortexRetrievalOptInAudi
         "may_change_search_order_now": false,
         "ordering_behavior_connected": false,
         "changes_memory_search_order": false,
+        "boundary": retrieval_boundary_payload(),
+    })
+}
+
+pub fn biocortex_retrieval_opt_in_dry_run_plan(
+    opts: BioCortexRetrievalOptInDryRunOptions,
+) -> Value {
+    let mode = normalize_token(&opts.mode);
+    let mode = if mode.is_empty() {
+        "fts".to_string()
+    } else {
+        mode
+    };
+    let mode_authorized = mode == "fts";
+    let gate = biocortex_retrieval_opt_in_gate_report(opts.per_call_opt_in);
+    let baseline_key_count = opts.baseline_keys.len();
+    let baseline_order_hash = sha256_json(&json!({
+        "mode": &mode,
+        "baseline_keys": &opts.baseline_keys,
+    }));
+    let query_hash = opts
+        .query
+        .as_deref()
+        .map(str::trim)
+        .filter(|query| !query.is_empty())
+        .map(|query| sha256_json(&json!({"query": query})))
+        .unwrap_or_else(|| sha256_json(&Value::Null));
+    let coverage_threshold = opts.coverage_threshold.clamp(0.0, 1.0);
+    let store_contract = BioCortexRetrievalOptInRequest {
+        mode: mode.clone(),
+        per_call_opt_in: opts.per_call_opt_in,
+        compile_feature_enabled: cfg!(feature = "biocortex-retrieval-opt-in"),
+        runtime_enabled: env_truthy(BIOCORTEX_RETRIEVAL_OPT_IN_ENABLE_ENV),
+        operator_disabled: env_truthy(BIOCORTEX_RETRIEVAL_DISABLE_ENV),
+        baseline_completed: opts.baseline_completed,
+        baseline_key_count,
+        runtime_adapter_approved: false,
+        ordering_behavior_connected: false,
+    }
+    .evaluate()
+    .response_contract(false);
+    let fallback_reason = serde_json::to_value(store_contract.fallback_reason)
+        .unwrap_or(Value::Null)
+        .as_str()
+        .map(str::to_string)
+        .unwrap_or_else(|| "dry_run_planner_only".to_string());
+    let blocking_reasons = store_contract.decision.blocking_reasons.clone();
+    let store_contract_json = serde_json::to_value(&store_contract).unwrap_or(Value::Null);
+
+    json!({
+        "schema": BIOCORTEX_RETRIEVAL_OPT_IN_DRY_RUN_SCHEMA,
+        "generated_at": now_secs(),
+        "read_only": true,
+        "dry_run": true,
+        "implementation_stage": "dry_run_planner_only",
+        "authorization_scope": "opt_in_experiment",
+        "mode": mode,
+        "mode_authorized": mode_authorized,
+        "per_call_opt_in": {
+            "present": opts.per_call_opt_in,
+            "source": "explicit_call_argument_reserved",
+            "required": true,
+        },
+        "query_hash": query_hash,
+        "baseline_order": {
+            "completed": opts.baseline_completed,
+            "key_count": baseline_key_count,
+            "hash": baseline_order_hash,
+            "raw_keys_included": false,
+            "content_included": false,
+        },
+        "planned_steps": [
+            {
+                "id": "baseline_fts_memory_search",
+                "status": "not_run_dry_run",
+                "call_site": {
+                    "file": "crates/store/src/sqlite.rs",
+                    "line": 3067,
+                    "function": "SqliteStore::memory_search",
+                },
+                "would_run_in_real_ordering_path": mode_authorized,
+                "dry_run_calls_memory_search": false,
+                "output": "baseline_order",
+            },
+            {
+                "id": "candidate_projection",
+                "status": if opts.baseline_completed {
+                    "planned_after_baseline"
+                } else {
+                    "blocked_baseline_not_established"
+                },
+                "input": "baseline_order",
+                "output": "bounded_candidate_summaries",
+                "raw_keys_included_in_report": false,
+                "content_included_in_report": false,
+            },
+            {
+                "id": "biocortex_side_signal",
+                "status": "not_run_dry_run",
+                "checkout_env": BIOCORTEX_CHECKOUT_ENV,
+                "timeout_ms": opts.timeout_ms,
+                "coverage_threshold": round3(coverage_threshold),
+                "join_key": "candidate_key",
+                "runs_biocortex_now": false,
+                "raw_side_signal_included": false,
+            },
+            {
+                "id": "join_and_score",
+                "status": "not_run_dry_run",
+                "join_key": "candidate_key",
+                "candidate_recall_source": "baseline_only",
+                "can_add_new_candidates": false,
+            },
+            {
+                "id": "return_order",
+                "status": "baseline_returned_by_contract",
+                "returned_order_source": "baseline",
+                "fallback_reason": fallback_reason,
+            }
+        ],
+        "planned_side_signal": {
+            "status": "not_run_dry_run",
+            "checkout_env": BIOCORTEX_CHECKOUT_ENV,
+            "timeout_ms": opts.timeout_ms,
+            "coverage_threshold": round3(coverage_threshold),
+            "join_key": "candidate_key",
+            "raw_included": false,
+        },
+        "planner_result": {
+            "returned_order_source": "baseline",
+            "baseline_returned": true,
+            "fallback_reason": fallback_reason,
+            "blocking_reasons": serde_json::to_value(blocking_reasons).unwrap_or(Value::Null),
+            "execution_ready": false,
+        },
+        "gate": gate,
+        "store_contract": store_contract_json,
+        "calls_memory_search": false,
+        "runs_biocortex": false,
+        "registers_embedding_backend": false,
+        "changes_memory_search_order": false,
+        "default_search_order_change_allowed": false,
+        "default_calls_unchanged": true,
+        "ordering_behavior_connected": false,
+        "may_change_search_order_now": false,
         "boundary": retrieval_boundary_payload(),
     })
 }
@@ -2336,6 +2508,118 @@ mod tests {
                 .iter()
                 .any(|entry| entry.as_str() == Some(mode)));
         }
+    }
+
+    #[test]
+    fn opt_in_dry_run_plan_is_readonly_and_baseline_only() {
+        let _lock = ENV_LOCK.lock().expect("env lock");
+        let _guard = EnvRestore::capture(&[
+            BIOCORTEX_RETRIEVAL_OPT_IN_ENABLE_ENV,
+            BIOCORTEX_RETRIEVAL_DISABLE_ENV,
+        ]);
+        std::env::set_var(BIOCORTEX_RETRIEVAL_OPT_IN_ENABLE_ENV, "1");
+        std::env::remove_var(BIOCORTEX_RETRIEVAL_DISABLE_ENV);
+
+        let plan =
+            biocortex_retrieval_opt_in_dry_run_plan(BioCortexRetrievalOptInDryRunOptions {
+                mode: "fts".to_string(),
+                per_call_opt_in: true,
+                query: Some("secret dry run query".to_string()),
+                baseline_keys: vec!["secret_baseline_a".to_string()],
+                baseline_completed: true,
+                timeout_ms: 1234,
+                coverage_threshold: 0.81234,
+            });
+
+        assert_eq!(
+            plan["schema"],
+            json!(BIOCORTEX_RETRIEVAL_OPT_IN_DRY_RUN_SCHEMA)
+        );
+        assert_eq!(plan["read_only"], json!(true));
+        assert_eq!(plan["dry_run"], json!(true));
+        assert_eq!(plan["calls_memory_search"], json!(false));
+        assert_eq!(plan["runs_biocortex"], json!(false));
+        assert_eq!(plan["changes_memory_search_order"], json!(false));
+        assert_eq!(plan["baseline_order"]["key_count"], json!(1));
+        assert_eq!(plan["baseline_order"]["raw_keys_included"], json!(false));
+        assert_eq!(plan["baseline_order"]["content_included"], json!(false));
+        assert_eq!(
+            plan["planner_result"]["returned_order_source"],
+            json!("baseline")
+        );
+        assert_eq!(
+            plan["planned_side_signal"]["status"],
+            json!("not_run_dry_run")
+        );
+        assert_eq!(plan["planned_side_signal"]["timeout_ms"], json!(1234));
+        assert_eq!(plan["planned_side_signal"]["coverage_threshold"], json!(0.812));
+        assert_eq!(
+            plan["store_contract"]["schema"],
+            json!("agent_bridge.store.memory_search.biocortex_opt_in_contract.v0")
+        );
+        assert_eq!(
+            plan["store_contract"]["returned_order_source"],
+            json!("baseline")
+        );
+        assert_eq!(plan["store_contract"]["baseline_returned"], json!(true));
+        assert_eq!(
+            plan["store_contract"]["changes_memory_search_order"],
+            json!(false)
+        );
+
+        if cfg!(feature = "biocortex-retrieval-opt-in") {
+            assert_eq!(
+                plan["planner_result"]["fallback_reason"],
+                json!("ordering_behavior_not_connected")
+            );
+        } else {
+            assert_eq!(
+                plan["planner_result"]["fallback_reason"],
+                json!("compile_feature_disabled")
+            );
+        }
+
+        let serialized = serde_json::to_string(&plan).expect("plan json");
+        assert!(!serialized.contains("secret dry run query"));
+        assert!(!serialized.contains("secret_baseline_a"));
+    }
+
+    #[test]
+    fn opt_in_dry_run_plan_rejects_non_fts_without_raw_keys() {
+        let _lock = ENV_LOCK.lock().expect("env lock");
+        let _guard = EnvRestore::capture(&[
+            BIOCORTEX_RETRIEVAL_OPT_IN_ENABLE_ENV,
+            BIOCORTEX_RETRIEVAL_DISABLE_ENV,
+        ]);
+        std::env::set_var(BIOCORTEX_RETRIEVAL_OPT_IN_ENABLE_ENV, "1");
+        std::env::remove_var(BIOCORTEX_RETRIEVAL_DISABLE_ENV);
+
+        let plan =
+            biocortex_retrieval_opt_in_dry_run_plan(BioCortexRetrievalOptInDryRunOptions {
+                mode: "semantic".to_string(),
+                per_call_opt_in: true,
+                query: Some("another secret query".to_string()),
+                baseline_keys: vec!["secret_semantic_key".to_string()],
+                ..Default::default()
+            });
+
+        assert_eq!(plan["mode"], json!("semantic"));
+        assert_eq!(plan["mode_authorized"], json!(false));
+        assert_eq!(
+            plan["planner_result"]["fallback_reason"],
+            json!("mode_not_authorized")
+        );
+        assert_eq!(
+            plan["store_contract"]["decision"]["mode_authorized"],
+            json!(false)
+        );
+        assert_eq!(plan["calls_memory_search"], json!(false));
+        assert_eq!(plan["runs_biocortex"], json!(false));
+        assert_eq!(plan["changes_memory_search_order"], json!(false));
+
+        let serialized = serde_json::to_string(&plan).expect("plan json");
+        assert!(!serialized.contains("another secret query"));
+        assert!(!serialized.contains("secret_semantic_key"));
     }
 
     struct EnvRestore {
