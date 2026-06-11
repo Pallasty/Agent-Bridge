@@ -47,14 +47,16 @@ use tokio::process::Command as TokioCommand;
 use crate::biocortex_shadow::{
     biocortex_replay_comparison, biocortex_retrieval_opt_in_audit_report,
     biocortex_retrieval_opt_in_dry_run_plan, biocortex_retrieval_opt_in_execution_packet,
-    biocortex_retrieval_opt_in_review_packet, biocortex_shadow_digest, supported_benchmarks,
-    BioCortexReplayComparisonOptions, BioCortexRetrievalOptInAuditOptions,
+    biocortex_retrieval_opt_in_review_packet, biocortex_retrieval_opt_in_runtime_trial,
+    biocortex_shadow_digest, supported_benchmarks, BioCortexReplayComparisonOptions,
+    BioCortexRetrievalCandidate, BioCortexRetrievalOptInAuditOptions,
     BioCortexRetrievalOptInDryRunOptions, BioCortexRetrievalOptInExecutionPacketOptions,
-    BioCortexRetrievalOptInReviewPacketOptions, BioCortexShadowOptions, BIOCORTEX_CHECKOUT_ENV,
+    BioCortexRetrievalOptInReviewPacketOptions, BioCortexRetrievalOptInRuntimeTrialOptions,
+    BioCortexShadowOptions, BIOCORTEX_CHECKOUT_ENV,
 };
 #[cfg(feature = "biocortex-retrieval-shadow")]
 use crate::biocortex_shadow::{
-    biocortex_retrieval_shadow_report, BioCortexRetrievalCandidate, BioCortexRetrievalShadowOptions,
+    biocortex_retrieval_shadow_report, BioCortexRetrievalShadowOptions,
 };
 use crate::context_budget::{
     budget_recommendation, env_context_window, estimate_tokens_from_text, estimated_usage_tokens,
@@ -25541,6 +25543,167 @@ impl McpTool for BioCortexRetrievalOptInExecutionPacketTool {
 }
 
 // ===========================================================================
+//  biocortex_retrieval_opt_in_runtime_trial — baseline-preserving side signal
+// ===========================================================================
+
+/// Baseline-preserving BioCortex retrieval opt-in runtime trial. This tool
+/// accepts an execution packet plus explicit candidate rows and may run the
+/// external side-signal adapter when opt-in gates pass. It never calls
+/// `memory_search`, includes raw query/key/content data in output, registers an
+/// EmbeddingBackend, approves runtime influence, or changes returned order.
+pub struct BioCortexRetrievalOptInRuntimeTrialTool;
+
+impl BioCortexRetrievalOptInRuntimeTrialTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for BioCortexRetrievalOptInRuntimeTrialTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for BioCortexRetrievalOptInRuntimeTrialTool {
+    fn name(&self) -> &'static str {
+        "biocortex_retrieval_opt_in_runtime_trial"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Baseline-preserving BioCortex retrieval opt-in runtime \
+                 trial. Accepts an execution packet and explicit candidate rows, \
+                 runs the external side-signal adapter only when opt-in gates pass, \
+                 and returns a sanitized evidence packet. Does not call \
+                 memory_search, mutate memory, include raw query/keys/content, \
+                 register an EmbeddingBackend, approve runtime influence, or alter \
+                 retrieval order."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["execution_packet", "query", "candidates"],
+                "properties": {
+                    "execution_packet": {
+                        "type": "object",
+                        "description": "JSON object produced by biocortex_retrieval_opt_in_execution_packet. Unknown/raw fields are ignored."
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Query text for the side-signal trial. Output includes only a hash."
+                    },
+                    "candidates": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "key": { "type": "string" },
+                                "content": { "type": "string" }
+                            },
+                            "required": ["key", "content"]
+                        },
+                        "description": "Explicit baseline candidate rows. The tool never fetches memory_search results and does not echo keys/content."
+                    },
+                    "expected_key": {
+                        "type": "string",
+                        "description": "Optional expected key. Output includes only a hash and ranks."
+                    },
+                    "checkout_path": {
+                        "type": "string",
+                        "description": "Optional local biocortex-rs checkout. Defaults to AB_BIOCORTEX_RS, sibling checkout paths, then /tmp/biocortex-rs-ab-eval."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 600000,
+                        "default": 120000,
+                        "description": "External side-signal adapter timeout in milliseconds."
+                    },
+                    "coverage_threshold": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "default": 0.8,
+                        "description": "Minimum matched side-signal coverage for advisory availability."
+                    },
+                    "attempt_id": {
+                        "type": "string",
+                        "description": "Optional runtime trial attempt id for audit correlation."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Optional implementation commit under review."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let execution_packet = args
+            .get("execution_packet")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let query = args
+            .get("query")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let candidates_value = args
+            .get("candidates")
+            .cloned()
+            .unwrap_or_else(|| json!([]));
+        let candidates =
+            serde_json::from_value::<Vec<BioCortexRetrievalCandidate>>(candidates_value)
+                .map_err(|e| ab_core::Error::Backend(format!("parse candidates: {e}")))?;
+        let expected_key = args
+            .get("expected_key")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let checkout = args
+            .get("checkout_path")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from);
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(120_000);
+        let coverage_threshold = args
+            .get("coverage_threshold")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.8);
+        let attempt_id = args
+            .get("attempt_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let commit = args
+            .get("commit")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+
+        let payload =
+            biocortex_retrieval_opt_in_runtime_trial(BioCortexRetrievalOptInRuntimeTrialOptions {
+                execution_packet,
+                query,
+                candidates,
+                expected_key,
+                checkout,
+                timeout_ms,
+                coverage_threshold,
+                attempt_id,
+                commit,
+            })
+            .await;
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
 //   biocortex_retrieval_shadow — review-only retrieval side-signal report
 // ===========================================================================
 
@@ -36815,6 +36978,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Standard,
         Arc::new(BioCortexRetrievalOptInExecutionPacketTool::new()),
     );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexRetrievalOptInRuntimeTrialTool::new()),
+    );
     #[cfg(feature = "biocortex-retrieval-shadow")]
     reg_if(
         &mut reg,
@@ -45939,6 +46108,122 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert_eq!(v["calls_memory_search"], json!(false));
         assert_eq!(v["runs_biocortex"], json!(false));
         assert_eq!(v["changes_memory_search_order"], json!(false));
+        assert_eq!(v["may_implement_ordering_now"], json!(false));
+    }
+
+    #[test]
+    fn biocortex_retrieval_opt_in_runtime_trial_schema_is_baseline_preserving() {
+        let tool = BioCortexRetrievalOptInRuntimeTrialTool::new();
+        let schema = tool.schema();
+        assert_eq!(schema.name, "biocortex_retrieval_opt_in_runtime_trial");
+        assert!(schema.description.contains("Baseline-preserving"));
+        assert!(schema.description.contains("Does not call memory_search"));
+        assert!(schema.description.contains("alter retrieval order"));
+
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required");
+        assert!(required.contains(&json!("execution_packet")));
+        assert!(required.contains(&json!("query")));
+        assert!(required.contains(&json!("candidates")));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("execution_packet").is_some());
+        assert!(props.get("query").is_some());
+        assert!(props.get("candidates").is_some());
+        assert!(props.get("checkout_path").is_some());
+        assert!(props.get("include_raw").is_none());
+        assert!(props.get("mutate").is_none());
+        assert!(props.get("memory_search").is_none());
+        assert!(props.get("raw_content").is_none());
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_runtime_trial_sanitizes_inputs() {
+        let tool = BioCortexRetrievalOptInRuntimeTrialTool::new();
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(
+                json!({
+                    "execution_packet": {
+                        "schema": "agent_bridge.biocortex_retrieval.opt_in_execution_packet.v0",
+                        "read_only": true,
+                        "execution_packet": true,
+                        "approval_state": "not_approved",
+                        "runtime_adapter_approved": false,
+                        "attempt": {
+                            "mode": "fts",
+                            "per_call_opt_in": true
+                        },
+                        "input_contract": {
+                            "review_packet_included": false,
+                            "raw_query_included": false,
+                            "raw_keys_included": false,
+                            "content_included": false
+                        },
+                        "review_summary": {
+                            "baseline_order": {
+                                "completed": true,
+                                "key_count": 1
+                            }
+                        },
+                        "preflight": {
+                            "preflight_passed_for_baseline_only_contract": true,
+                            "execution_allowed": false
+                        },
+                        "calls_memory_search": false,
+                        "changes_memory_search_order": false,
+                        "ordering_behavior_connected": false
+                    },
+                    "query": "secret runtime trial query",
+                    "candidates": [
+                        {
+                            "key": "secret_runtime_trial_key",
+                            "content": "secret runtime trial content"
+                        }
+                    ],
+                    "expected_key": "secret_runtime_trial_key",
+                    "attempt_id": "trial-attempt",
+                    "commit": "test-commit"
+                }),
+                &ctx,
+            )
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains("secret runtime trial query"));
+        assert!(!text.contains("secret_runtime_trial_key"));
+        assert!(!text.contains("secret runtime trial content"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_runtime_trial.v0")
+        );
+        assert_eq!(v["read_only"], json!(true));
+        assert_eq!(v["runtime_trial"], json!(true));
+        assert_eq!(v["approval_state"], json!("not_approved"));
+        assert_eq!(v["calls_memory_search"], json!(false));
+        assert_eq!(v["changes_memory_search_order"], json!(false));
+        assert_eq!(v["returned_order"]["source"], json!("baseline"));
+        assert_eq!(v["returned_order"]["baseline_returned"], json!(true));
+        assert_eq!(v["input_contract"]["execution_packet_included"], json!(false));
+        assert_eq!(v["baseline_order"]["raw_keys_included"], json!(false));
+        assert_eq!(v["baseline_order"]["content_included"], json!(false));
+        assert_eq!(v["side_signal"]["raw_included"], json!(false));
+        assert_eq!(v["side_signal"]["candidate_keys_included"], json!(false));
+        assert_eq!(v["side_signal"]["content_included"], json!(false));
+        assert_eq!(v["advisory_result"]["raw_keys_included"], json!(false));
+        assert_eq!(v["advisory_result"]["content_included"], json!(false));
+        assert_eq!(v["runtime_adapter_approved"], json!(false));
         assert_eq!(v["may_implement_ordering_now"], json!(false));
     }
 

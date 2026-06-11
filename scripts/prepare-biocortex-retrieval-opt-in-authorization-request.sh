@@ -173,7 +173,7 @@ jq -e '
     and .default_search_order_change_allowed == false
     and .implementation_allowed == true
     and .writes_approval == false
-    and .opt_in_plan.status == "execution_packet_contract_implemented"
+    and .opt_in_plan.status == "runtime_trial_contract_implemented"
     and .opt_in_plan.approval_state == "opt_in_implementation_authorized"
     and .opt_in_plan.implemented_gate_skeleton.ordering_behavior_connected == false
     and .opt_in_plan.implemented_gate_skeleton.may_change_search_order_now == false
@@ -243,6 +243,35 @@ jq -e '
     and .opt_in_plan.implemented_execution_packet_contract.changes_memory_search_order == false
     and .opt_in_plan.implemented_execution_packet_contract.ordering_behavior_connected == false
     and .opt_in_plan.implemented_execution_packet_contract.may_implement_ordering_now == false
+    and .opt_in_plan.implemented_runtime_trial.cli == "agent-bridge bio-cortex retrieval-opt-in-runtime-trial"
+    and .opt_in_plan.implemented_runtime_trial.mcp_tool == "biocortex_retrieval_opt_in_runtime_trial"
+    and .opt_in_plan.implemented_runtime_trial.schema == "agent_bridge.biocortex_retrieval.opt_in_runtime_trial.v0"
+    and .opt_in_plan.implemented_runtime_trial.read_only == true
+    and .opt_in_plan.implemented_runtime_trial.runtime_trial == true
+    and .opt_in_plan.implemented_runtime_trial.execution_packet_included == false
+    and .opt_in_plan.implemented_runtime_trial.consumes_execution_packet_summary == true
+    and .opt_in_plan.implemented_runtime_trial.calls_memory_search == false
+    and .opt_in_plan.implemented_runtime_trial.runs_biocortex == true
+    and .opt_in_plan.implemented_runtime_trial.runs_biocortex_only_when_gate_ready == true
+    and .opt_in_plan.implemented_runtime_trial.writes_temp_corpus == true
+    and .opt_in_plan.implemented_runtime_trial.mutates_ab_memory == false
+    and .opt_in_plan.implemented_runtime_trial.registers_embedding_backend == false
+    and .opt_in_plan.implemented_runtime_trial.candidate_recall_source == "baseline_only"
+    and .opt_in_plan.implemented_runtime_trial.join_key == "candidate_key"
+    and .opt_in_plan.implemented_runtime_trial.can_add_new_candidates == false
+    and .opt_in_plan.implemented_runtime_trial.raw_query_included == false
+    and .opt_in_plan.implemented_runtime_trial.raw_keys_included == false
+    and .opt_in_plan.implemented_runtime_trial.content_included == false
+    and .opt_in_plan.implemented_runtime_trial.side_signal_raw_included == false
+    and .opt_in_plan.implemented_runtime_trial.returned_order_source == "baseline"
+    and .opt_in_plan.implemented_runtime_trial.baseline_returned == true
+    and .opt_in_plan.implemented_runtime_trial.changes_memory_search_order == false
+    and .opt_in_plan.implemented_runtime_trial.ordering_behavior_connected == false
+    and .opt_in_plan.implemented_runtime_trial.runtime_adapter_approved == false
+    and .opt_in_plan.implemented_runtime_trial.default_search_order_change_allowed == false
+    and .opt_in_plan.implemented_runtime_trial.approval_writes_allowed == false
+    and .opt_in_plan.implemented_runtime_trial.may_change_search_order_now == false
+    and .opt_in_plan.implemented_runtime_trial.may_implement_ordering_now == false
     and .opt_in_plan.experiment.mode == "fts_only"
     and .opt_in_plan.experiment.affected_call_site.function == "SqliteStore::memory_search"
     and .evidence.runtime_boundary_proof.default_disabled_status == "runtime_disabled"

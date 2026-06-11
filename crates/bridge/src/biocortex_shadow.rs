@@ -30,6 +30,8 @@ pub const BIOCORTEX_RETRIEVAL_OPT_IN_REVIEW_PACKET_SCHEMA: &str =
     "agent_bridge.biocortex_retrieval.opt_in_review_packet.v0";
 pub const BIOCORTEX_RETRIEVAL_OPT_IN_EXECUTION_PACKET_SCHEMA: &str =
     "agent_bridge.biocortex_retrieval.opt_in_execution_packet.v0";
+pub const BIOCORTEX_RETRIEVAL_OPT_IN_RUNTIME_TRIAL_SCHEMA: &str =
+    "agent_bridge.biocortex_retrieval.opt_in_runtime_trial.v0";
 pub const BIOCORTEX_SUBSTRATE_REPLAY_PLAN_SCHEMA: &str =
     "agent_bridge.biocortex_substrate_replay_plan.v0";
 pub const BIOCORTEX_CHECKOUT_ENV: &str = "AB_BIOCORTEX_RS";
@@ -137,6 +139,19 @@ pub struct BioCortexRetrievalOptInExecutionPacketOptions {
     pub commit: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct BioCortexRetrievalOptInRuntimeTrialOptions {
+    pub execution_packet: Value,
+    pub query: String,
+    pub candidates: Vec<BioCortexRetrievalCandidate>,
+    pub expected_key: Option<String>,
+    pub checkout: Option<PathBuf>,
+    pub timeout_ms: u64,
+    pub coverage_threshold: f64,
+    pub attempt_id: Option<String>,
+    pub commit: Option<String>,
+}
+
 impl Default for BioCortexShadowOptions {
     fn default() -> Self {
         Self {
@@ -219,6 +234,22 @@ impl Default for BioCortexRetrievalOptInExecutionPacketOptions {
         Self {
             review_packet: Value::Null,
             per_call_opt_in: false,
+            attempt_id: None,
+            commit: None,
+        }
+    }
+}
+
+impl Default for BioCortexRetrievalOptInRuntimeTrialOptions {
+    fn default() -> Self {
+        Self {
+            execution_packet: Value::Null,
+            query: String::new(),
+            candidates: Vec::new(),
+            expected_key: None,
+            checkout: None,
+            timeout_ms: DEFAULT_TIMEOUT_MS,
+            coverage_threshold: 0.8,
             attempt_id: None,
             commit: None,
         }
@@ -1506,6 +1537,338 @@ pub fn biocortex_retrieval_opt_in_execution_packet(
     })
 }
 
+pub async fn biocortex_retrieval_opt_in_runtime_trial(
+    opts: BioCortexRetrievalOptInRuntimeTrialOptions,
+) -> Value {
+    let packet = opts.execution_packet;
+    let schema_ok = value_str_eq(
+        packet.get("schema"),
+        BIOCORTEX_RETRIEVAL_OPT_IN_EXECUTION_PACKET_SCHEMA,
+    );
+    let read_only_ok = value_bool_is(packet.get("read_only"), true);
+    let execution_packet_ok = value_bool_is(packet.get("execution_packet"), true);
+    let preflight_ok = value_bool_is(
+        packet.pointer("/preflight/preflight_passed_for_baseline_only_contract"),
+        true,
+    );
+    let ordering_execution_disallowed =
+        value_bool_is(packet.pointer("/preflight/execution_allowed"), false);
+    let approval_state_not_approved = value_str_eq(packet.get("approval_state"), "not_approved");
+    let runtime_adapter_not_approved = value_bool_is(packet.get("runtime_adapter_approved"), false);
+    let calls_memory_search_false = value_bool_is(packet.get("calls_memory_search"), false);
+    let changes_order_false = value_bool_is(packet.get("changes_memory_search_order"), false);
+    let ordering_connected_false = value_bool_is(packet.get("ordering_behavior_connected"), false);
+    let raw_packet_absent = value_bool_is(
+        packet.pointer("/input_contract/review_packet_included"),
+        false,
+    );
+    let raw_query_absent =
+        value_bool_is(packet.pointer("/input_contract/raw_query_included"), false);
+    let raw_keys_absent =
+        value_bool_is(packet.pointer("/input_contract/raw_keys_included"), false);
+    let content_absent = value_bool_is(packet.pointer("/input_contract/content_included"), false);
+
+    let mode = packet
+        .pointer("/attempt/mode")
+        .and_then(Value::as_str)
+        .unwrap_or("fts")
+        .to_string();
+    let per_call_opt_in = packet
+        .pointer("/attempt/per_call_opt_in")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let mode_authorized = normalize_token(&mode) == "fts";
+    let baseline_completed = packet
+        .pointer("/review_summary/baseline_order/completed")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let packet_baseline_key_count = packet
+        .pointer("/review_summary/baseline_order/key_count")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+
+    let query = opts.query.trim().to_string();
+    let candidates = opts
+        .candidates
+        .into_iter()
+        .filter(|candidate| !candidate.key.trim().is_empty())
+        .collect::<Vec<_>>();
+    let candidate_count = candidates.len();
+    let candidate_count_matches_packet = packet_baseline_key_count == candidate_count;
+    let coverage_threshold = opts.coverage_threshold.clamp(0.0, 1.0);
+    let timeout_ms = opts.timeout_ms.clamp(1_000, 600_000);
+    let gate = biocortex_retrieval_opt_in_gate_report(per_call_opt_in);
+    let gate_ready = gate
+        .get("ready_for_explicit_opt_in_experiment")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let query_present = !query.is_empty();
+    let candidates_present = candidate_count > 0;
+
+    let store_contract = BioCortexRetrievalOptInRequest {
+        mode: mode.clone(),
+        per_call_opt_in,
+        compile_feature_enabled: cfg!(feature = "biocortex-retrieval-opt-in"),
+        runtime_enabled: env_truthy(BIOCORTEX_RETRIEVAL_OPT_IN_ENABLE_ENV),
+        operator_disabled: env_truthy(BIOCORTEX_RETRIEVAL_DISABLE_ENV),
+        baseline_completed,
+        baseline_key_count: candidate_count,
+        runtime_adapter_approved: false,
+        ordering_behavior_connected: false,
+    }
+    .evaluate()
+    .response_contract(false);
+    let store_contract_json = serde_json::to_value(&store_contract).unwrap_or(Value::Null);
+
+    let mut blockers = Vec::new();
+    push_string_blocker(&mut blockers, schema_ok, "execution_packet_schema_invalid");
+    push_string_blocker(&mut blockers, read_only_ok, "execution_packet_not_read_only");
+    push_string_blocker(
+        &mut blockers,
+        execution_packet_ok,
+        "execution_packet_flag_missing",
+    );
+    push_string_blocker(&mut blockers, preflight_ok, "execution_packet_preflight_failed");
+    push_string_blocker(
+        &mut blockers,
+        ordering_execution_disallowed,
+        "execution_packet_allows_ordering_execution",
+    );
+    push_string_blocker(
+        &mut blockers,
+        approval_state_not_approved,
+        "execution_packet_approval_state_changed",
+    );
+    push_string_blocker(
+        &mut blockers,
+        runtime_adapter_not_approved,
+        "execution_packet_runtime_adapter_approved",
+    );
+    push_string_blocker(
+        &mut blockers,
+        calls_memory_search_false,
+        "execution_packet_claims_memory_search",
+    );
+    push_string_blocker(
+        &mut blockers,
+        changes_order_false,
+        "execution_packet_claims_order_change",
+    );
+    push_string_blocker(
+        &mut blockers,
+        ordering_connected_false,
+        "execution_packet_claims_ordering_connected",
+    );
+    push_string_blocker(&mut blockers, raw_packet_absent, "raw_execution_packet_included");
+    push_string_blocker(&mut blockers, raw_query_absent, "raw_query_included");
+    push_string_blocker(&mut blockers, raw_keys_absent, "raw_keys_included");
+    push_string_blocker(&mut blockers, content_absent, "content_included");
+    push_string_blocker(&mut blockers, mode_authorized, "mode_not_authorized");
+    push_string_blocker(&mut blockers, baseline_completed, "baseline_not_completed");
+    push_string_blocker(
+        &mut blockers,
+        candidate_count_matches_packet,
+        "candidate_count_mismatch",
+    );
+    push_string_blocker(&mut blockers, query_present, "query_missing");
+    push_string_blocker(&mut blockers, candidates_present, "candidates_missing");
+    push_string_blocker(&mut blockers, gate_ready, "opt_in_gate_not_ready");
+
+    let side_signal_trial_allowed = blockers.is_empty();
+    let baseline = if query_present && candidates_present {
+        retrieval_baseline_scores(&query, &candidates)
+    } else {
+        Vec::new()
+    };
+    let baseline_order_keys = baseline
+        .iter()
+        .map(|row| row.key.clone())
+        .collect::<Vec<_>>();
+    let baseline_order_hash = sha256_json(&json!({
+        "mode": &mode,
+        "baseline_keys": &baseline_order_keys,
+    }));
+    let query_hash = if query_present {
+        sha256_json(&json!({"query": &query}))
+    } else {
+        sha256_json(&Value::Null)
+    };
+
+    let mut side_status = if side_signal_trial_allowed {
+        "not_run".to_string()
+    } else {
+        "not_run_preflight_blocked".to_string()
+    };
+    let mut side_attempted = false;
+    let mut side_row_count = 0usize;
+    let mut matched_candidate_count = 0usize;
+    let mut latency_ms = 0.0f64;
+    let mut side_by_key = BTreeMap::new();
+    let mut evidence_by_key = BTreeMap::new();
+
+    if side_signal_trial_allowed {
+        side_attempted = true;
+        let started = Instant::now();
+        match run_retrieval_side_signal(
+            &query,
+            &candidates,
+            opts.expected_key.as_deref(),
+            opts.checkout.as_deref(),
+            timeout_ms,
+        )
+        .await
+        {
+            Ok(run) => {
+                latency_ms = started.elapsed().as_secs_f64() * 1000.0;
+                side_row_count = run.rows.len();
+                for row in run.rows {
+                    if row.query_id != "q_runtime_shadow" {
+                        continue;
+                    }
+                    if candidates
+                        .iter()
+                        .any(|candidate| candidate.key == row.candidate_key)
+                    {
+                        side_by_key.insert(row.candidate_key.clone(), row.score);
+                        if let Some(evidence) = row.evidence {
+                            evidence_by_key.insert(row.candidate_key, evidence);
+                        }
+                    }
+                }
+                matched_candidate_count = side_by_key.len();
+                let coverage = matched_candidate_count as f64 / candidate_count.max(1) as f64;
+                side_status = if coverage >= coverage_threshold {
+                    "ok".to_string()
+                } else {
+                    "coverage_below_threshold".to_string()
+                };
+            }
+            Err(error) => {
+                latency_ms = started.elapsed().as_secs_f64() * 1000.0;
+                side_status = safe_side_signal_error_status(&error);
+            }
+        }
+    }
+
+    let side_signal_coverage = matched_candidate_count as f64 / candidate_count.max(1) as f64;
+    let alpha = retrieval_alpha_config();
+    let advisory = advisory_order_summary(
+        &mode,
+        &baseline,
+        &side_by_key,
+        &evidence_by_key,
+        &alpha,
+        opts.expected_key.as_deref(),
+        side_status == "ok",
+    );
+    let fallback_reason = if !side_signal_trial_allowed {
+        blockers
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "preflight_blocked".to_string())
+    } else if side_status != "ok" {
+        side_status.clone()
+    } else {
+        "ordering_behavior_not_connected".to_string()
+    };
+
+    json!({
+        "schema": BIOCORTEX_RETRIEVAL_OPT_IN_RUNTIME_TRIAL_SCHEMA,
+        "generated_at": now_secs(),
+        "read_only": true,
+        "runtime_trial": true,
+        "implementation_stage": "baseline_preserving_runtime_trial",
+        "authorization_scope": "opt_in_experiment",
+        "purpose": "Run a protected side-signal trial for explicit candidates while returning baseline order.",
+        "attempt": {
+            "attempt_id": required_or_value(opts.attempt_id),
+            "commit": required_or_value(opts.commit),
+            "mode": mode,
+            "per_call_opt_in": per_call_opt_in,
+        },
+        "input_contract": {
+            "source_schema": packet.get("schema").cloned().unwrap_or(Value::Null),
+            "requires_schema": BIOCORTEX_RETRIEVAL_OPT_IN_EXECUTION_PACKET_SCHEMA,
+            "execution_packet_included": false,
+            "unknown_fields_ignored": true,
+            "raw_query_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+        },
+        "query_hash": query_hash,
+        "baseline_order": {
+            "completed": baseline_completed,
+            "key_count": candidate_count,
+            "hash": baseline_order_hash,
+            "top_key_hash": baseline
+                .first()
+                .map(|row| sha256_json(&json!({"candidate_key": &row.key})))
+                .map(Value::String)
+                .unwrap_or(Value::Null),
+            "raw_keys_included": false,
+            "content_included": false,
+        },
+        "runtime_preflight": {
+            "side_signal_trial_allowed": side_signal_trial_allowed,
+            "blockers": blockers,
+            "execution_packet_preflight_passed": preflight_ok,
+            "gate_ready": gate_ready,
+            "candidate_count_matches_packet": candidate_count_matches_packet,
+            "ordering_execution_allowed": false,
+        },
+        "protected_adapter_contract": {
+            "candidate_recall_source": "baseline_only",
+            "can_add_new_candidates": false,
+            "join_key": "candidate_key",
+            "calls_memory_search": false,
+            "writes_temp_corpus": side_attempted,
+            "mutates_ab_memory": false,
+            "registers_embedding_backend": false,
+            "raw_query_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "side_signal_raw_included": false,
+        },
+        "side_signal": {
+            "attempted": side_attempted,
+            "status": side_status,
+            "timeout_ms": timeout_ms,
+            "coverage_threshold": round3(coverage_threshold),
+            "row_count": side_row_count,
+            "matched_candidate_count": matched_candidate_count,
+            "coverage": round3(side_signal_coverage),
+            "latency_ms": round3(latency_ms),
+            "raw_included": false,
+            "checkout_path_included": false,
+            "candidate_keys_included": false,
+            "content_included": false,
+        },
+        "advisory_result": advisory,
+        "returned_order": {
+            "source": "baseline",
+            "baseline_returned": true,
+            "hash_matches_baseline": true,
+            "fallback_reason": fallback_reason,
+        },
+        "gate": gate,
+        "store_contract": store_contract_json,
+        "approval_state": "not_approved",
+        "runtime_adapter_approved": false,
+        "approval_writes_allowed": false,
+        "writes_approval": false,
+        "calls_memory_search": false,
+        "runs_biocortex": side_attempted,
+        "registers_embedding_backend": false,
+        "changes_memory_search_order": false,
+        "default_search_order_change_allowed": false,
+        "ordering_behavior_connected": false,
+        "may_change_search_order_now": false,
+        "may_implement_ordering_now": false,
+        "default_calls_unchanged": true,
+        "boundary": retrieval_runtime_trial_boundary_payload(side_attempted),
+    })
+}
+
 fn retrieval_status_payload(status: &str, reason: &str, gates: Value) -> Value {
     json!({
         "schema": BIOCORTEX_RETRIEVAL_SHADOW_SCHEMA,
@@ -1518,6 +1881,90 @@ fn retrieval_status_payload(status: &str, reason: &str, gates: Value) -> Value {
         "boundary": retrieval_boundary_payload(),
         "gates": gates,
     })
+}
+
+fn advisory_order_summary(
+    mode: &str,
+    baseline: &[RetrievalBaselineScore],
+    side_by_key: &BTreeMap<String, f32>,
+    evidence_by_key: &BTreeMap<String, String>,
+    alpha: &RetrievalAlphaConfig,
+    expected_key: Option<&str>,
+    available: bool,
+) -> Value {
+    let mut advisory_rows = baseline
+        .iter()
+        .map(|row| {
+            let side_score = side_by_key.get(&row.key).copied();
+            let advisory_score = row.score + alpha.alpha * side_score.unwrap_or(0.0);
+            (row.key.clone(), advisory_score)
+        })
+        .collect::<Vec<_>>();
+    advisory_rows.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let advisory_order_keys = advisory_rows
+        .iter()
+        .map(|(key, _)| key.clone())
+        .collect::<Vec<_>>();
+    let advisory_rank_by_key = advisory_rows
+        .iter()
+        .enumerate()
+        .map(|(idx, (key, _))| (key.clone(), idx + 1))
+        .collect::<BTreeMap<_, _>>();
+    let expected = expected_key
+        .map(|key| {
+            let baseline_rank = baseline.iter().find(|row| row.key == key).map(|row| row.rank);
+            let advisory_rank = advisory_rank_by_key.get(key).copied();
+            json!({
+                "key_hash": sha256_json(&json!({"candidate_key": key})),
+                "baseline_rank": baseline_rank,
+                "advisory_rank": advisory_rank,
+                "regressed": match (baseline_rank, advisory_rank) {
+                    (Some(baseline_rank), Some(advisory_rank)) => advisory_rank > baseline_rank,
+                    _ => false,
+                },
+            })
+        })
+        .unwrap_or(Value::Null);
+    let evidence_count = evidence_by_key.len();
+
+    json!({
+        "available": available,
+        "used_for_return_order": false,
+        "alpha_policy": alpha.policy,
+        "blend_alpha": alpha.alpha,
+        "explicit_alpha": alpha.explicit_alpha,
+        "order_hash": if available {
+            Value::String(sha256_json(&json!({
+                "mode": mode,
+                "advisory_keys": advisory_order_keys,
+            })))
+        } else {
+            Value::Null
+        },
+        "top_key_hash": if available {
+            advisory_rows
+                .first()
+                .map(|(key, _)| sha256_json(&json!({"candidate_key": key})))
+                .map(Value::String)
+                .unwrap_or(Value::Null)
+        } else {
+            Value::Null
+        },
+        "matched_side_signal_count": side_by_key.len(),
+        "evidence_count": evidence_count,
+        "expected": expected,
+        "raw_keys_included": false,
+        "content_included": false,
+        "side_signal_raw_included": false,
+    })
+}
+
+fn safe_side_signal_error_status(error: &Value) -> String {
+    error
+        .get("status")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| "side_signal_unavailable".to_string())
 }
 
 fn retrieval_fail_open_report(
@@ -1875,6 +2322,26 @@ fn retrieval_boundary_payload() -> Value {
         "links_biocortex_into_ab_runtime": false,
         "registers_embedding_backend": false,
         "calls_set_default_backend": false,
+        "mutates_ab_memory": false,
+        "writes_embeddings": false,
+        "writes_coactivation": false,
+        "writes_graph_edges": false,
+        "changes_memory_search_order": false,
+        "default_search_order_changed": false,
+        "runtime_adapter_approved": false,
+    })
+}
+
+fn retrieval_runtime_trial_boundary_payload(runs_external_side_signal: bool) -> Value {
+    json!({
+        "mode": "retrieval_opt_in_runtime_trial_baseline_preserving",
+        "read_only": true,
+        "runs_external_side_signal": runs_external_side_signal,
+        "writes_temp_corpus": runs_external_side_signal,
+        "links_biocortex_into_ab_runtime": false,
+        "registers_embedding_backend": false,
+        "calls_set_default_backend": false,
+        "calls_memory_search": false,
         "mutates_ab_memory": false,
         "writes_embeddings": false,
         "writes_coactivation": false,
@@ -3413,6 +3880,167 @@ mod tests {
         let serialized = serde_json::to_string(&packet).expect("packet json");
         assert!(!serialized.contains("bad review raw query"));
         assert!(!serialized.contains("bad_review_raw_key"));
+    }
+
+    #[tokio::test]
+    async fn opt_in_runtime_trial_blocks_without_feature_and_sanitizes_inputs() {
+        let _lock = ENV_LOCK.lock().expect("env lock");
+        let _guard = EnvRestore::capture(&[
+            BIOCORTEX_RETRIEVAL_OPT_IN_ENABLE_ENV,
+            BIOCORTEX_RETRIEVAL_DISABLE_ENV,
+        ]);
+        std::env::set_var(BIOCORTEX_RETRIEVAL_OPT_IN_ENABLE_ENV, "1");
+        std::env::remove_var(BIOCORTEX_RETRIEVAL_DISABLE_ENV);
+
+        let plan = biocortex_retrieval_opt_in_dry_run_plan(BioCortexRetrievalOptInDryRunOptions {
+            mode: "fts".to_string(),
+            per_call_opt_in: true,
+            query: Some("runtime trial dry-run secret query".to_string()),
+            baseline_keys: vec!["runtime_trial_secret_key".to_string()],
+            ..Default::default()
+        });
+        let review =
+            biocortex_retrieval_opt_in_review_packet(BioCortexRetrievalOptInReviewPacketOptions {
+                dry_run_plan: plan,
+                reviewer: Some("codex".to_string()),
+                commit: Some("test-commit".to_string()),
+                ..Default::default()
+            });
+        let execution_packet = biocortex_retrieval_opt_in_execution_packet(
+            BioCortexRetrievalOptInExecutionPacketOptions {
+                review_packet: review,
+                per_call_opt_in: true,
+                attempt_id: Some("attempt-runtime".to_string()),
+                commit: Some("test-commit".to_string()),
+            },
+        );
+        let trial =
+            biocortex_retrieval_opt_in_runtime_trial(BioCortexRetrievalOptInRuntimeTrialOptions {
+                execution_packet,
+                query: "runtime trial live secret query".to_string(),
+                candidates: vec![BioCortexRetrievalCandidate {
+                    key: "runtime_trial_secret_key".to_string(),
+                    content: "runtime trial secret content".to_string(),
+                }],
+                expected_key: Some("runtime_trial_secret_key".to_string()),
+                attempt_id: Some("trial-attempt".to_string()),
+                commit: Some("test-commit".to_string()),
+                ..Default::default()
+            })
+            .await;
+
+        assert_eq!(
+            trial["schema"],
+            json!(BIOCORTEX_RETRIEVAL_OPT_IN_RUNTIME_TRIAL_SCHEMA)
+        );
+        assert_eq!(trial["read_only"], json!(true));
+        assert_eq!(trial["runtime_trial"], json!(true));
+        assert_eq!(trial["approval_state"], json!("not_approved"));
+        assert_eq!(trial["runtime_adapter_approved"], json!(false));
+        assert_eq!(trial["calls_memory_search"], json!(false));
+        assert_eq!(trial["changes_memory_search_order"], json!(false));
+        assert_eq!(trial["returned_order"]["source"], json!("baseline"));
+        assert_eq!(trial["returned_order"]["baseline_returned"], json!(true));
+        assert_eq!(trial["baseline_order"]["raw_keys_included"], json!(false));
+        assert_eq!(trial["baseline_order"]["content_included"], json!(false));
+        assert_eq!(
+            trial["advisory_result"]["raw_keys_included"],
+            json!(false)
+        );
+        assert_eq!(trial["advisory_result"]["content_included"], json!(false));
+
+        if cfg!(feature = "biocortex-retrieval-opt-in") {
+            assert_eq!(
+                trial["runtime_preflight"]["side_signal_trial_allowed"],
+                json!(true)
+            );
+        } else {
+            assert_eq!(
+                trial["runtime_preflight"]["side_signal_trial_allowed"],
+                json!(false)
+            );
+            assert_eq!(trial["side_signal"]["attempted"], json!(false));
+            assert_eq!(trial["runs_biocortex"], json!(false));
+            let blockers = trial["runtime_preflight"]["blockers"]
+                .as_array()
+                .expect("blockers");
+            assert!(blockers.contains(&json!("opt_in_gate_not_ready")));
+        }
+
+        let serialized = serde_json::to_string(&trial).expect("trial json");
+        assert!(!serialized.contains("runtime trial dry-run secret query"));
+        assert!(!serialized.contains("runtime trial live secret query"));
+        assert!(!serialized.contains("runtime_trial_secret_key"));
+        assert!(!serialized.contains("runtime trial secret content"));
+    }
+
+    #[tokio::test]
+    async fn opt_in_runtime_trial_rejects_bad_execution_packet_without_echoing_raw_fields() {
+        let trial =
+            biocortex_retrieval_opt_in_runtime_trial(BioCortexRetrievalOptInRuntimeTrialOptions {
+                execution_packet: json!({
+                    "schema": BIOCORTEX_RETRIEVAL_OPT_IN_EXECUTION_PACKET_SCHEMA,
+                    "read_only": true,
+                    "execution_packet": true,
+                    "approval_state": "approved",
+                    "runtime_adapter_approved": true,
+                    "query": "bad execution raw query",
+                    "candidate_keys": ["bad_execution_raw_key"],
+                    "attempt": {
+                        "mode": "fts",
+                        "per_call_opt_in": true
+                    },
+                    "input_contract": {
+                        "review_packet_included": true,
+                        "raw_query_included": true,
+                        "raw_keys_included": true,
+                        "content_included": true
+                    },
+                    "review_summary": {
+                        "baseline_order": {
+                            "completed": true,
+                            "key_count": 1
+                        }
+                    },
+                    "preflight": {
+                        "preflight_passed_for_baseline_only_contract": false,
+                        "execution_allowed": true
+                    },
+                    "calls_memory_search": true,
+                    "changes_memory_search_order": true,
+                    "ordering_behavior_connected": true
+                }),
+                query: "bad runtime trial raw query".to_string(),
+                candidates: vec![BioCortexRetrievalCandidate {
+                    key: "bad_execution_raw_key".to_string(),
+                    content: "bad runtime trial raw content".to_string(),
+                }],
+                ..Default::default()
+            })
+            .await;
+
+        assert_eq!(
+            trial["runtime_preflight"]["side_signal_trial_allowed"],
+            json!(false)
+        );
+        let blockers = trial["runtime_preflight"]["blockers"]
+            .as_array()
+            .expect("blockers");
+        assert!(blockers.contains(&json!("execution_packet_preflight_failed")));
+        assert!(blockers.contains(&json!("execution_packet_allows_ordering_execution")));
+        assert!(blockers.contains(&json!("execution_packet_approval_state_changed")));
+        assert!(blockers.contains(&json!("raw_query_included")));
+        assert!(blockers.contains(&json!("execution_packet_claims_memory_search")));
+        assert_eq!(trial["side_signal"]["attempted"], json!(false));
+        assert_eq!(trial["runs_biocortex"], json!(false));
+        assert_eq!(trial["calls_memory_search"], json!(false));
+        assert_eq!(trial["changes_memory_search_order"], json!(false));
+
+        let serialized = serde_json::to_string(&trial).expect("trial json");
+        assert!(!serialized.contains("bad execution raw query"));
+        assert!(!serialized.contains("bad runtime trial raw query"));
+        assert!(!serialized.contains("bad_execution_raw_key"));
+        assert!(!serialized.contains("bad runtime trial raw content"));
     }
 
     struct EnvRestore {

@@ -5,15 +5,17 @@ use ab_agent::{
 use ab_bridge::biocortex_shadow::{
     biocortex_replay_comparison, biocortex_retrieval_opt_in_audit_report,
     biocortex_retrieval_opt_in_dry_run_plan, biocortex_retrieval_opt_in_execution_packet,
-    biocortex_retrieval_opt_in_review_packet, biocortex_retrieval_runtime_approval_packet_preview,
-    biocortex_shadow_digest, supported_benchmarks, BioCortexReplayComparisonOptions,
-    BioCortexRetrievalApprovalPacketOptions, BioCortexRetrievalOptInAuditOptions,
+    biocortex_retrieval_opt_in_review_packet, biocortex_retrieval_opt_in_runtime_trial,
+    biocortex_retrieval_runtime_approval_packet_preview, biocortex_shadow_digest,
+    supported_benchmarks, BioCortexReplayComparisonOptions, BioCortexRetrievalApprovalPacketOptions,
+    BioCortexRetrievalCandidate, BioCortexRetrievalOptInAuditOptions,
     BioCortexRetrievalOptInDryRunOptions, BioCortexRetrievalOptInExecutionPacketOptions,
-    BioCortexRetrievalOptInReviewPacketOptions, BioCortexShadowOptions,
+    BioCortexRetrievalOptInReviewPacketOptions, BioCortexRetrievalOptInRuntimeTrialOptions,
+    BioCortexShadowOptions,
 };
 #[cfg(feature = "biocortex-retrieval-shadow")]
 use ab_bridge::biocortex_shadow::{
-    biocortex_retrieval_shadow_report, BioCortexRetrievalCandidate, BioCortexRetrievalShadowOptions,
+    biocortex_retrieval_shadow_report, BioCortexRetrievalShadowOptions,
 };
 use ab_bridge::seed_substrate as ab_seed_bridge;
 use ab_bridge::shadow_cortex as ab_shadow_cortex;
@@ -2578,6 +2580,47 @@ enum BioCortexOp {
         #[arg(long)]
         json: bool,
     },
+    /// Run a baseline-preserving opt-in side-signal trial from an execution packet.
+    ///
+    /// This consumes an execution packet and explicit candidates. It may run
+    /// the external BioCortex side-signal adapter when opt-in gates pass, but
+    /// it never calls `memory_search` or changes returned retrieval order.
+    RetrievalOptInRuntimeTrial {
+        /// JSON file produced by `retrieval-opt-in-execution-packet --json`.
+        #[arg(long = "execution-packet-json")]
+        execution_packet_json: PathBuf,
+        /// Query text to evaluate. May also be provided in --input-json.
+        #[arg(long)]
+        query: Option<String>,
+        /// Candidate JSON file: either `{"query": "...", "candidates": [...]}` or a candidate array.
+        #[arg(long)]
+        input_json: Option<PathBuf>,
+        /// Candidate key/content JSON array file, used when --input-json is absent.
+        #[arg(long)]
+        candidates_json: Option<PathBuf>,
+        /// Optional expected key for labeled review/regression reporting.
+        #[arg(long)]
+        expected_key: Option<String>,
+        /// Local biocortex-rs checkout. Defaults to AB_BIOCORTEX_RS, sibling
+        /// checkout paths, then /tmp/biocortex-rs-ab-eval.
+        #[arg(long)]
+        checkout: Option<PathBuf>,
+        /// External side-signal adapter timeout in milliseconds.
+        #[arg(long, default_value_t = 120_000)]
+        timeout_ms: u64,
+        /// Minimum side-signal coverage threshold for an advisory result.
+        #[arg(long, default_value_t = 0.8)]
+        coverage_threshold: f64,
+        /// Optional runtime trial attempt id for audit correlation.
+        #[arg(long)]
+        attempt_id: Option<String>,
+        /// Implementation commit under review.
+        #[arg(long)]
+        commit: Option<String>,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
     /// Preview the future runtime approval packet without approving anything.
     ///
     /// This is a review-preparation packet only. It never runs BioCortex,
@@ -4400,6 +4443,40 @@ async fn real_main() -> Result<()> {
                     BioCortexRetrievalOptInExecutionPacketOptions {
                         review_packet: Value::Null,
                         per_call_opt_in: *per_call_opt_in,
+                        attempt_id: attempt_id.clone(),
+                        commit: commit.clone(),
+                    },
+                    *json,
+                )
+                .await
+            }
+            BioCortexOp::RetrievalOptInRuntimeTrial {
+                execution_packet_json,
+                query,
+                input_json,
+                candidates_json,
+                expected_key,
+                checkout,
+                timeout_ms,
+                coverage_threshold,
+                attempt_id,
+                commit,
+                json,
+            } => {
+                run_biocortex_retrieval_opt_in_runtime_trial(
+                    execution_packet_json,
+                    query.clone(),
+                    input_json.as_deref(),
+                    candidates_json.as_deref(),
+                    expected_key.clone(),
+                    BioCortexRetrievalOptInRuntimeTrialOptions {
+                        execution_packet: Value::Null,
+                        query: String::new(),
+                        candidates: Vec::new(),
+                        expected_key: None,
+                        checkout: checkout.clone(),
+                        timeout_ms: *timeout_ms,
+                        coverage_threshold: *coverage_threshold,
                         attempt_id: attempt_id.clone(),
                         commit: commit.clone(),
                     },
@@ -8496,6 +8573,109 @@ async fn run_biocortex_retrieval_opt_in_execution_packet(
         shadow_json_display(execution.get("baseline_returned"), "true"),
         shadow_json_display(execution.get("calls_memory_search_now"), "false"),
         shadow_json_display(execution.get("runs_biocortex_now"), "false")
+    );
+    Ok(())
+}
+
+async fn run_biocortex_retrieval_opt_in_runtime_trial(
+    execution_packet_json: &std::path::Path,
+    query: Option<String>,
+    input_json: Option<&std::path::Path>,
+    candidates_json: Option<&std::path::Path>,
+    expected_key: Option<String>,
+    mut opts: BioCortexRetrievalOptInRuntimeTrialOptions,
+    as_json: bool,
+) -> Result<()> {
+    let packet_body = std::fs::read_to_string(execution_packet_json).map_err(|e| {
+        anyhow::anyhow!("read execution-packet JSON at {execution_packet_json:?}: {e}")
+    })?;
+    opts.execution_packet = serde_json::from_str(&packet_body).map_err(|e| {
+        anyhow::anyhow!("parse execution-packet JSON at {execution_packet_json:?}: {e}")
+    })?;
+
+    let mut resolved_query = query;
+    let mut resolved_expected = expected_key;
+    let candidates = if let Some(path) = input_json {
+        let body = std::fs::read_to_string(path)
+            .map_err(|e| anyhow::anyhow!("read BioCortex trial input at {path:?}: {e}"))?;
+        let value: Value = serde_json::from_str(&body)
+            .map_err(|e| anyhow::anyhow!("parse BioCortex trial input at {path:?}: {e}"))?;
+        if resolved_query.is_none() {
+            resolved_query = value
+                .get("query")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+        }
+        if resolved_expected.is_none() {
+            resolved_expected = value
+                .get("expected_key")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+        }
+        let candidate_value = value
+            .get("candidates")
+            .cloned()
+            .unwrap_or_else(|| value.clone());
+        serde_json::from_value::<Vec<BioCortexRetrievalCandidate>>(candidate_value)
+            .map_err(|e| anyhow::anyhow!("parse candidates in {path:?}: {e}"))?
+    } else if let Some(path) = candidates_json {
+        let body = std::fs::read_to_string(path)
+            .map_err(|e| anyhow::anyhow!("read BioCortex candidates at {path:?}: {e}"))?;
+        serde_json::from_str::<Vec<BioCortexRetrievalCandidate>>(&body)
+            .map_err(|e| anyhow::anyhow!("parse BioCortex candidates at {path:?}: {e}"))?
+    } else {
+        anyhow::bail!("provide --input-json or --candidates-json");
+    };
+    opts.query = resolved_query
+        .map(|q| q.trim().to_string())
+        .filter(|q| !q.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("provide --query or query in --input-json"))?;
+    opts.candidates = candidates;
+    opts.expected_key = resolved_expected;
+
+    let payload = biocortex_retrieval_opt_in_runtime_trial(opts).await;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# BioCortex retrieval opt-in runtime trial");
+    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
+    println!(
+        "runtime_trial={} approval_state={} returned_order={}",
+        shadow_json_display(payload.get("runtime_trial"), "true"),
+        shadow_json_display(payload.get("approval_state"), "not_approved"),
+        shadow_json_display(
+            payload
+                .get("returned_order")
+                .and_then(|value| value.get("source")),
+            "baseline"
+        )
+    );
+    let preflight = payload.get("runtime_preflight").unwrap_or(&Value::Null);
+    println!(
+        "trial_allowed={} blockers={} gate_ready={}",
+        shadow_json_display(preflight.get("side_signal_trial_allowed"), "false"),
+        preflight
+            .get("blockers")
+            .and_then(Value::as_array)
+            .map(|items| items.len().to_string())
+            .unwrap_or_else(|| "0".to_string()),
+        shadow_json_display(preflight.get("gate_ready"), "false")
+    );
+    let side_signal = payload.get("side_signal").unwrap_or(&Value::Null);
+    println!(
+        "side_signal_status={} attempted={} coverage={} latency_ms={}",
+        shadow_json_display(side_signal.get("status"), "-"),
+        shadow_json_display(side_signal.get("attempted"), "false"),
+        shadow_json_display(side_signal.get("coverage"), "0"),
+        shadow_json_display(side_signal.get("latency_ms"), "0")
+    );
+    println!(
+        "calls_memory_search={} runs_biocortex={} changes_memory_search_order={}",
+        shadow_json_display(payload.get("calls_memory_search"), "false"),
+        shadow_json_display(payload.get("runs_biocortex"), "false"),
+        shadow_json_display(payload.get("changes_memory_search_order"), "false")
     );
     Ok(())
 }

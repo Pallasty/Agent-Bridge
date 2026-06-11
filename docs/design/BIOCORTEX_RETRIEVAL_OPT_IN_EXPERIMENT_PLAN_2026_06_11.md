@@ -7,8 +7,9 @@ Date: 2026-06-11
 Human authorization recorded for `opt_in_experiment` implementation work only.
 Gate skeleton, audit shape, read-only status surface, store-level
 request/response contract, read-only dry-run planner, read-only review packet
-consumer, and read-only execution packet contract implemented. Ordering behavior
-is not implemented and not approved.
+consumer, read-only execution packet contract, and baseline-preserving runtime
+trial surface implemented. Ordering behavior is not implemented and not
+approved.
 
 ```json
 {
@@ -24,6 +25,7 @@ is not implemented and not approved.
   "dry_run_planner_implemented": true,
   "review_packet_consumer_implemented": true,
   "execution_packet_contract_implemented": true,
+  "runtime_trial_implemented": true,
   "ordering_behavior_connected": false
 }
 ```
@@ -182,6 +184,23 @@ The execution packet is still a preflight contract only. It does not run the
 baseline search, run BioCortex, register an embedding backend, or change
 ordering behavior.
 
+Slice 8 landed a baseline-preserving runtime trial surface:
+
+- CLI: `agent-bridge bio-cortex retrieval-opt-in-runtime-trial`;
+- MCP tool: `biocortex_retrieval_opt_in_runtime_trial`;
+- packet schema: `agent_bridge.biocortex_retrieval.opt_in_runtime_trial.v0`;
+- consumes an execution packet and copies only safe summary fields;
+- accepts explicit query/candidate rows and does not call `memory_search`;
+- runs the external BioCortex side-signal adapter only when the opt-in gate,
+  execution-packet preflight, and candidate-count checks pass;
+- joins side-signal rows by candidate key and reports only hashed/order-count
+  summaries;
+- always returns baseline order and keeps `changes_memory_search_order=false`.
+
+The runtime trial is evidence generation only. It may run the side-signal
+adapter for an explicitly supplied candidate set, but it still does not approve
+runtime influence, register an embedding backend, or connect ordering behavior.
+
 ## Fail-Open Rules
 
 The experiment must return the baseline list for:
@@ -241,6 +260,11 @@ Future implementation review must include tests proving:
 - execution packet contract consumes review packets without including raw
   review payload, query, keys, or content;
 - execution packet contract keeps execution disallowed and baseline returned;
+- runtime trial runs side-signal only after execution-packet preflight and
+  explicit opt-in gates pass;
+- runtime trial returns baseline and does not echo query, keys, or content;
+- runtime trial fails open for missing checkout, timeout, low coverage, malformed
+  rows, missing opt-in, and operator disable;
 - audit telemetry includes baseline order, experimental order, fallback reason,
   latency, and authorization scope.
 
