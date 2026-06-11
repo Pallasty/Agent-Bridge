@@ -11,6 +11,7 @@ reviewer=""
 requester="codex"
 runtime_proof_summary=""
 runtime_trial_review_packet=""
+order_diff_packet=""
 plan_fixture="docs/design/fixtures/biocortex-retrieval-opt-in-experiment-plan-2026-06-11.json"
 memory_key=""
 forum_decision_post_id=""
@@ -30,6 +31,7 @@ Flags:
   --runtime-proof-summary PATH   proof-summary.json from prove-biocortex-retrieval-runtime-boundary.sh.
   --runtime-trial-review-packet PATH
                                  JSON from retrieval-opt-in-runtime-trial-review-packet.
+  --order-diff-packet PATH       Optional JSON from retrieval-opt-in-order-diff-packet.
   --plan-fixture PATH            Opt-in experiment plan fixture.
   --memory-key KEY               Memory key to cite in generated templates.
   --forum-decision-post-id ID    Forum post id to cite in generated templates.
@@ -44,6 +46,7 @@ while [[ $# -gt 0 ]]; do
         --requester) requester="$2"; shift 2 ;;
         --runtime-proof-summary) runtime_proof_summary="$2"; shift 2 ;;
         --runtime-trial-review-packet) runtime_trial_review_packet="$2"; shift 2 ;;
+        --order-diff-packet) order_diff_packet="$2"; shift 2 ;;
         --plan-fixture) plan_fixture="$2"; shift 2 ;;
         --memory-key) memory_key="$2"; shift 2 ;;
         --forum-decision-post-id) forum_decision_post_id="$2"; shift 2 ;;
@@ -68,12 +71,22 @@ if [[ ! -f "$runtime_trial_review_packet" ]]; then
     echo "runtime trial review packet not found: $runtime_trial_review_packet" >&2
     exit 2
 fi
+if [[ -n "$order_diff_packet" && ! -f "$order_diff_packet" ]]; then
+    echo "order diff packet not found: $order_diff_packet" >&2
+    exit 2
+fi
 if [[ ! -f "$plan_fixture" ]]; then
     echo "opt-in plan fixture not found: $plan_fixture" >&2
     exit 2
 fi
 
 mkdir -p "$out_dir"
+
+order_diff_packet_for_jq="$order_diff_packet"
+if [[ -z "$order_diff_packet_for_jq" ]]; then
+    order_diff_packet_for_jq="$out_dir/.order-diff-packet-absent.json"
+    printf 'null\n' > "$order_diff_packet_for_jq"
+fi
 
 target_host="$(hostname 2>/dev/null || printf 'unknown-host')"
 branch="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || printf '<required>')"
@@ -90,6 +103,7 @@ jq -n \
     --slurpfile plan "$plan_fixture" \
     --slurpfile proof "$runtime_proof_summary" \
     --slurpfile trial_review "$runtime_trial_review_packet" \
+    --slurpfile order_diff "$order_diff_packet_for_jq" \
     --arg generated_at "$generated_at" \
     --arg target_host "$target_host" \
     --arg branch "$branch" \
@@ -112,6 +126,7 @@ jq -n \
         default_search_order_change_allowed: false,
         implementation_allowed: $plan_implementation_allowed,
         writes_approval: false,
+        accepts_optional_order_diff_packet: true,
         requester: $requester,
         reviewer: (if ($reviewer | length) == 0 then "<required>" else $reviewer end),
         target_host: $target_host,
@@ -164,6 +179,67 @@ jq -n \
                 ordering_behavior_connected: $trial_review[0].ordering_behavior_connected,
                 may_implement_ordering_now: $trial_review[0].may_implement_ordering_now
             },
+            order_diff_packet:
+                if $order_diff[0] == null then
+                    {
+                        provided: false,
+                        required: false,
+                        note: "optional_hash_only_evidence_not_provided"
+                    }
+                else
+                    {
+                        provided: true,
+                        required: false,
+                        schema: $order_diff[0].schema,
+                        read_only: $order_diff[0].read_only,
+                        order_diff_packet: $order_diff[0].order_diff_packet,
+                        source_packet_consumer: $order_diff[0].source_packet_consumer,
+                        comparison_scope: $order_diff[0].comparison_scope,
+                        source_kind: $order_diff[0].review_target.source_kind,
+                        diff_ready: $order_diff[0].boundary_check.diff_ready,
+                        violation_count: ($order_diff[0].boundary_check.violations | length),
+                        order_hashes_comparable:
+                            $order_diff[0].order_comparison.hash_diff.order_hashes_comparable,
+                        order_hash_changed:
+                            $order_diff[0].order_comparison.hash_diff.order_hash_changed,
+                        top_key_hashes_comparable:
+                            $order_diff[0].order_comparison.hash_diff.top_key_hashes_comparable,
+                        top_key_changed:
+                            $order_diff[0].order_comparison.hash_diff.top_key_changed,
+                        expected_rank_delta_advisory_minus_baseline:
+                            $order_diff[0].order_comparison.expected_key_rank.rank_delta_advisory_minus_baseline,
+                        expected_rank_direction:
+                            $order_diff[0].order_comparison.expected_key_rank.direction,
+                        expected_regressed:
+                            $order_diff[0].order_comparison.expected_key_rank.regressed,
+                        returned_order_source:
+                            $order_diff[0].order_comparison.returned_order.source,
+                        baseline_returned:
+                            $order_diff[0].order_comparison.returned_order.baseline_returned,
+                        hash_matches_baseline:
+                            $order_diff[0].order_comparison.returned_order.hash_matches_baseline,
+                        actual_return_order_changed:
+                            $order_diff[0].order_comparison.returned_order.actual_return_order_changed,
+                        top_k_overlap:
+                            $order_diff[0].order_comparison.unavailable_metrics.top_k_overlap,
+                        per_key_movements:
+                            $order_diff[0].order_comparison.unavailable_metrics.per_key_movements,
+                        raw_query_included: $order_diff[0].input_contract.raw_query_included,
+                        raw_keys_included: $order_diff[0].input_contract.raw_keys_included,
+                        content_included: $order_diff[0].input_contract.content_included,
+                        side_signal_raw_included: $order_diff[0].input_contract.side_signal_raw_included,
+                        approval_state: $order_diff[0].approval_state,
+                        runtime_adapter_approved: $order_diff[0].runtime_adapter_approved,
+                        approval_writes_allowed: $order_diff[0].approval_writes_allowed,
+                        writes_approval: $order_diff[0].writes_approval,
+                        calls_memory_search: $order_diff[0].calls_memory_search,
+                        runs_biocortex: $order_diff[0].runs_biocortex,
+                        registers_embedding_backend: $order_diff[0].registers_embedding_backend,
+                        changes_memory_search_order: $order_diff[0].changes_memory_search_order,
+                        ordering_behavior_connected: $order_diff[0].ordering_behavior_connected,
+                        may_implement_ordering_now: $order_diff[0].may_implement_ordering_now
+                    }
+                end,
             docs: {
                 runtime_proof: "docs/design/BIOCORTEX_RETRIEVAL_RUNTIME_PROOF_2026_06_11.md",
                 default_influence_contract: "docs/design/BIOCORTEX_RETRIEVAL_DEFAULT_INFLUENCE_CONTRACT_2026_06_11.md",
@@ -217,9 +293,11 @@ jq -e '
     and .default_search_order_change_allowed == false
     and .implementation_allowed == true
     and .writes_approval == false
-    and .opt_in_plan.status == "order_diff_packet_implemented"
+    and .accepts_optional_order_diff_packet == true
+    and .opt_in_plan.status == "authorization_request_order_diff_evidence_implemented"
     and .opt_in_plan.approval_state == "opt_in_implementation_authorized"
     and .opt_in_plan.order_diff_packet_implemented == true
+    and .opt_in_plan.authorization_request_order_diff_evidence_implemented == true
     and .opt_in_plan.implemented_gate_skeleton.ordering_behavior_connected == false
     and .opt_in_plan.implemented_gate_skeleton.may_change_search_order_now == false
     and .opt_in_plan.implemented_audit_shape.schema == "agent_bridge.biocortex_retrieval.opt_in_call_audit.v0"
@@ -393,6 +471,43 @@ jq -e '
     and .evidence.runtime_trial_review_packet.changes_memory_search_order == false
     and .evidence.runtime_trial_review_packet.ordering_behavior_connected == false
     and .evidence.runtime_trial_review_packet.may_implement_ordering_now == false
+    and (
+        .evidence.order_diff_packet.provided == false
+        or (
+            .evidence.order_diff_packet.required == false
+            and .evidence.order_diff_packet.schema == "agent_bridge.biocortex_retrieval.opt_in_order_diff_packet.v0"
+            and .evidence.order_diff_packet.read_only == true
+            and .evidence.order_diff_packet.order_diff_packet == true
+            and .evidence.order_diff_packet.source_packet_consumer == true
+            and .evidence.order_diff_packet.source_kind == "runtime_trial_review_packet"
+            and .evidence.order_diff_packet.diff_ready == true
+            and .evidence.order_diff_packet.violation_count == 0
+            and .evidence.order_diff_packet.order_hashes_comparable == true
+            and (.evidence.order_diff_packet.order_hash_changed | type) == "boolean"
+            and .evidence.order_diff_packet.top_key_hashes_comparable == true
+            and (.evidence.order_diff_packet.top_key_changed | type) == "boolean"
+            and .evidence.order_diff_packet.returned_order_source == "baseline"
+            and .evidence.order_diff_packet.baseline_returned == true
+            and .evidence.order_diff_packet.hash_matches_baseline == true
+            and .evidence.order_diff_packet.actual_return_order_changed == false
+            and .evidence.order_diff_packet.top_k_overlap == "not_computed_no_raw_order_keys"
+            and .evidence.order_diff_packet.per_key_movements == "not_computed_no_raw_order_keys"
+            and .evidence.order_diff_packet.raw_query_included == false
+            and .evidence.order_diff_packet.raw_keys_included == false
+            and .evidence.order_diff_packet.content_included == false
+            and .evidence.order_diff_packet.side_signal_raw_included == false
+            and .evidence.order_diff_packet.approval_state == "not_approved"
+            and .evidence.order_diff_packet.runtime_adapter_approved == false
+            and .evidence.order_diff_packet.approval_writes_allowed == false
+            and .evidence.order_diff_packet.writes_approval == false
+            and .evidence.order_diff_packet.calls_memory_search == false
+            and .evidence.order_diff_packet.runs_biocortex == false
+            and .evidence.order_diff_packet.registers_embedding_backend == false
+            and .evidence.order_diff_packet.changes_memory_search_order == false
+            and .evidence.order_diff_packet.ordering_behavior_connected == false
+            and .evidence.order_diff_packet.may_implement_ordering_now == false
+        )
+    )
     and .current_permissions.may_implement_opt_in_experiment == true
     and .current_permissions.may_change_default_retrieval_order == false
     and .requested_permission_if_human_authorizes.may_affect_only_explicitly_opted_in_fts_calls == true
@@ -419,6 +534,7 @@ This packet is not an approval writer. It reflects:
 - default_search_order_change_allowed=false
 - implementation_allowed=$plan_implementation_allowed
 - runtime trial review packet included=true
+- order diff packet included=$(if [[ -n "$order_diff_packet" ]]; then printf 'true'; else printf 'false'; fi)
 
 The allowed implementation scope is only an FTS-only, per-call opt-in
 experiment behind a feature/runtime gate. It does not authorize default
@@ -434,6 +550,7 @@ runtime_adapter_approved=false, default_search_order_change_allowed=false, and
 implementation_allowed=$plan_implementation_allowed.
 
 Runtime trial review packet evidence included: true.
+Order diff packet evidence included: $(if [[ -n "$order_diff_packet" ]]; then printf 'true'; else printf 'false'; fi).
 
 Requested scope: opt_in_experiment.
 Not requested: default retrieval influence, hybrid influence, semantic influence.
@@ -455,7 +572,8 @@ Files:
 
 This bundle is review preparation only. It is not approval state and it does
 not change retrieval behavior. It includes runtime trial review evidence, but
-that evidence does not approve runtime influence or ordering behavior.
+that evidence does not approve runtime influence or ordering behavior. When
+provided, order-diff evidence is hash-only and optional.
 EOF
 
 printf 'authorization_request_bundle=%s\n' "$out_dir"

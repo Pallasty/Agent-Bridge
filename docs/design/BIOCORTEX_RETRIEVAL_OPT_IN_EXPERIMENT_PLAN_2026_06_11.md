@@ -10,7 +10,9 @@ request/response contract, read-only dry-run planner, read-only review packet
 consumer, read-only execution packet contract, and baseline-preserving runtime
 trial surface, read-only runtime trial review packet, and authorization request
 runtime-trial-review evidence hook, and hash-only order-diff review packet
-implemented. Ordering behavior is not implemented and not approved.
+implemented. The authorization request bundle can now optionally include
+hash-only order-diff evidence. Ordering behavior is not implemented and not
+approved.
 
 ```json
 {
@@ -30,6 +32,7 @@ implemented. Ordering behavior is not implemented and not approved.
   "runtime_trial_review_packet_implemented": true,
   "authorization_request_runtime_trial_review_evidence_implemented": true,
   "order_diff_packet_implemented": true,
+  "authorization_request_order_diff_evidence_implemented": true,
   "ordering_behavior_connected": false
 }
 ```
@@ -259,6 +262,27 @@ The order-diff packet answers whether the advisory ordering would differ from
 the default baseline ordering, but it remains review evidence only. It does not
 authorize runtime influence and does not connect ordering behavior.
 
+Slice 12 extended the authorization request bundle with optional order-diff
+evidence:
+
+- script: `scripts/prepare-biocortex-retrieval-opt-in-authorization-request.sh`;
+- optional input:
+  `agent_bridge.biocortex_retrieval.opt_in_order_diff_packet.v0`;
+- request evidence path: `evidence.order_diff_packet`;
+- preserves backward compatibility when no order-diff packet is supplied;
+- copies only safe booleans and rank summary fields: diff readiness,
+  comparable hash flags, changed/not-changed flags, expected-key rank delta,
+  returned-order source, and unavailable-metric sentinels;
+- does not copy raw order keys, raw query, candidate content, raw side-signal
+  rows, or the source packet;
+- keeps `approval_state=not_approved`, `runtime_adapter_approved=false`,
+  `calls_memory_search=false`, `runs_biocortex=false`, and
+  `may_implement_ordering_now=false`.
+
+Including order-diff evidence in the request bundle helps review the observed
+gap between default baseline order and advisory order. It still does not
+approve runtime influence, enable an adapter, or connect ordering behavior.
+
 ## Fail-Open Rules
 
 The experiment must return the baseline list for:
@@ -333,6 +357,8 @@ Future implementation review must include tests proving:
   order keys or per-key movement rows;
 - order-diff packet does not call `memory_search`, run BioCortex, approve
   runtime influence, or change returned order;
+- authorization request bundle can optionally include order-diff evidence
+  without including raw order keys or approving runtime influence;
 - audit telemetry includes baseline order, experimental order, fallback reason,
   latency, and authorization scope.
 

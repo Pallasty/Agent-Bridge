@@ -14,6 +14,8 @@
   "commit_under_review": "<required>",
   "requires_runtime_boundary_proof": true,
   "requires_runtime_trial_review_packet": true,
+  "requires_order_diff_packet": false,
+  "accepts_optional_order_diff_packet": true,
   "requires_opt_in_plan": "docs/design/fixtures/biocortex-retrieval-opt-in-experiment-plan-2026-06-11.json",
   "evidence": {
     "runtime_trial_review_packet": {
@@ -26,6 +28,28 @@
       "side_signal_raw_included": false,
       "approval_state": "not_approved",
       "runtime_adapter_approved": false,
+      "changes_memory_search_order": false,
+      "ordering_behavior_connected": false
+    },
+    "order_diff_packet": {
+      "required": false,
+      "required_schema_when_provided": "agent_bridge.biocortex_retrieval.opt_in_order_diff_packet.v0",
+      "required_diff_ready_when_provided": true,
+      "required_violation_count_when_provided": 0,
+      "raw_query_included": false,
+      "raw_keys_included": false,
+      "content_included": false,
+      "side_signal_raw_included": false,
+      "raw_order_keys_included": false,
+      "copies_raw_hashes": false,
+      "reports_order_hash_changed": true,
+      "reports_top_key_changed": true,
+      "reports_expected_rank_delta": true,
+      "actual_return_order_changed": false,
+      "approval_state": "not_approved",
+      "runtime_adapter_approved": false,
+      "calls_memory_search": false,
+      "runs_biocortex": false,
       "changes_memory_search_order": false,
       "ordering_behavior_connected": false
     }
@@ -43,7 +67,8 @@
     "may_affect_only_explicitly_opted_in_fts_calls": true,
     "must_keep_operator_disable": "AB_BIOCORTEX_RETRIEVAL_DISABLE",
     "requires_post_implementation_review_before_use": true,
-    "requires_runtime_trial_review_packet": true
+    "requires_runtime_trial_review_packet": true,
+    "accepts_optional_order_diff_packet": true
   },
   "not_requested": [
     "default_retrieval_influence_fts",

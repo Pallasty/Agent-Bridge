@@ -63,7 +63,7 @@ grep -q 'Authorization for one mode does not imply authorization for another mod
 opt_in_plan="docs/design/fixtures/biocortex-retrieval-opt-in-experiment-plan-2026-06-11.json"
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0"
-    and .status == "order_diff_packet_implemented"
+    and .status == "authorization_request_order_diff_evidence_implemented"
     and .approval_state == "opt_in_implementation_authorized"
     and .runtime_adapter_approved == false
     and .default_search_order_change_allowed == false
@@ -79,6 +79,7 @@ jq -e '
     and .runtime_trial_review_packet_implemented == true
     and .authorization_request_runtime_trial_review_evidence_implemented == true
     and .order_diff_packet_implemented == true
+    and .authorization_request_order_diff_evidence_implemented == true
     and .ordering_behavior_connected == false
     and .requested_human_authorization_scope == "opt_in_experiment"
     and .requested_default_influence_scope == "none"
@@ -293,6 +294,36 @@ jq -e '
     and .implemented_order_diff_packet.approval_writes_allowed == false
     and .implemented_order_diff_packet.writes_approval == false
     and .implemented_order_diff_packet.may_implement_ordering_now == false
+    and .implemented_authorization_request_order_diff_evidence.script == "scripts/prepare-biocortex-retrieval-opt-in-authorization-request.sh"
+    and .implemented_authorization_request_order_diff_evidence.request_schema == "agent_bridge.biocortex_retrieval.opt_in_authorization_request.v0"
+    and .implemented_authorization_request_order_diff_evidence.optional_input == "agent_bridge.biocortex_retrieval.opt_in_order_diff_packet.v0"
+    and .implemented_authorization_request_order_diff_evidence.evidence_path == "evidence.order_diff_packet"
+    and .implemented_authorization_request_order_diff_evidence.required == false
+    and .implemented_authorization_request_order_diff_evidence.read_only == true
+    and .implemented_authorization_request_order_diff_evidence.order_diff_packet_included == false
+    and .implemented_authorization_request_order_diff_evidence.raw_query_included == false
+    and .implemented_authorization_request_order_diff_evidence.raw_keys_included == false
+    and .implemented_authorization_request_order_diff_evidence.content_included == false
+    and .implemented_authorization_request_order_diff_evidence.side_signal_raw_included == false
+    and .implemented_authorization_request_order_diff_evidence.requires_diff_ready_when_provided == true
+    and .implemented_authorization_request_order_diff_evidence.requires_zero_boundary_violations_when_provided == true
+    and .implemented_authorization_request_order_diff_evidence.hash_only_summary == true
+    and .implemented_authorization_request_order_diff_evidence.copies_raw_hashes == false
+    and .implemented_authorization_request_order_diff_evidence.copies_raw_order_keys == false
+    and .implemented_authorization_request_order_diff_evidence.reports_order_hash_changed == true
+    and .implemented_authorization_request_order_diff_evidence.reports_top_key_changed == true
+    and .implemented_authorization_request_order_diff_evidence.reports_expected_rank_delta == true
+    and .implemented_authorization_request_order_diff_evidence.approval_state == "not_approved"
+    and .implemented_authorization_request_order_diff_evidence.runtime_adapter_approved == false
+    and .implemented_authorization_request_order_diff_evidence.approval_writes_allowed == false
+    and .implemented_authorization_request_order_diff_evidence.writes_approval == false
+    and .implemented_authorization_request_order_diff_evidence.calls_memory_search == false
+    and .implemented_authorization_request_order_diff_evidence.runs_biocortex == false
+    and .implemented_authorization_request_order_diff_evidence.registers_embedding_backend == false
+    and .implemented_authorization_request_order_diff_evidence.changes_memory_search_order == false
+    and .implemented_authorization_request_order_diff_evidence.ordering_behavior_connected == false
+    and .implemented_authorization_request_order_diff_evidence.actual_return_order_changed == false
+    and .implemented_authorization_request_order_diff_evidence.may_implement_ordering_now == false
     and .fail_open.operator_disable == "return_baseline"
     and .human_review_boundary.authorization_decision_recorded == true
     and .human_review_boundary.requires_separate_human_decision_before_implementation == false
@@ -311,6 +342,8 @@ jq -e '
     and .implementation_allowed == false
     and .writes_approval == false
     and .requires_runtime_trial_review_packet == true
+    and .requires_order_diff_packet == false
+    and .accepts_optional_order_diff_packet == true
     and .evidence.runtime_trial_review_packet.required_schema == "agent_bridge.biocortex_retrieval.opt_in_runtime_trial_review_packet.v0"
     and .evidence.runtime_trial_review_packet.required_review_ready_for_baseline_runtime_trial == true
     and .evidence.runtime_trial_review_packet.required_violation_count == 0
@@ -322,9 +355,30 @@ jq -e '
     and .evidence.runtime_trial_review_packet.runtime_adapter_approved == false
     and .evidence.runtime_trial_review_packet.changes_memory_search_order == false
     and .evidence.runtime_trial_review_packet.ordering_behavior_connected == false
+    and .evidence.order_diff_packet.required == false
+    and .evidence.order_diff_packet.required_schema_when_provided == "agent_bridge.biocortex_retrieval.opt_in_order_diff_packet.v0"
+    and .evidence.order_diff_packet.required_diff_ready_when_provided == true
+    and .evidence.order_diff_packet.required_violation_count_when_provided == 0
+    and .evidence.order_diff_packet.raw_query_included == false
+    and .evidence.order_diff_packet.raw_keys_included == false
+    and .evidence.order_diff_packet.content_included == false
+    and .evidence.order_diff_packet.side_signal_raw_included == false
+    and .evidence.order_diff_packet.raw_order_keys_included == false
+    and .evidence.order_diff_packet.copies_raw_hashes == false
+    and .evidence.order_diff_packet.reports_order_hash_changed == true
+    and .evidence.order_diff_packet.reports_top_key_changed == true
+    and .evidence.order_diff_packet.reports_expected_rank_delta == true
+    and .evidence.order_diff_packet.actual_return_order_changed == false
+    and .evidence.order_diff_packet.approval_state == "not_approved"
+    and .evidence.order_diff_packet.runtime_adapter_approved == false
+    and .evidence.order_diff_packet.calls_memory_search == false
+    and .evidence.order_diff_packet.runs_biocortex == false
+    and .evidence.order_diff_packet.changes_memory_search_order == false
+    and .evidence.order_diff_packet.ordering_behavior_connected == false
     and .current_permissions.may_implement_opt_in_experiment == false
     and .requested_permission_if_human_authorizes.may_affect_only_explicitly_opted_in_fts_calls == true
     and .requested_permission_if_human_authorizes.requires_runtime_trial_review_packet == true
+    and .requested_permission_if_human_authorizes.accepts_optional_order_diff_packet == true
     and (.not_requested | index("default_retrieval_influence_fts"))
     and (.not_requested | index("runtime_adapter_approved"))
 ' "$opt_in_auth_template" >/dev/null
@@ -966,6 +1020,7 @@ run scripts/prepare-biocortex-retrieval-opt-in-authorization-request.sh \
     --reviewer "verify-bundle" \
     --runtime-proof-summary "$runtime_proof/proof-summary.json" \
     --runtime-trial-review-packet "$opt_in_runtime_trial_review_packet" \
+    --order-diff-packet "$opt_in_order_diff_packet" \
     --memory-key "verify_bundle_memory_placeholder" \
     --forum-decision-post-id "verify_bundle_forum_placeholder"
 jq -e '
@@ -978,8 +1033,10 @@ jq -e '
     and .default_search_order_change_allowed == false
     and .implementation_allowed == true
     and .writes_approval == false
-    and .opt_in_plan.status == "order_diff_packet_implemented"
+    and .accepts_optional_order_diff_packet == true
+    and .opt_in_plan.status == "authorization_request_order_diff_evidence_implemented"
     and .opt_in_plan.order_diff_packet_implemented == true
+    and .opt_in_plan.authorization_request_order_diff_evidence_implemented == true
     and .opt_in_plan.implemented_gate_skeleton.ordering_behavior_connected == false
     and .opt_in_plan.implemented_gate_skeleton.may_change_search_order_now == false
     and .opt_in_plan.implemented_audit_shape.ordering_behavior_connected == false
@@ -1139,6 +1196,19 @@ jq -e '
     and .opt_in_plan.implemented_order_diff_packet.approval_state == "not_approved"
     and .opt_in_plan.implemented_order_diff_packet.runtime_adapter_approved == false
     and .opt_in_plan.implemented_order_diff_packet.may_implement_ordering_now == false
+    and .opt_in_plan.implemented_authorization_request_order_diff_evidence.script == "scripts/prepare-biocortex-retrieval-opt-in-authorization-request.sh"
+    and .opt_in_plan.implemented_authorization_request_order_diff_evidence.optional_input == "agent_bridge.biocortex_retrieval.opt_in_order_diff_packet.v0"
+    and .opt_in_plan.implemented_authorization_request_order_diff_evidence.evidence_path == "evidence.order_diff_packet"
+    and .opt_in_plan.implemented_authorization_request_order_diff_evidence.required == false
+    and .opt_in_plan.implemented_authorization_request_order_diff_evidence.hash_only_summary == true
+    and .opt_in_plan.implemented_authorization_request_order_diff_evidence.copies_raw_hashes == false
+    and .opt_in_plan.implemented_authorization_request_order_diff_evidence.copies_raw_order_keys == false
+    and .opt_in_plan.implemented_authorization_request_order_diff_evidence.approval_state == "not_approved"
+    and .opt_in_plan.implemented_authorization_request_order_diff_evidence.runtime_adapter_approved == false
+    and .opt_in_plan.implemented_authorization_request_order_diff_evidence.calls_memory_search == false
+    and .opt_in_plan.implemented_authorization_request_order_diff_evidence.runs_biocortex == false
+    and .opt_in_plan.implemented_authorization_request_order_diff_evidence.changes_memory_search_order == false
+    and .opt_in_plan.implemented_authorization_request_order_diff_evidence.ordering_behavior_connected == false
     and .opt_in_plan.experiment.mode == "fts_only"
     and .evidence.runtime_boundary_proof.default_disabled_status == "runtime_disabled"
     and .evidence.runtime_boundary_proof.kill_switch_status == "operator_disabled"
@@ -1169,6 +1239,41 @@ jq -e '
     and .evidence.runtime_trial_review_packet.changes_memory_search_order == false
     and .evidence.runtime_trial_review_packet.ordering_behavior_connected == false
     and .evidence.runtime_trial_review_packet.may_implement_ordering_now == false
+    and .evidence.order_diff_packet.provided == true
+    and .evidence.order_diff_packet.required == false
+    and .evidence.order_diff_packet.schema == "agent_bridge.biocortex_retrieval.opt_in_order_diff_packet.v0"
+    and .evidence.order_diff_packet.read_only == true
+    and .evidence.order_diff_packet.order_diff_packet == true
+    and .evidence.order_diff_packet.source_packet_consumer == true
+    and .evidence.order_diff_packet.source_kind == "runtime_trial_review_packet"
+    and .evidence.order_diff_packet.diff_ready == true
+    and .evidence.order_diff_packet.violation_count == 0
+    and .evidence.order_diff_packet.order_hashes_comparable == true
+    and (.evidence.order_diff_packet.order_hash_changed | type) == "boolean"
+    and .evidence.order_diff_packet.top_key_hashes_comparable == true
+    and (.evidence.order_diff_packet.top_key_changed | type) == "boolean"
+    and .evidence.order_diff_packet.expected_rank_delta_advisory_minus_baseline == 0
+    and .evidence.order_diff_packet.expected_rank_direction == "unchanged"
+    and .evidence.order_diff_packet.returned_order_source == "baseline"
+    and .evidence.order_diff_packet.baseline_returned == true
+    and .evidence.order_diff_packet.hash_matches_baseline == true
+    and .evidence.order_diff_packet.actual_return_order_changed == false
+    and .evidence.order_diff_packet.top_k_overlap == "not_computed_no_raw_order_keys"
+    and .evidence.order_diff_packet.per_key_movements == "not_computed_no_raw_order_keys"
+    and .evidence.order_diff_packet.raw_query_included == false
+    and .evidence.order_diff_packet.raw_keys_included == false
+    and .evidence.order_diff_packet.content_included == false
+    and .evidence.order_diff_packet.side_signal_raw_included == false
+    and .evidence.order_diff_packet.approval_state == "not_approved"
+    and .evidence.order_diff_packet.runtime_adapter_approved == false
+    and .evidence.order_diff_packet.approval_writes_allowed == false
+    and .evidence.order_diff_packet.writes_approval == false
+    and .evidence.order_diff_packet.calls_memory_search == false
+    and .evidence.order_diff_packet.runs_biocortex == false
+    and .evidence.order_diff_packet.registers_embedding_backend == false
+    and .evidence.order_diff_packet.changes_memory_search_order == false
+    and .evidence.order_diff_packet.ordering_behavior_connected == false
+    and .evidence.order_diff_packet.may_implement_ordering_now == false
     and .current_permissions.may_implement_opt_in_experiment == true
     and .current_permissions.may_change_default_retrieval_order == false
     and .requested_permission_if_human_authorizes.may_affect_only_explicitly_opted_in_fts_calls == true
@@ -1176,6 +1281,10 @@ jq -e '
     and (.not_requested | index("default_retrieval_influence_fts"))
     and (.not_requested | index("runtime_adapter_approved"))
 ' "$opt_in_auth_request/opt-in-authorization-request.json" >/dev/null
+if grep -q 'verify runtime trial secret query\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_auth_request/opt-in-authorization-request.json"; then
+    echo "opt-in authorization request leaked raw query/key/content data" >&2
+    exit 1
+fi
 test -s "$opt_in_auth_request/forum-post-template.md"
 test -s "$opt_in_auth_request/memory-note-template.md"
 

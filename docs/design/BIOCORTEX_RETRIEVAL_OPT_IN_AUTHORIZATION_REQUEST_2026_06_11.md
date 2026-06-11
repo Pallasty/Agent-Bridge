@@ -18,6 +18,7 @@ scripts/prove-biocortex-retrieval-runtime-boundary.sh \
 scripts/prepare-biocortex-retrieval-opt-in-authorization-request.sh \
   --runtime-proof-summary /tmp/biocortex-retrieval-runtime-proof/proof-summary.json \
   --runtime-trial-review-packet /tmp/biocortex-runtime-trial-review-packet.json \
+  --order-diff-packet /tmp/biocortex-order-diff-packet.json \
   --reviewer "<human reviewer>" \
   --memory-key "<future memory key>" \
   --forum-decision-post-id "<future forum post id>"
@@ -46,6 +47,13 @@ The runtime trial review packet is required post-implementation evidence. The
 request generator copies only its safe summary fields under
 `evidence.runtime_trial_review_packet`; it does not include raw query text,
 candidate keys, content, side-signal rows, or the raw review packet.
+
+The order-diff packet is optional hash-only evidence. When provided, the
+request generator copies only safe booleans and rank-summary fields under
+`evidence.order_diff_packet`: diff readiness, hash comparability, changed flags,
+expected-key rank delta, returned-order source, and unavailable-metric
+sentinels. It does not include raw order keys, raw query text, content, raw
+side-signal rows, raw source packets, or approval state changes.
 
 ## Scope Requested
 
