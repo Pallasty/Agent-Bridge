@@ -1,0 +1,121 @@
+{
+  "agent_technical_attestation": {
+    "attestor": "codex",
+    "can_authorize_runtime_influence": false,
+    "decision": "approve_continue_design",
+    "required": true,
+    "scope": "technical_evidence_and_behavioral_risk_only",
+    "summary": "Technical attestation approves continuing runtime influence design under read-only shadow or opt-in constraints only; it does not approve default memory_search influence or runtime reranking."
+  },
+  "approval_model": {
+    "agent_attestation_can_replace_human_authorization": false,
+    "agent_technical_attestation_required": true,
+    "human_authorization_required": true,
+    "human_reviews_scope_not_raw_memory_contents": true
+  },
+  "approval_state": "not_approved",
+  "approval_writes_allowed": false,
+  "default_decision": "keep_shadow_only",
+  "default_search_order_change_allowed": false,
+  "evidence": {
+    "audit_links": {
+      "forum_decision_post_id": "pending_forum_post",
+      "memory_key": "biocortex_agent_technical_attestation_20260611"
+    },
+    "branch": "master",
+    "commit": "22bebc00c355f516a801e95208897ceb23f308a0",
+    "gate_summaries": [
+      {
+        "corpus": "current",
+        "mrr_delta_required": "> 0",
+        "policy": "candidate-strong",
+        "regressions_required": 0,
+        "side_signal_coverage_min": 0.8,
+        "status": "side_signal_passes_offline_gate"
+      },
+      {
+        "corpus": "hard_holdout",
+        "mrr_delta_required": "> 0",
+        "policy": "candidate-strong",
+        "regressions_required": 0,
+        "side_signal_coverage_min": 0.8,
+        "status": "side_signal_passes_offline_gate"
+      }
+    ],
+    "latency": {
+      "default_memory_search_added_latency_ms": "0",
+      "side_signal_p95_ms_for_5_candidates": "<required>"
+    },
+    "live_mcp_default_disabled": {
+      "default_search_order_changed": false,
+      "runtime_adapter_approved": false,
+      "status": "<required: runtime_disabled>"
+    },
+    "operator_kill_switch": {
+      "env": "AB_BIOCORTEX_RETRIEVAL_DISABLE",
+      "expected_status": "operator_disabled",
+      "must_win_over_enable": true
+    },
+    "ordering_change_design": {
+      "bio_cortex_absent_behavior": "<required>",
+      "bio_cortex_error_behavior": "<required>",
+      "bio_cortex_slow_behavior": "<required>",
+      "default_search_order_change_allowed": false,
+      "exact_call_site": "<required>",
+      "fail_open_behavior": "baseline-only fallback; BioCortex absence, slowness, or errors must not block default memory_search"
+    },
+    "reviewer": "owner-scope-pending",
+    "rollback": {
+      "operator_kill_switch": "AB_BIOCORTEX_RETRIEVAL_DISABLE=1",
+      "rollback_command": "AB_BIOCORTEX_RETRIEVAL_DISABLE=1"
+    },
+    "target_host": "pallasting-ThinkBook-14-G5-IRH",
+    "verification_bundle": {
+      "captured_at": "2026-06-11T00:00:00Z",
+      "command": "AB_BIOCORTEX_RS=/Data/CascadeProjects/biocortex-rs scripts/verify-biocortex-retrieval-shadow.sh",
+      "status": "pass"
+    }
+  },
+  "gates": {
+    "compile_feature": "biocortex-retrieval-shadow",
+    "compile_feature_enabled": false,
+    "operator_disable_env": "AB_BIOCORTEX_RETRIEVAL_DISABLE",
+    "operator_disabled": false,
+    "runtime_enable_env": "AB_BIOCORTEX_RETRIEVAL_SHADOW",
+    "runtime_enabled": false
+  },
+  "generated_at": 1781163888,
+  "human_authorization": {
+    "can_be_replaced_by_agent_attestation": false,
+    "owner_decides_trust_boundary": true,
+    "required": true,
+    "scope": "none",
+    "status": "not_authorized"
+  },
+  "kill_switch_required": true,
+  "missing_attestation": [],
+  "missing_authorization": [],
+  "missing_evidence": [
+    "$.latency.side_signal_p95_ms_for_5_candidates",
+    "$.live_mcp_default_disabled.status",
+    "$.ordering_change_design.bio_cortex_absent_behavior",
+    "$.ordering_change_design.bio_cortex_error_behavior",
+    "$.ordering_change_design.bio_cortex_slow_behavior",
+    "$.ordering_change_design.exact_call_site"
+  ],
+  "purpose": "Preview packet for future human review; this is not approval state.",
+  "read_only": true,
+  "read_only_shadow_required_until_approved": true,
+  "ready_for_human_approval_review": false,
+  "requires_separate_human_approval": true,
+  "review_rule": "Approval requires a separate human decision explicitly allowing default retrieval influence and naming the reviewed implementation commit.",
+  "rollback_required": true,
+  "runtime_adapter_approved": false,
+  "schema": "agent_bridge.biocortex_retrieval.runtime_approval_packet_preview.v0",
+  "template": {
+    "doc": "docs/design/BIOCORTEX_RETRIEVAL_RUNTIME_APPROVAL_PACKET_TEMPLATE_2026_06_11.md",
+    "fixture": "docs/design/fixtures/biocortex-retrieval-runtime-approval-packet-template.json",
+    "fixture_schema": "agent_bridge.biocortex_retrieval.runtime_approval_packet_template.v0"
+  },
+  "writes_approval": false
+}

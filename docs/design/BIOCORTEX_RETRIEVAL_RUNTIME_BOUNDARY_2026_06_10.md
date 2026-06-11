@@ -196,6 +196,11 @@ of the following:
   The agent may attest to retrieval behavior and memory-system risk, but
   `agent_attestation_can_replace_human_authorization=false` must remain explicit
   in packet fields.
+- The current agent technical attestation is
+  `approve_continue_design`, recorded in
+  `docs/design/BIOCORTEX_RETRIEVAL_AGENT_TECHNICAL_ATTESTATION_2026_06_11.md`.
+  This allows continued shadow or opt-in design work only; it does not approve
+  default retrieval influence.
 - `scripts/verify-biocortex-retrieval-shadow.sh` passes on the target host.
 - The current corpus and hard holdout both pass `candidate-strong` with
   `side_signal_coverage >= 0.8`, zero regressions, and positive MRR lift.

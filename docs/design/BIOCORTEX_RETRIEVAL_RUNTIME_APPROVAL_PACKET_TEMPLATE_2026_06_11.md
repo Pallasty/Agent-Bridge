@@ -69,6 +69,11 @@ behavior and memory impact more directly than the human reviewer. That
 attestation is advisory and cannot replace human authorization of trust-boundary
 scope.
 
+Current allowed technical decisions are `approve_continue_design`, `approve`,
+`reject`, `defer`, and `technical_review_pending`. Only
+`approve_continue_design` is valid for continued design while the human
+authorization scope remains `none`.
+
 ## Evidence Requirements
 
 Before any packet can be considered for approval, it must include concrete

@@ -79,7 +79,7 @@
   },
   "agent_technical_attestation_required": {
     "attestor": "<required>",
-    "decision": "<required: approve | reject | defer | technical_review_pending>",
+    "decision": "<required: approve_continue_design | approve | reject | defer | technical_review_pending>",
     "summary": "<required>",
     "can_authorize_runtime_influence": false,
     "scope": "technical_evidence_and_behavioral_risk_only"

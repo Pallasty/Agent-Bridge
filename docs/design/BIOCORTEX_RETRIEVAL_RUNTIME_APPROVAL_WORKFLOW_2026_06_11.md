@@ -36,6 +36,18 @@ must separate two judgments:
 Agent attestation cannot replace human authorization. Human authorization does
 not rewrite technical evidence.
 
+## Current Agent Attestation
+
+The current agent technical attestation is
+`approve_continue_design`. It permits continued runtime-influence design under
+read-only shadow or explicit opt-in constraints only. It does not approve
+default `memory_search` influence, runtime reranking, or approval writes.
+
+See:
+
+- `docs/design/BIOCORTEX_RETRIEVAL_AGENT_TECHNICAL_ATTESTATION_2026_06_11.md`
+- `docs/design/fixtures/biocortex-retrieval-agent-technical-attestation-2026-06-11.json`
+
 ## Review Preparation
 
 1. Run the verification bundle on the target host:

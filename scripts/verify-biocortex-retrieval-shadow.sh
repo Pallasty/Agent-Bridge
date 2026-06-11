@@ -51,6 +51,28 @@ jq -e '
     and .human_authorization_required.can_be_replaced_by_agent_attestation == false
 ' docs/design/fixtures/biocortex-retrieval-runtime-approval-packet-template.json >/dev/null
 
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.runtime_approval_packet_preview.v0"
+    and .approval_state == "not_approved"
+    and .runtime_adapter_approved == false
+    and .writes_approval == false
+    and .approval_writes_allowed == false
+    and .default_search_order_change_allowed == false
+    and .ready_for_human_approval_review == false
+    and .approval_model.agent_technical_attestation_required == true
+    and .approval_model.human_authorization_required == true
+    and .approval_model.agent_attestation_can_replace_human_authorization == false
+    and .agent_technical_attestation.attestor == "codex"
+    and .agent_technical_attestation.decision == "approve_continue_design"
+    and .agent_technical_attestation.can_authorize_runtime_influence == false
+    and .human_authorization.status == "not_authorized"
+    and .human_authorization.scope == "none"
+    and .human_authorization.can_be_replaced_by_agent_attestation == false
+    and .requires_separate_human_approval == true
+    and .evidence.audit_links.memory_key == "biocortex_agent_technical_attestation_20260611"
+    and (.missing_evidence | length) > 0
+' docs/design/fixtures/biocortex-retrieval-agent-technical-attestation-2026-06-11.json >/dev/null
+
 extract_json_summary() {
     awk '
         /^```json$/ { in_json=1; next }
