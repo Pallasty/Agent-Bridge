@@ -3,13 +3,13 @@ use ab_agent::{
     GitWorktreeManager, OpenCodeFamilyRuntime, OzAgentRuntime,
 };
 use ab_bridge::biocortex_shadow::{
-    biocortex_replay_comparison, biocortex_shadow_digest, supported_benchmarks,
-    BioCortexReplayComparisonOptions, BioCortexShadowOptions,
+    biocortex_replay_comparison, biocortex_retrieval_runtime_approval_packet_preview,
+    biocortex_shadow_digest, supported_benchmarks, BioCortexReplayComparisonOptions,
+    BioCortexRetrievalApprovalPacketOptions, BioCortexShadowOptions,
 };
 #[cfg(feature = "biocortex-retrieval-shadow")]
 use ab_bridge::biocortex_shadow::{
-    biocortex_retrieval_shadow_report, BioCortexRetrievalCandidate,
-    BioCortexRetrievalShadowOptions,
+    biocortex_retrieval_shadow_report, BioCortexRetrievalCandidate, BioCortexRetrievalShadowOptions,
 };
 use ab_bridge::seed_substrate as ab_seed_bridge;
 use ab_bridge::shadow_cortex as ab_shadow_cortex;
@@ -2467,6 +2467,60 @@ enum BioCortexOp {
         #[arg(long)]
         json: bool,
     },
+    /// Preview the future runtime approval packet without approving anything.
+    ///
+    /// This is a review-preparation packet only. It never runs BioCortex,
+    /// changes retrieval order, writes approval state, or mutates memory.
+    RetrievalApprovalPacket {
+        /// Target host for the future review evidence.
+        #[arg(long)]
+        target_host: Option<String>,
+        /// Source branch/ref under review.
+        #[arg(long)]
+        branch: Option<String>,
+        /// Implementation commit under review.
+        #[arg(long)]
+        commit: Option<String>,
+        /// Human reviewer identity or handle.
+        #[arg(long)]
+        reviewer: Option<String>,
+        /// Verification bundle status, normally "pass".
+        #[arg(long)]
+        verification_status: Option<String>,
+        /// Verification capture timestamp.
+        #[arg(long)]
+        verification_captured_at: Option<String>,
+        /// Current corpus gate status.
+        #[arg(long)]
+        current_gate_status: Option<String>,
+        /// Hard holdout corpus gate status.
+        #[arg(long)]
+        hard_holdout_gate_status: Option<String>,
+        /// Measured p95 side-signal latency for five candidates.
+        #[arg(long)]
+        side_signal_p95_ms_for_5_candidates: Option<String>,
+        /// Measured added latency on the default memory_search path.
+        #[arg(long)]
+        default_memory_search_added_latency_ms: Option<String>,
+        /// Exact code call site where a future ordering change would happen.
+        #[arg(long)]
+        exact_call_site: Option<String>,
+        /// Fail-open behavior when BioCortex is absent, slow, or errors.
+        #[arg(long)]
+        fail_open_behavior: Option<String>,
+        /// Rollback command for the proposed runtime adapter.
+        #[arg(long)]
+        rollback_command: Option<String>,
+        /// Forum decision post id linking the evidence packet.
+        #[arg(long)]
+        forum_decision_post_id: Option<String>,
+        /// Memory key linking the evidence packet.
+        #[arg(long)]
+        memory_key: Option<String>,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -4092,6 +4146,48 @@ async fn real_main() -> Result<()> {
                 )
                 .await
             }
+            BioCortexOp::RetrievalApprovalPacket {
+                target_host,
+                branch,
+                commit,
+                reviewer,
+                verification_status,
+                verification_captured_at,
+                current_gate_status,
+                hard_holdout_gate_status,
+                side_signal_p95_ms_for_5_candidates,
+                default_memory_search_added_latency_ms,
+                exact_call_site,
+                fail_open_behavior,
+                rollback_command,
+                forum_decision_post_id,
+                memory_key,
+                json,
+            } => {
+                run_biocortex_retrieval_approval_packet(
+                    BioCortexRetrievalApprovalPacketOptions {
+                        target_host: target_host.clone(),
+                        branch: branch.clone(),
+                        commit: commit.clone(),
+                        reviewer: reviewer.clone(),
+                        verification_status: verification_status.clone(),
+                        verification_captured_at: verification_captured_at.clone(),
+                        current_gate_status: current_gate_status.clone(),
+                        hard_holdout_gate_status: hard_holdout_gate_status.clone(),
+                        side_signal_p95_ms_for_5_candidates: side_signal_p95_ms_for_5_candidates
+                            .clone(),
+                        default_memory_search_added_latency_ms:
+                            default_memory_search_added_latency_ms.clone(),
+                        exact_call_site: exact_call_site.clone(),
+                        fail_open_behavior: fail_open_behavior.clone(),
+                        rollback_command: rollback_command.clone(),
+                        forum_decision_post_id: forum_decision_post_id.clone(),
+                        memory_key: memory_key.clone(),
+                    },
+                    *json,
+                )
+                .await
+            }
             #[cfg(feature = "biocortex-retrieval-shadow")]
             BioCortexOp::RetrievalShadow {
                 query,
@@ -4373,9 +4469,13 @@ async fn real_main() -> Result<()> {
                 } else {
                     println!(
                         "instinct observer log: {} {} -> {}",
-                        plan.get("status").and_then(|v| v.as_str()).unwrap_or("unknown"),
+                        plan.get("status")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown"),
                         plan.get("log_path").and_then(|v| v.as_str()).unwrap_or(""),
-                        plan.get("archive_path").and_then(|v| v.as_str()).unwrap_or("")
+                        plan.get("archive_path")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
                     );
                 }
                 Ok(())
@@ -7834,7 +7934,9 @@ async fn run_biocortex_replay_compare(
 
     let projection = payload.get("ab_fixture_projection").unwrap_or(&Value::Null);
     let comparison = payload.get("comparison").unwrap_or(&Value::Null);
-    let digest = payload.get("biocortex_shadow_digest").unwrap_or(&Value::Null);
+    let digest = payload
+        .get("biocortex_shadow_digest")
+        .unwrap_or(&Value::Null);
     println!("# BioCortex replay comparison");
     println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
     println!("status={}", shadow_json_display(payload.get("status"), "-"));
@@ -7857,13 +7959,68 @@ async fn run_biocortex_replay_compare(
     println!(
         "alignment={} consumes_ab_events={} retrieval_mutation={}",
         shadow_json_display(comparison.get("benchmark_alignment"), "-"),
-        shadow_json_display(comparison.get("current_adapter_consumes_ab_events"), "false"),
+        shadow_json_display(
+            comparison.get("current_adapter_consumes_ab_events"),
+            "false"
+        ),
         shadow_json_display(comparison.get("retrieval_mutation"), "false")
     );
     println!(
         "next={}",
         shadow_json_display(comparison.get("next_step"), "-")
     );
+    Ok(())
+}
+
+async fn run_biocortex_retrieval_approval_packet(
+    opts: BioCortexRetrievalApprovalPacketOptions,
+    as_json: bool,
+) -> Result<()> {
+    let payload = biocortex_retrieval_runtime_approval_packet_preview(opts);
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# BioCortex retrieval runtime approval packet preview");
+    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
+    println!(
+        "approval_state={} default_decision={}",
+        shadow_json_display(payload.get("approval_state"), "-"),
+        shadow_json_display(payload.get("default_decision"), "-")
+    );
+    println!(
+        "runtime_adapter_approved={} approval_writes_allowed={} default_search_order_change_allowed={}",
+        shadow_json_display(payload.get("runtime_adapter_approved"), "false"),
+        shadow_json_display(payload.get("approval_writes_allowed"), "false"),
+        shadow_json_display(payload.get("default_search_order_change_allowed"), "false")
+    );
+    println!(
+        "requires_separate_human_approval={} ready_for_human_approval_review={}",
+        shadow_json_display(payload.get("requires_separate_human_approval"), "true"),
+        shadow_json_display(payload.get("ready_for_human_approval_review"), "false")
+    );
+    let gates = payload.get("gates").unwrap_or(&Value::Null);
+    println!(
+        "gates feature_enabled={} runtime_enabled={} operator_disabled={}",
+        shadow_json_display(gates.get("compile_feature_enabled"), "false"),
+        shadow_json_display(gates.get("runtime_enabled"), "false"),
+        shadow_json_display(gates.get("operator_disabled"), "false")
+    );
+    let missing_count = payload
+        .get("missing_evidence")
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .unwrap_or(0);
+    println!("missing_evidence_count={missing_count}");
+    if let Some(paths) = payload.get("missing_evidence").and_then(Value::as_array) {
+        for path in paths.iter().take(8).filter_map(Value::as_str) {
+            println!("missing={path}");
+        }
+        if paths.len() > 8 {
+            println!("missing=...{} more", paths.len() - 8);
+        }
+    }
     Ok(())
 }
 

@@ -243,6 +243,8 @@ First review-only surface landed on 2026-06-10:
 
 - feature gate: `biocortex-retrieval-shadow`;
 - CLI surface: `agent-bridge bio-cortex retrieval-shadow`;
+- CLI approval-prep surface:
+  `agent-bridge bio-cortex retrieval-approval-packet`;
 - MCP surface: `biocortex_retrieval_shadow`;
 - runtime enable: `AB_BIOCORTEX_RETRIEVAL_SHADOW=1`;
 - operator kill switch: `AB_BIOCORTEX_RETRIEVAL_DISABLE=1`;
@@ -285,6 +287,12 @@ Focused tests added on 2026-06-10:
   `crates/bridge/tests/fixtures/biocortex_retrieval_shadow_acceptance.jsonl`
   captures a small runtime acceptance corpus with one clear boundary case and
   one expected label-ambiguity case.
+- `agent-bridge bio-cortex retrieval-approval-packet --json` generates a
+  read-only runtime approval packet preview with
+  `approval_state=not_approved`, `runtime_adapter_approved=false`,
+  `approval_writes_allowed=false`, and
+  `default_search_order_change_allowed=false`. It does not run BioCortex or
+  write approval state.
 
 Targeted commands:
 

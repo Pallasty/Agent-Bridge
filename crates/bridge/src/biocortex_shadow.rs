@@ -18,6 +18,8 @@ pub const BIOCORTEX_SHADOW_SCHEMA: &str = "agent_bridge.biocortex_shadow_digest.
 pub const BIOCORTEX_REPLAY_COMPARISON_SCHEMA: &str = "agent_bridge.biocortex_replay_comparison.v0";
 pub const BIOCORTEX_RETRIEVAL_SHADOW_SCHEMA: &str =
     "agent_bridge.biocortex_retrieval_shadow_report.v0";
+pub const BIOCORTEX_RETRIEVAL_RUNTIME_APPROVAL_PACKET_SCHEMA: &str =
+    "agent_bridge.biocortex_retrieval.runtime_approval_packet_preview.v0";
 pub const BIOCORTEX_SUBSTRATE_REPLAY_PLAN_SCHEMA: &str =
     "agent_bridge.biocortex_substrate_replay_plan.v0";
 pub const BIOCORTEX_CHECKOUT_ENV: &str = "AB_BIOCORTEX_RS";
@@ -60,6 +62,25 @@ pub struct BioCortexRetrievalShadowOptions {
     pub checkout: Option<PathBuf>,
     pub timeout_ms: u64,
     pub include_raw: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct BioCortexRetrievalApprovalPacketOptions {
+    pub target_host: Option<String>,
+    pub branch: Option<String>,
+    pub commit: Option<String>,
+    pub reviewer: Option<String>,
+    pub verification_status: Option<String>,
+    pub verification_captured_at: Option<String>,
+    pub current_gate_status: Option<String>,
+    pub hard_holdout_gate_status: Option<String>,
+    pub side_signal_p95_ms_for_5_candidates: Option<String>,
+    pub default_memory_search_added_latency_ms: Option<String>,
+    pub exact_call_site: Option<String>,
+    pub fail_open_behavior: Option<String>,
+    pub rollback_command: Option<String>,
+    pub forum_decision_post_id: Option<String>,
+    pub memory_key: Option<String>,
 }
 
 impl Default for BioCortexShadowOptions {
@@ -463,6 +484,98 @@ pub async fn biocortex_retrieval_shadow_report(opts: BioCortexRetrievalShadowOpt
     report
 }
 
+pub fn biocortex_retrieval_runtime_approval_packet_preview(
+    opts: BioCortexRetrievalApprovalPacketOptions,
+) -> Value {
+    let evidence = json!({
+        "target_host": required_or_value(opts.target_host),
+        "branch": required_or_value(opts.branch),
+        "commit": required_or_value(opts.commit),
+        "reviewer": required_or_value(opts.reviewer),
+        "verification_bundle": {
+            "command": "AB_BIOCORTEX_RS=/Data/CascadeProjects/biocortex-rs scripts/verify-biocortex-retrieval-shadow.sh",
+            "status": required_or_value(opts.verification_status),
+            "captured_at": required_or_value(opts.verification_captured_at),
+        },
+        "gate_summaries": [
+            {
+                "corpus": "current",
+                "policy": "candidate-strong",
+                "side_signal_coverage_min": 0.8,
+                "regressions_required": 0,
+                "mrr_delta_required": "> 0",
+                "status": required_or_value(opts.current_gate_status),
+            },
+            {
+                "corpus": "hard_holdout",
+                "policy": "candidate-strong",
+                "side_signal_coverage_min": 0.8,
+                "regressions_required": 0,
+                "mrr_delta_required": "> 0",
+                "status": required_or_value(opts.hard_holdout_gate_status),
+            }
+        ],
+        "live_mcp_default_disabled": {
+            "status": "<required: runtime_disabled>",
+            "runtime_adapter_approved": false,
+            "default_search_order_changed": false,
+        },
+        "operator_kill_switch": {
+            "env": BIOCORTEX_RETRIEVAL_DISABLE_ENV,
+            "expected_status": "operator_disabled",
+            "must_win_over_enable": true,
+        },
+        "latency": {
+            "side_signal_p95_ms_for_5_candidates": required_or_value(opts.side_signal_p95_ms_for_5_candidates),
+            "default_memory_search_added_latency_ms": required_or_value(opts.default_memory_search_added_latency_ms),
+        },
+        "ordering_change_design": {
+            "exact_call_site": required_or_value(opts.exact_call_site),
+            "default_search_order_change_allowed": false,
+            "fail_open_behavior": required_or_value(opts.fail_open_behavior),
+            "bio_cortex_absent_behavior": "<required>",
+            "bio_cortex_slow_behavior": "<required>",
+            "bio_cortex_error_behavior": "<required>",
+        },
+        "rollback": {
+            "operator_kill_switch": format!("{BIOCORTEX_RETRIEVAL_DISABLE_ENV}=1"),
+            "rollback_command": required_or_value(opts.rollback_command),
+        },
+        "audit_links": {
+            "forum_decision_post_id": required_or_value(opts.forum_decision_post_id),
+            "memory_key": required_or_value(opts.memory_key),
+        },
+    });
+    let missing_evidence = missing_required_paths(&evidence);
+
+    json!({
+        "schema": BIOCORTEX_RETRIEVAL_RUNTIME_APPROVAL_PACKET_SCHEMA,
+        "generated_at": now_secs(),
+        "purpose": "Preview packet for future human review; this is not approval state.",
+        "approval_state": "not_approved",
+        "default_decision": "keep_shadow_only",
+        "runtime_adapter_approved": false,
+        "writes_approval": false,
+        "approval_writes_allowed": false,
+        "default_search_order_change_allowed": false,
+        "requires_separate_human_approval": true,
+        "read_only_shadow_required_until_approved": true,
+        "kill_switch_required": true,
+        "rollback_required": true,
+        "read_only": true,
+        "template": {
+            "doc": "docs/design/BIOCORTEX_RETRIEVAL_RUNTIME_APPROVAL_PACKET_TEMPLATE_2026_06_11.md",
+            "fixture": "docs/design/fixtures/biocortex-retrieval-runtime-approval-packet-template.json",
+            "fixture_schema": "agent_bridge.biocortex_retrieval.runtime_approval_packet_template.v0",
+        },
+        "gates": retrieval_gate_state(),
+        "evidence": evidence,
+        "missing_evidence": missing_evidence,
+        "ready_for_human_approval_review": false,
+        "review_rule": "Approval requires a separate human decision explicitly allowing default retrieval influence and naming the reviewed implementation commit.",
+    })
+}
+
 fn retrieval_status_payload(status: &str, reason: &str, gates: Value) -> Value {
     json!({
         "schema": BIOCORTEX_RETRIEVAL_SHADOW_SCHEMA,
@@ -631,7 +744,11 @@ fn retrieval_baseline_scores(
             rank: 0,
         })
         .collect::<Vec<_>>();
-    rows.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+    rows.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     for (idx, row) in rows.iter_mut().enumerate() {
         row.rank = idx + 1;
     }
@@ -734,7 +851,11 @@ async fn run_retrieval_side_signal(
     }
 
     let mut rows = Vec::new();
-    for line in stdout.lines().map(str::trim).filter(|line| !line.is_empty()) {
+    for line in stdout
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
         let row: RetrievalSideSignalRow = serde_json::from_str(line).map_err(|err| {
             json!({
                 "status": "parse_error",
@@ -832,6 +953,37 @@ fn retrieval_boundary_payload() -> Value {
         "default_search_order_changed": false,
         "runtime_adapter_approved": false,
     })
+}
+
+fn required_or_value(value: Option<String>) -> Value {
+    value
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .map(Value::String)
+        .unwrap_or_else(|| json!("<required>"))
+}
+
+fn missing_required_paths(value: &Value) -> Vec<String> {
+    let mut paths = Vec::new();
+    collect_missing_required_paths(value, "$", &mut paths);
+    paths
+}
+
+fn collect_missing_required_paths(value: &Value, path: &str, paths: &mut Vec<String>) {
+    match value {
+        Value::String(s) if s.starts_with("<required") => paths.push(path.to_string()),
+        Value::Array(items) => {
+            for (idx, item) in items.iter().enumerate() {
+                collect_missing_required_paths(item, &format!("{path}[{idx}]"), paths);
+            }
+        }
+        Value::Object(map) => {
+            for (key, item) in map {
+                collect_missing_required_paths(item, &format!("{path}.{key}"), paths);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn env_truthy(key: &str) -> bool {
@@ -1630,6 +1782,46 @@ mod tests {
         assert_eq!(
             report["boundary"]["changes_memory_search_order"],
             json!(false)
+        );
+    }
+
+    #[test]
+    fn retrieval_runtime_approval_packet_preview_is_not_approval_state() {
+        let packet = biocortex_retrieval_runtime_approval_packet_preview(
+            BioCortexRetrievalApprovalPacketOptions {
+                commit: Some("abc123".to_string()),
+                verification_status: Some("pass".to_string()),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(
+            packet["schema"],
+            json!(BIOCORTEX_RETRIEVAL_RUNTIME_APPROVAL_PACKET_SCHEMA)
+        );
+        assert_eq!(packet["approval_state"], json!("not_approved"));
+        assert_eq!(packet["default_decision"], json!("keep_shadow_only"));
+        assert_eq!(packet["runtime_adapter_approved"], json!(false));
+        assert_eq!(packet["writes_approval"], json!(false));
+        assert_eq!(packet["approval_writes_allowed"], json!(false));
+        assert_eq!(packet["default_search_order_change_allowed"], json!(false));
+        assert_eq!(packet["requires_separate_human_approval"], json!(true));
+        assert_eq!(packet["ready_for_human_approval_review"], json!(false));
+        assert_eq!(packet["evidence"]["commit"], json!("abc123"));
+        assert_eq!(
+            packet["evidence"]["verification_bundle"]["status"],
+            json!("pass")
+        );
+        let missing = packet["missing_evidence"]
+            .as_array()
+            .expect("missing paths");
+        assert!(missing.iter().any(|path| path == "$.target_host"));
+        assert!(missing
+            .iter()
+            .any(|path| path == "$.ordering_change_design.exact_call_site"));
+        assert_eq!(
+            packet["gates"]["compile_feature"],
+            json!("biocortex-retrieval-shadow")
         );
     }
 }

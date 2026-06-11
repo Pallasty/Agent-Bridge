@@ -28,6 +28,16 @@ The machine-readable packet should follow the companion fixture:
 
 - `docs/design/fixtures/biocortex-retrieval-runtime-approval-packet-template.json`
 
+Generate a current preview packet with:
+
+```bash
+cargo run -p ab-bridge --no-default-features \
+  -- bio-cortex retrieval-approval-packet --json
+```
+
+The preview command is read-only. It may fill evidence fields supplied by CLI
+arguments, but it always keeps approval state disabled.
+
 Required safety fields:
 
 - `approval_state=not_approved` until an explicit human decision changes it;

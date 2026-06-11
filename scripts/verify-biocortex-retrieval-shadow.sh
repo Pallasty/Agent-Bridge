@@ -71,6 +71,23 @@ assert_summary_pass() {
 }
 
 run cargo check -p ab-bridge --no-default-features
+
+approval_packet="$tmpdir/runtime-approval-packet-preview.json"
+run cargo run -p ab-bridge --no-default-features \
+    -- bio-cortex retrieval-approval-packet --json > "$approval_packet"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.runtime_approval_packet_preview.v0"
+    and .approval_state == "not_approved"
+    and .default_decision == "keep_shadow_only"
+    and .runtime_adapter_approved == false
+    and .writes_approval == false
+    and .approval_writes_allowed == false
+    and .default_search_order_change_allowed == false
+    and .requires_separate_human_approval == true
+    and .ready_for_human_approval_review == false
+    and (.missing_evidence | length) > 0
+' "$approval_packet" >/dev/null
+
 run cargo check -p ab-bridge --no-default-features --features biocortex-retrieval-shadow
 
 run cargo test -p ab-bridge --lib --no-default-features \
