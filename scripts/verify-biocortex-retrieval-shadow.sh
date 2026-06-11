@@ -63,7 +63,7 @@ grep -q 'Authorization for one mode does not imply authorization for another mod
 opt_in_plan="docs/design/fixtures/biocortex-retrieval-opt-in-experiment-plan-2026-06-11.json"
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0"
-    and .status == "redacted_order_artifact_implemented"
+    and .status == "authorization_request_redacted_order_artifact_evidence_implemented"
     and .approval_state == "opt_in_implementation_authorized"
     and .runtime_adapter_approved == false
     and .default_search_order_change_allowed == false
@@ -81,6 +81,7 @@ jq -e '
     and .order_diff_packet_implemented == true
     and .authorization_request_order_diff_evidence_implemented == true
     and .redacted_order_artifact_implemented == true
+    and .authorization_request_redacted_order_artifact_evidence_implemented == true
     and .ordering_behavior_connected == false
     and .requested_human_authorization_scope == "opt_in_experiment"
     and .requested_default_influence_scope == "none"
@@ -356,6 +357,39 @@ jq -e '
     and .implemented_authorization_request_order_diff_evidence.ordering_behavior_connected == false
     and .implemented_authorization_request_order_diff_evidence.actual_return_order_changed == false
     and .implemented_authorization_request_order_diff_evidence.may_implement_ordering_now == false
+    and .implemented_authorization_request_redacted_order_artifact_evidence.script == "scripts/prepare-biocortex-retrieval-opt-in-authorization-request.sh"
+    and .implemented_authorization_request_redacted_order_artifact_evidence.request_schema == "agent_bridge.biocortex_retrieval.opt_in_authorization_request.v0"
+    and .implemented_authorization_request_redacted_order_artifact_evidence.optional_input == "agent_bridge.biocortex_retrieval.opt_in_redacted_order_artifact.v0"
+    and .implemented_authorization_request_redacted_order_artifact_evidence.evidence_path == "evidence.redacted_order_artifact"
+    and .implemented_authorization_request_redacted_order_artifact_evidence.required == false
+    and .implemented_authorization_request_redacted_order_artifact_evidence.read_only == true
+    and .implemented_authorization_request_redacted_order_artifact_evidence.summary_only == true
+    and .implemented_authorization_request_redacted_order_artifact_evidence.artifact_included == false
+    and .implemented_authorization_request_redacted_order_artifact_evidence.requires_artifact_ready_when_provided == true
+    and .implemented_authorization_request_redacted_order_artifact_evidence.requires_zero_boundary_violations_when_provided == true
+    and .implemented_authorization_request_redacted_order_artifact_evidence.requires_redacted_rows_comparable_when_provided == true
+    and .implemented_authorization_request_redacted_order_artifact_evidence.reports_top_k_overlap == true
+    and .implemented_authorization_request_redacted_order_artifact_evidence.reports_rank_delta_distribution == true
+    and .implemented_authorization_request_redacted_order_artifact_evidence.reports_per_key_movement_count == true
+    and .implemented_authorization_request_redacted_order_artifact_evidence.copies_key_hashes == false
+    and .implemented_authorization_request_redacted_order_artifact_evidence.copies_redacted_rank_rows == false
+    and .implemented_authorization_request_redacted_order_artifact_evidence.copies_raw_order_keys == false
+    and .implemented_authorization_request_redacted_order_artifact_evidence.raw_query_included == false
+    and .implemented_authorization_request_redacted_order_artifact_evidence.raw_keys_included == false
+    and .implemented_authorization_request_redacted_order_artifact_evidence.raw_order_keys_included == false
+    and .implemented_authorization_request_redacted_order_artifact_evidence.content_included == false
+    and .implemented_authorization_request_redacted_order_artifact_evidence.side_signal_raw_included == false
+    and .implemented_authorization_request_redacted_order_artifact_evidence.approval_state == "not_approved"
+    and .implemented_authorization_request_redacted_order_artifact_evidence.runtime_adapter_approved == false
+    and .implemented_authorization_request_redacted_order_artifact_evidence.approval_writes_allowed == false
+    and .implemented_authorization_request_redacted_order_artifact_evidence.writes_approval == false
+    and .implemented_authorization_request_redacted_order_artifact_evidence.calls_memory_search == false
+    and .implemented_authorization_request_redacted_order_artifact_evidence.runs_biocortex == false
+    and .implemented_authorization_request_redacted_order_artifact_evidence.registers_embedding_backend == false
+    and .implemented_authorization_request_redacted_order_artifact_evidence.changes_memory_search_order == false
+    and .implemented_authorization_request_redacted_order_artifact_evidence.ordering_behavior_connected == false
+    and .implemented_authorization_request_redacted_order_artifact_evidence.actual_return_order_changed == false
+    and .implemented_authorization_request_redacted_order_artifact_evidence.may_implement_ordering_now == false
     and .fail_open.operator_disable == "return_baseline"
     and .human_review_boundary.authorization_decision_recorded == true
     and .human_review_boundary.requires_separate_human_decision_before_implementation == false
@@ -376,6 +410,7 @@ jq -e '
     and .requires_runtime_trial_review_packet == true
     and .requires_order_diff_packet == false
     and .accepts_optional_order_diff_packet == true
+    and .accepts_optional_redacted_order_artifact == true
     and .evidence.runtime_trial_review_packet.required_schema == "agent_bridge.biocortex_retrieval.opt_in_runtime_trial_review_packet.v0"
     and .evidence.runtime_trial_review_packet.required_review_ready_for_baseline_runtime_trial == true
     and .evidence.runtime_trial_review_packet.required_violation_count == 0
@@ -407,10 +442,35 @@ jq -e '
     and .evidence.order_diff_packet.runs_biocortex == false
     and .evidence.order_diff_packet.changes_memory_search_order == false
     and .evidence.order_diff_packet.ordering_behavior_connected == false
+    and .evidence.redacted_order_artifact.required == false
+    and .evidence.redacted_order_artifact.required_schema_when_provided == "agent_bridge.biocortex_retrieval.opt_in_redacted_order_artifact.v0"
+    and .evidence.redacted_order_artifact.required_artifact_ready_when_provided == true
+    and .evidence.redacted_order_artifact.required_violation_count_when_provided == 0
+    and .evidence.redacted_order_artifact.required_redacted_rows_comparable_when_provided == true
+    and .evidence.redacted_order_artifact.summary_only == true
+    and .evidence.redacted_order_artifact.reports_top_k_overlap == true
+    and .evidence.redacted_order_artifact.reports_rank_delta_distribution == true
+    and .evidence.redacted_order_artifact.reports_per_key_movement_count == true
+    and .evidence.redacted_order_artifact.raw_query_included == false
+    and .evidence.redacted_order_artifact.raw_keys_included == false
+    and .evidence.redacted_order_artifact.raw_order_keys_included == false
+    and .evidence.redacted_order_artifact.content_included == false
+    and .evidence.redacted_order_artifact.side_signal_raw_included == false
+    and .evidence.redacted_order_artifact.redacted_key_hashes_in_artifact == true
+    and .evidence.redacted_order_artifact.copies_key_hashes_to_request == false
+    and .evidence.redacted_order_artifact.copies_redacted_rank_rows == false
+    and .evidence.redacted_order_artifact.actual_return_order_changed == false
+    and .evidence.redacted_order_artifact.approval_state == "not_approved"
+    and .evidence.redacted_order_artifact.runtime_adapter_approved == false
+    and .evidence.redacted_order_artifact.calls_memory_search == false
+    and .evidence.redacted_order_artifact.runs_biocortex == false
+    and .evidence.redacted_order_artifact.changes_memory_search_order == false
+    and .evidence.redacted_order_artifact.ordering_behavior_connected == false
     and .current_permissions.may_implement_opt_in_experiment == false
     and .requested_permission_if_human_authorizes.may_affect_only_explicitly_opted_in_fts_calls == true
     and .requested_permission_if_human_authorizes.requires_runtime_trial_review_packet == true
     and .requested_permission_if_human_authorizes.accepts_optional_order_diff_packet == true
+    and .requested_permission_if_human_authorizes.accepts_optional_redacted_order_artifact == true
     and (.not_requested | index("default_retrieval_influence_fts"))
     and (.not_requested | index("runtime_adapter_approved"))
 ' "$opt_in_auth_template" >/dev/null
@@ -1154,6 +1214,7 @@ run scripts/prepare-biocortex-retrieval-opt-in-authorization-request.sh \
     --runtime-proof-summary "$runtime_proof/proof-summary.json" \
     --runtime-trial-review-packet "$opt_in_runtime_trial_review_packet" \
     --order-diff-packet "$opt_in_order_diff_packet" \
+    --redacted-order-artifact "$opt_in_redacted_order_artifact" \
     --memory-key "verify_bundle_memory_placeholder" \
     --forum-decision-post-id "verify_bundle_forum_placeholder"
 jq -e '
@@ -1167,10 +1228,12 @@ jq -e '
     and .implementation_allowed == true
     and .writes_approval == false
     and .accepts_optional_order_diff_packet == true
-    and .opt_in_plan.status == "redacted_order_artifact_implemented"
+    and .accepts_optional_redacted_order_artifact == true
+    and .opt_in_plan.status == "authorization_request_redacted_order_artifact_evidence_implemented"
     and .opt_in_plan.order_diff_packet_implemented == true
     and .opt_in_plan.authorization_request_order_diff_evidence_implemented == true
     and .opt_in_plan.redacted_order_artifact_implemented == true
+    and .opt_in_plan.authorization_request_redacted_order_artifact_evidence_implemented == true
     and .opt_in_plan.implemented_gate_skeleton.ordering_behavior_connected == false
     and .opt_in_plan.implemented_gate_skeleton.may_change_search_order_now == false
     and .opt_in_plan.implemented_audit_shape.ordering_behavior_connected == false
@@ -1365,6 +1428,39 @@ jq -e '
     and .opt_in_plan.implemented_authorization_request_order_diff_evidence.runs_biocortex == false
     and .opt_in_plan.implemented_authorization_request_order_diff_evidence.changes_memory_search_order == false
     and .opt_in_plan.implemented_authorization_request_order_diff_evidence.ordering_behavior_connected == false
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.script == "scripts/prepare-biocortex-retrieval-opt-in-authorization-request.sh"
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.request_schema == "agent_bridge.biocortex_retrieval.opt_in_authorization_request.v0"
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.optional_input == "agent_bridge.biocortex_retrieval.opt_in_redacted_order_artifact.v0"
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.evidence_path == "evidence.redacted_order_artifact"
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.required == false
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.read_only == true
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.summary_only == true
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.artifact_included == false
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.requires_artifact_ready_when_provided == true
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.requires_zero_boundary_violations_when_provided == true
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.requires_redacted_rows_comparable_when_provided == true
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.reports_top_k_overlap == true
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.reports_rank_delta_distribution == true
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.reports_per_key_movement_count == true
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.copies_key_hashes == false
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.copies_redacted_rank_rows == false
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.copies_raw_order_keys == false
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.raw_query_included == false
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.raw_keys_included == false
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.raw_order_keys_included == false
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.content_included == false
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.side_signal_raw_included == false
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.approval_state == "not_approved"
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.runtime_adapter_approved == false
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.approval_writes_allowed == false
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.writes_approval == false
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.calls_memory_search == false
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.runs_biocortex == false
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.registers_embedding_backend == false
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.changes_memory_search_order == false
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.ordering_behavior_connected == false
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.actual_return_order_changed == false
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.may_implement_ordering_now == false
     and .opt_in_plan.experiment.mode == "fts_only"
     and .evidence.runtime_boundary_proof.default_disabled_status == "runtime_disabled"
     and .evidence.runtime_boundary_proof.kill_switch_status == "operator_disabled"
@@ -1430,15 +1526,67 @@ jq -e '
     and .evidence.order_diff_packet.changes_memory_search_order == false
     and .evidence.order_diff_packet.ordering_behavior_connected == false
     and .evidence.order_diff_packet.may_implement_ordering_now == false
+    and .evidence.redacted_order_artifact.provided == true
+    and .evidence.redacted_order_artifact.required == false
+    and .evidence.redacted_order_artifact.schema == "agent_bridge.biocortex_retrieval.opt_in_redacted_order_artifact.v0"
+    and .evidence.redacted_order_artifact.read_only == true
+    and .evidence.redacted_order_artifact.redacted_order_artifact == true
+    and .evidence.redacted_order_artifact.source_packet_consumer == true
+    and .evidence.redacted_order_artifact.source_kind == "runtime_trial_review_packet"
+    and .evidence.redacted_order_artifact.artifact_ready == true
+    and .evidence.redacted_order_artifact.violation_count == 0
+    and .evidence.redacted_order_artifact.redacted_rows_comparable == true
+    and .evidence.redacted_order_artifact.baseline_rank_row_count == 1
+    and .evidence.redacted_order_artifact.advisory_rank_row_count == 1
+    and .evidence.redacted_order_artifact.top1_overlap_count == 1
+    and .evidence.redacted_order_artifact.top1_jaccard == 1
+    and .evidence.redacted_order_artifact.top3_overlap_count == 1
+    and .evidence.redacted_order_artifact.top3_jaccard == 1
+    and .evidence.redacted_order_artifact.improved_count == 0
+    and .evidence.redacted_order_artifact.regressed_count == 0
+    and .evidence.redacted_order_artifact.unchanged_count == 1
+    and .evidence.redacted_order_artifact.missing_baseline_count == 0
+    and .evidence.redacted_order_artifact.missing_advisory_count == 0
+    and .evidence.redacted_order_artifact.max_abs_delta == 0
+    and .evidence.redacted_order_artifact.comparable_key_count == 1
+    and .evidence.redacted_order_artifact.per_key_movement_count == 1
+    and .evidence.redacted_order_artifact.returned_order_source == "baseline"
+    and .evidence.redacted_order_artifact.baseline_returned == true
+    and .evidence.redacted_order_artifact.hash_matches_baseline == true
+    and .evidence.redacted_order_artifact.actual_return_order_changed == false
+    and .evidence.redacted_order_artifact.raw_query_included == false
+    and .evidence.redacted_order_artifact.raw_keys_included == false
+    and .evidence.redacted_order_artifact.raw_order_keys_included == false
+    and .evidence.redacted_order_artifact.content_included == false
+    and .evidence.redacted_order_artifact.side_signal_raw_included == false
+    and .evidence.redacted_order_artifact.redacted_key_hashes_in_artifact == true
+    and .evidence.redacted_order_artifact.copies_key_hashes_to_request == false
+    and .evidence.redacted_order_artifact.copies_redacted_rank_rows == false
+    and .evidence.redacted_order_artifact.approval_state == "not_approved"
+    and .evidence.redacted_order_artifact.runtime_adapter_approved == false
+    and .evidence.redacted_order_artifact.approval_writes_allowed == false
+    and .evidence.redacted_order_artifact.writes_approval == false
+    and .evidence.redacted_order_artifact.calls_memory_search == false
+    and .evidence.redacted_order_artifact.runs_biocortex == false
+    and .evidence.redacted_order_artifact.registers_embedding_backend == false
+    and .evidence.redacted_order_artifact.changes_memory_search_order == false
+    and .evidence.redacted_order_artifact.ordering_behavior_connected == false
+    and .evidence.redacted_order_artifact.may_implement_ordering_now == false
     and .current_permissions.may_implement_opt_in_experiment == true
     and .current_permissions.may_change_default_retrieval_order == false
     and .requested_permission_if_human_authorizes.may_affect_only_explicitly_opted_in_fts_calls == true
     and .requested_permission_if_human_authorizes.requires_runtime_trial_review_packet == true
+    and .requested_permission_if_human_authorizes.accepts_optional_order_diff_packet == true
+    and .requested_permission_if_human_authorizes.accepts_optional_redacted_order_artifact == true
     and (.not_requested | index("default_retrieval_influence_fts"))
     and (.not_requested | index("runtime_adapter_approved"))
 ' "$opt_in_auth_request/opt-in-authorization-request.json" >/dev/null
 if grep -q 'verify runtime trial secret query\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_auth_request/opt-in-authorization-request.json"; then
     echo "opt-in authorization request leaked raw query/key/content data" >&2
+    exit 1
+fi
+if grep -q 'sha256:' "$opt_in_auth_request/opt-in-authorization-request.json"; then
+    echo "opt-in authorization request copied redacted key hashes" >&2
     exit 1
 fi
 test -s "$opt_in_auth_request/forum-post-template.md"

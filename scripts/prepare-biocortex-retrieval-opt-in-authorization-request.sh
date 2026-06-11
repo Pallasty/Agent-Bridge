@@ -12,6 +12,7 @@ requester="codex"
 runtime_proof_summary=""
 runtime_trial_review_packet=""
 order_diff_packet=""
+redacted_order_artifact=""
 plan_fixture="docs/design/fixtures/biocortex-retrieval-opt-in-experiment-plan-2026-06-11.json"
 memory_key=""
 forum_decision_post_id=""
@@ -32,6 +33,7 @@ Flags:
   --runtime-trial-review-packet PATH
                                  JSON from retrieval-opt-in-runtime-trial-review-packet.
   --order-diff-packet PATH       Optional JSON from retrieval-opt-in-order-diff-packet.
+  --redacted-order-artifact PATH Optional JSON from retrieval-opt-in-redacted-order-artifact.
   --plan-fixture PATH            Opt-in experiment plan fixture.
   --memory-key KEY               Memory key to cite in generated templates.
   --forum-decision-post-id ID    Forum post id to cite in generated templates.
@@ -47,6 +49,7 @@ while [[ $# -gt 0 ]]; do
         --runtime-proof-summary) runtime_proof_summary="$2"; shift 2 ;;
         --runtime-trial-review-packet) runtime_trial_review_packet="$2"; shift 2 ;;
         --order-diff-packet) order_diff_packet="$2"; shift 2 ;;
+        --redacted-order-artifact) redacted_order_artifact="$2"; shift 2 ;;
         --plan-fixture) plan_fixture="$2"; shift 2 ;;
         --memory-key) memory_key="$2"; shift 2 ;;
         --forum-decision-post-id) forum_decision_post_id="$2"; shift 2 ;;
@@ -75,6 +78,10 @@ if [[ -n "$order_diff_packet" && ! -f "$order_diff_packet" ]]; then
     echo "order diff packet not found: $order_diff_packet" >&2
     exit 2
 fi
+if [[ -n "$redacted_order_artifact" && ! -f "$redacted_order_artifact" ]]; then
+    echo "redacted order artifact not found: $redacted_order_artifact" >&2
+    exit 2
+fi
 if [[ ! -f "$plan_fixture" ]]; then
     echo "opt-in plan fixture not found: $plan_fixture" >&2
     exit 2
@@ -86,6 +93,11 @@ order_diff_packet_for_jq="$order_diff_packet"
 if [[ -z "$order_diff_packet_for_jq" ]]; then
     order_diff_packet_for_jq="$out_dir/.order-diff-packet-absent.json"
     printf 'null\n' > "$order_diff_packet_for_jq"
+fi
+redacted_order_artifact_for_jq="$redacted_order_artifact"
+if [[ -z "$redacted_order_artifact_for_jq" ]]; then
+    redacted_order_artifact_for_jq="$out_dir/.redacted-order-artifact-absent.json"
+    printf 'null\n' > "$redacted_order_artifact_for_jq"
 fi
 
 target_host="$(hostname 2>/dev/null || printf 'unknown-host')"
@@ -104,6 +116,7 @@ jq -n \
     --slurpfile proof "$runtime_proof_summary" \
     --slurpfile trial_review "$runtime_trial_review_packet" \
     --slurpfile order_diff "$order_diff_packet_for_jq" \
+    --slurpfile redacted_order "$redacted_order_artifact_for_jq" \
     --arg generated_at "$generated_at" \
     --arg target_host "$target_host" \
     --arg branch "$branch" \
@@ -127,6 +140,7 @@ jq -n \
         implementation_allowed: $plan_implementation_allowed,
         writes_approval: false,
         accepts_optional_order_diff_packet: true,
+        accepts_optional_redacted_order_artifact: true,
         requester: $requester,
         reviewer: (if ($reviewer | length) == 0 then "<required>" else $reviewer end),
         target_host: $target_host,
@@ -240,6 +254,84 @@ jq -n \
                         may_implement_ordering_now: $order_diff[0].may_implement_ordering_now
                     }
                 end,
+            redacted_order_artifact:
+                if $redacted_order[0] == null then
+                    {
+                        provided: false,
+                        required: false,
+                        note: "optional_redacted_order_artifact_not_provided"
+                    }
+                else
+                    {
+                        provided: true,
+                        required: false,
+                        schema: $redacted_order[0].schema,
+                        read_only: $redacted_order[0].read_only,
+                        redacted_order_artifact: $redacted_order[0].redacted_order_artifact,
+                        source_packet_consumer: $redacted_order[0].source_packet_consumer,
+                        comparison_scope: $redacted_order[0].comparison_scope,
+                        source_kind: $redacted_order[0].review_target.source_kind,
+                        artifact_ready: $redacted_order[0].boundary_check.artifact_ready,
+                        violation_count: ($redacted_order[0].boundary_check.violations | length),
+                        redacted_rows_comparable:
+                            $redacted_order[0].boundary_check.redacted_rows_comparable,
+                        baseline_rank_row_count:
+                            ($redacted_order[0].redacted_order_comparison.baseline_order.rank_rows | length),
+                        advisory_rank_row_count:
+                            ($redacted_order[0].redacted_order_comparison.advisory_order.rank_rows | length),
+                        top1_overlap_count:
+                            ([$redacted_order[0].redacted_order_comparison.top_k_overlap[]? | select(.k == 1) | .overlap_count][0] // null),
+                        top1_jaccard:
+                            ([$redacted_order[0].redacted_order_comparison.top_k_overlap[]? | select(.k == 1) | .jaccard][0] // null),
+                        top3_overlap_count:
+                            ([$redacted_order[0].redacted_order_comparison.top_k_overlap[]? | select(.k == 3) | .overlap_count][0] // null),
+                        top3_jaccard:
+                            ([$redacted_order[0].redacted_order_comparison.top_k_overlap[]? | select(.k == 3) | .jaccard][0] // null),
+                        improved_count:
+                            $redacted_order[0].redacted_order_comparison.rank_delta_distribution.improved_count,
+                        regressed_count:
+                            $redacted_order[0].redacted_order_comparison.rank_delta_distribution.regressed_count,
+                        unchanged_count:
+                            $redacted_order[0].redacted_order_comparison.rank_delta_distribution.unchanged_count,
+                        missing_baseline_count:
+                            $redacted_order[0].redacted_order_comparison.rank_delta_distribution.missing_baseline_count,
+                        missing_advisory_count:
+                            $redacted_order[0].redacted_order_comparison.rank_delta_distribution.missing_advisory_count,
+                        max_abs_delta:
+                            $redacted_order[0].redacted_order_comparison.rank_delta_distribution.max_abs_delta,
+                        comparable_key_count:
+                            $redacted_order[0].redacted_order_comparison.rank_delta_distribution.comparable_key_count,
+                        per_key_movement_count:
+                            ($redacted_order[0].redacted_order_comparison.per_key_movements | length),
+                        returned_order_source:
+                            $redacted_order[0].redacted_order_comparison.returned_order.source,
+                        baseline_returned:
+                            $redacted_order[0].redacted_order_comparison.returned_order.baseline_returned,
+                        hash_matches_baseline:
+                            $redacted_order[0].redacted_order_comparison.returned_order.hash_matches_baseline,
+                        actual_return_order_changed:
+                            $redacted_order[0].redacted_order_comparison.returned_order.actual_return_order_changed,
+                        raw_query_included: $redacted_order[0].input_contract.raw_query_included,
+                        raw_keys_included: $redacted_order[0].input_contract.raw_keys_included,
+                        raw_order_keys_included: $redacted_order[0].input_contract.raw_order_keys_included,
+                        content_included: $redacted_order[0].input_contract.content_included,
+                        side_signal_raw_included: $redacted_order[0].input_contract.side_signal_raw_included,
+                        redacted_key_hashes_in_artifact:
+                            $redacted_order[0].input_contract.hashes_included,
+                        copies_key_hashes_to_request: false,
+                        copies_redacted_rank_rows: false,
+                        approval_state: $redacted_order[0].approval_state,
+                        runtime_adapter_approved: $redacted_order[0].runtime_adapter_approved,
+                        approval_writes_allowed: $redacted_order[0].approval_writes_allowed,
+                        writes_approval: $redacted_order[0].writes_approval,
+                        calls_memory_search: $redacted_order[0].calls_memory_search,
+                        runs_biocortex: $redacted_order[0].runs_biocortex,
+                        registers_embedding_backend: $redacted_order[0].registers_embedding_backend,
+                        changes_memory_search_order: $redacted_order[0].changes_memory_search_order,
+                        ordering_behavior_connected: $redacted_order[0].ordering_behavior_connected,
+                        may_implement_ordering_now: $redacted_order[0].may_implement_ordering_now
+                    }
+                end,
             docs: {
                 runtime_proof: "docs/design/BIOCORTEX_RETRIEVAL_RUNTIME_PROOF_2026_06_11.md",
                 default_influence_contract: "docs/design/BIOCORTEX_RETRIEVAL_DEFAULT_INFLUENCE_CONTRACT_2026_06_11.md",
@@ -261,7 +353,9 @@ jq -n \
             must_return_baseline_without_per_call_opt_in: true,
             must_return_baseline_on_absent_error_timeout_low_coverage_malformed_rows: true,
             requires_post_implementation_review_before_use: true,
-            requires_runtime_trial_review_packet: true
+            requires_runtime_trial_review_packet: true,
+            accepts_optional_order_diff_packet: true,
+            accepts_optional_redacted_order_artifact: true
         },
         not_requested: [
             "default_retrieval_influence_fts",
@@ -294,11 +388,13 @@ jq -e '
     and .implementation_allowed == true
     and .writes_approval == false
     and .accepts_optional_order_diff_packet == true
-    and .opt_in_plan.status == "redacted_order_artifact_implemented"
+    and .accepts_optional_redacted_order_artifact == true
+    and .opt_in_plan.status == "authorization_request_redacted_order_artifact_evidence_implemented"
     and .opt_in_plan.approval_state == "opt_in_implementation_authorized"
     and .opt_in_plan.order_diff_packet_implemented == true
     and .opt_in_plan.authorization_request_order_diff_evidence_implemented == true
     and .opt_in_plan.redacted_order_artifact_implemented == true
+    and .opt_in_plan.authorization_request_redacted_order_artifact_evidence_implemented == true
     and .opt_in_plan.implemented_gate_skeleton.ordering_behavior_connected == false
     and .opt_in_plan.implemented_gate_skeleton.may_change_search_order_now == false
     and .opt_in_plan.implemented_audit_shape.schema == "agent_bridge.biocortex_retrieval.opt_in_call_audit.v0"
@@ -463,6 +559,21 @@ jq -e '
     and .opt_in_plan.implemented_redacted_order_artifact.approval_state == "not_approved"
     and .opt_in_plan.implemented_redacted_order_artifact.runtime_adapter_approved == false
     and .opt_in_plan.implemented_redacted_order_artifact.may_implement_ordering_now == false
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.script == "scripts/prepare-biocortex-retrieval-opt-in-authorization-request.sh"
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.optional_input == "agent_bridge.biocortex_retrieval.opt_in_redacted_order_artifact.v0"
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.evidence_path == "evidence.redacted_order_artifact"
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.required == false
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.summary_only == true
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.copies_key_hashes == false
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.copies_redacted_rank_rows == false
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.reports_top_k_overlap == true
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.reports_rank_delta_distribution == true
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.approval_state == "not_approved"
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.runtime_adapter_approved == false
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.calls_memory_search == false
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.runs_biocortex == false
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.changes_memory_search_order == false
+    and .opt_in_plan.implemented_authorization_request_redacted_order_artifact_evidence.ordering_behavior_connected == false
     and .opt_in_plan.experiment.mode == "fts_only"
     and .opt_in_plan.experiment.affected_call_site.function == "SqliteStore::memory_search"
     and .evidence.runtime_boundary_proof.default_disabled_status == "runtime_disabled"
@@ -531,10 +642,53 @@ jq -e '
             and .evidence.order_diff_packet.may_implement_ordering_now == false
         )
     )
+    and (
+        .evidence.redacted_order_artifact.provided == false
+        or (
+            .evidence.redacted_order_artifact.required == false
+            and .evidence.redacted_order_artifact.schema == "agent_bridge.biocortex_retrieval.opt_in_redacted_order_artifact.v0"
+            and .evidence.redacted_order_artifact.read_only == true
+            and .evidence.redacted_order_artifact.redacted_order_artifact == true
+            and .evidence.redacted_order_artifact.source_packet_consumer == true
+            and .evidence.redacted_order_artifact.source_kind == "runtime_trial_review_packet"
+            and .evidence.redacted_order_artifact.artifact_ready == true
+            and .evidence.redacted_order_artifact.violation_count == 0
+            and .evidence.redacted_order_artifact.redacted_rows_comparable == true
+            and (.evidence.redacted_order_artifact.baseline_rank_row_count | type) == "number"
+            and (.evidence.redacted_order_artifact.advisory_rank_row_count | type) == "number"
+            and (.evidence.redacted_order_artifact.top1_overlap_count | type) == "number"
+            and ((.evidence.redacted_order_artifact.top1_jaccard | type) == "number" or .evidence.redacted_order_artifact.top1_jaccard == null)
+            and (.evidence.redacted_order_artifact.per_key_movement_count | type) == "number"
+            and .evidence.redacted_order_artifact.returned_order_source == "baseline"
+            and .evidence.redacted_order_artifact.baseline_returned == true
+            and .evidence.redacted_order_artifact.hash_matches_baseline == true
+            and .evidence.redacted_order_artifact.actual_return_order_changed == false
+            and .evidence.redacted_order_artifact.raw_query_included == false
+            and .evidence.redacted_order_artifact.raw_keys_included == false
+            and .evidence.redacted_order_artifact.raw_order_keys_included == false
+            and .evidence.redacted_order_artifact.content_included == false
+            and .evidence.redacted_order_artifact.side_signal_raw_included == false
+            and .evidence.redacted_order_artifact.redacted_key_hashes_in_artifact == true
+            and .evidence.redacted_order_artifact.copies_key_hashes_to_request == false
+            and .evidence.redacted_order_artifact.copies_redacted_rank_rows == false
+            and .evidence.redacted_order_artifact.approval_state == "not_approved"
+            and .evidence.redacted_order_artifact.runtime_adapter_approved == false
+            and .evidence.redacted_order_artifact.approval_writes_allowed == false
+            and .evidence.redacted_order_artifact.writes_approval == false
+            and .evidence.redacted_order_artifact.calls_memory_search == false
+            and .evidence.redacted_order_artifact.runs_biocortex == false
+            and .evidence.redacted_order_artifact.registers_embedding_backend == false
+            and .evidence.redacted_order_artifact.changes_memory_search_order == false
+            and .evidence.redacted_order_artifact.ordering_behavior_connected == false
+            and .evidence.redacted_order_artifact.may_implement_ordering_now == false
+        )
+    )
     and .current_permissions.may_implement_opt_in_experiment == true
     and .current_permissions.may_change_default_retrieval_order == false
     and .requested_permission_if_human_authorizes.may_affect_only_explicitly_opted_in_fts_calls == true
     and .requested_permission_if_human_authorizes.requires_runtime_trial_review_packet == true
+    and .requested_permission_if_human_authorizes.accepts_optional_order_diff_packet == true
+    and .requested_permission_if_human_authorizes.accepts_optional_redacted_order_artifact == true
     and (.not_requested | index("default_retrieval_influence_fts"))
     and (.not_requested | index("runtime_adapter_approved"))
 ' "$request_packet" >/dev/null
@@ -558,6 +712,7 @@ This packet is not an approval writer. It reflects:
 - implementation_allowed=$plan_implementation_allowed
 - runtime trial review packet included=true
 - order diff packet included=$(if [[ -n "$order_diff_packet" ]]; then printf 'true'; else printf 'false'; fi)
+- redacted order artifact included=$(if [[ -n "$redacted_order_artifact" ]]; then printf 'true'; else printf 'false'; fi)
 
 The allowed implementation scope is only an FTS-only, per-call opt-in
 experiment behind a feature/runtime gate. It does not authorize default
@@ -574,6 +729,7 @@ implementation_allowed=$plan_implementation_allowed.
 
 Runtime trial review packet evidence included: true.
 Order diff packet evidence included: $(if [[ -n "$order_diff_packet" ]]; then printf 'true'; else printf 'false'; fi).
+Redacted order artifact evidence included: $(if [[ -n "$redacted_order_artifact" ]]; then printf 'true'; else printf 'false'; fi).
 
 Requested scope: opt_in_experiment.
 Not requested: default retrieval influence, hybrid influence, semantic influence.
@@ -596,7 +752,9 @@ Files:
 This bundle is review preparation only. It is not approval state and it does
 not change retrieval behavior. It includes runtime trial review evidence, but
 that evidence does not approve runtime influence or ordering behavior. When
-provided, order-diff evidence is hash-only and optional.
+provided, order-diff evidence is hash-only and optional. When provided,
+redacted-order artifact evidence is summary-only and does not copy key hashes
+or redacted rank rows into the request packet.
 EOF
 
 printf 'authorization_request_bundle=%s\n' "$out_dir"

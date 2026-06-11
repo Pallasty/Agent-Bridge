@@ -12,8 +12,9 @@ trial surface, read-only runtime trial review packet, and authorization request
 runtime-trial-review evidence hook, and hash-only order-diff review packet
 implemented. The authorization request bundle can now optionally include
 hash-only order-diff evidence. A separate redacted-order artifact now computes
-top-k overlap and per-key rank movement from `key_hash` rows only. Ordering
-behavior is not implemented and not approved.
+top-k overlap and per-key rank movement from `key_hash` rows only, and the
+authorization request bundle can optionally include its summary-only evidence.
+Ordering behavior is not implemented and not approved.
 
 ```json
 {
@@ -35,6 +36,7 @@ behavior is not implemented and not approved.
   "order_diff_packet_implemented": true,
   "authorization_request_order_diff_evidence_implemented": true,
   "redacted_order_artifact_implemented": true,
+  "authorization_request_redacted_order_artifact_evidence_implemented": true,
   "ordering_behavior_connected": false
 }
 ```
@@ -304,9 +306,30 @@ Slice 13 landed a redacted-order artifact:
   `runtime_adapter_approved=false`, and `may_implement_ordering_now=false`.
 
 The redacted-order artifact answers how much the advisory order differs from
-the default baseline order without needing raw keys. It is evidence only; it is
-not part of the authorization request bundle yet and does not approve runtime
-influence or connect ordering behavior.
+the default baseline order without needing raw keys. It is evidence only and
+does not approve runtime influence or connect ordering behavior.
+
+Slice 14 extended the authorization request bundle with optional redacted-order
+artifact summary evidence:
+
+- script: `scripts/prepare-biocortex-retrieval-opt-in-authorization-request.sh`;
+- optional input:
+  `agent_bridge.biocortex_retrieval.opt_in_redacted_order_artifact.v0`;
+- request evidence path: `evidence.redacted_order_artifact`;
+- preserves backward compatibility when no redacted-order artifact is supplied;
+- copies summary-only metrics: artifact readiness, comparable-row status,
+  rank-row counts, top-k overlap counts/Jaccard, rank-delta distribution, and
+  per-key movement count;
+- does not copy raw order keys, raw query, candidate content, raw side-signal
+  rows, `key_hash` values, redacted rank rows, or the source packet;
+- keeps `approval_state=not_approved`, `runtime_adapter_approved=false`,
+  `calls_memory_search=false`, `runs_biocortex=false`, and
+  `may_implement_ordering_now=false`.
+
+Including redacted-order artifact evidence in the request bundle helps review
+the shape of ordering differences without exposing per-key identifiers in the
+request packet. It still does not approve runtime influence, enable an adapter,
+or connect ordering behavior.
 
 ## Fail-Open Rules
 
@@ -388,6 +411,8 @@ Future implementation review must include tests proving:
   runtime influence, or change returned order;
 - authorization request bundle can optionally include order-diff evidence
   without including raw order keys or approving runtime influence;
+- authorization request bundle can optionally include redacted-order artifact
+  summaries without copying key hashes or approving runtime influence;
 - audit telemetry includes baseline order, experimental order, fallback reason,
   latency, and authorization scope.
 
