@@ -43,6 +43,12 @@ jq -e '
     and .approval_writes_allowed == false
     and .default_search_order_change_allowed == false
     and .requires_separate_human_approval == true
+    and .approval_model.agent_technical_attestation_required == true
+    and .approval_model.human_authorization_required == true
+    and .approval_model.agent_attestation_can_replace_human_authorization == false
+    and .agent_technical_attestation_required.can_authorize_runtime_influence == false
+    and .human_authorization_required.status == "not_authorized"
+    and .human_authorization_required.can_be_replaced_by_agent_attestation == false
 ' docs/design/fixtures/biocortex-retrieval-runtime-approval-packet-template.json >/dev/null
 
 extract_json_summary() {
@@ -85,6 +91,12 @@ jq -e '
     and .default_search_order_change_allowed == false
     and .requires_separate_human_approval == true
     and .ready_for_human_approval_review == false
+    and .approval_model.agent_technical_attestation_required == true
+    and .approval_model.human_authorization_required == true
+    and .approval_model.agent_attestation_can_replace_human_authorization == false
+    and .agent_technical_attestation.can_authorize_runtime_influence == false
+    and .human_authorization.status == "not_authorized"
+    and .human_authorization.can_be_replaced_by_agent_attestation == false
     and (.missing_evidence | length) > 0
 ' "$approval_packet" >/dev/null
 
@@ -92,6 +104,9 @@ review_bundle="$tmpdir/runtime-approval-review"
 run scripts/prepare-biocortex-retrieval-approval-review.sh \
     --out-dir "$review_bundle" \
     --reviewer "verify-bundle" \
+    --agent-attestor "verify-bundle" \
+    --agent-attestation-decision "technical_review_pending" \
+    --human-authorization-scope "none" \
     --memory-key "verify_bundle_memory_placeholder" \
     --forum-decision-post-id "verify_bundle_forum_placeholder"
 jq -e '
@@ -101,6 +116,13 @@ jq -e '
     and .approval_writes_allowed == false
     and .default_search_order_change_allowed == false
     and .ready_for_human_approval_review == false
+    and .approval_model.agent_technical_attestation_required == true
+    and .approval_model.human_authorization_required == true
+    and .approval_model.agent_attestation_can_replace_human_authorization == false
+    and .agent_technical_attestation.can_authorize_runtime_influence == false
+    and .human_authorization.status == "not_authorized"
+    and .human_authorization.scope == "none"
+    and .human_authorization.can_be_replaced_by_agent_attestation == false
     and (.missing_evidence | length) > 0
 ' "$review_bundle/approval-packet-preview.json" >/dev/null
 test -s "$review_bundle/forum-post-template.md"

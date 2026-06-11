@@ -12,6 +12,12 @@
   "read_only_shadow_required_until_approved": true,
   "kill_switch_required": true,
   "rollback_required": true,
+  "approval_model": {
+    "agent_technical_attestation_required": true,
+    "human_authorization_required": true,
+    "agent_attestation_can_replace_human_authorization": false,
+    "human_reviews_scope_not_raw_memory_contents": true
+  },
   "evidence_required": {
     "target_host": "<required>",
     "branch": "<required>",
@@ -70,6 +76,19 @@
       "forum_decision_post_id": "<required before approval>",
       "memory_key": "<required before approval>"
     }
+  },
+  "agent_technical_attestation_required": {
+    "attestor": "<required>",
+    "decision": "<required: approve | reject | defer | technical_review_pending>",
+    "summary": "<required>",
+    "can_authorize_runtime_influence": false,
+    "scope": "technical_evidence_and_behavioral_risk_only"
+  },
+  "human_authorization_required": {
+    "status": "not_authorized",
+    "scope": "<required: none | continue_design | opt_in_experiment | default_retrieval_influence>",
+    "can_be_replaced_by_agent_attestation": false,
+    "owner_decides_trust_boundary": true
   },
   "review_rule": "Approval requires a separate human decision explicitly allowing default retrieval influence and naming the reviewed implementation commit."
 }

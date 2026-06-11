@@ -7,7 +7,7 @@
 use crate::shadow_cortex::{ShadowCortexEvent, ShadowCortexReplayFixture, SignalScope};
 use ab_store::{cosine_similarity, embedding::default_backend};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Map, Number, Value};
+use serde_json::{Map, Number, Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -70,6 +70,10 @@ pub struct BioCortexRetrievalApprovalPacketOptions {
     pub branch: Option<String>,
     pub commit: Option<String>,
     pub reviewer: Option<String>,
+    pub agent_attestor: Option<String>,
+    pub agent_attestation_decision: Option<String>,
+    pub agent_attestation_summary: Option<String>,
+    pub human_authorization_scope: Option<String>,
     pub verification_status: Option<String>,
     pub verification_captured_at: Option<String>,
     pub current_gate_status: Option<String>,
@@ -203,7 +207,7 @@ pub async fn biocortex_shadow_digest(opts: BioCortexShadowOptions) -> Value {
                 "requested_benchmark": requested,
                 "supported_benchmarks": supported_benchmarks(),
                 "boundary": boundary_payload(false, false),
-            })
+            });
         }
     };
 
@@ -238,7 +242,7 @@ pub async fn biocortex_shadow_digest(opts: BioCortexShadowOptions) -> Value {
                     .map(|path| display_path(path.as_path()))
                     .collect::<Vec<_>>(),
                 "boundary": boundary_payload(false, false),
-            })
+            });
         }
     };
 
@@ -281,7 +285,7 @@ pub async fn biocortex_shadow_digest(opts: BioCortexShadowOptions) -> Value {
                     "manifest_path": display_path(&manifest),
                     "error": err,
                     "boundary": boundary_payload(false, true),
-                })
+                });
             }
         }
     }
@@ -305,7 +309,7 @@ pub async fn biocortex_shadow_digest(opts: BioCortexShadowOptions) -> Value {
                 "manifest_path": display_path(&manifest),
                 "error": err.to_string(),
                 "boundary": boundary_payload(true, spec.requires_fixture_projection),
-            })
+            });
         }
         Err(_) => {
             return json!({
@@ -319,7 +323,7 @@ pub async fn biocortex_shadow_digest(opts: BioCortexShadowOptions) -> Value {
                 "manifest_path": display_path(&manifest),
                 "timeout_ms": timeout_ms,
                 "boundary": boundary_payload(true, spec.requires_fixture_projection),
-            })
+            });
         }
     };
 
@@ -453,7 +457,7 @@ pub async fn biocortex_retrieval_shadow_report(opts: BioCortexRetrievalShadowOpt
                 latency_ms,
                 payload,
                 opts.include_raw,
-            )
+            );
         }
     };
 
@@ -546,7 +550,24 @@ pub fn biocortex_retrieval_runtime_approval_packet_preview(
             "memory_key": required_or_value(opts.memory_key),
         },
     });
+    let agent_technical_attestation = json!({
+        "required": true,
+        "attestor": required_or_value(opts.agent_attestor),
+        "decision": required_or_value(opts.agent_attestation_decision),
+        "summary": required_or_value(opts.agent_attestation_summary),
+        "can_authorize_runtime_influence": false,
+        "scope": "technical_evidence_and_behavioral_risk_only",
+    });
+    let human_authorization = json!({
+        "required": true,
+        "status": "not_authorized",
+        "scope": required_or_value(opts.human_authorization_scope),
+        "can_be_replaced_by_agent_attestation": false,
+        "owner_decides_trust_boundary": true,
+    });
     let missing_evidence = missing_required_paths(&evidence);
+    let missing_attestation = missing_required_paths(&agent_technical_attestation);
+    let missing_authorization = missing_required_paths(&human_authorization);
 
     json!({
         "schema": BIOCORTEX_RETRIEVAL_RUNTIME_APPROVAL_PACKET_SCHEMA,
@@ -568,9 +589,19 @@ pub fn biocortex_retrieval_runtime_approval_packet_preview(
             "fixture": "docs/design/fixtures/biocortex-retrieval-runtime-approval-packet-template.json",
             "fixture_schema": "agent_bridge.biocortex_retrieval.runtime_approval_packet_template.v0",
         },
+        "approval_model": {
+            "agent_technical_attestation_required": true,
+            "human_authorization_required": true,
+            "agent_attestation_can_replace_human_authorization": false,
+            "human_reviews_scope_not_raw_memory_contents": true,
+        },
         "gates": retrieval_gate_state(),
         "evidence": evidence,
+        "agent_technical_attestation": agent_technical_attestation,
+        "human_authorization": human_authorization,
         "missing_evidence": missing_evidence,
+        "missing_attestation": missing_attestation,
+        "missing_authorization": missing_authorization,
         "ready_for_human_approval_review": false,
         "review_rule": "Approval requires a separate human decision explicitly allowing default retrieval influence and naming the reviewed implementation commit.",
     })
@@ -826,7 +857,7 @@ async fn run_retrieval_side_signal(
                 "error": err.to_string(),
                 "checkout_path": display_path(&checkout),
                 "manifest_path": display_path(&manifest),
-            }))
+            }));
         }
         Err(_) => {
             return Err(json!({
@@ -834,7 +865,7 @@ async fn run_retrieval_side_signal(
                 "timeout_ms": timeout_ms,
                 "checkout_path": display_path(&checkout),
                 "manifest_path": display_path(&manifest),
-            }))
+            }));
         }
     };
 
@@ -1692,10 +1723,12 @@ mod tests {
             projection["replay_feasibility"]["substrate_replay_plan_available"],
             json!(true)
         );
-        assert!(projection["fixture_hash"]
-            .as_str()
-            .unwrap_or_default()
-            .starts_with("sha256:"));
+        assert!(
+            projection["fixture_hash"]
+                .as_str()
+                .unwrap_or_default()
+                .starts_with("sha256:")
+        );
     }
 
     #[test]
@@ -1791,6 +1824,9 @@ mod tests {
             BioCortexRetrievalApprovalPacketOptions {
                 commit: Some("abc123".to_string()),
                 verification_status: Some("pass".to_string()),
+                agent_attestor: Some("codex".to_string()),
+                agent_attestation_decision: Some("technical_review_pending".to_string()),
+                human_authorization_scope: Some("none".to_string()),
                 ..Default::default()
             },
         );
@@ -1807,6 +1843,38 @@ mod tests {
         assert_eq!(packet["default_search_order_change_allowed"], json!(false));
         assert_eq!(packet["requires_separate_human_approval"], json!(true));
         assert_eq!(packet["ready_for_human_approval_review"], json!(false));
+        assert_eq!(
+            packet["approval_model"]["agent_technical_attestation_required"],
+            json!(true)
+        );
+        assert_eq!(
+            packet["approval_model"]["human_authorization_required"],
+            json!(true)
+        );
+        assert_eq!(
+            packet["approval_model"]["agent_attestation_can_replace_human_authorization"],
+            json!(false)
+        );
+        assert_eq!(
+            packet["agent_technical_attestation"]["attestor"],
+            json!("codex")
+        );
+        assert_eq!(
+            packet["agent_technical_attestation"]["decision"],
+            json!("technical_review_pending")
+        );
+        assert_eq!(
+            packet["agent_technical_attestation"]["can_authorize_runtime_influence"],
+            json!(false)
+        );
+        assert_eq!(
+            packet["human_authorization"]["status"],
+            json!("not_authorized")
+        );
+        assert_eq!(
+            packet["human_authorization"]["can_be_replaced_by_agent_attestation"],
+            json!(false)
+        );
         assert_eq!(packet["evidence"]["commit"], json!("abc123"));
         assert_eq!(
             packet["evidence"]["verification_bundle"]["status"],
@@ -1816,9 +1884,15 @@ mod tests {
             .as_array()
             .expect("missing paths");
         assert!(missing.iter().any(|path| path == "$.target_host"));
-        assert!(missing
-            .iter()
-            .any(|path| path == "$.ordering_change_design.exact_call_site"));
+        assert!(
+            missing
+                .iter()
+                .any(|path| path == "$.ordering_change_design.exact_call_site")
+        );
+        let missing_attestation = packet["missing_attestation"]
+            .as_array()
+            .expect("missing attestation paths");
+        assert!(missing_attestation.iter().any(|path| path == "$.summary"));
         assert_eq!(
             packet["gates"]["compile_feature"],
             json!("biocortex-retrieval-shadow")

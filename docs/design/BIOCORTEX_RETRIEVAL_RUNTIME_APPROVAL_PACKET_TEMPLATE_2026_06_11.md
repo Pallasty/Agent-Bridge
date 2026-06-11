@@ -58,8 +58,16 @@ Required safety fields:
 - `approval_writes_allowed=false`;
 - `default_search_order_change_allowed=false`;
 - `requires_separate_human_approval=true`;
+- `agent_technical_attestation.can_authorize_runtime_influence=false`;
+- `human_authorization.status=not_authorized`;
+- `human_authorization.can_be_replaced_by_agent_attestation=false`;
 - `kill_switch_required=true`;
 - `rollback_required=true`.
+
+The agent may provide a technical attestation because it can inspect retrieval
+behavior and memory impact more directly than the human reviewer. That
+attestation is advisory and cannot replace human authorization of trust-boundary
+scope.
 
 ## Evidence Requirements
 
@@ -79,6 +87,9 @@ evidence for every item below:
 - fail-open behavior when BioCortex is absent, slow, or errors;
 - rollback command and operator kill switch;
 - forum decision post id and memory key linking the final evidence packet.
+- agent technical attestation: attestor, decision, and summary;
+- human authorization scope, defaulting to `none` until the human explicitly
+  grants a wider scope.
 
 ## Review Rules
 
@@ -90,7 +101,7 @@ being filled out must leave:
 {"runtime_adapter_approved": false}
 ```
 
-A valid approval must be a separate human decision that explicitly says default
-retrieval influence is allowed and names the reviewed implementation commit.
-Until then, BioCortex remains a read-only side signal and the default
-`memory_search` order must stay unchanged.
+A valid approval must combine an agent technical attestation with a separate
+human authorization that explicitly names the reviewed implementation commit
+and the authorized scope. Until then, BioCortex remains a read-only side signal
+and the default `memory_search` order must stay unchanged.

@@ -192,6 +192,10 @@ of the following:
   and `scripts/prepare-biocortex-retrieval-approval-review.sh` to prepare
   reviewer-facing packet, forum, and memory templates. The script does not post
   or approve anything.
+- The packet must separate agent technical attestation from human authorization.
+  The agent may attest to retrieval behavior and memory-system risk, but
+  `agent_attestation_can_replace_human_authorization=false` must remain explicit
+  in packet fields.
 - `scripts/verify-biocortex-retrieval-shadow.sh` passes on the target host.
 - The current corpus and hard holdout both pass `candidate-strong` with
   `side_signal_coverage >= 0.8`, zero regressions, and positive MRR lift.

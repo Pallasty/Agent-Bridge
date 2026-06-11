@@ -7,6 +7,10 @@ cd "$repo_root"
 ts="$(date -u +%Y%m%dT%H%M%SZ)"
 out_dir="${TMPDIR:-/tmp}/ab-biocortex-retrieval-approval-review-$ts"
 reviewer=""
+agent_attestor="codex"
+agent_attestation_decision="technical_review_pending"
+agent_attestation_summary=""
+human_authorization_scope="none"
 verification_log=""
 memory_key=""
 forum_decision_post_id=""
@@ -27,6 +31,10 @@ changes retrieval order.
 Flags:
   --out-dir PATH                         Output directory.
   --reviewer TEXT                        Human reviewer identity.
+  --agent-attestor TEXT                  Agent technical attestor identity.
+  --agent-attestation-decision TEXT      Agent decision: approve, reject, defer, or technical_review_pending.
+  --agent-attestation-summary TEXT       Agent technical attestation summary.
+  --human-authorization-scope TEXT       Human authorization scope; default: none.
   --verification-log PATH                Log from verify-biocortex-retrieval-shadow.sh.
   --memory-key KEY                       Memory key to cite in generated templates.
   --forum-decision-post-id ID            Forum post id to cite in generated templates.
@@ -44,6 +52,10 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --out-dir) out_dir="$2"; shift 2 ;;
         --reviewer) reviewer="$2"; shift 2 ;;
+        --agent-attestor) agent_attestor="$2"; shift 2 ;;
+        --agent-attestation-decision) agent_attestation_decision="$2"; shift 2 ;;
+        --agent-attestation-summary) agent_attestation_summary="$2"; shift 2 ;;
+        --human-authorization-scope) human_authorization_scope="$2"; shift 2 ;;
         --verification-log) verification_log="$2"; shift 2 ;;
         --memory-key) memory_key="$2"; shift 2 ;;
         --forum-decision-post-id) forum_decision_post_id="$2"; shift 2 ;;
@@ -91,9 +103,13 @@ args=(
     --default-memory-search-added-latency-ms "$default_search_latency"
     --fail-open-behavior "$fail_open_behavior"
     --rollback-command "$rollback_command"
+    --agent-attestor "$agent_attestor"
+    --agent-attestation-decision "$agent_attestation_decision"
+    --human-authorization-scope "$human_authorization_scope"
 )
 
 [[ -n "$reviewer" ]] && args+=(--reviewer "$reviewer")
+[[ -n "$agent_attestation_summary" ]] && args+=(--agent-attestation-summary "$agent_attestation_summary")
 [[ -n "$verification_status" ]] && args+=(--verification-status "$verification_status")
 [[ -n "$verification_captured_at" ]] && args+=(--verification-captured-at "$verification_captured_at")
 [[ -n "$current_gate_status" ]] && args+=(--current-gate-status "$current_gate_status")
@@ -115,6 +131,13 @@ jq -e '
     and .default_search_order_change_allowed == false
     and .requires_separate_human_approval == true
     and .ready_for_human_approval_review == false
+    and .approval_model.agent_technical_attestation_required == true
+    and .approval_model.human_authorization_required == true
+    and .approval_model.agent_attestation_can_replace_human_authorization == false
+    and .agent_technical_attestation.can_authorize_runtime_influence == false
+    and .human_authorization.status == "not_authorized"
+    and .human_authorization.scope == "none"
+    and .human_authorization.can_be_replaced_by_agent_attestation == false
 ' "$packet" >/dev/null
 
 missing_count="$(jq '.missing_evidence | length' "$packet")"
@@ -127,6 +150,9 @@ Commit under review: $commit
 Branch: $branch
 Host: $target_host
 Reviewer: ${reviewer:-<required>}
+Agent technical attestor: $agent_attestor
+Agent technical decision: $agent_attestation_decision
+Human authorization scope: $human_authorization_scope
 Verification log: ${verification_log:-<required>}
 Missing evidence count: $missing_count
 
@@ -137,9 +163,13 @@ This is not approval state. The packet keeps:
 - approval_writes_allowed=false
 - default_search_order_change_allowed=false
 - ready_for_human_approval_review=false
+- agent_technical_attestation.can_authorize_runtime_influence=false
+- human_authorization.status=not_authorized
 
-Human approval, if ever granted, must be a separate decision that explicitly
-allows default retrieval influence and names the reviewed implementation commit.
+Agent technical attestation can recommend approve/reject/defer, but cannot
+replace human authorization. Human approval, if ever granted, must be a separate
+decision that explicitly allows a scope and names the reviewed implementation
+commit.
 EOF
 
 cat > "$out_dir/memory-note-template.md" <<EOF
@@ -148,6 +178,10 @@ BioCortex runtime approval review-prep packet generated for commit $commit.
 Status: not approved. The packet preserves runtime_adapter_approved=false,
 approval_writes_allowed=false, default_search_order_change_allowed=false, and
 ready_for_human_approval_review=false.
+Agent technical attestor: $agent_attestor
+Agent technical decision: $agent_attestation_decision
+Human authorization scope: $human_authorization_scope
+Agent technical attestation cannot replace human authorization.
 
 Packet path at generation time: $packet
 Forum decision post id: ${forum_decision_post_id:-<required>}
