@@ -38,6 +38,17 @@ cargo run -p ab-bridge --no-default-features \
 The preview command is read-only. It may fill evidence fields supplied by CLI
 arguments, but it always keeps approval state disabled.
 
+For a reviewer-facing bundle with forum and memory templates, use:
+
+```bash
+scripts/prepare-biocortex-retrieval-approval-review.sh \
+  --verification-log /tmp/biocortex-retrieval-shadow-verify.log \
+  --reviewer "<human reviewer>"
+```
+
+That script writes local review-prep files only. It does not post to forum,
+write memory, approve runtime influence, or change retrieval behavior.
+
 Required safety fields:
 
 - `approval_state=not_approved` until an explicit human decision changes it;

@@ -88,6 +88,24 @@ jq -e '
     and (.missing_evidence | length) > 0
 ' "$approval_packet" >/dev/null
 
+review_bundle="$tmpdir/runtime-approval-review"
+run scripts/prepare-biocortex-retrieval-approval-review.sh \
+    --out-dir "$review_bundle" \
+    --reviewer "verify-bundle" \
+    --memory-key "verify_bundle_memory_placeholder" \
+    --forum-decision-post-id "verify_bundle_forum_placeholder"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.runtime_approval_packet_preview.v0"
+    and .approval_state == "not_approved"
+    and .runtime_adapter_approved == false
+    and .approval_writes_allowed == false
+    and .default_search_order_change_allowed == false
+    and .ready_for_human_approval_review == false
+    and (.missing_evidence | length) > 0
+' "$review_bundle/approval-packet-preview.json" >/dev/null
+test -s "$review_bundle/forum-post-template.md"
+test -s "$review_bundle/memory-note-template.md"
+
 run cargo check -p ab-bridge --no-default-features --features biocortex-retrieval-shadow
 
 run cargo test -p ab-bridge --lib --no-default-features \

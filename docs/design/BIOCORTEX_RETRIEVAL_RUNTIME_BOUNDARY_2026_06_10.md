@@ -187,6 +187,11 @@ of the following:
   `docs/design/fixtures/biocortex-retrieval-runtime-approval-packet-template.json`
   as the starting point. The template is not approval state; it defaults to
   `approval_state=not_approved`.
+- Use
+  `docs/design/BIOCORTEX_RETRIEVAL_RUNTIME_APPROVAL_WORKFLOW_2026_06_11.md`
+  and `scripts/prepare-biocortex-retrieval-approval-review.sh` to prepare
+  reviewer-facing packet, forum, and memory templates. The script does not post
+  or approve anything.
 - `scripts/verify-biocortex-retrieval-shadow.sh` passes on the target host.
 - The current corpus and hard holdout both pass `candidate-strong` with
   `side_signal_coverage >= 0.8`, zero regressions, and positive MRR lift.
