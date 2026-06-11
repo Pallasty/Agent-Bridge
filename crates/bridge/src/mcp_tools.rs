@@ -33622,6 +33622,9 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // Search-ranking diagnostics: read-only graph topology preflight for
     // PageRank-like centrality experiments.
     "memory_graph_topology",
+    // BioCortex retrieval side-signal: review-only, explicit candidates only,
+    // and runtime-disabled unless AB_BIOCORTEX_RETRIEVAL_SHADOW=1.
+    "biocortex_retrieval_shadow",
     // Explicit-link diagnostics: read-only projection of related_keys into
     // candidate graph edges before any write-capable backfill is considered.
     "memory_related_keys_preflight",
@@ -41280,6 +41283,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(p.includes(Tier::Standard, "semantic_bus_runtime_conformance"));
         assert!(p.includes(Tier::Standard, "semantic_bus_peer_conformance"));
         assert!(p.includes(Tier::Standard, "browser_lite_probe"));
+        assert!(p.includes(Tier::Standard, "biocortex_retrieval_shadow"));
         assert!(!p.includes(Tier::Standard, "embed_text"));
         assert!(!p.includes(Tier::Niche, "browser_navigate"));
     }
@@ -41288,11 +41292,12 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 51 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 52 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-        //      + DIRECT(39: 6 avatar observation/sync/renderer tools
+        //      + DIRECT(40: 6 avatar observation/sync/renderer tools
         //      + xiao_shu_action_request + 14 mobile bridge tools
-        //      + memory_graph_topology + memory_related_keys_preflight
+        //      + memory_graph_topology + biocortex_retrieval_shadow
+        //      + memory_related_keys_preflight
         //      + memory_orphan_candidates + memory_orphan_inventory
         //      + desktop_snapshot + vision_grounding_ocr + desktop_verify
         //      + macos_ax_probe + macos_ax_verify + semantic_bus_adapter_report
@@ -41313,7 +41318,8 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         // +semantic_bus_runtime_health brought DIRECT 36→37, total 48→49.
         // +semantic_bus_runtime_conformance brought DIRECT 37→38, total 49→50.
         // +semantic_bus_peer_conformance brought DIRECT 38→39, total 50→51.
-        assert_eq!(extras.len(), 51);
+        // +biocortex_retrieval_shadow brought DIRECT 39→40, total 51→52.
+        assert_eq!(extras.len(), 52);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -41341,6 +41347,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(extras.contains(&"mobile_ios_apps"));
         assert!(extras.contains(&"mobile_ios_syslog_tail"));
         assert!(extras.contains(&"memory_graph_topology"));
+        assert!(extras.contains(&"biocortex_retrieval_shadow"));
         assert!(extras.contains(&"memory_related_keys_preflight"));
         assert!(!extras.contains(&"memory_related_keys_materialize"));
         assert!(extras.contains(&"memory_orphan_candidates"));
