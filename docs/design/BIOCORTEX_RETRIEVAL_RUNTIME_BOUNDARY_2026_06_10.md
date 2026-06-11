@@ -211,6 +211,10 @@ of the following:
   `AB_BIOCORTEX_RETRIEVAL_SHADOW=1`.
 - `AB_BIOCORTEX_RETRIEVAL_DISABLE=1` still forces baseline-only behavior even
   when the runtime enable flag is set.
+- `scripts/prove-biocortex-retrieval-runtime-boundary.sh` produces a runtime
+  proof bundle with default-disabled, kill-switch, enabled-shadow, p95 latency,
+  and future call-site evidence. See
+  `docs/design/BIOCORTEX_RETRIEVAL_RUNTIME_PROOF_2026_06_11.md`.
 - Any proposed default retrieval influence has a separate design showing:
   - the exact call site where ordering would change;
   - the fail-open behavior when BioCortex is absent, slow, or errors;
@@ -236,8 +240,9 @@ The bundle runs:
 2. no-default `ab-bridge` check with `biocortex-retrieval-shadow`;
 3. focused retrieval boundary unit tests;
 4. `biocortex_retrieval_shadow_acceptance`;
-5. BioCortex side-signal generation for the current and hard holdout corpora;
-6. `biocortex_retrieval_gate_eval` on both corpora with
+5. `scripts/prove-biocortex-retrieval-runtime-boundary.sh`;
+6. BioCortex side-signal generation for the current and hard holdout corpora;
+7. `biocortex_retrieval_gate_eval` on both corpora with
    `candidate-strong`, asserting pass status, read-only gate state, human-review
    requirement, full-enough coverage, and zero regressions.
 

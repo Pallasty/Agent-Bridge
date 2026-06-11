@@ -81,6 +81,8 @@ evidence for every item below:
 
 - target host, branch, commit, and reviewer identity;
 - output from `scripts/verify-biocortex-retrieval-shadow.sh`;
+- output from `scripts/prove-biocortex-retrieval-runtime-boundary.sh`, including
+  default-disabled, kill-switch, enabled-shadow, and p95 latency evidence;
 - current corpus and hard holdout gate summaries for `candidate-strong`;
 - live MCP default-disabled result showing `status=runtime_disabled` without
   `AB_BIOCORTEX_RETRIEVAL_SHADOW=1`;

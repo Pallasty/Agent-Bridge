@@ -58,7 +58,15 @@ See:
      2>&1 | tee /tmp/biocortex-retrieval-shadow-verify.log
    ```
 
-2. Generate the review-prep bundle:
+2. Capture a runtime boundary proof bundle:
+
+   ```bash
+   AB_BIOCORTEX_RS=/Data/CascadeProjects/biocortex-rs \
+   scripts/prove-biocortex-retrieval-runtime-boundary.sh \
+     --out-dir /tmp/biocortex-retrieval-runtime-proof
+   ```
+
+3. Generate the review-prep bundle:
 
    ```bash
    scripts/prepare-biocortex-retrieval-approval-review.sh \
@@ -71,7 +79,7 @@ See:
      --forum-decision-post-id "<future forum post id>"
    ```
 
-3. Inspect `approval-packet-preview.json`. It must still say:
+4. Inspect `approval-packet-preview.json`. It must still say:
 
    - `approval_state=not_approved`;
    - `runtime_adapter_approved=false`;
@@ -82,10 +90,10 @@ See:
    - `agent_technical_attestation.can_authorize_runtime_influence=false`;
    - `human_authorization.status=not_authorized`.
 
-4. Post the generated `forum-post-template.md` to the forum only after a human
+5. Post the generated `forum-post-template.md` to the forum only after a human
    reviewer has inspected the packet and any missing evidence.
 
-5. Save the generated `memory-note-template.md` as memory only after the forum
+6. Save the generated `memory-note-template.md` as memory only after the forum
    post id is known.
 
 ## Human Approval Rule

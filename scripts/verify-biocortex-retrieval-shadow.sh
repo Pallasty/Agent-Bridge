@@ -163,6 +163,25 @@ run env AB_BIOCORTEX_RS="$biocortex_rs" CARGO_INCREMENTAL=0 \
     --example biocortex_retrieval_shadow_acceptance \
     --features biocortex-retrieval-shadow
 
+runtime_proof="$tmpdir/runtime-boundary-proof"
+run scripts/prove-biocortex-retrieval-runtime-boundary.sh \
+    --out-dir "$runtime_proof" \
+    --checkout "$biocortex_rs" \
+    --samples 3
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.runtime_boundary_proof.v0"
+    and .read_only == true
+    and .writes_approval == false
+    and .runtime_adapter_approved == false
+    and .default_search_order_changed == false
+    and .proof.default_disabled.status == "runtime_disabled"
+    and .proof.kill_switch.status == "operator_disabled"
+    and .proof.enabled_shadow.status == "ok"
+    and .latency.sample_count == 3
+    and .boundary.calls_memory_search == false
+    and .boundary.changes_memory_search_order == false
+' "$runtime_proof/proof-summary.json" >/dev/null
+
 current_corpus="crates/bridge/tests/fixtures/biocortex_retrieval_gate_corpus.jsonl"
 hard_corpus="crates/bridge/tests/fixtures/biocortex_retrieval_gate_hard_holdout_corpus.jsonl"
 current_side="$tmpdir/current-side-signal.jsonl"
