@@ -63,12 +63,13 @@ grep -q 'Authorization for one mode does not imply authorization for another mod
 opt_in_plan="docs/design/fixtures/biocortex-retrieval-opt-in-experiment-plan-2026-06-11.json"
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0"
-    and .status == "gate_skeleton_implemented"
+    and .status == "audit_shape_implemented"
     and .approval_state == "opt_in_implementation_authorized"
     and .runtime_adapter_approved == false
     and .default_search_order_change_allowed == false
     and .implementation_allowed == true
     and .gate_skeleton_implemented == true
+    and .audit_shape_implemented == true
     and .ordering_behavior_connected == false
     and .requested_human_authorization_scope == "opt_in_experiment"
     and .requested_default_influence_scope == "none"
@@ -84,6 +85,17 @@ jq -e '
     and .implemented_gate_skeleton.operator_disable_env == "AB_BIOCORTEX_RETRIEVAL_DISABLE"
     and .implemented_gate_skeleton.ordering_behavior_connected == false
     and .implemented_gate_skeleton.may_change_search_order_now == false
+    and .implemented_audit_shape.schema == "agent_bridge.biocortex_retrieval.opt_in_call_audit.v0"
+    and .implemented_audit_shape.implementation_stage == "audit_shape_only"
+    and .implemented_audit_shape.per_call_opt_in_source == "explicit_call_argument_reserved"
+    and .implemented_audit_shape.raw_keys_included == false
+    and .implemented_audit_shape.content_included == false
+    and .implemented_audit_shape.experimental_order_available == false
+    and .implemented_audit_shape.returned_order_source == "baseline"
+    and .implemented_audit_shape.fallback_reason_required == true
+    and .implemented_audit_shape.hybrid_and_semantic_authorized == false
+    and .implemented_audit_shape.ordering_behavior_connected == false
+    and .implemented_audit_shape.may_change_search_order_now == false
     and .fail_open.operator_disable == "return_baseline"
     and .human_review_boundary.authorization_decision_recorded == true
     and .human_review_boundary.requires_separate_human_decision_before_implementation == false
@@ -239,6 +251,11 @@ run cargo test -p ab-bridge --lib --no-default-features \
 run cargo test -p ab-bridge --lib --no-default-features \
     --features biocortex-retrieval-opt-in \
     biocortex_shadow::tests::retrieval_opt_in_gate_requires_feature_runtime_and_call_opt_in -- --nocapture
+run cargo test -p ab-bridge --lib --no-default-features \
+    opt_in_audit_ -- --nocapture --test-threads=1
+run cargo test -p ab-bridge --lib --no-default-features \
+    --features biocortex-retrieval-opt-in \
+    opt_in_audit_ -- --nocapture --test-threads=1
 
 run env AB_BIOCORTEX_RS="$biocortex_rs" CARGO_INCREMENTAL=0 \
     cargo run -p ab-bridge \
@@ -281,9 +298,12 @@ jq -e '
     and .default_search_order_change_allowed == false
     and .implementation_allowed == true
     and .writes_approval == false
-    and .opt_in_plan.status == "gate_skeleton_implemented"
+    and .opt_in_plan.status == "audit_shape_implemented"
     and .opt_in_plan.implemented_gate_skeleton.ordering_behavior_connected == false
     and .opt_in_plan.implemented_gate_skeleton.may_change_search_order_now == false
+    and .opt_in_plan.implemented_audit_shape.ordering_behavior_connected == false
+    and .opt_in_plan.implemented_audit_shape.raw_keys_included == false
+    and .opt_in_plan.implemented_audit_shape.content_included == false
     and .opt_in_plan.experiment.mode == "fts_only"
     and .evidence.runtime_boundary_proof.default_disabled_status == "runtime_disabled"
     and .evidence.runtime_boundary_proof.kill_switch_status == "operator_disabled"

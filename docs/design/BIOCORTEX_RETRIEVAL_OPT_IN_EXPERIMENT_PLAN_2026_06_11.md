@@ -5,8 +5,8 @@ Date: 2026-06-11
 ## Status
 
 Human authorization recorded for `opt_in_experiment` implementation work only.
-Gate skeleton implemented. Ordering behavior is not implemented and not
-approved.
+Gate skeleton and audit shape implemented. Ordering behavior is not implemented
+and not approved.
 
 ```json
 {
@@ -16,6 +16,7 @@ approved.
   "default_search_order_change_allowed": false,
   "implementation_allowed": true,
   "gate_skeleton_implemented": true,
+  "audit_shape_implemented": true,
   "ordering_behavior_connected": false
 }
 ```
@@ -86,6 +87,20 @@ Slice 1 landed as a gate skeleton:
 The gate report can say the experiment is ready only when feature, runtime env,
 and per-call opt-in are present and the operator disable is absent. Even in that
 ready state, it still reports `may_change_search_order_now=false`.
+
+Slice 2 landed the explicit per-call audit shape:
+
+- audit schema: `agent_bridge.biocortex_retrieval.opt_in_call_audit.v0`;
+- per-call opt-in source: `explicit_call_argument_reserved`;
+- baseline order is represented by hash and count only;
+- raw memory keys and memory content are not included;
+- experimental order is marked unavailable;
+- returned order is explicitly `baseline`;
+- fallback reason is always present;
+- hybrid and semantic modes are marked unauthorized.
+
+The audit shape is still `audit_shape_only`; it does not run BioCortex, change
+candidate recall, or change returned order.
 
 ## Fail-Open Rules
 

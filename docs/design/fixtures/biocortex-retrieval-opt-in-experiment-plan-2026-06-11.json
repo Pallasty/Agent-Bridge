@@ -1,12 +1,13 @@
 {
   "schema": "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0",
   "created_at": "2026-06-11T00:00:00Z",
-  "status": "gate_skeleton_implemented",
+  "status": "audit_shape_implemented",
   "approval_state": "opt_in_implementation_authorized",
   "runtime_adapter_approved": false,
   "default_search_order_change_allowed": false,
   "implementation_allowed": true,
   "gate_skeleton_implemented": true,
+  "audit_shape_implemented": true,
   "ordering_behavior_connected": false,
   "authorization_decision": {
     "doc": "docs/design/BIOCORTEX_RETRIEVAL_OPT_IN_AUTHORIZATION_DECISION_2026_06_11.md",
@@ -70,6 +71,22 @@
     "may_change_search_order_now": false,
     "default_calls_unchanged": true
   },
+  "implemented_audit_shape": {
+    "schema": "agent_bridge.biocortex_retrieval.opt_in_call_audit.v0",
+    "implementation_stage": "audit_shape_only",
+    "per_call_opt_in_source": "explicit_call_argument_reserved",
+    "baseline_order_hash_required": true,
+    "baseline_order_count_required": true,
+    "raw_keys_included": false,
+    "content_included": false,
+    "experimental_order_available": false,
+    "returned_order_source": "baseline",
+    "fallback_reason_required": true,
+    "side_signal_raw_included": false,
+    "hybrid_and_semantic_authorized": false,
+    "ordering_behavior_connected": false,
+    "may_change_search_order_now": false
+  },
   "fail_open": {
     "bio_cortex_checkout_absent": "return_baseline",
     "adapter_error": "return_baseline",
@@ -108,6 +125,8 @@
     "malformed_rows_return_baseline",
     "fts_only_call_site_can_be_affected",
     "hybrid_and_semantic_unchanged",
+    "audit_shape_hashes_baseline_keys_without_content",
+    "audit_shape_rejects_non_fts_modes",
     "audit_telemetry_contains_baseline_experimental_fallback_latency_scope"
   ],
   "human_review_boundary": {

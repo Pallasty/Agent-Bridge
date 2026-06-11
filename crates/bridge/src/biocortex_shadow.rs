@@ -22,6 +22,8 @@ pub const BIOCORTEX_RETRIEVAL_RUNTIME_APPROVAL_PACKET_SCHEMA: &str =
     "agent_bridge.biocortex_retrieval.runtime_approval_packet_preview.v0";
 pub const BIOCORTEX_RETRIEVAL_OPT_IN_GATE_SCHEMA: &str =
     "agent_bridge.biocortex_retrieval.opt_in_gate.v0";
+pub const BIOCORTEX_RETRIEVAL_OPT_IN_AUDIT_SCHEMA: &str =
+    "agent_bridge.biocortex_retrieval.opt_in_call_audit.v0";
 pub const BIOCORTEX_SUBSTRATE_REPLAY_PLAN_SCHEMA: &str =
     "agent_bridge.biocortex_substrate_replay_plan.v0";
 pub const BIOCORTEX_CHECKOUT_ENV: &str = "AB_BIOCORTEX_RS";
@@ -90,6 +92,17 @@ pub struct BioCortexRetrievalApprovalPacketOptions {
     pub memory_key: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct BioCortexRetrievalOptInAuditOptions {
+    pub mode: String,
+    pub per_call_opt_in: bool,
+    pub query: Option<String>,
+    pub baseline_keys: Vec<String>,
+    pub side_signal_status: Option<String>,
+    pub fallback_reason: Option<String>,
+    pub latency_ms: Option<f64>,
+}
+
 impl Default for BioCortexShadowOptions {
     fn default() -> Self {
         Self {
@@ -123,6 +136,20 @@ impl Default for BioCortexRetrievalShadowOptions {
             checkout: None,
             timeout_ms: DEFAULT_TIMEOUT_MS,
             include_raw: false,
+        }
+    }
+}
+
+impl Default for BioCortexRetrievalOptInAuditOptions {
+    fn default() -> Self {
+        Self {
+            mode: "fts".to_string(),
+            per_call_opt_in: false,
+            query: None,
+            baseline_keys: Vec::new(),
+            side_signal_status: None,
+            fallback_reason: None,
+            latency_ms: None,
         }
     }
 }
@@ -650,6 +677,128 @@ pub fn biocortex_retrieval_opt_in_gate_report(per_call_opt_in: bool) -> Value {
         "ordering_behavior_connected": false,
         "effective_behavior": "baseline_only_until_ordering_implementation",
         "authorized_scope": "opt_in_experiment",
+        "boundary": retrieval_boundary_payload(),
+    })
+}
+
+pub fn biocortex_retrieval_opt_in_audit_report(opts: BioCortexRetrievalOptInAuditOptions) -> Value {
+    let mode = normalize_token(&opts.mode);
+    let mode = if mode.is_empty() {
+        "fts".to_string()
+    } else {
+        mode
+    };
+    let mode_authorized = mode == "fts";
+    let gate = biocortex_retrieval_opt_in_gate_report(opts.per_call_opt_in);
+    let gate_status = gate
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let gate_ready = gate
+        .get("ready_for_explicit_opt_in_experiment")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let fallback_reason = opts
+        .fallback_reason
+        .as_deref()
+        .map(str::trim)
+        .filter(|reason| !reason.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            if !mode_authorized {
+                "mode_not_authorized".to_string()
+            } else if !gate_ready {
+                gate_status.to_string()
+            } else {
+                "ordering_behavior_not_connected".to_string()
+            }
+        });
+    let side_signal_status = opts
+        .side_signal_status
+        .as_deref()
+        .map(str::trim)
+        .filter(|status| !status.is_empty())
+        .unwrap_or(if gate_ready && mode_authorized {
+            "not_run_ordering_behavior_not_connected"
+        } else {
+            "not_run_gate_unavailable"
+        });
+    let baseline_key_count = opts.baseline_keys.len();
+    let baseline_order_hash = sha256_json(&json!({
+        "mode": &mode,
+        "baseline_keys": &opts.baseline_keys,
+    }));
+    let query_hash = opts
+        .query
+        .as_deref()
+        .map(str::trim)
+        .filter(|query| !query.is_empty())
+        .map(|query| sha256_json(&json!({"query": query})))
+        .unwrap_or_else(|| sha256_json(&Value::Null));
+    let latency = opts
+        .latency_ms
+        .map(|value| json!(round3(value)))
+        .unwrap_or(Value::Null);
+
+    json!({
+        "schema": BIOCORTEX_RETRIEVAL_OPT_IN_AUDIT_SCHEMA,
+        "generated_at": now_secs(),
+        "read_only": true,
+        "implementation_stage": "audit_shape_only",
+        "authorization_scope": "opt_in_experiment",
+        "mode": mode,
+        "mode_authorized": mode_authorized,
+        "per_call_opt_in": {
+            "present": opts.per_call_opt_in,
+            "source": "explicit_call_argument_reserved",
+            "required": true,
+        },
+        "query_hash": query_hash,
+        "baseline_order": {
+            "key_count": baseline_key_count,
+            "hash": baseline_order_hash,
+            "raw_keys_included": false,
+            "content_included": false,
+        },
+        "experimental_order": {
+            "available": false,
+            "hash": Value::Null,
+            "reason": "ordering_behavior_not_connected",
+        },
+        "returned_order": {
+            "source": "baseline",
+            "hash_matches_baseline": true,
+        },
+        "fallback": {
+            "baseline_returned": true,
+            "reason": fallback_reason,
+        },
+        "side_signal": {
+            "status": side_signal_status,
+            "raw_included": false,
+        },
+        "latency_ms": latency,
+        "affected_call_site": if mode_authorized {
+            json!({
+                "file": "crates/store/src/sqlite.rs",
+                "line": 3067,
+                "function": "SqliteStore::memory_search",
+                "ordering_behavior_connected": false,
+            })
+        } else {
+            Value::Null
+        },
+        "unaffected_modes": [
+            "hybrid",
+            "semantic"
+        ],
+        "gate": gate,
+        "runtime_adapter_approved": false,
+        "default_search_order_change_allowed": false,
+        "default_calls_unchanged": true,
+        "may_change_search_order_now": false,
+        "ordering_behavior_connected": false,
+        "changes_memory_search_order": false,
         "boundary": retrieval_boundary_payload(),
     })
 }
@@ -1661,6 +1810,9 @@ fn now_nanos() -> u128 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn parse_key_value_report_types_scalars() {
@@ -1944,6 +2096,7 @@ mod tests {
 
     #[test]
     fn retrieval_opt_in_gate_requires_feature_runtime_and_call_opt_in() {
+        let _lock = ENV_LOCK.lock().expect("env lock");
         let _guard = EnvRestore::capture(&[
             BIOCORTEX_RETRIEVAL_OPT_IN_ENABLE_ENV,
             BIOCORTEX_RETRIEVAL_DISABLE_ENV,
@@ -2018,6 +2171,127 @@ mod tests {
             disabled["ready_for_explicit_opt_in_experiment"],
             json!(false)
         );
+    }
+
+    #[test]
+    fn opt_in_audit_shape_keeps_baseline_order_hashed() {
+        let _lock = ENV_LOCK.lock().expect("env lock");
+        let _guard = EnvRestore::capture(&[
+            BIOCORTEX_RETRIEVAL_OPT_IN_ENABLE_ENV,
+            BIOCORTEX_RETRIEVAL_DISABLE_ENV,
+        ]);
+        std::env::set_var(BIOCORTEX_RETRIEVAL_OPT_IN_ENABLE_ENV, "1");
+        std::env::remove_var(BIOCORTEX_RETRIEVAL_DISABLE_ENV);
+
+        let audit = biocortex_retrieval_opt_in_audit_report(BioCortexRetrievalOptInAuditOptions {
+            mode: "fts".to_string(),
+            per_call_opt_in: true,
+            query: Some("find the runtime boundary proof".to_string()),
+            baseline_keys: vec![
+                "baseline_top_key".to_string(),
+                "side_signal_candidate_key".to_string(),
+            ],
+            side_signal_status: None,
+            fallback_reason: None,
+            latency_ms: Some(3.4567),
+        });
+
+        assert_eq!(
+            audit["schema"],
+            json!(BIOCORTEX_RETRIEVAL_OPT_IN_AUDIT_SCHEMA)
+        );
+        assert_eq!(audit["read_only"], json!(true));
+        assert_eq!(audit["implementation_stage"], json!("audit_shape_only"));
+        assert_eq!(audit["authorization_scope"], json!("opt_in_experiment"));
+        assert_eq!(audit["mode"], json!("fts"));
+        assert_eq!(audit["mode_authorized"], json!(true));
+        assert_eq!(audit["per_call_opt_in"]["present"], json!(true));
+        assert_eq!(audit["baseline_order"]["key_count"], json!(2));
+        assert_eq!(audit["baseline_order"]["raw_keys_included"], json!(false));
+        assert_eq!(audit["baseline_order"]["content_included"], json!(false));
+        assert!(audit["baseline_order"]["hash"]
+            .as_str()
+            .unwrap_or_default()
+            .starts_with("sha256:"));
+        assert_eq!(audit["experimental_order"]["available"], json!(false));
+        assert_eq!(
+            audit["returned_order"]["hash_matches_baseline"],
+            json!(true)
+        );
+        assert_eq!(audit["fallback"]["baseline_returned"], json!(true));
+        assert_eq!(audit["side_signal"]["raw_included"], json!(false));
+        assert_eq!(audit["latency_ms"], json!(3.457));
+        assert_eq!(audit["runtime_adapter_approved"], json!(false));
+        assert_eq!(audit["default_search_order_change_allowed"], json!(false));
+        assert_eq!(audit["default_calls_unchanged"], json!(true));
+        assert_eq!(audit["may_change_search_order_now"], json!(false));
+        assert_eq!(audit["ordering_behavior_connected"], json!(false));
+        assert_eq!(audit["changes_memory_search_order"], json!(false));
+
+        if cfg!(feature = "biocortex-retrieval-opt-in") {
+            assert_eq!(
+                audit["gate"]["status"],
+                json!("ready_for_explicit_opt_in_experiment")
+            );
+            assert_eq!(
+                audit["fallback"]["reason"],
+                json!("ordering_behavior_not_connected")
+            );
+            assert_eq!(
+                audit["side_signal"]["status"],
+                json!("not_run_ordering_behavior_not_connected")
+            );
+        } else {
+            assert_eq!(audit["gate"]["status"], json!("compile_feature_disabled"));
+            assert_eq!(
+                audit["fallback"]["reason"],
+                json!("compile_feature_disabled")
+            );
+            assert_eq!(
+                audit["side_signal"]["status"],
+                json!("not_run_gate_unavailable")
+            );
+        }
+
+        let serialized = serde_json::to_string(&audit).expect("audit json");
+        assert!(!serialized.contains("baseline_top_key"));
+        assert!(!serialized.contains("side_signal_candidate_key"));
+        assert!(!serialized.contains("find the runtime boundary proof"));
+    }
+
+    #[test]
+    fn opt_in_audit_shape_rejects_non_fts_modes() {
+        let _lock = ENV_LOCK.lock().expect("env lock");
+        let _guard = EnvRestore::capture(&[
+            BIOCORTEX_RETRIEVAL_OPT_IN_ENABLE_ENV,
+            BIOCORTEX_RETRIEVAL_DISABLE_ENV,
+        ]);
+        std::env::set_var(BIOCORTEX_RETRIEVAL_OPT_IN_ENABLE_ENV, "1");
+        std::env::remove_var(BIOCORTEX_RETRIEVAL_DISABLE_ENV);
+
+        for mode in ["hybrid", "semantic"] {
+            let audit =
+                biocortex_retrieval_opt_in_audit_report(BioCortexRetrievalOptInAuditOptions {
+                    mode: mode.to_string(),
+                    per_call_opt_in: true,
+                    baseline_keys: vec!["candidate".to_string()],
+                    ..Default::default()
+                });
+
+            assert_eq!(audit["mode"], json!(mode));
+            assert_eq!(audit["mode_authorized"], json!(false));
+            assert_eq!(audit["affected_call_site"], Value::Null);
+            assert_eq!(audit["fallback"]["baseline_returned"], json!(true));
+            assert_eq!(audit["fallback"]["reason"], json!("mode_not_authorized"));
+            assert_eq!(audit["changes_memory_search_order"], json!(false));
+            assert_eq!(audit["ordering_behavior_connected"], json!(false));
+            let unaffected_modes = audit["unaffected_modes"]
+                .as_array()
+                .expect("unaffected modes");
+            assert!(unaffected_modes
+                .iter()
+                .any(|entry| entry.as_str() == Some(mode)));
+        }
     }
 
     struct EnvRestore {
