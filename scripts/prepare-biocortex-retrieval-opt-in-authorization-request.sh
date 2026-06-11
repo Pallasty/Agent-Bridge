@@ -294,10 +294,11 @@ jq -e '
     and .implementation_allowed == true
     and .writes_approval == false
     and .accepts_optional_order_diff_packet == true
-    and .opt_in_plan.status == "authorization_request_order_diff_evidence_implemented"
+    and .opt_in_plan.status == "redacted_order_artifact_implemented"
     and .opt_in_plan.approval_state == "opt_in_implementation_authorized"
     and .opt_in_plan.order_diff_packet_implemented == true
     and .opt_in_plan.authorization_request_order_diff_evidence_implemented == true
+    and .opt_in_plan.redacted_order_artifact_implemented == true
     and .opt_in_plan.implemented_gate_skeleton.ordering_behavior_connected == false
     and .opt_in_plan.implemented_gate_skeleton.may_change_search_order_now == false
     and .opt_in_plan.implemented_audit_shape.schema == "agent_bridge.biocortex_retrieval.opt_in_call_audit.v0"
@@ -440,6 +441,28 @@ jq -e '
     and .opt_in_plan.implemented_order_diff_packet.approval_state == "not_approved"
     and .opt_in_plan.implemented_order_diff_packet.runtime_adapter_approved == false
     and .opt_in_plan.implemented_order_diff_packet.may_implement_ordering_now == false
+    and .opt_in_plan.implemented_redacted_order_artifact.cli == "agent-bridge bio-cortex retrieval-opt-in-redacted-order-artifact"
+    and .opt_in_plan.implemented_redacted_order_artifact.mcp_tool == "biocortex_retrieval_opt_in_redacted_order_artifact"
+    and .opt_in_plan.implemented_redacted_order_artifact.schema == "agent_bridge.biocortex_retrieval.opt_in_redacted_order_artifact.v0"
+    and .opt_in_plan.implemented_redacted_order_artifact.read_only == true
+    and .opt_in_plan.implemented_redacted_order_artifact.redacted_order_artifact == true
+    and .opt_in_plan.implemented_redacted_order_artifact.source_packet_consumer == true
+    and .opt_in_plan.implemented_redacted_order_artifact.raw_query_included == false
+    and .opt_in_plan.implemented_redacted_order_artifact.raw_keys_included == false
+    and .opt_in_plan.implemented_redacted_order_artifact.raw_order_keys_included == false
+    and .opt_in_plan.implemented_redacted_order_artifact.content_included == false
+    and .opt_in_plan.implemented_redacted_order_artifact.side_signal_raw_included == false
+    and .opt_in_plan.implemented_redacted_order_artifact.computes_top_k_overlap == true
+    and .opt_in_plan.implemented_redacted_order_artifact.computes_rank_delta_distribution == true
+    and .opt_in_plan.implemented_redacted_order_artifact.computes_per_key_movements == true
+    and .opt_in_plan.implemented_redacted_order_artifact.calls_memory_search == false
+    and .opt_in_plan.implemented_redacted_order_artifact.runs_biocortex == false
+    and .opt_in_plan.implemented_redacted_order_artifact.changes_memory_search_order == false
+    and .opt_in_plan.implemented_redacted_order_artifact.ordering_behavior_connected == false
+    and .opt_in_plan.implemented_redacted_order_artifact.actual_return_order_changed == false
+    and .opt_in_plan.implemented_redacted_order_artifact.approval_state == "not_approved"
+    and .opt_in_plan.implemented_redacted_order_artifact.runtime_adapter_approved == false
+    and .opt_in_plan.implemented_redacted_order_artifact.may_implement_ordering_now == false
     and .opt_in_plan.experiment.mode == "fts_only"
     and .opt_in_plan.experiment.affected_call_site.function == "SqliteStore::memory_search"
     and .evidence.runtime_boundary_proof.default_disabled_status == "runtime_disabled"

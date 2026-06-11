@@ -11,8 +11,9 @@ consumer, read-only execution packet contract, and baseline-preserving runtime
 trial surface, read-only runtime trial review packet, and authorization request
 runtime-trial-review evidence hook, and hash-only order-diff review packet
 implemented. The authorization request bundle can now optionally include
-hash-only order-diff evidence. Ordering behavior is not implemented and not
-approved.
+hash-only order-diff evidence. A separate redacted-order artifact now computes
+top-k overlap and per-key rank movement from `key_hash` rows only. Ordering
+behavior is not implemented and not approved.
 
 ```json
 {
@@ -33,6 +34,7 @@ approved.
   "authorization_request_runtime_trial_review_evidence_implemented": true,
   "order_diff_packet_implemented": true,
   "authorization_request_order_diff_evidence_implemented": true,
+  "redacted_order_artifact_implemented": true,
   "ordering_behavior_connected": false
 }
 ```
@@ -283,6 +285,29 @@ Including order-diff evidence in the request bundle helps review the observed
 gap between default baseline order and advisory order. It still does not
 approve runtime influence, enable an adapter, or connect ordering behavior.
 
+Slice 13 landed a redacted-order artifact:
+
+- CLI: `agent-bridge bio-cortex retrieval-opt-in-redacted-order-artifact`;
+- MCP tool: `biocortex_retrieval_opt_in_redacted_order_artifact`;
+- packet schema:
+  `agent_bridge.biocortex_retrieval.opt_in_redacted_order_artifact.v0`;
+- consumes either a runtime trial packet or a runtime trial review packet;
+- sanitizes rank rows down to `{key_hash, baseline_rank}` and
+  `{key_hash, advisory_rank}` before output;
+- computes top-k overlap, rank-delta distribution, and per-key movements from
+  redacted rows only;
+- does not include raw order keys, raw query, candidate content, raw
+  side-signal rows, or the source packet;
+- keeps returned order as baseline and reports
+  `actual_return_order_changed=false`;
+- keeps `calls_memory_search=false`, `runs_biocortex=false`,
+  `runtime_adapter_approved=false`, and `may_implement_ordering_now=false`.
+
+The redacted-order artifact answers how much the advisory order differs from
+the default baseline order without needing raw keys. It is evidence only; it is
+not part of the authorization request bundle yet and does not approve runtime
+influence or connect ordering behavior.
+
 ## Fail-Open Rules
 
 The experiment must return the baseline list for:
@@ -356,6 +381,10 @@ Future implementation review must include tests proving:
 - order-diff packet compares baseline and advisory hashes without including raw
   order keys or per-key movement rows;
 - order-diff packet does not call `memory_search`, run BioCortex, approve
+  runtime influence, or change returned order;
+- redacted-order artifact computes top-k overlap and per-key movement from
+  key-hash rows without including raw order keys;
+- redacted-order artifact does not call `memory_search`, run BioCortex, approve
   runtime influence, or change returned order;
 - authorization request bundle can optionally include order-diff evidence
   without including raw order keys or approving runtime influence;

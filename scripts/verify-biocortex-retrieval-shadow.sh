@@ -63,7 +63,7 @@ grep -q 'Authorization for one mode does not imply authorization for another mod
 opt_in_plan="docs/design/fixtures/biocortex-retrieval-opt-in-experiment-plan-2026-06-11.json"
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0"
-    and .status == "authorization_request_order_diff_evidence_implemented"
+    and .status == "redacted_order_artifact_implemented"
     and .approval_state == "opt_in_implementation_authorized"
     and .runtime_adapter_approved == false
     and .default_search_order_change_allowed == false
@@ -80,6 +80,7 @@ jq -e '
     and .authorization_request_runtime_trial_review_evidence_implemented == true
     and .order_diff_packet_implemented == true
     and .authorization_request_order_diff_evidence_implemented == true
+    and .redacted_order_artifact_implemented == true
     and .ordering_behavior_connected == false
     and .requested_human_authorization_scope == "opt_in_experiment"
     and .requested_default_influence_scope == "none"
@@ -294,6 +295,37 @@ jq -e '
     and .implemented_order_diff_packet.approval_writes_allowed == false
     and .implemented_order_diff_packet.writes_approval == false
     and .implemented_order_diff_packet.may_implement_ordering_now == false
+    and .implemented_redacted_order_artifact.cli == "agent-bridge bio-cortex retrieval-opt-in-redacted-order-artifact"
+    and .implemented_redacted_order_artifact.mcp_tool == "biocortex_retrieval_opt_in_redacted_order_artifact"
+    and .implemented_redacted_order_artifact.schema == "agent_bridge.biocortex_retrieval.opt_in_redacted_order_artifact.v0"
+    and .implemented_redacted_order_artifact.read_only == true
+    and .implemented_redacted_order_artifact.redacted_order_artifact == true
+    and .implemented_redacted_order_artifact.source_packet_consumer == true
+    and (.implemented_redacted_order_artifact.accepted_source_schemas | index("agent_bridge.biocortex_retrieval.opt_in_runtime_trial.v0"))
+    and (.implemented_redacted_order_artifact.accepted_source_schemas | index("agent_bridge.biocortex_retrieval.opt_in_runtime_trial_review_packet.v0"))
+    and .implemented_redacted_order_artifact.source_packet_included == false
+    and .implemented_redacted_order_artifact.raw_query_included == false
+    and .implemented_redacted_order_artifact.raw_keys_included == false
+    and .implemented_redacted_order_artifact.raw_order_keys_included == false
+    and .implemented_redacted_order_artifact.content_included == false
+    and .implemented_redacted_order_artifact.side_signal_raw_included == false
+    and .implemented_redacted_order_artifact.redacted_key_hashes_included == true
+    and .implemented_redacted_order_artifact.computes_top_k_overlap == true
+    and .implemented_redacted_order_artifact.computes_rank_delta_distribution == true
+    and .implemented_redacted_order_artifact.computes_per_key_movements == true
+    and .implemented_redacted_order_artifact.copies_raw_hashes == false
+    and .implemented_redacted_order_artifact.copies_raw_order_keys == false
+    and .implemented_redacted_order_artifact.calls_memory_search == false
+    and .implemented_redacted_order_artifact.runs_biocortex == false
+    and .implemented_redacted_order_artifact.registers_embedding_backend == false
+    and .implemented_redacted_order_artifact.changes_memory_search_order == false
+    and .implemented_redacted_order_artifact.ordering_behavior_connected == false
+    and .implemented_redacted_order_artifact.actual_return_order_changed == false
+    and .implemented_redacted_order_artifact.approval_state == "not_approved"
+    and .implemented_redacted_order_artifact.runtime_adapter_approved == false
+    and .implemented_redacted_order_artifact.approval_writes_allowed == false
+    and .implemented_redacted_order_artifact.writes_approval == false
+    and .implemented_redacted_order_artifact.may_implement_ordering_now == false
     and .implemented_authorization_request_order_diff_evidence.script == "scripts/prepare-biocortex-retrieval-opt-in-authorization-request.sh"
     and .implemented_authorization_request_order_diff_evidence.request_schema == "agent_bridge.biocortex_retrieval.opt_in_authorization_request.v0"
     and .implemented_authorization_request_order_diff_evidence.optional_input == "agent_bridge.biocortex_retrieval.opt_in_order_diff_packet.v0"
@@ -540,6 +572,10 @@ run cargo test -p ab-bridge --lib --no-default-features \
     opt_in_order_diff_packet_ -- --nocapture --test-threads=1
 run cargo test -p ab-bridge --lib --no-default-features \
     biocortex_retrieval_opt_in_order_diff_packet_ -- --nocapture
+run cargo test -p ab-bridge --lib --no-default-features \
+    opt_in_redacted_order_artifact_ -- --nocapture --test-threads=1
+run cargo test -p ab-bridge --lib --no-default-features \
+    biocortex_retrieval_opt_in_redacted_order_artifact_ -- --nocapture
 
 opt_in_status_disabled="$tmpdir/opt-in-status-disabled.json"
 run cargo run -p ab-bridge --no-default-features -- \
@@ -833,7 +869,12 @@ jq -e '
     and .protected_adapter_contract.content_included == false
     and .protected_adapter_contract.side_signal_raw_included == false
     and .baseline_order.key_count == 1
+    and .baseline_order.redacted_rank_rows_included == true
+    and (.baseline_order.redacted_rank_rows | length) == 1
+    and (.baseline_order.redacted_rank_rows[0].key_hash | startswith("sha256:"))
+    and .baseline_order.redacted_rank_rows[0].baseline_rank == 1
     and .baseline_order.raw_keys_included == false
+    and .baseline_order.raw_order_keys_included == false
     and .baseline_order.content_included == false
     and .side_signal.attempted == true
     and .side_signal.status == "ok"
@@ -845,7 +886,12 @@ jq -e '
     and .side_signal.content_included == false
     and .advisory_result.available == true
     and .advisory_result.used_for_return_order == false
+    and .advisory_result.redacted_rank_rows_included == true
+    and (.advisory_result.redacted_rank_rows | length) == 1
+    and (.advisory_result.redacted_rank_rows[0].key_hash | startswith("sha256:"))
+    and .advisory_result.redacted_rank_rows[0].advisory_rank == 1
     and .advisory_result.raw_keys_included == false
+    and .advisory_result.raw_order_keys_included == false
     and .advisory_result.content_included == false
     and .advisory_result.side_signal_raw_included == false
     and .returned_order.source == "baseline"
@@ -902,7 +948,17 @@ jq -e '
     and .runtime_trial_summary.side_signal.candidate_keys_included == false
     and .runtime_trial_summary.side_signal.content_included == false
     and .runtime_trial_summary.advisory_result.used_for_return_order == false
+    and .runtime_trial_summary.baseline_order.redacted_rank_rows_included == true
+    and (.runtime_trial_summary.baseline_order.redacted_rank_rows | length) == 1
+    and (.runtime_trial_summary.baseline_order.redacted_rank_rows[0].key_hash | startswith("sha256:"))
+    and .runtime_trial_summary.baseline_order.redacted_rank_rows[0].baseline_rank == 1
+    and .runtime_trial_summary.baseline_order.raw_order_keys_included == false
+    and .runtime_trial_summary.advisory_result.redacted_rank_rows_included == true
+    and (.runtime_trial_summary.advisory_result.redacted_rank_rows | length) == 1
+    and (.runtime_trial_summary.advisory_result.redacted_rank_rows[0].key_hash | startswith("sha256:"))
+    and .runtime_trial_summary.advisory_result.redacted_rank_rows[0].advisory_rank == 1
     and .runtime_trial_summary.advisory_result.raw_keys_included == false
+    and .runtime_trial_summary.advisory_result.raw_order_keys_included == false
     and .runtime_trial_summary.advisory_result.content_included == false
     and .runtime_trial_summary.advisory_result.side_signal_raw_included == false
     and .runtime_trial_summary.returned_order.source == "baseline"
@@ -990,6 +1046,83 @@ if grep -q 'verify runtime trial secret query\|verify_runtime_trial_secret_key\|
     exit 1
 fi
 
+opt_in_redacted_order_artifact="$tmpdir/opt-in-redacted-order-artifact.json"
+run cargo run -p ab-bridge --no-default-features -- \
+    bio-cortex retrieval-opt-in-redacted-order-artifact \
+    --source-json "$opt_in_runtime_trial_review_packet" \
+    --reviewer verify-bundle \
+    --commit verify-dry-run-commit \
+    --forum-post-id verify-forum-post \
+    --memory-key verify-memory-key \
+    --json > "$opt_in_redacted_order_artifact"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_redacted_order_artifact.v0"
+    and .read_only == true
+    and .redacted_order_artifact == true
+    and .source_packet_consumer == true
+    and .implementation_stage == "redacted_order_review_artifact_only"
+    and .input_contract.source_schema == "agent_bridge.biocortex_retrieval.opt_in_runtime_trial_review_packet.v0"
+    and .input_contract.source_packet_included == false
+    and .input_contract.raw_query_included == false
+    and .input_contract.raw_keys_included == false
+    and .input_contract.raw_order_keys_included == false
+    and .input_contract.content_included == false
+    and .input_contract.side_signal_raw_included == false
+    and .input_contract.hashes_included == true
+    and .review_target.source_kind == "runtime_trial_review_packet"
+    and .redacted_order_comparison.baseline_order.key_count == 1
+    and .redacted_order_comparison.baseline_order.redacted_rank_rows_included == true
+    and (.redacted_order_comparison.baseline_order.rank_rows | length) == 1
+    and (.redacted_order_comparison.baseline_order.rank_rows[0].key_hash | startswith("sha256:"))
+    and .redacted_order_comparison.baseline_order.rank_rows[0].baseline_rank == 1
+    and .redacted_order_comparison.baseline_order.raw_keys_included == false
+    and .redacted_order_comparison.baseline_order.raw_order_keys_included == false
+    and .redacted_order_comparison.baseline_order.content_included == false
+    and .redacted_order_comparison.advisory_order.available == true
+    and .redacted_order_comparison.advisory_order.used_for_return_order == false
+    and .redacted_order_comparison.advisory_order.redacted_rank_rows_included == true
+    and (.redacted_order_comparison.advisory_order.rank_rows | length) == 1
+    and (.redacted_order_comparison.advisory_order.rank_rows[0].key_hash | startswith("sha256:"))
+    and .redacted_order_comparison.advisory_order.rank_rows[0].advisory_rank == 1
+    and .redacted_order_comparison.advisory_order.raw_keys_included == false
+    and .redacted_order_comparison.advisory_order.raw_order_keys_included == false
+    and .redacted_order_comparison.advisory_order.content_included == false
+    and .redacted_order_comparison.advisory_order.side_signal_raw_included == false
+    and (.redacted_order_comparison.top_k_overlap[] | select(.k == 1) | .overlap_count) == 1
+    and (.redacted_order_comparison.top_k_overlap[] | select(.k == 1) | .jaccard) == 1
+    and .redacted_order_comparison.rank_delta_distribution.improved_count == 0
+    and .redacted_order_comparison.rank_delta_distribution.regressed_count == 0
+    and .redacted_order_comparison.rank_delta_distribution.unchanged_count == 1
+    and .redacted_order_comparison.rank_delta_distribution.max_abs_delta == 0
+    and (.redacted_order_comparison.per_key_movements | length) == 1
+    and .redacted_order_comparison.per_key_movements[0].rank_delta_advisory_minus_baseline == 0
+    and .redacted_order_comparison.per_key_movements[0].direction == "unchanged"
+    and .redacted_order_comparison.returned_order.source == "baseline"
+    and .redacted_order_comparison.returned_order.baseline_returned == true
+    and .redacted_order_comparison.returned_order.hash_matches_baseline == true
+    and .redacted_order_comparison.returned_order.actual_return_order_changed == false
+    and .boundary_check.artifact_ready == true
+    and (.boundary_check.violations | length) == 0
+    and .boundary_check.redacted_rows_comparable == true
+    and .source_execution_summary.redacted_order_artifact_runs_biocortex == false
+    and .source_execution_summary.redacted_order_artifact_calls_memory_search == false
+    and .approval_state == "not_approved"
+    and .runtime_adapter_approved == false
+    and .approval_writes_allowed == false
+    and .writes_approval == false
+    and .calls_memory_search == false
+    and .runs_biocortex == false
+    and .registers_embedding_backend == false
+    and .changes_memory_search_order == false
+    and .actual_return_order_changed == false
+    and .ordering_behavior_connected == false
+    and .may_implement_ordering_now == false
+' "$opt_in_redacted_order_artifact" >/dev/null
+if grep -q 'verify runtime trial secret query\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_redacted_order_artifact"; then
+    echo "opt-in redacted order artifact leaked raw query/key/content data" >&2
+    exit 1
+fi
+
 run env AB_BIOCORTEX_RS="$biocortex_rs" CARGO_INCREMENTAL=0 \
     cargo run -p ab-bridge \
     --example biocortex_retrieval_shadow_acceptance \
@@ -1034,9 +1167,10 @@ jq -e '
     and .implementation_allowed == true
     and .writes_approval == false
     and .accepts_optional_order_diff_packet == true
-    and .opt_in_plan.status == "authorization_request_order_diff_evidence_implemented"
+    and .opt_in_plan.status == "redacted_order_artifact_implemented"
     and .opt_in_plan.order_diff_packet_implemented == true
     and .opt_in_plan.authorization_request_order_diff_evidence_implemented == true
+    and .opt_in_plan.redacted_order_artifact_implemented == true
     and .opt_in_plan.implemented_gate_skeleton.ordering_behavior_connected == false
     and .opt_in_plan.implemented_gate_skeleton.may_change_search_order_now == false
     and .opt_in_plan.implemented_audit_shape.ordering_behavior_connected == false
@@ -1196,6 +1330,28 @@ jq -e '
     and .opt_in_plan.implemented_order_diff_packet.approval_state == "not_approved"
     and .opt_in_plan.implemented_order_diff_packet.runtime_adapter_approved == false
     and .opt_in_plan.implemented_order_diff_packet.may_implement_ordering_now == false
+    and .opt_in_plan.implemented_redacted_order_artifact.cli == "agent-bridge bio-cortex retrieval-opt-in-redacted-order-artifact"
+    and .opt_in_plan.implemented_redacted_order_artifact.mcp_tool == "biocortex_retrieval_opt_in_redacted_order_artifact"
+    and .opt_in_plan.implemented_redacted_order_artifact.schema == "agent_bridge.biocortex_retrieval.opt_in_redacted_order_artifact.v0"
+    and .opt_in_plan.implemented_redacted_order_artifact.read_only == true
+    and .opt_in_plan.implemented_redacted_order_artifact.redacted_order_artifact == true
+    and .opt_in_plan.implemented_redacted_order_artifact.source_packet_consumer == true
+    and .opt_in_plan.implemented_redacted_order_artifact.raw_query_included == false
+    and .opt_in_plan.implemented_redacted_order_artifact.raw_keys_included == false
+    and .opt_in_plan.implemented_redacted_order_artifact.raw_order_keys_included == false
+    and .opt_in_plan.implemented_redacted_order_artifact.content_included == false
+    and .opt_in_plan.implemented_redacted_order_artifact.side_signal_raw_included == false
+    and .opt_in_plan.implemented_redacted_order_artifact.computes_top_k_overlap == true
+    and .opt_in_plan.implemented_redacted_order_artifact.computes_rank_delta_distribution == true
+    and .opt_in_plan.implemented_redacted_order_artifact.computes_per_key_movements == true
+    and .opt_in_plan.implemented_redacted_order_artifact.calls_memory_search == false
+    and .opt_in_plan.implemented_redacted_order_artifact.runs_biocortex == false
+    and .opt_in_plan.implemented_redacted_order_artifact.changes_memory_search_order == false
+    and .opt_in_plan.implemented_redacted_order_artifact.ordering_behavior_connected == false
+    and .opt_in_plan.implemented_redacted_order_artifact.actual_return_order_changed == false
+    and .opt_in_plan.implemented_redacted_order_artifact.approval_state == "not_approved"
+    and .opt_in_plan.implemented_redacted_order_artifact.runtime_adapter_approved == false
+    and .opt_in_plan.implemented_redacted_order_artifact.may_implement_ordering_now == false
     and .opt_in_plan.implemented_authorization_request_order_diff_evidence.script == "scripts/prepare-biocortex-retrieval-opt-in-authorization-request.sh"
     and .opt_in_plan.implemented_authorization_request_order_diff_evidence.optional_input == "agent_bridge.biocortex_retrieval.opt_in_order_diff_packet.v0"
     and .opt_in_plan.implemented_authorization_request_order_diff_evidence.evidence_path == "evidence.order_diff_packet"

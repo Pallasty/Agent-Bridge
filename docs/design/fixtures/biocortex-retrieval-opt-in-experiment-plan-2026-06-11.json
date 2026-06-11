@@ -1,7 +1,7 @@
 {
   "schema": "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0",
   "created_at": "2026-06-11T00:00:00Z",
-  "status": "authorization_request_order_diff_evidence_implemented",
+  "status": "redacted_order_artifact_implemented",
   "approval_state": "opt_in_implementation_authorized",
   "runtime_adapter_approved": false,
   "default_search_order_change_allowed": false,
@@ -18,6 +18,7 @@
   "authorization_request_runtime_trial_review_evidence_implemented": true,
   "order_diff_packet_implemented": true,
   "authorization_request_order_diff_evidence_implemented": true,
+  "redacted_order_artifact_implemented": true,
   "ordering_behavior_connected": false,
   "authorization_decision": {
     "doc": "docs/design/BIOCORTEX_RETRIEVAL_OPT_IN_AUTHORIZATION_DECISION_2026_06_11.md",
@@ -309,6 +310,41 @@
     "writes_approval": false,
     "may_implement_ordering_now": false
   },
+  "implemented_redacted_order_artifact": {
+    "cli": "agent-bridge bio-cortex retrieval-opt-in-redacted-order-artifact",
+    "mcp_tool": "biocortex_retrieval_opt_in_redacted_order_artifact",
+    "schema": "agent_bridge.biocortex_retrieval.opt_in_redacted_order_artifact.v0",
+    "read_only": true,
+    "redacted_order_artifact": true,
+    "source_packet_consumer": true,
+    "accepted_source_schemas": [
+      "agent_bridge.biocortex_retrieval.opt_in_runtime_trial.v0",
+      "agent_bridge.biocortex_retrieval.opt_in_runtime_trial_review_packet.v0"
+    ],
+    "source_packet_included": false,
+    "raw_query_included": false,
+    "raw_keys_included": false,
+    "raw_order_keys_included": false,
+    "content_included": false,
+    "side_signal_raw_included": false,
+    "redacted_key_hashes_included": true,
+    "computes_top_k_overlap": true,
+    "computes_rank_delta_distribution": true,
+    "computes_per_key_movements": true,
+    "copies_raw_hashes": false,
+    "copies_raw_order_keys": false,
+    "calls_memory_search": false,
+    "runs_biocortex": false,
+    "registers_embedding_backend": false,
+    "changes_memory_search_order": false,
+    "ordering_behavior_connected": false,
+    "actual_return_order_changed": false,
+    "approval_state": "not_approved",
+    "runtime_adapter_approved": false,
+    "approval_writes_allowed": false,
+    "writes_approval": false,
+    "may_implement_ordering_now": false
+  },
   "implemented_authorization_request_order_diff_evidence": {
     "script": "scripts/prepare-biocortex-retrieval-opt-in-authorization-request.sh",
     "request_schema": "agent_bridge.biocortex_retrieval.opt_in_authorization_request.v0",
@@ -397,6 +433,8 @@
     "runtime_trial_review_packet_reports_boundary_violations_without_approval",
     "order_diff_packet_compares_baseline_and_advisory_hashes_without_raw_order_keys",
     "order_diff_packet_does_not_call_memory_search_run_biocortex_or_approve_ordering",
+    "redacted_order_artifact_computes_top_k_overlap_and_rank_movements_from_key_hash_rows",
+    "redacted_order_artifact_does_not_echo_raw_order_keys_or_approve_ordering",
     "authorization_request_optionally_includes_order_diff_evidence_without_raw_order_keys",
     "audit_telemetry_contains_baseline_experimental_fallback_latency_scope"
   ],

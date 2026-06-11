@@ -5,15 +5,17 @@ use ab_agent::{
 use ab_bridge::biocortex_shadow::{
     biocortex_replay_comparison, biocortex_retrieval_opt_in_audit_report,
     biocortex_retrieval_opt_in_dry_run_plan, biocortex_retrieval_opt_in_execution_packet,
-    biocortex_retrieval_opt_in_order_diff_packet, biocortex_retrieval_opt_in_review_packet,
+    biocortex_retrieval_opt_in_order_diff_packet,
+    biocortex_retrieval_opt_in_redacted_order_artifact, biocortex_retrieval_opt_in_review_packet,
     biocortex_retrieval_opt_in_runtime_trial,
     biocortex_retrieval_opt_in_runtime_trial_review_packet,
     biocortex_retrieval_runtime_approval_packet_preview, biocortex_shadow_digest,
-    supported_benchmarks, BioCortexReplayComparisonOptions, BioCortexRetrievalApprovalPacketOptions,
-    BioCortexRetrievalCandidate, BioCortexRetrievalOptInAuditOptions,
-    BioCortexRetrievalOptInDryRunOptions, BioCortexRetrievalOptInExecutionPacketOptions,
-    BioCortexRetrievalOptInOrderDiffPacketOptions, BioCortexRetrievalOptInReviewPacketOptions,
-    BioCortexRetrievalOptInRuntimeTrialOptions,
+    supported_benchmarks, BioCortexReplayComparisonOptions,
+    BioCortexRetrievalApprovalPacketOptions, BioCortexRetrievalCandidate,
+    BioCortexRetrievalOptInAuditOptions, BioCortexRetrievalOptInDryRunOptions,
+    BioCortexRetrievalOptInExecutionPacketOptions, BioCortexRetrievalOptInOrderDiffPacketOptions,
+    BioCortexRetrievalOptInRedactedOrderArtifactOptions,
+    BioCortexRetrievalOptInReviewPacketOptions, BioCortexRetrievalOptInRuntimeTrialOptions,
     BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions, BioCortexShadowOptions,
 };
 #[cfg(feature = "biocortex-retrieval-shadow")]
@@ -2674,6 +2676,32 @@ enum BioCortexOp {
         #[arg(long)]
         json: bool,
     },
+    /// Compute redacted top-k overlap and rank movement evidence.
+    ///
+    /// This consumes a runtime-trial or runtime-trial-review JSON file and
+    /// emits rank metrics from key_hash rows only. It does not approve runtime
+    /// influence, run BioCortex, call `memory_search`, or change retrieval
+    /// order.
+    RetrievalOptInRedactedOrderArtifact {
+        /// JSON file produced by runtime-trial or runtime-trial-review-packet.
+        #[arg(long = "source-json")]
+        source_json: PathBuf,
+        /// Reviewer identity or handle.
+        #[arg(long)]
+        reviewer: Option<String>,
+        /// Implementation commit under review.
+        #[arg(long)]
+        commit: Option<String>,
+        /// Forum post id linking the artifact.
+        #[arg(long)]
+        forum_post_id: Option<String>,
+        /// Memory key linking the artifact.
+        #[arg(long)]
+        memory_key: Option<String>,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
     /// Preview the future runtime approval packet without approving anything.
     ///
     /// This is a review-preparation packet only. It never runs BioCortex,
@@ -4569,6 +4597,27 @@ async fn real_main() -> Result<()> {
                 run_biocortex_retrieval_opt_in_order_diff_packet(
                     source_json,
                     BioCortexRetrievalOptInOrderDiffPacketOptions {
+                        source_packet: Value::Null,
+                        reviewer: reviewer.clone(),
+                        commit: commit.clone(),
+                        forum_post_id: forum_post_id.clone(),
+                        memory_key: memory_key.clone(),
+                    },
+                    *json,
+                )
+                .await
+            }
+            BioCortexOp::RetrievalOptInRedactedOrderArtifact {
+                source_json,
+                reviewer,
+                commit,
+                forum_post_id,
+                memory_key,
+                json,
+            } => {
+                run_biocortex_retrieval_opt_in_redacted_order_artifact(
+                    source_json,
+                    BioCortexRetrievalOptInRedactedOrderArtifactOptions {
                         source_packet: Value::Null,
                         reviewer: reviewer.clone(),
                         commit: commit.clone(),
@@ -8882,6 +8931,73 @@ async fn run_biocortex_retrieval_opt_in_order_diff_packet(
         "returned_order={} actual_return_order_changed={} violations={}",
         shadow_json_display(returned.get("source"), "baseline"),
         shadow_json_display(returned.get("actual_return_order_changed"), "false"),
+        boundary
+            .get("violations")
+            .and_then(Value::as_array)
+            .map(|items| items.len().to_string())
+            .unwrap_or_else(|| "0".to_string())
+    );
+    println!(
+        "calls_memory_search={} runs_biocortex={} changes_memory_search_order={}",
+        shadow_json_display(payload.get("calls_memory_search"), "false"),
+        shadow_json_display(payload.get("runs_biocortex"), "false"),
+        shadow_json_display(payload.get("changes_memory_search_order"), "false")
+    );
+    Ok(())
+}
+
+async fn run_biocortex_retrieval_opt_in_redacted_order_artifact(
+    source_json: &std::path::Path,
+    mut opts: BioCortexRetrievalOptInRedactedOrderArtifactOptions,
+    as_json: bool,
+) -> Result<()> {
+    let body = std::fs::read_to_string(source_json).map_err(|e| {
+        anyhow::anyhow!("read redacted-order artifact source JSON at {source_json:?}: {e}")
+    })?;
+    opts.source_packet = serde_json::from_str(&body).map_err(|e| {
+        anyhow::anyhow!("parse redacted-order artifact source JSON at {source_json:?}: {e}")
+    })?;
+    let payload = biocortex_retrieval_opt_in_redacted_order_artifact(opts);
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# BioCortex retrieval opt-in redacted order artifact");
+    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
+    let boundary = payload.get("boundary_check").unwrap_or(&Value::Null);
+    println!(
+        "artifact_ready={} approval_state={} may_implement_ordering_now={}",
+        shadow_json_display(boundary.get("artifact_ready"), "false"),
+        shadow_json_display(payload.get("approval_state"), "not_approved"),
+        shadow_json_display(payload.get("may_implement_ordering_now"), "false")
+    );
+    let comparison = payload
+        .get("redacted_order_comparison")
+        .unwrap_or(&Value::Null);
+    let distribution = comparison
+        .get("rank_delta_distribution")
+        .unwrap_or(&Value::Null);
+    println!(
+        "improved={} regressed={} unchanged={} max_abs_delta={}",
+        shadow_json_display(distribution.get("improved_count"), "0"),
+        shadow_json_display(distribution.get("regressed_count"), "0"),
+        shadow_json_display(distribution.get("unchanged_count"), "0"),
+        shadow_json_display(distribution.get("max_abs_delta"), "0")
+    );
+    let overlap_k1 = comparison
+        .get("top_k_overlap")
+        .and_then(Value::as_array)
+        .and_then(|rows| {
+            rows.iter()
+                .find(|row| row.get("k").and_then(Value::as_u64) == Some(1))
+        })
+        .unwrap_or(&Value::Null);
+    println!(
+        "top1_overlap={} top1_jaccard={} redacted_rows_comparable={} violations={}",
+        shadow_json_display(overlap_k1.get("overlap_count"), "0"),
+        shadow_json_display(overlap_k1.get("jaccard"), "-"),
+        shadow_json_display(boundary.get("redacted_rows_comparable"), "false"),
         boundary
             .get("violations")
             .and_then(Value::as_array)
