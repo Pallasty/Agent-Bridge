@@ -63,13 +63,14 @@ grep -q 'Authorization for one mode does not imply authorization for another mod
 opt_in_plan="docs/design/fixtures/biocortex-retrieval-opt-in-experiment-plan-2026-06-11.json"
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0"
-    and .status == "audit_shape_implemented"
+    and .status == "read_only_status_surface_implemented"
     and .approval_state == "opt_in_implementation_authorized"
     and .runtime_adapter_approved == false
     and .default_search_order_change_allowed == false
     and .implementation_allowed == true
     and .gate_skeleton_implemented == true
     and .audit_shape_implemented == true
+    and .read_only_status_surface_implemented == true
     and .ordering_behavior_connected == false
     and .requested_human_authorization_scope == "opt_in_experiment"
     and .requested_default_influence_scope == "none"
@@ -96,6 +97,16 @@ jq -e '
     and .implemented_audit_shape.hybrid_and_semantic_authorized == false
     and .implemented_audit_shape.ordering_behavior_connected == false
     and .implemented_audit_shape.may_change_search_order_now == false
+    and .implemented_status_surface.cli == "agent-bridge bio-cortex retrieval-opt-in-status"
+    and .implemented_status_surface.mcp_tool == "biocortex_retrieval_opt_in_status"
+    and .implemented_status_surface.schema == "agent_bridge.biocortex_retrieval.opt_in_call_audit.v0"
+    and .implemented_status_surface.read_only == true
+    and .implemented_status_surface.calls_memory_search == false
+    and .implemented_status_surface.runs_biocortex == false
+    and .implemented_status_surface.raw_keys_included == false
+    and .implemented_status_surface.content_included == false
+    and .implemented_status_surface.ordering_behavior_connected == false
+    and .implemented_status_surface.may_change_search_order_now == false
     and .fail_open.operator_disable == "return_baseline"
     and .human_review_boundary.authorization_decision_recorded == true
     and .human_review_boundary.requires_separate_human_decision_before_implementation == false
@@ -256,6 +267,62 @@ run cargo test -p ab-bridge --lib --no-default-features \
 run cargo test -p ab-bridge --lib --no-default-features \
     --features biocortex-retrieval-opt-in \
     opt_in_audit_ -- --nocapture --test-threads=1
+run cargo test -p ab-bridge --lib --no-default-features \
+    biocortex_retrieval_opt_in_status_ -- --nocapture
+
+opt_in_status_disabled="$tmpdir/opt-in-status-disabled.json"
+run cargo run -p ab-bridge --no-default-features -- \
+    bio-cortex retrieval-opt-in-status \
+    --mode hybrid \
+    --per-call-opt-in \
+    --query "verify secret query text" \
+    --baseline-key verify_secret_key_a \
+    --baseline-key verify_secret_key_b \
+    --latency-ms 1.23456 \
+    --json > "$opt_in_status_disabled"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_call_audit.v0"
+    and .mode == "hybrid"
+    and .mode_authorized == false
+    and .baseline_order.key_count == 2
+    and .baseline_order.raw_keys_included == false
+    and .baseline_order.content_included == false
+    and .fallback.reason == "mode_not_authorized"
+    and .ordering_behavior_connected == false
+    and .may_change_search_order_now == false
+    and .changes_memory_search_order == false
+' "$opt_in_status_disabled" >/dev/null
+if grep -q 'verify secret query text\|verify_secret_key_a\|verify_secret_key_b' "$opt_in_status_disabled"; then
+    echo "opt-in status leaked raw query/key data" >&2
+    exit 1
+fi
+
+opt_in_status_ready="$tmpdir/opt-in-status-ready.json"
+run env AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
+    cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
+    bio-cortex retrieval-opt-in-status \
+    --mode fts \
+    --per-call-opt-in \
+    --query "verify ready secret query" \
+    --baseline-key verify_ready_secret_key \
+    --json > "$opt_in_status_ready"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_call_audit.v0"
+    and .mode == "fts"
+    and .mode_authorized == true
+    and .gate.status == "ready_for_explicit_opt_in_experiment"
+    and .gate.ready_for_explicit_opt_in_experiment == true
+    and .baseline_order.key_count == 1
+    and .fallback.reason == "ordering_behavior_not_connected"
+    and .side_signal.status == "not_run_ordering_behavior_not_connected"
+    and .ordering_behavior_connected == false
+    and .may_change_search_order_now == false
+    and .changes_memory_search_order == false
+' "$opt_in_status_ready" >/dev/null
+if grep -q 'verify ready secret query\|verify_ready_secret_key' "$opt_in_status_ready"; then
+    echo "opt-in ready status leaked raw query/key data" >&2
+    exit 1
+fi
 
 run env AB_BIOCORTEX_RS="$biocortex_rs" CARGO_INCREMENTAL=0 \
     cargo run -p ab-bridge \
@@ -298,12 +365,16 @@ jq -e '
     and .default_search_order_change_allowed == false
     and .implementation_allowed == true
     and .writes_approval == false
-    and .opt_in_plan.status == "audit_shape_implemented"
+    and .opt_in_plan.status == "read_only_status_surface_implemented"
     and .opt_in_plan.implemented_gate_skeleton.ordering_behavior_connected == false
     and .opt_in_plan.implemented_gate_skeleton.may_change_search_order_now == false
     and .opt_in_plan.implemented_audit_shape.ordering_behavior_connected == false
     and .opt_in_plan.implemented_audit_shape.raw_keys_included == false
     and .opt_in_plan.implemented_audit_shape.content_included == false
+    and .opt_in_plan.implemented_status_surface.mcp_tool == "biocortex_retrieval_opt_in_status"
+    and .opt_in_plan.implemented_status_surface.raw_keys_included == false
+    and .opt_in_plan.implemented_status_surface.content_included == false
+    and .opt_in_plan.implemented_status_surface.ordering_behavior_connected == false
     and .opt_in_plan.experiment.mode == "fts_only"
     and .evidence.runtime_boundary_proof.default_disabled_status == "runtime_disabled"
     and .evidence.runtime_boundary_proof.kill_switch_status == "operator_disabled"

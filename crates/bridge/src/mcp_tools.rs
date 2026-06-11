@@ -45,13 +45,13 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::process::Command as TokioCommand;
 
 use crate::biocortex_shadow::{
-    biocortex_replay_comparison, biocortex_shadow_digest, supported_benchmarks,
-    BioCortexReplayComparisonOptions, BioCortexShadowOptions, BIOCORTEX_CHECKOUT_ENV,
+    biocortex_replay_comparison, biocortex_retrieval_opt_in_audit_report, biocortex_shadow_digest,
+    supported_benchmarks, BioCortexReplayComparisonOptions, BioCortexRetrievalOptInAuditOptions,
+    BioCortexShadowOptions, BIOCORTEX_CHECKOUT_ENV,
 };
 #[cfg(feature = "biocortex-retrieval-shadow")]
 use crate::biocortex_shadow::{
-    biocortex_retrieval_shadow_report, BioCortexRetrievalCandidate,
-    BioCortexRetrievalShadowOptions,
+    biocortex_retrieval_shadow_report, BioCortexRetrievalCandidate, BioCortexRetrievalShadowOptions,
 };
 use crate::context_budget::{
     budget_recommendation, env_context_window, estimate_tokens_from_text, estimated_usage_tokens,
@@ -25097,6 +25097,129 @@ impl McpTool for BioCortexReplayCompareTool {
 }
 
 // ===========================================================================
+//  biocortex_retrieval_opt_in_status — read-only opt-in gate/audit report
+// ===========================================================================
+
+/// Read-only BioCortex retrieval opt-in status surface. This tool reports the
+/// gate and audit shape for a hypothetical per-call opt-in request. It does not
+/// call `memory_search`, run BioCortex, include raw memory content, or change
+/// retrieval order.
+pub struct BioCortexRetrievalOptInStatusTool;
+
+impl BioCortexRetrievalOptInStatusTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for BioCortexRetrievalOptInStatusTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for BioCortexRetrievalOptInStatusTool {
+    fn name(&self) -> &'static str {
+        "biocortex_retrieval_opt_in_status"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only BioCortex retrieval opt-in status/audit \
+                 report. Reports feature/runtime/per-call gate state and an \
+                 audit-shape preview with hashed query/order data only. Does \
+                 not call memory_search, run BioCortex, mutate memory, include \
+                 raw memory keys/content, register an EmbeddingBackend, or \
+                 alter retrieval order."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "enum": ["fts", "hybrid", "semantic"],
+                        "default": "fts",
+                        "description": "Retrieval mode under review. Only fts is authorized for opt-in work."
+                    },
+                    "per_call_opt_in": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Explicit per-call opt-in bit to evaluate."
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Optional query text. Output includes only a hash."
+                    },
+                    "baseline_keys": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Optional baseline candidate keys. Output includes only count/hash, never raw keys."
+                    },
+                    "side_signal_status": {
+                        "type": "string",
+                        "description": "Optional side-signal status label for audit-shape previews."
+                    },
+                    "fallback_reason": {
+                        "type": "string",
+                        "description": "Optional fallback reason override for audit-shape previews."
+                    },
+                    "latency_ms": {
+                        "type": "number",
+                        "description": "Optional latency in milliseconds for audit-shape previews."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let mode = args
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("fts")
+            .to_string();
+        let per_call_opt_in = args
+            .get("per_call_opt_in")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let query = args
+            .get("query")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let baseline_keys = args
+            .get("baseline_keys")
+            .cloned()
+            .map(serde_json::from_value::<Vec<String>>)
+            .transpose()
+            .map_err(|e| ab_core::Error::Backend(format!("parse baseline_keys: {e}")))?
+            .unwrap_or_default();
+        let side_signal_status = args
+            .get("side_signal_status")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let fallback_reason = args
+            .get("fallback_reason")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let latency_ms = args.get("latency_ms").and_then(Value::as_f64);
+
+        let payload =
+            biocortex_retrieval_opt_in_audit_report(BioCortexRetrievalOptInAuditOptions {
+                mode,
+                per_call_opt_in,
+                query,
+                baseline_keys,
+                side_signal_status,
+                fallback_reason,
+                latency_ms,
+            });
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
 //   biocortex_retrieval_shadow — review-only retrieval side-signal report
 // ===========================================================================
 
@@ -36347,6 +36470,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Standard,
         Arc::new(BioCortexReplayCompareTool::new(hub.clone())),
     );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexRetrievalOptInStatusTool::new()),
+    );
     #[cfg(feature = "biocortex-retrieval-shadow")]
     reg_if(
         &mut reg,
@@ -45112,11 +45241,82 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         let schema = tool.schema();
         assert_eq!(schema.name, "biocortex_replay_compare");
         assert!(schema.description.contains("Read-only"));
-        assert!(schema.input_schema["properties"].get("window_days").is_some());
+        assert!(schema.input_schema["properties"]
+            .get("window_days")
+            .is_some());
         assert!(schema.input_schema["properties"].get("source").is_some());
-        assert!(schema.input_schema["properties"].get("include_events").is_some());
-        assert!(schema.input_schema["properties"].get("fixture_path").is_none());
+        assert!(schema.input_schema["properties"]
+            .get("include_events")
+            .is_some());
+        assert!(schema.input_schema["properties"]
+            .get("fixture_path")
+            .is_none());
         assert!(schema.input_schema["properties"].get("mutate").is_none());
+    }
+
+    #[test]
+    fn biocortex_retrieval_opt_in_status_schema_is_readonly() {
+        let tool = BioCortexRetrievalOptInStatusTool::new();
+        let schema = tool.schema();
+        assert_eq!(schema.name, "biocortex_retrieval_opt_in_status");
+        assert!(schema.description.contains("Read-only"));
+        assert!(schema.description.contains("hashed query/order data"));
+        assert!(schema.description.contains("Does not call memory_search"));
+
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("mode").is_some());
+        assert!(props.get("per_call_opt_in").is_some());
+        assert!(props.get("query").is_some());
+        assert!(props.get("baseline_keys").is_some());
+        assert!(props.get("latency_ms").is_some());
+        assert!(props.get("mutate").is_none());
+        assert!(props.get("memory_search").is_none());
+        assert!(props.get("raw_content").is_none());
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_status_does_not_echo_query_or_keys() {
+        let tool = BioCortexRetrievalOptInStatusTool::new();
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(
+                json!({
+                    "mode": "hybrid",
+                    "per_call_opt_in": true,
+                    "query": "secret query text",
+                    "baseline_keys": ["secret_key_a", "secret_key_b"],
+                    "latency_ms": 1.23456
+                }),
+                &ctx,
+            )
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains("secret query text"));
+        assert!(!text.contains("secret_key_a"));
+        assert!(!text.contains("secret_key_b"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_call_audit.v0")
+        );
+        assert_eq!(v["mode"], json!("hybrid"));
+        assert_eq!(v["mode_authorized"], json!(false));
+        assert_eq!(v["baseline_order"]["key_count"], json!(2));
+        assert_eq!(v["baseline_order"]["raw_keys_included"], json!(false));
+        assert_eq!(v["baseline_order"]["content_included"], json!(false));
+        assert_eq!(v["fallback"]["baseline_returned"], json!(true));
+        assert_eq!(v["fallback"]["reason"], json!("mode_not_authorized"));
+        assert_eq!(v["changes_memory_search_order"], json!(false));
+        assert_eq!(v["ordering_behavior_connected"], json!(false));
     }
 
     #[cfg(feature = "biocortex-retrieval-shadow")]

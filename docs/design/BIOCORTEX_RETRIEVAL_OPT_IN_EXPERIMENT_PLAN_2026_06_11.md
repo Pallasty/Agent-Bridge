@@ -5,8 +5,8 @@ Date: 2026-06-11
 ## Status
 
 Human authorization recorded for `opt_in_experiment` implementation work only.
-Gate skeleton and audit shape implemented. Ordering behavior is not implemented
-and not approved.
+Gate skeleton, audit shape, and read-only status surface implemented. Ordering
+behavior is not implemented and not approved.
 
 ```json
 {
@@ -17,6 +17,7 @@ and not approved.
   "implementation_allowed": true,
   "gate_skeleton_implemented": true,
   "audit_shape_implemented": true,
+  "read_only_status_surface_implemented": true,
   "ordering_behavior_connected": false
 }
 ```
@@ -101,6 +102,14 @@ Slice 2 landed the explicit per-call audit shape:
 
 The audit shape is still `audit_shape_only`; it does not run BioCortex, change
 candidate recall, or change returned order.
+
+Slice 3 landed read-only status surfaces:
+
+- CLI: `agent-bridge bio-cortex retrieval-opt-in-status`;
+- MCP tool: `biocortex_retrieval_opt_in_status`;
+- both expose the same opt-in call audit schema;
+- both preserve hashed query/order output and no raw memory keys/content;
+- both keep `ordering_behavior_connected=false`.
 
 ## Fail-Open Rules
 

@@ -173,7 +173,7 @@ jq -e '
     and .default_search_order_change_allowed == false
     and .implementation_allowed == true
     and .writes_approval == false
-    and .opt_in_plan.status == "audit_shape_implemented"
+    and .opt_in_plan.status == "read_only_status_surface_implemented"
     and .opt_in_plan.approval_state == "opt_in_implementation_authorized"
     and .opt_in_plan.implemented_gate_skeleton.ordering_behavior_connected == false
     and .opt_in_plan.implemented_gate_skeleton.may_change_search_order_now == false
@@ -181,6 +181,10 @@ jq -e '
     and .opt_in_plan.implemented_audit_shape.raw_keys_included == false
     and .opt_in_plan.implemented_audit_shape.content_included == false
     and .opt_in_plan.implemented_audit_shape.ordering_behavior_connected == false
+    and .opt_in_plan.implemented_status_surface.mcp_tool == "biocortex_retrieval_opt_in_status"
+    and .opt_in_plan.implemented_status_surface.raw_keys_included == false
+    and .opt_in_plan.implemented_status_surface.content_included == false
+    and .opt_in_plan.implemented_status_surface.ordering_behavior_connected == false
     and .opt_in_plan.experiment.mode == "fts_only"
     and .opt_in_plan.experiment.affected_call_site.function == "SqliteStore::memory_search"
     and .evidence.runtime_boundary_proof.default_disabled_status == "runtime_disabled"
