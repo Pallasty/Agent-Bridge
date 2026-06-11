@@ -1,7 +1,7 @@
 {
   "schema": "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0",
   "created_at": "2026-06-11T00:00:00Z",
-  "status": "runtime_trial_contract_implemented",
+  "status": "runtime_trial_review_packet_implemented",
   "approval_state": "opt_in_implementation_authorized",
   "runtime_adapter_approved": false,
   "default_search_order_change_allowed": false,
@@ -14,6 +14,7 @@
   "review_packet_consumer_implemented": true,
   "execution_packet_contract_implemented": true,
   "runtime_trial_implemented": true,
+  "runtime_trial_review_packet_implemented": true,
   "ordering_behavior_connected": false,
   "authorization_decision": {
     "doc": "docs/design/BIOCORTEX_RETRIEVAL_OPT_IN_AUTHORIZATION_DECISION_2026_06_11.md",
@@ -222,6 +223,31 @@
     "may_change_search_order_now": false,
     "may_implement_ordering_now": false
   },
+  "implemented_runtime_trial_review_packet": {
+    "cli": "agent-bridge bio-cortex retrieval-opt-in-runtime-trial-review-packet",
+    "mcp_tool": "biocortex_retrieval_opt_in_runtime_trial_review_packet",
+    "schema": "agent_bridge.biocortex_retrieval.opt_in_runtime_trial_review_packet.v0",
+    "read_only": true,
+    "runtime_trial_consumer": true,
+    "runtime_trial_packet_included": false,
+    "raw_query_included": false,
+    "raw_keys_included": false,
+    "content_included": false,
+    "side_signal_raw_included": false,
+    "reports_boundary_violations": true,
+    "review_scope": "baseline_preserving_runtime_trial_only",
+    "review_ready_does_not_approve_runtime_influence": true,
+    "approval_state": "not_approved",
+    "runtime_adapter_approved": false,
+    "approval_writes_allowed": false,
+    "writes_approval": false,
+    "calls_memory_search": false,
+    "runs_biocortex": false,
+    "registers_embedding_backend": false,
+    "changes_memory_search_order": false,
+    "ordering_behavior_connected": false,
+    "may_implement_ordering_now": false
+  },
   "fail_open": {
     "bio_cortex_checkout_absent": "return_baseline",
     "adapter_error": "return_baseline",
@@ -274,6 +300,8 @@
     "runtime_trial_runs_side_signal_only_after_execution_packet_and_opt_in_gate",
     "runtime_trial_returns_baseline_and_does_not_echo_query_keys_or_content",
     "runtime_trial_fails_open_without_checkout_timeout_low_coverage_or_operator_disabled",
+    "runtime_trial_review_packet_does_not_include_raw_trial_query_keys_or_content",
+    "runtime_trial_review_packet_reports_boundary_violations_without_approval",
     "audit_telemetry_contains_baseline_experimental_fallback_latency_scope"
   ],
   "human_review_boundary": {

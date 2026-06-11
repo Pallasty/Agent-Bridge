@@ -6,12 +6,13 @@ use ab_bridge::biocortex_shadow::{
     biocortex_replay_comparison, biocortex_retrieval_opt_in_audit_report,
     biocortex_retrieval_opt_in_dry_run_plan, biocortex_retrieval_opt_in_execution_packet,
     biocortex_retrieval_opt_in_review_packet, biocortex_retrieval_opt_in_runtime_trial,
+    biocortex_retrieval_opt_in_runtime_trial_review_packet,
     biocortex_retrieval_runtime_approval_packet_preview, biocortex_shadow_digest,
     supported_benchmarks, BioCortexReplayComparisonOptions, BioCortexRetrievalApprovalPacketOptions,
     BioCortexRetrievalCandidate, BioCortexRetrievalOptInAuditOptions,
     BioCortexRetrievalOptInDryRunOptions, BioCortexRetrievalOptInExecutionPacketOptions,
     BioCortexRetrievalOptInReviewPacketOptions, BioCortexRetrievalOptInRuntimeTrialOptions,
-    BioCortexShadowOptions,
+    BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions, BioCortexShadowOptions,
 };
 #[cfg(feature = "biocortex-retrieval-shadow")]
 use ab_bridge::biocortex_shadow::{
@@ -2621,6 +2622,31 @@ enum BioCortexOp {
         #[arg(long)]
         json: bool,
     },
+    /// Convert a runtime trial into a read-only post-implementation review packet.
+    ///
+    /// This consumes only safe summary fields from a runtime-trial JSON file.
+    /// It does not approve runtime influence, run BioCortex, call
+    /// `memory_search`, or change retrieval order.
+    RetrievalOptInRuntimeTrialReviewPacket {
+        /// JSON file produced by `retrieval-opt-in-runtime-trial --json`.
+        #[arg(long = "runtime-trial-json")]
+        runtime_trial_json: PathBuf,
+        /// Reviewer identity or handle.
+        #[arg(long)]
+        reviewer: Option<String>,
+        /// Implementation commit under review.
+        #[arg(long)]
+        commit: Option<String>,
+        /// Forum post id linking the review packet.
+        #[arg(long)]
+        forum_post_id: Option<String>,
+        /// Memory key linking the review packet.
+        #[arg(long)]
+        memory_key: Option<String>,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
     /// Preview the future runtime approval packet without approving anything.
     ///
     /// This is a review-preparation packet only. It never runs BioCortex,
@@ -4479,6 +4505,27 @@ async fn real_main() -> Result<()> {
                         coverage_threshold: *coverage_threshold,
                         attempt_id: attempt_id.clone(),
                         commit: commit.clone(),
+                    },
+                    *json,
+                )
+                .await
+            }
+            BioCortexOp::RetrievalOptInRuntimeTrialReviewPacket {
+                runtime_trial_json,
+                reviewer,
+                commit,
+                forum_post_id,
+                memory_key,
+                json,
+            } => {
+                run_biocortex_retrieval_opt_in_runtime_trial_review_packet(
+                    runtime_trial_json,
+                    BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions {
+                        runtime_trial: Value::Null,
+                        reviewer: reviewer.clone(),
+                        commit: commit.clone(),
+                        forum_post_id: forum_post_id.clone(),
+                        memory_key: memory_key.clone(),
                     },
                     *json,
                 )
@@ -8670,6 +8717,69 @@ async fn run_biocortex_retrieval_opt_in_runtime_trial(
         shadow_json_display(side_signal.get("attempted"), "false"),
         shadow_json_display(side_signal.get("coverage"), "0"),
         shadow_json_display(side_signal.get("latency_ms"), "0")
+    );
+    println!(
+        "calls_memory_search={} runs_biocortex={} changes_memory_search_order={}",
+        shadow_json_display(payload.get("calls_memory_search"), "false"),
+        shadow_json_display(payload.get("runs_biocortex"), "false"),
+        shadow_json_display(payload.get("changes_memory_search_order"), "false")
+    );
+    Ok(())
+}
+
+async fn run_biocortex_retrieval_opt_in_runtime_trial_review_packet(
+    runtime_trial_json: &std::path::Path,
+    mut opts: BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions,
+    as_json: bool,
+) -> Result<()> {
+    let body = std::fs::read_to_string(runtime_trial_json)
+        .map_err(|e| anyhow::anyhow!("read runtime-trial JSON at {runtime_trial_json:?}: {e}"))?;
+    opts.runtime_trial = serde_json::from_str(&body)
+        .map_err(|e| anyhow::anyhow!("parse runtime-trial JSON at {runtime_trial_json:?}: {e}"))?;
+    let payload = biocortex_retrieval_opt_in_runtime_trial_review_packet(opts);
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# BioCortex retrieval opt-in runtime trial review packet");
+    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
+    let boundary = payload.get("boundary_check").unwrap_or(&Value::Null);
+    println!(
+        "review_ready={} approval_state={} may_implement_ordering_now={}",
+        shadow_json_display(
+            boundary.get("review_ready_for_baseline_runtime_trial"),
+            "false"
+        ),
+        shadow_json_display(payload.get("approval_state"), "not_approved"),
+        shadow_json_display(payload.get("may_implement_ordering_now"), "false")
+    );
+    let target = payload.get("review_target").unwrap_or(&Value::Null);
+    println!(
+        "mode={} per_call_opt_in={} commit={}",
+        shadow_json_display(target.get("mode"), "-"),
+        shadow_json_display(target.get("per_call_opt_in"), "false"),
+        shadow_json_display(target.get("commit"), "-")
+    );
+    let summary = payload.get("runtime_trial_summary").unwrap_or(&Value::Null);
+    let side_signal = summary.get("side_signal").unwrap_or(&Value::Null);
+    println!(
+        "side_signal_status={} attempted={} coverage={} latency_ms={}",
+        shadow_json_display(side_signal.get("status"), "-"),
+        shadow_json_display(side_signal.get("attempted"), "false"),
+        shadow_json_display(side_signal.get("coverage"), "0"),
+        shadow_json_display(side_signal.get("latency_ms"), "0")
+    );
+    let returned = summary.get("returned_order").unwrap_or(&Value::Null);
+    println!(
+        "returned_order={} baseline_returned={} violations={}",
+        shadow_json_display(returned.get("source"), "baseline"),
+        shadow_json_display(returned.get("baseline_returned"), "true"),
+        boundary
+            .get("violations")
+            .and_then(Value::as_array)
+            .map(|items| items.len().to_string())
+            .unwrap_or_else(|| "0".to_string())
     );
     println!(
         "calls_memory_search={} runs_biocortex={} changes_memory_search_order={}",

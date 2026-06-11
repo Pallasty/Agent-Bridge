@@ -32,6 +32,8 @@ pub const BIOCORTEX_RETRIEVAL_OPT_IN_EXECUTION_PACKET_SCHEMA: &str =
     "agent_bridge.biocortex_retrieval.opt_in_execution_packet.v0";
 pub const BIOCORTEX_RETRIEVAL_OPT_IN_RUNTIME_TRIAL_SCHEMA: &str =
     "agent_bridge.biocortex_retrieval.opt_in_runtime_trial.v0";
+pub const BIOCORTEX_RETRIEVAL_OPT_IN_RUNTIME_TRIAL_REVIEW_PACKET_SCHEMA: &str =
+    "agent_bridge.biocortex_retrieval.opt_in_runtime_trial_review_packet.v0";
 pub const BIOCORTEX_SUBSTRATE_REPLAY_PLAN_SCHEMA: &str =
     "agent_bridge.biocortex_substrate_replay_plan.v0";
 pub const BIOCORTEX_CHECKOUT_ENV: &str = "AB_BIOCORTEX_RS";
@@ -152,6 +154,15 @@ pub struct BioCortexRetrievalOptInRuntimeTrialOptions {
     pub commit: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions {
+    pub runtime_trial: Value,
+    pub reviewer: Option<String>,
+    pub commit: Option<String>,
+    pub forum_post_id: Option<String>,
+    pub memory_key: Option<String>,
+}
+
 impl Default for BioCortexShadowOptions {
     fn default() -> Self {
         Self {
@@ -252,6 +263,18 @@ impl Default for BioCortexRetrievalOptInRuntimeTrialOptions {
             coverage_threshold: 0.8,
             attempt_id: None,
             commit: None,
+        }
+    }
+}
+
+impl Default for BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions {
+    fn default() -> Self {
+        Self {
+            runtime_trial: Value::Null,
+            reviewer: None,
+            commit: None,
+            forum_post_id: None,
+            memory_key: None,
         }
     }
 }
@@ -1883,6 +1906,400 @@ fn retrieval_status_payload(status: &str, reason: &str, gates: Value) -> Value {
     })
 }
 
+pub fn biocortex_retrieval_opt_in_runtime_trial_review_packet(
+    opts: BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions,
+) -> Value {
+    let trial = opts.runtime_trial;
+    let schema_ok = value_str_eq(
+        trial.get("schema"),
+        BIOCORTEX_RETRIEVAL_OPT_IN_RUNTIME_TRIAL_SCHEMA,
+    );
+    let read_only_ok = value_bool_is(trial.get("read_only"), true);
+    let runtime_trial_ok = value_bool_is(trial.get("runtime_trial"), true);
+    let runtime_stage_ok = value_str_eq(
+        trial.get("implementation_stage"),
+        "baseline_preserving_runtime_trial",
+    );
+    let input_packet_absent = value_bool_is(
+        trial.pointer("/input_contract/execution_packet_included"),
+        false,
+    );
+    let input_raw_query_absent =
+        value_bool_is(trial.pointer("/input_contract/raw_query_included"), false);
+    let input_raw_keys_absent =
+        value_bool_is(trial.pointer("/input_contract/raw_keys_included"), false);
+    let input_content_absent =
+        value_bool_is(trial.pointer("/input_contract/content_included"), false);
+    let baseline_raw_keys_absent =
+        value_bool_is(trial.pointer("/baseline_order/raw_keys_included"), false);
+    let baseline_content_absent =
+        value_bool_is(trial.pointer("/baseline_order/content_included"), false);
+    let side_signal_raw_absent = value_bool_is(trial.pointer("/side_signal/raw_included"), false);
+    let side_signal_keys_absent =
+        value_bool_is(trial.pointer("/side_signal/candidate_keys_included"), false);
+    let side_signal_content_absent =
+        value_bool_is(trial.pointer("/side_signal/content_included"), false);
+    let advisory_raw_keys_absent =
+        value_bool_is(trial.pointer("/advisory_result/raw_keys_included"), false);
+    let advisory_content_absent =
+        value_bool_is(trial.pointer("/advisory_result/content_included"), false);
+    let advisory_raw_absent =
+        value_bool_is(trial.pointer("/advisory_result/side_signal_raw_included"), false);
+    let returned_baseline = value_str_eq(trial.pointer("/returned_order/source"), "baseline");
+    let baseline_returned = value_bool_is(trial.pointer("/returned_order/baseline_returned"), true);
+    let hash_matches_baseline =
+        value_bool_is(trial.pointer("/returned_order/hash_matches_baseline"), true);
+    let calls_memory_search_false = value_bool_is(trial.get("calls_memory_search"), false);
+    let registers_embedding_backend_false =
+        value_bool_is(trial.get("registers_embedding_backend"), false);
+    let changes_order_false = value_bool_is(trial.get("changes_memory_search_order"), false);
+    let ordering_connected_false = value_bool_is(trial.get("ordering_behavior_connected"), false);
+    let may_change_order_false = value_bool_is(trial.get("may_change_search_order_now"), false);
+    let may_implement_ordering_false =
+        value_bool_is(trial.get("may_implement_ordering_now"), false);
+    let default_change_false =
+        value_bool_is(trial.get("default_search_order_change_allowed"), false);
+    let approval_state_not_approved = value_str_eq(trial.get("approval_state"), "not_approved");
+    let runtime_adapter_not_approved = value_bool_is(trial.get("runtime_adapter_approved"), false);
+    let approval_writes_false = value_bool_is(trial.get("approval_writes_allowed"), false);
+    let writes_approval_false = value_bool_is(trial.get("writes_approval"), false);
+    let boundary_calls_memory_search_false =
+        value_bool_is(trial.pointer("/boundary/calls_memory_search"), false);
+    let boundary_changes_order_false =
+        value_bool_is(trial.pointer("/boundary/changes_memory_search_order"), false);
+    let boundary_mutates_memory_false =
+        value_bool_is(trial.pointer("/boundary/mutates_ab_memory"), false);
+    let side_signal_attempted = value_bool_is(trial.pointer("/side_signal/attempted"), true);
+    let side_signal_ok = value_str_eq(trial.pointer("/side_signal/status"), "ok");
+    let trial_allowed =
+        value_bool_is(trial.pointer("/runtime_preflight/side_signal_trial_allowed"), true);
+    let preflight_blockers_empty = trial
+        .pointer("/runtime_preflight/blockers")
+        .and_then(Value::as_array)
+        .map(Vec::is_empty)
+        .unwrap_or(false);
+    let advisory_not_used_for_return =
+        value_bool_is(trial.pointer("/advisory_result/used_for_return_order"), false);
+
+    let mut violations = Vec::new();
+    push_violation(
+        &mut violations,
+        schema_ok,
+        "schema_not_runtime_trial_packet",
+    );
+    push_violation(&mut violations, read_only_ok, "runtime_trial_not_read_only");
+    push_violation(&mut violations, runtime_trial_ok, "runtime_trial_flag_missing");
+    push_violation(&mut violations, runtime_stage_ok, "runtime_trial_stage_unexpected");
+    push_violation(
+        &mut violations,
+        input_packet_absent,
+        "runtime_trial_packet_included",
+    );
+    push_violation(
+        &mut violations,
+        input_raw_query_absent,
+        "input_raw_query_included",
+    );
+    push_violation(
+        &mut violations,
+        input_raw_keys_absent,
+        "input_raw_keys_included",
+    );
+    push_violation(
+        &mut violations,
+        input_content_absent,
+        "input_content_included",
+    );
+    push_violation(
+        &mut violations,
+        baseline_raw_keys_absent,
+        "baseline_raw_keys_included",
+    );
+    push_violation(
+        &mut violations,
+        baseline_content_absent,
+        "baseline_content_included",
+    );
+    push_violation(
+        &mut violations,
+        side_signal_raw_absent,
+        "side_signal_raw_included",
+    );
+    push_violation(
+        &mut violations,
+        side_signal_keys_absent,
+        "side_signal_candidate_keys_included",
+    );
+    push_violation(
+        &mut violations,
+        side_signal_content_absent,
+        "side_signal_content_included",
+    );
+    push_violation(
+        &mut violations,
+        advisory_raw_keys_absent,
+        "advisory_raw_keys_included",
+    );
+    push_violation(
+        &mut violations,
+        advisory_content_absent,
+        "advisory_content_included",
+    );
+    push_violation(
+        &mut violations,
+        advisory_raw_absent,
+        "advisory_side_signal_raw_included",
+    );
+    push_violation(&mut violations, returned_baseline, "returned_order_not_baseline");
+    push_violation(&mut violations, baseline_returned, "baseline_not_returned");
+    push_violation(
+        &mut violations,
+        hash_matches_baseline,
+        "returned_order_hash_not_baseline",
+    );
+    push_violation(
+        &mut violations,
+        calls_memory_search_false,
+        "calls_memory_search_true_or_missing",
+    );
+    push_violation(
+        &mut violations,
+        registers_embedding_backend_false,
+        "registers_embedding_backend_true_or_missing",
+    );
+    push_violation(
+        &mut violations,
+        changes_order_false,
+        "changes_memory_search_order_true_or_missing",
+    );
+    push_violation(
+        &mut violations,
+        ordering_connected_false,
+        "ordering_behavior_connected_true_or_missing",
+    );
+    push_violation(
+        &mut violations,
+        may_change_order_false,
+        "may_change_search_order_now_true_or_missing",
+    );
+    push_violation(
+        &mut violations,
+        may_implement_ordering_false,
+        "may_implement_ordering_now_true_or_missing",
+    );
+    push_violation(
+        &mut violations,
+        default_change_false,
+        "default_search_order_change_allowed_true_or_missing",
+    );
+    push_violation(
+        &mut violations,
+        approval_state_not_approved,
+        "approval_state_changed",
+    );
+    push_violation(
+        &mut violations,
+        runtime_adapter_not_approved,
+        "runtime_adapter_approved",
+    );
+    push_violation(
+        &mut violations,
+        approval_writes_false,
+        "approval_writes_allowed",
+    );
+    push_violation(&mut violations, writes_approval_false, "writes_approval");
+    push_violation(
+        &mut violations,
+        boundary_calls_memory_search_false,
+        "boundary_calls_memory_search",
+    );
+    push_violation(
+        &mut violations,
+        boundary_changes_order_false,
+        "boundary_changes_memory_search_order",
+    );
+    push_violation(
+        &mut violations,
+        boundary_mutates_memory_false,
+        "boundary_mutates_ab_memory",
+    );
+    push_violation(
+        &mut violations,
+        advisory_not_used_for_return,
+        "advisory_used_for_return_order",
+    );
+
+    let review_ready_for_baseline_runtime_trial = violations.is_empty()
+        && side_signal_attempted
+        && side_signal_ok
+        && trial_allowed
+        && preflight_blockers_empty;
+    let attempt = trial.get("attempt").unwrap_or(&Value::Null);
+    let baseline = trial.get("baseline_order").unwrap_or(&Value::Null);
+    let preflight = trial.get("runtime_preflight").unwrap_or(&Value::Null);
+    let side_signal = trial.get("side_signal").unwrap_or(&Value::Null);
+    let advisory = trial.get("advisory_result").unwrap_or(&Value::Null);
+    let returned_order = trial.get("returned_order").unwrap_or(&Value::Null);
+
+    json!({
+        "schema": BIOCORTEX_RETRIEVAL_OPT_IN_RUNTIME_TRIAL_REVIEW_PACKET_SCHEMA,
+        "generated_at": now_secs(),
+        "read_only": true,
+        "runtime_trial_consumer": true,
+        "implementation_stage": "runtime_trial_review_packet_only",
+        "authorization_scope": "opt_in_experiment",
+        "review_scope": "baseline_preserving_runtime_trial_only",
+        "purpose": "Review packet derived from a runtime trial; this is not runtime influence approval.",
+        "input_contract": {
+            "source_schema": trial.get("schema").cloned().unwrap_or(Value::Null),
+            "requires_schema": BIOCORTEX_RETRIEVAL_OPT_IN_RUNTIME_TRIAL_SCHEMA,
+            "runtime_trial_packet_included": false,
+            "unknown_fields_ignored": true,
+            "raw_query_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "side_signal_raw_included": false,
+        },
+        "review_target": {
+            "mode": attempt.get("mode").cloned().unwrap_or(Value::Null),
+            "per_call_opt_in": attempt.get("per_call_opt_in").cloned().unwrap_or(Value::Null),
+            "runtime_trial_attempt_id": attempt.get("attempt_id").cloned().unwrap_or(Value::Null),
+            "runtime_trial_commit": attempt.get("commit").cloned().unwrap_or(Value::Null),
+            "reviewer": required_or_value(opts.reviewer),
+            "commit": required_or_value(opts.commit),
+            "forum_post_id": required_or_value(opts.forum_post_id),
+            "memory_key": required_or_value(opts.memory_key),
+        },
+        "runtime_trial_summary": {
+            "query_hash": trial.get("query_hash").cloned().unwrap_or(Value::Null),
+            "baseline_order": {
+                "completed": baseline.get("completed").cloned().unwrap_or(Value::Null),
+                "key_count": baseline.get("key_count").cloned().unwrap_or(Value::Null),
+                "hash": baseline.get("hash").cloned().unwrap_or(Value::Null),
+                "top_key_hash": baseline.get("top_key_hash").cloned().unwrap_or(Value::Null),
+                "raw_keys_included": false,
+                "content_included": false,
+            },
+            "runtime_preflight": {
+                "side_signal_trial_allowed": preflight
+                    .get("side_signal_trial_allowed")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "blocker_count": preflight
+                    .get("blockers")
+                    .and_then(Value::as_array)
+                    .map(|items| json!(items.len()))
+                    .unwrap_or(Value::Null),
+                "execution_packet_preflight_passed": preflight
+                    .get("execution_packet_preflight_passed")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "gate_ready": preflight.get("gate_ready").cloned().unwrap_or(Value::Null),
+                "candidate_count_matches_packet": preflight
+                    .get("candidate_count_matches_packet")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "ordering_execution_allowed": preflight
+                    .get("ordering_execution_allowed")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+            },
+            "side_signal": {
+                "attempted": side_signal.get("attempted").cloned().unwrap_or(Value::Null),
+                "status": side_signal.get("status").cloned().unwrap_or(Value::Null),
+                "timeout_ms": side_signal.get("timeout_ms").cloned().unwrap_or(Value::Null),
+                "coverage_threshold": side_signal
+                    .get("coverage_threshold")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "row_count": side_signal.get("row_count").cloned().unwrap_or(Value::Null),
+                "matched_candidate_count": side_signal
+                    .get("matched_candidate_count")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "coverage": side_signal.get("coverage").cloned().unwrap_or(Value::Null),
+                "latency_ms": side_signal.get("latency_ms").cloned().unwrap_or(Value::Null),
+                "raw_included": false,
+                "candidate_keys_included": false,
+                "content_included": false,
+            },
+            "advisory_result": {
+                "available": advisory.get("available").cloned().unwrap_or(Value::Null),
+                "used_for_return_order": advisory
+                    .get("used_for_return_order")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "order_hash": advisory.get("order_hash").cloned().unwrap_or(Value::Null),
+                "top_key_hash": advisory.get("top_key_hash").cloned().unwrap_or(Value::Null),
+                "matched_side_signal_count": advisory
+                    .get("matched_side_signal_count")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "evidence_count": advisory.get("evidence_count").cloned().unwrap_or(Value::Null),
+                "expected": advisory.get("expected").cloned().unwrap_or(Value::Null),
+                "raw_keys_included": false,
+                "content_included": false,
+                "side_signal_raw_included": false,
+            },
+            "returned_order": {
+                "source": returned_order.get("source").cloned().unwrap_or(Value::Null),
+                "baseline_returned": returned_order
+                    .get("baseline_returned")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "hash_matches_baseline": returned_order
+                    .get("hash_matches_baseline")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "fallback_reason": returned_order
+                    .get("fallback_reason")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+            },
+        },
+        "boundary_check": {
+            "review_ready_for_baseline_runtime_trial": review_ready_for_baseline_runtime_trial,
+            "violations": violations,
+            "schema_ok": schema_ok,
+            "read_only_ok": read_only_ok,
+            "runtime_trial_ok": runtime_trial_ok,
+            "side_signal_attempted": side_signal_attempted,
+            "side_signal_ok": side_signal_ok,
+            "trial_allowed": trial_allowed,
+            "preflight_blockers_empty": preflight_blockers_empty,
+            "returned_baseline": returned_baseline,
+            "baseline_returned": baseline_returned,
+            "calls_memory_search_false": calls_memory_search_false,
+            "registers_embedding_backend_false": registers_embedding_backend_false,
+            "changes_order_false": changes_order_false,
+            "ordering_connected_false": ordering_connected_false,
+            "advisory_not_used_for_return": advisory_not_used_for_return,
+        },
+        "required_human_checks": [
+            "Confirm the runtime trial packet was generated from the reviewed commit.",
+            "Confirm only explicit baseline candidates were used and BioCortex was not a recall source.",
+            "Confirm the side-signal adapter ran only under opt-in gates.",
+            "Confirm returned order remained baseline.",
+            "Confirm no raw query, memory keys, memory contents, or raw side-signal payloads are present.",
+            "Confirm any later ordering implementation has a separate review and authorization record."
+        ],
+        "approval_state": "not_approved",
+        "runtime_adapter_approved": false,
+        "approval_writes_allowed": false,
+        "writes_approval": false,
+        "calls_memory_search": false,
+        "runs_biocortex": false,
+        "registers_embedding_backend": false,
+        "changes_memory_search_order": false,
+        "default_search_order_change_allowed": false,
+        "ordering_behavior_connected": false,
+        "may_change_search_order_now": false,
+        "may_implement_ordering_now": false,
+        "default_calls_unchanged": true,
+        "boundary": retrieval_runtime_trial_review_boundary_payload(),
+    })
+}
+
 fn advisory_order_summary(
     mode: &str,
     baseline: &[RetrievalBaselineScore],
@@ -2338,6 +2755,26 @@ fn retrieval_runtime_trial_boundary_payload(runs_external_side_signal: bool) -> 
         "read_only": true,
         "runs_external_side_signal": runs_external_side_signal,
         "writes_temp_corpus": runs_external_side_signal,
+        "links_biocortex_into_ab_runtime": false,
+        "registers_embedding_backend": false,
+        "calls_set_default_backend": false,
+        "calls_memory_search": false,
+        "mutates_ab_memory": false,
+        "writes_embeddings": false,
+        "writes_coactivation": false,
+        "writes_graph_edges": false,
+        "changes_memory_search_order": false,
+        "default_search_order_changed": false,
+        "runtime_adapter_approved": false,
+    })
+}
+
+fn retrieval_runtime_trial_review_boundary_payload() -> Value {
+    json!({
+        "mode": "retrieval_opt_in_runtime_trial_review_packet",
+        "read_only": true,
+        "runs_external_side_signal": false,
+        "writes_temp_corpus": false,
         "links_biocortex_into_ab_runtime": false,
         "registers_embedding_backend": false,
         "calls_set_default_backend": false,
@@ -4041,6 +4478,234 @@ mod tests {
         assert!(!serialized.contains("bad runtime trial raw query"));
         assert!(!serialized.contains("bad_execution_raw_key"));
         assert!(!serialized.contains("bad runtime trial raw content"));
+    }
+
+    #[test]
+    fn opt_in_runtime_trial_review_packet_consumes_trial_without_approval() {
+        let packet = biocortex_retrieval_opt_in_runtime_trial_review_packet(
+            BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions {
+                runtime_trial: json!({
+                    "schema": BIOCORTEX_RETRIEVAL_OPT_IN_RUNTIME_TRIAL_SCHEMA,
+                    "read_only": true,
+                    "runtime_trial": true,
+                    "implementation_stage": "baseline_preserving_runtime_trial",
+                    "approval_state": "not_approved",
+                    "runtime_adapter_approved": false,
+                    "approval_writes_allowed": false,
+                    "writes_approval": false,
+                    "query": "runtime trial review raw query",
+                    "candidate_keys": ["runtime_trial_review_raw_key"],
+                    "attempt": {
+                        "mode": "fts",
+                        "per_call_opt_in": true,
+                        "attempt_id": "trial-attempt",
+                        "commit": "trial-commit"
+                    },
+                    "input_contract": {
+                        "execution_packet_included": false,
+                        "raw_query_included": false,
+                        "raw_keys_included": false,
+                        "content_included": false
+                    },
+                    "query_hash": "sha256:query",
+                    "baseline_order": {
+                        "completed": true,
+                        "key_count": 1,
+                        "hash": "sha256:baseline",
+                        "top_key_hash": "sha256:top",
+                        "raw_keys_included": false,
+                        "content_included": false
+                    },
+                    "runtime_preflight": {
+                        "side_signal_trial_allowed": true,
+                        "blockers": [],
+                        "execution_packet_preflight_passed": true,
+                        "gate_ready": true,
+                        "candidate_count_matches_packet": true,
+                        "ordering_execution_allowed": false
+                    },
+                    "side_signal": {
+                        "attempted": true,
+                        "status": "ok",
+                        "timeout_ms": 30000,
+                        "coverage_threshold": 0.5,
+                        "row_count": 1,
+                        "matched_candidate_count": 1,
+                        "coverage": 1.0,
+                        "latency_ms": 12.345,
+                        "raw_included": false,
+                        "candidate_keys_included": false,
+                        "content_included": false
+                    },
+                    "advisory_result": {
+                        "available": true,
+                        "used_for_return_order": false,
+                        "order_hash": "sha256:advisory",
+                        "top_key_hash": "sha256:advisory-top",
+                        "matched_side_signal_count": 1,
+                        "evidence_count": 1,
+                        "expected": {
+                            "key_hash": "sha256:expected",
+                            "baseline_rank": 1,
+                            "advisory_rank": 1,
+                            "regressed": false
+                        },
+                        "raw_keys_included": false,
+                        "content_included": false,
+                        "side_signal_raw_included": false
+                    },
+                    "returned_order": {
+                        "source": "baseline",
+                        "baseline_returned": true,
+                        "hash_matches_baseline": true,
+                        "fallback_reason": "ordering_behavior_not_connected"
+                    },
+                    "calls_memory_search": false,
+                    "runs_biocortex": true,
+                    "registers_embedding_backend": false,
+                    "changes_memory_search_order": false,
+                    "default_search_order_change_allowed": false,
+                    "ordering_behavior_connected": false,
+                    "may_change_search_order_now": false,
+                    "may_implement_ordering_now": false,
+                    "boundary": {
+                        "calls_memory_search": false,
+                        "changes_memory_search_order": false,
+                        "mutates_ab_memory": false
+                    }
+                }),
+                reviewer: Some("codex".to_string()),
+                commit: Some("review-commit".to_string()),
+                forum_post_id: Some("103".to_string()),
+                memory_key: Some("memory-key".to_string()),
+            },
+        );
+
+        assert_eq!(
+            packet["schema"],
+            json!(BIOCORTEX_RETRIEVAL_OPT_IN_RUNTIME_TRIAL_REVIEW_PACKET_SCHEMA)
+        );
+        assert_eq!(packet["read_only"], json!(true));
+        assert_eq!(packet["runtime_trial_consumer"], json!(true));
+        assert_eq!(packet["approval_state"], json!("not_approved"));
+        assert_eq!(packet["runtime_adapter_approved"], json!(false));
+        assert_eq!(packet["calls_memory_search"], json!(false));
+        assert_eq!(packet["runs_biocortex"], json!(false));
+        assert_eq!(packet["changes_memory_search_order"], json!(false));
+        assert_eq!(packet["may_implement_ordering_now"], json!(false));
+        assert_eq!(
+            packet["input_contract"]["runtime_trial_packet_included"],
+            json!(false)
+        );
+        assert_eq!(
+            packet["boundary_check"]["review_ready_for_baseline_runtime_trial"],
+            json!(true)
+        );
+        assert_eq!(
+            packet["boundary_check"]["violations"]
+                .as_array()
+                .expect("violations")
+                .len(),
+            0
+        );
+        assert_eq!(
+            packet["runtime_trial_summary"]["side_signal"]["status"],
+            json!("ok")
+        );
+        assert_eq!(
+            packet["runtime_trial_summary"]["returned_order"]["source"],
+            json!("baseline")
+        );
+
+        let serialized = serde_json::to_string(&packet).expect("packet json");
+        assert!(!serialized.contains("runtime trial review raw query"));
+        assert!(!serialized.contains("runtime_trial_review_raw_key"));
+    }
+
+    #[test]
+    fn opt_in_runtime_trial_review_packet_reports_violations_without_echoing_raw_fields() {
+        let packet = biocortex_retrieval_opt_in_runtime_trial_review_packet(
+            BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions {
+                runtime_trial: json!({
+                    "schema": BIOCORTEX_RETRIEVAL_OPT_IN_RUNTIME_TRIAL_SCHEMA,
+                    "read_only": true,
+                    "runtime_trial": true,
+                    "implementation_stage": "baseline_preserving_runtime_trial",
+                    "approval_state": "approved",
+                    "runtime_adapter_approved": true,
+                    "query": "bad runtime trial review raw query",
+                    "candidate_keys": ["bad_runtime_trial_review_raw_key"],
+                    "input_contract": {
+                        "execution_packet_included": true,
+                        "raw_query_included": true,
+                        "raw_keys_included": true,
+                        "content_included": true
+                    },
+                    "baseline_order": {
+                        "raw_keys_included": true,
+                        "content_included": true
+                    },
+                    "runtime_preflight": {
+                        "side_signal_trial_allowed": false,
+                        "blockers": ["bad"]
+                    },
+                    "side_signal": {
+                        "attempted": false,
+                        "status": "not_run",
+                        "raw_included": true,
+                        "candidate_keys_included": true,
+                        "content_included": true
+                    },
+                    "advisory_result": {
+                        "used_for_return_order": true,
+                        "raw_keys_included": true,
+                        "content_included": true,
+                        "side_signal_raw_included": true
+                    },
+                    "returned_order": {
+                        "source": "experimental",
+                        "baseline_returned": false,
+                        "hash_matches_baseline": false
+                    },
+                    "calls_memory_search": true,
+                    "registers_embedding_backend": true,
+                    "changes_memory_search_order": true,
+                    "default_search_order_change_allowed": true,
+                    "ordering_behavior_connected": true,
+                    "may_change_search_order_now": true,
+                    "may_implement_ordering_now": true,
+                    "approval_writes_allowed": true,
+                    "writes_approval": true,
+                    "boundary": {
+                        "calls_memory_search": true,
+                        "changes_memory_search_order": true,
+                        "mutates_ab_memory": true
+                    }
+                }),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(
+            packet["boundary_check"]["review_ready_for_baseline_runtime_trial"],
+            json!(false)
+        );
+        let violations = packet["boundary_check"]["violations"]
+            .as_array()
+            .expect("violations");
+        assert!(violations.contains(&json!("runtime_trial_packet_included")));
+        assert!(violations.contains(&json!("input_raw_query_included")));
+        assert!(violations.contains(&json!("side_signal_raw_included")));
+        assert!(violations.contains(&json!("returned_order_not_baseline")));
+        assert!(violations.contains(&json!("calls_memory_search_true_or_missing")));
+        assert!(violations.contains(&json!("runtime_adapter_approved")));
+        assert_eq!(packet["approval_state"], json!("not_approved"));
+        assert_eq!(packet["runs_biocortex"], json!(false));
+        assert_eq!(packet["changes_memory_search_order"], json!(false));
+
+        let serialized = serde_json::to_string(&packet).expect("packet json");
+        assert!(!serialized.contains("bad runtime trial review raw query"));
+        assert!(!serialized.contains("bad_runtime_trial_review_raw_key"));
     }
 
     struct EnvRestore {

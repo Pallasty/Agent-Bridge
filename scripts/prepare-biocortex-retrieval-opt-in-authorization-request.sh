@@ -173,7 +173,7 @@ jq -e '
     and .default_search_order_change_allowed == false
     and .implementation_allowed == true
     and .writes_approval == false
-    and .opt_in_plan.status == "runtime_trial_contract_implemented"
+    and .opt_in_plan.status == "runtime_trial_review_packet_implemented"
     and .opt_in_plan.approval_state == "opt_in_implementation_authorized"
     and .opt_in_plan.implemented_gate_skeleton.ordering_behavior_connected == false
     and .opt_in_plan.implemented_gate_skeleton.may_change_search_order_now == false
@@ -272,6 +272,29 @@ jq -e '
     and .opt_in_plan.implemented_runtime_trial.approval_writes_allowed == false
     and .opt_in_plan.implemented_runtime_trial.may_change_search_order_now == false
     and .opt_in_plan.implemented_runtime_trial.may_implement_ordering_now == false
+    and .opt_in_plan.implemented_runtime_trial_review_packet.cli == "agent-bridge bio-cortex retrieval-opt-in-runtime-trial-review-packet"
+    and .opt_in_plan.implemented_runtime_trial_review_packet.mcp_tool == "biocortex_retrieval_opt_in_runtime_trial_review_packet"
+    and .opt_in_plan.implemented_runtime_trial_review_packet.schema == "agent_bridge.biocortex_retrieval.opt_in_runtime_trial_review_packet.v0"
+    and .opt_in_plan.implemented_runtime_trial_review_packet.read_only == true
+    and .opt_in_plan.implemented_runtime_trial_review_packet.runtime_trial_consumer == true
+    and .opt_in_plan.implemented_runtime_trial_review_packet.runtime_trial_packet_included == false
+    and .opt_in_plan.implemented_runtime_trial_review_packet.raw_query_included == false
+    and .opt_in_plan.implemented_runtime_trial_review_packet.raw_keys_included == false
+    and .opt_in_plan.implemented_runtime_trial_review_packet.content_included == false
+    and .opt_in_plan.implemented_runtime_trial_review_packet.side_signal_raw_included == false
+    and .opt_in_plan.implemented_runtime_trial_review_packet.reports_boundary_violations == true
+    and .opt_in_plan.implemented_runtime_trial_review_packet.review_scope == "baseline_preserving_runtime_trial_only"
+    and .opt_in_plan.implemented_runtime_trial_review_packet.review_ready_does_not_approve_runtime_influence == true
+    and .opt_in_plan.implemented_runtime_trial_review_packet.approval_state == "not_approved"
+    and .opt_in_plan.implemented_runtime_trial_review_packet.runtime_adapter_approved == false
+    and .opt_in_plan.implemented_runtime_trial_review_packet.approval_writes_allowed == false
+    and .opt_in_plan.implemented_runtime_trial_review_packet.writes_approval == false
+    and .opt_in_plan.implemented_runtime_trial_review_packet.calls_memory_search == false
+    and .opt_in_plan.implemented_runtime_trial_review_packet.runs_biocortex == false
+    and .opt_in_plan.implemented_runtime_trial_review_packet.registers_embedding_backend == false
+    and .opt_in_plan.implemented_runtime_trial_review_packet.changes_memory_search_order == false
+    and .opt_in_plan.implemented_runtime_trial_review_packet.ordering_behavior_connected == false
+    and .opt_in_plan.implemented_runtime_trial_review_packet.may_implement_ordering_now == false
     and .opt_in_plan.experiment.mode == "fts_only"
     and .opt_in_plan.experiment.affected_call_site.function == "SqliteStore::memory_search"
     and .evidence.runtime_boundary_proof.default_disabled_status == "runtime_disabled"

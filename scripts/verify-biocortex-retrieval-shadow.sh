@@ -63,7 +63,7 @@ grep -q 'Authorization for one mode does not imply authorization for another mod
 opt_in_plan="docs/design/fixtures/biocortex-retrieval-opt-in-experiment-plan-2026-06-11.json"
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0"
-    and .status == "runtime_trial_contract_implemented"
+    and .status == "runtime_trial_review_packet_implemented"
     and .approval_state == "opt_in_implementation_authorized"
     and .runtime_adapter_approved == false
     and .default_search_order_change_allowed == false
@@ -76,6 +76,7 @@ jq -e '
     and .review_packet_consumer_implemented == true
     and .execution_packet_contract_implemented == true
     and .runtime_trial_implemented == true
+    and .runtime_trial_review_packet_implemented == true
     and .ordering_behavior_connected == false
     and .requested_human_authorization_scope == "opt_in_experiment"
     and .requested_default_influence_scope == "none"
@@ -215,6 +216,29 @@ jq -e '
     and .implemented_runtime_trial.approval_writes_allowed == false
     and .implemented_runtime_trial.may_change_search_order_now == false
     and .implemented_runtime_trial.may_implement_ordering_now == false
+    and .implemented_runtime_trial_review_packet.cli == "agent-bridge bio-cortex retrieval-opt-in-runtime-trial-review-packet"
+    and .implemented_runtime_trial_review_packet.mcp_tool == "biocortex_retrieval_opt_in_runtime_trial_review_packet"
+    and .implemented_runtime_trial_review_packet.schema == "agent_bridge.biocortex_retrieval.opt_in_runtime_trial_review_packet.v0"
+    and .implemented_runtime_trial_review_packet.read_only == true
+    and .implemented_runtime_trial_review_packet.runtime_trial_consumer == true
+    and .implemented_runtime_trial_review_packet.runtime_trial_packet_included == false
+    and .implemented_runtime_trial_review_packet.raw_query_included == false
+    and .implemented_runtime_trial_review_packet.raw_keys_included == false
+    and .implemented_runtime_trial_review_packet.content_included == false
+    and .implemented_runtime_trial_review_packet.side_signal_raw_included == false
+    and .implemented_runtime_trial_review_packet.reports_boundary_violations == true
+    and .implemented_runtime_trial_review_packet.review_scope == "baseline_preserving_runtime_trial_only"
+    and .implemented_runtime_trial_review_packet.review_ready_does_not_approve_runtime_influence == true
+    and .implemented_runtime_trial_review_packet.approval_state == "not_approved"
+    and .implemented_runtime_trial_review_packet.runtime_adapter_approved == false
+    and .implemented_runtime_trial_review_packet.approval_writes_allowed == false
+    and .implemented_runtime_trial_review_packet.writes_approval == false
+    and .implemented_runtime_trial_review_packet.calls_memory_search == false
+    and .implemented_runtime_trial_review_packet.runs_biocortex == false
+    and .implemented_runtime_trial_review_packet.registers_embedding_backend == false
+    and .implemented_runtime_trial_review_packet.changes_memory_search_order == false
+    and .implemented_runtime_trial_review_packet.ordering_behavior_connected == false
+    and .implemented_runtime_trial_review_packet.may_implement_ordering_now == false
     and .fail_open.operator_disable == "return_baseline"
     and .human_review_boundary.authorization_decision_recorded == true
     and .human_review_boundary.requires_separate_human_decision_before_implementation == false
@@ -387,6 +411,10 @@ run cargo test -p ab-bridge --lib --no-default-features \
     opt_in_execution_packet_ -- --nocapture --test-threads=1
 run cargo test -p ab-bridge --lib --no-default-features \
     opt_in_runtime_trial_ -- --nocapture --test-threads=1
+run cargo test -p ab-bridge --lib --no-default-features \
+    opt_in_runtime_trial_review_packet_ -- --nocapture --test-threads=1
+run cargo test -p ab-bridge --lib --no-default-features \
+    biocortex_retrieval_opt_in_runtime_trial_review_packet_ -- --nocapture
 
 opt_in_status_disabled="$tmpdir/opt-in-status-disabled.json"
 run cargo run -p ab-bridge --no-default-features -- \
@@ -719,6 +747,60 @@ if grep -q 'verify runtime trial secret query\|verify_runtime_trial_secret_key\|
     exit 1
 fi
 
+opt_in_runtime_trial_review_packet="$tmpdir/opt-in-runtime-trial-review-packet.json"
+run cargo run -p ab-bridge --no-default-features -- \
+    bio-cortex retrieval-opt-in-runtime-trial-review-packet \
+    --runtime-trial-json "$opt_in_runtime_trial" \
+    --reviewer verify-bundle \
+    --commit verify-dry-run-commit \
+    --forum-post-id verify-forum-post \
+    --memory-key verify-memory-key \
+    --json > "$opt_in_runtime_trial_review_packet"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_runtime_trial_review_packet.v0"
+    and .read_only == true
+    and .runtime_trial_consumer == true
+    and .implementation_stage == "runtime_trial_review_packet_only"
+    and .input_contract.source_schema == "agent_bridge.biocortex_retrieval.opt_in_runtime_trial.v0"
+    and .input_contract.runtime_trial_packet_included == false
+    and .input_contract.raw_query_included == false
+    and .input_contract.raw_keys_included == false
+    and .input_contract.content_included == false
+    and .input_contract.side_signal_raw_included == false
+    and .review_target.mode == "fts"
+    and .review_target.per_call_opt_in == true
+    and .review_target.commit == "verify-dry-run-commit"
+    and .runtime_trial_summary.side_signal.attempted == true
+    and .runtime_trial_summary.side_signal.status == "ok"
+    and .runtime_trial_summary.side_signal.coverage >= 0.5
+    and .runtime_trial_summary.side_signal.raw_included == false
+    and .runtime_trial_summary.side_signal.candidate_keys_included == false
+    and .runtime_trial_summary.side_signal.content_included == false
+    and .runtime_trial_summary.advisory_result.used_for_return_order == false
+    and .runtime_trial_summary.advisory_result.raw_keys_included == false
+    and .runtime_trial_summary.advisory_result.content_included == false
+    and .runtime_trial_summary.advisory_result.side_signal_raw_included == false
+    and .runtime_trial_summary.returned_order.source == "baseline"
+    and .runtime_trial_summary.returned_order.baseline_returned == true
+    and .runtime_trial_summary.returned_order.hash_matches_baseline == true
+    and .boundary_check.review_ready_for_baseline_runtime_trial == true
+    and (.boundary_check.violations | length) == 0
+    and .approval_state == "not_approved"
+    and .runtime_adapter_approved == false
+    and .approval_writes_allowed == false
+    and .writes_approval == false
+    and .calls_memory_search == false
+    and .runs_biocortex == false
+    and .registers_embedding_backend == false
+    and .changes_memory_search_order == false
+    and .ordering_behavior_connected == false
+    and .may_implement_ordering_now == false
+' "$opt_in_runtime_trial_review_packet" >/dev/null
+if grep -q 'verify runtime trial secret query\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_runtime_trial_review_packet"; then
+    echo "opt-in runtime trial review packet leaked raw query/key/content data" >&2
+    exit 1
+fi
+
 run env AB_BIOCORTEX_RS="$biocortex_rs" CARGO_INCREMENTAL=0 \
     cargo run -p ab-bridge \
     --example biocortex_retrieval_shadow_acceptance \
@@ -760,7 +842,7 @@ jq -e '
     and .default_search_order_change_allowed == false
     and .implementation_allowed == true
     and .writes_approval == false
-    and .opt_in_plan.status == "runtime_trial_contract_implemented"
+    and .opt_in_plan.status == "runtime_trial_review_packet_implemented"
     and .opt_in_plan.implemented_gate_skeleton.ordering_behavior_connected == false
     and .opt_in_plan.implemented_gate_skeleton.may_change_search_order_now == false
     and .opt_in_plan.implemented_audit_shape.ordering_behavior_connected == false
@@ -854,6 +936,29 @@ jq -e '
     and .opt_in_plan.implemented_runtime_trial.approval_writes_allowed == false
     and .opt_in_plan.implemented_runtime_trial.may_change_search_order_now == false
     and .opt_in_plan.implemented_runtime_trial.may_implement_ordering_now == false
+    and .opt_in_plan.implemented_runtime_trial_review_packet.cli == "agent-bridge bio-cortex retrieval-opt-in-runtime-trial-review-packet"
+    and .opt_in_plan.implemented_runtime_trial_review_packet.mcp_tool == "biocortex_retrieval_opt_in_runtime_trial_review_packet"
+    and .opt_in_plan.implemented_runtime_trial_review_packet.schema == "agent_bridge.biocortex_retrieval.opt_in_runtime_trial_review_packet.v0"
+    and .opt_in_plan.implemented_runtime_trial_review_packet.read_only == true
+    and .opt_in_plan.implemented_runtime_trial_review_packet.runtime_trial_consumer == true
+    and .opt_in_plan.implemented_runtime_trial_review_packet.runtime_trial_packet_included == false
+    and .opt_in_plan.implemented_runtime_trial_review_packet.raw_query_included == false
+    and .opt_in_plan.implemented_runtime_trial_review_packet.raw_keys_included == false
+    and .opt_in_plan.implemented_runtime_trial_review_packet.content_included == false
+    and .opt_in_plan.implemented_runtime_trial_review_packet.side_signal_raw_included == false
+    and .opt_in_plan.implemented_runtime_trial_review_packet.reports_boundary_violations == true
+    and .opt_in_plan.implemented_runtime_trial_review_packet.review_scope == "baseline_preserving_runtime_trial_only"
+    and .opt_in_plan.implemented_runtime_trial_review_packet.review_ready_does_not_approve_runtime_influence == true
+    and .opt_in_plan.implemented_runtime_trial_review_packet.approval_state == "not_approved"
+    and .opt_in_plan.implemented_runtime_trial_review_packet.runtime_adapter_approved == false
+    and .opt_in_plan.implemented_runtime_trial_review_packet.approval_writes_allowed == false
+    and .opt_in_plan.implemented_runtime_trial_review_packet.writes_approval == false
+    and .opt_in_plan.implemented_runtime_trial_review_packet.calls_memory_search == false
+    and .opt_in_plan.implemented_runtime_trial_review_packet.runs_biocortex == false
+    and .opt_in_plan.implemented_runtime_trial_review_packet.registers_embedding_backend == false
+    and .opt_in_plan.implemented_runtime_trial_review_packet.changes_memory_search_order == false
+    and .opt_in_plan.implemented_runtime_trial_review_packet.ordering_behavior_connected == false
+    and .opt_in_plan.implemented_runtime_trial_review_packet.may_implement_ordering_now == false
     and .opt_in_plan.experiment.mode == "fts_only"
     and .evidence.runtime_boundary_proof.default_disabled_status == "runtime_disabled"
     and .evidence.runtime_boundary_proof.kill_switch_status == "operator_disabled"

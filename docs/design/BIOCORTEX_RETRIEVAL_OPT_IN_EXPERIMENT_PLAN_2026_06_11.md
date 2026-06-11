@@ -8,8 +8,8 @@ Human authorization recorded for `opt_in_experiment` implementation work only.
 Gate skeleton, audit shape, read-only status surface, store-level
 request/response contract, read-only dry-run planner, read-only review packet
 consumer, read-only execution packet contract, and baseline-preserving runtime
-trial surface implemented. Ordering behavior is not implemented and not
-approved.
+trial surface, and read-only runtime trial review packet implemented. Ordering
+behavior is not implemented and not approved.
 
 ```json
 {
@@ -26,6 +26,7 @@ approved.
   "review_packet_consumer_implemented": true,
   "execution_packet_contract_implemented": true,
   "runtime_trial_implemented": true,
+  "runtime_trial_review_packet_implemented": true,
   "ordering_behavior_connected": false
 }
 ```
@@ -201,6 +202,23 @@ The runtime trial is evidence generation only. It may run the side-signal
 adapter for an explicitly supplied candidate set, but it still does not approve
 runtime influence, register an embedding backend, or connect ordering behavior.
 
+Slice 9 landed a read-only runtime trial review packet:
+
+- CLI: `agent-bridge bio-cortex retrieval-opt-in-runtime-trial-review-packet`;
+- MCP tool: `biocortex_retrieval_opt_in_runtime_trial_review_packet`;
+- packet schema:
+  `agent_bridge.biocortex_retrieval.opt_in_runtime_trial_review_packet.v0`;
+- consumes a runtime trial packet and copies only safe summary fields;
+- verifies that the trial did not call `memory_search`, register a backend,
+  mutate AB memory, echo raw query/key/content, or change returned order;
+- reports review readiness for baseline-preserving evidence only;
+- keeps `approval_state=not_approved`, `runtime_adapter_approved=false`, and
+  `may_implement_ordering_now=false`.
+
+The runtime trial review packet organizes post-implementation evidence. It does
+not approve runtime influence and does not request permission to connect
+ordering behavior.
+
 ## Fail-Open Rules
 
 The experiment must return the baseline list for:
@@ -265,6 +283,10 @@ Future implementation review must include tests proving:
 - runtime trial returns baseline and does not echo query, keys, or content;
 - runtime trial fails open for missing checkout, timeout, low coverage, malformed
   rows, missing opt-in, and operator disable;
+- runtime trial review packet consumes runtime trial output without including
+  raw trial payload, query, keys, or content;
+- runtime trial review packet reports boundary violations without approving
+  runtime influence;
 - audit telemetry includes baseline order, experimental order, fallback reason,
   latency, and authorization scope.
 
