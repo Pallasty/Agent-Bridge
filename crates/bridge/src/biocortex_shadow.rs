@@ -26,6 +26,8 @@ pub const BIOCORTEX_RETRIEVAL_OPT_IN_AUDIT_SCHEMA: &str =
     "agent_bridge.biocortex_retrieval.opt_in_call_audit.v0";
 pub const BIOCORTEX_RETRIEVAL_OPT_IN_DRY_RUN_SCHEMA: &str =
     "agent_bridge.biocortex_retrieval.opt_in_dry_run_plan.v0";
+pub const BIOCORTEX_RETRIEVAL_OPT_IN_REVIEW_PACKET_SCHEMA: &str =
+    "agent_bridge.biocortex_retrieval.opt_in_review_packet.v0";
 pub const BIOCORTEX_SUBSTRATE_REPLAY_PLAN_SCHEMA: &str =
     "agent_bridge.biocortex_substrate_replay_plan.v0";
 pub const BIOCORTEX_CHECKOUT_ENV: &str = "AB_BIOCORTEX_RS";
@@ -116,6 +118,15 @@ pub struct BioCortexRetrievalOptInDryRunOptions {
     pub coverage_threshold: f64,
 }
 
+#[derive(Debug, Clone)]
+pub struct BioCortexRetrievalOptInReviewPacketOptions {
+    pub dry_run_plan: Value,
+    pub reviewer: Option<String>,
+    pub commit: Option<String>,
+    pub forum_post_id: Option<String>,
+    pub memory_key: Option<String>,
+}
+
 impl Default for BioCortexShadowOptions {
     fn default() -> Self {
         Self {
@@ -177,6 +188,18 @@ impl Default for BioCortexRetrievalOptInDryRunOptions {
             baseline_completed: true,
             timeout_ms: DEFAULT_TIMEOUT_MS,
             coverage_threshold: 0.8,
+        }
+    }
+}
+
+impl Default for BioCortexRetrievalOptInReviewPacketOptions {
+    fn default() -> Self {
+        Self {
+            dry_run_plan: Value::Null,
+            reviewer: None,
+            commit: None,
+            forum_post_id: None,
+            memory_key: None,
         }
     }
 }
@@ -990,6 +1013,253 @@ pub fn biocortex_retrieval_opt_in_dry_run_plan(
     })
 }
 
+pub fn biocortex_retrieval_opt_in_review_packet(
+    opts: BioCortexRetrievalOptInReviewPacketOptions,
+) -> Value {
+    let plan = opts.dry_run_plan;
+    let schema_ok = value_str_eq(
+        plan.get("schema"),
+        BIOCORTEX_RETRIEVAL_OPT_IN_DRY_RUN_SCHEMA,
+    );
+    let read_only_ok = value_bool_is(plan.get("read_only"), true);
+    let dry_run_ok = value_bool_is(plan.get("dry_run"), true);
+    let calls_memory_search_false = value_bool_is(plan.get("calls_memory_search"), false);
+    let runs_biocortex_false = value_bool_is(plan.get("runs_biocortex"), false);
+    let registers_embedding_backend_false =
+        value_bool_is(plan.get("registers_embedding_backend"), false);
+    let changes_memory_search_order_false =
+        value_bool_is(plan.get("changes_memory_search_order"), false);
+    let default_search_order_change_allowed_false =
+        value_bool_is(plan.get("default_search_order_change_allowed"), false);
+    let ordering_behavior_connected_false =
+        value_bool_is(plan.get("ordering_behavior_connected"), false);
+    let may_change_search_order_now_false =
+        value_bool_is(plan.get("may_change_search_order_now"), false);
+    let baseline_raw_keys_absent =
+        value_bool_is(plan.pointer("/baseline_order/raw_keys_included"), false);
+    let baseline_content_absent =
+        value_bool_is(plan.pointer("/baseline_order/content_included"), false);
+    let side_signal_raw_absent =
+        value_bool_is(plan.pointer("/planned_side_signal/raw_included"), false);
+    let baseline_returned = value_bool_is(plan.pointer("/planner_result/baseline_returned"), true);
+    let returned_order_is_baseline = value_str_eq(
+        plan.pointer("/planner_result/returned_order_source"),
+        "baseline",
+    );
+
+    let mut violations = Vec::new();
+    push_violation(&mut violations, schema_ok, "schema_not_dry_run_plan");
+    push_violation(&mut violations, read_only_ok, "dry_run_plan_not_read_only");
+    push_violation(&mut violations, dry_run_ok, "dry_run_flag_missing");
+    push_violation(
+        &mut violations,
+        calls_memory_search_false,
+        "calls_memory_search_true_or_missing",
+    );
+    push_violation(
+        &mut violations,
+        runs_biocortex_false,
+        "runs_biocortex_true_or_missing",
+    );
+    push_violation(
+        &mut violations,
+        registers_embedding_backend_false,
+        "registers_embedding_backend_true_or_missing",
+    );
+    push_violation(
+        &mut violations,
+        changes_memory_search_order_false,
+        "changes_memory_search_order_true_or_missing",
+    );
+    push_violation(
+        &mut violations,
+        default_search_order_change_allowed_false,
+        "default_search_order_change_allowed_true_or_missing",
+    );
+    push_violation(
+        &mut violations,
+        ordering_behavior_connected_false,
+        "ordering_behavior_connected_true_or_missing",
+    );
+    push_violation(
+        &mut violations,
+        may_change_search_order_now_false,
+        "may_change_search_order_now_true_or_missing",
+    );
+    push_violation(
+        &mut violations,
+        baseline_raw_keys_absent,
+        "baseline_raw_keys_included_or_missing",
+    );
+    push_violation(
+        &mut violations,
+        baseline_content_absent,
+        "baseline_content_included_or_missing",
+    );
+    push_violation(
+        &mut violations,
+        side_signal_raw_absent,
+        "side_signal_raw_included_or_missing",
+    );
+    push_violation(
+        &mut violations,
+        baseline_returned,
+        "baseline_not_returned_by_contract",
+    );
+    push_violation(
+        &mut violations,
+        returned_order_is_baseline,
+        "returned_order_not_baseline",
+    );
+
+    let review_ready = violations.is_empty();
+    let mode = plan
+        .get("mode")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let gate = plan.get("gate").unwrap_or(&Value::Null);
+    let planner = plan.get("planner_result").unwrap_or(&Value::Null);
+    let baseline = plan.get("baseline_order").unwrap_or(&Value::Null);
+    let side_signal = plan.get("planned_side_signal").unwrap_or(&Value::Null);
+    let store_contract = plan.get("store_contract").unwrap_or(&Value::Null);
+
+    json!({
+        "schema": BIOCORTEX_RETRIEVAL_OPT_IN_REVIEW_PACKET_SCHEMA,
+        "generated_at": now_secs(),
+        "read_only": true,
+        "dry_run_consumer": true,
+        "implementation_stage": "review_packet_consumer_only",
+        "authorization_scope": "opt_in_experiment",
+        "purpose": "Review packet derived from a dry-run plan; this is not approval state.",
+        "input_contract": {
+            "source_schema": plan.get("schema").cloned().unwrap_or(Value::Null),
+            "requires_schema": BIOCORTEX_RETRIEVAL_OPT_IN_DRY_RUN_SCHEMA,
+            "dry_run_plan_included": false,
+            "unknown_fields_ignored": true,
+            "raw_query_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+        },
+        "review_target": {
+            "mode": mode,
+            "mode_authorized": plan.get("mode_authorized").cloned().unwrap_or(Value::Null),
+            "commit": required_or_value(opts.commit),
+            "reviewer": required_or_value(opts.reviewer),
+            "forum_post_id": required_or_value(opts.forum_post_id),
+            "memory_key": required_or_value(opts.memory_key),
+        },
+        "dry_run_summary": {
+            "query_hash": plan.get("query_hash").cloned().unwrap_or(Value::Null),
+            "baseline_order": {
+                "completed": baseline.get("completed").cloned().unwrap_or(Value::Null),
+                "key_count": baseline.get("key_count").cloned().unwrap_or(Value::Null),
+                "hash": baseline.get("hash").cloned().unwrap_or(Value::Null),
+                "raw_keys_included": false,
+                "content_included": false,
+            },
+            "gate": {
+                "status": gate.get("status").cloned().unwrap_or(Value::Null),
+                "ready_for_explicit_opt_in_experiment": gate
+                    .get("ready_for_explicit_opt_in_experiment")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "runtime_enabled": gate.get("runtime_enabled").cloned().unwrap_or(Value::Null),
+                "operator_disabled": gate.get("operator_disabled").cloned().unwrap_or(Value::Null),
+            },
+            "planner_result": {
+                "returned_order_source": planner
+                    .get("returned_order_source")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "baseline_returned": planner
+                    .get("baseline_returned")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "fallback_reason": planner
+                    .get("fallback_reason")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "blocking_reasons": planner
+                    .get("blocking_reasons")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "execution_ready": planner
+                    .get("execution_ready")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+            },
+            "planned_side_signal": {
+                "status": side_signal.get("status").cloned().unwrap_or(Value::Null),
+                "timeout_ms": side_signal.get("timeout_ms").cloned().unwrap_or(Value::Null),
+                "coverage_threshold": side_signal
+                    .get("coverage_threshold")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "raw_included": false,
+            },
+            "store_contract": {
+                "schema": store_contract.get("schema").cloned().unwrap_or(Value::Null),
+                "baseline_returned": store_contract
+                    .get("baseline_returned")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "returned_order_source": store_contract
+                    .get("returned_order_source")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "fallback_reason": store_contract
+                    .get("fallback_reason")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "changes_memory_search_order": store_contract
+                    .get("changes_memory_search_order")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+            },
+        },
+        "boundary_check": {
+            "review_ready": review_ready,
+            "violations": violations,
+            "schema_ok": schema_ok,
+            "read_only_ok": read_only_ok,
+            "dry_run_ok": dry_run_ok,
+            "calls_memory_search_false": calls_memory_search_false,
+            "runs_biocortex_false": runs_biocortex_false,
+            "registers_embedding_backend_false": registers_embedding_backend_false,
+            "changes_memory_search_order_false": changes_memory_search_order_false,
+            "default_search_order_change_allowed_false": default_search_order_change_allowed_false,
+            "ordering_behavior_connected_false": ordering_behavior_connected_false,
+            "may_change_search_order_now_false": may_change_search_order_now_false,
+            "baseline_raw_keys_absent": baseline_raw_keys_absent,
+            "baseline_content_absent": baseline_content_absent,
+            "side_signal_raw_absent": side_signal_raw_absent,
+            "baseline_returned": baseline_returned,
+            "returned_order_is_baseline": returned_order_is_baseline,
+        },
+        "required_human_checks": [
+            "Confirm the dry-run packet was generated from the reviewed commit.",
+            "Confirm fts is the only authorized mode for this opt-in experiment.",
+            "Confirm the packet still reports baseline-only return order.",
+            "Confirm no raw query, memory keys, or memory contents are present.",
+            "Confirm any later ordering implementation has a separate review and authorization record."
+        ],
+        "approval_state": "not_approved",
+        "runtime_adapter_approved": false,
+        "approval_writes_allowed": false,
+        "writes_approval": false,
+        "calls_memory_search": false,
+        "runs_biocortex": false,
+        "registers_embedding_backend": false,
+        "changes_memory_search_order": false,
+        "default_search_order_change_allowed": false,
+        "ordering_behavior_connected": false,
+        "may_change_search_order_now": false,
+        "may_implement_ordering_now": false,
+        "default_calls_unchanged": true,
+        "boundary": retrieval_boundary_payload(),
+    })
+}
+
 fn retrieval_status_payload(status: &str, reason: &str, gates: Value) -> Value {
     json!({
         "schema": BIOCORTEX_RETRIEVAL_SHADOW_SCHEMA,
@@ -1375,6 +1645,20 @@ fn required_or_value(value: Option<String>) -> Value {
         .filter(|s| !s.is_empty())
         .map(Value::String)
         .unwrap_or_else(|| json!("<required>"))
+}
+
+fn value_bool_is(value: Option<&Value>, expected: bool) -> bool {
+    value.and_then(Value::as_bool) == Some(expected)
+}
+
+fn value_str_eq(value: Option<&Value>, expected: &str) -> bool {
+    value.and_then(Value::as_str) == Some(expected)
+}
+
+fn push_violation(violations: &mut Vec<&'static str>, ok: bool, violation: &'static str) {
+    if !ok {
+        violations.push(violation);
+    }
 }
 
 fn missing_required_paths(value: &Value) -> Vec<String> {
@@ -2520,16 +2804,15 @@ mod tests {
         std::env::set_var(BIOCORTEX_RETRIEVAL_OPT_IN_ENABLE_ENV, "1");
         std::env::remove_var(BIOCORTEX_RETRIEVAL_DISABLE_ENV);
 
-        let plan =
-            biocortex_retrieval_opt_in_dry_run_plan(BioCortexRetrievalOptInDryRunOptions {
-                mode: "fts".to_string(),
-                per_call_opt_in: true,
-                query: Some("secret dry run query".to_string()),
-                baseline_keys: vec!["secret_baseline_a".to_string()],
-                baseline_completed: true,
-                timeout_ms: 1234,
-                coverage_threshold: 0.81234,
-            });
+        let plan = biocortex_retrieval_opt_in_dry_run_plan(BioCortexRetrievalOptInDryRunOptions {
+            mode: "fts".to_string(),
+            per_call_opt_in: true,
+            query: Some("secret dry run query".to_string()),
+            baseline_keys: vec!["secret_baseline_a".to_string()],
+            baseline_completed: true,
+            timeout_ms: 1234,
+            coverage_threshold: 0.81234,
+        });
 
         assert_eq!(
             plan["schema"],
@@ -2552,7 +2835,10 @@ mod tests {
             json!("not_run_dry_run")
         );
         assert_eq!(plan["planned_side_signal"]["timeout_ms"], json!(1234));
-        assert_eq!(plan["planned_side_signal"]["coverage_threshold"], json!(0.812));
+        assert_eq!(
+            plan["planned_side_signal"]["coverage_threshold"],
+            json!(0.812)
+        );
         assert_eq!(
             plan["store_contract"]["schema"],
             json!("agent_bridge.store.memory_search.biocortex_opt_in_contract.v0")
@@ -2594,14 +2880,13 @@ mod tests {
         std::env::set_var(BIOCORTEX_RETRIEVAL_OPT_IN_ENABLE_ENV, "1");
         std::env::remove_var(BIOCORTEX_RETRIEVAL_DISABLE_ENV);
 
-        let plan =
-            biocortex_retrieval_opt_in_dry_run_plan(BioCortexRetrievalOptInDryRunOptions {
-                mode: "semantic".to_string(),
-                per_call_opt_in: true,
-                query: Some("another secret query".to_string()),
-                baseline_keys: vec!["secret_semantic_key".to_string()],
-                ..Default::default()
-            });
+        let plan = biocortex_retrieval_opt_in_dry_run_plan(BioCortexRetrievalOptInDryRunOptions {
+            mode: "semantic".to_string(),
+            per_call_opt_in: true,
+            query: Some("another secret query".to_string()),
+            baseline_keys: vec!["secret_semantic_key".to_string()],
+            ..Default::default()
+        });
 
         assert_eq!(plan["mode"], json!("semantic"));
         assert_eq!(plan["mode_authorized"], json!(false));
@@ -2620,6 +2905,126 @@ mod tests {
         let serialized = serde_json::to_string(&plan).expect("plan json");
         assert!(!serialized.contains("another secret query"));
         assert!(!serialized.contains("secret_semantic_key"));
+    }
+
+    #[test]
+    fn opt_in_review_packet_consumes_dry_run_without_approval() {
+        let _lock = ENV_LOCK.lock().expect("env lock");
+        let _guard = EnvRestore::capture(&[
+            BIOCORTEX_RETRIEVAL_OPT_IN_ENABLE_ENV,
+            BIOCORTEX_RETRIEVAL_DISABLE_ENV,
+        ]);
+        std::env::set_var(BIOCORTEX_RETRIEVAL_OPT_IN_ENABLE_ENV, "1");
+        std::env::remove_var(BIOCORTEX_RETRIEVAL_DISABLE_ENV);
+
+        let plan = biocortex_retrieval_opt_in_dry_run_plan(BioCortexRetrievalOptInDryRunOptions {
+            mode: "fts".to_string(),
+            per_call_opt_in: true,
+            query: Some("review secret query".to_string()),
+            baseline_keys: vec!["review_secret_key".to_string()],
+            ..Default::default()
+        });
+        let packet =
+            biocortex_retrieval_opt_in_review_packet(BioCortexRetrievalOptInReviewPacketOptions {
+                dry_run_plan: plan,
+                reviewer: Some("codex".to_string()),
+                commit: Some("test-commit".to_string()),
+                forum_post_id: Some("103".to_string()),
+                memory_key: Some("memory-key".to_string()),
+            });
+
+        assert_eq!(
+            packet["schema"],
+            json!(BIOCORTEX_RETRIEVAL_OPT_IN_REVIEW_PACKET_SCHEMA)
+        );
+        assert_eq!(packet["read_only"], json!(true));
+        assert_eq!(packet["dry_run_consumer"], json!(true));
+        assert_eq!(packet["approval_state"], json!("not_approved"));
+        assert_eq!(packet["runtime_adapter_approved"], json!(false));
+        assert_eq!(packet["approval_writes_allowed"], json!(false));
+        assert_eq!(packet["calls_memory_search"], json!(false));
+        assert_eq!(packet["runs_biocortex"], json!(false));
+        assert_eq!(packet["changes_memory_search_order"], json!(false));
+        assert_eq!(packet["may_implement_ordering_now"], json!(false));
+        assert_eq!(
+            packet["input_contract"]["dry_run_plan_included"],
+            json!(false)
+        );
+        assert_eq!(
+            packet["dry_run_summary"]["baseline_order"]["key_count"],
+            json!(1)
+        );
+        assert_eq!(
+            packet["boundary_check"]["violations"]
+                .as_array()
+                .expect("violations")
+                .len(),
+            0
+        );
+
+        let serialized = serde_json::to_string(&packet).expect("packet json");
+        assert!(!serialized.contains("review secret query"));
+        assert!(!serialized.contains("review_secret_key"));
+    }
+
+    #[test]
+    fn opt_in_review_packet_rejects_executing_or_raw_plan_without_echoing_it() {
+        let packet =
+            biocortex_retrieval_opt_in_review_packet(BioCortexRetrievalOptInReviewPacketOptions {
+                dry_run_plan: json!({
+                    "schema": BIOCORTEX_RETRIEVAL_OPT_IN_DRY_RUN_SCHEMA,
+                    "read_only": true,
+                    "dry_run": true,
+                    "mode": "fts",
+                    "mode_authorized": true,
+                    "query": "do not echo raw query",
+                    "baseline_keys": ["do_not_echo_key"],
+                    "baseline_order": {
+                        "key_count": 1,
+                        "hash": "sha256:test",
+                        "raw_keys_included": true,
+                        "content_included": true
+                    },
+                    "planned_side_signal": {
+                        "status": "ran",
+                        "raw_included": true
+                    },
+                    "planner_result": {
+                        "returned_order_source": "experimental",
+                        "baseline_returned": false,
+                        "fallback_reason": null,
+                        "blocking_reasons": [],
+                        "execution_ready": true
+                    },
+                    "calls_memory_search": true,
+                    "runs_biocortex": true,
+                    "registers_embedding_backend": true,
+                    "changes_memory_search_order": true,
+                    "default_search_order_change_allowed": true,
+                    "ordering_behavior_connected": true,
+                    "may_change_search_order_now": true
+                }),
+                ..Default::default()
+            });
+
+        assert_eq!(packet["boundary_check"]["review_ready"], json!(false));
+        let violations = packet["boundary_check"]["violations"]
+            .as_array()
+            .expect("violations");
+        assert!(violations.contains(&json!("calls_memory_search_true_or_missing")));
+        assert!(violations.contains(&json!("runs_biocortex_true_or_missing")));
+        assert!(violations.contains(&json!("baseline_raw_keys_included_or_missing")));
+        assert!(violations.contains(&json!("returned_order_not_baseline")));
+        assert_eq!(
+            packet["input_contract"]["dry_run_plan_included"],
+            json!(false)
+        );
+        assert_eq!(packet["approval_state"], json!("not_approved"));
+        assert_eq!(packet["changes_memory_search_order"], json!(false));
+
+        let serialized = serde_json::to_string(&packet).expect("packet json");
+        assert!(!serialized.contains("do not echo raw query"));
+        assert!(!serialized.contains("do_not_echo_key"));
     }
 
     struct EnvRestore {

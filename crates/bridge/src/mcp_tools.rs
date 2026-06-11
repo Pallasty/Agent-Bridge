@@ -46,9 +46,10 @@ use tokio::process::Command as TokioCommand;
 
 use crate::biocortex_shadow::{
     biocortex_replay_comparison, biocortex_retrieval_opt_in_audit_report,
-    biocortex_retrieval_opt_in_dry_run_plan, biocortex_shadow_digest, supported_benchmarks,
-    BioCortexReplayComparisonOptions, BioCortexRetrievalOptInAuditOptions,
-    BioCortexRetrievalOptInDryRunOptions, BioCortexShadowOptions, BIOCORTEX_CHECKOUT_ENV,
+    biocortex_retrieval_opt_in_dry_run_plan, biocortex_retrieval_opt_in_review_packet,
+    biocortex_shadow_digest, supported_benchmarks, BioCortexReplayComparisonOptions,
+    BioCortexRetrievalOptInAuditOptions, BioCortexRetrievalOptInDryRunOptions,
+    BioCortexRetrievalOptInReviewPacketOptions, BioCortexShadowOptions, BIOCORTEX_CHECKOUT_ENV,
 };
 #[cfg(feature = "biocortex-retrieval-shadow")]
 use crate::biocortex_shadow::{
@@ -25353,6 +25354,103 @@ impl McpTool for BioCortexRetrievalOptInDryRunTool {
 }
 
 // ===========================================================================
+//  biocortex_retrieval_opt_in_review_packet — read-only dry-run review packet
+// ===========================================================================
+
+/// Read-only BioCortex retrieval opt-in review-packet consumer. This tool
+/// accepts an opt-in dry-run plan and emits a safe review packet for human/agent
+/// inspection. It does not include the raw dry-run payload, approve anything,
+/// call `memory_search`, run BioCortex, or change retrieval order.
+pub struct BioCortexRetrievalOptInReviewPacketTool;
+
+impl BioCortexRetrievalOptInReviewPacketTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for BioCortexRetrievalOptInReviewPacketTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for BioCortexRetrievalOptInReviewPacketTool {
+    fn name(&self) -> &'static str {
+        "biocortex_retrieval_opt_in_review_packet"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only BioCortex retrieval opt-in review packet \
+                 consumer. Accepts a dry-run plan and emits safe summary evidence \
+                 for review without including the raw dry-run payload. Does not \
+                 call memory_search, run BioCortex, mutate memory, include raw \
+                 memory keys/content, register an EmbeddingBackend, approve \
+                 runtime influence, or alter retrieval order."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["dry_run_plan"],
+                "properties": {
+                    "dry_run_plan": {
+                        "type": "object",
+                        "description": "JSON object produced by biocortex_retrieval_opt_in_dry_run. Unknown/raw fields are ignored."
+                    },
+                    "reviewer": {
+                        "type": "string",
+                        "description": "Optional reviewer identity or handle."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Optional implementation commit under review."
+                    },
+                    "forum_post_id": {
+                        "type": "string",
+                        "description": "Optional forum post id linking this review packet."
+                    },
+                    "memory_key": {
+                        "type": "string",
+                        "description": "Optional memory key linking this review packet."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let dry_run_plan = args.get("dry_run_plan").cloned().unwrap_or(Value::Null);
+        let reviewer = args
+            .get("reviewer")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let commit = args
+            .get("commit")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let forum_post_id = args
+            .get("forum_post_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let memory_key = args
+            .get("memory_key")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let payload =
+            biocortex_retrieval_opt_in_review_packet(BioCortexRetrievalOptInReviewPacketOptions {
+                dry_run_plan,
+                reviewer,
+                commit,
+                forum_post_id,
+                memory_key,
+            });
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
 //   biocortex_retrieval_shadow — review-only retrieval side-signal report
 // ===========================================================================
 
@@ -36615,6 +36713,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Standard,
         Arc::new(BioCortexRetrievalOptInDryRunTool::new()),
     );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexRetrievalOptInReviewPacketTool::new()),
+    );
     #[cfg(feature = "biocortex-retrieval-shadow")]
     reg_if(
         &mut reg,
@@ -45527,6 +45631,115 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert_eq!(v["runs_biocortex"], json!(false));
         assert_eq!(v["changes_memory_search_order"], json!(false));
         assert_eq!(v["ordering_behavior_connected"], json!(false));
+    }
+
+    #[test]
+    fn biocortex_retrieval_opt_in_review_packet_schema_is_readonly() {
+        let tool = BioCortexRetrievalOptInReviewPacketTool::new();
+        let schema = tool.schema();
+        assert_eq!(schema.name, "biocortex_retrieval_opt_in_review_packet");
+        assert!(schema.description.contains("Read-only"));
+        assert!(schema.description.contains("review packet"));
+        assert!(schema.description.contains("Does not call memory_search"));
+
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required");
+        assert!(required.contains(&json!("dry_run_plan")));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("dry_run_plan").is_some());
+        assert!(props.get("reviewer").is_some());
+        assert!(props.get("commit").is_some());
+        assert!(props.get("forum_post_id").is_some());
+        assert!(props.get("memory_key").is_some());
+        assert!(props.get("mutate").is_none());
+        assert!(props.get("memory_search").is_none());
+        assert!(props.get("raw_content").is_none());
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_review_packet_ignores_raw_plan_fields() {
+        let tool = BioCortexRetrievalOptInReviewPacketTool::new();
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(
+                json!({
+                    "dry_run_plan": {
+                        "schema": "agent_bridge.biocortex_retrieval.opt_in_dry_run_plan.v0",
+                        "read_only": true,
+                        "dry_run": true,
+                        "mode": "fts",
+                        "mode_authorized": true,
+                        "query": "secret review packet query",
+                        "baseline_keys": ["secret_review_packet_key"],
+                        "query_hash": "sha256:query",
+                        "baseline_order": {
+                            "completed": true,
+                            "key_count": 1,
+                            "hash": "sha256:baseline",
+                            "raw_keys_included": false,
+                            "content_included": false
+                        },
+                        "planned_side_signal": {
+                            "status": "not_run_dry_run",
+                            "raw_included": false
+                        },
+                        "planner_result": {
+                            "returned_order_source": "baseline",
+                            "baseline_returned": true,
+                            "fallback_reason": "ordering_behavior_not_connected",
+                            "blocking_reasons": [],
+                            "execution_ready": false
+                        },
+                        "store_contract": {
+                            "schema": "agent_bridge.store.memory_search.biocortex_opt_in_contract.v0",
+                            "baseline_returned": true,
+                            "returned_order_source": "baseline",
+                            "fallback_reason": "ordering_behavior_not_connected",
+                            "changes_memory_search_order": false
+                        },
+                        "calls_memory_search": false,
+                        "runs_biocortex": false,
+                        "registers_embedding_backend": false,
+                        "changes_memory_search_order": false,
+                        "default_search_order_change_allowed": false,
+                        "ordering_behavior_connected": false,
+                        "may_change_search_order_now": false
+                    },
+                    "reviewer": "codex",
+                    "commit": "test-commit"
+                }),
+                &ctx,
+            )
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains("secret review packet query"));
+        assert!(!text.contains("secret_review_packet_key"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_review_packet.v0")
+        );
+        assert_eq!(v["read_only"], json!(true));
+        assert_eq!(v["dry_run_consumer"], json!(true));
+        assert_eq!(v["approval_state"], json!("not_approved"));
+        assert_eq!(v["boundary_check"]["review_ready"], json!(true));
+        assert_eq!(v["input_contract"]["dry_run_plan_included"], json!(false));
+        assert_eq!(v["calls_memory_search"], json!(false));
+        assert_eq!(v["runs_biocortex"], json!(false));
+        assert_eq!(v["changes_memory_search_order"], json!(false));
+        assert_eq!(v["may_implement_ordering_now"], json!(false));
     }
 
     #[cfg(feature = "biocortex-retrieval-shadow")]

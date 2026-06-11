@@ -6,8 +6,9 @@ Date: 2026-06-11
 
 Human authorization recorded for `opt_in_experiment` implementation work only.
 Gate skeleton, audit shape, read-only status surface, store-level
-request/response contract, and read-only dry-run planner implemented. Ordering
-behavior is not implemented and not approved.
+request/response contract, read-only dry-run planner, and read-only review
+packet consumer implemented. Ordering behavior is not implemented and not
+approved.
 
 ```json
 {
@@ -21,6 +22,7 @@ behavior is not implemented and not approved.
   "read_only_status_surface_implemented": true,
   "store_contract_implemented": true,
   "dry_run_planner_implemented": true,
+  "review_packet_consumer_implemented": true,
   "ordering_behavior_connected": false
 }
 ```
@@ -146,6 +148,22 @@ Slice 5 landed a read-only dry-run planner:
 The planner is a preview and review surface only. It does not grant runtime
 adapter approval and does not connect ordering behavior.
 
+Slice 6 landed a read-only review packet consumer:
+
+- CLI: `agent-bridge bio-cortex retrieval-opt-in-review-packet`;
+- MCP tool: `biocortex_retrieval_opt_in_review_packet`;
+- packet schema: `agent_bridge.biocortex_retrieval.opt_in_review_packet.v0`;
+- consumes a dry-run plan and copies only safe summary fields;
+- does not include the raw dry-run payload;
+- reports boundary violations if the plan claims execution, raw data exposure,
+  or ordering influence;
+- keeps `approval_state=not_approved`, `runtime_adapter_approved=false`, and
+  `may_implement_ordering_now=false`.
+
+The review packet consumer is evidence organization only. It can make a dry-run
+plan easier to inspect, but it cannot approve runtime influence or connect
+ordering behavior.
+
 ## Fail-Open Rules
 
 The experiment must return the baseline list for:
@@ -196,6 +214,12 @@ Future implementation review must include tests proving:
   return baseline;
 - FTS opt-in may only affect `SqliteStore::memory_search`;
 - hybrid and semantic modes remain unchanged;
+- dry-run planner does not call `memory_search` or BioCortex and does not echo
+  query or keys;
+- review packet consumer does not include the raw dry-run payload, query, keys,
+  or content;
+- review packet consumer reports boundary violations without approving order
+  influence;
 - audit telemetry includes baseline order, experimental order, fallback reason,
   latency, and authorization scope.
 

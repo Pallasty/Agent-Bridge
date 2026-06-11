@@ -1,7 +1,7 @@
 {
   "schema": "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0",
   "created_at": "2026-06-11T00:00:00Z",
-  "status": "dry_run_planner_implemented",
+  "status": "review_packet_consumer_implemented",
   "approval_state": "opt_in_implementation_authorized",
   "runtime_adapter_approved": false,
   "default_search_order_change_allowed": false,
@@ -11,6 +11,7 @@
   "read_only_status_surface_implemented": true,
   "store_contract_implemented": true,
   "dry_run_planner_implemented": true,
+  "review_packet_consumer_implemented": true,
   "ordering_behavior_connected": false,
   "authorization_decision": {
     "doc": "docs/design/BIOCORTEX_RETRIEVAL_OPT_IN_AUTHORIZATION_DECISION_2026_06_11.md",
@@ -141,6 +142,27 @@
     "ordering_behavior_connected": false,
     "may_change_search_order_now": false
   },
+  "implemented_review_packet_consumer": {
+    "cli": "agent-bridge bio-cortex retrieval-opt-in-review-packet",
+    "mcp_tool": "biocortex_retrieval_opt_in_review_packet",
+    "schema": "agent_bridge.biocortex_retrieval.opt_in_review_packet.v0",
+    "read_only": true,
+    "dry_run_consumer": true,
+    "raw_dry_run_plan_included": false,
+    "raw_query_included": false,
+    "raw_keys_included": false,
+    "content_included": false,
+    "reports_boundary_violations": true,
+    "approval_state": "not_approved",
+    "runtime_adapter_approved": false,
+    "approval_writes_allowed": false,
+    "calls_memory_search": false,
+    "runs_biocortex": false,
+    "registers_embedding_backend": false,
+    "changes_memory_search_order": false,
+    "ordering_behavior_connected": false,
+    "may_implement_ordering_now": false
+  },
   "fail_open": {
     "bio_cortex_checkout_absent": "return_baseline",
     "adapter_error": "return_baseline",
@@ -186,6 +208,8 @@
     "store_contract_response_falls_back_to_baseline_without_side_signal",
     "dry_run_planner_does_not_call_memory_search_or_biocortex",
     "dry_run_planner_does_not_echo_query_or_keys",
+    "review_packet_consumer_does_not_include_raw_plan_query_or_keys",
+    "review_packet_consumer_reports_boundary_violations_without_approval",
     "audit_telemetry_contains_baseline_experimental_fallback_latency_scope"
   ],
   "human_review_boundary": {

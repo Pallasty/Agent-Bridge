@@ -173,7 +173,7 @@ jq -e '
     and .default_search_order_change_allowed == false
     and .implementation_allowed == true
     and .writes_approval == false
-    and .opt_in_plan.status == "dry_run_planner_implemented"
+    and .opt_in_plan.status == "review_packet_consumer_implemented"
     and .opt_in_plan.approval_state == "opt_in_implementation_authorized"
     and .opt_in_plan.implemented_gate_skeleton.ordering_behavior_connected == false
     and .opt_in_plan.implemented_gate_skeleton.may_change_search_order_now == false
@@ -205,6 +205,20 @@ jq -e '
     and .opt_in_plan.implemented_dry_run_planner.content_included == false
     and .opt_in_plan.implemented_dry_run_planner.includes_store_contract == true
     and .opt_in_plan.implemented_dry_run_planner.ordering_behavior_connected == false
+    and .opt_in_plan.implemented_review_packet_consumer.mcp_tool == "biocortex_retrieval_opt_in_review_packet"
+    and .opt_in_plan.implemented_review_packet_consumer.schema == "agent_bridge.biocortex_retrieval.opt_in_review_packet.v0"
+    and .opt_in_plan.implemented_review_packet_consumer.read_only == true
+    and .opt_in_plan.implemented_review_packet_consumer.dry_run_consumer == true
+    and .opt_in_plan.implemented_review_packet_consumer.raw_dry_run_plan_included == false
+    and .opt_in_plan.implemented_review_packet_consumer.raw_query_included == false
+    and .opt_in_plan.implemented_review_packet_consumer.raw_keys_included == false
+    and .opt_in_plan.implemented_review_packet_consumer.content_included == false
+    and .opt_in_plan.implemented_review_packet_consumer.reports_boundary_violations == true
+    and .opt_in_plan.implemented_review_packet_consumer.approval_state == "not_approved"
+    and .opt_in_plan.implemented_review_packet_consumer.approval_writes_allowed == false
+    and .opt_in_plan.implemented_review_packet_consumer.changes_memory_search_order == false
+    and .opt_in_plan.implemented_review_packet_consumer.ordering_behavior_connected == false
+    and .opt_in_plan.implemented_review_packet_consumer.may_implement_ordering_now == false
     and .opt_in_plan.experiment.mode == "fts_only"
     and .opt_in_plan.experiment.affected_call_site.function == "SqliteStore::memory_search"
     and .evidence.runtime_boundary_proof.default_disabled_status == "runtime_disabled"
