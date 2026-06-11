@@ -75,6 +75,7 @@ set -u
 
 prev_total=0
 prev_idle=0
+cpu_percent=0
 warp_text="WARP ..."
 wifi_text="WiFi ..."
 ime_text="IME ..."
@@ -145,8 +146,8 @@ handle_clicks() {
 }
 
 read_cpu() {
-    local cpu user nice system idle iowait irq softirq steal guest guest_nice
-    read -r cpu user nice system idle iowait irq softirq steal guest guest_nice < /proc/stat
+    local stat_label user nice system idle iowait irq softirq steal guest guest_nice
+    read -r stat_label user nice system idle iowait irq softirq steal guest guest_nice < /proc/stat
     local idle_all=$((idle + iowait))
     local non_idle=$((user + nice + system + irq + softirq + steal))
     local total=$((idle_all + non_idle))
@@ -154,7 +155,7 @@ read_cpu() {
     if [ "$prev_total" -eq 0 ]; then
         prev_total=$total
         prev_idle=$idle_all
-        printf "0"
+        cpu_percent=0
         return
     fi
 
@@ -164,9 +165,9 @@ read_cpu() {
     prev_idle=$idle_all
 
     if [ "$total_delta" -le 0 ]; then
-        printf "0"
+        cpu_percent=0
     else
-        printf "%d" $((100 * (total_delta - idle_delta) / total_delta))
+        cpu_percent=$((100 * (total_delta - idle_delta) / total_delta))
     fi
 }
 
@@ -304,7 +305,7 @@ printf '[\n'
 
 first=1
 while true; do
-    cpu=$(read_cpu)
+    read_cpu
     IFS='|' read -r ram_text ram_color <<EOF
 $(read_ram)
 EOF
@@ -356,7 +357,7 @@ EOF
         "$(block wifi "$wifi_text" "${wifi_color:-#ffffffff}")" \
         "$(block ime "$ime_text" "${ime_color:-#ffffffff}")" \
         "$(block battery "$battery_text" "${battery_color:-#ffffffff}")" \
-        "$(block cpu "CPU ${cpu}%" "#f9e2afff")" \
+        "$(block cpu "CPU ${cpu_percent}%" "#f9e2afff")" \
         "$(block ram "$ram_text" "${ram_color:-#cba6f7ff}")" \
         "$(block clock "$(date '+%Y-%m-%d %H:%M:%S')" "#ffffffff")"
     sleep 1
