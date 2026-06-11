@@ -34,6 +34,17 @@ run() {
     "$@"
 }
 
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.runtime_approval_packet_template.v0"
+    and .approval_state == "not_approved"
+    and .default_decision == "keep_shadow_only"
+    and .runtime_adapter_approved == false
+    and .writes_approval == false
+    and .approval_writes_allowed == false
+    and .default_search_order_change_allowed == false
+    and .requires_separate_human_approval == true
+' docs/design/fixtures/biocortex-retrieval-runtime-approval-packet-template.json >/dev/null
+
 extract_json_summary() {
     awk '
         /^```json$/ { in_json=1; next }

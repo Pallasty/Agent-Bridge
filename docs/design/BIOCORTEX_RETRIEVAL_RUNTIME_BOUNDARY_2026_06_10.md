@@ -181,6 +181,12 @@ Passing the shadow checks below is necessary but not sufficient for changing
 `runtime_adapter_approved` to true. A future approval packet must include all
 of the following:
 
+- Use
+  `docs/design/BIOCORTEX_RETRIEVAL_RUNTIME_APPROVAL_PACKET_TEMPLATE_2026_06_11.md`
+  and its fixture
+  `docs/design/fixtures/biocortex-retrieval-runtime-approval-packet-template.json`
+  as the starting point. The template is not approval state; it defaults to
+  `approval_state=not_approved`.
 - `scripts/verify-biocortex-retrieval-shadow.sh` passes on the target host.
 - The current corpus and hard holdout both pass `candidate-strong` with
   `side_signal_coverage >= 0.8`, zero regressions, and positive MRR lift.
