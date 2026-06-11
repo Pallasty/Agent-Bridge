@@ -63,7 +63,7 @@ grep -q 'Authorization for one mode does not imply authorization for another mod
 opt_in_plan="docs/design/fixtures/biocortex-retrieval-opt-in-experiment-plan-2026-06-11.json"
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0"
-    and .status == "review_packet_consumer_implemented"
+    and .status == "execution_packet_contract_implemented"
     and .approval_state == "opt_in_implementation_authorized"
     and .runtime_adapter_approved == false
     and .default_search_order_change_allowed == false
@@ -74,6 +74,7 @@ jq -e '
     and .store_contract_implemented == true
     and .dry_run_planner_implemented == true
     and .review_packet_consumer_implemented == true
+    and .execution_packet_contract_implemented == true
     and .ordering_behavior_connected == false
     and .requested_human_authorization_scope == "opt_in_experiment"
     and .requested_default_influence_scope == "none"
@@ -160,6 +161,30 @@ jq -e '
     and .implemented_review_packet_consumer.changes_memory_search_order == false
     and .implemented_review_packet_consumer.ordering_behavior_connected == false
     and .implemented_review_packet_consumer.may_implement_ordering_now == false
+    and .implemented_execution_packet_contract.cli == "agent-bridge bio-cortex retrieval-opt-in-execution-packet"
+    and .implemented_execution_packet_contract.mcp_tool == "biocortex_retrieval_opt_in_execution_packet"
+    and .implemented_execution_packet_contract.schema == "agent_bridge.biocortex_retrieval.opt_in_execution_packet.v0"
+    and .implemented_execution_packet_contract.read_only == true
+    and .implemented_execution_packet_contract.execution_packet == true
+    and .implemented_execution_packet_contract.review_packet_included == false
+    and .implemented_execution_packet_contract.raw_query_included == false
+    and .implemented_execution_packet_contract.raw_keys_included == false
+    and .implemented_execution_packet_contract.content_included == false
+    and .implemented_execution_packet_contract.rebuilds_store_contract == true
+    and .implemented_execution_packet_contract.protected_adapter_contract == true
+    and .implemented_execution_packet_contract.candidate_recall_source == "baseline_only"
+    and .implemented_execution_packet_contract.join_key == "candidate_key"
+    and .implemented_execution_packet_contract.can_add_new_candidates == false
+    and .implemented_execution_packet_contract.execution_allowed == false
+    and .implemented_execution_packet_contract.approval_state == "not_approved"
+    and .implemented_execution_packet_contract.runtime_adapter_approved == false
+    and .implemented_execution_packet_contract.approval_writes_allowed == false
+    and .implemented_execution_packet_contract.calls_memory_search == false
+    and .implemented_execution_packet_contract.runs_biocortex == false
+    and .implemented_execution_packet_contract.registers_embedding_backend == false
+    and .implemented_execution_packet_contract.changes_memory_search_order == false
+    and .implemented_execution_packet_contract.ordering_behavior_connected == false
+    and .implemented_execution_packet_contract.may_implement_ordering_now == false
     and .fail_open.operator_disable == "return_baseline"
     and .human_review_boundary.authorization_decision_recorded == true
     and .human_review_boundary.requires_separate_human_decision_before_implementation == false
@@ -328,6 +353,8 @@ run cargo test -p ab-bridge --lib --no-default-features \
     biocortex_retrieval_opt_in_dry_run_ -- --nocapture
 run cargo test -p ab-bridge --lib --no-default-features \
     opt_in_review_packet_ -- --nocapture --test-threads=1
+run cargo test -p ab-bridge --lib --no-default-features \
+    opt_in_execution_packet_ -- --nocapture --test-threads=1
 
 opt_in_status_disabled="$tmpdir/opt-in-status-disabled.json"
 run cargo run -p ab-bridge --no-default-features -- \
@@ -518,6 +545,58 @@ if grep -q 'verify dry ready query\|verify_dry_ready_key' "$opt_in_review_packet
     exit 1
 fi
 
+opt_in_execution_packet="$tmpdir/opt-in-execution-packet.json"
+run cargo run -p ab-bridge --no-default-features -- \
+    bio-cortex retrieval-opt-in-execution-packet \
+    --review-packet-json "$opt_in_review_packet" \
+    --per-call-opt-in \
+    --attempt-id verify-execution-attempt \
+    --commit verify-dry-run-commit \
+    --json > "$opt_in_execution_packet"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_execution_packet.v0"
+    and .read_only == true
+    and .execution_packet == true
+    and .implementation_stage == "execution_packet_contract_only"
+    and .input_contract.source_schema == "agent_bridge.biocortex_retrieval.opt_in_review_packet.v0"
+    and .input_contract.review_packet_included == false
+    and .input_contract.raw_query_included == false
+    and .input_contract.raw_keys_included == false
+    and .input_contract.content_included == false
+    and .review_summary.review_ready == true
+    and .review_summary.review_violation_count == 0
+    and .review_summary.baseline_order.key_count == 1
+    and .review_summary.baseline_order.raw_keys_included == false
+    and .review_summary.baseline_order.content_included == false
+    and .protected_adapter_contract.candidate_recall_source == "baseline_only"
+    and .protected_adapter_contract.can_add_new_candidates == false
+    and .protected_adapter_contract.join_key == "candidate_key"
+    and .protected_adapter_contract.fail_open_return == "baseline"
+    and .preflight.preflight_passed_for_baseline_only_contract == true
+    and .preflight.execution_allowed == false
+    and (.preflight.packet_blockers | length) == 0
+    and .store_contract.schema == "agent_bridge.store.memory_search.biocortex_opt_in_contract.v0"
+    and .store_contract.returned_order_source == "baseline"
+    and .store_contract.changes_memory_search_order == false
+    and .execution_decision.returned_order_source == "baseline"
+    and .execution_decision.baseline_returned == true
+    and .execution_decision.calls_memory_search_now == false
+    and .execution_decision.runs_biocortex_now == false
+    and .approval_state == "not_approved"
+    and .runtime_adapter_approved == false
+    and .approval_writes_allowed == false
+    and .calls_memory_search == false
+    and .runs_biocortex == false
+    and .registers_embedding_backend == false
+    and .changes_memory_search_order == false
+    and .ordering_behavior_connected == false
+    and .may_implement_ordering_now == false
+' "$opt_in_execution_packet" >/dev/null
+if grep -q 'verify dry ready query\|verify_dry_ready_key' "$opt_in_execution_packet"; then
+    echo "opt-in execution packet leaked raw query/key data" >&2
+    exit 1
+fi
+
 run env AB_BIOCORTEX_RS="$biocortex_rs" CARGO_INCREMENTAL=0 \
     cargo run -p ab-bridge \
     --example biocortex_retrieval_shadow_acceptance \
@@ -559,7 +638,7 @@ jq -e '
     and .default_search_order_change_allowed == false
     and .implementation_allowed == true
     and .writes_approval == false
-    and .opt_in_plan.status == "review_packet_consumer_implemented"
+    and .opt_in_plan.status == "execution_packet_contract_implemented"
     and .opt_in_plan.implemented_gate_skeleton.ordering_behavior_connected == false
     and .opt_in_plan.implemented_gate_skeleton.may_change_search_order_now == false
     and .opt_in_plan.implemented_audit_shape.ordering_behavior_connected == false
@@ -600,6 +679,30 @@ jq -e '
     and .opt_in_plan.implemented_review_packet_consumer.changes_memory_search_order == false
     and .opt_in_plan.implemented_review_packet_consumer.ordering_behavior_connected == false
     and .opt_in_plan.implemented_review_packet_consumer.may_implement_ordering_now == false
+    and .opt_in_plan.implemented_execution_packet_contract.cli == "agent-bridge bio-cortex retrieval-opt-in-execution-packet"
+    and .opt_in_plan.implemented_execution_packet_contract.mcp_tool == "biocortex_retrieval_opt_in_execution_packet"
+    and .opt_in_plan.implemented_execution_packet_contract.schema == "agent_bridge.biocortex_retrieval.opt_in_execution_packet.v0"
+    and .opt_in_plan.implemented_execution_packet_contract.read_only == true
+    and .opt_in_plan.implemented_execution_packet_contract.execution_packet == true
+    and .opt_in_plan.implemented_execution_packet_contract.review_packet_included == false
+    and .opt_in_plan.implemented_execution_packet_contract.raw_query_included == false
+    and .opt_in_plan.implemented_execution_packet_contract.raw_keys_included == false
+    and .opt_in_plan.implemented_execution_packet_contract.content_included == false
+    and .opt_in_plan.implemented_execution_packet_contract.rebuilds_store_contract == true
+    and .opt_in_plan.implemented_execution_packet_contract.protected_adapter_contract == true
+    and .opt_in_plan.implemented_execution_packet_contract.candidate_recall_source == "baseline_only"
+    and .opt_in_plan.implemented_execution_packet_contract.join_key == "candidate_key"
+    and .opt_in_plan.implemented_execution_packet_contract.can_add_new_candidates == false
+    and .opt_in_plan.implemented_execution_packet_contract.execution_allowed == false
+    and .opt_in_plan.implemented_execution_packet_contract.approval_state == "not_approved"
+    and .opt_in_plan.implemented_execution_packet_contract.runtime_adapter_approved == false
+    and .opt_in_plan.implemented_execution_packet_contract.approval_writes_allowed == false
+    and .opt_in_plan.implemented_execution_packet_contract.calls_memory_search == false
+    and .opt_in_plan.implemented_execution_packet_contract.runs_biocortex == false
+    and .opt_in_plan.implemented_execution_packet_contract.registers_embedding_backend == false
+    and .opt_in_plan.implemented_execution_packet_contract.changes_memory_search_order == false
+    and .opt_in_plan.implemented_execution_packet_contract.ordering_behavior_connected == false
+    and .opt_in_plan.implemented_execution_packet_contract.may_implement_ordering_now == false
     and .opt_in_plan.experiment.mode == "fts_only"
     and .evidence.runtime_boundary_proof.default_disabled_status == "runtime_disabled"
     and .evidence.runtime_boundary_proof.kill_switch_status == "operator_disabled"

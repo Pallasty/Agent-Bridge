@@ -46,9 +46,10 @@ use tokio::process::Command as TokioCommand;
 
 use crate::biocortex_shadow::{
     biocortex_replay_comparison, biocortex_retrieval_opt_in_audit_report,
-    biocortex_retrieval_opt_in_dry_run_plan, biocortex_retrieval_opt_in_review_packet,
-    biocortex_shadow_digest, supported_benchmarks, BioCortexReplayComparisonOptions,
-    BioCortexRetrievalOptInAuditOptions, BioCortexRetrievalOptInDryRunOptions,
+    biocortex_retrieval_opt_in_dry_run_plan, biocortex_retrieval_opt_in_execution_packet,
+    biocortex_retrieval_opt_in_review_packet, biocortex_shadow_digest, supported_benchmarks,
+    BioCortexReplayComparisonOptions, BioCortexRetrievalOptInAuditOptions,
+    BioCortexRetrievalOptInDryRunOptions, BioCortexRetrievalOptInExecutionPacketOptions,
     BioCortexRetrievalOptInReviewPacketOptions, BioCortexShadowOptions, BIOCORTEX_CHECKOUT_ENV,
 };
 #[cfg(feature = "biocortex-retrieval-shadow")]
@@ -25451,6 +25452,95 @@ impl McpTool for BioCortexRetrievalOptInReviewPacketTool {
 }
 
 // ===========================================================================
+//  biocortex_retrieval_opt_in_execution_packet — protected preflight contract
+// ===========================================================================
+
+/// Read-only BioCortex retrieval opt-in execution packet. This tool accepts an
+/// opt-in review packet and emits a protected preflight contract for a future
+/// adapter. It does not include the raw review packet, approve anything, call
+/// `memory_search`, run BioCortex, or change retrieval order.
+pub struct BioCortexRetrievalOptInExecutionPacketTool;
+
+impl BioCortexRetrievalOptInExecutionPacketTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for BioCortexRetrievalOptInExecutionPacketTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for BioCortexRetrievalOptInExecutionPacketTool {
+    fn name(&self) -> &'static str {
+        "biocortex_retrieval_opt_in_execution_packet"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only BioCortex retrieval opt-in execution preflight \
+                 packet. Accepts a review packet and emits a protected adapter \
+                 contract while still returning baseline. Does not call \
+                 memory_search, run BioCortex, mutate memory, include raw memory \
+                 keys/content, register an EmbeddingBackend, approve runtime \
+                 influence, or alter retrieval order."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["review_packet"],
+                "properties": {
+                    "review_packet": {
+                        "type": "object",
+                        "description": "JSON object produced by biocortex_retrieval_opt_in_review_packet. Unknown/raw fields are ignored."
+                    },
+                    "per_call_opt_in": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Explicit per-call opt-in bit to evaluate in the store contract."
+                    },
+                    "attempt_id": {
+                        "type": "string",
+                        "description": "Optional execution attempt id for audit correlation."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Optional implementation commit under review."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let review_packet = args.get("review_packet").cloned().unwrap_or(Value::Null);
+        let per_call_opt_in = args
+            .get("per_call_opt_in")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let attempt_id = args
+            .get("attempt_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let commit = args
+            .get("commit")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let payload =
+            biocortex_retrieval_opt_in_execution_packet(BioCortexRetrievalOptInExecutionPacketOptions {
+                review_packet,
+                per_call_opt_in,
+                attempt_id,
+                commit,
+            });
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
 //   biocortex_retrieval_shadow — review-only retrieval side-signal report
 // ===========================================================================
 
@@ -36719,6 +36809,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Standard,
         Arc::new(BioCortexRetrievalOptInReviewPacketTool::new()),
     );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexRetrievalOptInExecutionPacketTool::new()),
+    );
     #[cfg(feature = "biocortex-retrieval-shadow")]
     reg_if(
         &mut reg,
@@ -45736,6 +45832,110 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert_eq!(v["approval_state"], json!("not_approved"));
         assert_eq!(v["boundary_check"]["review_ready"], json!(true));
         assert_eq!(v["input_contract"]["dry_run_plan_included"], json!(false));
+        assert_eq!(v["calls_memory_search"], json!(false));
+        assert_eq!(v["runs_biocortex"], json!(false));
+        assert_eq!(v["changes_memory_search_order"], json!(false));
+        assert_eq!(v["may_implement_ordering_now"], json!(false));
+    }
+
+    #[test]
+    fn biocortex_retrieval_opt_in_execution_packet_schema_is_readonly() {
+        let tool = BioCortexRetrievalOptInExecutionPacketTool::new();
+        let schema = tool.schema();
+        assert_eq!(schema.name, "biocortex_retrieval_opt_in_execution_packet");
+        assert!(schema.description.contains("Read-only"));
+        assert!(schema.description.contains("execution preflight"));
+        assert!(schema.description.contains("Does not call memory_search"));
+
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required");
+        assert!(required.contains(&json!("review_packet")));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("review_packet").is_some());
+        assert!(props.get("per_call_opt_in").is_some());
+        assert!(props.get("attempt_id").is_some());
+        assert!(props.get("commit").is_some());
+        assert!(props.get("mutate").is_none());
+        assert!(props.get("memory_search").is_none());
+        assert!(props.get("raw_content").is_none());
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_execution_packet_ignores_raw_review_fields() {
+        let tool = BioCortexRetrievalOptInExecutionPacketTool::new();
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(
+                json!({
+                    "review_packet": {
+                        "schema": "agent_bridge.biocortex_retrieval.opt_in_review_packet.v0",
+                        "read_only": true,
+                        "dry_run_consumer": true,
+                        "approval_state": "not_approved",
+                        "query": "secret execution packet query",
+                        "baseline_keys": ["secret_execution_packet_key"],
+                        "review_target": {
+                            "mode": "fts",
+                            "mode_authorized": true
+                        },
+                        "input_contract": {
+                            "dry_run_plan_included": false,
+                            "raw_query_included": false,
+                            "raw_keys_included": false,
+                            "content_included": false
+                        },
+                        "boundary_check": {
+                            "review_ready": true,
+                            "violations": []
+                        },
+                        "dry_run_summary": {
+                            "query_hash": "sha256:query",
+                            "baseline_order": {
+                                "completed": true,
+                                "key_count": 1,
+                                "hash": "sha256:baseline"
+                            },
+                            "planner_result": {
+                                "fallback_reason": "ordering_behavior_not_connected"
+                            }
+                        },
+                        "calls_memory_search": false,
+                        "runs_biocortex": false,
+                        "changes_memory_search_order": false,
+                        "ordering_behavior_connected": false
+                    },
+                    "per_call_opt_in": true,
+                    "attempt_id": "attempt-test",
+                    "commit": "test-commit"
+                }),
+                &ctx,
+            )
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains("secret execution packet query"));
+        assert!(!text.contains("secret_execution_packet_key"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_execution_packet.v0")
+        );
+        assert_eq!(v["read_only"], json!(true));
+        assert_eq!(v["execution_packet"], json!(true));
+        assert_eq!(v["approval_state"], json!("not_approved"));
+        assert_eq!(v["preflight"]["execution_allowed"], json!(false));
+        assert_eq!(v["execution_decision"]["baseline_returned"], json!(true));
         assert_eq!(v["calls_memory_search"], json!(false));
         assert_eq!(v["runs_biocortex"], json!(false));
         assert_eq!(v["changes_memory_search_order"], json!(false));

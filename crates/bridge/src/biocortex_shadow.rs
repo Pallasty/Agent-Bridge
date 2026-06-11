@@ -28,6 +28,8 @@ pub const BIOCORTEX_RETRIEVAL_OPT_IN_DRY_RUN_SCHEMA: &str =
     "agent_bridge.biocortex_retrieval.opt_in_dry_run_plan.v0";
 pub const BIOCORTEX_RETRIEVAL_OPT_IN_REVIEW_PACKET_SCHEMA: &str =
     "agent_bridge.biocortex_retrieval.opt_in_review_packet.v0";
+pub const BIOCORTEX_RETRIEVAL_OPT_IN_EXECUTION_PACKET_SCHEMA: &str =
+    "agent_bridge.biocortex_retrieval.opt_in_execution_packet.v0";
 pub const BIOCORTEX_SUBSTRATE_REPLAY_PLAN_SCHEMA: &str =
     "agent_bridge.biocortex_substrate_replay_plan.v0";
 pub const BIOCORTEX_CHECKOUT_ENV: &str = "AB_BIOCORTEX_RS";
@@ -127,6 +129,14 @@ pub struct BioCortexRetrievalOptInReviewPacketOptions {
     pub memory_key: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct BioCortexRetrievalOptInExecutionPacketOptions {
+    pub review_packet: Value,
+    pub per_call_opt_in: bool,
+    pub attempt_id: Option<String>,
+    pub commit: Option<String>,
+}
+
 impl Default for BioCortexShadowOptions {
     fn default() -> Self {
         Self {
@@ -200,6 +210,17 @@ impl Default for BioCortexRetrievalOptInReviewPacketOptions {
             commit: None,
             forum_post_id: None,
             memory_key: None,
+        }
+    }
+}
+
+impl Default for BioCortexRetrievalOptInExecutionPacketOptions {
+    fn default() -> Self {
+        Self {
+            review_packet: Value::Null,
+            per_call_opt_in: false,
+            attempt_id: None,
+            commit: None,
         }
     }
 }
@@ -1260,6 +1281,231 @@ pub fn biocortex_retrieval_opt_in_review_packet(
     })
 }
 
+pub fn biocortex_retrieval_opt_in_execution_packet(
+    opts: BioCortexRetrievalOptInExecutionPacketOptions,
+) -> Value {
+    let review = opts.review_packet;
+    let schema_ok = value_str_eq(
+        review.get("schema"),
+        BIOCORTEX_RETRIEVAL_OPT_IN_REVIEW_PACKET_SCHEMA,
+    );
+    let read_only_ok = value_bool_is(review.get("read_only"), true);
+    let dry_run_consumer_ok = value_bool_is(review.get("dry_run_consumer"), true);
+    let approval_state_not_approved = value_str_eq(review.get("approval_state"), "not_approved");
+    let review_ready = value_bool_is(review.pointer("/boundary_check/review_ready"), true);
+    let review_violations_empty = review
+        .pointer("/boundary_check/violations")
+        .and_then(Value::as_array)
+        .map(Vec::is_empty)
+        .unwrap_or(false);
+    let raw_plan_absent = value_bool_is(
+        review.pointer("/input_contract/dry_run_plan_included"),
+        false,
+    );
+    let raw_query_absent =
+        value_bool_is(review.pointer("/input_contract/raw_query_included"), false);
+    let raw_keys_absent =
+        value_bool_is(review.pointer("/input_contract/raw_keys_included"), false);
+    let content_absent = value_bool_is(review.pointer("/input_contract/content_included"), false);
+    let review_calls_memory_search_false = value_bool_is(review.get("calls_memory_search"), false);
+    let review_runs_biocortex_false = value_bool_is(review.get("runs_biocortex"), false);
+    let review_changes_order_false =
+        value_bool_is(review.get("changes_memory_search_order"), false);
+    let review_ordering_connected_false =
+        value_bool_is(review.get("ordering_behavior_connected"), false);
+
+    let mut packet_blockers = Vec::new();
+    push_string_blocker(&mut packet_blockers, schema_ok, "review_packet_schema_invalid");
+    push_string_blocker(&mut packet_blockers, read_only_ok, "review_packet_not_read_only");
+    push_string_blocker(
+        &mut packet_blockers,
+        dry_run_consumer_ok,
+        "review_packet_not_dry_run_consumer",
+    );
+    push_string_blocker(
+        &mut packet_blockers,
+        approval_state_not_approved,
+        "review_packet_approval_state_changed",
+    );
+    push_string_blocker(&mut packet_blockers, review_ready, "review_packet_not_ready");
+    push_string_blocker(
+        &mut packet_blockers,
+        review_violations_empty,
+        "review_packet_has_boundary_violations",
+    );
+    push_string_blocker(&mut packet_blockers, raw_plan_absent, "raw_plan_included");
+    push_string_blocker(&mut packet_blockers, raw_query_absent, "raw_query_included");
+    push_string_blocker(&mut packet_blockers, raw_keys_absent, "raw_keys_included");
+    push_string_blocker(&mut packet_blockers, content_absent, "content_included");
+    push_string_blocker(
+        &mut packet_blockers,
+        review_calls_memory_search_false,
+        "review_packet_claims_memory_search",
+    );
+    push_string_blocker(
+        &mut packet_blockers,
+        review_runs_biocortex_false,
+        "review_packet_claims_biocortex_execution",
+    );
+    push_string_blocker(
+        &mut packet_blockers,
+        review_changes_order_false,
+        "review_packet_claims_order_change",
+    );
+    push_string_blocker(
+        &mut packet_blockers,
+        review_ordering_connected_false,
+        "review_packet_claims_ordering_connected",
+    );
+
+    let mode = review
+        .pointer("/review_target/mode")
+        .and_then(Value::as_str)
+        .unwrap_or("fts")
+        .to_string();
+    let baseline_completed = review
+        .pointer("/dry_run_summary/baseline_order/completed")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let baseline_key_count = review
+        .pointer("/dry_run_summary/baseline_order/key_count")
+        .and_then(Value::as_u64)
+        .unwrap_or(0) as usize;
+    let store_contract = BioCortexRetrievalOptInRequest {
+        mode: mode.clone(),
+        per_call_opt_in: opts.per_call_opt_in,
+        compile_feature_enabled: cfg!(feature = "biocortex-retrieval-opt-in"),
+        runtime_enabled: env_truthy(BIOCORTEX_RETRIEVAL_OPT_IN_ENABLE_ENV),
+        operator_disabled: env_truthy(BIOCORTEX_RETRIEVAL_DISABLE_ENV),
+        baseline_completed,
+        baseline_key_count,
+        runtime_adapter_approved: false,
+        ordering_behavior_connected: false,
+    }
+    .evaluate()
+    .response_contract(false);
+    let store_blockers = store_contract
+        .decision
+        .blocking_reasons
+        .iter()
+        .map(|reason| serde_json::to_value(reason).unwrap_or(Value::Null))
+        .collect::<Vec<_>>();
+    let store_fallback_reason = serde_json::to_value(store_contract.fallback_reason)
+        .unwrap_or(Value::Null)
+        .as_str()
+        .map(str::to_string)
+        .unwrap_or_else(|| "execution_packet_contract_only".to_string());
+    let execution_allowed = false;
+    let preflight_passed = packet_blockers.is_empty()
+        && store_contract.baseline_returned
+        && !store_contract.changes_memory_search_order;
+    let store_contract_json = serde_json::to_value(&store_contract).unwrap_or(Value::Null);
+
+    json!({
+        "schema": BIOCORTEX_RETRIEVAL_OPT_IN_EXECUTION_PACKET_SCHEMA,
+        "generated_at": now_secs(),
+        "read_only": true,
+        "execution_packet": true,
+        "implementation_stage": "execution_packet_contract_only",
+        "authorization_scope": "opt_in_experiment",
+        "purpose": "Preflight contract for a future protected adapter; this does not execute retrieval ordering.",
+        "attempt": {
+            "attempt_id": required_or_value(opts.attempt_id),
+            "commit": required_or_value(opts.commit),
+            "mode": mode,
+            "per_call_opt_in": opts.per_call_opt_in,
+        },
+        "input_contract": {
+            "source_schema": review.get("schema").cloned().unwrap_or(Value::Null),
+            "requires_schema": BIOCORTEX_RETRIEVAL_OPT_IN_REVIEW_PACKET_SCHEMA,
+            "review_packet_included": false,
+            "unknown_fields_ignored": true,
+            "raw_query_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+        },
+        "review_summary": {
+            "review_ready": review_ready,
+            "review_violation_count": review
+                .pointer("/boundary_check/violations")
+                .and_then(Value::as_array)
+                .map(|items| items.len())
+                .unwrap_or(0),
+            "approval_state": review.get("approval_state").cloned().unwrap_or(Value::Null),
+            "query_hash": review
+                .pointer("/dry_run_summary/query_hash")
+                .cloned()
+                .unwrap_or(Value::Null),
+            "baseline_order": {
+                "completed": baseline_completed,
+                "key_count": baseline_key_count,
+                "hash": review
+                    .pointer("/dry_run_summary/baseline_order/hash")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "raw_keys_included": false,
+                "content_included": false,
+            },
+            "fallback_reason": review
+                .pointer("/dry_run_summary/planner_result/fallback_reason")
+                .cloned()
+                .unwrap_or(Value::Null),
+        },
+        "protected_adapter_contract": {
+            "call_site": {
+                "file": "crates/store/src/sqlite.rs",
+                "line": 3067,
+                "function": "SqliteStore::memory_search",
+            },
+            "candidate_recall_source": "baseline_only",
+            "can_add_new_candidates": false,
+            "join_key": "candidate_key",
+            "requires_review_packet": true,
+            "requires_per_call_opt_in": true,
+            "requires_runtime_adapter_approval": true,
+            "requires_ordering_behavior_connected": true,
+            "fail_open_return": "baseline",
+            "raw_query_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "side_signal_raw_included": false,
+        },
+        "preflight": {
+            "preflight_passed_for_baseline_only_contract": preflight_passed,
+            "execution_allowed": execution_allowed,
+            "packet_blockers": packet_blockers,
+            "store_blockers": store_blockers,
+            "fallback_reason": store_fallback_reason,
+        },
+        "store_contract": store_contract_json,
+        "execution_decision": {
+            "calls_memory_search_now": false,
+            "runs_biocortex_now": false,
+            "registers_embedding_backend_now": false,
+            "returned_order_source": "baseline",
+            "baseline_returned": true,
+            "changes_memory_search_order": false,
+            "ordering_behavior_connected": false,
+            "may_change_search_order_now": false,
+            "may_implement_ordering_now": false,
+        },
+        "approval_state": "not_approved",
+        "runtime_adapter_approved": false,
+        "approval_writes_allowed": false,
+        "writes_approval": false,
+        "calls_memory_search": false,
+        "runs_biocortex": false,
+        "registers_embedding_backend": false,
+        "changes_memory_search_order": false,
+        "default_search_order_change_allowed": false,
+        "ordering_behavior_connected": false,
+        "may_change_search_order_now": false,
+        "may_implement_ordering_now": false,
+        "default_calls_unchanged": true,
+        "boundary": retrieval_boundary_payload(),
+    })
+}
+
 fn retrieval_status_payload(status: &str, reason: &str, gates: Value) -> Value {
     json!({
         "schema": BIOCORTEX_RETRIEVAL_SHADOW_SCHEMA,
@@ -1658,6 +1904,12 @@ fn value_str_eq(value: Option<&Value>, expected: &str) -> bool {
 fn push_violation(violations: &mut Vec<&'static str>, ok: bool, violation: &'static str) {
     if !ok {
         violations.push(violation);
+    }
+}
+
+fn push_string_blocker(blockers: &mut Vec<String>, ok: bool, blocker: &str) {
+    if !ok {
+        blockers.push(blocker.to_string());
     }
 }
 
@@ -3025,6 +3277,142 @@ mod tests {
         let serialized = serde_json::to_string(&packet).expect("packet json");
         assert!(!serialized.contains("do not echo raw query"));
         assert!(!serialized.contains("do_not_echo_key"));
+    }
+
+    #[test]
+    fn opt_in_execution_packet_preflights_review_without_execution() {
+        let _lock = ENV_LOCK.lock().expect("env lock");
+        let _guard = EnvRestore::capture(&[
+            BIOCORTEX_RETRIEVAL_OPT_IN_ENABLE_ENV,
+            BIOCORTEX_RETRIEVAL_DISABLE_ENV,
+        ]);
+        std::env::set_var(BIOCORTEX_RETRIEVAL_OPT_IN_ENABLE_ENV, "1");
+        std::env::remove_var(BIOCORTEX_RETRIEVAL_DISABLE_ENV);
+
+        let plan = biocortex_retrieval_opt_in_dry_run_plan(BioCortexRetrievalOptInDryRunOptions {
+            mode: "fts".to_string(),
+            per_call_opt_in: true,
+            query: Some("execution secret query".to_string()),
+            baseline_keys: vec!["execution_secret_key".to_string()],
+            ..Default::default()
+        });
+        let review =
+            biocortex_retrieval_opt_in_review_packet(BioCortexRetrievalOptInReviewPacketOptions {
+                dry_run_plan: plan,
+                reviewer: Some("codex".to_string()),
+                commit: Some("test-commit".to_string()),
+                ..Default::default()
+            });
+        let packet = biocortex_retrieval_opt_in_execution_packet(
+            BioCortexRetrievalOptInExecutionPacketOptions {
+                review_packet: review,
+                per_call_opt_in: true,
+                attempt_id: Some("attempt-1".to_string()),
+                commit: Some("test-commit".to_string()),
+            },
+        );
+
+        assert_eq!(
+            packet["schema"],
+            json!(BIOCORTEX_RETRIEVAL_OPT_IN_EXECUTION_PACKET_SCHEMA)
+        );
+        assert_eq!(packet["read_only"], json!(true));
+        assert_eq!(packet["execution_packet"], json!(true));
+        assert_eq!(packet["approval_state"], json!("not_approved"));
+        assert_eq!(packet["runtime_adapter_approved"], json!(false));
+        assert_eq!(packet["calls_memory_search"], json!(false));
+        assert_eq!(packet["runs_biocortex"], json!(false));
+        assert_eq!(packet["changes_memory_search_order"], json!(false));
+        assert_eq!(packet["execution_decision"]["baseline_returned"], json!(true));
+        assert_eq!(
+            packet["execution_decision"]["returned_order_source"],
+            json!("baseline")
+        );
+        assert_eq!(
+            packet["preflight"]["preflight_passed_for_baseline_only_contract"],
+            json!(true)
+        );
+        assert_eq!(packet["preflight"]["execution_allowed"], json!(false));
+        assert_eq!(
+            packet["preflight"]["packet_blockers"]
+                .as_array()
+                .expect("packet blockers")
+                .len(),
+            0
+        );
+        assert_eq!(
+            packet["store_contract"]["returned_order_source"],
+            json!("baseline")
+        );
+        assert_eq!(
+            packet["store_contract"]["changes_memory_search_order"],
+            json!(false)
+        );
+
+        let serialized = serde_json::to_string(&packet).expect("packet json");
+        assert!(!serialized.contains("execution secret query"));
+        assert!(!serialized.contains("execution_secret_key"));
+    }
+
+    #[test]
+    fn opt_in_execution_packet_rejects_bad_review_without_echoing_raw_fields() {
+        let packet = biocortex_retrieval_opt_in_execution_packet(
+            BioCortexRetrievalOptInExecutionPacketOptions {
+                review_packet: json!({
+                    "schema": BIOCORTEX_RETRIEVAL_OPT_IN_REVIEW_PACKET_SCHEMA,
+                    "read_only": true,
+                    "dry_run_consumer": true,
+                    "approval_state": "approved",
+                    "query": "bad review raw query",
+                    "baseline_keys": ["bad_review_raw_key"],
+                    "review_target": {
+                        "mode": "fts"
+                    },
+                    "input_contract": {
+                        "dry_run_plan_included": true,
+                        "raw_query_included": true,
+                        "raw_keys_included": true,
+                        "content_included": true
+                    },
+                    "boundary_check": {
+                        "review_ready": false,
+                        "violations": ["bad"]
+                    },
+                    "dry_run_summary": {
+                        "baseline_order": {
+                            "completed": true,
+                            "key_count": 1,
+                            "hash": "sha256:bad"
+                        }
+                    },
+                    "calls_memory_search": true,
+                    "runs_biocortex": true,
+                    "changes_memory_search_order": true,
+                    "ordering_behavior_connected": true
+                }),
+                per_call_opt_in: true,
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(
+            packet["preflight"]["preflight_passed_for_baseline_only_contract"],
+            json!(false)
+        );
+        assert_eq!(packet["preflight"]["execution_allowed"], json!(false));
+        let blockers = packet["preflight"]["packet_blockers"]
+            .as_array()
+            .expect("packet blockers");
+        assert!(blockers.contains(&json!("review_packet_approval_state_changed")));
+        assert!(blockers.contains(&json!("review_packet_not_ready")));
+        assert!(blockers.contains(&json!("raw_query_included")));
+        assert!(blockers.contains(&json!("review_packet_claims_memory_search")));
+        assert_eq!(packet["approval_state"], json!("not_approved"));
+        assert_eq!(packet["changes_memory_search_order"], json!(false));
+
+        let serialized = serde_json::to_string(&packet).expect("packet json");
+        assert!(!serialized.contains("bad review raw query"));
+        assert!(!serialized.contains("bad_review_raw_key"));
     }
 
     struct EnvRestore {

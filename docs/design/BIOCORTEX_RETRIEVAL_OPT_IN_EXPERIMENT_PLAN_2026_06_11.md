@@ -6,9 +6,9 @@ Date: 2026-06-11
 
 Human authorization recorded for `opt_in_experiment` implementation work only.
 Gate skeleton, audit shape, read-only status surface, store-level
-request/response contract, read-only dry-run planner, and read-only review
-packet consumer implemented. Ordering behavior is not implemented and not
-approved.
+request/response contract, read-only dry-run planner, read-only review packet
+consumer, and read-only execution packet contract implemented. Ordering behavior
+is not implemented and not approved.
 
 ```json
 {
@@ -23,6 +23,7 @@ approved.
   "store_contract_implemented": true,
   "dry_run_planner_implemented": true,
   "review_packet_consumer_implemented": true,
+  "execution_packet_contract_implemented": true,
   "ordering_behavior_connected": false
 }
 ```
@@ -164,6 +165,23 @@ The review packet consumer is evidence organization only. It can make a dry-run
 plan easier to inspect, but it cannot approve runtime influence or connect
 ordering behavior.
 
+Slice 7 landed a read-only execution packet contract:
+
+- CLI: `agent-bridge bio-cortex retrieval-opt-in-execution-packet`;
+- MCP tool: `biocortex_retrieval_opt_in_execution_packet`;
+- packet schema: `agent_bridge.biocortex_retrieval.opt_in_execution_packet.v0`;
+- consumes a review packet and copies only safe summary fields;
+- rebuilds the store contract with the explicit per-call opt-in bit;
+- defines the protected adapter preflight contract: baseline-only candidate
+  recall, candidate-key join, fail-open baseline return, and no raw data in the
+  report;
+- keeps `execution_allowed=false`, `approval_state=not_approved`,
+  `runtime_adapter_approved=false`, and `may_implement_ordering_now=false`.
+
+The execution packet is still a preflight contract only. It does not run the
+baseline search, run BioCortex, register an embedding backend, or change
+ordering behavior.
+
 ## Fail-Open Rules
 
 The experiment must return the baseline list for:
@@ -220,6 +238,9 @@ Future implementation review must include tests proving:
   or content;
 - review packet consumer reports boundary violations without approving order
   influence;
+- execution packet contract consumes review packets without including raw
+  review payload, query, keys, or content;
+- execution packet contract keeps execution disallowed and baseline returned;
 - audit telemetry includes baseline order, experimental order, fallback reason,
   latency, and authorization scope.
 

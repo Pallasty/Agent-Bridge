@@ -173,7 +173,7 @@ jq -e '
     and .default_search_order_change_allowed == false
     and .implementation_allowed == true
     and .writes_approval == false
-    and .opt_in_plan.status == "review_packet_consumer_implemented"
+    and .opt_in_plan.status == "execution_packet_contract_implemented"
     and .opt_in_plan.approval_state == "opt_in_implementation_authorized"
     and .opt_in_plan.implemented_gate_skeleton.ordering_behavior_connected == false
     and .opt_in_plan.implemented_gate_skeleton.may_change_search_order_now == false
@@ -219,6 +219,30 @@ jq -e '
     and .opt_in_plan.implemented_review_packet_consumer.changes_memory_search_order == false
     and .opt_in_plan.implemented_review_packet_consumer.ordering_behavior_connected == false
     and .opt_in_plan.implemented_review_packet_consumer.may_implement_ordering_now == false
+    and .opt_in_plan.implemented_execution_packet_contract.cli == "agent-bridge bio-cortex retrieval-opt-in-execution-packet"
+    and .opt_in_plan.implemented_execution_packet_contract.mcp_tool == "biocortex_retrieval_opt_in_execution_packet"
+    and .opt_in_plan.implemented_execution_packet_contract.schema == "agent_bridge.biocortex_retrieval.opt_in_execution_packet.v0"
+    and .opt_in_plan.implemented_execution_packet_contract.read_only == true
+    and .opt_in_plan.implemented_execution_packet_contract.execution_packet == true
+    and .opt_in_plan.implemented_execution_packet_contract.review_packet_included == false
+    and .opt_in_plan.implemented_execution_packet_contract.raw_query_included == false
+    and .opt_in_plan.implemented_execution_packet_contract.raw_keys_included == false
+    and .opt_in_plan.implemented_execution_packet_contract.content_included == false
+    and .opt_in_plan.implemented_execution_packet_contract.rebuilds_store_contract == true
+    and .opt_in_plan.implemented_execution_packet_contract.protected_adapter_contract == true
+    and .opt_in_plan.implemented_execution_packet_contract.candidate_recall_source == "baseline_only"
+    and .opt_in_plan.implemented_execution_packet_contract.join_key == "candidate_key"
+    and .opt_in_plan.implemented_execution_packet_contract.can_add_new_candidates == false
+    and .opt_in_plan.implemented_execution_packet_contract.execution_allowed == false
+    and .opt_in_plan.implemented_execution_packet_contract.approval_state == "not_approved"
+    and .opt_in_plan.implemented_execution_packet_contract.runtime_adapter_approved == false
+    and .opt_in_plan.implemented_execution_packet_contract.approval_writes_allowed == false
+    and .opt_in_plan.implemented_execution_packet_contract.calls_memory_search == false
+    and .opt_in_plan.implemented_execution_packet_contract.runs_biocortex == false
+    and .opt_in_plan.implemented_execution_packet_contract.registers_embedding_backend == false
+    and .opt_in_plan.implemented_execution_packet_contract.changes_memory_search_order == false
+    and .opt_in_plan.implemented_execution_packet_contract.ordering_behavior_connected == false
+    and .opt_in_plan.implemented_execution_packet_contract.may_implement_ordering_now == false
     and .opt_in_plan.experiment.mode == "fts_only"
     and .opt_in_plan.experiment.affected_call_site.function == "SqliteStore::memory_search"
     and .evidence.runtime_boundary_proof.default_disabled_status == "runtime_disabled"
