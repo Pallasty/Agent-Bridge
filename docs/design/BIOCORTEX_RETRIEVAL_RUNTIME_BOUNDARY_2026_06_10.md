@@ -226,6 +226,10 @@ Focused tests added on 2026-06-10:
 - `retrieval_boundary_payload_keeps_runtime_mutation_forbidden`;
 - `retrieval_rank_report_is_advisory_even_when_side_signal_changes_top`;
 - `biocortex_retrieval_shadow_schema_is_explicit_and_readonly`.
+- `crates/bridge/examples/biocortex_retrieval_shadow_acceptance.rs` plus
+  `crates/bridge/tests/fixtures/biocortex_retrieval_shadow_acceptance.jsonl`
+  captures a small runtime acceptance corpus with one clear boundary case and
+  one expected label-ambiguity case.
 
 Targeted commands:
 
@@ -245,3 +249,25 @@ cargo test -p ab-bridge --lib --no-default-features \
 Both targeted `--lib` test runs passed. A broader `cargo test -p ab-bridge`
 attempt was intentionally abandoned after integration-test linking exhausted
 the temporary disk quota; it did not expose a code assertion failure.
+
+Runtime acceptance command added after live MCP dogfood:
+
+```bash
+AB_BIOCORTEX_RS=/Data/CascadeProjects/biocortex-rs \
+CARGO_INCREMENTAL=0 \
+cargo run -p ab-bridge \
+  --example biocortex_retrieval_shadow_acceptance \
+  --features biocortex-retrieval-shadow
+```
+
+Observed acceptance output:
+
+- `runtime_boundary_precise`: baseline and advisory both rank
+  `decision_biocortex_demo_fixture_clarified_20260610` first; regressed=false.
+- `runtime_label_ambiguous`: baseline ranks
+  `biocortex_retrieval_shadow_codex_exposed_20260610` first, advisory ranks
+  `decision_biocortex_demo_fixture_clarified_20260610` first; regressed=true by
+  label design. This is an expected ambiguity sentinel, not runtime approval.
+- summary: `status=pass`, `case_count=2`, `expected_regression_cases=1`,
+  `read_only=true`, `runtime_adapter_approved=false`,
+  `default_search_order_changed=false`.
