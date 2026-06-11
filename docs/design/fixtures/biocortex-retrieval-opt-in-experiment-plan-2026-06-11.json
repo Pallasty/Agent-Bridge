@@ -1,7 +1,7 @@
 {
   "schema": "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0",
   "created_at": "2026-06-11T00:00:00Z",
-  "status": "authorization_request_runtime_trial_review_evidence_implemented",
+  "status": "order_diff_packet_implemented",
   "approval_state": "opt_in_implementation_authorized",
   "runtime_adapter_approved": false,
   "default_search_order_change_allowed": false,
@@ -16,6 +16,7 @@
   "runtime_trial_implemented": true,
   "runtime_trial_review_packet_implemented": true,
   "authorization_request_runtime_trial_review_evidence_implemented": true,
+  "order_diff_packet_implemented": true,
   "ordering_behavior_connected": false,
   "authorization_decision": {
     "doc": "docs/design/BIOCORTEX_RETRIEVAL_OPT_IN_AUTHORIZATION_DECISION_2026_06_11.md",
@@ -273,6 +274,40 @@
     "ordering_behavior_connected": false,
     "may_implement_ordering_now": false
   },
+  "implemented_order_diff_packet": {
+    "cli": "agent-bridge bio-cortex retrieval-opt-in-order-diff-packet",
+    "mcp_tool": "biocortex_retrieval_opt_in_order_diff_packet",
+    "schema": "agent_bridge.biocortex_retrieval.opt_in_order_diff_packet.v0",
+    "read_only": true,
+    "order_diff_packet": true,
+    "source_packet_consumer": true,
+    "accepted_source_schemas": [
+      "agent_bridge.biocortex_retrieval.opt_in_runtime_trial.v0",
+      "agent_bridge.biocortex_retrieval.opt_in_runtime_trial_review_packet.v0"
+    ],
+    "source_packet_included": false,
+    "raw_query_included": false,
+    "raw_keys_included": false,
+    "content_included": false,
+    "side_signal_raw_included": false,
+    "compares_baseline_vs_advisory_hash_only": true,
+    "reports_order_hash_changed": true,
+    "reports_top_key_changed": true,
+    "reports_expected_rank_delta": true,
+    "full_top_k_overlap_available": false,
+    "per_key_movements_available": false,
+    "calls_memory_search": false,
+    "runs_biocortex": false,
+    "registers_embedding_backend": false,
+    "changes_memory_search_order": false,
+    "ordering_behavior_connected": false,
+    "actual_return_order_changed": false,
+    "approval_state": "not_approved",
+    "runtime_adapter_approved": false,
+    "approval_writes_allowed": false,
+    "writes_approval": false,
+    "may_implement_ordering_now": false
+  },
   "fail_open": {
     "bio_cortex_checkout_absent": "return_baseline",
     "adapter_error": "return_baseline",
@@ -327,6 +362,8 @@
     "runtime_trial_fails_open_without_checkout_timeout_low_coverage_or_operator_disabled",
     "runtime_trial_review_packet_does_not_include_raw_trial_query_keys_or_content",
     "runtime_trial_review_packet_reports_boundary_violations_without_approval",
+    "order_diff_packet_compares_baseline_and_advisory_hashes_without_raw_order_keys",
+    "order_diff_packet_does_not_call_memory_search_run_biocortex_or_approve_ordering",
     "audit_telemetry_contains_baseline_experimental_fallback_latency_scope"
   ],
   "human_review_boundary": {

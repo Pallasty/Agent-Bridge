@@ -9,8 +9,8 @@ Gate skeleton, audit shape, read-only status surface, store-level
 request/response contract, read-only dry-run planner, read-only review packet
 consumer, read-only execution packet contract, and baseline-preserving runtime
 trial surface, read-only runtime trial review packet, and authorization request
-runtime-trial-review evidence hook implemented. Ordering behavior is not
-implemented and not approved.
+runtime-trial-review evidence hook, and hash-only order-diff review packet
+implemented. Ordering behavior is not implemented and not approved.
 
 ```json
 {
@@ -29,6 +29,7 @@ implemented and not approved.
   "runtime_trial_implemented": true,
   "runtime_trial_review_packet_implemented": true,
   "authorization_request_runtime_trial_review_evidence_implemented": true,
+  "order_diff_packet_implemented": true,
   "ordering_behavior_connected": false
 }
 ```
@@ -236,6 +237,28 @@ The authorization request bundle is still review preparation only. Including
 runtime trial review evidence does not approve runtime influence or connect
 ordering behavior.
 
+Slice 11 landed a hash-only order-diff review packet:
+
+- CLI: `agent-bridge bio-cortex retrieval-opt-in-order-diff-packet`;
+- MCP tool: `biocortex_retrieval_opt_in_order_diff_packet`;
+- packet schema:
+  `agent_bridge.biocortex_retrieval.opt_in_order_diff_packet.v0`;
+- consumes either a runtime trial packet or a runtime trial review packet;
+- compares baseline order and BioCortex advisory order by order hash, top-key
+  hash, and expected-key rank delta only;
+- does not include raw order keys, raw query, candidate content, or raw
+  side-signal rows;
+- explicitly marks top-k overlap and per-key movements unavailable without a
+  separate redacted-order artifact;
+- keeps returned order as baseline and reports
+  `actual_return_order_changed=false`;
+- keeps `calls_memory_search=false`, `runs_biocortex=false`,
+  `runtime_adapter_approved=false`, and `may_implement_ordering_now=false`.
+
+The order-diff packet answers whether the advisory ordering would differ from
+the default baseline ordering, but it remains review evidence only. It does not
+authorize runtime influence and does not connect ordering behavior.
+
 ## Fail-Open Rules
 
 The experiment must return the baseline list for:
@@ -306,6 +329,10 @@ Future implementation review must include tests proving:
   runtime influence;
 - authorization request bundle requires runtime trial review evidence and does
   not include raw trial payload, query, keys, content, or side-signal rows;
+- order-diff packet compares baseline and advisory hashes without including raw
+  order keys or per-key movement rows;
+- order-diff packet does not call `memory_search`, run BioCortex, approve
+  runtime influence, or change returned order;
 - audit telemetry includes baseline order, experimental order, fallback reason,
   latency, and authorization scope.
 

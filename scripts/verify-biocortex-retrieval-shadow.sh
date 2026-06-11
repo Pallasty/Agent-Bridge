@@ -63,7 +63,7 @@ grep -q 'Authorization for one mode does not imply authorization for another mod
 opt_in_plan="docs/design/fixtures/biocortex-retrieval-opt-in-experiment-plan-2026-06-11.json"
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0"
-    and .status == "authorization_request_runtime_trial_review_evidence_implemented"
+    and .status == "order_diff_packet_implemented"
     and .approval_state == "opt_in_implementation_authorized"
     and .runtime_adapter_approved == false
     and .default_search_order_change_allowed == false
@@ -78,6 +78,7 @@ jq -e '
     and .runtime_trial_implemented == true
     and .runtime_trial_review_packet_implemented == true
     and .authorization_request_runtime_trial_review_evidence_implemented == true
+    and .order_diff_packet_implemented == true
     and .ordering_behavior_connected == false
     and .requested_human_authorization_scope == "opt_in_experiment"
     and .requested_default_influence_scope == "none"
@@ -262,6 +263,36 @@ jq -e '
     and .implemented_authorization_request_runtime_trial_review_evidence.changes_memory_search_order == false
     and .implemented_authorization_request_runtime_trial_review_evidence.ordering_behavior_connected == false
     and .implemented_authorization_request_runtime_trial_review_evidence.may_implement_ordering_now == false
+    and .implemented_order_diff_packet.cli == "agent-bridge bio-cortex retrieval-opt-in-order-diff-packet"
+    and .implemented_order_diff_packet.mcp_tool == "biocortex_retrieval_opt_in_order_diff_packet"
+    and .implemented_order_diff_packet.schema == "agent_bridge.biocortex_retrieval.opt_in_order_diff_packet.v0"
+    and .implemented_order_diff_packet.read_only == true
+    and .implemented_order_diff_packet.order_diff_packet == true
+    and .implemented_order_diff_packet.source_packet_consumer == true
+    and (.implemented_order_diff_packet.accepted_source_schemas | index("agent_bridge.biocortex_retrieval.opt_in_runtime_trial.v0"))
+    and (.implemented_order_diff_packet.accepted_source_schemas | index("agent_bridge.biocortex_retrieval.opt_in_runtime_trial_review_packet.v0"))
+    and .implemented_order_diff_packet.source_packet_included == false
+    and .implemented_order_diff_packet.raw_query_included == false
+    and .implemented_order_diff_packet.raw_keys_included == false
+    and .implemented_order_diff_packet.content_included == false
+    and .implemented_order_diff_packet.side_signal_raw_included == false
+    and .implemented_order_diff_packet.compares_baseline_vs_advisory_hash_only == true
+    and .implemented_order_diff_packet.reports_order_hash_changed == true
+    and .implemented_order_diff_packet.reports_top_key_changed == true
+    and .implemented_order_diff_packet.reports_expected_rank_delta == true
+    and .implemented_order_diff_packet.full_top_k_overlap_available == false
+    and .implemented_order_diff_packet.per_key_movements_available == false
+    and .implemented_order_diff_packet.calls_memory_search == false
+    and .implemented_order_diff_packet.runs_biocortex == false
+    and .implemented_order_diff_packet.registers_embedding_backend == false
+    and .implemented_order_diff_packet.changes_memory_search_order == false
+    and .implemented_order_diff_packet.ordering_behavior_connected == false
+    and .implemented_order_diff_packet.actual_return_order_changed == false
+    and .implemented_order_diff_packet.approval_state == "not_approved"
+    and .implemented_order_diff_packet.runtime_adapter_approved == false
+    and .implemented_order_diff_packet.approval_writes_allowed == false
+    and .implemented_order_diff_packet.writes_approval == false
+    and .implemented_order_diff_packet.may_implement_ordering_now == false
     and .fail_open.operator_disable == "return_baseline"
     and .human_review_boundary.authorization_decision_recorded == true
     and .human_review_boundary.requires_separate_human_decision_before_implementation == false
@@ -451,6 +482,10 @@ run cargo test -p ab-bridge --lib --no-default-features \
     opt_in_runtime_trial_review_packet_ -- --nocapture --test-threads=1
 run cargo test -p ab-bridge --lib --no-default-features \
     biocortex_retrieval_opt_in_runtime_trial_review_packet_ -- --nocapture
+run cargo test -p ab-bridge --lib --no-default-features \
+    opt_in_order_diff_packet_ -- --nocapture --test-threads=1
+run cargo test -p ab-bridge --lib --no-default-features \
+    biocortex_retrieval_opt_in_order_diff_packet_ -- --nocapture
 
 opt_in_status_disabled="$tmpdir/opt-in-status-disabled.json"
 run cargo run -p ab-bridge --no-default-features -- \
@@ -837,6 +872,70 @@ if grep -q 'verify runtime trial secret query\|verify_runtime_trial_secret_key\|
     exit 1
 fi
 
+opt_in_order_diff_packet="$tmpdir/opt-in-order-diff-packet.json"
+run cargo run -p ab-bridge --no-default-features -- \
+    bio-cortex retrieval-opt-in-order-diff-packet \
+    --source-json "$opt_in_runtime_trial_review_packet" \
+    --reviewer verify-bundle \
+    --commit verify-dry-run-commit \
+    --forum-post-id verify-forum-post \
+    --memory-key verify-memory-key \
+    --json > "$opt_in_order_diff_packet"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_order_diff_packet.v0"
+    and .read_only == true
+    and .order_diff_packet == true
+    and .source_packet_consumer == true
+    and .implementation_stage == "order_diff_review_packet_only"
+    and .input_contract.source_schema == "agent_bridge.biocortex_retrieval.opt_in_runtime_trial_review_packet.v0"
+    and .input_contract.source_packet_included == false
+    and .input_contract.raw_query_included == false
+    and .input_contract.raw_keys_included == false
+    and .input_contract.content_included == false
+    and .input_contract.side_signal_raw_included == false
+    and .review_target.source_kind == "runtime_trial_review_packet"
+    and .order_comparison.baseline_order.key_count == 1
+    and .order_comparison.baseline_order.raw_keys_included == false
+    and .order_comparison.baseline_order.content_included == false
+    and .order_comparison.advisory_order.available == true
+    and .order_comparison.advisory_order.used_for_return_order == false
+    and .order_comparison.advisory_order.raw_keys_included == false
+    and .order_comparison.advisory_order.content_included == false
+    and .order_comparison.advisory_order.side_signal_raw_included == false
+    and .order_comparison.hash_diff.order_hashes_comparable == true
+    and (.order_comparison.hash_diff.order_hash_changed | type) == "boolean"
+    and .order_comparison.hash_diff.top_key_hashes_comparable == true
+    and (.order_comparison.hash_diff.top_key_changed | type) == "boolean"
+    and .order_comparison.expected_key_rank.rank_delta_advisory_minus_baseline == 0
+    and .order_comparison.expected_key_rank.direction == "unchanged"
+    and .order_comparison.returned_order.source == "baseline"
+    and .order_comparison.returned_order.baseline_returned == true
+    and .order_comparison.returned_order.hash_matches_baseline == true
+    and .order_comparison.returned_order.actual_return_order_changed == false
+    and .order_comparison.unavailable_metrics.top_k_overlap == "not_computed_no_raw_order_keys"
+    and .order_comparison.unavailable_metrics.rank_delta_distribution == "not_computed_no_raw_order_keys"
+    and .order_comparison.unavailable_metrics.per_key_movements == "not_computed_no_raw_order_keys"
+    and .boundary_check.diff_ready == true
+    and (.boundary_check.violations | length) == 0
+    and .source_execution_summary.source_runs_biocortex == false
+    and .source_execution_summary.order_diff_packet_runs_biocortex == false
+    and .source_execution_summary.order_diff_packet_calls_memory_search == false
+    and .approval_state == "not_approved"
+    and .runtime_adapter_approved == false
+    and .approval_writes_allowed == false
+    and .writes_approval == false
+    and .calls_memory_search == false
+    and .runs_biocortex == false
+    and .registers_embedding_backend == false
+    and .changes_memory_search_order == false
+    and .ordering_behavior_connected == false
+    and .may_implement_ordering_now == false
+' "$opt_in_order_diff_packet" >/dev/null
+if grep -q 'verify runtime trial secret query\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_order_diff_packet"; then
+    echo "opt-in order diff packet leaked raw query/key/content data" >&2
+    exit 1
+fi
+
 run env AB_BIOCORTEX_RS="$biocortex_rs" CARGO_INCREMENTAL=0 \
     cargo run -p ab-bridge \
     --example biocortex_retrieval_shadow_acceptance \
@@ -879,7 +978,8 @@ jq -e '
     and .default_search_order_change_allowed == false
     and .implementation_allowed == true
     and .writes_approval == false
-    and .opt_in_plan.status == "authorization_request_runtime_trial_review_evidence_implemented"
+    and .opt_in_plan.status == "order_diff_packet_implemented"
+    and .opt_in_plan.order_diff_packet_implemented == true
     and .opt_in_plan.implemented_gate_skeleton.ordering_behavior_connected == false
     and .opt_in_plan.implemented_gate_skeleton.may_change_search_order_now == false
     and .opt_in_plan.implemented_audit_shape.ordering_behavior_connected == false
@@ -1017,6 +1117,28 @@ jq -e '
     and .opt_in_plan.implemented_authorization_request_runtime_trial_review_evidence.changes_memory_search_order == false
     and .opt_in_plan.implemented_authorization_request_runtime_trial_review_evidence.ordering_behavior_connected == false
     and .opt_in_plan.implemented_authorization_request_runtime_trial_review_evidence.may_implement_ordering_now == false
+    and .opt_in_plan.implemented_order_diff_packet.cli == "agent-bridge bio-cortex retrieval-opt-in-order-diff-packet"
+    and .opt_in_plan.implemented_order_diff_packet.mcp_tool == "biocortex_retrieval_opt_in_order_diff_packet"
+    and .opt_in_plan.implemented_order_diff_packet.schema == "agent_bridge.biocortex_retrieval.opt_in_order_diff_packet.v0"
+    and .opt_in_plan.implemented_order_diff_packet.read_only == true
+    and .opt_in_plan.implemented_order_diff_packet.order_diff_packet == true
+    and .opt_in_plan.implemented_order_diff_packet.source_packet_consumer == true
+    and .opt_in_plan.implemented_order_diff_packet.source_packet_included == false
+    and .opt_in_plan.implemented_order_diff_packet.raw_query_included == false
+    and .opt_in_plan.implemented_order_diff_packet.raw_keys_included == false
+    and .opt_in_plan.implemented_order_diff_packet.content_included == false
+    and .opt_in_plan.implemented_order_diff_packet.side_signal_raw_included == false
+    and .opt_in_plan.implemented_order_diff_packet.compares_baseline_vs_advisory_hash_only == true
+    and .opt_in_plan.implemented_order_diff_packet.full_top_k_overlap_available == false
+    and .opt_in_plan.implemented_order_diff_packet.per_key_movements_available == false
+    and .opt_in_plan.implemented_order_diff_packet.calls_memory_search == false
+    and .opt_in_plan.implemented_order_diff_packet.runs_biocortex == false
+    and .opt_in_plan.implemented_order_diff_packet.changes_memory_search_order == false
+    and .opt_in_plan.implemented_order_diff_packet.ordering_behavior_connected == false
+    and .opt_in_plan.implemented_order_diff_packet.actual_return_order_changed == false
+    and .opt_in_plan.implemented_order_diff_packet.approval_state == "not_approved"
+    and .opt_in_plan.implemented_order_diff_packet.runtime_adapter_approved == false
+    and .opt_in_plan.implemented_order_diff_packet.may_implement_ordering_now == false
     and .opt_in_plan.experiment.mode == "fts_only"
     and .evidence.runtime_boundary_proof.default_disabled_status == "runtime_disabled"
     and .evidence.runtime_boundary_proof.kill_switch_status == "operator_disabled"

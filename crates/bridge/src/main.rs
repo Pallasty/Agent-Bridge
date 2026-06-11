@@ -5,13 +5,15 @@ use ab_agent::{
 use ab_bridge::biocortex_shadow::{
     biocortex_replay_comparison, biocortex_retrieval_opt_in_audit_report,
     biocortex_retrieval_opt_in_dry_run_plan, biocortex_retrieval_opt_in_execution_packet,
-    biocortex_retrieval_opt_in_review_packet, biocortex_retrieval_opt_in_runtime_trial,
+    biocortex_retrieval_opt_in_order_diff_packet, biocortex_retrieval_opt_in_review_packet,
+    biocortex_retrieval_opt_in_runtime_trial,
     biocortex_retrieval_opt_in_runtime_trial_review_packet,
     biocortex_retrieval_runtime_approval_packet_preview, biocortex_shadow_digest,
     supported_benchmarks, BioCortexReplayComparisonOptions, BioCortexRetrievalApprovalPacketOptions,
     BioCortexRetrievalCandidate, BioCortexRetrievalOptInAuditOptions,
     BioCortexRetrievalOptInDryRunOptions, BioCortexRetrievalOptInExecutionPacketOptions,
-    BioCortexRetrievalOptInReviewPacketOptions, BioCortexRetrievalOptInRuntimeTrialOptions,
+    BioCortexRetrievalOptInOrderDiffPacketOptions, BioCortexRetrievalOptInReviewPacketOptions,
+    BioCortexRetrievalOptInRuntimeTrialOptions,
     BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions, BioCortexShadowOptions,
 };
 #[cfg(feature = "biocortex-retrieval-shadow")]
@@ -2647,6 +2649,31 @@ enum BioCortexOp {
         #[arg(long)]
         json: bool,
     },
+    /// Compare baseline order against the BioCortex advisory order.
+    ///
+    /// This consumes a runtime-trial or runtime-trial-review JSON file and emits
+    /// hash-only order-diff evidence. It does not approve runtime influence,
+    /// run BioCortex, call `memory_search`, or change retrieval order.
+    RetrievalOptInOrderDiffPacket {
+        /// JSON file produced by runtime-trial or runtime-trial-review-packet.
+        #[arg(long = "source-json")]
+        source_json: PathBuf,
+        /// Reviewer identity or handle.
+        #[arg(long)]
+        reviewer: Option<String>,
+        /// Implementation commit under review.
+        #[arg(long)]
+        commit: Option<String>,
+        /// Forum post id linking the review packet.
+        #[arg(long)]
+        forum_post_id: Option<String>,
+        /// Memory key linking the review packet.
+        #[arg(long)]
+        memory_key: Option<String>,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
     /// Preview the future runtime approval packet without approving anything.
     ///
     /// This is a review-preparation packet only. It never runs BioCortex,
@@ -4522,6 +4549,27 @@ async fn real_main() -> Result<()> {
                     runtime_trial_json,
                     BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions {
                         runtime_trial: Value::Null,
+                        reviewer: reviewer.clone(),
+                        commit: commit.clone(),
+                        forum_post_id: forum_post_id.clone(),
+                        memory_key: memory_key.clone(),
+                    },
+                    *json,
+                )
+                .await
+            }
+            BioCortexOp::RetrievalOptInOrderDiffPacket {
+                source_json,
+                reviewer,
+                commit,
+                forum_post_id,
+                memory_key,
+                json,
+            } => {
+                run_biocortex_retrieval_opt_in_order_diff_packet(
+                    source_json,
+                    BioCortexRetrievalOptInOrderDiffPacketOptions {
+                        source_packet: Value::Null,
                         reviewer: reviewer.clone(),
                         commit: commit.clone(),
                         forum_post_id: forum_post_id.clone(),
@@ -8775,6 +8823,65 @@ async fn run_biocortex_retrieval_opt_in_runtime_trial_review_packet(
         "returned_order={} baseline_returned={} violations={}",
         shadow_json_display(returned.get("source"), "baseline"),
         shadow_json_display(returned.get("baseline_returned"), "true"),
+        boundary
+            .get("violations")
+            .and_then(Value::as_array)
+            .map(|items| items.len().to_string())
+            .unwrap_or_else(|| "0".to_string())
+    );
+    println!(
+        "calls_memory_search={} runs_biocortex={} changes_memory_search_order={}",
+        shadow_json_display(payload.get("calls_memory_search"), "false"),
+        shadow_json_display(payload.get("runs_biocortex"), "false"),
+        shadow_json_display(payload.get("changes_memory_search_order"), "false")
+    );
+    Ok(())
+}
+
+async fn run_biocortex_retrieval_opt_in_order_diff_packet(
+    source_json: &std::path::Path,
+    mut opts: BioCortexRetrievalOptInOrderDiffPacketOptions,
+    as_json: bool,
+) -> Result<()> {
+    let body = std::fs::read_to_string(source_json)
+        .map_err(|e| anyhow::anyhow!("read order-diff source JSON at {source_json:?}: {e}"))?;
+    opts.source_packet = serde_json::from_str(&body)
+        .map_err(|e| anyhow::anyhow!("parse order-diff source JSON at {source_json:?}: {e}"))?;
+    let payload = biocortex_retrieval_opt_in_order_diff_packet(opts);
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# BioCortex retrieval opt-in order diff packet");
+    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
+    let boundary = payload.get("boundary_check").unwrap_or(&Value::Null);
+    println!(
+        "diff_ready={} approval_state={} may_implement_ordering_now={}",
+        shadow_json_display(boundary.get("diff_ready"), "false"),
+        shadow_json_display(payload.get("approval_state"), "not_approved"),
+        shadow_json_display(payload.get("may_implement_ordering_now"), "false")
+    );
+    let comparison = payload.get("order_comparison").unwrap_or(&Value::Null);
+    let hash_diff = comparison.get("hash_diff").unwrap_or(&Value::Null);
+    println!(
+        "order_hash_changed={} top_key_changed={} order_hashes_comparable={}",
+        shadow_json_display(hash_diff.get("order_hash_changed"), "-"),
+        shadow_json_display(hash_diff.get("top_key_changed"), "-"),
+        shadow_json_display(hash_diff.get("order_hashes_comparable"), "false")
+    );
+    let expected = comparison.get("expected_key_rank").unwrap_or(&Value::Null);
+    println!(
+        "expected_rank_delta={} direction={} regressed={}",
+        shadow_json_display(expected.get("rank_delta_advisory_minus_baseline"), "-"),
+        shadow_json_display(expected.get("direction"), "unknown"),
+        shadow_json_display(expected.get("regressed"), "false")
+    );
+    let returned = comparison.get("returned_order").unwrap_or(&Value::Null);
+    println!(
+        "returned_order={} actual_return_order_changed={} violations={}",
+        shadow_json_display(returned.get("source"), "baseline"),
+        shadow_json_display(returned.get("actual_return_order_changed"), "false"),
         boundary
             .get("violations")
             .and_then(Value::as_array)

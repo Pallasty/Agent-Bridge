@@ -217,8 +217,9 @@ jq -e '
     and .default_search_order_change_allowed == false
     and .implementation_allowed == true
     and .writes_approval == false
-    and .opt_in_plan.status == "authorization_request_runtime_trial_review_evidence_implemented"
+    and .opt_in_plan.status == "order_diff_packet_implemented"
     and .opt_in_plan.approval_state == "opt_in_implementation_authorized"
+    and .opt_in_plan.order_diff_packet_implemented == true
     and .opt_in_plan.implemented_gate_skeleton.ordering_behavior_connected == false
     and .opt_in_plan.implemented_gate_skeleton.may_change_search_order_now == false
     and .opt_in_plan.implemented_audit_shape.schema == "agent_bridge.biocortex_retrieval.opt_in_call_audit.v0"
@@ -339,6 +340,28 @@ jq -e '
     and .opt_in_plan.implemented_runtime_trial_review_packet.changes_memory_search_order == false
     and .opt_in_plan.implemented_runtime_trial_review_packet.ordering_behavior_connected == false
     and .opt_in_plan.implemented_runtime_trial_review_packet.may_implement_ordering_now == false
+    and .opt_in_plan.implemented_order_diff_packet.cli == "agent-bridge bio-cortex retrieval-opt-in-order-diff-packet"
+    and .opt_in_plan.implemented_order_diff_packet.mcp_tool == "biocortex_retrieval_opt_in_order_diff_packet"
+    and .opt_in_plan.implemented_order_diff_packet.schema == "agent_bridge.biocortex_retrieval.opt_in_order_diff_packet.v0"
+    and .opt_in_plan.implemented_order_diff_packet.read_only == true
+    and .opt_in_plan.implemented_order_diff_packet.order_diff_packet == true
+    and .opt_in_plan.implemented_order_diff_packet.source_packet_consumer == true
+    and .opt_in_plan.implemented_order_diff_packet.source_packet_included == false
+    and .opt_in_plan.implemented_order_diff_packet.raw_query_included == false
+    and .opt_in_plan.implemented_order_diff_packet.raw_keys_included == false
+    and .opt_in_plan.implemented_order_diff_packet.content_included == false
+    and .opt_in_plan.implemented_order_diff_packet.side_signal_raw_included == false
+    and .opt_in_plan.implemented_order_diff_packet.compares_baseline_vs_advisory_hash_only == true
+    and .opt_in_plan.implemented_order_diff_packet.full_top_k_overlap_available == false
+    and .opt_in_plan.implemented_order_diff_packet.per_key_movements_available == false
+    and .opt_in_plan.implemented_order_diff_packet.calls_memory_search == false
+    and .opt_in_plan.implemented_order_diff_packet.runs_biocortex == false
+    and .opt_in_plan.implemented_order_diff_packet.changes_memory_search_order == false
+    and .opt_in_plan.implemented_order_diff_packet.ordering_behavior_connected == false
+    and .opt_in_plan.implemented_order_diff_packet.actual_return_order_changed == false
+    and .opt_in_plan.implemented_order_diff_packet.approval_state == "not_approved"
+    and .opt_in_plan.implemented_order_diff_packet.runtime_adapter_approved == false
+    and .opt_in_plan.implemented_order_diff_packet.may_implement_ordering_now == false
     and .opt_in_plan.experiment.mode == "fts_only"
     and .opt_in_plan.experiment.affected_call_site.function == "SqliteStore::memory_search"
     and .evidence.runtime_boundary_proof.default_disabled_status == "runtime_disabled"

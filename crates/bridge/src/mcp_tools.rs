@@ -47,12 +47,13 @@ use tokio::process::Command as TokioCommand;
 use crate::biocortex_shadow::{
     biocortex_replay_comparison, biocortex_retrieval_opt_in_audit_report,
     biocortex_retrieval_opt_in_dry_run_plan, biocortex_retrieval_opt_in_execution_packet,
-    biocortex_retrieval_opt_in_review_packet, biocortex_retrieval_opt_in_runtime_trial,
+    biocortex_retrieval_opt_in_order_diff_packet, biocortex_retrieval_opt_in_review_packet,
+    biocortex_retrieval_opt_in_runtime_trial,
     biocortex_retrieval_opt_in_runtime_trial_review_packet, biocortex_shadow_digest,
     supported_benchmarks, BioCortexReplayComparisonOptions, BioCortexRetrievalCandidate,
     BioCortexRetrievalOptInAuditOptions, BioCortexRetrievalOptInDryRunOptions,
-    BioCortexRetrievalOptInExecutionPacketOptions, BioCortexRetrievalOptInReviewPacketOptions,
-    BioCortexRetrievalOptInRuntimeTrialOptions,
+    BioCortexRetrievalOptInExecutionPacketOptions, BioCortexRetrievalOptInOrderDiffPacketOptions,
+    BioCortexRetrievalOptInReviewPacketOptions, BioCortexRetrievalOptInRuntimeTrialOptions,
     BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions, BioCortexShadowOptions,
     BIOCORTEX_CHECKOUT_ENV,
 };
@@ -25805,6 +25806,105 @@ impl McpTool for BioCortexRetrievalOptInRuntimeTrialReviewPacketTool {
 }
 
 // ===========================================================================
+//  biocortex_retrieval_opt_in_order_diff_packet — hash-only order diff
+// ===========================================================================
+
+/// Read-only BioCortex retrieval opt-in order-diff packet. This tool accepts a
+/// runtime-trial or runtime-trial-review packet and compares baseline order
+/// against the advisory order using safe hash/rank summaries only. It does not
+/// include raw order keys, approve anything, call `memory_search`, run
+/// BioCortex, or change retrieval order.
+pub struct BioCortexRetrievalOptInOrderDiffPacketTool;
+
+impl BioCortexRetrievalOptInOrderDiffPacketTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for BioCortexRetrievalOptInOrderDiffPacketTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for BioCortexRetrievalOptInOrderDiffPacketTool {
+    fn name(&self) -> &'static str {
+        "biocortex_retrieval_opt_in_order_diff_packet"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only BioCortex retrieval opt-in order-diff \
+                 packet. Accepts a runtime trial or runtime-trial-review packet \
+                 and compares baseline order against advisory order using \
+                 hash/rank summaries only. Does not call memory_search, run \
+                 BioCortex, mutate memory, include raw query/keys/content, \
+                 register an EmbeddingBackend, approve runtime influence, or \
+                 alter retrieval order."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["source_packet"],
+                "properties": {
+                    "source_packet": {
+                        "type": "object",
+                        "description": "JSON object produced by biocortex_retrieval_opt_in_runtime_trial or biocortex_retrieval_opt_in_runtime_trial_review_packet. Unknown/raw fields are ignored."
+                    },
+                    "reviewer": {
+                        "type": "string",
+                        "description": "Optional reviewer identity or handle."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Optional implementation commit under review."
+                    },
+                    "forum_post_id": {
+                        "type": "string",
+                        "description": "Optional forum post id linking this packet."
+                    },
+                    "memory_key": {
+                        "type": "string",
+                        "description": "Optional memory key linking this packet."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let source_packet = args.get("source_packet").cloned().unwrap_or(Value::Null);
+        let reviewer = args
+            .get("reviewer")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let commit = args
+            .get("commit")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let forum_post_id = args
+            .get("forum_post_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let memory_key = args
+            .get("memory_key")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let payload =
+            biocortex_retrieval_opt_in_order_diff_packet(BioCortexRetrievalOptInOrderDiffPacketOptions {
+                source_packet,
+                reviewer,
+                commit,
+                forum_post_id,
+                memory_key,
+            });
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
 //   biocortex_retrieval_shadow — review-only retrieval side-signal report
 // ===========================================================================
 
@@ -37091,6 +37191,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Standard,
         Arc::new(BioCortexRetrievalOptInRuntimeTrialReviewPacketTool::new()),
     );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexRetrievalOptInOrderDiffPacketTool::new()),
+    );
     #[cfg(feature = "biocortex-retrieval-shadow")]
     reg_if(
         &mut reg,
@@ -46519,6 +46625,175 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             v["runtime_trial_summary"]["returned_order"]["source"],
             json!("baseline")
         );
+        assert_eq!(v["may_implement_ordering_now"], json!(false));
+    }
+
+    #[test]
+    fn biocortex_retrieval_opt_in_order_diff_packet_schema_is_readonly() {
+        let tool = BioCortexRetrievalOptInOrderDiffPacketTool::new();
+        let schema = tool.schema();
+        assert_eq!(
+            schema.name,
+            "biocortex_retrieval_opt_in_order_diff_packet"
+        );
+        assert!(schema.description.contains("Read-only"));
+        assert!(schema.description.contains("Does not call memory_search"));
+        assert!(schema.description.contains("run BioCortex"));
+        assert!(schema.description.contains("alter retrieval order"));
+
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required");
+        assert!(required.contains(&json!("source_packet")));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("source_packet").is_some());
+        assert!(props.get("reviewer").is_some());
+        assert!(props.get("commit").is_some());
+        assert!(props.get("forum_post_id").is_some());
+        assert!(props.get("memory_key").is_some());
+        assert!(props.get("include_raw").is_none());
+        assert!(props.get("mutate").is_none());
+        assert!(props.get("memory_search").is_none());
+        assert!(props.get("raw_content").is_none());
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_order_diff_packet_sanitizes_inputs() {
+        let tool = BioCortexRetrievalOptInOrderDiffPacketTool::new();
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(
+                json!({
+                    "source_packet": {
+                        "schema": "agent_bridge.biocortex_retrieval.opt_in_runtime_trial_review_packet.v0",
+                        "read_only": true,
+                        "runtime_trial_consumer": true,
+                        "implementation_stage": "runtime_trial_review_packet_only",
+                        "approval_state": "not_approved",
+                        "runtime_adapter_approved": false,
+                        "approval_writes_allowed": false,
+                        "writes_approval": false,
+                        "query": "secret order diff query",
+                        "candidate_keys": ["secret_order_diff_key"],
+                        "candidate_content": "secret order diff content",
+                        "input_contract": {
+                            "runtime_trial_packet_included": false,
+                            "raw_query_included": false,
+                            "raw_keys_included": false,
+                            "content_included": false,
+                            "side_signal_raw_included": false
+                        },
+                        "runtime_trial_summary": {
+                            "baseline_order": {
+                                "key_count": 2,
+                                "hash": "sha256:baseline",
+                                "top_key_hash": "sha256:baseline-top",
+                                "raw_keys_included": false,
+                                "content_included": false
+                            },
+                            "side_signal": {
+                                "status": "ok",
+                                "matched_candidate_count": 2,
+                                "raw_included": false,
+                                "candidate_keys_included": false,
+                                "content_included": false
+                            },
+                            "advisory_result": {
+                                "available": true,
+                                "used_for_return_order": false,
+                                "order_hash": "sha256:advisory",
+                                "top_key_hash": "sha256:advisory-top",
+                                "matched_side_signal_count": 2,
+                                "evidence_count": 1,
+                                "expected": {
+                                    "key_hash": "sha256:expected",
+                                    "baseline_rank": 1,
+                                    "advisory_rank": 2,
+                                    "regressed": true
+                                },
+                                "raw_keys_included": false,
+                                "content_included": false,
+                                "side_signal_raw_included": false
+                            },
+                            "returned_order": {
+                                "source": "baseline",
+                                "baseline_returned": true,
+                                "hash_matches_baseline": true
+                            }
+                        },
+                        "boundary_check": {
+                            "review_ready_for_baseline_runtime_trial": true,
+                            "violations": []
+                        },
+                        "calls_memory_search": false,
+                        "runs_biocortex": false,
+                        "registers_embedding_backend": false,
+                        "changes_memory_search_order": false,
+                        "default_search_order_change_allowed": false,
+                        "ordering_behavior_connected": false,
+                        "may_change_search_order_now": false,
+                        "may_implement_ordering_now": false
+                    },
+                    "reviewer": "codex",
+                    "commit": "order-diff-commit",
+                    "forum_post_id": "103",
+                    "memory_key": "order-diff-memory"
+                }),
+                &ctx,
+            )
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains("secret order diff query"));
+        assert!(!text.contains("secret_order_diff_key"));
+        assert!(!text.contains("secret order diff content"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_order_diff_packet.v0")
+        );
+        assert_eq!(v["read_only"], json!(true));
+        assert_eq!(v["order_diff_packet"], json!(true));
+        assert_eq!(v["source_packet_consumer"], json!(true));
+        assert_eq!(
+            v["review_target"]["source_kind"],
+            json!("runtime_trial_review_packet")
+        );
+        assert_eq!(v["boundary_check"]["diff_ready"], json!(true));
+        assert_eq!(
+            v["order_comparison"]["hash_diff"]["order_hash_changed"],
+            json!(true)
+        );
+        assert_eq!(
+            v["order_comparison"]["hash_diff"]["top_key_changed"],
+            json!(true)
+        );
+        assert_eq!(
+            v["order_comparison"]["expected_key_rank"]
+                ["rank_delta_advisory_minus_baseline"],
+            json!(1)
+        );
+        assert_eq!(
+            v["order_comparison"]["expected_key_rank"]["direction"],
+            json!("regressed")
+        );
+        assert_eq!(
+            v["order_comparison"]["returned_order"]["actual_return_order_changed"],
+            json!(false)
+        );
+        assert_eq!(v["calls_memory_search"], json!(false));
+        assert_eq!(v["runs_biocortex"], json!(false));
+        assert_eq!(v["changes_memory_search_order"], json!(false));
         assert_eq!(v["may_implement_ordering_now"], json!(false));
     }
 
