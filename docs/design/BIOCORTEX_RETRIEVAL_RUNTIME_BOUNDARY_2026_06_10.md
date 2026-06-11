@@ -230,8 +230,8 @@ of the following:
   default retrieval influence.
 - The opt-in authorization request generator is
   `scripts/prepare-biocortex-retrieval-opt-in-authorization-request.sh`. It
-  prepares human review only and keeps
-  `authorization_state=requested_not_granted`.
+  prepares human review only, requires runtime trial review evidence, and keeps
+  runtime influence unapproved.
 - Human authorization for `opt_in_experiment` implementation work is recorded
   at
   `docs/design/BIOCORTEX_RETRIEVAL_OPT_IN_AUTHORIZATION_DECISION_2026_06_11.md`.

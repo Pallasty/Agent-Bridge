@@ -8,8 +8,9 @@ Human authorization recorded for `opt_in_experiment` implementation work only.
 Gate skeleton, audit shape, read-only status surface, store-level
 request/response contract, read-only dry-run planner, read-only review packet
 consumer, read-only execution packet contract, and baseline-preserving runtime
-trial surface, and read-only runtime trial review packet implemented. Ordering
-behavior is not implemented and not approved.
+trial surface, read-only runtime trial review packet, and authorization request
+runtime-trial-review evidence hook implemented. Ordering behavior is not
+implemented and not approved.
 
 ```json
 {
@@ -27,6 +28,7 @@ behavior is not implemented and not approved.
   "execution_packet_contract_implemented": true,
   "runtime_trial_implemented": true,
   "runtime_trial_review_packet_implemented": true,
+  "authorization_request_runtime_trial_review_evidence_implemented": true,
   "ordering_behavior_connected": false
 }
 ```
@@ -219,6 +221,21 @@ The runtime trial review packet organizes post-implementation evidence. It does
 not approve runtime influence and does not request permission to connect
 ordering behavior.
 
+Slice 10 landed the authorization request evidence hook:
+
+- script: `scripts/prepare-biocortex-retrieval-opt-in-authorization-request.sh`;
+- required input:
+  `agent_bridge.biocortex_retrieval.opt_in_runtime_trial_review_packet.v0`;
+- request evidence path: `evidence.runtime_trial_review_packet`;
+- copies only safe summary fields from the runtime trial review packet;
+- requires baseline-trial review readiness and zero boundary violations;
+- keeps `approval_state=not_approved`, `runtime_adapter_approved=false`, and
+  `may_implement_ordering_now=false`.
+
+The authorization request bundle is still review preparation only. Including
+runtime trial review evidence does not approve runtime influence or connect
+ordering behavior.
+
 ## Fail-Open Rules
 
 The experiment must return the baseline list for:
@@ -287,6 +304,8 @@ Future implementation review must include tests proving:
   raw trial payload, query, keys, or content;
 - runtime trial review packet reports boundary violations without approving
   runtime influence;
+- authorization request bundle requires runtime trial review evidence and does
+  not include raw trial payload, query, keys, content, or side-signal rows;
 - audit telemetry includes baseline order, experimental order, fallback reason,
   latency, and authorization scope.
 

@@ -17,12 +17,13 @@ scripts/prove-biocortex-retrieval-runtime-boundary.sh \
 
 scripts/prepare-biocortex-retrieval-opt-in-authorization-request.sh \
   --runtime-proof-summary /tmp/biocortex-retrieval-runtime-proof/proof-summary.json \
+  --runtime-trial-review-packet /tmp/biocortex-runtime-trial-review-packet.json \
   --reviewer "<human reviewer>" \
   --memory-key "<future memory key>" \
   --forum-decision-post-id "<future forum post id>"
 ```
 
-The generated packet schema is:
+The static request template starts as:
 
 ```json
 {
@@ -33,6 +34,18 @@ The generated packet schema is:
   "implementation_allowed": false
 }
 ```
+
+When generated against the current opt-in plan fixture, the request reflects the
+already recorded implementation authorization with
+`approval_state=opt_in_implementation_authorized` and
+`authorization_state=authorized_for_opt_in_implementation`. It still preserves
+`runtime_adapter_approved=false`, `default_search_order_change_allowed=false`,
+and `writes_approval=false`.
+
+The runtime trial review packet is required post-implementation evidence. The
+request generator copies only its safe summary fields under
+`evidence.runtime_trial_review_packet`; it does not include raw query text,
+candidate keys, content, side-signal rows, or the raw review packet.
 
 ## Scope Requested
 

@@ -13,7 +13,23 @@
   "requester": "codex",
   "commit_under_review": "<required>",
   "requires_runtime_boundary_proof": true,
+  "requires_runtime_trial_review_packet": true,
   "requires_opt_in_plan": "docs/design/fixtures/biocortex-retrieval-opt-in-experiment-plan-2026-06-11.json",
+  "evidence": {
+    "runtime_trial_review_packet": {
+      "required_schema": "agent_bridge.biocortex_retrieval.opt_in_runtime_trial_review_packet.v0",
+      "required_review_ready_for_baseline_runtime_trial": true,
+      "required_violation_count": 0,
+      "raw_query_included": false,
+      "raw_keys_included": false,
+      "content_included": false,
+      "side_signal_raw_included": false,
+      "approval_state": "not_approved",
+      "runtime_adapter_approved": false,
+      "changes_memory_search_order": false,
+      "ordering_behavior_connected": false
+    }
+  },
   "current_permissions": {
     "may_implement_opt_in_experiment": false,
     "may_change_default_calls_without_opt_in": false,
@@ -26,7 +42,8 @@
     "may_add_per_call_opt_in_surface": true,
     "may_affect_only_explicitly_opted_in_fts_calls": true,
     "must_keep_operator_disable": "AB_BIOCORTEX_RETRIEVAL_DISABLE",
-    "requires_post_implementation_review_before_use": true
+    "requires_post_implementation_review_before_use": true,
+    "requires_runtime_trial_review_packet": true
   },
   "not_requested": [
     "default_retrieval_influence_fts",

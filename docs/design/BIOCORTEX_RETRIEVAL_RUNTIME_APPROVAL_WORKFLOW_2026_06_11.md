@@ -106,12 +106,15 @@ See:
    ```bash
    scripts/prepare-biocortex-retrieval-opt-in-authorization-request.sh \
      --runtime-proof-summary /tmp/biocortex-retrieval-runtime-proof/proof-summary.json \
+     --runtime-trial-review-packet /tmp/biocortex-runtime-trial-review-packet.json \
      --reviewer "<human reviewer>" \
      --memory-key "<future memory key>" \
      --forum-decision-post-id "<future forum post id>"
    ```
 
-   The generated request remains `authorization_state=requested_not_granted`.
+   The generated request must include only safe runtime trial review evidence
+   under `evidence.runtime_trial_review_packet`. The generated request remains
+   review preparation and does not approve runtime influence.
 
 8. If a human authorizes `opt_in_experiment`, record the decision as a separate
    artifact. The current decision record is:

@@ -10,6 +10,7 @@ out_dir="${TMPDIR:-/tmp}/ab-biocortex-opt-in-authorization-request-$ts"
 reviewer=""
 requester="codex"
 runtime_proof_summary=""
+runtime_trial_review_packet=""
 plan_fixture="docs/design/fixtures/biocortex-retrieval-opt-in-experiment-plan-2026-06-11.json"
 memory_key=""
 forum_decision_post_id=""
@@ -27,6 +28,8 @@ Flags:
   --reviewer TEXT                Human reviewer identity.
   --requester TEXT               Requesting agent identity. Default: codex.
   --runtime-proof-summary PATH   proof-summary.json from prove-biocortex-retrieval-runtime-boundary.sh.
+  --runtime-trial-review-packet PATH
+                                 JSON from retrieval-opt-in-runtime-trial-review-packet.
   --plan-fixture PATH            Opt-in experiment plan fixture.
   --memory-key KEY               Memory key to cite in generated templates.
   --forum-decision-post-id ID    Forum post id to cite in generated templates.
@@ -40,6 +43,7 @@ while [[ $# -gt 0 ]]; do
         --reviewer) reviewer="$2"; shift 2 ;;
         --requester) requester="$2"; shift 2 ;;
         --runtime-proof-summary) runtime_proof_summary="$2"; shift 2 ;;
+        --runtime-trial-review-packet) runtime_trial_review_packet="$2"; shift 2 ;;
         --plan-fixture) plan_fixture="$2"; shift 2 ;;
         --memory-key) memory_key="$2"; shift 2 ;;
         --forum-decision-post-id) forum_decision_post_id="$2"; shift 2 ;;
@@ -54,6 +58,14 @@ if [[ -z "$runtime_proof_summary" ]]; then
 fi
 if [[ ! -f "$runtime_proof_summary" ]]; then
     echo "runtime proof summary not found: $runtime_proof_summary" >&2
+    exit 2
+fi
+if [[ -z "$runtime_trial_review_packet" ]]; then
+    echo "--runtime-trial-review-packet is required" >&2
+    exit 2
+fi
+if [[ ! -f "$runtime_trial_review_packet" ]]; then
+    echo "runtime trial review packet not found: $runtime_trial_review_packet" >&2
     exit 2
 fi
 if [[ ! -f "$plan_fixture" ]]; then
@@ -77,6 +89,7 @@ fi
 jq -n \
     --slurpfile plan "$plan_fixture" \
     --slurpfile proof "$runtime_proof_summary" \
+    --slurpfile trial_review "$runtime_trial_review_packet" \
     --arg generated_at "$generated_at" \
     --arg target_host "$target_host" \
     --arg branch "$branch" \
@@ -121,6 +134,36 @@ jq -n \
                 p95_ms: $proof[0].latency.p95_ms,
                 sample_count: $proof[0].latency.sample_count
             },
+            runtime_trial_review_packet: {
+                provided: true,
+                schema: $trial_review[0].schema,
+                read_only: $trial_review[0].read_only,
+                runtime_trial_consumer: $trial_review[0].runtime_trial_consumer,
+                review_scope: $trial_review[0].review_scope,
+                review_ready_for_baseline_runtime_trial:
+                    $trial_review[0].boundary_check.review_ready_for_baseline_runtime_trial,
+                violation_count: ($trial_review[0].boundary_check.violations | length),
+                side_signal_status: $trial_review[0].runtime_trial_summary.side_signal.status,
+                side_signal_coverage: $trial_review[0].runtime_trial_summary.side_signal.coverage,
+                side_signal_latency_ms: $trial_review[0].runtime_trial_summary.side_signal.latency_ms,
+                returned_order_source: $trial_review[0].runtime_trial_summary.returned_order.source,
+                baseline_returned: $trial_review[0].runtime_trial_summary.returned_order.baseline_returned,
+                hash_matches_baseline: $trial_review[0].runtime_trial_summary.returned_order.hash_matches_baseline,
+                raw_query_included: $trial_review[0].input_contract.raw_query_included,
+                raw_keys_included: $trial_review[0].input_contract.raw_keys_included,
+                content_included: $trial_review[0].input_contract.content_included,
+                side_signal_raw_included: $trial_review[0].input_contract.side_signal_raw_included,
+                approval_state: $trial_review[0].approval_state,
+                runtime_adapter_approved: $trial_review[0].runtime_adapter_approved,
+                approval_writes_allowed: $trial_review[0].approval_writes_allowed,
+                writes_approval: $trial_review[0].writes_approval,
+                calls_memory_search: $trial_review[0].calls_memory_search,
+                runs_biocortex: $trial_review[0].runs_biocortex,
+                registers_embedding_backend: $trial_review[0].registers_embedding_backend,
+                changes_memory_search_order: $trial_review[0].changes_memory_search_order,
+                ordering_behavior_connected: $trial_review[0].ordering_behavior_connected,
+                may_implement_ordering_now: $trial_review[0].may_implement_ordering_now
+            },
             docs: {
                 runtime_proof: "docs/design/BIOCORTEX_RETRIEVAL_RUNTIME_PROOF_2026_06_11.md",
                 default_influence_contract: "docs/design/BIOCORTEX_RETRIEVAL_DEFAULT_INFLUENCE_CONTRACT_2026_06_11.md",
@@ -141,7 +184,8 @@ jq -n \
             must_keep_operator_disable: "AB_BIOCORTEX_RETRIEVAL_DISABLE",
             must_return_baseline_without_per_call_opt_in: true,
             must_return_baseline_on_absent_error_timeout_low_coverage_malformed_rows: true,
-            requires_post_implementation_review_before_use: true
+            requires_post_implementation_review_before_use: true,
+            requires_runtime_trial_review_packet: true
         },
         not_requested: [
             "default_retrieval_influence_fts",
@@ -173,7 +217,7 @@ jq -e '
     and .default_search_order_change_allowed == false
     and .implementation_allowed == true
     and .writes_approval == false
-    and .opt_in_plan.status == "runtime_trial_review_packet_implemented"
+    and .opt_in_plan.status == "authorization_request_runtime_trial_review_evidence_implemented"
     and .opt_in_plan.approval_state == "opt_in_implementation_authorized"
     and .opt_in_plan.implemented_gate_skeleton.ordering_behavior_connected == false
     and .opt_in_plan.implemented_gate_skeleton.may_change_search_order_now == false
@@ -300,9 +344,36 @@ jq -e '
     and .evidence.runtime_boundary_proof.default_disabled_status == "runtime_disabled"
     and .evidence.runtime_boundary_proof.kill_switch_status == "operator_disabled"
     and .evidence.runtime_boundary_proof.enabled_shadow_status == "ok"
+    and .evidence.runtime_trial_review_packet.provided == true
+    and .evidence.runtime_trial_review_packet.schema == "agent_bridge.biocortex_retrieval.opt_in_runtime_trial_review_packet.v0"
+    and .evidence.runtime_trial_review_packet.read_only == true
+    and .evidence.runtime_trial_review_packet.runtime_trial_consumer == true
+    and .evidence.runtime_trial_review_packet.review_scope == "baseline_preserving_runtime_trial_only"
+    and .evidence.runtime_trial_review_packet.review_ready_for_baseline_runtime_trial == true
+    and .evidence.runtime_trial_review_packet.violation_count == 0
+    and .evidence.runtime_trial_review_packet.side_signal_status == "ok"
+    and .evidence.runtime_trial_review_packet.side_signal_coverage >= 0.5
+    and .evidence.runtime_trial_review_packet.returned_order_source == "baseline"
+    and .evidence.runtime_trial_review_packet.baseline_returned == true
+    and .evidence.runtime_trial_review_packet.hash_matches_baseline == true
+    and .evidence.runtime_trial_review_packet.raw_query_included == false
+    and .evidence.runtime_trial_review_packet.raw_keys_included == false
+    and .evidence.runtime_trial_review_packet.content_included == false
+    and .evidence.runtime_trial_review_packet.side_signal_raw_included == false
+    and .evidence.runtime_trial_review_packet.approval_state == "not_approved"
+    and .evidence.runtime_trial_review_packet.runtime_adapter_approved == false
+    and .evidence.runtime_trial_review_packet.approval_writes_allowed == false
+    and .evidence.runtime_trial_review_packet.writes_approval == false
+    and .evidence.runtime_trial_review_packet.calls_memory_search == false
+    and .evidence.runtime_trial_review_packet.runs_biocortex == false
+    and .evidence.runtime_trial_review_packet.registers_embedding_backend == false
+    and .evidence.runtime_trial_review_packet.changes_memory_search_order == false
+    and .evidence.runtime_trial_review_packet.ordering_behavior_connected == false
+    and .evidence.runtime_trial_review_packet.may_implement_ordering_now == false
     and .current_permissions.may_implement_opt_in_experiment == true
     and .current_permissions.may_change_default_retrieval_order == false
     and .requested_permission_if_human_authorizes.may_affect_only_explicitly_opted_in_fts_calls == true
+    and .requested_permission_if_human_authorizes.requires_runtime_trial_review_packet == true
     and (.not_requested | index("default_retrieval_influence_fts"))
     and (.not_requested | index("runtime_adapter_approved"))
 ' "$request_packet" >/dev/null
@@ -324,6 +395,7 @@ This packet is not an approval writer. It reflects:
 - runtime_adapter_approved=false
 - default_search_order_change_allowed=false
 - implementation_allowed=$plan_implementation_allowed
+- runtime trial review packet included=true
 
 The allowed implementation scope is only an FTS-only, per-call opt-in
 experiment behind a feature/runtime gate. It does not authorize default
@@ -337,6 +409,8 @@ BioCortex opt-in experiment authorization request prepared for commit $commit.
 Status: request prepared/status reflected. The packet preserves
 runtime_adapter_approved=false, default_search_order_change_allowed=false, and
 implementation_allowed=$plan_implementation_allowed.
+
+Runtime trial review packet evidence included: true.
 
 Requested scope: opt_in_experiment.
 Not requested: default retrieval influence, hybrid influence, semantic influence.
@@ -357,7 +431,8 @@ Files:
 - memory-note-template.md
 
 This bundle is review preparation only. It is not approval state and it does
-not change retrieval behavior.
+not change retrieval behavior. It includes runtime trial review evidence, but
+that evidence does not approve runtime influence or ordering behavior.
 EOF
 
 printf 'authorization_request_bundle=%s\n' "$out_dir"
