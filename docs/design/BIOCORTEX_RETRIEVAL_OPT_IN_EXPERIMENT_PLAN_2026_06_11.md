@@ -5,8 +5,9 @@ Date: 2026-06-11
 ## Status
 
 Human authorization recorded for `opt_in_experiment` implementation work only.
-Gate skeleton, audit shape, and read-only status surface implemented. Ordering
-behavior is not implemented and not approved.
+Gate skeleton, audit shape, read-only status surface, and store-level
+request/response contract implemented. Ordering behavior is not implemented
+and not approved.
 
 ```json
 {
@@ -18,6 +19,7 @@ behavior is not implemented and not approved.
   "gate_skeleton_implemented": true,
   "audit_shape_implemented": true,
   "read_only_status_surface_implemented": true,
+  "store_contract_implemented": true,
   "ordering_behavior_connected": false
 }
 ```
@@ -110,6 +112,22 @@ Slice 3 landed read-only status surfaces:
 - both expose the same opt-in call audit schema;
 - both preserve hashed query/order output and no raw memory keys/content;
 - both keep `ordering_behavior_connected=false`.
+
+Slice 4 landed the store-level request/response contract:
+
+- contract schema: `agent_bridge.store.memory_search.biocortex_opt_in_contract.v0`;
+- request type: `BioCortexRetrievalOptInRequest`;
+- decision type: `BioCortexRetrievalOptInDecision`;
+- response type: `BioCortexRetrievalOptInResponseContract`;
+- only `fts` is mode-authorized;
+- baseline completion is explicit and can represent zero-hit baseline results;
+- every blocked state returns a baseline response with a fallback reason;
+- audit requirements forbid raw query text, raw memory keys, and memory content;
+- bridge audit/status includes a `store_contract` summary.
+
+The contract still does not call BioCortex or alter ordering. It gives the
+future ordering implementation a typed boundary it must satisfy before any
+experimental order can be returned.
 
 ## Fail-Open Rules
 

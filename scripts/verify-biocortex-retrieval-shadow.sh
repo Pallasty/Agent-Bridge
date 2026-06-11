@@ -63,7 +63,7 @@ grep -q 'Authorization for one mode does not imply authorization for another mod
 opt_in_plan="docs/design/fixtures/biocortex-retrieval-opt-in-experiment-plan-2026-06-11.json"
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0"
-    and .status == "read_only_status_surface_implemented"
+    and .status == "store_contract_implemented"
     and .approval_state == "opt_in_implementation_authorized"
     and .runtime_adapter_approved == false
     and .default_search_order_change_allowed == false
@@ -71,6 +71,7 @@ jq -e '
     and .gate_skeleton_implemented == true
     and .audit_shape_implemented == true
     and .read_only_status_surface_implemented == true
+    and .store_contract_implemented == true
     and .ordering_behavior_connected == false
     and .requested_human_authorization_scope == "opt_in_experiment"
     and .requested_default_influence_scope == "none"
@@ -107,6 +108,20 @@ jq -e '
     and .implemented_status_surface.content_included == false
     and .implemented_status_surface.ordering_behavior_connected == false
     and .implemented_status_surface.may_change_search_order_now == false
+    and .implemented_store_contract.schema == "agent_bridge.store.memory_search.biocortex_opt_in_contract.v0"
+    and .implemented_store_contract.request_type == "BioCortexRetrievalOptInRequest"
+    and .implemented_store_contract.decision_type == "BioCortexRetrievalOptInDecision"
+    and .implemented_store_contract.response_type == "BioCortexRetrievalOptInResponseContract"
+    and .implemented_store_contract.authorized_mode == "fts"
+    and .implemented_store_contract.baseline_completed_required == true
+    and .implemented_store_contract.zero_hit_baseline_is_completed == true
+    and .implemented_store_contract.fallback_returns_baseline == true
+    and .implemented_store_contract.fallback_reason_required == true
+    and .implemented_store_contract.raw_query_included == false
+    and .implemented_store_contract.raw_keys_included == false
+    and .implemented_store_contract.content_included == false
+    and .implemented_store_contract.ordering_behavior_connected == false
+    and .implemented_store_contract.may_change_search_order_now == false
     and .fail_open.operator_disable == "return_baseline"
     and .human_review_boundary.authorization_decision_recorded == true
     and .human_review_boundary.requires_separate_human_decision_before_implementation == false
@@ -254,6 +269,8 @@ test -s "$review_bundle/memory-note-template.md"
 run cargo check -p ab-bridge --no-default-features --features biocortex-retrieval-shadow
 run cargo check -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in
 
+run cargo test -p ab-store --lib --no-default-features \
+    biocortex_contract_ -- --nocapture
 run cargo test -p ab-bridge --lib --no-default-features \
     biocortex_shadow::tests::retrieval_ -- --nocapture
 run cargo test -p ab-bridge --lib --no-default-features \
@@ -288,6 +305,14 @@ jq -e '
     and .baseline_order.raw_keys_included == false
     and .baseline_order.content_included == false
     and .fallback.reason == "mode_not_authorized"
+    and .store_contract.schema == "agent_bridge.store.memory_search.biocortex_opt_in_contract.v0"
+    and .store_contract.returned_order_source == "baseline"
+    and .store_contract.baseline_returned == true
+    and .store_contract.fallback_reason == "mode_not_authorized"
+    and .store_contract.changes_memory_search_order == false
+    and .store_contract.decision.mode_authorized == false
+    and .store_contract.decision.audit_requirements.raw_keys_included == false
+    and .store_contract.decision.audit_requirements.content_included == false
     and .ordering_behavior_connected == false
     and .may_change_search_order_now == false
     and .changes_memory_search_order == false
@@ -314,6 +339,13 @@ jq -e '
     and .gate.ready_for_explicit_opt_in_experiment == true
     and .baseline_order.key_count == 1
     and .fallback.reason == "ordering_behavior_not_connected"
+    and .store_contract.schema == "agent_bridge.store.memory_search.biocortex_opt_in_contract.v0"
+    and .store_contract.returned_order_source == "baseline"
+    and .store_contract.baseline_returned == true
+    and .store_contract.fallback_reason == "ordering_behavior_not_connected"
+    and any(.store_contract.decision.blocking_reasons[]; . == "runtime_adapter_not_approved")
+    and .store_contract.changes_memory_search_order == false
+    and .store_contract.decision.mode_authorized == true
     and .side_signal.status == "not_run_ordering_behavior_not_connected"
     and .ordering_behavior_connected == false
     and .may_change_search_order_now == false
@@ -365,7 +397,7 @@ jq -e '
     and .default_search_order_change_allowed == false
     and .implementation_allowed == true
     and .writes_approval == false
-    and .opt_in_plan.status == "read_only_status_surface_implemented"
+    and .opt_in_plan.status == "store_contract_implemented"
     and .opt_in_plan.implemented_gate_skeleton.ordering_behavior_connected == false
     and .opt_in_plan.implemented_gate_skeleton.may_change_search_order_now == false
     and .opt_in_plan.implemented_audit_shape.ordering_behavior_connected == false
@@ -375,6 +407,13 @@ jq -e '
     and .opt_in_plan.implemented_status_surface.raw_keys_included == false
     and .opt_in_plan.implemented_status_surface.content_included == false
     and .opt_in_plan.implemented_status_surface.ordering_behavior_connected == false
+    and .opt_in_plan.implemented_store_contract.schema == "agent_bridge.store.memory_search.biocortex_opt_in_contract.v0"
+    and .opt_in_plan.implemented_store_contract.authorized_mode == "fts"
+    and .opt_in_plan.implemented_store_contract.fallback_returns_baseline == true
+    and .opt_in_plan.implemented_store_contract.raw_query_included == false
+    and .opt_in_plan.implemented_store_contract.raw_keys_included == false
+    and .opt_in_plan.implemented_store_contract.content_included == false
+    and .opt_in_plan.implemented_store_contract.ordering_behavior_connected == false
     and .opt_in_plan.experiment.mode == "fts_only"
     and .evidence.runtime_boundary_proof.default_disabled_status == "runtime_disabled"
     and .evidence.runtime_boundary_proof.kill_switch_status == "operator_disabled"

@@ -5,7 +5,7 @@
 //! deterministic `key=value` output into AB status JSON.
 
 use crate::shadow_cortex::{ShadowCortexEvent, ShadowCortexReplayFixture, SignalScope};
-use ab_store::{cosine_similarity, embedding::default_backend};
+use ab_store::{cosine_similarity, embedding::default_backend, BioCortexRetrievalOptInRequest};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Number, Value};
 use sha2::{Digest, Sha256};
@@ -739,6 +739,20 @@ pub fn biocortex_retrieval_opt_in_audit_report(opts: BioCortexRetrievalOptInAudi
         .latency_ms
         .map(|value| json!(round3(value)))
         .unwrap_or(Value::Null);
+    let store_contract = BioCortexRetrievalOptInRequest {
+        mode: mode.clone(),
+        per_call_opt_in: opts.per_call_opt_in,
+        compile_feature_enabled: cfg!(feature = "biocortex-retrieval-opt-in"),
+        runtime_enabled: env_truthy(BIOCORTEX_RETRIEVAL_OPT_IN_ENABLE_ENV),
+        operator_disabled: env_truthy(BIOCORTEX_RETRIEVAL_DISABLE_ENV),
+        baseline_completed: true,
+        baseline_key_count,
+        runtime_adapter_approved: false,
+        ordering_behavior_connected: false,
+    }
+    .evaluate()
+    .response_contract(false);
+    let store_contract = serde_json::to_value(&store_contract).unwrap_or(Value::Null);
 
     json!({
         "schema": BIOCORTEX_RETRIEVAL_OPT_IN_AUDIT_SCHEMA,
@@ -793,6 +807,7 @@ pub fn biocortex_retrieval_opt_in_audit_report(opts: BioCortexRetrievalOptInAudi
             "semantic"
         ],
         "gate": gate,
+        "store_contract": store_contract,
         "runtime_adapter_approved": false,
         "default_search_order_change_allowed": false,
         "default_calls_unchanged": true,
@@ -2227,6 +2242,27 @@ mod tests {
         assert_eq!(audit["may_change_search_order_now"], json!(false));
         assert_eq!(audit["ordering_behavior_connected"], json!(false));
         assert_eq!(audit["changes_memory_search_order"], json!(false));
+        assert_eq!(
+            audit["store_contract"]["schema"],
+            json!("agent_bridge.store.memory_search.biocortex_opt_in_contract.v0")
+        );
+        assert_eq!(
+            audit["store_contract"]["returned_order_source"],
+            json!("baseline")
+        );
+        assert_eq!(audit["store_contract"]["baseline_returned"], json!(true));
+        assert_eq!(
+            audit["store_contract"]["changes_memory_search_order"],
+            json!(false)
+        );
+        assert_eq!(
+            audit["store_contract"]["decision"]["audit_requirements"]["raw_keys_included"],
+            json!(false)
+        );
+        assert_eq!(
+            audit["store_contract"]["decision"]["audit_requirements"]["content_included"],
+            json!(false)
+        );
 
         if cfg!(feature = "biocortex-retrieval-opt-in") {
             assert_eq!(
@@ -2283,6 +2319,14 @@ mod tests {
             assert_eq!(audit["affected_call_site"], Value::Null);
             assert_eq!(audit["fallback"]["baseline_returned"], json!(true));
             assert_eq!(audit["fallback"]["reason"], json!("mode_not_authorized"));
+            assert_eq!(
+                audit["store_contract"]["fallback_reason"],
+                json!("mode_not_authorized")
+            );
+            assert_eq!(
+                audit["store_contract"]["decision"]["mode_authorized"],
+                json!(false)
+            );
             assert_eq!(audit["changes_memory_search_order"], json!(false));
             assert_eq!(audit["ordering_behavior_connected"], json!(false));
             let unaffected_modes = audit["unaffected_modes"]

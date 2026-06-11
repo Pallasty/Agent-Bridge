@@ -173,7 +173,7 @@ jq -e '
     and .default_search_order_change_allowed == false
     and .implementation_allowed == true
     and .writes_approval == false
-    and .opt_in_plan.status == "read_only_status_surface_implemented"
+    and .opt_in_plan.status == "store_contract_implemented"
     and .opt_in_plan.approval_state == "opt_in_implementation_authorized"
     and .opt_in_plan.implemented_gate_skeleton.ordering_behavior_connected == false
     and .opt_in_plan.implemented_gate_skeleton.may_change_search_order_now == false
@@ -185,6 +185,15 @@ jq -e '
     and .opt_in_plan.implemented_status_surface.raw_keys_included == false
     and .opt_in_plan.implemented_status_surface.content_included == false
     and .opt_in_plan.implemented_status_surface.ordering_behavior_connected == false
+    and .opt_in_plan.implemented_store_contract.schema == "agent_bridge.store.memory_search.biocortex_opt_in_contract.v0"
+    and .opt_in_plan.implemented_store_contract.authorized_mode == "fts"
+    and .opt_in_plan.implemented_store_contract.baseline_completed_required == true
+    and .opt_in_plan.implemented_store_contract.zero_hit_baseline_is_completed == true
+    and .opt_in_plan.implemented_store_contract.fallback_returns_baseline == true
+    and .opt_in_plan.implemented_store_contract.raw_query_included == false
+    and .opt_in_plan.implemented_store_contract.raw_keys_included == false
+    and .opt_in_plan.implemented_store_contract.content_included == false
+    and .opt_in_plan.implemented_store_contract.ordering_behavior_connected == false
     and .opt_in_plan.experiment.mode == "fts_only"
     and .opt_in_plan.experiment.affected_call_site.function == "SqliteStore::memory_search"
     and .evidence.runtime_boundary_proof.default_disabled_status == "runtime_disabled"
