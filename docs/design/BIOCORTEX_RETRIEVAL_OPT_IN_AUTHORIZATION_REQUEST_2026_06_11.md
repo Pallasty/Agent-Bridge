@@ -60,3 +60,13 @@ include:
 
 Without that separate human decision, this request remains review preparation
 only.
+
+## Current Decision
+
+The current human decision is recorded separately:
+
+- `docs/design/BIOCORTEX_RETRIEVAL_OPT_IN_AUTHORIZATION_DECISION_2026_06_11.md`
+- `docs/design/fixtures/biocortex-retrieval-opt-in-authorization-decision-2026-06-11.json`
+
+That decision authorizes `opt_in_experiment` implementation work only. It does
+not authorize default retrieval influence.

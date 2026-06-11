@@ -232,6 +232,10 @@ of the following:
   `scripts/prepare-biocortex-retrieval-opt-in-authorization-request.sh`. It
   prepares human review only and keeps
   `authorization_state=requested_not_granted`.
+- Human authorization for `opt_in_experiment` implementation work is recorded
+  at
+  `docs/design/BIOCORTEX_RETRIEVAL_OPT_IN_AUTHORIZATION_DECISION_2026_06_11.md`.
+  The decision does not authorize default retrieval influence.
 - Human approval must explicitly say that default retrieval influence is
   allowed. Approval of shadow telemetry, offline gate results, or acceptance
   corpus results does not imply this.

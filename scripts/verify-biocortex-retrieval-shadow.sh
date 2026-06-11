@@ -97,6 +97,28 @@ jq -e '
     and (.not_requested | index("runtime_adapter_approved"))
 ' "$opt_in_auth_template" >/dev/null
 
+opt_in_auth_decision="docs/design/fixtures/biocortex-retrieval-opt-in-authorization-decision-2026-06-11.json"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_authorization_decision.v0"
+    and .decision == "authorized"
+    and .authorization_state == "authorized"
+    and .authorized_scope == "opt_in_experiment"
+    and .implementation_allowed == true
+    and .runtime_adapter_approved == false
+    and .default_search_order_change_allowed == false
+    and .default_retrieval_influence_authorized == false
+    and .hybrid_retrieval_influence_authorized == false
+    and .semantic_retrieval_influence_authorized == false
+    and .authorized_implementation.may_add_cargo_feature == "biocortex-retrieval-opt-in"
+    and .authorized_implementation.may_add_runtime_enable_env == "AB_BIOCORTEX_RETRIEVAL_OPT_IN"
+    and .authorized_implementation.may_affect_only_explicitly_opted_in_fts_calls == true
+    and .authorized_implementation.must_keep_operator_disable == "AB_BIOCORTEX_RETRIEVAL_DISABLE"
+    and .authorized_implementation.must_return_baseline_without_per_call_opt_in == true
+    and (.not_authorized | index("runtime_adapter_approved"))
+    and (.not_authorized | index("default_search_order_change_allowed"))
+    and .requires_post_implementation_review_before_use == true
+' "$opt_in_auth_decision" >/dev/null
+
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.runtime_approval_packet_preview.v0"
     and .approval_state == "not_approved"

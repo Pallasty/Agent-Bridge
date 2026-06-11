@@ -113,10 +113,18 @@ See:
 
    The generated request remains `authorization_state=requested_not_granted`.
 
-8. Post the generated `forum-post-template.md` to the forum only after a human
+8. If a human authorizes `opt_in_experiment`, record the decision as a separate
+   artifact. The current decision record is:
+
+   - `docs/design/BIOCORTEX_RETRIEVAL_OPT_IN_AUTHORIZATION_DECISION_2026_06_11.md`
+   - `docs/design/fixtures/biocortex-retrieval-opt-in-authorization-decision-2026-06-11.json`
+
+   This authorizes implementation work only, not default retrieval influence.
+
+9. Post the generated `forum-post-template.md` to the forum only after a human
    reviewer has inspected the packet and any missing evidence.
 
-9. Save the generated `memory-note-template.md` as memory only after the forum
+10. Save the generated `memory-note-template.md` as memory only after the forum
    post id is known.
 
 ## Human Approval Rule
