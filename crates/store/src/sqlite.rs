@@ -18126,6 +18126,214 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn memory_search_biocortex_opt_in_wrapper_returns_experimental_order_when_authorized() {
+        use crate::{
+            BioCortexRetrievalOptInSearchOptions, BioCortexRetrievalOptInSideSignal,
+            BioCortexReturnedOrderSource, MemoryRecord,
+        };
+
+        let temp_dir = fidelity_temp_dir("biocortex_optin_order");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+        let secret_query = "synaptic plasticity";
+        let low_key = "low_imp_order_target_secret";
+        let high_key = "high_imp_baseline_secret";
+        let make = |key: &str, importance: f64, body: &str| MemoryRecord {
+            key: key.into(),
+            kind: "fact".into(),
+            content: body.into(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+
+        store
+            .memory_save(&make(
+                low_key,
+                0.10,
+                "synaptic plasticity iota kappa lambda mu nu xi omicron pi",
+            ))
+            .await
+            .expect("save low");
+        store
+            .memory_save(&make(
+                high_key,
+                0.95,
+                "synaptic plasticity alpha beta gamma delta epsilon zeta eta theta",
+            ))
+            .await
+            .expect("save high");
+
+        let outcome = store
+            .memory_search_biocortex_opt_in(
+                secret_query,
+                &[],
+                10,
+                BioCortexRetrievalOptInSearchOptions {
+                    per_call_opt_in: true,
+                    compile_feature_enabled: true,
+                    runtime_enabled: true,
+                    runtime_adapter_approved: true,
+                    ordering_behavior_connected: true,
+                    side_signal_scores: vec![
+                        BioCortexRetrievalOptInSideSignal {
+                            candidate_key: low_key.into(),
+                            score: 1.0,
+                        },
+                        BioCortexRetrievalOptInSideSignal {
+                            candidate_key: high_key.into(),
+                            score: -1.0,
+                        },
+                    ],
+                    side_signal_alpha: 0.8,
+                    side_signal_coverage_threshold: 1.0,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("opt-in search");
+
+        assert_eq!(outcome.baseline_hits.len(), 2);
+        assert_eq!(outcome.baseline_hits[0].record.key, high_key);
+        assert_eq!(outcome.returned_hits[0].record.key, low_key);
+        assert_eq!(
+            outcome.response_contract.returned_order_source,
+            BioCortexReturnedOrderSource::Experimental
+        );
+        assert!(!outcome.response_contract.baseline_returned);
+        assert!(outcome.response_contract.changes_memory_search_order);
+        assert!(outcome.response_contract.fallback_reason.is_none());
+        assert_eq!(outcome.side_signal_summary.row_count, 2);
+        assert_eq!(outcome.side_signal_summary.matched_candidate_count, 2);
+        assert_eq!(outcome.side_signal_summary.candidate_count, 2);
+        assert_eq!(outcome.side_signal_summary.coverage, 1.0);
+        assert!(outcome.side_signal_summary.available);
+        assert!(!outcome.side_signal_summary.raw_keys_included);
+        assert!(!outcome.side_signal_summary.content_included);
+
+        let audit = outcome.redacted_audit();
+        assert_eq!(audit.returned_hit_count, 2);
+        assert_eq!(
+            audit.returned_order_source,
+            BioCortexReturnedOrderSource::Experimental
+        );
+        assert!(audit.changes_memory_search_order);
+        assert!(audit.side_signal_summary.available);
+        let serialized = serde_json::to_string(&audit).expect("serialize audit");
+        assert!(!serialized.contains(secret_query), "audit leaked raw query");
+        assert!(!serialized.contains(low_key), "audit leaked raw low key");
+        assert!(!serialized.contains(high_key), "audit leaked raw high key");
+        assert!(
+            !serialized.contains("iota kappa"),
+            "audit leaked memory content"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_search_biocortex_opt_in_wrapper_fails_open_on_low_side_signal_coverage() {
+        use crate::{
+            BioCortexRetrievalOptInBlocker, BioCortexRetrievalOptInSearchOptions,
+            BioCortexRetrievalOptInSideSignal, BioCortexReturnedOrderSource, MemoryRecord,
+        };
+
+        let temp_dir = fidelity_temp_dir("biocortex_optin_low_coverage");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+        let low_key = "low_coverage_target_secret";
+        let high_key = "low_coverage_baseline_secret";
+        let make = |key: &str, importance: f64, body: &str| MemoryRecord {
+            key: key.into(),
+            kind: "fact".into(),
+            content: body.into(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+
+        store
+            .memory_save(&make(
+                low_key,
+                0.10,
+                "synaptic plasticity iota kappa lambda mu nu xi omicron pi",
+            ))
+            .await
+            .expect("save low");
+        store
+            .memory_save(&make(
+                high_key,
+                0.95,
+                "synaptic plasticity alpha beta gamma delta epsilon zeta eta theta",
+            ))
+            .await
+            .expect("save high");
+
+        let outcome = store
+            .memory_search_biocortex_opt_in(
+                "synaptic plasticity",
+                &[],
+                10,
+                BioCortexRetrievalOptInSearchOptions {
+                    per_call_opt_in: true,
+                    compile_feature_enabled: true,
+                    runtime_enabled: true,
+                    runtime_adapter_approved: true,
+                    ordering_behavior_connected: true,
+                    side_signal_scores: vec![BioCortexRetrievalOptInSideSignal {
+                        candidate_key: low_key.into(),
+                        score: 1.0,
+                    }],
+                    side_signal_alpha: 0.8,
+                    side_signal_coverage_threshold: 1.0,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("opt-in search");
+
+        assert_eq!(outcome.baseline_hits[0].record.key, high_key);
+        assert_eq!(outcome.returned_hits[0].record.key, high_key);
+        assert_eq!(
+            outcome.response_contract.returned_order_source,
+            BioCortexReturnedOrderSource::Baseline
+        );
+        assert!(outcome.response_contract.baseline_returned);
+        assert!(!outcome.response_contract.changes_memory_search_order);
+        assert_eq!(
+            outcome.response_contract.fallback_reason,
+            Some(BioCortexRetrievalOptInBlocker::SideSignalUnavailable)
+        );
+        assert_eq!(outcome.side_signal_summary.row_count, 1);
+        assert_eq!(outcome.side_signal_summary.matched_candidate_count, 1);
+        assert_eq!(outcome.side_signal_summary.candidate_count, 2);
+        assert_eq!(outcome.side_signal_summary.coverage, 0.5);
+        assert!(!outcome.side_signal_summary.available);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
     async fn signal_fidelity_touched_subset_excludes_zero_access() {
         // Mix: 2 rows with access > 0 (perfectly correlated) plus 1 with
         // access = 0. Overall r = +1.0 (touched-only also = +1.0 with n=2).

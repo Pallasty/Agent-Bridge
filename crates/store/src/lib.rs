@@ -520,7 +520,48 @@ pub struct BioCortexRetrievalOptInResponseContract {
     pub decision: BioCortexRetrievalOptInDecision,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BioCortexRetrievalOptInSideSignal {
+    pub candidate_key: String,
+    pub score: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BioCortexRetrievalOptInSideSignalSummary {
+    pub row_count: usize,
+    pub matched_candidate_count: usize,
+    pub candidate_count: usize,
+    pub coverage: f64,
+    pub coverage_threshold: f64,
+    pub blend_alpha: f32,
+    pub invalid_score_count: usize,
+    pub duplicate_candidate_count: usize,
+    pub available: bool,
+    pub raw_scores_included: bool,
+    pub raw_keys_included: bool,
+    pub content_included: bool,
+}
+
+impl BioCortexRetrievalOptInSideSignalSummary {
+    fn unavailable(candidate_count: usize, coverage_threshold: f64, blend_alpha: f32) -> Self {
+        Self {
+            row_count: 0,
+            matched_candidate_count: 0,
+            candidate_count,
+            coverage: if candidate_count == 0 { 1.0 } else { 0.0 },
+            coverage_threshold,
+            blend_alpha,
+            invalid_score_count: 0,
+            duplicate_candidate_count: 0,
+            available: false,
+            raw_scores_included: false,
+            raw_keys_included: false,
+            content_included: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BioCortexRetrievalOptInSearchOptions {
     #[serde(default = "default_biocortex_retrieval_mode")]
     pub mode: String,
@@ -536,6 +577,12 @@ pub struct BioCortexRetrievalOptInSearchOptions {
     pub runtime_adapter_approved: bool,
     #[serde(default)]
     pub ordering_behavior_connected: bool,
+    #[serde(default)]
+    pub side_signal_scores: Vec<BioCortexRetrievalOptInSideSignal>,
+    #[serde(default = "default_biocortex_side_signal_alpha")]
+    pub side_signal_alpha: f32,
+    #[serde(default = "default_biocortex_side_signal_coverage_threshold")]
+    pub side_signal_coverage_threshold: f64,
 }
 
 impl Default for BioCortexRetrievalOptInSearchOptions {
@@ -548,8 +595,130 @@ impl Default for BioCortexRetrievalOptInSearchOptions {
             operator_disabled: false,
             runtime_adapter_approved: false,
             ordering_behavior_connected: false,
+            side_signal_scores: Vec::new(),
+            side_signal_alpha: default_biocortex_side_signal_alpha(),
+            side_signal_coverage_threshold: default_biocortex_side_signal_coverage_threshold(),
         }
     }
+}
+
+fn default_biocortex_side_signal_alpha() -> f32 {
+    0.8
+}
+
+fn default_biocortex_side_signal_coverage_threshold() -> f64 {
+    0.8
+}
+
+fn biocortex_opt_in_apply_side_signal(
+    baseline_hits: &[MemorySearchHit],
+    side_signal_scores: &[BioCortexRetrievalOptInSideSignal],
+    side_signal_alpha: f32,
+    side_signal_coverage_threshold: f64,
+    gate_allows_ordering: bool,
+) -> (Vec<MemorySearchHit>, BioCortexRetrievalOptInSideSignalSummary, bool) {
+    let candidate_count = baseline_hits.len();
+    let alpha = if side_signal_alpha.is_finite() && side_signal_alpha >= 0.0 {
+        side_signal_alpha
+    } else {
+        default_biocortex_side_signal_alpha()
+    };
+    let coverage_threshold = if side_signal_coverage_threshold.is_finite()
+        && (0.0..=1.0).contains(&side_signal_coverage_threshold)
+    {
+        side_signal_coverage_threshold
+    } else {
+        default_biocortex_side_signal_coverage_threshold()
+    };
+
+    if side_signal_scores.is_empty() || candidate_count == 0 {
+        return (
+            baseline_hits.to_vec(),
+            BioCortexRetrievalOptInSideSignalSummary::unavailable(
+                candidate_count,
+                coverage_threshold,
+                alpha,
+            ),
+            false,
+        );
+    }
+
+    let mut matched_scores: Vec<(String, f32)> = Vec::new();
+    let mut invalid_score_count = 0usize;
+    let mut duplicate_candidate_count = 0usize;
+
+    for row in side_signal_scores {
+        if !row.score.is_finite() || !(-1.0..=1.0).contains(&row.score) {
+            invalid_score_count += 1;
+            continue;
+        }
+        if !baseline_hits
+            .iter()
+            .any(|hit| hit.record.key == row.candidate_key)
+        {
+            continue;
+        }
+        if matched_scores
+            .iter()
+            .any(|(key, _)| key == &row.candidate_key)
+        {
+            duplicate_candidate_count += 1;
+            continue;
+        }
+        matched_scores.push((row.candidate_key.clone(), row.score));
+    }
+
+    let coverage = matched_scores.len() as f64 / candidate_count.max(1) as f64;
+    let available =
+        invalid_score_count == 0 && coverage >= coverage_threshold && !matched_scores.is_empty();
+    let summary = BioCortexRetrievalOptInSideSignalSummary {
+        row_count: side_signal_scores.len(),
+        matched_candidate_count: matched_scores.len(),
+        candidate_count,
+        coverage,
+        coverage_threshold,
+        blend_alpha: alpha,
+        invalid_score_count,
+        duplicate_candidate_count,
+        available,
+        raw_scores_included: false,
+        raw_keys_included: false,
+        content_included: false,
+    };
+
+    if !(gate_allows_ordering && available) {
+        return (baseline_hits.to_vec(), summary, false);
+    }
+
+    let mut scored_hits = baseline_hits
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(idx, hit)| {
+            let side_score = matched_scores
+                .iter()
+                .find(|(key, _)| key == &hit.record.key)
+                .map(|(_, score)| *score)
+                .unwrap_or(0.0);
+            let blended = hit.score + f64::from(alpha * side_score);
+            (idx, blended, hit)
+        })
+        .collect::<Vec<_>>();
+
+    scored_hits.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.0.cmp(&b.0))
+    });
+
+    (
+        scored_hits
+            .into_iter()
+            .map(|(_, _, hit)| hit)
+            .collect::<Vec<_>>(),
+        summary,
+        true,
+    )
 }
 
 #[derive(Debug, Clone)]
@@ -557,6 +726,7 @@ pub struct BioCortexRetrievalOptInSearchOutcome {
     pub baseline_hits: Vec<MemorySearchHit>,
     pub returned_hits: Vec<MemorySearchHit>,
     pub response_contract: BioCortexRetrievalOptInResponseContract,
+    pub side_signal_summary: BioCortexRetrievalOptInSideSignalSummary,
 }
 
 impl BioCortexRetrievalOptInSearchOutcome {
@@ -572,6 +742,7 @@ impl BioCortexRetrievalOptInSearchOutcome {
             raw_query_included: false,
             raw_keys_included: false,
             content_included: false,
+            side_signal_summary: self.side_signal_summary.clone(),
             response_contract: self.response_contract.clone(),
         }
     }
@@ -589,6 +760,7 @@ pub struct BioCortexRetrievalOptInSearchAudit {
     pub raw_query_included: bool,
     pub raw_keys_included: bool,
     pub content_included: bool,
+    pub side_signal_summary: BioCortexRetrievalOptInSideSignalSummary,
     pub response_contract: BioCortexRetrievalOptInResponseContract,
 }
 
@@ -2075,10 +2247,11 @@ pub trait StateStore: Send + Sync {
 
     /// Protected BioCortex opt-in search surface.
     ///
-    /// The current implementation intentionally returns the baseline
-    /// `memory_search` order. This connects explicit per-call opt-in and the
-    /// store contract to the real search boundary without running BioCortex,
-    /// registering an embedding backend, or changing returned order.
+    /// Default calls still use baseline `memory_search`. This protected wrapper
+    /// can return an experimental order only when the caller supplies explicit
+    /// opt-in, runtime approval, an ordering connection flag, and sufficient
+    /// side-signal coverage. Every blocked or malformed side-signal path returns
+    /// the baseline list.
     async fn memory_search_biocortex_opt_in(
         &self,
         query: &str,
@@ -2087,7 +2260,10 @@ pub trait StateStore: Send + Sync {
         options: BioCortexRetrievalOptInSearchOptions,
     ) -> Result<BioCortexRetrievalOptInSearchOutcome> {
         let baseline_hits = self.memory_search(query, tags_any, limit).await?;
-        let response_contract = BioCortexRetrievalOptInRequest {
+        let side_signal_scores = options.side_signal_scores;
+        let side_signal_alpha = options.side_signal_alpha;
+        let side_signal_coverage_threshold = options.side_signal_coverage_threshold;
+        let decision = BioCortexRetrievalOptInRequest {
             mode: options.mode,
             per_call_opt_in: options.per_call_opt_in,
             compile_feature_enabled: options.compile_feature_enabled,
@@ -2098,13 +2274,22 @@ pub trait StateStore: Send + Sync {
             runtime_adapter_approved: options.runtime_adapter_approved,
             ordering_behavior_connected: options.ordering_behavior_connected,
         }
-        .evaluate()
-        .response_contract(false);
+        .evaluate();
+        let (returned_hits, side_signal_summary, experimental_order_available) =
+            biocortex_opt_in_apply_side_signal(
+                &baseline_hits,
+                &side_signal_scores,
+                side_signal_alpha,
+                side_signal_coverage_threshold,
+                decision.may_change_search_order,
+            );
+        let response_contract = decision.response_contract(experimental_order_available);
 
         Ok(BioCortexRetrievalOptInSearchOutcome {
-            returned_hits: baseline_hits.clone(),
+            returned_hits,
             baseline_hits,
             response_contract,
+            side_signal_summary,
         })
     }
 

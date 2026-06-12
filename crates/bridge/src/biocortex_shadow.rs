@@ -3368,6 +3368,7 @@ pub fn biocortex_retrieval_opt_in_authorization_decision_packet(
                     || status == "post_implementation_review_gate_implemented"
                     || status == "runtime_influence_review_request_implemented"
                     || status == "runtime_influence_decision_packet_implemented"
+                    || status == "store_opt_in_order_connection_implemented"
             })
             .unwrap_or(false);
 
@@ -3706,6 +3707,7 @@ pub fn biocortex_retrieval_opt_in_post_implementation_review_gate(
                 || status == "post_implementation_review_gate_implemented"
                 || status == "runtime_influence_review_request_implemented"
                 || status == "runtime_influence_decision_packet_implemented"
+                || status == "store_opt_in_order_connection_implemented"
         })
         .unwrap_or(false);
     let plan_implementation_allowed =
@@ -4048,6 +4050,7 @@ pub fn biocortex_retrieval_opt_in_post_implementation_review_gate(
             "post_implementation_review_gate_implemented": plan.get("post_implementation_review_gate_implemented").cloned().unwrap_or(Value::Null),
             "runtime_influence_review_request_implemented": plan.get("runtime_influence_review_request_implemented").cloned().unwrap_or(Value::Null),
             "runtime_influence_decision_packet_implemented": plan.get("runtime_influence_decision_packet_implemented").cloned().unwrap_or(Value::Null),
+            "store_opt_in_order_connection_implemented": plan.get("store_opt_in_order_connection_implemented").cloned().unwrap_or(Value::Null),
             "default_memory_search_unchanged": plan.get("default_memory_search_unchanged").cloned().unwrap_or(Value::Null),
             "runtime_adapter_approved": false,
             "default_search_order_change_allowed": false,

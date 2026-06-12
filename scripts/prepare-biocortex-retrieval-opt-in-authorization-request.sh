@@ -389,7 +389,7 @@ jq -e '
     and .writes_approval == false
     and .accepts_optional_order_diff_packet == true
     and .accepts_optional_redacted_order_artifact == true
-    and .opt_in_plan.status == "runtime_influence_decision_packet_implemented"
+    and .opt_in_plan.status == "store_opt_in_order_connection_implemented"
     and .opt_in_plan.approval_state == "opt_in_implementation_authorized"
     and .opt_in_plan.order_diff_packet_implemented == true
     and .opt_in_plan.authorization_request_order_diff_evidence_implemented == true
@@ -400,6 +400,9 @@ jq -e '
     and .opt_in_plan.post_implementation_review_gate_implemented == true
     and .opt_in_plan.runtime_influence_review_request_implemented == true
     and .opt_in_plan.runtime_influence_decision_packet_implemented == true
+    and .opt_in_plan.store_opt_in_order_connection_implemented == true
+    and .opt_in_plan.ordering_behavior_connected == false
+    and .opt_in_plan.explicit_opt_in_fts_ordering_behavior_connected == true
     and .opt_in_plan.implemented_gate_skeleton.ordering_behavior_connected == false
     and .opt_in_plan.implemented_gate_skeleton.may_change_search_order_now == false
     and .opt_in_plan.implemented_audit_shape.schema == "agent_bridge.biocortex_retrieval.opt_in_call_audit.v0"
@@ -438,6 +441,36 @@ jq -e '
     and .opt_in_plan.implemented_store_opt_in_search_wrapper.ordering_behavior_connected == false
     and .opt_in_plan.implemented_store_opt_in_search_wrapper.default_calls_unchanged == true
     and .opt_in_plan.implemented_store_opt_in_search_wrapper.may_implement_ordering_now == false
+    and .opt_in_plan.implemented_store_opt_in_order_connection.method == "StateStore::memory_search_biocortex_opt_in"
+    and .opt_in_plan.implemented_store_opt_in_order_connection.options_type == "BioCortexRetrievalOptInSearchOptions"
+    and .opt_in_plan.implemented_store_opt_in_order_connection.side_signal_type == "BioCortexRetrievalOptInSideSignal"
+    and .opt_in_plan.implemented_store_opt_in_order_connection.side_signal_summary_type == "BioCortexRetrievalOptInSideSignalSummary"
+    and .opt_in_plan.implemented_store_opt_in_order_connection.implementation_stage == "store_opt_in_order_connection"
+    and .opt_in_plan.implemented_store_opt_in_order_connection.authorized_scope == "explicit_opt_in_fts_runtime_influence"
+    and .opt_in_plan.implemented_store_opt_in_order_connection.authorized_mode == "fts"
+    and .opt_in_plan.implemented_store_opt_in_order_connection.requires_per_call_opt_in == true
+    and .opt_in_plan.implemented_store_opt_in_order_connection.requires_compile_feature_enabled == true
+    and .opt_in_plan.implemented_store_opt_in_order_connection.requires_runtime_enabled == true
+    and .opt_in_plan.implemented_store_opt_in_order_connection.requires_runtime_adapter_approved == true
+    and .opt_in_plan.implemented_store_opt_in_order_connection.requires_ordering_behavior_connected == true
+    and .opt_in_plan.implemented_store_opt_in_order_connection.requires_operator_disable_absent == true
+    and .opt_in_plan.implemented_store_opt_in_order_connection.requires_side_signal_coverage_threshold == true
+    and .opt_in_plan.implemented_store_opt_in_order_connection.default_side_signal_coverage_threshold == 0.8
+    and .opt_in_plan.implemented_store_opt_in_order_connection.default_blend_alpha == 0.8
+    and .opt_in_plan.implemented_store_opt_in_order_connection.returns_experimental_order_when_all_gates_pass == true
+    and .opt_in_plan.implemented_store_opt_in_order_connection.fallback_returns_baseline == true
+    and .opt_in_plan.implemented_store_opt_in_order_connection.baseline_candidate_recall_source == "memory_search"
+    and .opt_in_plan.implemented_store_opt_in_order_connection.side_signal_join_key == "candidate_key"
+    and .opt_in_plan.implemented_store_opt_in_order_connection.side_signal_scores_in_audit == false
+    and .opt_in_plan.implemented_store_opt_in_order_connection.raw_query_included_in_audit == false
+    and .opt_in_plan.implemented_store_opt_in_order_connection.raw_keys_included_in_audit == false
+    and .opt_in_plan.implemented_store_opt_in_order_connection.content_included_in_audit == false
+    and .opt_in_plan.implemented_store_opt_in_order_connection.runs_biocortex == false
+    and .opt_in_plan.implemented_store_opt_in_order_connection.registers_embedding_backend == false
+    and .opt_in_plan.implemented_store_opt_in_order_connection.default_memory_search_unchanged == true
+    and .opt_in_plan.implemented_store_opt_in_order_connection.hybrid_and_semantic_unchanged == true
+    and .opt_in_plan.implemented_store_opt_in_order_connection.default_search_order_change_allowed == false
+    and .opt_in_plan.implemented_store_opt_in_order_connection.explicit_opt_in_fts_ordering_behavior_connected == true
     and .opt_in_plan.implemented_authorization_decision_consumer.cli == "agent-bridge bio-cortex retrieval-opt-in-authorization-decision-packet"
     and .opt_in_plan.implemented_authorization_decision_consumer.mcp_tool == "biocortex_retrieval_opt_in_authorization_decision_packet"
     and .opt_in_plan.implemented_authorization_decision_consumer.schema == "agent_bridge.biocortex_retrieval.opt_in_authorization_decision_packet.v0"

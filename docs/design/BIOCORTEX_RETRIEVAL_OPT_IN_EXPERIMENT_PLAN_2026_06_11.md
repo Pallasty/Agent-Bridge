@@ -28,7 +28,10 @@ A read-only runtime-influence decision consumer now turns a separate human
 runtime review record into a machine-checkable implementation gate for explicit
 opt-in FTS runtime adapter/order-connection work only. The decision packet
 consumer still does not connect ordering behavior or change any returned order.
-Ordering behavior is not implemented and not approved.
+The store-level opt-in wrapper now connects an explicit opt-in FTS ordering path
+for caller-supplied side-signal rows only when runtime approval, ordering
+connection, feature/runtime/per-call gates, coverage, and kill-switch checks all
+pass. Default `memory_search`, hybrid, and semantic paths remain unchanged.
 
 ```json
 {
@@ -56,7 +59,9 @@ Ordering behavior is not implemented and not approved.
   "post_implementation_review_gate_implemented": true,
   "runtime_influence_review_request_implemented": true,
   "runtime_influence_decision_packet_implemented": true,
-  "ordering_behavior_connected": false
+  "store_opt_in_order_connection_implemented": true,
+  "ordering_behavior_connected": false,
+  "explicit_opt_in_fts_ordering_behavior_connected": true
 }
 ```
 
@@ -475,6 +480,28 @@ This packet is still not the ordering implementation. It makes the separate
 human runtime review machine-checkable, but a later implementation step must
 connect the adapter and return-order behavior behind the explicit opt-in gates
 and then pass post-connection verification.
+
+Slice 20 landed a store-level explicit opt-in FTS ordering connection:
+
+- method: `StateStore::memory_search_biocortex_opt_in`;
+- side-signal input type: `BioCortexRetrievalOptInSideSignal`;
+- redacted summary type: `BioCortexRetrievalOptInSideSignalSummary`;
+- requires `per_call_opt_in=true`, compile feature enabled, runtime enabled,
+  `runtime_adapter_approved=true`, `ordering_behavior_connected=true`, and the
+  operator disable env absent before any experimental order can be returned;
+- requires side-signal coverage to meet the configured threshold, default `0.8`;
+- uses baseline FTS `memory_search` as the only candidate recall source;
+- joins side-signal rows by candidate key, blends with the baseline score, and
+  returns the experimental order only for the protected wrapper call;
+- every missing, malformed, or low-coverage side-signal path fails open to the
+  baseline order;
+- the redacted audit includes counts, coverage, alpha, and availability only;
+  it does not include raw query text, raw memory keys, memory contents, or raw
+  side-signal rows.
+
+This connects ordering behavior only for the protected explicit opt-in FTS
+wrapper. Default `memory_search` calls, hybrid search, and semantic search remain
+unchanged, and default search order changes are still unauthorized.
 
 ## Fail-Open Rules
 
