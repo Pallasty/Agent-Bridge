@@ -580,6 +580,25 @@ Slice 23 added a controlled non-production order-movement fixture:
 - default `memory_search`, hybrid search, semantic search, approval state, and
   embedding backend registration remain unchanged.
 
+Slice 24 added a redacted post-runtime evidence summary:
+
+- CLI: `agent-bridge bio-cortex retrieval-opt-in-evidence-summary`;
+- packet schema:
+  `agent_bridge.biocortex_retrieval.opt_in_evidence_summary.v0`;
+- implementation stage: `post_runtime_evidence_summary`;
+- consumes a redacted batch diagnostics JSON and a redacted controlled order
+  fixture run JSON, but does not include either input body in the output;
+- reports schema checks, count summaries, raw-safety checks, controlled fixture
+  movement, and a review-state recommendation only;
+- separates runtime adapter connection/alignment evidence from controlled
+  non-production rank-movement evidence;
+- reports `recommended_next_step=expand_non_production_corpus` only when the
+  controlled movement and redaction checks pass;
+- never calls `memory_search`, runs BioCortex, writes approval state, registers
+  an embedding backend, or grants default retrieval influence;
+- default `memory_search`, hybrid search, semantic search, approval state, and
+  embedding backend registration remain unchanged.
+
 ## Fail-Open Rules
 
 The experiment must return the baseline list for:

@@ -552,6 +552,27 @@ jq -e '
     and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.registers_embedding_backend == false
     and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.default_search_order_change_allowed == false
     and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.default_calls_unchanged == true
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.cli == "agent-bridge bio-cortex retrieval-opt-in-evidence-summary"
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.schema == "agent_bridge.biocortex_retrieval.opt_in_evidence_summary.v0"
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.implementation_stage == "post_runtime_evidence_summary"
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.authorized_scope == "explicit_opt_in_fts_runtime_influence"
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.consumes_batch_diagnostics == true
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.consumes_controlled_order_fixture_run == true
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.batch_diagnostics_included == false
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.controlled_order_fixture_run_included == false
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.separates_batch_alignment_from_controlled_movement == true
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.can_recommend_expand_non_production_corpus == true
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.can_grant_runtime_influence == false
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.raw_queries_included == false
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.raw_keys_included == false
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.content_included == false
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.side_signal_raw_included == false
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.writes_approval == false
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.calls_memory_search == false
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.runs_biocortex == false
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.registers_embedding_backend == false
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.default_search_order_change_allowed == false
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.default_calls_unchanged == true
     and .opt_in_plan.implemented_authorization_decision_consumer.cli == "agent-bridge bio-cortex retrieval-opt-in-authorization-decision-packet"
     and .opt_in_plan.implemented_authorization_decision_consumer.mcp_tool == "biocortex_retrieval_opt_in_authorization_decision_packet"
     and .opt_in_plan.implemented_authorization_decision_consumer.schema == "agent_bridge.biocortex_retrieval.opt_in_authorization_decision_packet.v0"

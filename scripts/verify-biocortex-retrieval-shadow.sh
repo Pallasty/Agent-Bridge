@@ -314,6 +314,27 @@ jq -e '
     and .implemented_store_opt_in_controlled_order_fixture.registers_embedding_backend == false
     and .implemented_store_opt_in_controlled_order_fixture.default_search_order_change_allowed == false
     and .implemented_store_opt_in_controlled_order_fixture.default_calls_unchanged == true
+    and .implemented_store_opt_in_evidence_summary.cli == "agent-bridge bio-cortex retrieval-opt-in-evidence-summary"
+    and .implemented_store_opt_in_evidence_summary.schema == "agent_bridge.biocortex_retrieval.opt_in_evidence_summary.v0"
+    and .implemented_store_opt_in_evidence_summary.implementation_stage == "post_runtime_evidence_summary"
+    and .implemented_store_opt_in_evidence_summary.authorized_scope == "explicit_opt_in_fts_runtime_influence"
+    and .implemented_store_opt_in_evidence_summary.consumes_batch_diagnostics == true
+    and .implemented_store_opt_in_evidence_summary.consumes_controlled_order_fixture_run == true
+    and .implemented_store_opt_in_evidence_summary.batch_diagnostics_included == false
+    and .implemented_store_opt_in_evidence_summary.controlled_order_fixture_run_included == false
+    and .implemented_store_opt_in_evidence_summary.separates_batch_alignment_from_controlled_movement == true
+    and .implemented_store_opt_in_evidence_summary.can_recommend_expand_non_production_corpus == true
+    and .implemented_store_opt_in_evidence_summary.can_grant_runtime_influence == false
+    and .implemented_store_opt_in_evidence_summary.raw_queries_included == false
+    and .implemented_store_opt_in_evidence_summary.raw_keys_included == false
+    and .implemented_store_opt_in_evidence_summary.content_included == false
+    and .implemented_store_opt_in_evidence_summary.side_signal_raw_included == false
+    and .implemented_store_opt_in_evidence_summary.writes_approval == false
+    and .implemented_store_opt_in_evidence_summary.calls_memory_search == false
+    and .implemented_store_opt_in_evidence_summary.runs_biocortex == false
+    and .implemented_store_opt_in_evidence_summary.registers_embedding_backend == false
+    and .implemented_store_opt_in_evidence_summary.default_search_order_change_allowed == false
+    and .implemented_store_opt_in_evidence_summary.default_calls_unchanged == true
     and .implemented_authorization_decision_consumer.cli == "agent-bridge bio-cortex retrieval-opt-in-authorization-decision-packet"
     and .implemented_authorization_decision_consumer.mcp_tool == "biocortex_retrieval_opt_in_authorization_decision_packet"
     and .implemented_authorization_decision_consumer.schema == "agent_bridge.biocortex_retrieval.opt_in_authorization_decision_packet.v0"
@@ -1719,6 +1740,27 @@ jq -e '
     and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.registers_embedding_backend == false
     and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.default_search_order_change_allowed == false
     and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.default_calls_unchanged == true
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.cli == "agent-bridge bio-cortex retrieval-opt-in-evidence-summary"
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.schema == "agent_bridge.biocortex_retrieval.opt_in_evidence_summary.v0"
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.implementation_stage == "post_runtime_evidence_summary"
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.authorized_scope == "explicit_opt_in_fts_runtime_influence"
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.consumes_batch_diagnostics == true
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.consumes_controlled_order_fixture_run == true
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.batch_diagnostics_included == false
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.controlled_order_fixture_run_included == false
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.separates_batch_alignment_from_controlled_movement == true
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.can_recommend_expand_non_production_corpus == true
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.can_grant_runtime_influence == false
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.raw_queries_included == false
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.raw_keys_included == false
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.content_included == false
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.side_signal_raw_included == false
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.writes_approval == false
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.calls_memory_search == false
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.runs_biocortex == false
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.registers_embedding_backend == false
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.default_search_order_change_allowed == false
+    and .opt_in_plan.implemented_store_opt_in_evidence_summary.default_calls_unchanged == true
     and .opt_in_plan.implemented_authorization_decision_consumer.cli == "agent-bridge bio-cortex retrieval-opt-in-authorization-decision-packet"
     and .opt_in_plan.implemented_authorization_decision_consumer.mcp_tool == "biocortex_retrieval_opt_in_authorization_decision_packet"
     and .opt_in_plan.implemented_authorization_decision_consumer.schema == "agent_bridge.biocortex_retrieval.opt_in_authorization_decision_packet.v0"
@@ -2810,6 +2852,78 @@ jq -e '
 ' "$opt_in_controlled_order" >/dev/null
 if grep -q 'cortexdelta\|cortexepsilon\|cortexzeta\|cortexeta\|cortextheta\|cortexiota\|controlled_order_baseline_high\|controlled_order_biocortex_target\|target anchor\|baseline anchor' "$opt_in_controlled_order"; then
     echo "opt-in controlled order fixture leaked raw query/key/content data" >&2
+    exit 1
+fi
+
+opt_in_evidence_summary="$tmpdir/opt-in-evidence-summary.json"
+run cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
+    bio-cortex retrieval-opt-in-evidence-summary \
+    --batch-diagnostics-json "$opt_in_batch_diagnostics_empty" \
+    --controlled-order-fixture-run-json "$opt_in_controlled_order" \
+    --reviewer verify-bundle \
+    --commit verify-dry-run-commit \
+    --forum-post-id verify-forum-post \
+    --memory-key verify-memory-key \
+    --json > "$opt_in_evidence_summary"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_evidence_summary.v0"
+    and .read_only == true
+    and .evidence_summary == true
+    and .implementation_stage == "post_runtime_evidence_summary"
+    and .authorization_scope == "explicit_opt_in_fts_runtime_influence"
+    and .input_contract.batch_diagnostics_schema == "agent_bridge.biocortex_retrieval.opt_in_batch_diagnostics.v0"
+    and .input_contract.controlled_order_fixture_run_schema == "agent_bridge.biocortex_retrieval.opt_in_controlled_order_fixture_run.v0"
+    and .input_contract.batch_diagnostics_included == false
+    and .input_contract.controlled_order_fixture_run_included == false
+    and .input_contract.raw_queries_included == false
+    and .input_contract.raw_keys_included == false
+    and .input_contract.content_included == false
+    and .input_contract.side_signal_raw_included == false
+    and .batch_diagnostics.schema_ok == true
+    and .batch_diagnostics.query_count == 6
+    and .batch_diagnostics.baseline_completed_count == 6
+    and .batch_diagnostics.baseline_empty_count == 6
+    and .batch_diagnostics.adapter_allowed_count == 0
+    and .batch_diagnostics.actual_order_changed_count == 0
+    and .batch_diagnostics.raw_flags_all_false == true
+    and .batch_diagnostics.movement_observed == false
+    and .batch_diagnostics.diagnostic_class == "preflight_or_baseline_empty"
+    and .controlled_order.schema_ok == true
+    and .controlled_order.expected_met == true
+    and .controlled_order.seeded_memory_count == 2
+    and .controlled_order.query_count == 1
+    and .controlled_order.adapter_allowed_count == 1
+    and .controlled_order.side_signal_ok_count == 1
+    and .controlled_order.experimental_source_count == 1
+    and .controlled_order.actual_order_changed_count == 1
+    and .controlled_order.raw_flags_all_false == true
+    and .controlled_order.movement_observed == true
+    and .interpretation.batch_diagnostics_raw_safe == true
+    and .interpretation.controlled_order_raw_safe == true
+    and .interpretation.runtime_adapter_connection_evidence == true
+    and .interpretation.batch_alignment_or_preflight_evidence == true
+    and .interpretation.controlled_rank_movement_observed == true
+    and .interpretation.evidence_ready == true
+    and .interpretation.default_influence_ready == false
+    and .interpretation.recommended_next_step == "expand_non_production_corpus"
+    and .interpretation.review_state == "post_runtime_evidence_ready"
+    and .approval_state == "evidence_summary_only"
+    and .authorization_state == "does_not_grant_runtime_influence"
+    and .approval_writes_allowed == false
+    and .writes_approval == false
+    and .calls_memory_search == false
+    and .runs_biocortex == false
+    and .registers_embedding_backend == false
+    and .changes_memory_search_order == false
+    and .default_search_order_change_allowed == false
+    and .default_calls_unchanged == true
+    and .raw_queries_included == false
+    and .raw_keys_included == false
+    and .content_included == false
+    and .side_signal_raw_included == false
+' "$opt_in_evidence_summary" >/dev/null
+if grep -q 'cortexdelta\|cortexepsilon\|cortexzeta\|cortexeta\|cortextheta\|cortexiota\|controlled_order_baseline_high\|controlled_order_biocortex_target\|target anchor\|baseline anchor\|biocortex opt-in runtime adapter\|runtime influence decision packet\|memory search baseline recall\|redacted order artifact movement\|agent bridge mcp tool registry\|agent bridge mcp\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_evidence_summary"; then
+    echo "opt-in evidence summary leaked raw query/key/content data" >&2
     exit 1
 fi
 test -s "$opt_in_auth_request/forum-post-template.md"
