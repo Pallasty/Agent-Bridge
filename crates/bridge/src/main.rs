@@ -3011,6 +3011,35 @@ enum BioCortexOp {
         #[arg(long)]
         json: bool,
     },
+    /// Aggregate redacted movement and expanded coverage evidence.
+    ///
+    /// This consumes two redacted controlled fixture runs: one canonical
+    /// movement run and one expanded coverage/alignment run. It reports only
+    /// schema/count/safety conclusions, and never calls `memory_search`, runs
+    /// BioCortex, writes approval state, or changes retrieval order.
+    RetrievalOptInRedactedEvidenceAggregate {
+        /// JSON file produced by retrieval-opt-in-controlled-order-fixture that demonstrates movement.
+        #[arg(long = "movement-fixture-run-json")]
+        movement_fixture_run_json: PathBuf,
+        /// JSON file produced by retrieval-opt-in-controlled-order-fixture that demonstrates expanded coverage.
+        #[arg(long = "coverage-fixture-run-json")]
+        coverage_fixture_run_json: PathBuf,
+        /// Reviewer identity or handle.
+        #[arg(long)]
+        reviewer: Option<String>,
+        /// Implementation commit under review.
+        #[arg(long)]
+        commit: Option<String>,
+        /// Forum post id linking the aggregate.
+        #[arg(long)]
+        forum_post_id: Option<String>,
+        /// Memory key linking the aggregate.
+        #[arg(long)]
+        memory_key: Option<String>,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
     /// Preview the future runtime approval packet without approving anything.
     ///
     /// This is a review-preparation packet only. It never runs BioCortex,
@@ -5159,6 +5188,23 @@ async fn real_main() -> Result<()> {
             } => run_biocortex_retrieval_opt_in_evidence_summary(
                 batch_diagnostics_json,
                 controlled_order_fixture_run_json,
+                reviewer.clone(),
+                commit.clone(),
+                forum_post_id.clone(),
+                memory_key.clone(),
+                *json,
+            ),
+            BioCortexOp::RetrievalOptInRedactedEvidenceAggregate {
+                movement_fixture_run_json,
+                coverage_fixture_run_json,
+                reviewer,
+                commit,
+                forum_post_id,
+                memory_key,
+                json,
+            } => run_biocortex_retrieval_opt_in_redacted_evidence_aggregate(
+                movement_fixture_run_json,
+                coverage_fixture_run_json,
                 reviewer.clone(),
                 commit.clone(),
                 forum_post_id.clone(),
@@ -9984,6 +10030,8 @@ const BIOCORTEX_RETRIEVAL_OPT_IN_BATCH_DIAGNOSTICS_SCHEMA: &str =
     "agent_bridge.biocortex_retrieval.opt_in_batch_diagnostics.v0";
 const BIOCORTEX_RETRIEVAL_OPT_IN_EVIDENCE_SUMMARY_SCHEMA: &str =
     "agent_bridge.biocortex_retrieval.opt_in_evidence_summary.v0";
+const BIOCORTEX_RETRIEVAL_OPT_IN_REDACTED_EVIDENCE_AGGREGATE_SCHEMA: &str =
+    "agent_bridge.biocortex_retrieval.opt_in_redacted_evidence_aggregate.v0";
 const BIOCORTEX_RETRIEVAL_OPT_IN_CONTROLLED_ORDER_FIXTURE_RUN_SCHEMA: &str =
     "agent_bridge.biocortex_retrieval.opt_in_controlled_order_fixture_run.v0";
 const BIOCORTEX_RETRIEVAL_OPT_IN_CONTROLLED_ORDER_FIXTURE_SCHEMA: &str =
@@ -10411,6 +10459,226 @@ fn run_biocortex_retrieval_opt_in_evidence_summary(
         controlled_raw_flags_all_false
     );
     Ok(())
+}
+
+fn run_biocortex_retrieval_opt_in_redacted_evidence_aggregate(
+    movement_fixture_run_json: &std::path::Path,
+    coverage_fixture_run_json: &std::path::Path,
+    reviewer: Option<String>,
+    commit: Option<String>,
+    forum_post_id: Option<String>,
+    memory_key: Option<String>,
+    as_json: bool,
+) -> Result<()> {
+    let movement = load_biocortex_redacted_json(
+        movement_fixture_run_json,
+        "opt-in movement fixture run JSON",
+    )?;
+    let coverage = load_biocortex_redacted_json(
+        coverage_fixture_run_json,
+        "opt-in coverage fixture run JSON",
+    )?;
+    let movement_summary = summarize_biocortex_redacted_fixture_run(&movement);
+    let coverage_summary = summarize_biocortex_redacted_fixture_run(&coverage);
+
+    let movement_ready = movement_summary.movement_observed && movement_summary.raw_flags_all_false;
+    let coverage_ready =
+        coverage_summary.expanded_coverage_observed && coverage_summary.raw_flags_all_false;
+    let aggregate_ready = movement_ready && coverage_ready;
+    let runtime_adapter_connection_evidence = movement_summary.adapter_allowed_count > 0
+        || coverage_summary.adapter_allowed_count > 0
+        || movement_summary.side_signal_ok_count > 0
+        || coverage_summary.side_signal_ok_count > 0;
+    let recommended_next_step = if aggregate_ready {
+        "prepare_human_runtime_influence_review_request"
+    } else {
+        "collect_missing_redacted_evidence"
+    };
+    let review_state = if aggregate_ready {
+        "redacted_aggregate_ready"
+    } else {
+        "redacted_aggregate_incomplete"
+    };
+
+    let payload = json!({
+        "schema": BIOCORTEX_RETRIEVAL_OPT_IN_REDACTED_EVIDENCE_AGGREGATE_SCHEMA,
+        "read_only": true,
+        "redacted_evidence_aggregate": true,
+        "implementation_stage": "post_runtime_redacted_evidence_aggregate",
+        "authorization_scope": "explicit_opt_in_fts_runtime_influence",
+        "purpose": "Aggregate redacted controlled rank-movement evidence and expanded adapter-coverage evidence without copying raw inputs or granting runtime/default retrieval approval.",
+        "status": "completed",
+        "reviewer": optional_string_json(reviewer),
+        "commit": optional_string_json(commit),
+        "forum_post_id": optional_string_json(forum_post_id),
+        "memory_key": optional_string_json(memory_key),
+        "input_contract": {
+            "movement_fixture_run_schema": movement.get("schema").cloned().unwrap_or(Value::Null),
+            "coverage_fixture_run_schema": coverage.get("schema").cloned().unwrap_or(Value::Null),
+            "movement_fixture_run_included": false,
+            "coverage_fixture_run_included": false,
+            "unknown_fields_ignored": true,
+            "raw_queries_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "side_signal_raw_included": false,
+        },
+        "movement_evidence": redacted_fixture_run_evidence_json(&movement_summary),
+        "coverage_evidence": redacted_fixture_run_evidence_json(&coverage_summary),
+        "interpretation": {
+            "movement_redacted_evidence_ready": movement_ready,
+            "expanded_coverage_redacted_evidence_ready": coverage_ready,
+            "runtime_adapter_connection_evidence": runtime_adapter_connection_evidence,
+            "controlled_rank_movement_observed": movement_summary.movement_observed,
+            "expanded_coverage_without_additional_movement": coverage_summary.expanded_coverage_observed,
+            "aggregate_evidence_ready": aggregate_ready,
+            "default_influence_ready": false,
+            "human_review_required": true,
+            "why_not_default": "aggregate is explicit-opt-in review evidence only; fixture runs are non-production; default memory_search remains unchanged",
+            "recommended_next_step": recommended_next_step,
+            "review_state": review_state,
+        },
+        "approval_state": "evidence_aggregate_only",
+        "authorization_state": "does_not_grant_runtime_influence",
+        "approval_writes_allowed": false,
+        "writes_approval": false,
+        "calls_memory_search": false,
+        "runs_biocortex": false,
+        "registers_embedding_backend": false,
+        "changes_memory_search_order": false,
+        "default_search_order_change_allowed": false,
+        "default_calls_unchanged": true,
+        "raw_queries_included": false,
+        "raw_keys_included": false,
+        "content_included": false,
+        "side_signal_raw_included": false,
+    });
+
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# BioCortex retrieval opt-in redacted evidence aggregate");
+    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
+    println!(
+        "review_state={} aggregate_ready={} default_influence_ready={}",
+        shadow_json_display(payload.pointer("/interpretation/review_state"), "-"),
+        shadow_json_display(
+            payload.pointer("/interpretation/aggregate_evidence_ready"),
+            "false"
+        ),
+        shadow_json_display(
+            payload.pointer("/interpretation/default_influence_ready"),
+            "false"
+        )
+    );
+    println!(
+        "movement_moved={} coverage_queries={} coverage_experimental={} coverage_moved={}",
+        movement_summary.actual_order_changed_count,
+        coverage_summary.query_count,
+        coverage_summary.experimental_source_count,
+        coverage_summary.actual_order_changed_count
+    );
+    println!(
+        "recommended_next_step={} raw_flags movement={} coverage={}",
+        shadow_json_display(
+            payload.pointer("/interpretation/recommended_next_step"),
+            "-"
+        ),
+        movement_summary.raw_flags_all_false,
+        coverage_summary.raw_flags_all_false
+    );
+    Ok(())
+}
+
+#[derive(Debug, Clone)]
+struct BioCortexRedactedFixtureRunEvidence {
+    schema_ok: bool,
+    expected_met: bool,
+    seeded_memory_count: u64,
+    query_count: u64,
+    adapter_allowed_count: u64,
+    side_signal_ok_count: u64,
+    experimental_source_count: u64,
+    actual_order_changed_count: u64,
+    hash_matches_baseline_count: u64,
+    raw_flags_all_false: bool,
+    movement_observed: bool,
+    expanded_coverage_observed: bool,
+}
+
+fn summarize_biocortex_redacted_fixture_run(value: &Value) -> BioCortexRedactedFixtureRunEvidence {
+    let summary = value
+        .pointer("/diagnostics/summary")
+        .unwrap_or(&Value::Null);
+    let schema_ok = evidence_json_str_eq(
+        value.get("schema"),
+        BIOCORTEX_RETRIEVAL_OPT_IN_CONTROLLED_ORDER_FIXTURE_RUN_SCHEMA,
+    );
+    let expected_met = evidence_json_bool_is(value.pointer("/expected/met"), true);
+    let query_count = evidence_json_u64(summary.get("query_count"));
+    let adapter_allowed_count = evidence_json_u64(summary.get("adapter_allowed_count"));
+    let side_signal_ok_count = evidence_json_u64(summary.get("side_signal_ok_count"));
+    let experimental_source_count = evidence_json_u64(summary.get("experimental_source_count"));
+    let actual_order_changed_count = evidence_json_u64(summary.get("actual_order_changed_count"));
+    let hash_matches_baseline_count = evidence_json_u64(summary.get("hash_matches_baseline_count"));
+    let raw_flags_all_false = evidence_json_bool_is(
+        value.pointer("/diagnostics/safety/raw_flags_all_false"),
+        true,
+    ) && evidence_json_bool_is(value.get("raw_queries_included"), false)
+        && evidence_json_bool_is(value.get("raw_keys_included"), false)
+        && evidence_json_bool_is(value.get("content_included"), false)
+        && evidence_json_bool_is(value.get("side_signal_raw_included"), false)
+        && evidence_json_bool_is(
+            value.pointer("/fixture_contract/raw_queries_included"),
+            false,
+        )
+        && evidence_json_bool_is(value.pointer("/fixture_contract/raw_keys_included"), false)
+        && evidence_json_bool_is(value.pointer("/fixture_contract/content_included"), false)
+        && evidence_json_bool_is(
+            value.pointer("/fixture_contract/side_signal_raw_included"),
+            false,
+        );
+    let movement_observed = schema_ok && expected_met && actual_order_changed_count > 0;
+    let expanded_coverage_observed = schema_ok
+        && expected_met
+        && query_count >= 5
+        && adapter_allowed_count == query_count
+        && side_signal_ok_count == query_count
+        && experimental_source_count == query_count
+        && actual_order_changed_count == 0;
+    BioCortexRedactedFixtureRunEvidence {
+        schema_ok,
+        expected_met,
+        seeded_memory_count: evidence_json_u64(value.pointer("/attempt/seeded_memory_count")),
+        query_count,
+        adapter_allowed_count,
+        side_signal_ok_count,
+        experimental_source_count,
+        actual_order_changed_count,
+        hash_matches_baseline_count,
+        raw_flags_all_false,
+        movement_observed,
+        expanded_coverage_observed,
+    }
+}
+
+fn redacted_fixture_run_evidence_json(summary: &BioCortexRedactedFixtureRunEvidence) -> Value {
+    json!({
+        "schema_ok": summary.schema_ok,
+        "expected_met": summary.expected_met,
+        "seeded_memory_count": summary.seeded_memory_count,
+        "query_count": summary.query_count,
+        "adapter_allowed_count": summary.adapter_allowed_count,
+        "side_signal_ok_count": summary.side_signal_ok_count,
+        "experimental_source_count": summary.experimental_source_count,
+        "actual_order_changed_count": summary.actual_order_changed_count,
+        "hash_matches_baseline_count": summary.hash_matches_baseline_count,
+        "raw_flags_all_false": summary.raw_flags_all_false,
+        "movement_observed": summary.movement_observed,
+        "expanded_coverage_observed": summary.expanded_coverage_observed,
+    })
 }
 
 fn load_biocortex_redacted_json(path: &std::path::Path, label: &str) -> Result<Value> {

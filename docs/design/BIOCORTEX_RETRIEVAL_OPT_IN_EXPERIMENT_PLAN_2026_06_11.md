@@ -621,6 +621,26 @@ Slice 25 added an expanded non-production adapter-coverage fixture:
 - default `memory_search`, hybrid search, semantic search, approval state, and
   embedding backend registration remain unchanged.
 
+Slice 26 added a redacted evidence aggregate:
+
+- CLI:
+  `agent-bridge bio-cortex retrieval-opt-in-redacted-evidence-aggregate`;
+- packet schema:
+  `agent_bridge.biocortex_retrieval.opt_in_redacted_evidence_aggregate.v0`;
+- implementation stage: `post_runtime_redacted_evidence_aggregate`;
+- consumes two redacted controlled fixture run JSON files: the Slice 23
+  canonical movement run and the Slice 25 expanded adapter-coverage run;
+- does not include either input body in the output, only schema/count/safety
+  summaries and an interpretation block;
+- reports aggregate readiness only when controlled rank movement is observed
+  and expanded coverage is observed without additional returned-order movement;
+- reports `recommended_next_step=prepare_human_runtime_influence_review_request`
+  only when the aggregate is ready;
+- never calls `memory_search`, runs BioCortex, writes approval state, registers
+  an embedding backend, or grants default retrieval influence;
+- default `memory_search`, hybrid search, semantic search, approval state, and
+  embedding backend registration remain unchanged.
+
 ## Fail-Open Rules
 
 The experiment must return the baseline list for:
