@@ -534,6 +534,24 @@ jq -e '
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.default_memory_search_unchanged == true
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.default_search_order_change_allowed == false
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.default_calls_unchanged == true
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.cli == "agent-bridge bio-cortex retrieval-opt-in-controlled-order-fixture"
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.fixture == "docs/design/fixtures/biocortex-retrieval-opt-in-controlled-order-fixture-2026-06-12.json"
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.schema == "agent_bridge.biocortex_retrieval.opt_in_controlled_order_fixture_run.v0"
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.implementation_stage == "store_opt_in_controlled_order_fixture"
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.authorized_scope == "explicit_opt_in_fts_runtime_influence"
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.requires_agent_bridge_db_override == true
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.requires_non_production_store_write_ack == true
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.writes_only_fixture_memories == true
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.reuses_store_trial_gate == true
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.proves_actual_order_movement == true
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.raw_queries_included == false
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.raw_keys_included == false
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.content_included == false
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.side_signal_raw_included == false
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.writes_approval == false
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.registers_embedding_backend == false
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.default_search_order_change_allowed == false
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.default_calls_unchanged == true
     and .opt_in_plan.implemented_authorization_decision_consumer.cli == "agent-bridge bio-cortex retrieval-opt-in-authorization-decision-packet"
     and .opt_in_plan.implemented_authorization_decision_consumer.mcp_tool == "biocortex_retrieval_opt_in_authorization_decision_packet"
     and .opt_in_plan.implemented_authorization_decision_consumer.schema == "agent_bridge.biocortex_retrieval.opt_in_authorization_decision_packet.v0"

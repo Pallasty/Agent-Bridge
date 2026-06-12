@@ -2931,6 +2931,57 @@ enum BioCortexOp {
         #[arg(long)]
         json: bool,
     },
+    /// Seed a non-production store fixture and run redacted batch diagnostics.
+    ///
+    /// This is a controlled order-movement probe. It requires an explicit
+    /// non-production store write flag and AGENT_BRIDGE_DB override, writes only
+    /// fixture memories into that store, then runs the existing protected batch
+    /// diagnostics surface. Output remains redacted.
+    RetrievalOptInControlledOrderFixture {
+        /// JSON file produced by retrieval-opt-in-runtime-influence-decision-packet.
+        #[arg(long = "runtime-influence-decision-packet-json")]
+        runtime_influence_decision_packet_json: PathBuf,
+        /// Controlled fixture JSON containing memory_records and query_cases.
+        #[arg(long = "fixture-json")]
+        fixture_json: PathBuf,
+        /// Required acknowledgement that the selected AGENT_BRIDGE_DB is non-production.
+        #[arg(long)]
+        allow_non_production_store_writes: bool,
+        /// Optional tag filter forwarded to baseline memory_search. May be repeated.
+        #[arg(long = "tag")]
+        tags_any: Vec<String>,
+        /// Maximum baseline candidates to retrieve from store memory_search.
+        #[arg(long, default_value_t = 10)]
+        limit: u32,
+        /// Retrieval mode under review. Only fts is authorized for runtime influence.
+        #[arg(long, default_value = "fts")]
+        mode: String,
+        /// Required explicit per-call opt-in bit.
+        #[arg(long)]
+        per_call_opt_in: bool,
+        /// Local biocortex-rs checkout. Defaults to AB_BIOCORTEX_RS, sibling
+        /// checkout paths, then /tmp/biocortex-rs-ab-eval.
+        #[arg(long)]
+        checkout: Option<PathBuf>,
+        /// External side-signal adapter timeout in milliseconds, per query.
+        #[arg(long, default_value_t = 120_000)]
+        timeout_ms: u64,
+        /// Minimum matched side-signal coverage before experimental order is allowed.
+        #[arg(long, default_value_t = 0.8)]
+        coverage_threshold: f64,
+        /// Blend weight passed to the protected store wrapper.
+        #[arg(long, default_value_t = 0.8)]
+        blend_alpha: f32,
+        /// Optional controlled fixture attempt id for audit correlation.
+        #[arg(long)]
+        attempt_id: Option<String>,
+        /// Implementation commit under review.
+        #[arg(long)]
+        commit: Option<String>,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
     /// Preview the future runtime approval packet without approving anything.
     ///
     /// This is a review-preparation packet only. It never runs BioCortex,
@@ -5015,6 +5066,44 @@ async fn real_main() -> Result<()> {
                     BioCortexRetrievalOptInBatchDiagnosticsOptions {
                         runtime_influence_decision_packet: Value::Null,
                         queries: query_cases,
+                        tags_any: tags_any.clone(),
+                        limit: *limit,
+                        mode: mode.clone(),
+                        per_call_opt_in: *per_call_opt_in,
+                        checkout: checkout.clone(),
+                        timeout_ms: *timeout_ms,
+                        coverage_threshold: *coverage_threshold,
+                        blend_alpha: *blend_alpha,
+                        attempt_id: attempt_id.clone(),
+                        commit: commit.clone(),
+                    },
+                    *json,
+                )
+                .await
+            }
+            BioCortexOp::RetrievalOptInControlledOrderFixture {
+                runtime_influence_decision_packet_json,
+                fixture_json,
+                allow_non_production_store_writes,
+                tags_any,
+                limit,
+                mode,
+                per_call_opt_in,
+                checkout,
+                timeout_ms,
+                coverage_threshold,
+                blend_alpha,
+                attempt_id,
+                commit,
+                json,
+            } => {
+                run_biocortex_retrieval_opt_in_controlled_order_fixture(
+                    runtime_influence_decision_packet_json,
+                    fixture_json,
+                    *allow_non_production_store_writes,
+                    BioCortexRetrievalOptInBatchDiagnosticsOptions {
+                        runtime_influence_decision_packet: Value::Null,
+                        queries: Vec::new(),
                         tags_any: tags_any.clone(),
                         limit: *limit,
                         mode: mode.clone(),
@@ -9843,6 +9932,267 @@ async fn run_biocortex_retrieval_opt_in_batch_diagnostics(
         }
     }
     Ok(())
+}
+
+const BIOCORTEX_RETRIEVAL_OPT_IN_CONTROLLED_ORDER_FIXTURE_RUN_SCHEMA: &str =
+    "agent_bridge.biocortex_retrieval.opt_in_controlled_order_fixture_run.v0";
+const BIOCORTEX_RETRIEVAL_OPT_IN_CONTROLLED_ORDER_FIXTURE_SCHEMA: &str =
+    "agent_bridge.biocortex_retrieval.opt_in_controlled_order_fixture.v0";
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct BioCortexControlledOrderFixture {
+    #[serde(default)]
+    schema: Option<String>,
+    memory_records: Vec<BioCortexControlledOrderMemoryRecord>,
+    query_cases: Vec<BioCortexControlledOrderQueryCase>,
+    #[serde(default)]
+    expected: BioCortexControlledOrderExpected,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct BioCortexControlledOrderMemoryRecord {
+    key: String,
+    content: String,
+    #[serde(default)]
+    kind: Option<String>,
+    #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default)]
+    related_keys: Vec<String>,
+    #[serde(default)]
+    scope: Option<String>,
+    #[serde(default)]
+    importance: Option<f64>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct BioCortexControlledOrderQueryCase {
+    query: String,
+    #[serde(default)]
+    class_label: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+struct BioCortexControlledOrderExpected {
+    #[serde(default)]
+    min_actual_order_changed_count: Option<u64>,
+    #[serde(default)]
+    min_experimental_source_count: Option<u64>,
+    #[serde(default)]
+    min_side_signal_ok_count: Option<u64>,
+}
+
+async fn run_biocortex_retrieval_opt_in_controlled_order_fixture(
+    runtime_influence_decision_packet_json: &std::path::Path,
+    fixture_json: &std::path::Path,
+    allow_non_production_store_writes: bool,
+    mut opts: BioCortexRetrievalOptInBatchDiagnosticsOptions,
+    as_json: bool,
+) -> Result<()> {
+    if !allow_non_production_store_writes {
+        return Err(anyhow::anyhow!(
+            "controlled order fixture requires --allow-non-production-store-writes"
+        ));
+    }
+
+    let db_path = controlled_fixture_db_path()?;
+    let packet_body = std::fs::read_to_string(runtime_influence_decision_packet_json).map_err(|e| {
+        anyhow::anyhow!(
+            "read opt-in runtime influence decision packet JSON at {runtime_influence_decision_packet_json:?}: {e}"
+        )
+    })?;
+    opts.runtime_influence_decision_packet =
+        serde_json::from_str(&packet_body).map_err(|e| {
+            anyhow::anyhow!(
+                "parse opt-in runtime influence decision packet JSON at {runtime_influence_decision_packet_json:?}: {e}"
+            )
+        })?;
+
+    let fixture = load_biocortex_controlled_order_fixture(fixture_json)?;
+    opts.queries = fixture
+        .query_cases
+        .iter()
+        .map(|case| BioCortexRetrievalOptInBatchQueryCase {
+            query: case.query.clone(),
+            class_label: case.class_label.clone(),
+        })
+        .collect();
+
+    let store = SqliteStore::open(&db_path)
+        .await
+        .map_err(|e| anyhow::anyhow!("open non-production state.db at {db_path:?}: {e}"))?;
+    for rec in &fixture.memory_records {
+        let mem = ab_store::MemoryRecord {
+            key: rec.key.trim().to_string(),
+            kind: rec
+                .kind
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or("fact")
+                .to_string(),
+            content: rec.content.clone(),
+            tags: rec.tags.clone(),
+            related_keys: rec.related_keys.clone(),
+            scope: rec.scope.clone(),
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: rec.importance.unwrap_or(0.5).clamp(0.0, 1.0),
+            status: "active".to_string(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        if mem.key.is_empty() {
+            return Err(anyhow::anyhow!(
+                "controlled order fixture memory_records cannot contain an empty key"
+            ));
+        }
+        store
+            .memory_save(&mem)
+            .await
+            .map_err(|e| anyhow::anyhow!("seed controlled order fixture memory: {e}"))?;
+    }
+
+    let diagnostics = biocortex_retrieval_opt_in_batch_diagnostics(&store, opts).await;
+    let summary = diagnostics.get("summary").unwrap_or(&Value::Null);
+    let actual_moved = summary
+        .get("actual_order_changed_count")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let experimental_source = summary
+        .get("experimental_source_count")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let side_signal_ok = summary
+        .get("side_signal_ok_count")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let expected_min_moved = fixture.expected.min_actual_order_changed_count.unwrap_or(0);
+    let expected_min_experimental = fixture.expected.min_experimental_source_count.unwrap_or(0);
+    let expected_min_side_signal_ok = fixture.expected.min_side_signal_ok_count.unwrap_or(0);
+    let expected_met = actual_moved >= expected_min_moved
+        && experimental_source >= expected_min_experimental
+        && side_signal_ok >= expected_min_side_signal_ok;
+
+    let payload = json!({
+        "schema": BIOCORTEX_RETRIEVAL_OPT_IN_CONTROLLED_ORDER_FIXTURE_RUN_SCHEMA,
+        "generated_at": diagnostics.get("generated_at").cloned().unwrap_or(Value::Null),
+        "controlled_order_fixture": true,
+        "implementation_stage": "store_opt_in_controlled_order_fixture",
+        "authorization_scope": "explicit_opt_in_fts_runtime_influence",
+        "purpose": "Seed a caller-selected non-production store with fixture memories, then run redacted opt-in batch diagnostics to prove the protected path can surface actual order movement.",
+        "status": if expected_met { "completed" } else { "completed_expected_movement_missing" },
+        "attempt": {
+            "attempt_id": diagnostics.pointer("/attempt/attempt_id").cloned().unwrap_or(Value::Null),
+            "commit": diagnostics.pointer("/attempt/commit").cloned().unwrap_or(Value::Null),
+            "query_count": fixture.query_cases.len(),
+            "seeded_memory_count": fixture.memory_records.len(),
+        },
+        "fixture_contract": {
+            "fixture_schema": fixture.schema.unwrap_or_else(|| BIOCORTEX_RETRIEVAL_OPT_IN_CONTROLLED_ORDER_FIXTURE_SCHEMA.to_string()),
+            "requires_agent_bridge_db_override": true,
+            "requires_non_production_store_write_ack": true,
+            "writes_ab_store": true,
+            "writes_approval": false,
+            "registers_embedding_backend": false,
+            "raw_queries_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "side_signal_raw_included": false,
+        },
+        "expected": {
+            "min_actual_order_changed_count": expected_min_moved,
+            "min_experimental_source_count": expected_min_experimental,
+            "min_side_signal_ok_count": expected_min_side_signal_ok,
+            "met": expected_met,
+        },
+        "diagnostics": diagnostics,
+        "raw_queries_included": false,
+        "raw_keys_included": false,
+        "content_included": false,
+        "side_signal_raw_included": false,
+        "default_search_order_change_allowed": false,
+        "default_calls_unchanged": true,
+    });
+
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# BioCortex retrieval opt-in controlled order fixture");
+    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
+    println!(
+        "status={} expected_met={}",
+        shadow_json_display(payload.get("status"), "-"),
+        shadow_json_display(payload.pointer("/expected/met"), "false")
+    );
+    println!(
+        "seeded_memories={} queries={} actual_order_changed={} experimental_source={} side_signal_ok={}",
+        shadow_json_display(payload.pointer("/attempt/seeded_memory_count"), "0"),
+        shadow_json_display(payload.pointer("/attempt/query_count"), "0"),
+        actual_moved,
+        experimental_source,
+        side_signal_ok
+    );
+    println!(
+        "raw_queries_included={} raw_keys_included={} content_included={}",
+        shadow_json_display(payload.get("raw_queries_included"), "false"),
+        shadow_json_display(payload.get("raw_keys_included"), "false"),
+        shadow_json_display(payload.get("content_included"), "false")
+    );
+    Ok(())
+}
+
+fn controlled_fixture_db_path() -> Result<PathBuf> {
+    let raw = std::env::var("AGENT_BRIDGE_DB")
+        .map_err(|_| anyhow::anyhow!("controlled order fixture requires AGENT_BRIDGE_DB"))?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(anyhow::anyhow!(
+            "controlled order fixture requires non-empty AGENT_BRIDGE_DB"
+        ));
+    }
+    let db_path = PathBuf::from(trimmed);
+    let default_path = default_db_path();
+    if paths_equivalent_or_equal(&db_path, &default_path) {
+        return Err(anyhow::anyhow!(
+            "controlled order fixture refuses to write the default Agent-Bridge DB; set AGENT_BRIDGE_DB to a non-production path"
+        ));
+    }
+    Ok(db_path)
+}
+
+fn paths_equivalent_or_equal(a: &std::path::Path, b: &std::path::Path) -> bool {
+    if a == b {
+        return true;
+    }
+    match (a.canonicalize(), b.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
+fn load_biocortex_controlled_order_fixture(
+    path: &std::path::Path,
+) -> Result<BioCortexControlledOrderFixture> {
+    let body = std::fs::read_to_string(path)
+        .map_err(|e| anyhow::anyhow!("read controlled order fixture JSON at {path:?}: {e}"))?;
+    let fixture: BioCortexControlledOrderFixture = serde_json::from_str(&body)
+        .map_err(|e| anyhow::anyhow!("parse controlled order fixture JSON at {path:?}: {e}"))?;
+    if fixture.memory_records.is_empty() {
+        return Err(anyhow::anyhow!(
+            "controlled order fixture at {path:?} must contain memory_records"
+        ));
+    }
+    if fixture.query_cases.is_empty() {
+        return Err(anyhow::anyhow!(
+            "controlled order fixture at {path:?} must contain query_cases"
+        ));
+    }
+    Ok(fixture)
 }
 
 fn load_biocortex_batch_query_cases(

@@ -557,6 +557,29 @@ store trial:
 - the artifact is read-only and does not mutate AB memory, write approval state,
   register an embedding backend, or authorize default retrieval influence.
 
+Slice 23 added a controlled non-production order-movement fixture:
+
+- CLI:
+  `agent-bridge bio-cortex retrieval-opt-in-controlled-order-fixture`;
+- fixture:
+  `docs/design/fixtures/biocortex-retrieval-opt-in-controlled-order-fixture-2026-06-12.json`;
+- run schema:
+  `agent_bridge.biocortex_retrieval.opt_in_controlled_order_fixture_run.v0`;
+- the command refuses to run unless `AGENT_BRIDGE_DB` is explicitly set away
+  from the default store and `--allow-non-production-store-writes` is passed;
+- it seeds only fixture memories into the caller-selected non-production store,
+  then runs the existing protected batch diagnostics path;
+- the fixture uses an FTS `OR` query so baseline recall can include both a
+  high-importance one-term match and a lower-importance multi-term match, while
+  the BioCortex side-signal can prefer the broader query-term coverage;
+- expected evidence is at least one `experimental_moved_order` row with
+  `actual_order_changed_count >= 1`, `experimental_source_count >= 1`, and
+  `side_signal_ok_count >= 1`;
+- output remains redacted: raw queries, memory keys, memory contents, raw
+  side-signal rows, and the runtime decision packet body are not returned;
+- default `memory_search`, hybrid search, semantic search, approval state, and
+  embedding backend registration remain unchanged.
+
 ## Fail-Open Rules
 
 The experiment must return the baseline list for:

@@ -62,6 +62,7 @@ grep -q 'Authorization for one mode does not imply authorization for another mod
 
 opt_in_plan="docs/design/fixtures/biocortex-retrieval-opt-in-experiment-plan-2026-06-11.json"
 opt_in_batch_query_cases="docs/design/fixtures/biocortex-retrieval-opt-in-batch-diagnostic-queries-2026-06-12.json"
+opt_in_controlled_order_fixture="docs/design/fixtures/biocortex-retrieval-opt-in-controlled-order-fixture-2026-06-12.json"
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.opt_in_batch_diagnostic_query_cases.v0"
     and .read_only == true
@@ -83,6 +84,28 @@ jq -e '
     and .expected_batch_contract.default_search_order_change_allowed == false
     and .expected_batch_contract.default_calls_unchanged == true
 ' "$opt_in_batch_query_cases" >/dev/null
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_controlled_order_fixture.v0"
+    and .read_only == false
+    and .safety_boundary.requires_agent_bridge_db_override == true
+    and .safety_boundary.requires_non_production_store_write_ack == true
+    and .safety_boundary.writes_only_fixture_memories == true
+    and .safety_boundary.writes_approval == false
+    and .safety_boundary.registers_embedding_backend == false
+    and .safety_boundary.raw_queries_are_fixture_inputs == true
+    and .safety_boundary.raw_queries_must_not_be_returned_by_runner == true
+    and .safety_boundary.raw_keys_must_not_be_returned_by_runner == true
+    and .safety_boundary.content_must_not_be_returned_by_runner == true
+    and .safety_boundary.side_signal_raw_must_not_be_returned_by_runner == true
+    and .safety_boundary.default_search_order_change_allowed == false
+    and .safety_boundary.default_calls_unchanged == true
+    and (.memory_records | length) == 2
+    and (.query_cases | length) == 1
+    and .query_cases[0].class_label == "controlled_rank_movement"
+    and .expected.min_actual_order_changed_count == 1
+    and .expected.min_experimental_source_count == 1
+    and .expected.min_side_signal_ok_count == 1
+' "$opt_in_controlled_order_fixture" >/dev/null
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0"
     and .status == "store_opt_in_runtime_adapter_connection_implemented"
@@ -273,6 +296,24 @@ jq -e '
     and .implemented_store_opt_in_batch_diagnostics.default_memory_search_unchanged == true
     and .implemented_store_opt_in_batch_diagnostics.default_search_order_change_allowed == false
     and .implemented_store_opt_in_batch_diagnostics.default_calls_unchanged == true
+    and .implemented_store_opt_in_controlled_order_fixture.cli == "agent-bridge bio-cortex retrieval-opt-in-controlled-order-fixture"
+    and .implemented_store_opt_in_controlled_order_fixture.fixture == "docs/design/fixtures/biocortex-retrieval-opt-in-controlled-order-fixture-2026-06-12.json"
+    and .implemented_store_opt_in_controlled_order_fixture.schema == "agent_bridge.biocortex_retrieval.opt_in_controlled_order_fixture_run.v0"
+    and .implemented_store_opt_in_controlled_order_fixture.implementation_stage == "store_opt_in_controlled_order_fixture"
+    and .implemented_store_opt_in_controlled_order_fixture.authorized_scope == "explicit_opt_in_fts_runtime_influence"
+    and .implemented_store_opt_in_controlled_order_fixture.requires_agent_bridge_db_override == true
+    and .implemented_store_opt_in_controlled_order_fixture.requires_non_production_store_write_ack == true
+    and .implemented_store_opt_in_controlled_order_fixture.writes_only_fixture_memories == true
+    and .implemented_store_opt_in_controlled_order_fixture.reuses_store_trial_gate == true
+    and .implemented_store_opt_in_controlled_order_fixture.proves_actual_order_movement == true
+    and .implemented_store_opt_in_controlled_order_fixture.raw_queries_included == false
+    and .implemented_store_opt_in_controlled_order_fixture.raw_keys_included == false
+    and .implemented_store_opt_in_controlled_order_fixture.content_included == false
+    and .implemented_store_opt_in_controlled_order_fixture.side_signal_raw_included == false
+    and .implemented_store_opt_in_controlled_order_fixture.writes_approval == false
+    and .implemented_store_opt_in_controlled_order_fixture.registers_embedding_backend == false
+    and .implemented_store_opt_in_controlled_order_fixture.default_search_order_change_allowed == false
+    and .implemented_store_opt_in_controlled_order_fixture.default_calls_unchanged == true
     and .implemented_authorization_decision_consumer.cli == "agent-bridge bio-cortex retrieval-opt-in-authorization-decision-packet"
     and .implemented_authorization_decision_consumer.mcp_tool == "biocortex_retrieval_opt_in_authorization_decision_packet"
     and .implemented_authorization_decision_consumer.schema == "agent_bridge.biocortex_retrieval.opt_in_authorization_decision_packet.v0"
@@ -1660,6 +1701,24 @@ jq -e '
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.default_memory_search_unchanged == true
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.default_search_order_change_allowed == false
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.default_calls_unchanged == true
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.cli == "agent-bridge bio-cortex retrieval-opt-in-controlled-order-fixture"
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.fixture == "docs/design/fixtures/biocortex-retrieval-opt-in-controlled-order-fixture-2026-06-12.json"
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.schema == "agent_bridge.biocortex_retrieval.opt_in_controlled_order_fixture_run.v0"
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.implementation_stage == "store_opt_in_controlled_order_fixture"
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.authorized_scope == "explicit_opt_in_fts_runtime_influence"
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.requires_agent_bridge_db_override == true
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.requires_non_production_store_write_ack == true
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.writes_only_fixture_memories == true
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.reuses_store_trial_gate == true
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.proves_actual_order_movement == true
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.raw_queries_included == false
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.raw_keys_included == false
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.content_included == false
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.side_signal_raw_included == false
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.writes_approval == false
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.registers_embedding_backend == false
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.default_search_order_change_allowed == false
+    and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.default_calls_unchanged == true
     and .opt_in_plan.implemented_authorization_decision_consumer.cli == "agent-bridge bio-cortex retrieval-opt-in-authorization-decision-packet"
     and .opt_in_plan.implemented_authorization_decision_consumer.mcp_tool == "biocortex_retrieval_opt_in_authorization_decision_packet"
     and .opt_in_plan.implemented_authorization_decision_consumer.schema == "agent_bridge.biocortex_retrieval.opt_in_authorization_decision_packet.v0"
@@ -2686,6 +2745,71 @@ jq -e '
 ' "$opt_in_batch_diagnostics_empty" >/dev/null
 if grep -q 'biocortex opt-in runtime adapter\|runtime influence decision packet\|memory search baseline recall\|redacted order artifact movement\|agent bridge mcp tool registry\|agent bridge mcp\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_batch_diagnostics_empty"; then
     echo "opt-in batch diagnostics empty path leaked raw query/key/content data" >&2
+    exit 1
+fi
+
+opt_in_controlled_order="$tmpdir/opt-in-controlled-order-fixture.json"
+run env AGENT_BRIDGE_DB="$tmpdir/opt-in-controlled-order-fixture.db" \
+    AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
+    cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
+    bio-cortex retrieval-opt-in-controlled-order-fixture \
+    --runtime-influence-decision-packet-json "$opt_in_runtime_influence_decision_packet" \
+    --fixture-json "$opt_in_controlled_order_fixture" \
+    --allow-non-production-store-writes \
+    --per-call-opt-in \
+    --checkout "$biocortex_rs" \
+    --limit 5 \
+    --coverage-threshold 0.5 \
+    --attempt-id verify-controlled-order-fixture \
+    --commit verify-dry-run-commit \
+    --json > "$opt_in_controlled_order"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_controlled_order_fixture_run.v0"
+    and .controlled_order_fixture == true
+    and .implementation_stage == "store_opt_in_controlled_order_fixture"
+    and .status == "completed"
+    and .expected.met == true
+    and .attempt.seeded_memory_count == 2
+    and .attempt.query_count == 1
+    and .fixture_contract.requires_agent_bridge_db_override == true
+    and .fixture_contract.requires_non_production_store_write_ack == true
+    and .fixture_contract.writes_ab_store == true
+    and .fixture_contract.writes_approval == false
+    and .fixture_contract.registers_embedding_backend == false
+    and .fixture_contract.raw_queries_included == false
+    and .fixture_contract.raw_keys_included == false
+    and .fixture_contract.content_included == false
+    and .fixture_contract.side_signal_raw_included == false
+    and .diagnostics.schema == "agent_bridge.biocortex_retrieval.opt_in_batch_diagnostics.v0"
+    and .diagnostics.summary.query_count == 1
+    and .diagnostics.summary.baseline_completed_count == 1
+    and .diagnostics.summary.baseline_empty_count == 0
+    and .diagnostics.summary.adapter_allowed_count == 1
+    and .diagnostics.summary.side_signal_attempted_count == 1
+    and .diagnostics.summary.side_signal_ok_count == 1
+    and .diagnostics.summary.experimental_source_count == 1
+    and .diagnostics.summary.actual_order_changed_count == 1
+    and .diagnostics.summary.raw_flagged_count == 0
+    and .diagnostics.query_results[0].movement_class == "experimental_moved_order"
+    and .diagnostics.query_results[0].returned_order.actual_return_order_changed == true
+    and .diagnostics.query_results[0].returned_order.hash_matches_baseline == false
+    and .diagnostics.query_results[0].raw_query_included == false
+    and .diagnostics.query_results[0].raw_keys_included == false
+    and .diagnostics.query_results[0].content_included == false
+    and .diagnostics.query_results[0].side_signal_raw_included == false
+    and .diagnostics.safety.calls_memory_search_all == true
+    and .diagnostics.safety.runs_biocortex_any == true
+    and .diagnostics.safety.actual_return_order_changed_any == true
+    and .diagnostics.safety.raw_flags_all_false == true
+    and .raw_queries_included == false
+    and .raw_keys_included == false
+    and .content_included == false
+    and .side_signal_raw_included == false
+    and .default_search_order_change_allowed == false
+    and .default_calls_unchanged == true
+' "$opt_in_controlled_order" >/dev/null
+if grep -q 'cortexdelta\|cortexepsilon\|cortexzeta\|cortexeta\|cortextheta\|cortexiota\|controlled_order_baseline_high\|controlled_order_biocortex_target\|target anchor\|baseline anchor' "$opt_in_controlled_order"; then
+    echo "opt-in controlled order fixture leaked raw query/key/content data" >&2
     exit 1
 fi
 test -s "$opt_in_auth_request/forum-post-template.md"

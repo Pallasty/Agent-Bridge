@@ -254,6 +254,26 @@
     "default_search_order_change_allowed": false,
     "default_calls_unchanged": true
   },
+  "implemented_store_opt_in_controlled_order_fixture": {
+    "cli": "agent-bridge bio-cortex retrieval-opt-in-controlled-order-fixture",
+    "fixture": "docs/design/fixtures/biocortex-retrieval-opt-in-controlled-order-fixture-2026-06-12.json",
+    "schema": "agent_bridge.biocortex_retrieval.opt_in_controlled_order_fixture_run.v0",
+    "implementation_stage": "store_opt_in_controlled_order_fixture",
+    "authorized_scope": "explicit_opt_in_fts_runtime_influence",
+    "requires_agent_bridge_db_override": true,
+    "requires_non_production_store_write_ack": true,
+    "writes_only_fixture_memories": true,
+    "reuses_store_trial_gate": true,
+    "proves_actual_order_movement": true,
+    "raw_queries_included": false,
+    "raw_keys_included": false,
+    "content_included": false,
+    "side_signal_raw_included": false,
+    "writes_approval": false,
+    "registers_embedding_backend": false,
+    "default_search_order_change_allowed": false,
+    "default_calls_unchanged": true
+  },
   "implemented_authorization_decision_consumer": {
     "cli": "agent-bridge bio-cortex retrieval-opt-in-authorization-decision-packet",
     "mcp_tool": "biocortex_retrieval_opt_in_authorization_decision_packet",

@@ -1,0 +1,51 @@
+{
+  "schema": "agent_bridge.biocortex_retrieval.opt_in_controlled_order_fixture.v0",
+  "read_only": false,
+  "purpose": "Non-production fixture for proving the protected BioCortex opt-in path can produce an actual returned-order movement while the default memory_search path remains unchanged.",
+  "safety_boundary": {
+    "requires_agent_bridge_db_override": true,
+    "requires_non_production_store_write_ack": true,
+    "writes_only_fixture_memories": true,
+    "writes_approval": false,
+    "registers_embedding_backend": false,
+    "raw_queries_are_fixture_inputs": true,
+    "raw_queries_must_not_be_returned_by_runner": true,
+    "raw_keys_must_not_be_returned_by_runner": true,
+    "content_must_not_be_returned_by_runner": true,
+    "side_signal_raw_must_not_be_returned_by_runner": true,
+    "default_search_order_change_allowed": false,
+    "default_calls_unchanged": true
+  },
+  "memory_records": [
+    {
+      "key": "controlled_order_baseline_high",
+      "kind": "fact",
+      "importance": 1.0,
+      "tags": [
+        "biocortex_controlled_order_fixture"
+      ],
+      "content": "cortexdelta cortexdelta cortexdelta cortexdelta cortexdelta baseline anchor"
+    },
+    {
+      "key": "controlled_order_biocortex_target",
+      "kind": "fact",
+      "importance": 0.0,
+      "tags": [
+        "biocortex_controlled_order_fixture"
+      ],
+      "content": "cortexdelta cortexepsilon cortexzeta cortexeta cortextheta cortexiota target anchor"
+    }
+  ],
+  "query_cases": [
+    {
+      "query": "cortexdelta OR cortexepsilon OR cortexzeta OR cortexeta OR cortextheta OR cortexiota",
+      "class_label": "controlled_rank_movement",
+      "diagnostic_focus": "baseline_high_importance_vs_biocortex_term_coverage"
+    }
+  ],
+  "expected": {
+    "min_actual_order_changed_count": 1,
+    "min_experimental_source_count": 1,
+    "min_side_signal_ok_count": 1
+  }
+}
