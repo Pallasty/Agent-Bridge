@@ -389,12 +389,13 @@ jq -e '
     and .writes_approval == false
     and .accepts_optional_order_diff_packet == true
     and .accepts_optional_redacted_order_artifact == true
-    and .opt_in_plan.status == "authorization_request_redacted_order_artifact_evidence_implemented"
+    and .opt_in_plan.status == "store_opt_in_search_wrapper_implemented"
     and .opt_in_plan.approval_state == "opt_in_implementation_authorized"
     and .opt_in_plan.order_diff_packet_implemented == true
     and .opt_in_plan.authorization_request_order_diff_evidence_implemented == true
     and .opt_in_plan.redacted_order_artifact_implemented == true
     and .opt_in_plan.authorization_request_redacted_order_artifact_evidence_implemented == true
+    and .opt_in_plan.store_opt_in_search_wrapper_implemented == true
     and .opt_in_plan.implemented_gate_skeleton.ordering_behavior_connected == false
     and .opt_in_plan.implemented_gate_skeleton.may_change_search_order_now == false
     and .opt_in_plan.implemented_audit_shape.schema == "agent_bridge.biocortex_retrieval.opt_in_call_audit.v0"
@@ -414,6 +415,25 @@ jq -e '
     and .opt_in_plan.implemented_store_contract.raw_keys_included == false
     and .opt_in_plan.implemented_store_contract.content_included == false
     and .opt_in_plan.implemented_store_contract.ordering_behavior_connected == false
+    and .opt_in_plan.implemented_store_opt_in_search_wrapper.method == "StateStore::memory_search_biocortex_opt_in"
+    and .opt_in_plan.implemented_store_opt_in_search_wrapper.options_type == "BioCortexRetrievalOptInSearchOptions"
+    and .opt_in_plan.implemented_store_opt_in_search_wrapper.outcome_type == "BioCortexRetrievalOptInSearchOutcome"
+    and .opt_in_plan.implemented_store_opt_in_search_wrapper.redacted_audit_type == "BioCortexRetrievalOptInSearchAudit"
+    and .opt_in_plan.implemented_store_opt_in_search_wrapper.redacted_audit_schema == "agent_bridge.store.memory_search.biocortex_opt_in_search_audit.v0"
+    and .opt_in_plan.implemented_store_opt_in_search_wrapper.calls_existing_memory_search == true
+    and .opt_in_plan.implemented_store_opt_in_search_wrapper.uses_existing_store_contract == true
+    and .opt_in_plan.implemented_store_opt_in_search_wrapper.returns_baseline_order == true
+    and .opt_in_plan.implemented_store_opt_in_search_wrapper.redacted_audit_only == true
+    and .opt_in_plan.implemented_store_opt_in_search_wrapper.raw_query_included_in_audit == false
+    and .opt_in_plan.implemented_store_opt_in_search_wrapper.raw_keys_included_in_audit == false
+    and .opt_in_plan.implemented_store_opt_in_search_wrapper.content_included_in_audit == false
+    and .opt_in_plan.implemented_store_opt_in_search_wrapper.runs_biocortex == false
+    and .opt_in_plan.implemented_store_opt_in_search_wrapper.registers_embedding_backend == false
+    and .opt_in_plan.implemented_store_opt_in_search_wrapper.runtime_adapter_approved == false
+    and .opt_in_plan.implemented_store_opt_in_search_wrapper.changes_memory_search_order == false
+    and .opt_in_plan.implemented_store_opt_in_search_wrapper.ordering_behavior_connected == false
+    and .opt_in_plan.implemented_store_opt_in_search_wrapper.default_calls_unchanged == true
+    and .opt_in_plan.implemented_store_opt_in_search_wrapper.may_implement_ordering_now == false
     and .opt_in_plan.implemented_dry_run_planner.mcp_tool == "biocortex_retrieval_opt_in_dry_run"
     and .opt_in_plan.implemented_dry_run_planner.schema == "agent_bridge.biocortex_retrieval.opt_in_dry_run_plan.v0"
     and .opt_in_plan.implemented_dry_run_planner.read_only == true

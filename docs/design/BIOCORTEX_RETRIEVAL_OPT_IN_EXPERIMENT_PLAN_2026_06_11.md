@@ -14,6 +14,8 @@ implemented. The authorization request bundle can now optionally include
 hash-only order-diff evidence. A separate redacted-order artifact now computes
 top-k overlap and per-key rank movement from `key_hash` rows only, and the
 authorization request bundle can optionally include its summary-only evidence.
+The store layer now has a baseline-preserving opt-in search wrapper with a
+redacted audit summary.
 Ordering behavior is not implemented and not approved.
 
 ```json
@@ -37,6 +39,7 @@ Ordering behavior is not implemented and not approved.
   "authorization_request_order_diff_evidence_implemented": true,
   "redacted_order_artifact_implemented": true,
   "authorization_request_redacted_order_artifact_evidence_implemented": true,
+  "store_opt_in_search_wrapper_implemented": true,
   "ordering_behavior_connected": false
 }
 ```
@@ -331,6 +334,29 @@ the shape of ordering differences without exposing per-key identifiers in the
 request packet. It still does not approve runtime influence, enable an adapter,
 or connect ordering behavior.
 
+Slice 15 landed a store-level opt-in search wrapper:
+
+- method: `StateStore::memory_search_biocortex_opt_in`;
+- options type: `BioCortexRetrievalOptInSearchOptions`;
+- outcome type: `BioCortexRetrievalOptInSearchOutcome`;
+- redacted audit type/schema:
+  `BioCortexRetrievalOptInSearchAudit` /
+  `agent_bridge.store.memory_search.biocortex_opt_in_search_audit.v0`;
+- calls the existing baseline `memory_search` first;
+- returns the baseline hit order as both `baseline_hits` and `returned_hits`;
+- exposes `redacted_audit()` for review/telemetry without raw query, memory
+  keys, or memory content;
+- reuses `BioCortexRetrievalOptInRequest` /
+  `BioCortexRetrievalOptInResponseContract` for the gate decision;
+- keeps `runs_biocortex=false`, `runtime_adapter_approved=false`,
+  `changes_memory_search_order=false`, `ordering_behavior_connected=false`,
+  and `may_implement_ordering_now=false`.
+
+This is the first store boundary where an explicit per-call opt-in can wrap a
+real FTS search path. It still does not connect an ordering path: even when
+feature/runtime/per-call gates are present, the wrapper returns baseline until a
+separate review authorizes runtime adapter influence and ordering behavior.
+
 ## Fail-Open Rules
 
 The experiment must return the baseline list for:
@@ -413,6 +439,8 @@ Future implementation review must include tests proving:
   without including raw order keys or approving runtime influence;
 - authorization request bundle can optionally include redacted-order artifact
   summaries without copying key hashes or approving runtime influence;
+- store opt-in search wrapper returns baseline order and emits redacted audit
+  without serializing query, keys, or content;
 - audit telemetry includes baseline order, experimental order, fallback reason,
   latency, and authorization scope.
 

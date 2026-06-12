@@ -18038,6 +18038,94 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn memory_search_biocortex_opt_in_wrapper_returns_baseline_and_redacted_audit() {
+        use crate::{
+            BioCortexRetrievalOptInBlocker, BioCortexRetrievalOptInSearchOptions,
+            BioCortexReturnedOrderSource, MemoryRecord,
+            BIOCORTEX_RETRIEVAL_OPT_IN_SEARCH_AUDIT_SCHEMA,
+        };
+
+        let temp_dir = fidelity_temp_dir("biocortex_optin_wrapper");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+        let secret_key = "secret_optin_key_20260611";
+        let secret_query = "protected optin phrase";
+        let secret_content = "protected optin phrase with secret optin content";
+
+        store
+            .memory_save(&MemoryRecord {
+                key: secret_key.into(),
+                kind: "fact".into(),
+                content: secret_content.into(),
+                tags: vec![],
+                related_keys: vec![],
+                scope: None,
+                created_at: 0,
+                updated_at: 0,
+                last_accessed_at: 0,
+                access_count: 0,
+                importance: 0.5,
+                status: String::new(),
+                trigger_pattern: None,
+                superseded_by: None,
+            })
+            .await
+            .expect("save memory");
+
+        let outcome = store
+            .memory_search_biocortex_opt_in(
+                secret_query,
+                &[],
+                5,
+                BioCortexRetrievalOptInSearchOptions {
+                    per_call_opt_in: true,
+                    compile_feature_enabled: true,
+                    runtime_enabled: true,
+                    runtime_adapter_approved: false,
+                    ordering_behavior_connected: false,
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("opt-in search");
+
+        assert_eq!(outcome.baseline_hits.len(), 1);
+        assert_eq!(outcome.returned_hits.len(), 1);
+        assert_eq!(outcome.baseline_hits[0].record.key, secret_key);
+        assert_eq!(outcome.returned_hits[0].record.key, secret_key);
+        assert_eq!(
+            outcome.response_contract.returned_order_source,
+            BioCortexReturnedOrderSource::Baseline
+        );
+        assert!(outcome.response_contract.baseline_returned);
+        assert!(!outcome.response_contract.changes_memory_search_order);
+        assert_eq!(
+            outcome.response_contract.fallback_reason,
+            Some(BioCortexRetrievalOptInBlocker::OrderingBehaviorNotConnected)
+        );
+
+        let audit = outcome.redacted_audit();
+        assert_eq!(audit.schema, BIOCORTEX_RETRIEVAL_OPT_IN_SEARCH_AUDIT_SCHEMA);
+        assert_eq!(audit.baseline_key_count, 1);
+        assert_eq!(audit.returned_hit_count, 1);
+        assert!(!audit.raw_query_included);
+        assert!(!audit.raw_keys_included);
+        assert!(!audit.content_included);
+
+        let serialized = serde_json::to_string(&audit).expect("serialize audit");
+        assert!(!serialized.contains(secret_key), "audit leaked raw memory key");
+        assert!(!serialized.contains(secret_query), "audit leaked raw query");
+        assert!(
+            !serialized.contains("secret optin content"),
+            "audit leaked raw memory content"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
     async fn signal_fidelity_touched_subset_excludes_zero_access() {
         // Mix: 2 rows with access > 0 (perfectly correlated) plus 1 with
         // access = 0. Overall r = +1.0 (touched-only also = +1.0 with n=2).

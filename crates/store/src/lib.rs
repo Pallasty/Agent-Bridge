@@ -277,6 +277,8 @@ pub struct MemorySearchHit {
 
 pub const BIOCORTEX_RETRIEVAL_OPT_IN_STORE_CONTRACT_SCHEMA: &str =
     "agent_bridge.store.memory_search.biocortex_opt_in_contract.v0";
+pub const BIOCORTEX_RETRIEVAL_OPT_IN_SEARCH_AUDIT_SCHEMA: &str =
+    "agent_bridge.store.memory_search.biocortex_opt_in_search_audit.v0";
 pub const BIOCORTEX_RETRIEVAL_OPT_IN_AUTHORIZATION_SCOPE: &str = "opt_in_experiment";
 
 /// Store-level contract for a future BioCortex-assisted `memory_search` call.
@@ -516,6 +518,78 @@ pub struct BioCortexRetrievalOptInResponseContract {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fallback_reason: Option<BioCortexRetrievalOptInBlocker>,
     pub decision: BioCortexRetrievalOptInDecision,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BioCortexRetrievalOptInSearchOptions {
+    #[serde(default = "default_biocortex_retrieval_mode")]
+    pub mode: String,
+    #[serde(default)]
+    pub per_call_opt_in: bool,
+    #[serde(default)]
+    pub compile_feature_enabled: bool,
+    #[serde(default)]
+    pub runtime_enabled: bool,
+    #[serde(default)]
+    pub operator_disabled: bool,
+    #[serde(default)]
+    pub runtime_adapter_approved: bool,
+    #[serde(default)]
+    pub ordering_behavior_connected: bool,
+}
+
+impl Default for BioCortexRetrievalOptInSearchOptions {
+    fn default() -> Self {
+        Self {
+            mode: default_biocortex_retrieval_mode(),
+            per_call_opt_in: false,
+            compile_feature_enabled: false,
+            runtime_enabled: false,
+            operator_disabled: false,
+            runtime_adapter_approved: false,
+            ordering_behavior_connected: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct BioCortexRetrievalOptInSearchOutcome {
+    pub baseline_hits: Vec<MemorySearchHit>,
+    pub returned_hits: Vec<MemorySearchHit>,
+    pub response_contract: BioCortexRetrievalOptInResponseContract,
+}
+
+impl BioCortexRetrievalOptInSearchOutcome {
+    pub fn redacted_audit(&self) -> BioCortexRetrievalOptInSearchAudit {
+        BioCortexRetrievalOptInSearchAudit {
+            schema: BIOCORTEX_RETRIEVAL_OPT_IN_SEARCH_AUDIT_SCHEMA.to_string(),
+            authorization_scope: BIOCORTEX_RETRIEVAL_OPT_IN_AUTHORIZATION_SCOPE.to_string(),
+            baseline_key_count: self.baseline_hits.len(),
+            returned_hit_count: self.returned_hits.len(),
+            returned_order_source: self.response_contract.returned_order_source,
+            baseline_returned: self.response_contract.baseline_returned,
+            changes_memory_search_order: self.response_contract.changes_memory_search_order,
+            raw_query_included: false,
+            raw_keys_included: false,
+            content_included: false,
+            response_contract: self.response_contract.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BioCortexRetrievalOptInSearchAudit {
+    pub schema: String,
+    pub authorization_scope: String,
+    pub baseline_key_count: usize,
+    pub returned_hit_count: usize,
+    pub returned_order_source: BioCortexReturnedOrderSource,
+    pub baseline_returned: bool,
+    pub changes_memory_search_order: bool,
+    pub raw_query_included: bool,
+    pub raw_keys_included: bool,
+    pub content_included: bool,
+    pub response_contract: BioCortexRetrievalOptInResponseContract,
 }
 
 /// One memory ranked purely by cosine similarity to a query, **without**
@@ -1998,6 +2072,41 @@ pub trait StateStore: Send + Sync {
         tags_any: &[String],
         limit: u32,
     ) -> Result<Vec<MemorySearchHit>>;
+
+    /// Protected BioCortex opt-in search surface.
+    ///
+    /// The current implementation intentionally returns the baseline
+    /// `memory_search` order. This connects explicit per-call opt-in and the
+    /// store contract to the real search boundary without running BioCortex,
+    /// registering an embedding backend, or changing returned order.
+    async fn memory_search_biocortex_opt_in(
+        &self,
+        query: &str,
+        tags_any: &[String],
+        limit: u32,
+        options: BioCortexRetrievalOptInSearchOptions,
+    ) -> Result<BioCortexRetrievalOptInSearchOutcome> {
+        let baseline_hits = self.memory_search(query, tags_any, limit).await?;
+        let response_contract = BioCortexRetrievalOptInRequest {
+            mode: options.mode,
+            per_call_opt_in: options.per_call_opt_in,
+            compile_feature_enabled: options.compile_feature_enabled,
+            runtime_enabled: options.runtime_enabled,
+            operator_disabled: options.operator_disabled,
+            baseline_completed: true,
+            baseline_key_count: baseline_hits.len(),
+            runtime_adapter_approved: options.runtime_adapter_approved,
+            ordering_behavior_connected: options.ordering_behavior_connected,
+        }
+        .evaluate()
+        .response_contract(false);
+
+        Ok(BioCortexRetrievalOptInSearchOutcome {
+            returned_hits: baseline_hits.clone(),
+            baseline_hits,
+            response_contract,
+        })
+    }
 
     /// List memories. `scope` filters to records visible in the given context:
     /// returns records whose scope is None/global OR matches the provided scope.
