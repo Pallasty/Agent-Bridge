@@ -24,6 +24,10 @@ ordering behavior. A read-only runtime-influence review request packet now
 combines the post-implementation review gate and redacted order artifact into a
 separate human-review request for explicit opt-in FTS influence, while still
 granting no runtime adapter approval and connecting no ordering behavior.
+A read-only runtime-influence decision consumer now turns a separate human
+runtime review record into a machine-checkable implementation gate for explicit
+opt-in FTS runtime adapter/order-connection work only. The decision packet
+consumer still does not connect ordering behavior or change any returned order.
 Ordering behavior is not implemented and not approved.
 
 ```json
@@ -51,6 +55,7 @@ Ordering behavior is not implemented and not approved.
   "authorization_decision_consumer_implemented": true,
   "post_implementation_review_gate_implemented": true,
   "runtime_influence_review_request_implemented": true,
+  "runtime_influence_decision_packet_implemented": true,
   "ordering_behavior_connected": false
 }
 ```
@@ -442,6 +447,34 @@ Slice 18 landed a read-only runtime-influence review request:
 This request packet is the handoff artifact for the next human runtime review.
 It asks for the review, but it is not the review decision and cannot authorize
 runtime adapter influence by itself.
+
+Slice 19 landed a read-only runtime-influence decision consumer:
+
+- CLI:
+  `agent-bridge bio-cortex retrieval-opt-in-runtime-influence-decision-packet`;
+- MCP tool:
+  `biocortex_retrieval_opt_in_runtime_influence_decision_packet`;
+- packet schema:
+  `agent_bridge.biocortex_retrieval.opt_in_runtime_influence_decision_packet.v0`;
+- consumes a runtime-influence review request summary and a separate human
+  runtime decision record;
+- does not include the raw review request, raw decision payload, human decision
+  text, raw query, keys, or content;
+- can authorize implementation work for explicit opt-in FTS runtime adapter
+  influence and explicit opt-in FTS ordering-behavior connection only when the
+  human decision and request both preserve the FTS-only, per-call opt-in,
+  baseline-candidate-recall, redacted-audit, kill-switch, and fail-open rules;
+- keeps default search order changes, default retrieval influence, hybrid
+  influence, and semantic influence unauthorized;
+- keeps `approval_writes_allowed=false`, `writes_approval=false`,
+  `calls_memory_search=false`, `runs_biocortex=false`,
+  `changes_memory_search_order=false`, `ordering_behavior_connected=false`, and
+  `this_packet_changes_return_order=false`.
+
+This packet is still not the ordering implementation. It makes the separate
+human runtime review machine-checkable, but a later implementation step must
+connect the adapter and return-order behavior behind the explicit opt-in gates
+and then pass post-connection verification.
 
 ## Fail-Open Rules
 
