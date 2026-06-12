@@ -63,6 +63,7 @@ grep -q 'Authorization for one mode does not imply authorization for another mod
 opt_in_plan="docs/design/fixtures/biocortex-retrieval-opt-in-experiment-plan-2026-06-11.json"
 opt_in_batch_query_cases="docs/design/fixtures/biocortex-retrieval-opt-in-batch-diagnostic-queries-2026-06-12.json"
 opt_in_controlled_order_fixture="docs/design/fixtures/biocortex-retrieval-opt-in-controlled-order-fixture-2026-06-12.json"
+opt_in_expanded_corpus_fixture="docs/design/fixtures/biocortex-retrieval-opt-in-expanded-controlled-corpus-2026-06-12.json"
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.opt_in_batch_diagnostic_query_cases.v0"
     and .read_only == true
@@ -84,6 +85,27 @@ jq -e '
     and .expected_batch_contract.default_search_order_change_allowed == false
     and .expected_batch_contract.default_calls_unchanged == true
 ' "$opt_in_batch_query_cases" >/dev/null
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_controlled_order_fixture.v0"
+    and .read_only == false
+    and .safety_boundary.requires_agent_bridge_db_override == true
+    and .safety_boundary.requires_non_production_store_write_ack == true
+    and .safety_boundary.writes_only_fixture_memories == true
+    and .safety_boundary.writes_approval == false
+    and .safety_boundary.registers_embedding_backend == false
+    and .safety_boundary.raw_queries_are_fixture_inputs == true
+    and .safety_boundary.raw_queries_must_not_be_returned_by_runner == true
+    and .safety_boundary.raw_keys_must_not_be_returned_by_runner == true
+    and .safety_boundary.content_must_not_be_returned_by_runner == true
+    and .safety_boundary.side_signal_raw_must_not_be_returned_by_runner == true
+    and .safety_boundary.default_search_order_change_allowed == false
+    and .safety_boundary.default_calls_unchanged == true
+    and (.memory_records | length) == 10
+    and (.query_cases | length) == 5
+    and .expected.min_actual_order_changed_count == 0
+    and .expected.min_experimental_source_count == 5
+    and .expected.min_side_signal_ok_count == 5
+' "$opt_in_expanded_corpus_fixture" >/dev/null
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.opt_in_controlled_order_fixture.v0"
     and .read_only == false
@@ -335,6 +357,34 @@ jq -e '
     and .implemented_store_opt_in_evidence_summary.registers_embedding_backend == false
     and .implemented_store_opt_in_evidence_summary.default_search_order_change_allowed == false
     and .implemented_store_opt_in_evidence_summary.default_calls_unchanged == true
+    and .implemented_store_opt_in_expanded_non_production_corpus.fixture == "docs/design/fixtures/biocortex-retrieval-opt-in-expanded-controlled-corpus-2026-06-12.json"
+    and .implemented_store_opt_in_expanded_non_production_corpus.reuses_cli == "agent-bridge bio-cortex retrieval-opt-in-controlled-order-fixture"
+    and .implemented_store_opt_in_expanded_non_production_corpus.reuses_evidence_summary_cli == "agent-bridge bio-cortex retrieval-opt-in-evidence-summary"
+    and .implemented_store_opt_in_expanded_non_production_corpus.schema == "agent_bridge.biocortex_retrieval.opt_in_controlled_order_fixture_run.v0"
+    and .implemented_store_opt_in_expanded_non_production_corpus.implementation_stage == "expanded_non_production_adapter_coverage"
+    and .implemented_store_opt_in_expanded_non_production_corpus.authorized_scope == "explicit_opt_in_fts_runtime_influence"
+    and .implemented_store_opt_in_expanded_non_production_corpus.memory_record_count == 10
+    and .implemented_store_opt_in_expanded_non_production_corpus.query_count == 5
+    and .implemented_store_opt_in_expanded_non_production_corpus.expected_min_actual_order_changed_count == 0
+    and .implemented_store_opt_in_expanded_non_production_corpus.expected_min_experimental_source_count == 5
+    and .implemented_store_opt_in_expanded_non_production_corpus.expected_min_side_signal_ok_count == 5
+    and .implemented_store_opt_in_expanded_non_production_corpus.proves_multi_bucket_adapter_coverage == true
+    and .implemented_store_opt_in_expanded_non_production_corpus.proves_additional_rank_movement == false
+    and .implemented_store_opt_in_expanded_non_production_corpus.canonical_rank_movement_fixture == "docs/design/fixtures/biocortex-retrieval-opt-in-controlled-order-fixture-2026-06-12.json"
+    and .implemented_store_opt_in_expanded_non_production_corpus.writes_only_fixture_memories == true
+    and .implemented_store_opt_in_expanded_non_production_corpus.uses_non_production_store_only == true
+    and .implemented_store_opt_in_expanded_non_production_corpus.uses_redacted_evidence_summary == true
+    and .implemented_store_opt_in_expanded_non_production_corpus.raw_queries_included == false
+    and .implemented_store_opt_in_expanded_non_production_corpus.raw_keys_included == false
+    and .implemented_store_opt_in_expanded_non_production_corpus.content_included == false
+    and .implemented_store_opt_in_expanded_non_production_corpus.side_signal_raw_included == false
+    and .implemented_store_opt_in_expanded_non_production_corpus.writes_approval == false
+    and .implemented_store_opt_in_expanded_non_production_corpus.calls_memory_search == true
+    and .implemented_store_opt_in_expanded_non_production_corpus.runs_biocortex == true
+    and .implemented_store_opt_in_expanded_non_production_corpus.registers_embedding_backend == false
+    and .implemented_store_opt_in_expanded_non_production_corpus.can_grant_runtime_influence == false
+    and .implemented_store_opt_in_expanded_non_production_corpus.default_search_order_change_allowed == false
+    and .implemented_store_opt_in_expanded_non_production_corpus.default_calls_unchanged == true
     and .implemented_authorization_decision_consumer.cli == "agent-bridge bio-cortex retrieval-opt-in-authorization-decision-packet"
     and .implemented_authorization_decision_consumer.mcp_tool == "biocortex_retrieval_opt_in_authorization_decision_packet"
     and .implemented_authorization_decision_consumer.schema == "agent_bridge.biocortex_retrieval.opt_in_authorization_decision_packet.v0"
@@ -1761,6 +1811,34 @@ jq -e '
     and .opt_in_plan.implemented_store_opt_in_evidence_summary.registers_embedding_backend == false
     and .opt_in_plan.implemented_store_opt_in_evidence_summary.default_search_order_change_allowed == false
     and .opt_in_plan.implemented_store_opt_in_evidence_summary.default_calls_unchanged == true
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.fixture == "docs/design/fixtures/biocortex-retrieval-opt-in-expanded-controlled-corpus-2026-06-12.json"
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.reuses_cli == "agent-bridge bio-cortex retrieval-opt-in-controlled-order-fixture"
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.reuses_evidence_summary_cli == "agent-bridge bio-cortex retrieval-opt-in-evidence-summary"
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.schema == "agent_bridge.biocortex_retrieval.opt_in_controlled_order_fixture_run.v0"
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.implementation_stage == "expanded_non_production_adapter_coverage"
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.authorized_scope == "explicit_opt_in_fts_runtime_influence"
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.memory_record_count == 10
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.query_count == 5
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.expected_min_actual_order_changed_count == 0
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.expected_min_experimental_source_count == 5
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.expected_min_side_signal_ok_count == 5
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.proves_multi_bucket_adapter_coverage == true
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.proves_additional_rank_movement == false
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.canonical_rank_movement_fixture == "docs/design/fixtures/biocortex-retrieval-opt-in-controlled-order-fixture-2026-06-12.json"
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.writes_only_fixture_memories == true
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.uses_non_production_store_only == true
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.uses_redacted_evidence_summary == true
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.raw_queries_included == false
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.raw_keys_included == false
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.content_included == false
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.side_signal_raw_included == false
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.writes_approval == false
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.calls_memory_search == true
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.runs_biocortex == true
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.registers_embedding_backend == false
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.can_grant_runtime_influence == false
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.default_search_order_change_allowed == false
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.default_calls_unchanged == true
     and .opt_in_plan.implemented_authorization_decision_consumer.cli == "agent-bridge bio-cortex retrieval-opt-in-authorization-decision-packet"
     and .opt_in_plan.implemented_authorization_decision_consumer.mcp_tool == "biocortex_retrieval_opt_in_authorization_decision_packet"
     and .opt_in_plan.implemented_authorization_decision_consumer.schema == "agent_bridge.biocortex_retrieval.opt_in_authorization_decision_packet.v0"
@@ -2924,6 +3002,129 @@ jq -e '
 ' "$opt_in_evidence_summary" >/dev/null
 if grep -q 'cortexdelta\|cortexepsilon\|cortexzeta\|cortexeta\|cortextheta\|cortexiota\|controlled_order_baseline_high\|controlled_order_biocortex_target\|target anchor\|baseline anchor\|biocortex opt-in runtime adapter\|runtime influence decision packet\|memory search baseline recall\|redacted order artifact movement\|agent bridge mcp tool registry\|agent bridge mcp\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_evidence_summary"; then
     echo "opt-in evidence summary leaked raw query/key/content data" >&2
+    exit 1
+fi
+
+opt_in_expanded_corpus="$tmpdir/opt-in-expanded-controlled-corpus.json"
+run env AGENT_BRIDGE_DB="$tmpdir/opt-in-expanded-controlled-corpus.db" \
+    AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
+    cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
+    bio-cortex retrieval-opt-in-controlled-order-fixture \
+    --runtime-influence-decision-packet-json "$opt_in_runtime_influence_decision_packet" \
+    --fixture-json "$opt_in_expanded_corpus_fixture" \
+    --allow-non-production-store-writes \
+    --per-call-opt-in \
+    --checkout "$biocortex_rs" \
+    --limit 5 \
+    --coverage-threshold 0.5 \
+    --attempt-id verify-expanded-controlled-corpus \
+    --commit verify-dry-run-commit \
+    --json > "$opt_in_expanded_corpus"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_controlled_order_fixture_run.v0"
+    and .controlled_order_fixture == true
+    and .implementation_stage == "store_opt_in_controlled_order_fixture"
+    and .status == "completed"
+    and .expected.met == true
+    and .attempt.seeded_memory_count == 10
+    and .attempt.query_count == 5
+    and .fixture_contract.requires_agent_bridge_db_override == true
+    and .fixture_contract.requires_non_production_store_write_ack == true
+    and .fixture_contract.writes_ab_store == true
+    and .fixture_contract.writes_approval == false
+    and .fixture_contract.registers_embedding_backend == false
+    and .fixture_contract.raw_queries_included == false
+    and .fixture_contract.raw_keys_included == false
+    and .fixture_contract.content_included == false
+    and .fixture_contract.side_signal_raw_included == false
+    and .diagnostics.schema == "agent_bridge.biocortex_retrieval.opt_in_batch_diagnostics.v0"
+    and .diagnostics.summary.query_count == 5
+    and .diagnostics.summary.baseline_completed_count == 5
+    and .diagnostics.summary.baseline_empty_count == 0
+    and .diagnostics.summary.adapter_allowed_count == 5
+    and .diagnostics.summary.side_signal_attempted_count == 5
+    and .diagnostics.summary.side_signal_ok_count == 5
+    and .diagnostics.summary.experimental_source_count == 5
+    and .diagnostics.summary.actual_order_changed_count == 0
+    and .diagnostics.summary.hash_matches_baseline_count == 5
+    and .diagnostics.summary.raw_flagged_count == 0
+    and .diagnostics.summary.runs_biocortex_count == 5
+    and (.diagnostics.query_results | length) == 5
+    and ([.diagnostics.query_results[].movement_class] | unique) == ["experimental_aligned_with_baseline"]
+    and ([.diagnostics.query_results[].returned_order.actual_return_order_changed] | unique) == [false]
+    and ([.diagnostics.query_results[].returned_order.hash_matches_baseline] | unique) == [true]
+    and ([.diagnostics.query_results[].raw_query_included] | unique) == [false]
+    and ([.diagnostics.query_results[].raw_keys_included] | unique) == [false]
+    and ([.diagnostics.query_results[].content_included] | unique) == [false]
+    and ([.diagnostics.query_results[].side_signal_raw_included] | unique) == [false]
+    and .diagnostics.safety.calls_memory_search_all == true
+    and .diagnostics.safety.runs_biocortex_any == true
+    and .diagnostics.safety.actual_return_order_changed_any == false
+    and .diagnostics.safety.raw_flags_all_false == true
+    and .raw_queries_included == false
+    and .raw_keys_included == false
+    and .content_included == false
+    and .side_signal_raw_included == false
+    and .default_search_order_change_allowed == false
+    and .default_calls_unchanged == true
+' "$opt_in_expanded_corpus" >/dev/null
+if grep -q 'axonalpha\|axonbeta\|axongamma\|axondelta\|axonepsilon\|axonzeta\|dendritealpha\|dendritebeta\|dendritegamma\|dendritedelta\|dendriteepsilon\|dendritezeta\|gliaalph\|gliabet\|gliagam\|gliadel\|gliaeps\|gliazet\|myelinalpha\|myelinbeta\|myelingamma\|myelindelta\|myelinepsilon\|myelinzeta\|synapsealpha\|synapsebeta\|synapsegamma\|synapsedelta\|synapseepsilon\|synapsezeta\|expanded_corpus_baseline_focus\|expanded_corpus_target_span\|baseline focus\|target span' "$opt_in_expanded_corpus"; then
+    echo "opt-in expanded controlled corpus leaked raw query/key/content data" >&2
+    exit 1
+fi
+
+opt_in_expanded_evidence_summary="$tmpdir/opt-in-expanded-evidence-summary.json"
+run cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
+    bio-cortex retrieval-opt-in-evidence-summary \
+    --batch-diagnostics-json "$opt_in_batch_diagnostics_empty" \
+    --controlled-order-fixture-run-json "$opt_in_expanded_corpus" \
+    --reviewer verify-bundle \
+    --commit verify-dry-run-commit \
+    --forum-post-id verify-forum-post \
+    --memory-key verify-memory-key \
+    --json > "$opt_in_expanded_evidence_summary"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_evidence_summary.v0"
+    and .read_only == true
+    and .evidence_summary == true
+    and .implementation_stage == "post_runtime_evidence_summary"
+    and .batch_diagnostics.query_count == 6
+    and .batch_diagnostics.raw_flags_all_false == true
+    and .controlled_order.schema_ok == true
+    and .controlled_order.expected_met == true
+    and .controlled_order.seeded_memory_count == 10
+    and .controlled_order.query_count == 5
+    and .controlled_order.adapter_allowed_count == 5
+    and .controlled_order.side_signal_ok_count == 5
+    and .controlled_order.experimental_source_count == 5
+    and .controlled_order.actual_order_changed_count == 0
+    and .controlled_order.raw_flags_all_false == true
+    and .controlled_order.movement_observed == false
+    and .interpretation.batch_diagnostics_raw_safe == true
+    and .interpretation.controlled_order_raw_safe == true
+    and .interpretation.runtime_adapter_connection_evidence == true
+    and .interpretation.controlled_rank_movement_observed == false
+    and .interpretation.evidence_ready == false
+    and .interpretation.default_influence_ready == false
+    and .interpretation.recommended_next_step == "collect_missing_redacted_evidence"
+    and .interpretation.review_state == "post_runtime_evidence_incomplete"
+    and .approval_state == "evidence_summary_only"
+    and .authorization_state == "does_not_grant_runtime_influence"
+    and .approval_writes_allowed == false
+    and .writes_approval == false
+    and .calls_memory_search == false
+    and .runs_biocortex == false
+    and .registers_embedding_backend == false
+    and .changes_memory_search_order == false
+    and .default_search_order_change_allowed == false
+    and .default_calls_unchanged == true
+    and .raw_queries_included == false
+    and .raw_keys_included == false
+    and .content_included == false
+    and .side_signal_raw_included == false
+' "$opt_in_expanded_evidence_summary" >/dev/null
+if grep -q 'axonalpha\|axonbeta\|axongamma\|axondelta\|axonepsilon\|axonzeta\|dendritealpha\|dendritebeta\|dendritegamma\|dendritedelta\|dendriteepsilon\|dendritezeta\|gliaalph\|gliabet\|gliagam\|gliadel\|gliaeps\|gliazet\|myelinalpha\|myelinbeta\|myelingamma\|myelindelta\|myelinepsilon\|myelinzeta\|synapsealpha\|synapsebeta\|synapsegamma\|synapsedelta\|synapseepsilon\|synapsezeta\|expanded_corpus_baseline_focus\|expanded_corpus_target_span\|baseline focus\|target span\|biocortex opt-in runtime adapter\|runtime influence decision packet\|memory search baseline recall\|redacted order artifact movement\|agent bridge mcp tool registry\|agent bridge mcp\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_expanded_evidence_summary"; then
+    echo "opt-in expanded evidence summary leaked raw query/key/content data" >&2
     exit 1
 fi
 test -s "$opt_in_auth_request/forum-post-template.md"

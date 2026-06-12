@@ -599,6 +599,28 @@ Slice 24 added a redacted post-runtime evidence summary:
 - default `memory_search`, hybrid search, semantic search, approval state, and
   embedding backend registration remain unchanged.
 
+Slice 25 added an expanded non-production adapter-coverage fixture:
+
+- fixture:
+  `docs/design/fixtures/biocortex-retrieval-opt-in-expanded-controlled-corpus-2026-06-12.json`;
+- reuses CLI:
+  `agent-bridge bio-cortex retrieval-opt-in-controlled-order-fixture`;
+- reuses evidence summary:
+  `agent-bridge bio-cortex retrieval-opt-in-evidence-summary`;
+- seeds 10 non-production fixture memories across 5 independent query buckets;
+- expected evidence is five adapter-allowed, side-signal-ok, experimental-source
+  rows, but not additional order movement: the expected
+  `actual_order_changed_count` is 0 because this fixture is a broader
+  coverage/alignment check rather than a rank-movement proof;
+- the separate Slice 23 controlled fixture remains the canonical redacted proof
+  that the protected path can produce a returned-order movement;
+- output remains redacted: raw queries, memory keys, memory contents, raw
+  side-signal rows, and the runtime decision packet body are not returned;
+- this fixture is for broader non-production evidence only and does not grant or
+  imply runtime/default retrieval influence;
+- default `memory_search`, hybrid search, semantic search, approval state, and
+  embedding backend registration remain unchanged.
+
 ## Fail-Open Rules
 
 The experiment must return the baseline list for:

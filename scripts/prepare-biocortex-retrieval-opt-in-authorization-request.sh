@@ -573,6 +573,34 @@ jq -e '
     and .opt_in_plan.implemented_store_opt_in_evidence_summary.registers_embedding_backend == false
     and .opt_in_plan.implemented_store_opt_in_evidence_summary.default_search_order_change_allowed == false
     and .opt_in_plan.implemented_store_opt_in_evidence_summary.default_calls_unchanged == true
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.fixture == "docs/design/fixtures/biocortex-retrieval-opt-in-expanded-controlled-corpus-2026-06-12.json"
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.reuses_cli == "agent-bridge bio-cortex retrieval-opt-in-controlled-order-fixture"
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.reuses_evidence_summary_cli == "agent-bridge bio-cortex retrieval-opt-in-evidence-summary"
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.schema == "agent_bridge.biocortex_retrieval.opt_in_controlled_order_fixture_run.v0"
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.implementation_stage == "expanded_non_production_adapter_coverage"
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.authorized_scope == "explicit_opt_in_fts_runtime_influence"
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.memory_record_count == 10
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.query_count == 5
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.expected_min_actual_order_changed_count == 0
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.expected_min_experimental_source_count == 5
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.expected_min_side_signal_ok_count == 5
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.proves_multi_bucket_adapter_coverage == true
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.proves_additional_rank_movement == false
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.canonical_rank_movement_fixture == "docs/design/fixtures/biocortex-retrieval-opt-in-controlled-order-fixture-2026-06-12.json"
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.writes_only_fixture_memories == true
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.uses_non_production_store_only == true
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.uses_redacted_evidence_summary == true
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.raw_queries_included == false
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.raw_keys_included == false
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.content_included == false
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.side_signal_raw_included == false
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.writes_approval == false
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.calls_memory_search == true
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.runs_biocortex == true
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.registers_embedding_backend == false
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.can_grant_runtime_influence == false
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.default_search_order_change_allowed == false
+    and .opt_in_plan.implemented_store_opt_in_expanded_non_production_corpus.default_calls_unchanged == true
     and .opt_in_plan.implemented_authorization_decision_consumer.cli == "agent-bridge bio-cortex retrieval-opt-in-authorization-decision-packet"
     and .opt_in_plan.implemented_authorization_decision_consumer.mcp_tool == "biocortex_retrieval_opt_in_authorization_decision_packet"
     and .opt_in_plan.implemented_authorization_decision_consumer.schema == "agent_bridge.biocortex_retrieval.opt_in_authorization_decision_packet.v0"

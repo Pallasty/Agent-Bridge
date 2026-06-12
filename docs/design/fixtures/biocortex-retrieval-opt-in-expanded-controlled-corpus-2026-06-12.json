@@ -1,0 +1,143 @@
+{
+  "schema": "agent_bridge.biocortex_retrieval.opt_in_controlled_order_fixture.v0",
+  "read_only": false,
+  "purpose": "Expanded non-production corpus for checking that the protected BioCortex opt-in path can produce repeated adapter coverage and experimental-order alignment across multiple independent FTS query buckets while default retrieval remains unchanged.",
+  "safety_boundary": {
+    "requires_agent_bridge_db_override": true,
+    "requires_non_production_store_write_ack": true,
+    "writes_only_fixture_memories": true,
+    "writes_approval": false,
+    "registers_embedding_backend": false,
+    "raw_queries_are_fixture_inputs": true,
+    "raw_queries_must_not_be_returned_by_runner": true,
+    "raw_keys_must_not_be_returned_by_runner": true,
+    "content_must_not_be_returned_by_runner": true,
+    "side_signal_raw_must_not_be_returned_by_runner": true,
+    "default_search_order_change_allowed": false,
+    "default_calls_unchanged": true
+  },
+  "memory_records": [
+    {
+      "key": "expanded_corpus_baseline_focus_a",
+      "kind": "fact",
+      "importance": 1.0,
+      "tags": [
+        "biocortex_expanded_controlled_corpus"
+      ],
+      "content": "axonalpha axonalpha axonalpha axonalpha axonalpha baseline focus"
+    },
+    {
+      "key": "expanded_corpus_target_span_a",
+      "kind": "fact",
+      "importance": 0.0,
+      "tags": [
+        "biocortex_expanded_controlled_corpus"
+      ],
+      "content": "axonalpha axonbeta axongamma axondelta axonepsilon axonzeta target span"
+    },
+    {
+      "key": "expanded_corpus_baseline_focus_b",
+      "kind": "fact",
+      "importance": 1.0,
+      "tags": [
+        "biocortex_expanded_controlled_corpus"
+      ],
+      "content": "dendritealpha dendritealpha dendritealpha dendritealpha dendritealpha baseline focus"
+    },
+    {
+      "key": "expanded_corpus_target_span_b",
+      "kind": "fact",
+      "importance": 0.0,
+      "tags": [
+        "biocortex_expanded_controlled_corpus"
+      ],
+      "content": "dendritealpha dendritebeta dendritegamma dendritedelta dendriteepsilon dendritezeta target span"
+    },
+    {
+      "key": "expanded_corpus_baseline_focus_c",
+      "kind": "fact",
+      "importance": 1.0,
+      "tags": [
+        "biocortex_expanded_controlled_corpus"
+      ],
+      "content": "gliaalph gliaalph gliaalph gliaalph gliaalph baseline focus"
+    },
+    {
+      "key": "expanded_corpus_target_span_c",
+      "kind": "fact",
+      "importance": 0.0,
+      "tags": [
+        "biocortex_expanded_controlled_corpus"
+      ],
+      "content": "gliaalph gliabet gliagam gliadel gliaeps gliazet target span"
+    },
+    {
+      "key": "expanded_corpus_baseline_focus_d",
+      "kind": "fact",
+      "importance": 1.0,
+      "tags": [
+        "biocortex_expanded_controlled_corpus"
+      ],
+      "content": "myelinalpha myelinalpha myelinalpha myelinalpha myelinalpha baseline focus"
+    },
+    {
+      "key": "expanded_corpus_target_span_d",
+      "kind": "fact",
+      "importance": 0.0,
+      "tags": [
+        "biocortex_expanded_controlled_corpus"
+      ],
+      "content": "myelinalpha myelinbeta myelingamma myelindelta myelinepsilon myelinzeta target span"
+    },
+    {
+      "key": "expanded_corpus_baseline_focus_e",
+      "kind": "fact",
+      "importance": 1.0,
+      "tags": [
+        "biocortex_expanded_controlled_corpus"
+      ],
+      "content": "synapsealpha synapsealpha synapsealpha synapsealpha synapsealpha baseline focus"
+    },
+    {
+      "key": "expanded_corpus_target_span_e",
+      "kind": "fact",
+      "importance": 0.0,
+      "tags": [
+        "biocortex_expanded_controlled_corpus"
+      ],
+      "content": "synapsealpha synapsebeta synapsegamma synapsedelta synapseepsilon synapsezeta target span"
+    }
+  ],
+  "query_cases": [
+    {
+      "query": "axonalpha OR axonbeta OR axongamma OR axondelta OR axonepsilon OR axonzeta",
+      "class_label": "expanded_adapter_coverage_a",
+      "diagnostic_focus": "baseline_high_importance_vs_biocortex_term_coverage"
+    },
+    {
+      "query": "dendritealpha OR dendritebeta OR dendritegamma OR dendritedelta OR dendriteepsilon OR dendritezeta",
+      "class_label": "expanded_adapter_coverage_b",
+      "diagnostic_focus": "baseline_high_importance_vs_biocortex_term_coverage"
+    },
+    {
+      "query": "gliaalph OR gliabet OR gliagam OR gliadel OR gliaeps OR gliazet",
+      "class_label": "expanded_adapter_coverage_c",
+      "diagnostic_focus": "baseline_high_importance_vs_biocortex_term_coverage"
+    },
+    {
+      "query": "myelinalpha OR myelinbeta OR myelingamma OR myelindelta OR myelinepsilon OR myelinzeta",
+      "class_label": "expanded_adapter_coverage_d",
+      "diagnostic_focus": "baseline_high_importance_vs_biocortex_term_coverage"
+    },
+    {
+      "query": "synapsealpha OR synapsebeta OR synapsegamma OR synapsedelta OR synapseepsilon OR synapsezeta",
+      "class_label": "expanded_adapter_coverage_e",
+      "diagnostic_focus": "baseline_high_importance_vs_biocortex_term_coverage"
+    }
+  ],
+  "expected": {
+    "min_actual_order_changed_count": 0,
+    "min_experimental_source_count": 5,
+    "min_side_signal_ok_count": 5
+  }
+}
