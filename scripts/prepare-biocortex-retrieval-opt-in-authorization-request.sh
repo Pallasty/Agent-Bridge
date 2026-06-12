@@ -389,13 +389,14 @@ jq -e '
     and .writes_approval == false
     and .accepts_optional_order_diff_packet == true
     and .accepts_optional_redacted_order_artifact == true
-    and .opt_in_plan.status == "store_opt_in_search_wrapper_implemented"
+    and .opt_in_plan.status == "authorization_decision_consumer_implemented"
     and .opt_in_plan.approval_state == "opt_in_implementation_authorized"
     and .opt_in_plan.order_diff_packet_implemented == true
     and .opt_in_plan.authorization_request_order_diff_evidence_implemented == true
     and .opt_in_plan.redacted_order_artifact_implemented == true
     and .opt_in_plan.authorization_request_redacted_order_artifact_evidence_implemented == true
     and .opt_in_plan.store_opt_in_search_wrapper_implemented == true
+    and .opt_in_plan.authorization_decision_consumer_implemented == true
     and .opt_in_plan.implemented_gate_skeleton.ordering_behavior_connected == false
     and .opt_in_plan.implemented_gate_skeleton.may_change_search_order_now == false
     and .opt_in_plan.implemented_audit_shape.schema == "agent_bridge.biocortex_retrieval.opt_in_call_audit.v0"
@@ -434,6 +435,34 @@ jq -e '
     and .opt_in_plan.implemented_store_opt_in_search_wrapper.ordering_behavior_connected == false
     and .opt_in_plan.implemented_store_opt_in_search_wrapper.default_calls_unchanged == true
     and .opt_in_plan.implemented_store_opt_in_search_wrapper.may_implement_ordering_now == false
+    and .opt_in_plan.implemented_authorization_decision_consumer.cli == "agent-bridge bio-cortex retrieval-opt-in-authorization-decision-packet"
+    and .opt_in_plan.implemented_authorization_decision_consumer.mcp_tool == "biocortex_retrieval_opt_in_authorization_decision_packet"
+    and .opt_in_plan.implemented_authorization_decision_consumer.schema == "agent_bridge.biocortex_retrieval.opt_in_authorization_decision_packet.v0"
+    and .opt_in_plan.implemented_authorization_decision_consumer.read_only == true
+    and .opt_in_plan.implemented_authorization_decision_consumer.authorization_decision_consumer == true
+    and .opt_in_plan.implemented_authorization_decision_consumer.implementation_stage == "authorization_decision_consumer_only"
+    and .opt_in_plan.implemented_authorization_decision_consumer.consumes_authorization_request_summary == true
+    and .opt_in_plan.implemented_authorization_decision_consumer.consumes_authorization_decision_summary == true
+    and .opt_in_plan.implemented_authorization_decision_consumer.authorization_request_included == false
+    and .opt_in_plan.implemented_authorization_decision_consumer.authorization_decision_included == false
+    and .opt_in_plan.implemented_authorization_decision_consumer.raw_query_included == false
+    and .opt_in_plan.implemented_authorization_decision_consumer.raw_keys_included == false
+    and .opt_in_plan.implemented_authorization_decision_consumer.content_included == false
+    and .opt_in_plan.implemented_authorization_decision_consumer.implementation_allowed == true
+    and .opt_in_plan.implemented_authorization_decision_consumer.approval_state == "opt_in_implementation_authorized"
+    and .opt_in_plan.implemented_authorization_decision_consumer.authorization_state == "authorized_for_opt_in_implementation"
+    and .opt_in_plan.implemented_authorization_decision_consumer.runtime_adapter_approved == false
+    and .opt_in_plan.implemented_authorization_decision_consumer.default_search_order_change_allowed == false
+    and .opt_in_plan.implemented_authorization_decision_consumer.requires_post_implementation_review_before_use == true
+    and .opt_in_plan.implemented_authorization_decision_consumer.approval_writes_allowed == false
+    and .opt_in_plan.implemented_authorization_decision_consumer.writes_approval == false
+    and .opt_in_plan.implemented_authorization_decision_consumer.calls_memory_search == false
+    and .opt_in_plan.implemented_authorization_decision_consumer.runs_biocortex == false
+    and .opt_in_plan.implemented_authorization_decision_consumer.registers_embedding_backend == false
+    and .opt_in_plan.implemented_authorization_decision_consumer.changes_memory_search_order == false
+    and .opt_in_plan.implemented_authorization_decision_consumer.ordering_behavior_connected == false
+    and .opt_in_plan.implemented_authorization_decision_consumer.may_change_search_order_now == false
+    and .opt_in_plan.implemented_authorization_decision_consumer.may_implement_ordering_now == false
     and .opt_in_plan.implemented_dry_run_planner.mcp_tool == "biocortex_retrieval_opt_in_dry_run"
     and .opt_in_plan.implemented_dry_run_planner.schema == "agent_bridge.biocortex_retrieval.opt_in_dry_run_plan.v0"
     and .opt_in_plan.implemented_dry_run_planner.read_only == true

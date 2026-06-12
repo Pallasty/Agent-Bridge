@@ -15,7 +15,9 @@ hash-only order-diff evidence. A separate redacted-order artifact now computes
 top-k overlap and per-key rank movement from `key_hash` rows only, and the
 authorization request bundle can optionally include its summary-only evidence.
 The store layer now has a baseline-preserving opt-in search wrapper with a
-redacted audit summary.
+redacted audit summary. A read-only authorization decision consumer now turns
+the human implementation authorization record into a machine-checkable
+implementation-only gate.
 Ordering behavior is not implemented and not approved.
 
 ```json
@@ -40,6 +42,7 @@ Ordering behavior is not implemented and not approved.
   "redacted_order_artifact_implemented": true,
   "authorization_request_redacted_order_artifact_evidence_implemented": true,
   "store_opt_in_search_wrapper_implemented": true,
+  "authorization_decision_consumer_implemented": true,
   "ordering_behavior_connected": false
 }
 ```
@@ -357,6 +360,31 @@ real FTS search path. It still does not connect an ordering path: even when
 feature/runtime/per-call gates are present, the wrapper returns baseline until a
 separate review authorizes runtime adapter influence and ordering behavior.
 
+Slice 16 landed a read-only authorization decision consumer:
+
+- CLI:
+  `agent-bridge bio-cortex retrieval-opt-in-authorization-decision-packet`;
+- MCP tool:
+  `biocortex_retrieval_opt_in_authorization_decision_packet`;
+- packet schema:
+  `agent_bridge.biocortex_retrieval.opt_in_authorization_decision_packet.v0`;
+- consumes the authorization request summary and the human authorization
+  decision record;
+- does not include the raw request or decision payload;
+- authorizes implementation work only when both records preserve
+  `runtime_adapter_approved=false`, `default_search_order_change_allowed=false`,
+  FTS-only per-call scope, baseline fallback rules, and post-implementation
+  review before use;
+- keeps `runtime_adapter_approved=false`, `approval_writes_allowed=false`,
+  `writes_approval=false`, `calls_memory_search=false`, `runs_biocortex=false`,
+  `changes_memory_search_order=false`, `ordering_behavior_connected=false`, and
+  `may_implement_ordering_now=false`.
+
+This makes the recorded human authorization machine-checkable while preserving
+the separation between "implementation work is authorized" and "runtime adapter
+influence is approved." The latter still requires a separate post-implementation
+review and explicit ordering-behavior connection.
+
 ## Fail-Open Rules
 
 The experiment must return the baseline list for:
@@ -441,6 +469,8 @@ Future implementation review must include tests proving:
   summaries without copying key hashes or approving runtime influence;
 - store opt-in search wrapper returns baseline order and emits redacted audit
   without serializing query, keys, or content;
+- authorization decision consumer authorizes implementation only and does not
+  approve runtime influence or echo raw request/decision fields;
 - audit telemetry includes baseline order, experimental order, fallback reason,
   latency, and authorization scope.
 

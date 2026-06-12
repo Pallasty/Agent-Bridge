@@ -4,6 +4,7 @@ use ab_agent::{
 };
 use ab_bridge::biocortex_shadow::{
     biocortex_replay_comparison, biocortex_retrieval_opt_in_audit_report,
+    biocortex_retrieval_opt_in_authorization_decision_packet,
     biocortex_retrieval_opt_in_dry_run_plan, biocortex_retrieval_opt_in_execution_packet,
     biocortex_retrieval_opt_in_order_diff_packet,
     biocortex_retrieval_opt_in_redacted_order_artifact, biocortex_retrieval_opt_in_review_packet,
@@ -12,8 +13,10 @@ use ab_bridge::biocortex_shadow::{
     biocortex_retrieval_runtime_approval_packet_preview, biocortex_shadow_digest,
     supported_benchmarks, BioCortexReplayComparisonOptions,
     BioCortexRetrievalApprovalPacketOptions, BioCortexRetrievalCandidate,
-    BioCortexRetrievalOptInAuditOptions, BioCortexRetrievalOptInDryRunOptions,
-    BioCortexRetrievalOptInExecutionPacketOptions, BioCortexRetrievalOptInOrderDiffPacketOptions,
+    BioCortexRetrievalOptInAuditOptions,
+    BioCortexRetrievalOptInAuthorizationDecisionPacketOptions,
+    BioCortexRetrievalOptInDryRunOptions, BioCortexRetrievalOptInExecutionPacketOptions,
+    BioCortexRetrievalOptInOrderDiffPacketOptions,
     BioCortexRetrievalOptInRedactedOrderArtifactOptions,
     BioCortexRetrievalOptInReviewPacketOptions, BioCortexRetrievalOptInRuntimeTrialOptions,
     BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions, BioCortexShadowOptions,
@@ -2702,6 +2705,34 @@ enum BioCortexOp {
         #[arg(long)]
         json: bool,
     },
+    /// Consume the opt-in authorization decision as an implementation-only gate.
+    ///
+    /// This consumes safe summary fields from the authorization request and
+    /// human decision records. It does not approve runtime adapter influence,
+    /// call `memory_search`, run BioCortex, or change retrieval order.
+    RetrievalOptInAuthorizationDecisionPacket {
+        /// JSON file produced by `prepare-biocortex-retrieval-opt-in-authorization-request.sh`.
+        #[arg(long = "authorization-request-json")]
+        authorization_request_json: PathBuf,
+        /// JSON decision fixture for the human opt-in implementation authorization.
+        #[arg(long = "authorization-decision-json")]
+        authorization_decision_json: PathBuf,
+        /// Reviewer identity or handle.
+        #[arg(long)]
+        reviewer: Option<String>,
+        /// Implementation commit under review.
+        #[arg(long)]
+        commit: Option<String>,
+        /// Forum post id linking the decision packet.
+        #[arg(long)]
+        forum_post_id: Option<String>,
+        /// Memory key linking the decision packet.
+        #[arg(long)]
+        memory_key: Option<String>,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
     /// Preview the future runtime approval packet without approving anything.
     ///
     /// This is a review-preparation packet only. It never runs BioCortex,
@@ -4619,6 +4650,30 @@ async fn real_main() -> Result<()> {
                     source_json,
                     BioCortexRetrievalOptInRedactedOrderArtifactOptions {
                         source_packet: Value::Null,
+                        reviewer: reviewer.clone(),
+                        commit: commit.clone(),
+                        forum_post_id: forum_post_id.clone(),
+                        memory_key: memory_key.clone(),
+                    },
+                    *json,
+                )
+                .await
+            }
+            BioCortexOp::RetrievalOptInAuthorizationDecisionPacket {
+                authorization_request_json,
+                authorization_decision_json,
+                reviewer,
+                commit,
+                forum_post_id,
+                memory_key,
+                json,
+            } => {
+                run_biocortex_retrieval_opt_in_authorization_decision_packet(
+                    authorization_request_json,
+                    authorization_decision_json,
+                    BioCortexRetrievalOptInAuthorizationDecisionPacketOptions {
+                        authorization_decision: Value::Null,
+                        authorization_request: Value::Null,
                         reviewer: reviewer.clone(),
                         commit: commit.clone(),
                         forum_post_id: forum_post_id.clone(),
@@ -9006,6 +9061,82 @@ async fn run_biocortex_retrieval_opt_in_redacted_order_artifact(
     );
     println!(
         "calls_memory_search={} runs_biocortex={} changes_memory_search_order={}",
+        shadow_json_display(payload.get("calls_memory_search"), "false"),
+        shadow_json_display(payload.get("runs_biocortex"), "false"),
+        shadow_json_display(payload.get("changes_memory_search_order"), "false")
+    );
+    Ok(())
+}
+
+async fn run_biocortex_retrieval_opt_in_authorization_decision_packet(
+    authorization_request_json: &std::path::Path,
+    authorization_decision_json: &std::path::Path,
+    mut opts: BioCortexRetrievalOptInAuthorizationDecisionPacketOptions,
+    as_json: bool,
+) -> Result<()> {
+    let request_body = std::fs::read_to_string(authorization_request_json).map_err(|e| {
+        anyhow::anyhow!(
+            "read opt-in authorization request JSON at {authorization_request_json:?}: {e}"
+        )
+    })?;
+    opts.authorization_request = serde_json::from_str(&request_body).map_err(|e| {
+        anyhow::anyhow!(
+            "parse opt-in authorization request JSON at {authorization_request_json:?}: {e}"
+        )
+    })?;
+    let decision_body = std::fs::read_to_string(authorization_decision_json).map_err(|e| {
+        anyhow::anyhow!(
+            "read opt-in authorization decision JSON at {authorization_decision_json:?}: {e}"
+        )
+    })?;
+    opts.authorization_decision = serde_json::from_str(&decision_body).map_err(|e| {
+        anyhow::anyhow!(
+            "parse opt-in authorization decision JSON at {authorization_decision_json:?}: {e}"
+        )
+    })?;
+    let payload = biocortex_retrieval_opt_in_authorization_decision_packet(opts);
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# BioCortex retrieval opt-in authorization decision packet");
+    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
+    let boundary = payload.get("boundary_check").unwrap_or(&Value::Null);
+    println!(
+        "implementation_authorized={} approval_state={} authorization_state={}",
+        shadow_json_display(boundary.get("implementation_authorized"), "false"),
+        shadow_json_display(payload.get("approval_state"), "not_approved"),
+        shadow_json_display(payload.get("authorization_state"), "not_authorized")
+    );
+    println!(
+        "runtime_adapter_approved={} default_search_order_change_allowed={} may_implement_ordering_now={}",
+        shadow_json_display(payload.get("runtime_adapter_approved"), "false"),
+        shadow_json_display(payload.get("default_search_order_change_allowed"), "false"),
+        shadow_json_display(payload.get("may_implement_ordering_now"), "false")
+    );
+    let authorized = payload
+        .get("authorized_implementation")
+        .unwrap_or(&Value::Null);
+    println!(
+        "fts_only={} per_call_surface={} post_review_required={}",
+        shadow_json_display(
+            authorized.get("may_affect_only_explicitly_opted_in_fts_calls"),
+            "false"
+        ),
+        shadow_json_display(authorized.get("may_add_per_call_opt_in_surface"), "false"),
+        shadow_json_display(
+            authorized.get("requires_post_implementation_review_before_use"),
+            "true"
+        )
+    );
+    println!(
+        "blockers={} calls_memory_search={} runs_biocortex={} changes_memory_search_order={}",
+        boundary
+            .get("blockers")
+            .and_then(Value::as_array)
+            .map(|items| items.len().to_string())
+            .unwrap_or_else(|| "0".to_string()),
         shadow_json_display(payload.get("calls_memory_search"), "false"),
         shadow_json_display(payload.get("runs_biocortex"), "false"),
         shadow_json_display(payload.get("changes_memory_search_order"), "false")
