@@ -511,6 +511,7 @@ unchanged, and default search order changes are still unauthorized.
 
 Slice 21 landed a protected store-level runtime adapter trial:
 
+- CLI: `agent-bridge bio-cortex retrieval-opt-in-store-trial`;
 - MCP tool: `biocortex_retrieval_opt_in_store_trial`;
 - packet schema: `agent_bridge.biocortex_retrieval.opt_in_store_trial.v0`;
 - implementation stage: `store_opt_in_runtime_adapter_connection`;

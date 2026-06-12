@@ -9,24 +9,24 @@ use ab_bridge::biocortex_shadow::{
     biocortex_retrieval_opt_in_order_diff_packet,
     biocortex_retrieval_opt_in_post_implementation_review_gate,
     biocortex_retrieval_opt_in_redacted_order_artifact, biocortex_retrieval_opt_in_review_packet,
-    biocortex_retrieval_opt_in_runtime_influence_review_request,
     biocortex_retrieval_opt_in_runtime_influence_decision_packet,
+    biocortex_retrieval_opt_in_runtime_influence_review_request,
     biocortex_retrieval_opt_in_runtime_trial,
-    biocortex_retrieval_opt_in_runtime_trial_review_packet,
+    biocortex_retrieval_opt_in_runtime_trial_review_packet, biocortex_retrieval_opt_in_store_trial,
     biocortex_retrieval_runtime_approval_packet_preview, biocortex_shadow_digest,
     supported_benchmarks, BioCortexReplayComparisonOptions,
     BioCortexRetrievalApprovalPacketOptions, BioCortexRetrievalCandidate,
-    BioCortexRetrievalOptInAuditOptions,
-    BioCortexRetrievalOptInAuthorizationDecisionPacketOptions,
+    BioCortexRetrievalOptInAuditOptions, BioCortexRetrievalOptInAuthorizationDecisionPacketOptions,
     BioCortexRetrievalOptInDryRunOptions, BioCortexRetrievalOptInExecutionPacketOptions,
     BioCortexRetrievalOptInOrderDiffPacketOptions,
     BioCortexRetrievalOptInPostImplementationReviewGateOptions,
     BioCortexRetrievalOptInRedactedOrderArtifactOptions,
     BioCortexRetrievalOptInReviewPacketOptions,
-    BioCortexRetrievalOptInRuntimeInfluenceReviewRequestOptions,
     BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketOptions,
+    BioCortexRetrievalOptInRuntimeInfluenceReviewRequestOptions,
     BioCortexRetrievalOptInRuntimeTrialOptions,
-    BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions, BioCortexShadowOptions,
+    BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions,
+    BioCortexRetrievalOptInStoreTrialOptions, BioCortexShadowOptions,
 };
 #[cfg(feature = "biocortex-retrieval-shadow")]
 use ab_bridge::biocortex_shadow::{
@@ -2828,6 +2828,54 @@ enum BioCortexOp {
         #[arg(long)]
         json: bool,
     },
+    /// Run a protected live store trial from a runtime-influence decision packet.
+    ///
+    /// This opens the AB store, calls baseline `memory_search`, runs BioCortex
+    /// only when explicit runtime-influence gates authorize it, and feeds
+    /// sanitized side-signal rows into the protected opt-in store wrapper.
+    /// Output is redacted to hashes, counts, rank rows, and contracts.
+    RetrievalOptInStoreTrial {
+        /// JSON file produced by retrieval-opt-in-runtime-influence-decision-packet.
+        #[arg(long = "runtime-influence-decision-packet-json")]
+        runtime_influence_decision_packet_json: PathBuf,
+        /// FTS query to evaluate against the AB store. Output includes only a hash.
+        #[arg(long)]
+        query: String,
+        /// Optional tag filter forwarded to baseline memory_search. May be repeated.
+        #[arg(long = "tag")]
+        tags_any: Vec<String>,
+        /// Maximum baseline candidates to retrieve from store memory_search.
+        #[arg(long, default_value_t = 10)]
+        limit: u32,
+        /// Retrieval mode under review. Only fts is authorized for runtime influence.
+        #[arg(long, default_value = "fts")]
+        mode: String,
+        /// Required explicit per-call opt-in bit.
+        #[arg(long)]
+        per_call_opt_in: bool,
+        /// Local biocortex-rs checkout. Defaults to AB_BIOCORTEX_RS, sibling
+        /// checkout paths, then /tmp/biocortex-rs-ab-eval.
+        #[arg(long)]
+        checkout: Option<PathBuf>,
+        /// External side-signal adapter timeout in milliseconds.
+        #[arg(long, default_value_t = 120_000)]
+        timeout_ms: u64,
+        /// Minimum matched side-signal coverage before experimental order is allowed.
+        #[arg(long, default_value_t = 0.8)]
+        coverage_threshold: f64,
+        /// Blend weight passed to the protected store wrapper.
+        #[arg(long, default_value_t = 0.8)]
+        blend_alpha: f32,
+        /// Optional store-trial attempt id for audit correlation.
+        #[arg(long)]
+        attempt_id: Option<String>,
+        /// Implementation commit under review.
+        #[arg(long)]
+        commit: Option<String>,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
     /// Preview the future runtime approval packet without approving anything.
     ///
     /// This is a review-preparation packet only. It never runs BioCortex,
@@ -4845,6 +4893,41 @@ async fn real_main() -> Result<()> {
                         commit: commit.clone(),
                         forum_post_id: forum_post_id.clone(),
                         memory_key: memory_key.clone(),
+                    },
+                    *json,
+                )
+                .await
+            }
+            BioCortexOp::RetrievalOptInStoreTrial {
+                runtime_influence_decision_packet_json,
+                query,
+                tags_any,
+                limit,
+                mode,
+                per_call_opt_in,
+                checkout,
+                timeout_ms,
+                coverage_threshold,
+                blend_alpha,
+                attempt_id,
+                commit,
+                json,
+            } => {
+                run_biocortex_retrieval_opt_in_store_trial(
+                    runtime_influence_decision_packet_json,
+                    BioCortexRetrievalOptInStoreTrialOptions {
+                        runtime_influence_decision_packet: Value::Null,
+                        query: query.clone(),
+                        tags_any: tags_any.clone(),
+                        limit: *limit,
+                        mode: mode.clone(),
+                        per_call_opt_in: *per_call_opt_in,
+                        checkout: checkout.clone(),
+                        timeout_ms: *timeout_ms,
+                        coverage_threshold: *coverage_threshold,
+                        blend_alpha: *blend_alpha,
+                        attempt_id: attempt_id.clone(),
+                        commit: commit.clone(),
                     },
                     *json,
                 )
@@ -9495,6 +9578,95 @@ async fn run_biocortex_retrieval_opt_in_runtime_influence_decision_packet(
         shadow_json_display(payload.get("calls_memory_search"), "false"),
         shadow_json_display(payload.get("runs_biocortex"), "false"),
         shadow_json_display(payload.get("changes_memory_search_order"), "false")
+    );
+    Ok(())
+}
+
+async fn run_biocortex_retrieval_opt_in_store_trial(
+    runtime_influence_decision_packet_json: &std::path::Path,
+    mut opts: BioCortexRetrievalOptInStoreTrialOptions,
+    as_json: bool,
+) -> Result<()> {
+    let packet_body = std::fs::read_to_string(runtime_influence_decision_packet_json).map_err(|e| {
+        anyhow::anyhow!(
+            "read opt-in runtime influence decision packet JSON at {runtime_influence_decision_packet_json:?}: {e}"
+        )
+    })?;
+    opts.runtime_influence_decision_packet =
+        serde_json::from_str(&packet_body).map_err(|e| {
+            anyhow::anyhow!(
+                "parse opt-in runtime influence decision packet JSON at {runtime_influence_decision_packet_json:?}: {e}"
+            )
+        })?;
+
+    let db_path = std::env::var("AGENT_BRIDGE_DB")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(default_db_path);
+    let store = SqliteStore::open(&db_path)
+        .await
+        .map_err(|e| anyhow::anyhow!("open state.db at {db_path:?}: {e}"))?;
+    let payload = biocortex_retrieval_opt_in_store_trial(&store, opts).await;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# BioCortex retrieval opt-in store trial");
+    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
+    println!(
+        "status={} implementation_stage={} approval_state={}",
+        shadow_json_display(payload.get("status"), "-"),
+        shadow_json_display(payload.get("implementation_stage"), "-"),
+        shadow_json_display(payload.get("approval_state"), "not_approved")
+    );
+    let preflight = payload.get("runtime_preflight").unwrap_or(&Value::Null);
+    println!(
+        "adapter_allowed={} blockers={} compile_feature_enabled={} runtime_enabled={} operator_disabled={}",
+        shadow_json_display(preflight.get("adapter_allowed"), "false"),
+        preflight
+            .get("blockers")
+            .and_then(Value::as_array)
+            .map(|items| items.len().to_string())
+            .unwrap_or_else(|| "0".to_string()),
+        shadow_json_display(preflight.get("compile_feature_enabled"), "false"),
+        shadow_json_display(preflight.get("runtime_enabled"), "false"),
+        shadow_json_display(preflight.get("operator_disabled"), "false")
+    );
+    let baseline = payload.get("baseline_order").unwrap_or(&Value::Null);
+    println!(
+        "baseline_completed={} baseline_key_count={} baseline_hash={} raw_keys_included={} content_included={}",
+        shadow_json_display(baseline.get("completed"), "false"),
+        shadow_json_display(baseline.get("key_count"), "0"),
+        shadow_json_display(baseline.get("hash"), "-"),
+        shadow_json_display(baseline.get("raw_keys_included"), "false"),
+        shadow_json_display(baseline.get("content_included"), "false")
+    );
+    let side_signal = payload.get("side_signal").unwrap_or(&Value::Null);
+    println!(
+        "side_signal_attempted={} side_signal_status={} matched_candidate_count={} coverage={} raw_included={}",
+        shadow_json_display(side_signal.get("attempted"), "false"),
+        shadow_json_display(side_signal.get("status"), "-"),
+        shadow_json_display(side_signal.get("matched_candidate_count"), "0"),
+        shadow_json_display(side_signal.get("coverage"), "0"),
+        shadow_json_display(side_signal.get("raw_included"), "false")
+    );
+    let returned = payload.get("returned_order").unwrap_or(&Value::Null);
+    println!(
+        "returned_source={} baseline_returned={} actual_return_order_changed={} fallback_reason={}",
+        shadow_json_display(returned.get("source"), "baseline"),
+        shadow_json_display(returned.get("baseline_returned"), "true"),
+        shadow_json_display(returned.get("actual_return_order_changed"), "false"),
+        shadow_json_display(returned.get("fallback_reason"), "-")
+    );
+    println!(
+        "calls_memory_search={} runs_biocortex={} changes_memory_search_order={} default_calls_unchanged={}",
+        shadow_json_display(payload.get("calls_memory_search"), "false"),
+        shadow_json_display(payload.get("runs_biocortex"), "false"),
+        shadow_json_display(payload.get("changes_memory_search_order"), "false"),
+        shadow_json_display(payload.get("default_calls_unchanged"), "true")
     );
     Ok(())
 }

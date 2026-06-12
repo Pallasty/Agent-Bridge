@@ -190,6 +190,7 @@ jq -e '
     and .implemented_store_opt_in_order_connection.hybrid_and_semantic_unchanged == true
     and .implemented_store_opt_in_order_connection.default_search_order_change_allowed == false
     and .implemented_store_opt_in_order_connection.explicit_opt_in_fts_ordering_behavior_connected == true
+    and .implemented_store_opt_in_runtime_adapter_connection.cli == "agent-bridge bio-cortex retrieval-opt-in-store-trial"
     and .implemented_store_opt_in_runtime_adapter_connection.mcp_tool == "biocortex_retrieval_opt_in_store_trial"
     and .implemented_store_opt_in_runtime_adapter_connection.schema == "agent_bridge.biocortex_retrieval.opt_in_store_trial.v0"
     and .implemented_store_opt_in_runtime_adapter_connection.implementation_stage == "store_opt_in_runtime_adapter_connection"
@@ -1551,6 +1552,7 @@ jq -e '
     and .opt_in_plan.implemented_store_opt_in_order_connection.hybrid_and_semantic_unchanged == true
     and .opt_in_plan.implemented_store_opt_in_order_connection.default_search_order_change_allowed == false
     and .opt_in_plan.implemented_store_opt_in_order_connection.explicit_opt_in_fts_ordering_behavior_connected == true
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.cli == "agent-bridge bio-cortex retrieval-opt-in-store-trial"
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.mcp_tool == "biocortex_retrieval_opt_in_store_trial"
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.schema == "agent_bridge.biocortex_retrieval.opt_in_store_trial.v0"
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.implementation_stage == "store_opt_in_runtime_adapter_connection"
@@ -2431,6 +2433,92 @@ jq -e '
 ' "$opt_in_runtime_influence_decision_packet" >/dev/null
 if grep -q 'verify runtime influence decision secret wording\|verify runtime influence decision secret query\|verify_runtime_influence_decision_secret_key\|verify runtime influence decision secret content\|verify runtime trial secret query\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_runtime_influence_decision_packet"; then
     echo "opt-in runtime influence decision packet leaked raw decision/request data" >&2
+    exit 1
+fi
+
+opt_in_store_trial_disabled="$tmpdir/opt-in-store-trial-disabled.json"
+run env AGENT_BRIDGE_DB="$tmpdir/opt-in-store-trial-disabled.db" \
+    cargo run -p ab-bridge --no-default-features -- \
+    bio-cortex retrieval-opt-in-store-trial \
+    --runtime-influence-decision-packet-json "$opt_in_runtime_influence_decision_packet" \
+    --query "verify store trial secret query" \
+    --per-call-opt-in \
+    --limit 3 \
+    --attempt-id verify-store-trial-disabled \
+    --commit verify-dry-run-commit \
+    --json > "$opt_in_store_trial_disabled"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_store_trial.v0"
+    and .implementation_stage == "store_opt_in_runtime_adapter_connection"
+    and .authorization_scope == "explicit_opt_in_fts_runtime_influence"
+    and .runtime_preflight.adapter_allowed == false
+    and (.runtime_preflight.blockers | index("compile_feature_disabled"))
+    and (.runtime_preflight.blockers | index("runtime_disabled"))
+    and (.runtime_preflight.blockers | index("baseline_empty"))
+    and .runtime_preflight.decision_packet_authorized == true
+    and .runtime_preflight.baseline_completed == true
+    and .baseline_order.key_count == 0
+    and .baseline_order.raw_keys_included == false
+    and .baseline_order.content_included == false
+    and .side_signal.attempted == false
+    and .side_signal.raw_included == false
+    and .protected_adapter_contract.raw_query_included == false
+    and .protected_adapter_contract.raw_keys_included == false
+    and .protected_adapter_contract.content_included == false
+    and .store_wrapper.called == true
+    and .returned_order.baseline_returned == true
+    and .returned_order.actual_return_order_changed == false
+    and .returned_order.raw_keys_included == false
+    and .returned_order.content_included == false
+    and .calls_memory_search == true
+    and .runs_biocortex == false
+    and .registers_embedding_backend == false
+    and .default_search_order_change_allowed == false
+    and .default_calls_unchanged == true
+' "$opt_in_store_trial_disabled" >/dev/null
+if grep -q 'verify store trial secret query\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_store_trial_disabled"; then
+    echo "opt-in store trial disabled path leaked raw query/key/content data" >&2
+    exit 1
+fi
+
+opt_in_store_trial_empty="$tmpdir/opt-in-store-trial-empty.json"
+run env AGENT_BRIDGE_DB="$tmpdir/opt-in-store-trial-empty.db" \
+    AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
+    cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
+    bio-cortex retrieval-opt-in-store-trial \
+    --runtime-influence-decision-packet-json "$opt_in_runtime_influence_decision_packet" \
+    --query "verify store trial ready secret query" \
+    --per-call-opt-in \
+    --checkout "$biocortex_rs" \
+    --limit 3 \
+    --attempt-id verify-store-trial-empty \
+    --commit verify-dry-run-commit \
+    --json > "$opt_in_store_trial_empty"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_store_trial.v0"
+    and .runtime_preflight.compile_feature_enabled == true
+    and .runtime_preflight.runtime_enabled == true
+    and .runtime_preflight.operator_disabled == false
+    and .runtime_preflight.decision_packet_authorized == true
+    and .runtime_preflight.adapter_allowed == false
+    and (.runtime_preflight.blockers | index("baseline_empty"))
+    and .baseline_order.completed == true
+    and .baseline_order.key_count == 0
+    and .side_signal.attempted == false
+    and .store_wrapper.called == true
+    and .returned_order.baseline_returned == true
+    and .returned_order.actual_return_order_changed == false
+    and .calls_memory_search == true
+    and .runs_biocortex == false
+    and .raw_query_included == false
+    and .raw_keys_included == false
+    and .content_included == false
+    and .side_signal_raw_included == false
+    and .default_search_order_change_allowed == false
+    and .default_calls_unchanged == true
+' "$opt_in_store_trial_empty" >/dev/null
+if grep -q 'verify store trial ready secret query\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_store_trial_empty"; then
+    echo "opt-in store trial empty path leaked raw query/key/content data" >&2
     exit 1
 fi
 test -s "$opt_in_auth_request/forum-post-template.md"

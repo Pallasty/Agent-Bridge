@@ -473,6 +473,7 @@ jq -e '
     and .opt_in_plan.implemented_store_opt_in_order_connection.hybrid_and_semantic_unchanged == true
     and .opt_in_plan.implemented_store_opt_in_order_connection.default_search_order_change_allowed == false
     and .opt_in_plan.implemented_store_opt_in_order_connection.explicit_opt_in_fts_ordering_behavior_connected == true
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.cli == "agent-bridge bio-cortex retrieval-opt-in-store-trial"
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.mcp_tool == "biocortex_retrieval_opt_in_store_trial"
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.schema == "agent_bridge.biocortex_retrieval.opt_in_store_trial.v0"
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.implementation_stage == "store_opt_in_runtime_adapter_connection"

@@ -190,6 +190,7 @@
     "explicit_opt_in_fts_ordering_behavior_connected": true
   },
   "implemented_store_opt_in_runtime_adapter_connection": {
+    "cli": "agent-bridge bio-cortex retrieval-opt-in-store-trial",
     "mcp_tool": "biocortex_retrieval_opt_in_store_trial",
     "schema": "agent_bridge.biocortex_retrieval.opt_in_store_trial.v0",
     "implementation_stage": "store_opt_in_runtime_adapter_connection",
