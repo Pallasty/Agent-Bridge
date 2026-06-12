@@ -31,7 +31,11 @@ consumer still does not connect ordering behavior or change any returned order.
 The store-level opt-in wrapper now connects an explicit opt-in FTS ordering path
 for caller-supplied side-signal rows only when runtime approval, ordering
 connection, feature/runtime/per-call gates, coverage, and kill-switch checks all
-pass. Default `memory_search`, hybrid, and semantic paths remain unchanged.
+pass. A protected MCP store-trial path now calls AB store baseline
+`memory_search`, runs the external BioCortex side-signal adapter only when a
+runtime-influence decision packet and runtime gates authorize it, and feeds the
+sanitized side-signal into the store wrapper. Default `memory_search`, hybrid,
+and semantic paths remain unchanged.
 
 ```json
 {
@@ -60,8 +64,10 @@ pass. Default `memory_search`, hybrid, and semantic paths remain unchanged.
   "runtime_influence_review_request_implemented": true,
   "runtime_influence_decision_packet_implemented": true,
   "store_opt_in_order_connection_implemented": true,
+  "store_opt_in_runtime_adapter_connection_implemented": true,
   "ordering_behavior_connected": false,
-  "explicit_opt_in_fts_ordering_behavior_connected": true
+  "explicit_opt_in_fts_ordering_behavior_connected": true,
+  "explicit_opt_in_fts_runtime_adapter_connected": true
 }
 ```
 
@@ -502,6 +508,32 @@ Slice 20 landed a store-level explicit opt-in FTS ordering connection:
 This connects ordering behavior only for the protected explicit opt-in FTS
 wrapper. Default `memory_search` calls, hybrid search, and semantic search remain
 unchanged, and default search order changes are still unauthorized.
+
+Slice 21 landed a protected store-level runtime adapter trial:
+
+- MCP tool: `biocortex_retrieval_opt_in_store_trial`;
+- packet schema: `agent_bridge.biocortex_retrieval.opt_in_store_trial.v0`;
+- implementation stage: `store_opt_in_runtime_adapter_connection`;
+- requires a valid
+  `agent_bridge.biocortex_retrieval.opt_in_runtime_influence_decision_packet.v0`
+  whose summary authorizes explicit opt-in FTS runtime adapter use and ordering
+  connection;
+- requires `per_call_opt_in=true`, compile feature enabled, runtime env enabled,
+  and the operator disable env absent before the external adapter is attempted;
+- uses AB store baseline `memory_search` as the only candidate recall source;
+- runs `biocortex-rs` only against those baseline candidates and joins rows by
+  `candidate_key`;
+- calls `StateStore::memory_search_biocortex_opt_in` with sanitized side-signal
+  rows and returns the wrapper's redacted audit;
+- exposes query/order/key information only as hashes, counts, rank rows, and
+  contract summaries; raw query text, memory keys, memory contents, and raw
+  side-signal rows are not returned;
+- does not mutate AB memory, write approval state, register an embedding backend,
+  or authorize default retrieval influence.
+
+This is the first real adapter-to-store-wrapper connection, but it is still an
+explicit MCP trial surface. Default `memory_search` calls, hybrid search, and
+semantic search remain unchanged.
 
 ## Fail-Open Rules
 

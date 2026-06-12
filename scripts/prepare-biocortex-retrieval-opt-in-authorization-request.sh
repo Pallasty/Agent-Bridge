@@ -389,7 +389,7 @@ jq -e '
     and .writes_approval == false
     and .accepts_optional_order_diff_packet == true
     and .accepts_optional_redacted_order_artifact == true
-    and .opt_in_plan.status == "store_opt_in_order_connection_implemented"
+    and .opt_in_plan.status == "store_opt_in_runtime_adapter_connection_implemented"
     and .opt_in_plan.approval_state == "opt_in_implementation_authorized"
     and .opt_in_plan.order_diff_packet_implemented == true
     and .opt_in_plan.authorization_request_order_diff_evidence_implemented == true
@@ -401,8 +401,10 @@ jq -e '
     and .opt_in_plan.runtime_influence_review_request_implemented == true
     and .opt_in_plan.runtime_influence_decision_packet_implemented == true
     and .opt_in_plan.store_opt_in_order_connection_implemented == true
+    and .opt_in_plan.store_opt_in_runtime_adapter_connection_implemented == true
     and .opt_in_plan.ordering_behavior_connected == false
     and .opt_in_plan.explicit_opt_in_fts_ordering_behavior_connected == true
+    and .opt_in_plan.explicit_opt_in_fts_runtime_adapter_connected == true
     and .opt_in_plan.implemented_gate_skeleton.ordering_behavior_connected == false
     and .opt_in_plan.implemented_gate_skeleton.may_change_search_order_now == false
     and .opt_in_plan.implemented_audit_shape.schema == "agent_bridge.biocortex_retrieval.opt_in_call_audit.v0"
@@ -471,6 +473,41 @@ jq -e '
     and .opt_in_plan.implemented_store_opt_in_order_connection.hybrid_and_semantic_unchanged == true
     and .opt_in_plan.implemented_store_opt_in_order_connection.default_search_order_change_allowed == false
     and .opt_in_plan.implemented_store_opt_in_order_connection.explicit_opt_in_fts_ordering_behavior_connected == true
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.mcp_tool == "biocortex_retrieval_opt_in_store_trial"
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.schema == "agent_bridge.biocortex_retrieval.opt_in_store_trial.v0"
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.implementation_stage == "store_opt_in_runtime_adapter_connection"
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.authorized_scope == "explicit_opt_in_fts_runtime_influence"
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.authorized_mode == "fts"
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.requires_runtime_influence_decision_packet == true
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.requires_decision_packet_runtime_adapter_approved == true
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.requires_decision_packet_ordering_connection_authorized == true
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.requires_per_call_opt_in == true
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.requires_compile_feature_enabled == true
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.requires_runtime_enabled == true
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.requires_operator_disable_absent == true
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.requires_side_signal_coverage_threshold == true
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.baseline_candidate_recall_source == "store_memory_search_baseline_only"
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.calls_memory_search == true
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.runs_biocortex == true
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.calls_store_opt_in_wrapper == true
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.store_wrapper_method == "StateStore::memory_search_biocortex_opt_in"
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.side_signal_join_key == "candidate_key"
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.can_add_new_candidates == false
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.mutates_ab_memory == false
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.registers_embedding_backend == false
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.writes_approval == false
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.raw_query_included == false
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.raw_keys_included == false
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.content_included == false
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.side_signal_raw_included == false
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.returns_redacted_order_summary == true
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.returns_redacted_store_wrapper_audit == true
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.fallback_returns_baseline == true
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.default_memory_search_unchanged == true
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.hybrid_and_semantic_unchanged == true
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.default_search_order_change_allowed == false
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.default_calls_unchanged == true
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.explicit_opt_in_fts_runtime_adapter_connected == true
     and .opt_in_plan.implemented_authorization_decision_consumer.cli == "agent-bridge bio-cortex retrieval-opt-in-authorization-decision-packet"
     and .opt_in_plan.implemented_authorization_decision_consumer.mcp_tool == "biocortex_retrieval_opt_in_authorization_decision_packet"
     and .opt_in_plan.implemented_authorization_decision_consumer.schema == "agent_bridge.biocortex_retrieval.opt_in_authorization_decision_packet.v0"

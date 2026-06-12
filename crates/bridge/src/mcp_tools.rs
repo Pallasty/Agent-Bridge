@@ -50,28 +50,27 @@ use crate::biocortex_shadow::{
     biocortex_retrieval_opt_in_dry_run_plan, biocortex_retrieval_opt_in_execution_packet,
     biocortex_retrieval_opt_in_order_diff_packet,
     biocortex_retrieval_opt_in_post_implementation_review_gate,
-    biocortex_retrieval_opt_in_review_packet, biocortex_retrieval_opt_in_redacted_order_artifact,
-    biocortex_retrieval_opt_in_runtime_influence_review_request,
+    biocortex_retrieval_opt_in_redacted_order_artifact, biocortex_retrieval_opt_in_review_packet,
     biocortex_retrieval_opt_in_runtime_influence_decision_packet,
+    biocortex_retrieval_opt_in_runtime_influence_review_request,
     biocortex_retrieval_opt_in_runtime_trial,
-    biocortex_retrieval_opt_in_runtime_trial_review_packet, biocortex_shadow_digest,
-    supported_benchmarks, BioCortexReplayComparisonOptions, BioCortexRetrievalCandidate,
-    BioCortexRetrievalOptInAuditOptions, BioCortexRetrievalOptInAuthorizationDecisionPacketOptions,
+    biocortex_retrieval_opt_in_runtime_trial_review_packet, biocortex_retrieval_opt_in_store_trial,
+    biocortex_shadow_digest, supported_benchmarks, BioCortexReplayComparisonOptions,
+    BioCortexRetrievalCandidate, BioCortexRetrievalOptInAuditOptions,
+    BioCortexRetrievalOptInAuthorizationDecisionPacketOptions,
     BioCortexRetrievalOptInDryRunOptions, BioCortexRetrievalOptInExecutionPacketOptions,
     BioCortexRetrievalOptInOrderDiffPacketOptions,
     BioCortexRetrievalOptInPostImplementationReviewGateOptions,
     BioCortexRetrievalOptInRedactedOrderArtifactOptions,
     BioCortexRetrievalOptInReviewPacketOptions,
-    BioCortexRetrievalOptInRuntimeInfluenceReviewRequestOptions,
     BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketOptions,
+    BioCortexRetrievalOptInRuntimeInfluenceReviewRequestOptions,
     BioCortexRetrievalOptInRuntimeTrialOptions,
-    BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions, BioCortexShadowOptions,
-    BIOCORTEX_CHECKOUT_ENV,
+    BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions,
+    BioCortexRetrievalOptInStoreTrialOptions, BioCortexShadowOptions, BIOCORTEX_CHECKOUT_ENV,
 };
 #[cfg(feature = "biocortex-retrieval-shadow")]
-use crate::biocortex_shadow::{
-    biocortex_retrieval_shadow_report, BioCortexRetrievalShadowOptions,
-};
+use crate::biocortex_shadow::{biocortex_retrieval_shadow_report, BioCortexRetrievalShadowOptions};
 use crate::context_budget::{
     budget_recommendation, env_context_window, estimate_tokens_from_text, estimated_usage_tokens,
     resolve_context_window,
@@ -1335,10 +1334,7 @@ fn desktop_snapshot_semantic_bus_payload(snapshot: &Value, include_raw: bool) ->
                     let role = desktop_snapshot_str(element, "role").unwrap_or("element");
                     let name = desktop_snapshot_str(element, "name").unwrap_or("");
                     let element_slug = desktop_snapshot_slug(&format!("{role}-{name}-{idx}"));
-                    let object_id = format!(
-                        "desktop:linux:atspi:{pid_label}:{}",
-                        element_slug
-                    );
+                    let object_id = format!("desktop:linux:atspi:{pid_label}:{}", element_slug);
                     let mut relations = vec![json!({
                         "type": "member_of",
                         "target": session_object_id
@@ -1488,7 +1484,11 @@ fn desktop_snapshot_semantic_bus_payload(snapshot: &Value, include_raw: bool) ->
 }
 
 fn desktop_snapshot_str<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
-    value.get(key).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty())
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
 }
 
 fn desktop_snapshot_value_label(value: &Value, fallback: &str) -> String {
@@ -1736,7 +1736,8 @@ impl McpTool for DesktopVerifyTool {
         push_optional_str_arg(&mut cmd, &args, "before_present", "--before-present");
         push_optional_str_arg(&mut cmd, &args, "before_focus", "--before-focus");
         if let Some(pi) = args.get("poll_interval_secs").and_then(|v| v.as_f64()) {
-            cmd.arg("--poll-interval").arg(pi.clamp(0.05, 5.0).to_string());
+            cmd.arg("--poll-interval")
+                .arg(pi.clamp(0.05, 5.0).to_string());
         }
         if let Some(s) = args.get("settle_secs").and_then(|v| v.as_f64()) {
             if s > 0.0 {
@@ -2753,7 +2754,8 @@ impl McpTool for MacosAxVerifyTool {
         push_optional_value_arg(&mut cmd, &args, "index", "--index");
         push_optional_str_arg(&mut cmd, &args, "state", "--state");
         if let Some(pi) = args.get("poll_interval_secs").and_then(Value::as_f64) {
-            cmd.arg("--poll-interval").arg(pi.clamp(0.05, 5.0).to_string());
+            cmd.arg("--poll-interval")
+                .arg(pi.clamp(0.05, 5.0).to_string());
         }
         if let Some(s) = args.get("settle_secs").and_then(Value::as_f64) {
             if s > 0.0 {
@@ -3010,15 +3012,7 @@ fn macos_ax_verify_target_family(expect: &str) -> &'static str {
 
 fn macos_ax_verify_selector_summary(selector: &Value) -> String {
     let mut parts = Vec::new();
-    for key in [
-        "app",
-        "bundle_id",
-        "pid",
-        "title",
-        "role",
-        "index",
-        "state",
-    ] {
+    for key in ["app", "bundle_id", "pid", "title", "role", "index", "state"] {
         if let Some(value) = selector.get(key) {
             match value {
                 Value::String(s) if !s.trim().is_empty() => {
@@ -3075,14 +3069,11 @@ fn macos_ax_verify_error(error: Value) -> ToolResult {
 //                       semantic_bus_adapter_report
 // ===========================================================================
 
-const SEMANTIC_BUS_ADAPTER_REPORT_SCHEMA: &str =
-    "agent_bridge.semantic_bus.adapter_report.v0";
-const SEMANTIC_BUS_RUNTIME_HEALTH_SCHEMA: &str =
-    "agent_bridge.semantic_bus.runtime_health.v0";
+const SEMANTIC_BUS_ADAPTER_REPORT_SCHEMA: &str = "agent_bridge.semantic_bus.adapter_report.v0";
+const SEMANTIC_BUS_RUNTIME_HEALTH_SCHEMA: &str = "agent_bridge.semantic_bus.runtime_health.v0";
 const SEMANTIC_BUS_RUNTIME_CONFORMANCE_SCHEMA: &str =
     "agent_bridge.semantic_bus.runtime_conformance.v0";
-const SEMANTIC_BUS_PEER_CONFORMANCE_SCHEMA: &str =
-    "agent_bridge.semantic_bus.peer_conformance.v0";
+const SEMANTIC_BUS_PEER_CONFORMANCE_SCHEMA: &str = "agent_bridge.semantic_bus.peer_conformance.v0";
 
 pub struct SemanticBusAdapterReportTool {
     _hub: Hub,
@@ -3131,7 +3122,9 @@ impl McpTool for SemanticBusAdapterReportTool {
     }
 
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        Ok(ToolResult::json_text(&semantic_bus_adapter_report_payload(&args)))
+        Ok(ToolResult::json_text(&semantic_bus_adapter_report_payload(
+            &args,
+        )))
     }
 }
 
@@ -3398,21 +3391,14 @@ fn semantic_bus_adapter_row(
     let all_runtime_present = runtime_assets.iter().all(semantic_bus_asset_present);
     let any_fixture_present = fixture_assets.iter().any(semantic_bus_asset_present);
     let any_doc_present = doc_assets.iter().any(semantic_bus_asset_present);
-    let ready_for_runtime = spec.evidence_level == "runtime_backed"
-        && all_runtime_present
-        && any_doc_present;
-    let fixture_adapter_contract_present = fixture_assets.iter().any(|asset| {
-        asset
-            .get("has_adapter_contract")
-            .and_then(Value::as_bool)
-            == Some(true)
-    });
+    let ready_for_runtime =
+        spec.evidence_level == "runtime_backed" && all_runtime_present && any_doc_present;
+    let fixture_adapter_contract_present = fixture_assets
+        .iter()
+        .any(|asset| asset.get("has_adapter_contract").and_then(Value::as_bool) == Some(true));
     let fixture_without_adapter_contract = fixture_assets.iter().any(|asset| {
         semantic_bus_asset_present(asset)
-            && asset
-                .get("has_adapter_contract")
-                .and_then(Value::as_bool)
-                == Some(false)
+            && asset.get("has_adapter_contract").and_then(Value::as_bool) == Some(false)
     });
 
     let mut row = json!({
@@ -3457,7 +3443,9 @@ fn semantic_bus_adapter_row(
 }
 
 fn semantic_bus_asset_list(repo_root: &Path, rels: &[&str]) -> Vec<Value> {
-    rels.iter().map(|rel| semantic_bus_asset(repo_root, rel)).collect()
+    rels.iter()
+        .map(|rel| semantic_bus_asset(repo_root, rel))
+        .collect()
 }
 
 fn semantic_bus_fixture_asset_list(repo_root: &Path, rels: &[&str]) -> Vec<Value> {
@@ -3492,7 +3480,10 @@ fn semantic_bus_fixture_asset(repo_root: &Path, rel: &str) -> Value {
 }
 
 fn semantic_bus_asset_present(asset: &Value) -> bool {
-    asset.get("exists").and_then(Value::as_bool).unwrap_or(false)
+    asset
+        .get("exists")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 fn semantic_bus_adapter_report_summary(adapters: &[Value]) -> Value {
@@ -3655,11 +3646,8 @@ impl McpTool for SemanticBusRuntimeHealthTool {
 }
 
 async fn semantic_bus_runtime_health_payload(args: &Value) -> Value {
-    let daemon_http_url = semantic_bus_runtime_arg(
-        args,
-        "daemon_http_url",
-        "http://127.0.0.1:7878",
-    );
+    let daemon_http_url =
+        semantic_bus_runtime_arg(args, "daemon_http_url", "http://127.0.0.1:7878");
     let palace_url = semantic_bus_runtime_arg(args, "palace_url", "http://127.0.0.1:7979");
     let include_all = args
         .get("include_all")
@@ -3907,7 +3895,12 @@ async fn semantic_bus_runtime_get_text(
 ) -> (Value, Option<String>) {
     let url = match semantic_bus_runtime_join_url(base_url, endpoint) {
         Ok(url) => url,
-        Err(e) => return (semantic_bus_runtime_error_check(endpoint, "invalid_url", &e), None),
+        Err(e) => {
+            return (
+                semantic_bus_runtime_error_check(endpoint, "invalid_url", &e),
+                None,
+            )
+        }
     };
     let started = Instant::now();
     let response = client
@@ -3977,10 +3970,7 @@ fn semantic_bus_runtime_parse_json(check: &mut Value, body: Option<&str>) -> Opt
             if let Some(obj) = check.as_object_mut() {
                 obj.insert("ok".to_string(), json!(false));
                 obj.insert("status".to_string(), json!("invalid_json"));
-                obj.insert(
-                    "error".to_string(),
-                    json!("response was not valid JSON"),
-                );
+                obj.insert("error".to_string(), json!("response was not valid JSON"));
             }
             None
         }
@@ -3997,7 +3987,10 @@ fn semantic_bus_runtime_arg(args: &Value, key: &str, default: &str) -> String {
         .to_string()
 }
 
-fn semantic_bus_runtime_join_url(base_url: &str, endpoint: &str) -> std::result::Result<String, String> {
+fn semantic_bus_runtime_join_url(
+    base_url: &str,
+    endpoint: &str,
+) -> std::result::Result<String, String> {
     let base_url = base_url.trim();
     if base_url.is_empty() {
         return Err("base URL is empty".to_string());
@@ -4042,8 +4035,8 @@ fn semantic_bus_runtime_health_ok(check: &Value, body: Option<&str>) -> bool {
 }
 
 fn semantic_bus_runtime_service_id(name: &str, base_url: &str) -> String {
-    let authority = semantic_bus_runtime_url_authority(base_url)
-        .unwrap_or_else(|| "unknown".to_string());
+    let authority =
+        semantic_bus_runtime_url_authority(base_url).unwrap_or_else(|| "unknown".to_string());
     format!("service:agent-bridge:{name}:{authority}")
 }
 
@@ -4135,10 +4128,9 @@ fn semantic_bus_runtime_graph_stats(graph: &Value) -> Value {
             "markdown" => markdown_nodes += 1,
             _ => {}
         }
-        let last_accessed = semantic_bus_runtime_i64(
-            node.get("last_accessed").unwrap_or(&Value::Null),
-        )
-        .unwrap_or(0);
+        let last_accessed =
+            semantic_bus_runtime_i64(node.get("last_accessed").unwrap_or(&Value::Null))
+                .unwrap_or(0);
         if last_accessed > 0 {
             let age = now_secs.saturating_sub(last_accessed);
             if age < 3600 {
@@ -4178,7 +4170,12 @@ fn semantic_bus_runtime_graph_stats(graph: &Value) -> Value {
     let mut degrees: Vec<i64> = degree.values().copied().filter(|d| *d > 0).collect();
     degrees.sort_unstable();
     let hub_threshold = degrees
-        .get(degrees.len().saturating_sub(1).min(degrees.len() * 95 / 100))
+        .get(
+            degrees
+                .len()
+                .saturating_sub(1)
+                .min(degrees.len() * 95 / 100),
+        )
         .copied()
         .unwrap_or(0)
         .max(5);
@@ -4386,12 +4383,16 @@ fn semantic_bus_runtime_conformance_report(
         .unwrap_or_else(|| json!([]));
     let windows_slot = rows
         .iter()
-        .find(|row| row.get("adapter_id").and_then(Value::as_str) == Some("windows_uia_runtime_adapter"))
+        .find(|row| {
+            row.get("adapter_id").and_then(Value::as_str) == Some("windows_uia_runtime_adapter")
+        })
         .cloned()
-        .unwrap_or_else(|| json!({
-            "adapter_id": "windows_uia_runtime_adapter",
-            "live_status": "missing_from_adapter_report"
-        }));
+        .unwrap_or_else(|| {
+            json!({
+                "adapter_id": "windows_uia_runtime_adapter",
+                "live_status": "missing_from_adapter_report"
+            })
+        });
     let verdict = if runtime_health_verified {
         "verified"
     } else if runtime_health.is_some() {
@@ -4620,20 +4621,11 @@ async fn semantic_bus_peer_conformance_fetch(
     timeout_ms: u64,
     include_raw: bool,
 ) -> Value {
-    let url = match semantic_bus_peer_conformance_url(
-        endpoint,
-        include_runtime_health,
-        timeout_ms,
-    ) {
+    let url = match semantic_bus_peer_conformance_url(endpoint, include_runtime_health, timeout_ms)
+    {
         Ok(url) => url,
         Err(e) => {
-            return semantic_bus_peer_conformance_error_row(
-                idx,
-                endpoint,
-                None,
-                "invalid_url",
-                &e,
-            )
+            return semantic_bus_peer_conformance_error_row(idx, endpoint, None, "invalid_url", &e)
         }
     };
     let started = Instant::now();
@@ -4721,8 +4713,8 @@ fn semantic_bus_peer_conformance_url(
     } else {
         semantic_bus_runtime_join_url(trimmed, "/semantic-bus/runtime-conformance")?
     };
-    let mut parsed = reqwest::Url::parse(&url)
-        .map_err(|e| format!("parse conformance URL {url}: {e}"))?;
+    let mut parsed =
+        reqwest::Url::parse(&url).map_err(|e| format!("parse conformance URL {url}: {e}"))?;
     if !matches!(parsed.scheme(), "http" | "https") {
         return Err(format!("unsupported URL scheme: {}", parsed.scheme()));
     }
@@ -4730,7 +4722,11 @@ fn semantic_bus_peer_conformance_url(
         let mut qp = parsed.query_pairs_mut();
         qp.append_pair(
             "include_runtime_health",
-            if include_runtime_health { "true" } else { "false" },
+            if include_runtime_health {
+                "true"
+            } else {
+                "false"
+            },
         );
         qp.append_pair("timeout_ms", &timeout_ms.to_string());
     }
@@ -4747,7 +4743,10 @@ fn semantic_bus_peer_conformance_payload_row(
     payload: Value,
     include_raw: bool,
 ) -> Value {
-    let schema = payload.get("schema").and_then(Value::as_str).unwrap_or("unknown");
+    let schema = payload
+        .get("schema")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
     let schema_ok = schema == SEMANTIC_BUS_RUNTIME_CONFORMANCE_SCHEMA;
     let verification = payload.get("verification").cloned().unwrap_or(Value::Null);
     let verdict = verification
@@ -9173,11 +9172,16 @@ impl McpTool for PresentTool {
         // a listing failure leaves it empty rather than failing the render.
         let chain_head = {
             let artifacts = crate::present::list_artifacts(&dir, 500, None);
-            crate::present::present_replay_snapshot(&artifacts, 0usize, 0u64, crate::present::now_unix())
-                .get("chain_head")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .unwrap_or_default()
+            crate::present::present_replay_snapshot(
+                &artifacts,
+                0usize,
+                0u64,
+                crate::present::now_unix(),
+            )
+            .get("chain_head")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_default()
         };
         let outcome_record = json!({
             "artifact_id": id,
@@ -9505,18 +9509,56 @@ impl McpTool for PresentVoiceTool {
     }
 
     async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
-        let backend = args.get("backend").and_then(|v| v.as_str()).unwrap_or("tone").to_string();
+        let backend = args
+            .get("backend")
+            .and_then(|v| v.as_str())
+            .unwrap_or("tone")
+            .to_string();
         let is_speech = backend != "tone";
-        let freq = args.get("freq").and_then(|v| v.as_f64()).unwrap_or(440.0).clamp(50.0, 18000.0);
-        let duration_ms = args.get("duration_ms").and_then(|v| v.as_u64()).unwrap_or(1500).clamp(100, 8000);
-        let amplitude = args.get("amplitude").and_then(|v| v.as_f64()).unwrap_or(0.25).clamp(0.0, 1.0);
-        let text = args.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let voice = args.get("voice").and_then(|v| v.as_str()).unwrap_or("af_sarah").to_string();
-        let speed = args.get("speed").and_then(|v| v.as_f64()).unwrap_or(1.0).clamp(0.5, 2.0);
-        let verify_intelligibility = args.get("verify_intelligibility").and_then(|v| v.as_bool()).unwrap_or(false);
+        let freq = args
+            .get("freq")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(440.0)
+            .clamp(50.0, 18000.0);
+        let duration_ms = args
+            .get("duration_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1500)
+            .clamp(100, 8000);
+        let amplitude = args
+            .get("amplitude")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.25)
+            .clamp(0.0, 1.0);
+        let text = args
+            .get("text")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let voice = args
+            .get("voice")
+            .and_then(|v| v.as_str())
+            .unwrap_or("af_sarah")
+            .to_string();
+        let speed = args
+            .get("speed")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(1.0)
+            .clamp(0.5, 2.0);
+        let verify_intelligibility = args
+            .get("verify_intelligibility")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let capture_channel = args
-            .get("capture_channel").and_then(|v| v.as_str()).unwrap_or("sink_monitor").to_string();
-        let intent = args.get("intent").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            .get("capture_channel")
+            .and_then(|v| v.as_str())
+            .unwrap_or("sink_monitor")
+            .to_string();
+        let intent = args
+            .get("intent")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let cwd = args.get("cwd").and_then(|v| v.as_str()).map(PathBuf::from);
 
         if is_speech && text.trim().is_empty() {
@@ -9534,18 +9576,27 @@ impl McpTool for PresentVoiceTool {
         }
 
         let mut cmd = killable_command(
-            std::env::var("PYTHON").ok().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "python3".to_string()),
+            std::env::var("PYTHON")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| "python3".to_string()),
         );
         cmd.arg(&script).arg("--json");
         if is_speech {
             // backend=kokoro|piper: synthesize `text` with that engine and verify via
             // envelope correlation. `backend` is exactly the audio_embody synth engine.
-            cmd.arg("--mode").arg("speech")
-                .arg("--text").arg(&text)
-                .arg("--voice").arg(&voice)
-                .arg("--speed").arg(format!("{speed}"))
-                .arg("--synth-backend").arg(&backend)
-                .arg("--capture-channel").arg(&capture_channel);
+            cmd.arg("--mode")
+                .arg("speech")
+                .arg("--text")
+                .arg(&text)
+                .arg("--voice")
+                .arg(&voice)
+                .arg("--speed")
+                .arg(format!("{speed}"))
+                .arg("--synth-backend")
+                .arg(&backend)
+                .arg("--capture-channel")
+                .arg(&capture_channel);
             push_optional_str_arg(&mut cmd, &args, "synth_bin", "--synth-bin");
             if verify_intelligibility {
                 cmd.arg("--check-intelligibility");
@@ -9553,10 +9604,14 @@ impl McpTool for PresentVoiceTool {
                 push_optional_str_arg(&mut cmd, &args, "stt_model", "--stt-model");
             }
         } else {
-            cmd.arg("--freq").arg(format!("{freq}"))
-                .arg("--duration-ms").arg(duration_ms.to_string())
-                .arg("--amplitude").arg(format!("{amplitude}"))
-                .arg("--capture-channel").arg(&capture_channel);
+            cmd.arg("--freq")
+                .arg(format!("{freq}"))
+                .arg("--duration-ms")
+                .arg(duration_ms.to_string())
+                .arg("--amplitude")
+                .arg(format!("{amplitude}"))
+                .arg("--capture-channel")
+                .arg(&capture_channel);
         }
         push_optional_str_arg(&mut cmd, &args, "sink", "--sink");
         cmd.stdout(std::process::Stdio::piped());
@@ -9567,12 +9622,25 @@ impl McpTool for PresentVoiceTool {
 
         // process kill ceiling. tone: emit duration + capture/ffmpeg margin. speech:
         // generous — first call loads the ~300 MB model (~3-4s) + synth + realtime play.
-        let timeout_ms = if is_speech { 120_000 } else { duration_ms + 8_000 };
-        let output = match tokio::time::timeout(Duration::from_millis(timeout_ms), cmd.output()).await {
-            Err(_) => return Ok(ToolResult::error(format!("present_voice: audio_embody exceeded {timeout_ms} ms"))),
-            Ok(Err(e)) => return Ok(ToolResult::error(format!("present_voice: spawn failed: {e}"))),
-            Ok(Ok(o)) => o,
+        let timeout_ms = if is_speech {
+            120_000
+        } else {
+            duration_ms + 8_000
         };
+        let output =
+            match tokio::time::timeout(Duration::from_millis(timeout_ms), cmd.output()).await {
+                Err(_) => {
+                    return Ok(ToolResult::error(format!(
+                        "present_voice: audio_embody exceeded {timeout_ms} ms"
+                    )))
+                }
+                Ok(Err(e)) => {
+                    return Ok(ToolResult::error(format!(
+                        "present_voice: spawn failed: {e}"
+                    )))
+                }
+                Ok(Ok(o)) => o,
+            };
         let (stdout, _) = lossy_truncate(&output.stdout);
         let (stderr, _) = lossy_truncate(&output.stderr);
         let res: Value = match serde_json::from_str(&stdout) {
@@ -9584,8 +9652,14 @@ impl McpTool for PresentVoiceTool {
             }
         };
 
-        let status = res.get("status").and_then(|v| v.as_str()).unwrap_or("error");
-        let verify_status = res.get("verify_status").and_then(|v| v.as_str()).unwrap_or("error");
+        let status = res
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("error");
+        let verify_status = res
+            .get("verify_status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("error");
 
         // Provenance: the present_replay chain_head over the lane's artifacts NOW
         // (same idiom present()/present_dashboard use). build_outcome_memory now
@@ -9594,8 +9668,16 @@ impl McpTool for PresentVoiceTool {
         let dir = crate::present::presentations_dir();
         let chain_head = {
             let artifacts = crate::present::list_artifacts(&dir, 500, None);
-            crate::present::present_replay_snapshot(&artifacts, 0usize, 0u64, crate::present::now_unix())
-                .get("chain_head").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default()
+            crate::present::present_replay_snapshot(
+                &artifacts,
+                0usize,
+                0u64,
+                crate::present::now_unix(),
+            )
+            .get("chain_head")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_default()
         };
         let ts = crate::present::now_unix();
         let id = if is_speech {
@@ -9649,12 +9731,18 @@ impl McpTool for PresentVoiceTool {
             obj.insert("action_tool".to_string(), json!("present_voice"));
             obj.insert("verify_method".to_string(), json!("audio_bus_readback"));
             obj.insert("chain_head".to_string(), json!(chain_head));
-            obj.insert("outcome_sidecar".to_string(), json!(format!("{id}.outcome.json")));
-            obj.insert("mcp_wrapper".to_string(), json!({
-                "tool": "present_voice",
-                "exit_code": output.status.code().unwrap_or(-1),
-                "stderr_present": !stderr.is_empty()
-            }));
+            obj.insert(
+                "outcome_sidecar".to_string(),
+                json!(format!("{id}.outcome.json")),
+            );
+            obj.insert(
+                "mcp_wrapper".to_string(),
+                json!({
+                    "tool": "present_voice",
+                    "exit_code": output.status.code().unwrap_or(-1),
+                    "stderr_present": !stderr.is_empty()
+                }),
+            );
         }
         Ok(ToolResult::json_text(&result))
     }
@@ -9827,9 +9915,8 @@ impl McpTool for PresentDashboardTool {
                                             .and_then(|v| v.as_str())
                                             .unwrap_or("")
                                             .to_string();
-                                        embody_status = crate::present::classify_embody(
-                                            &readback, &expected,
-                                        );
+                                        embody_status =
+                                            crate::present::classify_embody(&readback, &expected);
                                         embody_detail = Some(format!(
                                             "dom_head={} expected_head={} rendered={} rows={}",
                                             short_head(&readback.chain_head),
@@ -10594,7 +10681,10 @@ impl McpTool for PresentOutcomesIngestTool {
             .and_then(|v| v.as_u64())
             .unwrap_or(25)
             .clamp(1, 200) as usize;
-        let dry_run = args.get("dry_run").and_then(|v| v.as_bool()).unwrap_or(true);
+        let dry_run = args
+            .get("dry_run")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
 
         let now = dispatch_now_secs();
         let cutoff = now.saturating_sub(window_secs).max(0) as u64;
@@ -22476,13 +22566,14 @@ async fn mcp_lifecycle_tool_telemetry(hub: &Hub, window_secs: i64) -> Value {
             })
         }
     };
-    let snapshot = crate::tool_atlas::build_tool_atlas_snapshot(crate::tool_atlas::ToolAtlasInput {
-        generated_at: dispatch_now_secs(),
-        window_secs,
-        current_tools,
-        stats,
-        recent_errors,
-    });
+    let snapshot =
+        crate::tool_atlas::build_tool_atlas_snapshot(crate::tool_atlas::ToolAtlasInput {
+            generated_at: dispatch_now_secs(),
+            window_secs,
+            current_tools,
+            stats,
+            recent_errors,
+        });
     let mut payload = crate::tool_atlas::project_tool_atlas_snapshot(
         &snapshot,
         crate::tool_atlas::ToolAtlasViewOptions {
@@ -22504,13 +22595,18 @@ fn mcp_lifecycle_recommendations(
 ) -> Vec<String> {
     let mut out = Vec::new();
     if readiness_warnings > 0 {
-        out.push("Inspect readiness_audit recommendations before changing MCP tool profiles.".into());
+        out.push(
+            "Inspect readiness_audit recommendations before changing MCP tool profiles.".into(),
+        );
     }
     if failing_tool_count > 0 {
         out.push("Inspect tool_atlas_snapshot or mcp_dispatch_audit for failing MCP tools.".into());
     }
     if !include_runtime_health {
-        out.push("Set include_runtime_health=true when diagnosing daemon-http or Palace availability.".into());
+        out.push(
+            "Set include_runtime_health=true when diagnosing daemon-http or Palace availability."
+                .into(),
+        );
     } else if runtime_status != "ok" {
         out.push("Treat daemon-http/Palace degradation as runtime health, separate from MCP stdio readiness.".into());
     }
@@ -23421,10 +23517,7 @@ fn readiness_tool_surface_rows(hub: &Hub) -> Vec<Value> {
             "tool_atlas_snapshot",
             "tool registry and failure-mode atlas",
         ),
-        (
-            "mcp_lifecycle_digest",
-            "MCP lifecycle/status digest",
-        ),
+        ("mcp_lifecycle_digest", "MCP lifecycle/status digest"),
         ("hook_status", "installed hook health"),
         ("skills_recommend", "skill index retrieval"),
         ("skills_route", "skill routing metadata"),
@@ -25545,13 +25638,14 @@ impl McpTool for BioCortexRetrievalOptInExecutionPacketTool {
             .get("commit")
             .and_then(Value::as_str)
             .map(str::to_string);
-        let payload =
-            biocortex_retrieval_opt_in_execution_packet(BioCortexRetrievalOptInExecutionPacketOptions {
+        let payload = biocortex_retrieval_opt_in_execution_packet(
+            BioCortexRetrievalOptInExecutionPacketOptions {
                 review_packet,
                 per_call_opt_in,
                 attempt_id,
                 commit,
-            });
+            },
+        );
         Ok(ToolResult::json_text(&payload))
     }
 }
@@ -25657,19 +25751,13 @@ impl McpTool for BioCortexRetrievalOptInRuntimeTrialTool {
     }
 
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let execution_packet = args
-            .get("execution_packet")
-            .cloned()
-            .unwrap_or(Value::Null);
+        let execution_packet = args.get("execution_packet").cloned().unwrap_or(Value::Null);
         let query = args
             .get("query")
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
-        let candidates_value = args
-            .get("candidates")
-            .cloned()
-            .unwrap_or_else(|| json!([]));
+        let candidates_value = args.get("candidates").cloned().unwrap_or_else(|| json!([]));
         let candidates =
             serde_json::from_value::<Vec<BioCortexRetrievalCandidate>>(candidates_value)
                 .map_err(|e| ab_core::Error::Backend(format!("parse candidates: {e}")))?;
@@ -25903,14 +25991,15 @@ impl McpTool for BioCortexRetrievalOptInOrderDiffPacketTool {
             .get("memory_key")
             .and_then(Value::as_str)
             .map(str::to_string);
-        let payload =
-            biocortex_retrieval_opt_in_order_diff_packet(BioCortexRetrievalOptInOrderDiffPacketOptions {
+        let payload = biocortex_retrieval_opt_in_order_diff_packet(
+            BioCortexRetrievalOptInOrderDiffPacketOptions {
                 source_packet,
                 reviewer,
                 commit,
                 forum_post_id,
                 memory_key,
-            });
+            },
+        );
         Ok(ToolResult::json_text(&payload))
     }
 }
@@ -26461,6 +26550,198 @@ impl McpTool for BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketTool {
 }
 
 // ===========================================================================
+//  biocortex_retrieval_opt_in_store_trial — protected store wrapper connection
+// ===========================================================================
+
+/// Explicit opt-in BioCortex store trial. This tool calls AB store baseline
+/// `memory_search`, runs the external BioCortex side-signal adapter only after a
+/// runtime-influence decision packet authorizes it, then feeds the side-signal
+/// into the protected opt-in store wrapper. Output is redacted to hashes/counts.
+pub struct BioCortexRetrievalOptInStoreTrialTool {
+    hub: Hub,
+}
+
+impl BioCortexRetrievalOptInStoreTrialTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for BioCortexRetrievalOptInStoreTrialTool {
+    fn name(&self) -> &'static str {
+        "biocortex_retrieval_opt_in_store_trial"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Explicit opt-in BioCortex store trial. Calls AB store \
+                 baseline memory_search, runs the external BioCortex side-signal \
+                 adapter only when a runtime-influence decision packet and runtime \
+                 gates authorize it, and feeds sanitized side-signal rows into the \
+                 protected opt-in store wrapper. Returns only redacted hashes/counts; \
+                 does not mutate memory, register an EmbeddingBackend, expose raw \
+                 query/keys/content, or affect default memory_search."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["runtime_influence_decision_packet", "query", "per_call_opt_in"],
+                "properties": {
+                    "runtime_influence_decision_packet": {
+                        "type": "object",
+                        "description": "JSON object produced by biocortex_retrieval_opt_in_runtime_influence_decision_packet. The tool consumes only safe summary fields and does not echo the packet."
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "FTS query for baseline memory_search. Output includes only a query hash."
+                    },
+                    "tags_any": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Optional tag filter forwarded to baseline memory_search. Output includes only the filter count."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100,
+                        "default": 10,
+                        "description": "Maximum baseline candidates to retrieve from store memory_search."
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["fts", "hybrid", "semantic"],
+                        "default": "fts",
+                        "description": "Retrieval mode. Only fts is authorized for runtime influence."
+                    },
+                    "per_call_opt_in": {
+                        "type": "boolean",
+                        "description": "Required explicit per-call opt-in bit."
+                    },
+                    "checkout_path": {
+                        "type": "string",
+                        "description": "Optional local biocortex-rs checkout. Defaults to AB_BIOCORTEX_RS, sibling checkout paths, then /tmp/biocortex-rs-ab-eval."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 600000,
+                        "default": 120000,
+                        "description": "External side-signal adapter timeout in milliseconds."
+                    },
+                    "coverage_threshold": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "default": 0.8,
+                        "description": "Minimum matched side-signal coverage required before the store wrapper may return experimental order."
+                    },
+                    "blend_alpha": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "default": 0.8,
+                        "description": "Blend weight passed to the protected store wrapper."
+                    },
+                    "attempt_id": {
+                        "type": "string",
+                        "description": "Optional attempt id for audit correlation."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Optional implementation commit under review."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = self
+            .hub
+            .store
+            .as_ref()
+            .ok_or_else(|| ab_core::Error::Backend("store unavailable".into()))?;
+        let runtime_influence_decision_packet = args
+            .get("runtime_influence_decision_packet")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let query = args
+            .get("query")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let tags_any = args
+            .get("tags_any")
+            .cloned()
+            .map(serde_json::from_value::<Vec<String>>)
+            .transpose()
+            .map_err(|e| ab_core::Error::Backend(format!("parse tags_any: {e}")))?
+            .unwrap_or_default();
+        let limit = args
+            .get("limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(10)
+            .clamp(1, 100) as u32;
+        let mode = args
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("fts")
+            .to_string();
+        let per_call_opt_in = args
+            .get("per_call_opt_in")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let checkout = args
+            .get("checkout_path")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from);
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(120_000);
+        let coverage_threshold = args
+            .get("coverage_threshold")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.8);
+        let blend_alpha = args
+            .get("blend_alpha")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.8) as f32;
+        let attempt_id = args
+            .get("attempt_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let commit = args
+            .get("commit")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+
+        let payload = biocortex_retrieval_opt_in_store_trial(
+            store.as_ref(),
+            BioCortexRetrievalOptInStoreTrialOptions {
+                runtime_influence_decision_packet,
+                query,
+                tags_any,
+                limit,
+                mode,
+                per_call_opt_in,
+                checkout,
+                timeout_ms,
+                coverage_threshold,
+                blend_alpha,
+                attempt_id,
+                commit,
+            },
+        )
+        .await;
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
 //   biocortex_retrieval_shadow — review-only retrieval side-signal report
 // ===========================================================================
 
@@ -26554,10 +26835,7 @@ impl McpTool for BioCortexRetrievalShadowTool {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
-        let candidates_value = args
-            .get("candidates")
-            .cloned()
-            .unwrap_or_else(|| json!([]));
+        let candidates_value = args.get("candidates").cloned().unwrap_or_else(|| json!([]));
         let candidates =
             serde_json::from_value::<Vec<BioCortexRetrievalCandidate>>(candidates_value)
                 .map_err(|e| ab_core::Error::Backend(format!("parse candidates: {e}")))?;
@@ -35345,7 +35623,9 @@ fn lswr_readonly_bridge_display_payload(
             })
         })?;
 
-    if packet.schema != crate::lswr_snapshot_report_packet::LSWR_READONLY_BRIDGE_REPORT_PACKET_SCHEMA {
+    if packet.schema
+        != crate::lswr_snapshot_report_packet::LSWR_READONLY_BRIDGE_REPORT_PACKET_SCHEMA
+    {
         return Err(json!({
             "code": "schema_mismatch",
             "message": "report_packet schema does not match the LSWR read-only bridge packet contract",
@@ -35442,9 +35722,21 @@ fn lswr_readonly_bridge_display_surface_profile_rows() -> Vec<Value> {
     [
         ("profile-standard", None, None, Some("standard"), false),
         ("profile-all", None, None, Some("all"), true),
-        ("codex-essential", Some("codex-essential"), None, None, false),
+        (
+            "codex-essential",
+            Some("codex-essential"),
+            None,
+            None,
+            false,
+        ),
         ("codex-lean", Some("codex-lean"), None, None, false),
-        ("claude-standard", Some("claude-standard"), None, None, false),
+        (
+            "claude-standard",
+            Some("claude-standard"),
+            None,
+            None,
+            false,
+        ),
         ("gemini-lean", Some("gemini-lean"), None, None, false),
         ("hook-lifecycle", Some("hook-lifecycle"), None, None, false),
         ("all-dev", Some("all-dev"), None, None, true),
@@ -35452,8 +35744,7 @@ fn lswr_readonly_bridge_display_surface_profile_rows() -> Vec<Value> {
     .into_iter()
     .map(|(label, toolset, client, profile, expected_registered)| {
         let policy = ToolPolicy::from_values(toolset, client, None, profile);
-        let registered =
-            lswr_readonly_bridge_display_schema_for_policy(policy).is_some();
+        let registered = lswr_readonly_bridge_display_schema_for_policy(policy).is_some();
         json!({
             "label": label,
             "toolset": policy.label(),
@@ -35550,8 +35841,7 @@ fn lswr_readonly_bridge_display_surface_checks(
         .as_array()
         .map(|keys| keys.len() == 1 && keys.iter().any(|key| key == "report_packet"))
         .unwrap_or(false);
-    let no_additional_properties =
-        schema_facts["additional_properties"] == Value::Bool(false);
+    let no_additional_properties = schema_facts["additional_properties"] == Value::Bool(false);
     let forbidden_absent = schema_facts["forbidden_input_keys_absent"]
         .as_bool()
         .unwrap_or(false);
@@ -36561,7 +36851,10 @@ impl McpTool for AgentSteerDriveTool {
             } else if matched {
                 "expect matched".to_string()
             } else if expect.is_some() {
-                format!("drove {} ms, expect not matched", start.elapsed().as_millis())
+                format!(
+                    "drove {} ms, expect not matched",
+                    start.elapsed().as_millis()
+                )
             } else {
                 format!("drove {} ms", start.elapsed().as_millis())
             };
@@ -37782,6 +38075,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Standard,
         Arc::new(BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexRetrievalOptInStoreTrialTool::new(hub.clone())),
     );
     #[cfg(feature = "biocortex-retrieval-shadow")]
     reg_if(
@@ -41344,7 +41643,10 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         // The single upstream gate excludes BOTH cohorts, keeps ordinary kinds.
         assert!(vis(&lesson));
         assert!(vis(&decision));
-        assert!(!vis(&outcome), "present_outcome must be excluded from coverage");
+        assert!(
+            !vis(&outcome),
+            "present_outcome must be excluded from coverage"
+        );
         assert!(!vis(&skill), "skill stays excluded");
 
         // End-to-end: gate -> from_records denominator counts only the 2
@@ -43145,7 +43447,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(tool.input_schema["properties"]
             .get("include_screenshot")
             .is_some());
-        assert!(tool.input_schema["properties"].get("semantic_bus").is_some());
+        assert!(tool.input_schema["properties"]
+            .get("semantic_bus")
+            .is_some());
         assert!(tool.input_schema["properties"]
             .get("semantic_include_raw")
             .is_some());
@@ -43167,7 +43471,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
 
         assert!(tool.description.contains("Read-only"));
         assert!(tool.input_schema["properties"].get("expect").is_some());
-        assert!(tool.input_schema["properties"].get("semantic_bus").is_some());
+        assert!(tool.input_schema["properties"]
+            .get("semantic_bus")
+            .is_some());
         assert!(tool.input_schema["properties"]
             .get("semantic_include_raw")
             .is_some());
@@ -43210,7 +43516,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             .get("include_windows")
             .is_some());
         assert!(tool.input_schema["properties"].get("max_windows").is_some());
-        assert!(tool.input_schema["properties"].get("semantic_bus").is_some());
+        assert!(tool.input_schema["properties"]
+            .get("semantic_bus")
+            .is_some());
         assert!(tool.input_schema["properties"]
             .get("semantic_include_raw")
             .is_some());
@@ -43235,7 +43543,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(tool.input_schema["properties"]
             .get("poll_timeout_secs")
             .is_some());
-        assert!(tool.input_schema["properties"].get("semantic_bus").is_some());
+        assert!(tool.input_schema["properties"]
+            .get("semantic_bus")
+            .is_some());
         assert!(tool.input_schema["properties"]
             .get("semantic_include_raw")
             .is_some());
@@ -43256,8 +43566,12 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(tool.description.contains("Read-only"));
         assert!(tool.description.contains("never runs probes"));
         assert!(tool.input_schema["properties"].get("cwd").is_some());
-        assert!(tool.input_schema["properties"].get("include_details").is_some());
-        assert!(tool.input_schema["properties"].get("include_design_only").is_some());
+        assert!(tool.input_schema["properties"]
+            .get("include_details")
+            .is_some());
+        assert!(tool.input_schema["properties"]
+            .get("include_design_only")
+            .is_some());
         assert!(tool.input_schema["properties"].get("run_live").is_none());
     }
 
@@ -43274,7 +43588,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
 
         assert!(tool.description.contains("Read-only"));
         assert!(tool.description.contains("never"));
-        assert!(tool.input_schema["properties"].get("daemon_http_url").is_some());
+        assert!(tool.input_schema["properties"]
+            .get("daemon_http_url")
+            .is_some());
         assert!(tool.input_schema["properties"].get("palace_url").is_some());
         assert!(tool.input_schema["properties"].get("include_raw").is_some());
         assert!(tool.input_schema["properties"].get("restart").is_none());
@@ -43294,8 +43610,12 @@ com.example.multiline, , \"Line one\nLine two\"\n";
 
         assert!(tool.description.contains("Read-only"));
         assert!(tool.description.contains("never mutates"));
-        assert!(tool.input_schema["properties"].get("include_runtime_health").is_some());
-        assert!(tool.input_schema["properties"].get("daemon_http_url").is_some());
+        assert!(tool.input_schema["properties"]
+            .get("include_runtime_health")
+            .is_some());
+        assert!(tool.input_schema["properties"]
+            .get("daemon_http_url")
+            .is_some());
         assert!(tool.input_schema["properties"].get("restart").is_none());
         assert!(tool.input_schema["properties"].get("write_edges").is_none());
     }
@@ -43314,7 +43634,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(tool.description.contains("Read-only"));
         assert!(tool.description.contains("never restarts"));
         assert!(tool.input_schema["properties"].get("endpoints").is_some());
-        assert!(tool.input_schema["properties"].get("include_runtime_health").is_some());
+        assert!(tool.input_schema["properties"]
+            .get("include_runtime_health")
+            .is_some());
         assert!(tool.input_schema["properties"].get("restart").is_none());
         assert!(tool.input_schema["properties"].get("write_edges").is_none());
     }
@@ -43380,18 +43702,24 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         );
 
         let summary = &payload["summary"];
-        assert!(summary["by_evidence_level"]["runtime_backed"]
-            .as_u64()
-            .unwrap_or(0)
-            >= 6);
-        assert!(summary["by_evidence_level"]["fixture_backed"]
-            .as_u64()
-            .unwrap_or(0)
-            >= 4);
-        assert!(summary["by_evidence_level"]["design_only"]
-            .as_u64()
-            .unwrap_or(0)
-            >= 1);
+        assert!(
+            summary["by_evidence_level"]["runtime_backed"]
+                .as_u64()
+                .unwrap_or(0)
+                >= 6
+        );
+        assert!(
+            summary["by_evidence_level"]["fixture_backed"]
+                .as_u64()
+                .unwrap_or(0)
+                >= 4
+        );
+        assert!(
+            summary["by_evidence_level"]["design_only"]
+                .as_u64()
+                .unwrap_or(0)
+                >= 1
+        );
 
         let gaps = payload["gaps"].as_array().expect("gaps array");
         assert!(gaps.iter().any(|gap| {
@@ -43462,7 +43790,10 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert_eq!(payload["read_only"].as_bool(), Some(true));
         assert_eq!(payload["live_checks_executed"].as_bool(), Some(true));
         assert_eq!(payload["status"].as_str(), Some("ready"));
-        assert_eq!(payload["verification"]["verdict"].as_str(), Some("verified"));
+        assert_eq!(
+            payload["verification"]["verdict"].as_str(),
+            Some("verified")
+        );
         assert_eq!(
             payload["summary"]["palace_semantic_events_status"].as_str(),
             Some("http_error")
@@ -43477,8 +43808,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             .as_array()
             .unwrap()
             .iter()
-            .any(|obj| obj["object_id"].as_str()
-                == Some("palace:memory-region:agent-bridge")));
+            .any(|obj| obj["object_id"].as_str() == Some("palace:memory-region:agent-bridge")));
     }
 
     #[tokio::test]
@@ -43523,15 +43853,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
 
     #[test]
     fn semantic_bus_peer_conformance_url_accepts_base_and_full_endpoint() {
-        let from_base = semantic_bus_peer_conformance_url(
-            "http://127.0.0.1:7878",
-            false,
-            1_500,
-        )
-        .expect("base URL");
-        assert!(from_base.starts_with(
-            "http://127.0.0.1:7878/semantic-bus/runtime-conformance?"
-        ));
+        let from_base = semantic_bus_peer_conformance_url("http://127.0.0.1:7878", false, 1_500)
+            .expect("base URL");
+        assert!(from_base.starts_with("http://127.0.0.1:7878/semantic-bus/runtime-conformance?"));
         assert!(from_base.contains("include_runtime_health=false"));
         assert!(from_base.contains("timeout_ms=1500"));
 
@@ -43541,9 +43865,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             2_500,
         )
         .expect("full URL");
-        assert!(from_full.starts_with(
-            "http://example.test/semantic-bus/runtime-conformance?node=win&"
-        ));
+        assert!(
+            from_full.starts_with("http://example.test/semantic-bus/runtime-conformance?node=win&")
+        );
         assert!(from_full.contains("include_runtime_health=true"));
         assert!(from_full.contains("timeout_ms=2500"));
 
@@ -43809,17 +44133,17 @@ print(json.dumps(payload))
             o["object_id"] == "desktop:linux:sway:window:42"
                 && o["source_adapter"] == "linux.sway.tree"
         }));
-        assert!(objects.iter().any(|o| {
-            o["source_adapter"] == "linux.atspi" && o["label"] == "INVOKEOK"
-        }));
+        assert!(objects
+            .iter()
+            .any(|o| { o["source_adapter"] == "linux.atspi" && o["label"] == "INVOKEOK" }));
 
         let affordances = payload["affordances"].as_array().expect("affordances");
-        assert!(affordances.iter().any(|a| {
-            a["action_type"] == "desktop.verify" && a["requires_gate"] == false
-        }));
-        assert!(affordances.iter().any(|a| {
-            a["action_type"] == "desktop.invoke" && a["requires_gate"] == true
-        }));
+        assert!(affordances
+            .iter()
+            .any(|a| { a["action_type"] == "desktop.verify" && a["requires_gate"] == false }));
+        assert!(affordances
+            .iter()
+            .any(|a| { a["action_type"] == "desktop.invoke" && a["requires_gate"] == true }));
         assert_eq!(
             payload["presentation"]["machine_payload"]["atspi_object_count"],
             1
@@ -43844,7 +44168,10 @@ print(json.dumps(payload))
             .expect("raw execute");
         let raw_payload = result_text_as_json(&raw_out);
         assert_eq!(raw_payload["raw_included"], true);
-        assert_eq!(raw_payload["raw_snapshot"]["schema"], DESKTOP_SNAPSHOT_SOURCE_SCHEMA);
+        assert_eq!(
+            raw_payload["raw_snapshot"]["schema"],
+            DESKTOP_SNAPSHOT_SOURCE_SCHEMA
+        );
         assert!(raw_payload["raw_snapshot"].get("mcp_wrapper").is_some());
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
@@ -43983,7 +44310,10 @@ print(json.dumps(payload))
             .expect("raw execute");
         let raw_payload = result_text_as_json(&raw_out);
         assert_eq!(raw_payload["raw_included"], true);
-        assert_eq!(raw_payload["raw_verify"]["schema"], DESKTOP_VERIFY_SOURCE_SCHEMA);
+        assert_eq!(
+            raw_payload["raw_verify"]["schema"],
+            DESKTOP_VERIFY_SOURCE_SCHEMA
+        );
         assert!(raw_payload["raw_verify"].get("mcp_wrapper").is_some());
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
@@ -44171,7 +44501,10 @@ print(json.dumps(payload))
             .expect("raw execute");
         let raw_payload = result_text_as_json(&raw_out);
         assert_eq!(raw_payload["raw_included"], true);
-        assert_eq!(raw_payload["raw_probe"]["schema"], MACOS_AX_PROBE_SOURCE_SCHEMA);
+        assert_eq!(
+            raw_payload["raw_probe"]["schema"],
+            MACOS_AX_PROBE_SOURCE_SCHEMA
+        );
         assert!(raw_payload["raw_probe"].get("mcp_wrapper").is_some());
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
@@ -44384,7 +44717,10 @@ print(json.dumps(payload))
             .expect("raw execute");
         let raw_payload = result_text_as_json(&raw_out);
         assert_eq!(raw_payload["raw_included"], true);
-        assert_eq!(raw_payload["raw_verify"]["schema"], MACOS_AX_VERIFY_SOURCE_SCHEMA);
+        assert_eq!(
+            raw_payload["raw_verify"]["schema"],
+            MACOS_AX_VERIFY_SOURCE_SCHEMA
+        );
         assert!(raw_payload["raw_verify"].get("mcp_wrapper").is_some());
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
@@ -44565,8 +44901,14 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
             "world_visibility_query",
             "world_present",
         ] {
-            assert!(all.includes(Tier::Niche, t), "{t} must be available under all");
-            assert!(!std_p.includes(Tier::Niche, t), "{t} must stay out of standard");
+            assert!(
+                all.includes(Tier::Niche, t),
+                "{t} must be available under all"
+            );
+            assert!(
+                !std_p.includes(Tier::Niche, t),
+                "{t} must stay out of standard"
+            );
         }
         // P34 read-only bridge display wrapper follows the same all-profile opt-in
         // shape as the LSWR world tools, but stays read-only and packet-backed.
@@ -44593,9 +44935,7 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
             "present_outcomes must register under the all profile"
         );
         assert!(
-            schemas
-                .iter()
-                .any(|s| s.name == "lswr_outcome_admissions"),
+            schemas.iter().any(|s| s.name == "lswr_outcome_admissions"),
             "lswr_outcome_admissions must register under the all profile"
         );
         assert!(
@@ -44619,8 +44959,7 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
                 .any(|s| s.name == "lswr_readonly_bridge_display"),
             "lswr_readonly_bridge_display must register under the all profile"
         );
-        let standard_schemas =
-            build_registry_with_policy(Hub::builder().build(), std_p).list();
+        let standard_schemas = build_registry_with_policy(Hub::builder().build(), std_p).list();
         assert!(
             !standard_schemas
                 .iter()
@@ -44633,7 +44972,8 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
                 .any(|s| s.name == "lswr_outcome_admissions"),
             "lswr_outcome_admissions must stay out of standard"
         );
-        let codex_schemas = build_registry_with_policy(Hub::builder().build(), codex_essential).list();
+        let codex_schemas =
+            build_registry_with_policy(Hub::builder().build(), codex_essential).list();
         assert!(
             !codex_schemas
                 .iter()
@@ -44653,7 +44993,9 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
 
         assert!(tool.description.contains("Read-only"));
         assert!(tool.description.contains("explicit"));
-        assert!(tool.input_schema["properties"].get("report_packet").is_some());
+        assert!(tool.input_schema["properties"]
+            .get("report_packet")
+            .is_some());
         assert_eq!(
             tool.input_schema["additionalProperties"],
             serde_json::Value::Bool(false)
@@ -44703,9 +45045,15 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
             .map(|schema| schema.name)
             .collect::<Vec<_>>();
 
-        assert!(all_names.iter().any(|name| name == "lswr_readonly_bridge_display"));
-        assert!(!standard_names.iter().any(|name| name == "lswr_readonly_bridge_display"));
-        assert!(!codex_names.iter().any(|name| name == "lswr_readonly_bridge_display"));
+        assert!(all_names
+            .iter()
+            .any(|name| name == "lswr_readonly_bridge_display"));
+        assert!(!standard_names
+            .iter()
+            .any(|name| name == "lswr_readonly_bridge_display"));
+        assert!(!codex_names
+            .iter()
+            .any(|name| name == "lswr_readonly_bridge_display"));
     }
 
     fn lswr_readonly_bridge_report_packet_fixture() -> Value {
@@ -46690,7 +47038,10 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert_eq!(v["baseline_order"]["key_count"], json!(2));
         assert_eq!(v["baseline_order"]["raw_keys_included"], json!(false));
         assert_eq!(v["baseline_order"]["content_included"], json!(false));
-        assert_eq!(v["planner_result"]["fallback_reason"], json!("mode_not_authorized"));
+        assert_eq!(
+            v["planner_result"]["fallback_reason"],
+            json!("mode_not_authorized")
+        );
         assert_eq!(v["calls_memory_search"], json!(false));
         assert_eq!(v["runs_biocortex"], json!(false));
         assert_eq!(v["changes_memory_search_order"], json!(false));
@@ -47014,7 +47365,10 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert_eq!(v["changes_memory_search_order"], json!(false));
         assert_eq!(v["returned_order"]["source"], json!("baseline"));
         assert_eq!(v["returned_order"]["baseline_returned"], json!(true));
-        assert_eq!(v["input_contract"]["execution_packet_included"], json!(false));
+        assert_eq!(
+            v["input_contract"]["execution_packet_included"],
+            json!(false)
+        );
         assert_eq!(v["baseline_order"]["raw_keys_included"], json!(false));
         assert_eq!(v["baseline_order"]["content_included"], json!(false));
         assert_eq!(v["side_signal"]["raw_included"], json!(false));
@@ -47218,10 +47572,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
     fn biocortex_retrieval_opt_in_order_diff_packet_schema_is_readonly() {
         let tool = BioCortexRetrievalOptInOrderDiffPacketTool::new();
         let schema = tool.schema();
-        assert_eq!(
-            schema.name,
-            "biocortex_retrieval_opt_in_order_diff_packet"
-        );
+        assert_eq!(schema.name, "biocortex_retrieval_opt_in_order_diff_packet");
         assert!(schema.description.contains("Read-only"));
         assert!(schema.description.contains("Does not call memory_search"));
         assert!(schema.description.contains("run BioCortex"));
@@ -47365,8 +47716,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             json!(true)
         );
         assert_eq!(
-            v["order_comparison"]["expected_key_rank"]
-                ["rank_delta_advisory_minus_baseline"],
+            v["order_comparison"]["expected_key_rank"]["rank_delta_advisory_minus_baseline"],
             json!(1)
         );
         assert_eq!(
@@ -47534,10 +47884,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             json!("runtime_trial_review_packet")
         );
         assert_eq!(v["boundary_check"]["artifact_ready"], json!(true));
-        assert_eq!(
-            v["boundary_check"]["redacted_rows_comparable"],
-            json!(true)
-        );
+        assert_eq!(v["boundary_check"]["redacted_rows_comparable"], json!(true));
         assert_eq!(
             v["redacted_order_comparison"]["top_k_overlap"][0]["overlap_count"],
             json!(0)
@@ -47720,7 +48067,9 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             "biocortex_retrieval_opt_in_post_implementation_review_gate"
         );
         assert!(schema.description.contains("Read-only"));
-        assert!(schema.description.contains("post-implementation review gate"));
+        assert!(schema
+            .description
+            .contains("post-implementation review gate"));
         assert!(schema.description.contains("Does not call memory_search"));
         assert!(schema.description.contains("run BioCortex"));
         assert!(schema.description.contains("approve runtime influence"));
@@ -47890,10 +48239,14 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             "biocortex_retrieval_opt_in_runtime_influence_review_request"
         );
         assert!(schema.description.contains("Read-only"));
-        assert!(schema.description.contains("runtime-influence review request"));
+        assert!(schema
+            .description
+            .contains("runtime-influence review request"));
         assert!(schema.description.contains("Does not call memory_search"));
         assert!(schema.description.contains("run BioCortex"));
-        assert!(schema.description.contains("include raw query/keys/content"));
+        assert!(schema
+            .description
+            .contains("include raw query/keys/content"));
         assert!(schema.description.contains("approve runtime influence"));
         assert!(schema.description.contains("alter retrieval order"));
 
@@ -48106,7 +48459,9 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             "biocortex_retrieval_opt_in_runtime_influence_decision_packet"
         );
         assert!(schema.description.contains("Read-only"));
-        assert!(schema.description.contains("runtime-influence decision consumer"));
+        assert!(schema
+            .description
+            .contains("runtime-influence decision consumer"));
         assert!(schema.description.contains("explicit opt-in FTS"));
         assert!(schema.description.contains("Does not call memory_search"));
         assert!(schema.description.contains("run BioCortex"));
@@ -48269,10 +48624,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         );
         assert_eq!(v["implementation_allowed"], json!(true));
         assert_eq!(v["runtime_adapter_approved"], json!(true));
-        assert_eq!(
-            v["ordering_behavior_connection_authorized"],
-            json!(true)
-        );
+        assert_eq!(v["ordering_behavior_connection_authorized"], json!(true));
         assert_eq!(v["default_search_order_change_allowed"], json!(false));
         assert_eq!(v["writes_approval"], json!(false));
         assert_eq!(v["calls_memory_search"], json!(false));
@@ -48291,6 +48643,296 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         );
     }
 
+    fn biocortex_store_trial_authorized_decision_packet_fixture() -> Value {
+        json!({
+            "schema": "agent_bridge.biocortex_retrieval.opt_in_runtime_influence_decision_packet.v0",
+            "read_only": true,
+            "runtime_influence_decision_consumer": true,
+            "implementation_stage": "runtime_influence_decision_consumer_only",
+            "authorization_scope": "explicit_opt_in_fts_runtime_influence",
+            "input_contract": {
+                "runtime_influence_review_request_included": false,
+                "runtime_influence_decision_included": false,
+                "raw_query_included": false,
+                "raw_keys_included": false,
+                "content_included": false,
+                "human_decision_text_included": false
+            },
+            "decision_summary": {
+                "decision": "authorized",
+                "authorization_state": "authorized",
+                "authorized_scope": "explicit_opt_in_fts_runtime_influence",
+                "runtime_adapter_approved": true,
+                "ordering_behavior_connection_authorized": true,
+                "default_search_order_change_allowed": false,
+                "default_retrieval_influence_authorized": false,
+                "hybrid_retrieval_influence_authorized": false,
+                "semantic_retrieval_influence_authorized": false
+            },
+            "authorized_runtime_influence": {
+                "may_run_runtime_adapter_for_explicit_opt_in_fts": true,
+                "may_connect_ordering_behavior_for_explicit_opt_in_fts": true,
+                "may_affect_only_explicitly_opted_in_fts_calls": true,
+                "requires_per_call_opt_in": true,
+                "must_keep_baseline_candidate_recall": true,
+                "must_keep_default_calls_unchanged": true,
+                "must_keep_redacted_audit_only": true,
+                "must_keep_operator_disable": "AB_BIOCORTEX_RETRIEVAL_DISABLE",
+                "must_return_baseline_without_per_call_opt_in": true,
+                "must_fail_open_to_baseline": true
+            },
+            "boundary_check": {
+                "runtime_influence_authorized": true,
+                "blockers": []
+            },
+            "required_next_gate": {
+                "implementation_may_add_runtime_adapter_for_explicit_opt_in_fts": true,
+                "implementation_may_connect_ordering_behavior_for_explicit_opt_in_fts": true,
+                "post_connection_verification_required": true,
+                "this_packet_connects_ordering_behavior": false,
+                "this_packet_changes_return_order": false,
+                "this_packet_allows_default_search_order_change": false
+            },
+            "approval_state": "runtime_influence_review_authorized",
+            "authorization_state": "authorized_for_explicit_opt_in_fts_runtime_influence",
+            "implementation_allowed": true,
+            "runtime_adapter_approved": true,
+            "ordering_behavior_connection_authorized": true,
+            "approval_writes_allowed": false,
+            "writes_approval": false,
+            "calls_memory_search": false,
+            "runs_biocortex": false,
+            "registers_embedding_backend": false,
+            "changes_memory_search_order": false,
+            "default_search_order_change_allowed": false,
+            "ordering_behavior_connected": false,
+            "may_change_search_order_now": false,
+            "may_implement_ordering_now": true,
+            "default_calls_unchanged": true,
+            "raw_query": "secret store trial packet query",
+            "raw_key": "secret_store_trial_packet_key",
+            "content": "secret store trial packet content"
+        })
+    }
+
+    async fn save_store_trial_memory(hub: &Hub, key: &str, importance: f64, content: &str) {
+        let store = hub.store.as_ref().expect("store");
+        store
+            .memory_save(&ab_store::MemoryRecord {
+                key: key.to_string(),
+                kind: "fact".to_string(),
+                content: content.to_string(),
+                tags: vec![],
+                related_keys: vec![],
+                scope: None,
+                created_at: 0,
+                updated_at: 0,
+                last_accessed_at: 0,
+                access_count: 0,
+                importance,
+                status: String::new(),
+                trigger_pattern: None,
+                superseded_by: None,
+            })
+            .await
+            .expect("save memory");
+    }
+
+    #[test]
+    fn biocortex_retrieval_opt_in_store_trial_schema_requires_runtime_decision() {
+        let tool = BioCortexRetrievalOptInStoreTrialTool::new(Hub::builder().build());
+        let schema = tool.schema();
+        assert_eq!(schema.name, "biocortex_retrieval_opt_in_store_trial");
+        assert!(schema.description.contains("Calls AB store"));
+        assert!(schema
+            .description
+            .contains("runtime-influence decision packet"));
+        assert!(schema.description.contains("default memory_search"));
+
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required");
+        assert!(required.contains(&json!("runtime_influence_decision_packet")));
+        assert!(required.contains(&json!("query")));
+        assert!(required.contains(&json!("per_call_opt_in")));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("runtime_influence_decision_packet").is_some());
+        assert!(props.get("query").is_some());
+        assert!(props.get("tags_any").is_some());
+        assert!(props.get("limit").is_some());
+        assert!(props.get("checkout_path").is_some());
+        assert!(props.get("mutate").is_none());
+        assert!(props.get("raw_content").is_none());
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_store_trial_blocks_without_decision_and_redacts_store_data()
+    {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let secret_query = "secret store trial query";
+        let secret_key = "secret_store_trial_key";
+        let secret_content = "secret store trial query content should not leak";
+        save_store_trial_memory(&hub, secret_key, 0.9, secret_content).await;
+
+        let tool = BioCortexRetrievalOptInStoreTrialTool::new(hub);
+        let out = tool
+            .execute(
+                json!({
+                    "runtime_influence_decision_packet": {
+                        "raw_query": "secret packet query should not leak",
+                        "raw_key": "secret_packet_key",
+                        "content": "secret packet content"
+                    },
+                    "query": secret_query,
+                    "per_call_opt_in": true,
+                    "limit": 5,
+                    "attempt_id": "blocked-store-trial"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let text = match out.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains(secret_query));
+        assert!(!text.contains(secret_key));
+        assert!(!text.contains(secret_content));
+        assert!(!text.contains("secret packet query should not leak"));
+        assert!(!text.contains("secret_packet_key"));
+        assert!(!text.contains("secret packet content"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_store_trial.v0")
+        );
+        assert_eq!(v["store_trial"], json!(true));
+        assert_eq!(v["runtime_preflight"]["adapter_allowed"], json!(false));
+        assert!(v["runtime_preflight"]["blockers"]
+            .as_array()
+            .expect("blockers")
+            .contains(&json!("decision_packet_schema_invalid")));
+        assert_eq!(v["baseline_order"]["key_count"], json!(1));
+        assert_eq!(v["baseline_order"]["raw_keys_included"], json!(false));
+        assert_eq!(v["baseline_order"]["content_included"], json!(false));
+        assert_eq!(v["side_signal"]["attempted"], json!(false));
+        assert_eq!(v["store_wrapper"]["called"], json!(true));
+        assert_eq!(v["returned_order"]["baseline_returned"], json!(true));
+        assert_eq!(v["calls_memory_search"], json!(true));
+        assert_eq!(v["runs_biocortex"], json!(false));
+        assert_eq!(v["raw_query_included"], json!(false));
+        assert_eq!(v["raw_keys_included"], json!(false));
+        assert_eq!(v["content_included"], json!(false));
+
+        let _ = tokio::fs::remove_dir_all(temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_store_trial_runs_adapter_when_feature_env_and_packet_allow()
+    {
+        if !cfg!(feature = "biocortex-retrieval-opt-in") {
+            return;
+        }
+        let checkout = match std::env::var("AB_BIOCORTEX_RS") {
+            Ok(path) if std::path::Path::new(&path).join("Cargo.toml").exists() => path,
+            _ => return,
+        };
+        let prior_enable = std::env::var("AB_BIOCORTEX_RETRIEVAL_OPT_IN").ok();
+        let prior_disable = std::env::var("AB_BIOCORTEX_RETRIEVAL_DISABLE").ok();
+        std::env::set_var("AB_BIOCORTEX_RETRIEVAL_OPT_IN", "1");
+        std::env::remove_var("AB_BIOCORTEX_RETRIEVAL_DISABLE");
+
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let secret_query = "synaptic plasticity";
+        let low_key = "secret_store_runtime_low";
+        let high_key = "secret_store_runtime_high";
+        save_store_trial_memory(
+            &hub,
+            low_key,
+            0.10,
+            "synaptic plasticity iota kappa lambda mu nu xi omicron pi",
+        )
+        .await;
+        save_store_trial_memory(
+            &hub,
+            high_key,
+            0.95,
+            "synaptic plasticity alpha beta gamma delta epsilon zeta eta theta",
+        )
+        .await;
+
+        let tool = BioCortexRetrievalOptInStoreTrialTool::new(hub);
+        let out = tool
+            .execute(
+                json!({
+                    "runtime_influence_decision_packet": biocortex_store_trial_authorized_decision_packet_fixture(),
+                    "query": secret_query,
+                    "per_call_opt_in": true,
+                    "limit": 10,
+                    "checkout_path": checkout,
+                    "timeout_ms": 30000,
+                    "coverage_threshold": 0.5,
+                    "blend_alpha": 0.8,
+                    "attempt_id": "authorized-store-trial"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let text = match out.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains(secret_query));
+        assert!(!text.contains(low_key));
+        assert!(!text.contains(high_key));
+        assert!(!text.contains("iota kappa"));
+        assert!(!text.contains("alpha beta"));
+        assert!(!text.contains("secret store trial packet query"));
+        assert!(!text.contains("secret_store_trial_packet_key"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_store_trial.v0")
+        );
+        assert_eq!(v["runtime_preflight"]["adapter_allowed"], json!(true));
+        assert_eq!(v["side_signal"]["attempted"], json!(true));
+        assert_eq!(v["side_signal"]["status"], json!("ok"));
+        assert_eq!(v["side_signal"]["raw_included"], json!(false));
+        assert_eq!(v["store_wrapper"]["called"], json!(true));
+        assert_eq!(
+            v["store_wrapper"]["redacted_audit"]["side_signal_summary"]["available"],
+            json!(true)
+        );
+        assert_eq!(v["runtime_adapter_approved"], json!(true));
+        assert_eq!(v["ordering_behavior_connected"], json!(true));
+        assert_eq!(v["calls_memory_search"], json!(true));
+        assert_eq!(v["runs_biocortex"], json!(true));
+        assert_eq!(v["default_search_order_change_allowed"], json!(false));
+        assert_eq!(v["raw_query_included"], json!(false));
+        assert_eq!(v["raw_keys_included"], json!(false));
+        assert_eq!(v["content_included"], json!(false));
+
+        if let Some(value) = prior_enable {
+            std::env::set_var("AB_BIOCORTEX_RETRIEVAL_OPT_IN", value);
+        } else {
+            std::env::remove_var("AB_BIOCORTEX_RETRIEVAL_OPT_IN");
+        }
+        if let Some(value) = prior_disable {
+            std::env::set_var("AB_BIOCORTEX_RETRIEVAL_DISABLE", value);
+        }
+        let _ = tokio::fs::remove_dir_all(temp_dir).await;
+    }
+
     #[cfg(feature = "biocortex-retrieval-shadow")]
     #[test]
     fn biocortex_retrieval_shadow_schema_is_explicit_and_readonly() {
@@ -48298,7 +48940,9 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         let schema = tool.schema();
         assert_eq!(schema.name, "biocortex_retrieval_shadow");
         assert!(schema.description.contains("Review-only"));
-        assert!(schema.description.contains("runtime_adapter_approved=false"));
+        assert!(schema
+            .description
+            .contains("runtime_adapter_approved=false"));
         assert!(schema.description.contains("Does not call memory_search"));
 
         let required = schema
@@ -48306,7 +48950,10 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             .get("required")
             .and_then(Value::as_array)
             .expect("required fields");
-        let required = required.iter().filter_map(Value::as_str).collect::<Vec<_>>();
+        let required = required
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
         assert!(required.contains(&"query"));
         assert!(required.contains(&"candidates"));
 
