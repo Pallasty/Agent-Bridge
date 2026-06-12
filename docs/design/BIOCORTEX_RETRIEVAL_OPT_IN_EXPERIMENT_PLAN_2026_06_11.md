@@ -536,6 +536,24 @@ This is the first real adapter-to-store-wrapper connection, but it is still an
 explicit MCP trial surface. Default `memory_search` calls, hybrid search, and
 semantic search remain unchanged.
 
+Slice 22 added a redacted batch diagnostics artifact over the same protected
+store trial:
+
+- CLI: `agent-bridge bio-cortex retrieval-opt-in-batch-diagnostics`;
+- MCP tool: `biocortex_retrieval_opt_in_batch_diagnostics`;
+- packet schema:
+  `agent_bridge.biocortex_retrieval.opt_in_batch_diagnostics.v0`;
+- implementation stage: `store_opt_in_batch_diagnostics`;
+- each query reuses the protected store-trial gate, including the runtime
+  influence decision packet, `per_call_opt_in`, feature/env gates, baseline
+  recall, side-signal coverage threshold, and fail-open behavior;
+- output includes query hashes, baseline/returned order hashes, top key hashes,
+  counts, coverage, latency, bucket summaries, and movement classes only;
+- raw query text, memory keys, memory contents, raw side-signal rows, and the
+  runtime decision packet body are not returned;
+- the artifact is read-only and does not mutate AB memory, write approval state,
+  register an embedding backend, or authorize default retrieval influence.
+
 ## Fail-Open Rules
 
 The experiment must return the baseline list for:

@@ -5,8 +5,8 @@ use ab_agent::{
 use ab_bridge::biocortex_shadow::{
     biocortex_replay_comparison, biocortex_retrieval_opt_in_audit_report,
     biocortex_retrieval_opt_in_authorization_decision_packet,
-    biocortex_retrieval_opt_in_dry_run_plan, biocortex_retrieval_opt_in_execution_packet,
-    biocortex_retrieval_opt_in_order_diff_packet,
+    biocortex_retrieval_opt_in_batch_diagnostics, biocortex_retrieval_opt_in_dry_run_plan,
+    biocortex_retrieval_opt_in_execution_packet, biocortex_retrieval_opt_in_order_diff_packet,
     biocortex_retrieval_opt_in_post_implementation_review_gate,
     biocortex_retrieval_opt_in_redacted_order_artifact, biocortex_retrieval_opt_in_review_packet,
     biocortex_retrieval_opt_in_runtime_influence_decision_packet,
@@ -17,6 +17,7 @@ use ab_bridge::biocortex_shadow::{
     supported_benchmarks, BioCortexReplayComparisonOptions,
     BioCortexRetrievalApprovalPacketOptions, BioCortexRetrievalCandidate,
     BioCortexRetrievalOptInAuditOptions, BioCortexRetrievalOptInAuthorizationDecisionPacketOptions,
+    BioCortexRetrievalOptInBatchDiagnosticsOptions, BioCortexRetrievalOptInBatchQueryCase,
     BioCortexRetrievalOptInDryRunOptions, BioCortexRetrievalOptInExecutionPacketOptions,
     BioCortexRetrievalOptInOrderDiffPacketOptions,
     BioCortexRetrievalOptInPostImplementationReviewGateOptions,
@@ -2876,6 +2877,56 @@ enum BioCortexOp {
         #[arg(long)]
         json: bool,
     },
+    /// Run redacted batch diagnostics over protected live store trials.
+    ///
+    /// Each query reuses the same runtime-influence decision packet and
+    /// protected store-trial gate. Output includes only query hashes, order
+    /// hashes, counts, coverage, latency, and movement classes.
+    RetrievalOptInBatchDiagnostics {
+        /// JSON file produced by retrieval-opt-in-runtime-influence-decision-packet.
+        #[arg(long = "runtime-influence-decision-packet-json")]
+        runtime_influence_decision_packet_json: PathBuf,
+        /// FTS query to evaluate against the AB store. May be repeated.
+        #[arg(long = "query")]
+        queries: Vec<String>,
+        /// Optional bucket label for the corresponding --query. May be repeated.
+        #[arg(long = "query-class")]
+        query_classes: Vec<String>,
+        /// Optional tag filter forwarded to baseline memory_search. May be repeated.
+        #[arg(long = "tag")]
+        tags_any: Vec<String>,
+        /// Maximum baseline candidates to retrieve from store memory_search.
+        #[arg(long, default_value_t = 10)]
+        limit: u32,
+        /// Retrieval mode under review. Only fts is authorized for runtime influence.
+        #[arg(long, default_value = "fts")]
+        mode: String,
+        /// Required explicit per-call opt-in bit.
+        #[arg(long)]
+        per_call_opt_in: bool,
+        /// Local biocortex-rs checkout. Defaults to AB_BIOCORTEX_RS, sibling
+        /// checkout paths, then /tmp/biocortex-rs-ab-eval.
+        #[arg(long)]
+        checkout: Option<PathBuf>,
+        /// External side-signal adapter timeout in milliseconds, per query.
+        #[arg(long, default_value_t = 120_000)]
+        timeout_ms: u64,
+        /// Minimum matched side-signal coverage before experimental order is allowed.
+        #[arg(long, default_value_t = 0.8)]
+        coverage_threshold: f64,
+        /// Blend weight passed to the protected store wrapper.
+        #[arg(long, default_value_t = 0.8)]
+        blend_alpha: f32,
+        /// Optional batch attempt id for audit correlation.
+        #[arg(long)]
+        attempt_id: Option<String>,
+        /// Implementation commit under review.
+        #[arg(long)]
+        commit: Option<String>,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
     /// Preview the future runtime approval packet without approving anything.
     ///
     /// This is a review-preparation packet only. It never runs BioCortex,
@@ -4918,6 +4969,50 @@ async fn real_main() -> Result<()> {
                     BioCortexRetrievalOptInStoreTrialOptions {
                         runtime_influence_decision_packet: Value::Null,
                         query: query.clone(),
+                        tags_any: tags_any.clone(),
+                        limit: *limit,
+                        mode: mode.clone(),
+                        per_call_opt_in: *per_call_opt_in,
+                        checkout: checkout.clone(),
+                        timeout_ms: *timeout_ms,
+                        coverage_threshold: *coverage_threshold,
+                        blend_alpha: *blend_alpha,
+                        attempt_id: attempt_id.clone(),
+                        commit: commit.clone(),
+                    },
+                    *json,
+                )
+                .await
+            }
+            BioCortexOp::RetrievalOptInBatchDiagnostics {
+                runtime_influence_decision_packet_json,
+                queries,
+                query_classes,
+                tags_any,
+                limit,
+                mode,
+                per_call_opt_in,
+                checkout,
+                timeout_ms,
+                coverage_threshold,
+                blend_alpha,
+                attempt_id,
+                commit,
+                json,
+            } => {
+                let query_cases = queries
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, query)| BioCortexRetrievalOptInBatchQueryCase {
+                        query: query.clone(),
+                        class_label: query_classes.get(idx).cloned(),
+                    })
+                    .collect::<Vec<_>>();
+                run_biocortex_retrieval_opt_in_batch_diagnostics(
+                    runtime_influence_decision_packet_json,
+                    BioCortexRetrievalOptInBatchDiagnosticsOptions {
+                        runtime_influence_decision_packet: Value::Null,
+                        queries: query_cases,
                         tags_any: tags_any.clone(),
                         limit: *limit,
                         mode: mode.clone(),
@@ -9668,6 +9763,83 @@ async fn run_biocortex_retrieval_opt_in_store_trial(
         shadow_json_display(payload.get("changes_memory_search_order"), "false"),
         shadow_json_display(payload.get("default_calls_unchanged"), "true")
     );
+    Ok(())
+}
+
+async fn run_biocortex_retrieval_opt_in_batch_diagnostics(
+    runtime_influence_decision_packet_json: &std::path::Path,
+    mut opts: BioCortexRetrievalOptInBatchDiagnosticsOptions,
+    as_json: bool,
+) -> Result<()> {
+    let packet_body = std::fs::read_to_string(runtime_influence_decision_packet_json).map_err(|e| {
+        anyhow::anyhow!(
+            "read opt-in runtime influence decision packet JSON at {runtime_influence_decision_packet_json:?}: {e}"
+        )
+    })?;
+    opts.runtime_influence_decision_packet =
+        serde_json::from_str(&packet_body).map_err(|e| {
+            anyhow::anyhow!(
+                "parse opt-in runtime influence decision packet JSON at {runtime_influence_decision_packet_json:?}: {e}"
+            )
+        })?;
+
+    let db_path = std::env::var("AGENT_BRIDGE_DB")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(default_db_path);
+    let store = SqliteStore::open(&db_path)
+        .await
+        .map_err(|e| anyhow::anyhow!("open state.db at {db_path:?}: {e}"))?;
+    let payload = biocortex_retrieval_opt_in_batch_diagnostics(&store, opts).await;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# BioCortex retrieval opt-in batch diagnostics");
+    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
+    println!(
+        "status={} implementation_stage={}",
+        shadow_json_display(payload.get("status"), "-"),
+        shadow_json_display(payload.get("implementation_stage"), "-")
+    );
+    let summary = payload.get("summary").unwrap_or(&Value::Null);
+    println!(
+        "queries={} baseline_completed={} adapter_allowed={} side_signal_ok={} experimental_source={} actual_order_changed={}",
+        shadow_json_display(summary.get("query_count"), "0"),
+        shadow_json_display(summary.get("baseline_completed_count"), "0"),
+        shadow_json_display(summary.get("adapter_allowed_count"), "0"),
+        shadow_json_display(summary.get("side_signal_ok_count"), "0"),
+        shadow_json_display(summary.get("experimental_source_count"), "0"),
+        shadow_json_display(summary.get("actual_order_changed_count"), "0")
+    );
+    println!(
+        "avg_coverage={} avg_latency_ms={} raw_flagged_count={}",
+        shadow_json_display(summary.get("avg_coverage"), "0"),
+        shadow_json_display(summary.get("avg_latency_ms"), "0"),
+        shadow_json_display(summary.get("raw_flagged_count"), "0")
+    );
+    let safety = payload.get("safety").unwrap_or(&Value::Null);
+    println!(
+        "calls_memory_search_all={} runs_biocortex_any={} default_calls_unchanged_all={} raw_flags_all_false={}",
+        shadow_json_display(safety.get("calls_memory_search_all"), "false"),
+        shadow_json_display(safety.get("runs_biocortex_any"), "false"),
+        shadow_json_display(safety.get("default_calls_unchanged_all"), "true"),
+        shadow_json_display(safety.get("raw_flags_all_false"), "true")
+    );
+    if let Some(buckets) = payload.get("bucket_summary").and_then(Value::as_array) {
+        for bucket in buckets.iter().take(12) {
+            println!(
+                "bucket={} queries={} moved={} aligned_experimental={}",
+                shadow_json_display(bucket.get("class_label"), "unlabeled"),
+                shadow_json_display(bucket.get("query_count"), "0"),
+                shadow_json_display(bucket.get("actual_order_changed_count"), "0"),
+                shadow_json_display(bucket.get("experimental_source_count"), "0")
+            );
+        }
+    }
     Ok(())
 }
 

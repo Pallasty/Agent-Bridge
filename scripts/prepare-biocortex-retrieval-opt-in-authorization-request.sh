@@ -509,6 +509,29 @@ jq -e '
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.default_search_order_change_allowed == false
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.default_calls_unchanged == true
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.explicit_opt_in_fts_runtime_adapter_connected == true
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.cli == "agent-bridge bio-cortex retrieval-opt-in-batch-diagnostics"
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.mcp_tool == "biocortex_retrieval_opt_in_batch_diagnostics"
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.schema == "agent_bridge.biocortex_retrieval.opt_in_batch_diagnostics.v0"
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.implementation_stage == "store_opt_in_batch_diagnostics"
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.authorized_scope == "explicit_opt_in_fts_runtime_influence"
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.reuses_store_trial_gate == true
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.calls_memory_search == true
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.runs_biocortex_only_when_store_trial_allows == true
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.calls_store_opt_in_wrapper == true
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.returns_batch_summary == true
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.returns_bucket_summary == true
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.returns_per_query_hashes == true
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.returns_movement_classes == true
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.raw_queries_included == false
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.raw_keys_included == false
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.content_included == false
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.side_signal_raw_included == false
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.mutates_ab_memory == false
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.registers_embedding_backend == false
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.writes_approval == false
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.default_memory_search_unchanged == true
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.default_search_order_change_allowed == false
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.default_calls_unchanged == true
     and .opt_in_plan.implemented_authorization_decision_consumer.cli == "agent-bridge bio-cortex retrieval-opt-in-authorization-decision-packet"
     and .opt_in_plan.implemented_authorization_decision_consumer.mcp_tool == "biocortex_retrieval_opt_in_authorization_decision_packet"
     and .opt_in_plan.implemented_authorization_decision_consumer.schema == "agent_bridge.biocortex_retrieval.opt_in_authorization_decision_packet.v0"

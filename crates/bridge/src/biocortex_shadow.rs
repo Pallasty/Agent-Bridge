@@ -52,6 +52,8 @@ pub const BIOCORTEX_RETRIEVAL_OPT_IN_RUNTIME_INFLUENCE_DECISION_PACKET_SCHEMA: &
     "agent_bridge.biocortex_retrieval.opt_in_runtime_influence_decision_packet.v0";
 pub const BIOCORTEX_RETRIEVAL_OPT_IN_STORE_TRIAL_SCHEMA: &str =
     "agent_bridge.biocortex_retrieval.opt_in_store_trial.v0";
+pub const BIOCORTEX_RETRIEVAL_OPT_IN_BATCH_DIAGNOSTICS_SCHEMA: &str =
+    "agent_bridge.biocortex_retrieval.opt_in_batch_diagnostics.v0";
 pub const BIOCORTEX_SUBSTRATE_REPLAY_PLAN_SCHEMA: &str =
     "agent_bridge.biocortex_substrate_replay_plan.v0";
 pub const BIOCORTEX_CHECKOUT_ENV: &str = "AB_BIOCORTEX_RS";
@@ -243,6 +245,28 @@ pub struct BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketOptions {
 pub struct BioCortexRetrievalOptInStoreTrialOptions {
     pub runtime_influence_decision_packet: Value,
     pub query: String,
+    pub tags_any: Vec<String>,
+    pub limit: u32,
+    pub mode: String,
+    pub per_call_opt_in: bool,
+    pub checkout: Option<PathBuf>,
+    pub timeout_ms: u64,
+    pub coverage_threshold: f64,
+    pub blend_alpha: f32,
+    pub attempt_id: Option<String>,
+    pub commit: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BioCortexRetrievalOptInBatchQueryCase {
+    pub query: String,
+    pub class_label: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BioCortexRetrievalOptInBatchDiagnosticsOptions {
+    pub runtime_influence_decision_packet: Value,
+    pub queries: Vec<BioCortexRetrievalOptInBatchQueryCase>,
     pub tags_any: Vec<String>,
     pub limit: u32,
     pub mode: String,
@@ -5640,6 +5664,375 @@ pub async fn biocortex_retrieval_opt_in_store_trial(
         "side_signal_raw_included": false,
         "boundary": retrieval_runtime_trial_boundary_payload(side_attempted),
     })
+}
+
+pub async fn biocortex_retrieval_opt_in_batch_diagnostics(
+    store: &dyn StateStore,
+    opts: BioCortexRetrievalOptInBatchDiagnosticsOptions,
+) -> Value {
+    let queries = opts
+        .queries
+        .into_iter()
+        .filter_map(|case| {
+            let query = case.query.trim().to_string();
+            if query.is_empty() {
+                None
+            } else {
+                Some(BioCortexRetrievalOptInBatchQueryCase {
+                    query,
+                    class_label: case.class_label,
+                })
+            }
+        })
+        .take(50)
+        .collect::<Vec<_>>();
+    let mode = normalize_token(&opts.mode);
+    let limit = opts.limit.clamp(1, 100);
+    let timeout_ms = opts.timeout_ms.clamp(1_000, 600_000);
+    let coverage_threshold = opts.coverage_threshold.clamp(0.0, 1.0);
+    let blend_alpha = if opts.blend_alpha.is_finite() && opts.blend_alpha >= 0.0 {
+        opts.blend_alpha.clamp(0.0, 1.0)
+    } else {
+        CANDIDATE_STRONG_RETRIEVAL_ALPHA
+    };
+    let tag_filter_count = opts
+        .tags_any
+        .iter()
+        .map(|tag| tag.trim())
+        .filter(|tag| !tag.is_empty())
+        .count();
+    let runtime_influence_decision_packet = opts.runtime_influence_decision_packet;
+    let attempt_id = opts.attempt_id.clone();
+    let commit = opts.commit.clone();
+
+    let mut query_results = Vec::with_capacity(queries.len());
+    let mut bucket_stats = BTreeMap::<String, BatchBucketStats>::new();
+    let mut summary = BatchBucketStats::default();
+
+    for (idx, case) in queries.into_iter().enumerate() {
+        let class_label = safe_batch_class_label(case.class_label.as_deref());
+        let trial_attempt_id = attempt_id.as_ref().map(|id| format!("{id}:q{}", idx + 1));
+        let trial = biocortex_retrieval_opt_in_store_trial(
+            store,
+            BioCortexRetrievalOptInStoreTrialOptions {
+                runtime_influence_decision_packet: runtime_influence_decision_packet.clone(),
+                query: case.query,
+                tags_any: opts.tags_any.clone(),
+                limit,
+                mode: mode.clone(),
+                per_call_opt_in: opts.per_call_opt_in,
+                checkout: opts.checkout.clone(),
+                timeout_ms,
+                coverage_threshold,
+                blend_alpha,
+                attempt_id: trial_attempt_id,
+                commit: commit.clone(),
+            },
+        )
+        .await;
+        let movement_class = batch_movement_class(&trial).to_string();
+        let result = batch_trial_summary(idx, &class_label, &movement_class, &trial);
+        summary.add_trial(&trial);
+        bucket_stats
+            .entry(class_label)
+            .or_default()
+            .add_trial(&trial);
+        query_results.push(result);
+    }
+
+    let bucket_summary = bucket_stats
+        .into_iter()
+        .map(|(class_label, stats)| stats.to_value(Some(class_label)))
+        .collect::<Vec<_>>();
+    let raw_flags_all_false = query_results.iter().all(|row| {
+        value_bool_is(row.get("raw_query_included"), false)
+            && value_bool_is(row.get("raw_keys_included"), false)
+            && value_bool_is(row.get("content_included"), false)
+            && value_bool_is(row.get("side_signal_raw_included"), false)
+    });
+    let query_count = query_results.len();
+    let no_queries = query_count == 0;
+
+    json!({
+        "schema": BIOCORTEX_RETRIEVAL_OPT_IN_BATCH_DIAGNOSTICS_SCHEMA,
+        "generated_at": now_secs(),
+        "batch_diagnostics": true,
+        "implementation_stage": "store_opt_in_batch_diagnostics",
+        "authorization_scope": "explicit_opt_in_fts_runtime_influence",
+        "purpose": "Batch redacted diagnostics for explicit opt-in BioCortex store trials. Each row reuses the protected store-trial gate and reports only hashes, counts, coverage, latency, and order-movement classes.",
+        "status": if no_queries { "empty_batch" } else { "completed" },
+        "attempt": {
+            "attempt_id": required_or_value(attempt_id),
+            "commit": required_or_value(commit),
+            "mode": mode,
+            "per_call_opt_in": opts.per_call_opt_in,
+            "limit": limit,
+            "query_count": query_count,
+            "tag_filter_count": tag_filter_count,
+            "coverage_threshold": round3(coverage_threshold),
+            "blend_alpha": blend_alpha,
+        },
+        "input_contract": {
+            "runtime_influence_decision_packet_schema": runtime_influence_decision_packet.get("schema").cloned().unwrap_or(Value::Null),
+            "runtime_influence_decision_packet_included": false,
+            "raw_queries_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "side_signal_raw_included": false,
+            "query_classes_sanitized": true,
+        },
+        "summary": summary.to_value(None),
+        "bucket_summary": bucket_summary,
+        "query_results": query_results,
+        "safety": {
+            "calls_memory_search_any": summary.calls_memory_search_count > 0,
+            "calls_memory_search_all": query_count > 0 && summary.calls_memory_search_count == query_count,
+            "runs_biocortex_any": summary.runs_biocortex_count > 0,
+            "changes_memory_search_order_any": summary.contract_changes_order_count > 0,
+            "actual_return_order_changed_any": summary.actual_order_changed_count > 0,
+            "default_calls_unchanged_all": query_count == 0 || summary.default_calls_unchanged_count == query_count,
+            "raw_query_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "side_signal_raw_included": false,
+            "raw_flags_all_false": raw_flags_all_false,
+        },
+        "approval_state": "batch_diagnostics_only",
+        "approval_writes_allowed": false,
+        "writes_approval": false,
+        "registers_embedding_backend": false,
+        "default_search_order_change_allowed": false,
+        "default_calls_unchanged": query_count == 0 || summary.default_calls_unchanged_count == query_count,
+        "raw_queries_included": false,
+        "raw_keys_included": false,
+        "content_included": false,
+        "side_signal_raw_included": false,
+        "boundary": retrieval_runtime_trial_boundary_payload(summary.runs_biocortex_count > 0),
+    })
+}
+
+#[derive(Default)]
+struct BatchBucketStats {
+    query_count: usize,
+    baseline_completed_count: usize,
+    baseline_empty_count: usize,
+    adapter_allowed_count: usize,
+    side_signal_attempted_count: usize,
+    side_signal_ok_count: usize,
+    experimental_source_count: usize,
+    baseline_returned_count: usize,
+    hash_matches_baseline_count: usize,
+    contract_changes_order_count: usize,
+    actual_order_changed_count: usize,
+    calls_memory_search_count: usize,
+    runs_biocortex_count: usize,
+    default_calls_unchanged_count: usize,
+    raw_flagged_count: usize,
+    coverage_sum: f64,
+    coverage_count: usize,
+    latency_sum: f64,
+    latency_count: usize,
+}
+
+impl BatchBucketStats {
+    fn add_trial(&mut self, trial: &Value) {
+        self.query_count += 1;
+        if value_bool_is(trial.pointer("/runtime_preflight/baseline_completed"), true) {
+            self.baseline_completed_count += 1;
+        }
+        if trial
+            .pointer("/baseline_order/key_count")
+            .and_then(Value::as_u64)
+            == Some(0)
+        {
+            self.baseline_empty_count += 1;
+        }
+        if value_bool_is(trial.pointer("/runtime_preflight/adapter_allowed"), true) {
+            self.adapter_allowed_count += 1;
+        }
+        if value_bool_is(trial.pointer("/side_signal/attempted"), true) {
+            self.side_signal_attempted_count += 1;
+        }
+        if value_str_eq(trial.pointer("/side_signal/status"), "ok") {
+            self.side_signal_ok_count += 1;
+        }
+        if value_str_eq(trial.pointer("/returned_order/source"), "experimental") {
+            self.experimental_source_count += 1;
+        }
+        if value_bool_is(trial.pointer("/returned_order/baseline_returned"), true) {
+            self.baseline_returned_count += 1;
+        }
+        if value_bool_is(trial.pointer("/returned_order/hash_matches_baseline"), true) {
+            self.hash_matches_baseline_count += 1;
+        }
+        if value_bool_is(
+            trial.pointer("/returned_order/contract_changes_memory_search_order"),
+            true,
+        ) {
+            self.contract_changes_order_count += 1;
+        }
+        if value_bool_is(
+            trial.pointer("/returned_order/actual_return_order_changed"),
+            true,
+        ) {
+            self.actual_order_changed_count += 1;
+        }
+        if value_bool_is(trial.get("calls_memory_search"), true) {
+            self.calls_memory_search_count += 1;
+        }
+        if value_bool_is(trial.get("runs_biocortex"), true) {
+            self.runs_biocortex_count += 1;
+        }
+        if value_bool_is(trial.get("default_calls_unchanged"), true) {
+            self.default_calls_unchanged_count += 1;
+        }
+        let raw_flagged = value_bool_is(trial.get("raw_query_included"), true)
+            || value_bool_is(trial.get("raw_keys_included"), true)
+            || value_bool_is(trial.get("content_included"), true)
+            || value_bool_is(trial.get("side_signal_raw_included"), true);
+        if raw_flagged {
+            self.raw_flagged_count += 1;
+        }
+        if let Some(coverage) = trial
+            .pointer("/side_signal/coverage")
+            .and_then(Value::as_f64)
+        {
+            self.coverage_sum += coverage;
+            self.coverage_count += 1;
+        }
+        if let Some(latency) = trial
+            .pointer("/side_signal/latency_ms")
+            .and_then(Value::as_f64)
+        {
+            self.latency_sum += latency;
+            self.latency_count += 1;
+        }
+    }
+
+    fn to_value(&self, class_label: Option<String>) -> Value {
+        let avg_coverage = if self.coverage_count > 0 {
+            round3(self.coverage_sum / self.coverage_count as f64)
+        } else {
+            0.0
+        };
+        let avg_latency_ms = if self.latency_count > 0 {
+            round3(self.latency_sum / self.latency_count as f64)
+        } else {
+            0.0
+        };
+        let mut value = json!({
+            "query_count": self.query_count,
+            "baseline_completed_count": self.baseline_completed_count,
+            "baseline_empty_count": self.baseline_empty_count,
+            "adapter_allowed_count": self.adapter_allowed_count,
+            "side_signal_attempted_count": self.side_signal_attempted_count,
+            "side_signal_ok_count": self.side_signal_ok_count,
+            "experimental_source_count": self.experimental_source_count,
+            "baseline_returned_count": self.baseline_returned_count,
+            "hash_matches_baseline_count": self.hash_matches_baseline_count,
+            "contract_changes_order_count": self.contract_changes_order_count,
+            "actual_order_changed_count": self.actual_order_changed_count,
+            "calls_memory_search_count": self.calls_memory_search_count,
+            "runs_biocortex_count": self.runs_biocortex_count,
+            "default_calls_unchanged_count": self.default_calls_unchanged_count,
+            "raw_flagged_count": self.raw_flagged_count,
+            "avg_coverage": avg_coverage,
+            "avg_latency_ms": avg_latency_ms,
+        });
+        if let Some(class_label) = class_label {
+            value["class_label"] = json!(class_label);
+        }
+        value
+    }
+}
+
+fn batch_trial_summary(
+    idx: usize,
+    class_label: &str,
+    movement_class: &str,
+    trial: &Value,
+) -> Value {
+    json!({
+        "index": idx,
+        "class_label": class_label,
+        "query_hash": trial.get("query_hash").cloned().unwrap_or(Value::Null),
+        "status": trial.get("status").cloned().unwrap_or(Value::Null),
+        "movement_class": movement_class,
+        "preflight": {
+            "adapter_allowed": trial.pointer("/runtime_preflight/adapter_allowed").cloned().unwrap_or(Value::Bool(false)),
+            "blocker_count": trial.pointer("/runtime_preflight/blockers").and_then(Value::as_array).map(|items| items.len()).unwrap_or(0),
+            "compile_feature_enabled": trial.pointer("/runtime_preflight/compile_feature_enabled").cloned().unwrap_or(Value::Bool(false)),
+            "runtime_enabled": trial.pointer("/runtime_preflight/runtime_enabled").cloned().unwrap_or(Value::Bool(false)),
+            "operator_disabled": trial.pointer("/runtime_preflight/operator_disabled").cloned().unwrap_or(Value::Bool(false)),
+            "decision_packet_authorized": trial.pointer("/runtime_preflight/decision_packet_authorized").cloned().unwrap_or(Value::Bool(false)),
+        },
+        "baseline": {
+            "completed": trial.pointer("/baseline_order/completed").cloned().unwrap_or(Value::Bool(false)),
+            "key_count": trial.pointer("/baseline_order/key_count").cloned().unwrap_or_else(|| json!(0)),
+            "hash": trial.pointer("/baseline_order/hash").cloned().unwrap_or(Value::Null),
+            "top_key_hash": trial.pointer("/baseline_order/top_key_hash").cloned().unwrap_or(Value::Null),
+        },
+        "side_signal": {
+            "attempted": trial.pointer("/side_signal/attempted").cloned().unwrap_or(Value::Bool(false)),
+            "status": trial.pointer("/side_signal/status").cloned().unwrap_or(Value::Null),
+            "matched_candidate_count": trial.pointer("/side_signal/matched_candidate_count").cloned().unwrap_or_else(|| json!(0)),
+            "coverage": trial.pointer("/side_signal/coverage").cloned().unwrap_or_else(|| json!(0.0)),
+            "latency_ms": trial.pointer("/side_signal/latency_ms").cloned().unwrap_or_else(|| json!(0.0)),
+        },
+        "returned_order": {
+            "source": trial.pointer("/returned_order/source").cloned().unwrap_or_else(|| json!("baseline")),
+            "baseline_returned": trial.pointer("/returned_order/baseline_returned").cloned().unwrap_or(Value::Bool(true)),
+            "contract_changes_memory_search_order": trial.pointer("/returned_order/contract_changes_memory_search_order").cloned().unwrap_or(Value::Bool(false)),
+            "actual_return_order_changed": trial.pointer("/returned_order/actual_return_order_changed").cloned().unwrap_or(Value::Bool(false)),
+            "hash_matches_baseline": trial.pointer("/returned_order/hash_matches_baseline").cloned().unwrap_or(Value::Bool(true)),
+            "hash": trial.pointer("/returned_order/hash").cloned().unwrap_or(Value::Null),
+            "top_key_hash": trial.pointer("/returned_order/top_key_hash").cloned().unwrap_or(Value::Null),
+            "fallback_reason": trial.pointer("/returned_order/fallback_reason").cloned().unwrap_or(Value::Null),
+        },
+        "calls_memory_search": trial.get("calls_memory_search").cloned().unwrap_or(Value::Bool(false)),
+        "runs_biocortex": trial.get("runs_biocortex").cloned().unwrap_or(Value::Bool(false)),
+        "changes_memory_search_order": trial.get("changes_memory_search_order").cloned().unwrap_or(Value::Bool(false)),
+        "default_calls_unchanged": trial.get("default_calls_unchanged").cloned().unwrap_or(Value::Bool(true)),
+        "raw_query_included": false,
+        "raw_keys_included": false,
+        "content_included": false,
+        "side_signal_raw_included": false,
+    })
+}
+
+fn batch_movement_class(trial: &Value) -> &'static str {
+    if !value_bool_is(trial.pointer("/runtime_preflight/baseline_completed"), true) {
+        "baseline_unavailable"
+    } else if !value_bool_is(trial.pointer("/runtime_preflight/adapter_allowed"), true) {
+        "preflight_blocked"
+    } else if !value_str_eq(trial.pointer("/side_signal/status"), "ok") {
+        "side_signal_unavailable"
+    } else if value_bool_is(
+        trial.pointer("/returned_order/actual_return_order_changed"),
+        true,
+    ) {
+        "experimental_moved_order"
+    } else if value_str_eq(trial.pointer("/returned_order/source"), "experimental") {
+        "experimental_aligned_with_baseline"
+    } else if value_bool_is(trial.pointer("/returned_order/baseline_returned"), true) {
+        "baseline_returned"
+    } else {
+        "unknown"
+    }
+}
+
+fn safe_batch_class_label(label: Option<&str>) -> String {
+    let normalized = label.map(normalize_token).unwrap_or_default();
+    let safe = normalized
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+        .take(64)
+        .collect::<String>();
+    if safe.is_empty() {
+        "unlabeled".to_string()
+    } else {
+        safe
+    }
 }
 
 fn advisory_order_summary(
