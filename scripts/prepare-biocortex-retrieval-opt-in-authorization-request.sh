@@ -389,7 +389,7 @@ jq -e '
     and .writes_approval == false
     and .accepts_optional_order_diff_packet == true
     and .accepts_optional_redacted_order_artifact == true
-    and .opt_in_plan.status == "post_implementation_review_gate_implemented"
+    and .opt_in_plan.status == "runtime_influence_review_request_implemented"
     and .opt_in_plan.approval_state == "opt_in_implementation_authorized"
     and .opt_in_plan.order_diff_packet_implemented == true
     and .opt_in_plan.authorization_request_order_diff_evidence_implemented == true
@@ -398,6 +398,7 @@ jq -e '
     and .opt_in_plan.store_opt_in_search_wrapper_implemented == true
     and .opt_in_plan.authorization_decision_consumer_implemented == true
     and .opt_in_plan.post_implementation_review_gate_implemented == true
+    and .opt_in_plan.runtime_influence_review_request_implemented == true
     and .opt_in_plan.implemented_gate_skeleton.ordering_behavior_connected == false
     and .opt_in_plan.implemented_gate_skeleton.may_change_search_order_now == false
     and .opt_in_plan.implemented_audit_shape.schema == "agent_bridge.biocortex_retrieval.opt_in_call_audit.v0"
@@ -496,6 +497,40 @@ jq -e '
     and .opt_in_plan.implemented_post_implementation_review_gate.ordering_behavior_connected == false
     and .opt_in_plan.implemented_post_implementation_review_gate.may_change_search_order_now == false
     and .opt_in_plan.implemented_post_implementation_review_gate.may_implement_ordering_now == false
+    and .opt_in_plan.implemented_runtime_influence_review_request.cli == "agent-bridge bio-cortex retrieval-opt-in-runtime-influence-review-request"
+    and .opt_in_plan.implemented_runtime_influence_review_request.mcp_tool == "biocortex_retrieval_opt_in_runtime_influence_review_request"
+    and .opt_in_plan.implemented_runtime_influence_review_request.schema == "agent_bridge.biocortex_retrieval.opt_in_runtime_influence_review_request.v0"
+    and .opt_in_plan.implemented_runtime_influence_review_request.read_only == true
+    and .opt_in_plan.implemented_runtime_influence_review_request.runtime_influence_review_request == true
+    and .opt_in_plan.implemented_runtime_influence_review_request.implementation_stage == "runtime_influence_review_request_only"
+    and .opt_in_plan.implemented_runtime_influence_review_request.consumes_post_implementation_review_gate_summary == true
+    and .opt_in_plan.implemented_runtime_influence_review_request.consumes_redacted_order_artifact_summary == true
+    and .opt_in_plan.implemented_runtime_influence_review_request.post_implementation_review_gate_included == false
+    and .opt_in_plan.implemented_runtime_influence_review_request.redacted_order_artifact_included == false
+    and .opt_in_plan.implemented_runtime_influence_review_request.raw_query_included == false
+    and .opt_in_plan.implemented_runtime_influence_review_request.raw_keys_included == false
+    and .opt_in_plan.implemented_runtime_influence_review_request.content_included == false
+    and .opt_in_plan.implemented_runtime_influence_review_request.request_scope == "explicit_opt_in_fts_runtime_influence_review"
+    and .opt_in_plan.implemented_runtime_influence_review_request.request_runtime_adapter_review == true
+    and .opt_in_plan.implemented_runtime_influence_review_request.request_ordering_behavior_connection_review == true
+    and .opt_in_plan.implemented_runtime_influence_review_request.request_default_search_order_change == false
+    and .opt_in_plan.implemented_runtime_influence_review_request.request_hybrid_retrieval_influence == false
+    and .opt_in_plan.implemented_runtime_influence_review_request.request_semantic_retrieval_influence == false
+    and .opt_in_plan.implemented_runtime_influence_review_request.this_packet_grants_request == false
+    and .opt_in_plan.implemented_runtime_influence_review_request.approval_state == "not_approved"
+    and .opt_in_plan.implemented_runtime_influence_review_request.authorization_state == "runtime_influence_review_requested_not_granted"
+    and .opt_in_plan.implemented_runtime_influence_review_request.implementation_allowed == false
+    and .opt_in_plan.implemented_runtime_influence_review_request.runtime_adapter_approved == false
+    and .opt_in_plan.implemented_runtime_influence_review_request.default_search_order_change_allowed == false
+    and .opt_in_plan.implemented_runtime_influence_review_request.approval_writes_allowed == false
+    and .opt_in_plan.implemented_runtime_influence_review_request.writes_approval == false
+    and .opt_in_plan.implemented_runtime_influence_review_request.calls_memory_search == false
+    and .opt_in_plan.implemented_runtime_influence_review_request.runs_biocortex == false
+    and .opt_in_plan.implemented_runtime_influence_review_request.registers_embedding_backend == false
+    and .opt_in_plan.implemented_runtime_influence_review_request.changes_memory_search_order == false
+    and .opt_in_plan.implemented_runtime_influence_review_request.ordering_behavior_connected == false
+    and .opt_in_plan.implemented_runtime_influence_review_request.may_change_search_order_now == false
+    and .opt_in_plan.implemented_runtime_influence_review_request.may_implement_ordering_now == false
     and .opt_in_plan.implemented_dry_run_planner.mcp_tool == "biocortex_retrieval_opt_in_dry_run"
     and .opt_in_plan.implemented_dry_run_planner.schema == "agent_bridge.biocortex_retrieval.opt_in_dry_run_plan.v0"
     and .opt_in_plan.implemented_dry_run_planner.read_only == true

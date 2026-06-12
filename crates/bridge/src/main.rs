@@ -9,6 +9,7 @@ use ab_bridge::biocortex_shadow::{
     biocortex_retrieval_opt_in_order_diff_packet,
     biocortex_retrieval_opt_in_post_implementation_review_gate,
     biocortex_retrieval_opt_in_redacted_order_artifact, biocortex_retrieval_opt_in_review_packet,
+    biocortex_retrieval_opt_in_runtime_influence_review_request,
     biocortex_retrieval_opt_in_runtime_trial,
     biocortex_retrieval_opt_in_runtime_trial_review_packet,
     biocortex_retrieval_runtime_approval_packet_preview, biocortex_shadow_digest,
@@ -20,7 +21,9 @@ use ab_bridge::biocortex_shadow::{
     BioCortexRetrievalOptInOrderDiffPacketOptions,
     BioCortexRetrievalOptInPostImplementationReviewGateOptions,
     BioCortexRetrievalOptInRedactedOrderArtifactOptions,
-    BioCortexRetrievalOptInReviewPacketOptions, BioCortexRetrievalOptInRuntimeTrialOptions,
+    BioCortexRetrievalOptInReviewPacketOptions,
+    BioCortexRetrievalOptInRuntimeInfluenceReviewRequestOptions,
+    BioCortexRetrievalOptInRuntimeTrialOptions,
     BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions, BioCortexShadowOptions,
 };
 #[cfg(feature = "biocortex-retrieval-shadow")]
@@ -2764,6 +2767,36 @@ enum BioCortexOp {
         #[arg(long)]
         json: bool,
     },
+    /// Prepare a human runtime-influence review request without approval.
+    ///
+    /// This consumes the post-implementation review gate and redacted order
+    /// artifact summaries. It requests a separate human review for explicit
+    /// opt-in FTS runtime influence only; it does not approve runtime adapter
+    /// influence, call `memory_search`, run BioCortex, or change retrieval
+    /// order.
+    RetrievalOptInRuntimeInfluenceReviewRequest {
+        /// JSON file produced by retrieval-opt-in-post-implementation-review-gate.
+        #[arg(long = "post-implementation-review-gate-json")]
+        post_implementation_review_gate_json: PathBuf,
+        /// JSON file produced by retrieval-opt-in-redacted-order-artifact.
+        #[arg(long = "redacted-order-artifact-json")]
+        redacted_order_artifact_json: PathBuf,
+        /// Reviewer identity or handle.
+        #[arg(long)]
+        reviewer: Option<String>,
+        /// Implementation commit under review.
+        #[arg(long)]
+        commit: Option<String>,
+        /// Forum post id linking the review request.
+        #[arg(long)]
+        forum_post_id: Option<String>,
+        /// Memory key linking the review request.
+        #[arg(long)]
+        memory_key: Option<String>,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
     /// Preview the future runtime approval packet without approving anything.
     ///
     /// This is a review-preparation packet only. It never runs BioCortex,
@@ -4729,6 +4762,30 @@ async fn real_main() -> Result<()> {
                     BioCortexRetrievalOptInPostImplementationReviewGateOptions {
                         authorization_decision_packet: Value::Null,
                         opt_in_plan: Value::Null,
+                        reviewer: reviewer.clone(),
+                        commit: commit.clone(),
+                        forum_post_id: forum_post_id.clone(),
+                        memory_key: memory_key.clone(),
+                    },
+                    *json,
+                )
+                .await
+            }
+            BioCortexOp::RetrievalOptInRuntimeInfluenceReviewRequest {
+                post_implementation_review_gate_json,
+                redacted_order_artifact_json,
+                reviewer,
+                commit,
+                forum_post_id,
+                memory_key,
+                json,
+            } => {
+                run_biocortex_retrieval_opt_in_runtime_influence_review_request(
+                    post_implementation_review_gate_json,
+                    redacted_order_artifact_json,
+                    BioCortexRetrievalOptInRuntimeInfluenceReviewRequestOptions {
+                        post_implementation_review_gate: Value::Null,
+                        redacted_order_artifact: Value::Null,
                         reviewer: reviewer.clone(),
                         commit: commit.clone(),
                         forum_post_id: forum_post_id.clone(),
@@ -9237,6 +9294,70 @@ async fn run_biocortex_retrieval_opt_in_post_implementation_review_gate(
             "false"
         ),
         shadow_json_display(payload.get("review_state"), "blocked"),
+        shadow_json_display(payload.get("approval_state"), "not_approved")
+    );
+    println!(
+        "runtime_adapter_approved={} default_search_order_change_allowed={} ordering_behavior_connected={}",
+        shadow_json_display(payload.get("runtime_adapter_approved"), "false"),
+        shadow_json_display(payload.get("default_search_order_change_allowed"), "false"),
+        shadow_json_display(payload.get("ordering_behavior_connected"), "false")
+    );
+    println!(
+        "blockers={} calls_memory_search={} runs_biocortex={} changes_memory_search_order={}",
+        boundary
+            .get("blockers")
+            .and_then(Value::as_array)
+            .map(|items| items.len().to_string())
+            .unwrap_or_else(|| "0".to_string()),
+        shadow_json_display(payload.get("calls_memory_search"), "false"),
+        shadow_json_display(payload.get("runs_biocortex"), "false"),
+        shadow_json_display(payload.get("changes_memory_search_order"), "false")
+    );
+    Ok(())
+}
+
+async fn run_biocortex_retrieval_opt_in_runtime_influence_review_request(
+    post_implementation_review_gate_json: &std::path::Path,
+    redacted_order_artifact_json: &std::path::Path,
+    mut opts: BioCortexRetrievalOptInRuntimeInfluenceReviewRequestOptions,
+    as_json: bool,
+) -> Result<()> {
+    let gate_body = std::fs::read_to_string(post_implementation_review_gate_json).map_err(|e| {
+        anyhow::anyhow!(
+            "read opt-in post-implementation review gate JSON at {post_implementation_review_gate_json:?}: {e}"
+        )
+    })?;
+    opts.post_implementation_review_gate = serde_json::from_str(&gate_body).map_err(|e| {
+        anyhow::anyhow!(
+            "parse opt-in post-implementation review gate JSON at {post_implementation_review_gate_json:?}: {e}"
+        )
+    })?;
+    let artifact_body = std::fs::read_to_string(redacted_order_artifact_json).map_err(|e| {
+        anyhow::anyhow!(
+            "read opt-in redacted order artifact JSON at {redacted_order_artifact_json:?}: {e}"
+        )
+    })?;
+    opts.redacted_order_artifact = serde_json::from_str(&artifact_body).map_err(|e| {
+        anyhow::anyhow!(
+            "parse opt-in redacted order artifact JSON at {redacted_order_artifact_json:?}: {e}"
+        )
+    })?;
+    let payload = biocortex_retrieval_opt_in_runtime_influence_review_request(opts);
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# BioCortex retrieval opt-in runtime-influence review request");
+    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
+    let boundary = payload.get("boundary_check").unwrap_or(&Value::Null);
+    println!(
+        "request_ready={} request_state={} approval_state={}",
+        shadow_json_display(
+            boundary.get("runtime_influence_review_request_ready"),
+            "false"
+        ),
+        shadow_json_display(payload.get("review_request_state"), "blocked"),
         shadow_json_display(payload.get("approval_state"), "not_approved")
     );
     println!(

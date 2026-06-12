@@ -20,7 +20,10 @@ the human implementation authorization record into a machine-checkable
 implementation-only gate. A read-only post-implementation review gate now
 checks whether that implementation-only evidence is ready for a separate human
 runtime-influence review, without approving runtime adapter influence or
-ordering behavior.
+ordering behavior. A read-only runtime-influence review request packet now
+combines the post-implementation review gate and redacted order artifact into a
+separate human-review request for explicit opt-in FTS influence, while still
+granting no runtime adapter approval and connecting no ordering behavior.
 Ordering behavior is not implemented and not approved.
 
 ```json
@@ -47,6 +50,7 @@ Ordering behavior is not implemented and not approved.
   "store_opt_in_search_wrapper_implemented": true,
   "authorization_decision_consumer_implemented": true,
   "post_implementation_review_gate_implemented": true,
+  "runtime_influence_review_request_implemented": true,
   "ordering_behavior_connected": false
 }
 ```
@@ -412,6 +416,32 @@ This gate is deliberately not a runtime approval. It creates the next review
 packet boundary: after implementation exists, a separate human runtime-influence
 review still has to decide whether any BioCortex side-signal may affect an
 explicitly opted-in return order.
+
+Slice 18 landed a read-only runtime-influence review request:
+
+- CLI:
+  `agent-bridge bio-cortex retrieval-opt-in-runtime-influence-review-request`;
+- MCP tool:
+  `biocortex_retrieval_opt_in_runtime_influence_review_request`;
+- packet schema:
+  `agent_bridge.biocortex_retrieval.opt_in_runtime_influence_review_request.v0`;
+- consumes the post-implementation review gate summary and redacted order
+  artifact summary;
+- does not include the raw gate packet, redacted artifact payload, raw query,
+  keys, content, or redacted `key_hash` rows;
+- requests separate human review for explicit opt-in FTS runtime influence and
+  ordering-behavior connection;
+- explicitly keeps default search order changes, hybrid influence, semantic
+  influence, and this packet's own approval grant set to `false`;
+- keeps `approval_state=not_approved`, `runtime_adapter_approved=false`,
+  `approval_writes_allowed=false`, `writes_approval=false`,
+  `calls_memory_search=false`, `runs_biocortex=false`,
+  `changes_memory_search_order=false`, `ordering_behavior_connected=false`, and
+  `may_implement_ordering_now=false`.
+
+This request packet is the handoff artifact for the next human runtime review.
+It asks for the review, but it is not the review decision and cannot authorize
+runtime adapter influence by itself.
 
 ## Fail-Open Rules
 

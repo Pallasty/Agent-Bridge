@@ -51,6 +51,7 @@ use crate::biocortex_shadow::{
     biocortex_retrieval_opt_in_order_diff_packet,
     biocortex_retrieval_opt_in_post_implementation_review_gate,
     biocortex_retrieval_opt_in_review_packet, biocortex_retrieval_opt_in_redacted_order_artifact,
+    biocortex_retrieval_opt_in_runtime_influence_review_request,
     biocortex_retrieval_opt_in_runtime_trial,
     biocortex_retrieval_opt_in_runtime_trial_review_packet, biocortex_shadow_digest,
     supported_benchmarks, BioCortexReplayComparisonOptions, BioCortexRetrievalCandidate,
@@ -59,7 +60,9 @@ use crate::biocortex_shadow::{
     BioCortexRetrievalOptInOrderDiffPacketOptions,
     BioCortexRetrievalOptInPostImplementationReviewGateOptions,
     BioCortexRetrievalOptInRedactedOrderArtifactOptions,
-    BioCortexRetrievalOptInReviewPacketOptions, BioCortexRetrievalOptInRuntimeTrialOptions,
+    BioCortexRetrievalOptInReviewPacketOptions,
+    BioCortexRetrievalOptInRuntimeInfluenceReviewRequestOptions,
+    BioCortexRetrievalOptInRuntimeTrialOptions,
     BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions, BioCortexShadowOptions,
     BIOCORTEX_CHECKOUT_ENV,
 };
@@ -26230,6 +26233,118 @@ impl McpTool for BioCortexRetrievalOptInPostImplementationReviewGateTool {
 }
 
 // ===========================================================================
+//  biocortex_retrieval_opt_in_runtime_influence_review_request — request
+// ===========================================================================
+
+/// Read-only BioCortex retrieval opt-in runtime-influence review request. This
+/// tool accepts the post-implementation review gate plus redacted order artifact
+/// and emits a human review request for explicit opt-in FTS influence. It never
+/// approves runtime adapter influence, calls `memory_search`, runs BioCortex,
+/// or changes retrieval order.
+pub struct BioCortexRetrievalOptInRuntimeInfluenceReviewRequestTool;
+
+impl BioCortexRetrievalOptInRuntimeInfluenceReviewRequestTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for BioCortexRetrievalOptInRuntimeInfluenceReviewRequestTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for BioCortexRetrievalOptInRuntimeInfluenceReviewRequestTool {
+    fn name(&self) -> &'static str {
+        "biocortex_retrieval_opt_in_runtime_influence_review_request"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only BioCortex retrieval opt-in \
+                 runtime-influence review request. Accepts a post-implementation \
+                 review gate and redacted order artifact, then emits a request \
+                 for separate human review of explicit opt-in FTS influence. \
+                 Does not call memory_search, run BioCortex, mutate memory, \
+                 include raw query/keys/content, register an EmbeddingBackend, \
+                 approve runtime influence, or alter retrieval order."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["post_implementation_review_gate", "redacted_order_artifact"],
+                "properties": {
+                    "post_implementation_review_gate": {
+                        "type": "object",
+                        "description": "JSON object produced by biocortex_retrieval_opt_in_post_implementation_review_gate. Unknown/raw fields are ignored."
+                    },
+                    "redacted_order_artifact": {
+                        "type": "object",
+                        "description": "JSON object produced by biocortex_retrieval_opt_in_redacted_order_artifact. Unknown/raw fields are ignored."
+                    },
+                    "reviewer": {
+                        "type": "string",
+                        "description": "Optional reviewer identity or handle."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Optional implementation commit under review."
+                    },
+                    "forum_post_id": {
+                        "type": "string",
+                        "description": "Optional forum post id linking this request."
+                    },
+                    "memory_key": {
+                        "type": "string",
+                        "description": "Optional memory key linking this request."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let post_implementation_review_gate = args
+            .get("post_implementation_review_gate")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let redacted_order_artifact = args
+            .get("redacted_order_artifact")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let reviewer = args
+            .get("reviewer")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let commit = args
+            .get("commit")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let forum_post_id = args
+            .get("forum_post_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let memory_key = args
+            .get("memory_key")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let payload = biocortex_retrieval_opt_in_runtime_influence_review_request(
+            BioCortexRetrievalOptInRuntimeInfluenceReviewRequestOptions {
+                post_implementation_review_gate,
+                redacted_order_artifact,
+                reviewer,
+                commit,
+                forum_post_id,
+                memory_key,
+            },
+        );
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
 //   biocortex_retrieval_shadow — review-only retrieval side-signal report
 // ===========================================================================
 
@@ -37540,6 +37655,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Standard,
         Arc::new(BioCortexRetrievalOptInPostImplementationReviewGateTool::new()),
     );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexRetrievalOptInRuntimeInfluenceReviewRequestTool::new()),
+    );
     #[cfg(feature = "biocortex-retrieval-shadow")]
     reg_if(
         &mut reg,
@@ -47636,6 +47757,222 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             v["required_next_gate"]["this_packet_connects_ordering_behavior"],
             json!(false)
         );
+    }
+
+    #[test]
+    fn biocortex_retrieval_opt_in_runtime_influence_review_request_schema_is_readonly() {
+        let tool = BioCortexRetrievalOptInRuntimeInfluenceReviewRequestTool::new();
+        let schema = tool.schema();
+        assert_eq!(
+            schema.name,
+            "biocortex_retrieval_opt_in_runtime_influence_review_request"
+        );
+        assert!(schema.description.contains("Read-only"));
+        assert!(schema.description.contains("runtime-influence review request"));
+        assert!(schema.description.contains("Does not call memory_search"));
+        assert!(schema.description.contains("run BioCortex"));
+        assert!(schema.description.contains("include raw query/keys/content"));
+        assert!(schema.description.contains("approve runtime influence"));
+        assert!(schema.description.contains("alter retrieval order"));
+
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required");
+        assert!(required.contains(&json!("post_implementation_review_gate")));
+        assert!(required.contains(&json!("redacted_order_artifact")));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("post_implementation_review_gate").is_some());
+        assert!(props.get("redacted_order_artifact").is_some());
+        assert!(props.get("reviewer").is_some());
+        assert!(props.get("commit").is_some());
+        assert!(props.get("forum_post_id").is_some());
+        assert!(props.get("memory_key").is_some());
+        assert!(props.get("include_raw").is_none());
+        assert!(props.get("mutate").is_none());
+        assert!(props.get("memory_search").is_none());
+        assert!(props.get("raw_content").is_none());
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_runtime_influence_review_request_sanitizes_inputs() {
+        let tool = BioCortexRetrievalOptInRuntimeInfluenceReviewRequestTool::new();
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(
+                json!({
+                    "post_implementation_review_gate": {
+                        "schema": "agent_bridge.biocortex_retrieval.opt_in_post_implementation_review_gate.v0",
+                        "read_only": true,
+                        "post_implementation_review_gate": true,
+                        "review_readiness": {
+                            "ready_for_human_runtime_influence_review": true
+                        },
+                        "boundary_check": {
+                            "ready_for_human_runtime_influence_review": true
+                        },
+                        "review_state": "ready_for_human_runtime_influence_review",
+                        "approval_state": "not_approved",
+                        "authorization_state": "requires_separate_human_runtime_influence_review",
+                        "required_next_gate": {
+                            "runtime_adapter_approval_required": true,
+                            "ordering_behavior_connection_required": true,
+                            "this_packet_approves_runtime_adapter": false,
+                            "this_packet_connects_ordering_behavior": false
+                        },
+                        "runtime_adapter_approved": false,
+                        "default_search_order_change_allowed": false,
+                        "writes_approval": false,
+                        "calls_memory_search": false,
+                        "runs_biocortex": false,
+                        "changes_memory_search_order": false,
+                        "ordering_behavior_connected": false,
+                        "may_change_search_order_now": false,
+                        "may_implement_ordering_now": false,
+                        "raw_query": "secret gate query",
+                        "raw_key": "secret_gate_key",
+                        "content": "secret gate content"
+                    },
+                    "redacted_order_artifact": {
+                        "schema": "agent_bridge.biocortex_retrieval.opt_in_redacted_order_artifact.v0",
+                        "read_only": true,
+                        "input_contract": {
+                            "raw_query_included": false,
+                            "raw_keys_included": false,
+                            "content_included": false
+                        },
+                        "redacted_order_comparison": {
+                            "top_k_overlap": [
+                                {"k": 1, "overlap_count": 1, "jaccard": 1.0}
+                            ],
+                            "rank_delta_distribution": {
+                                "improved_count": 0,
+                                "regressed_count": 0,
+                                "unchanged_count": 1,
+                                "max_abs_delta": 0
+                            },
+                            "returned_order": {
+                                "baseline_returned": true,
+                                "actual_return_order_changed": false
+                            }
+                        },
+                        "boundary_check": {
+                            "artifact_ready": true,
+                            "redacted_rows_comparable": true
+                        },
+                        "approval_state": "not_approved",
+                        "runtime_adapter_approved": false,
+                        "approval_writes_allowed": false,
+                        "writes_approval": false,
+                        "calls_memory_search": false,
+                        "runs_biocortex": false,
+                        "registers_embedding_backend": false,
+                        "changes_memory_search_order": false,
+                        "actual_return_order_changed": false,
+                        "default_search_order_change_allowed": false,
+                        "ordering_behavior_connected": false,
+                        "may_change_search_order_now": false,
+                        "may_implement_ordering_now": false,
+                        "raw_query": "secret artifact query",
+                        "raw_key": "secret_artifact_key",
+                        "content": "secret artifact content"
+                    },
+                    "reviewer": "codex",
+                    "commit": "runtime-review-request-commit",
+                    "forum_post_id": "104",
+                    "memory_key": "runtime-review-request-memory"
+                }),
+                &ctx,
+            )
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains("secret gate query"));
+        assert!(!text.contains("secret_gate_key"));
+        assert!(!text.contains("secret gate content"));
+        assert!(!text.contains("secret artifact query"));
+        assert!(!text.contains("secret_artifact_key"));
+        assert!(!text.contains("secret artifact content"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_runtime_influence_review_request.v0")
+        );
+        assert_eq!(v["read_only"], json!(true));
+        assert_eq!(v["runtime_influence_review_request"], json!(true));
+        assert_eq!(
+            v["implementation_stage"],
+            json!("runtime_influence_review_request_only")
+        );
+        assert_eq!(
+            v["input_contract"]["post_implementation_review_gate_included"],
+            json!(false)
+        );
+        assert_eq!(
+            v["input_contract"]["redacted_order_artifact_included"],
+            json!(false)
+        );
+        assert_eq!(v["input_contract"]["raw_query_included"], json!(false));
+        assert_eq!(v["input_contract"]["raw_keys_included"], json!(false));
+        assert_eq!(v["input_contract"]["content_included"], json!(false));
+        assert_eq!(
+            v["requested_authorization"]["request_runtime_adapter_review"],
+            json!(true)
+        );
+        assert_eq!(
+            v["requested_authorization"]["request_ordering_behavior_connection_review"],
+            json!(true)
+        );
+        assert_eq!(
+            v["requested_authorization"]["request_default_search_order_change"],
+            json!(false)
+        );
+        assert_eq!(
+            v["requested_authorization"]["request_hybrid_retrieval_influence"],
+            json!(false)
+        );
+        assert_eq!(
+            v["requested_authorization"]["request_semantic_retrieval_influence"],
+            json!(false)
+        );
+        assert_eq!(
+            v["requested_authorization"]["this_packet_grants_request"],
+            json!(false)
+        );
+        assert_eq!(
+            v["boundary_check"]["runtime_influence_review_request_ready"],
+            json!(true)
+        );
+        assert_eq!(v["boundary_check"]["blockers"], json!([]));
+        assert_eq!(
+            v["review_request_state"],
+            json!("ready_for_human_runtime_influence_review")
+        );
+        assert_eq!(v["approval_state"], json!("not_approved"));
+        assert_eq!(
+            v["authorization_state"],
+            json!("runtime_influence_review_requested_not_granted")
+        );
+        assert_eq!(v["implementation_allowed"], json!(false));
+        assert_eq!(v["runtime_adapter_approved"], json!(false));
+        assert_eq!(v["default_search_order_change_allowed"], json!(false));
+        assert_eq!(v["writes_approval"], json!(false));
+        assert_eq!(v["calls_memory_search"], json!(false));
+        assert_eq!(v["runs_biocortex"], json!(false));
+        assert_eq!(v["registers_embedding_backend"], json!(false));
+        assert_eq!(v["changes_memory_search_order"], json!(false));
+        assert_eq!(v["ordering_behavior_connected"], json!(false));
+        assert_eq!(v["may_change_search_order_now"], json!(false));
+        assert_eq!(v["may_implement_ordering_now"], json!(false));
     }
 
     #[cfg(feature = "biocortex-retrieval-shadow")]
