@@ -659,6 +659,23 @@ request as optional evidence:
   grant runtime influence, and does not connect ordering behavior or change
   default search order.
 
+Slice 28 wires the aggregate-backed review request into the runtime-influence
+decision packet:
+
+- the decision packet now accepts review requests that carry the redacted
+  aggregate evidence summary from Slice 27;
+- when aggregate evidence is present, it must be ready, redacted, safe for
+  review, default-influence-unready, and marked as requiring human review before
+  the packet can authorize explicit opt-in FTS implementation;
+- legacy review requests without aggregate evidence remain valid and are marked
+  `aggregate_review_evidence_state=not_provided_legacy_compatible`;
+- the packet copies only summary booleans/state from the review request and
+  still excludes the review request body, decision body, aggregate body, raw
+  query, raw keys, content, and human decision text;
+- this still does not authorize default search order changes, hybrid retrieval,
+  semantic retrieval, approval writes, BioCortex runs, memory search calls, or an
+  embedding backend registration.
+
 ## Fail-Open Rules
 
 The experiment must return the baseline list for:

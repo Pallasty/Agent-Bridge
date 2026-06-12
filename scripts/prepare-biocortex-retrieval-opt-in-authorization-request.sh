@@ -730,8 +730,12 @@ jq -e '
     and .opt_in_plan.implemented_runtime_influence_decision_packet.implementation_stage == "runtime_influence_decision_consumer_only"
     and .opt_in_plan.implemented_runtime_influence_decision_packet.consumes_runtime_influence_review_request_summary == true
     and .opt_in_plan.implemented_runtime_influence_decision_packet.consumes_runtime_influence_decision_summary == true
+    and .opt_in_plan.implemented_runtime_influence_decision_packet.accepts_aggregate_backed_review_request == true
+    and .opt_in_plan.implemented_runtime_influence_decision_packet.requires_aggregate_ready_when_provided == true
+    and .opt_in_plan.implemented_runtime_influence_decision_packet.legacy_review_request_without_aggregate_allowed == true
     and .opt_in_plan.implemented_runtime_influence_decision_packet.runtime_influence_review_request_included == false
     and .opt_in_plan.implemented_runtime_influence_decision_packet.runtime_influence_decision_included == false
+    and .opt_in_plan.implemented_runtime_influence_decision_packet.redacted_evidence_aggregate_included == false
     and .opt_in_plan.implemented_runtime_influence_decision_packet.human_decision_text_included == false
     and .opt_in_plan.implemented_runtime_influence_decision_packet.raw_query_included == false
     and .opt_in_plan.implemented_runtime_influence_decision_packet.raw_keys_included == false
