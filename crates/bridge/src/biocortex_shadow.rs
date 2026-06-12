@@ -40,6 +40,8 @@ pub const BIOCORTEX_RETRIEVAL_OPT_IN_REDACTED_ORDER_ARTIFACT_SCHEMA: &str =
     "agent_bridge.biocortex_retrieval.opt_in_redacted_order_artifact.v0";
 pub const BIOCORTEX_RETRIEVAL_OPT_IN_AUTHORIZATION_DECISION_PACKET_SCHEMA: &str =
     "agent_bridge.biocortex_retrieval.opt_in_authorization_decision_packet.v0";
+pub const BIOCORTEX_RETRIEVAL_OPT_IN_POST_IMPLEMENTATION_REVIEW_GATE_SCHEMA: &str =
+    "agent_bridge.biocortex_retrieval.opt_in_post_implementation_review_gate.v0";
 pub const BIOCORTEX_SUBSTRATE_REPLAY_PLAN_SCHEMA: &str =
     "agent_bridge.biocortex_substrate_replay_plan.v0";
 pub const BIOCORTEX_CHECKOUT_ENV: &str = "AB_BIOCORTEX_RS";
@@ -191,6 +193,16 @@ pub struct BioCortexRetrievalOptInRedactedOrderArtifactOptions {
 pub struct BioCortexRetrievalOptInAuthorizationDecisionPacketOptions {
     pub authorization_decision: Value,
     pub authorization_request: Value,
+    pub reviewer: Option<String>,
+    pub commit: Option<String>,
+    pub forum_post_id: Option<String>,
+    pub memory_key: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BioCortexRetrievalOptInPostImplementationReviewGateOptions {
+    pub authorization_decision_packet: Value,
+    pub opt_in_plan: Value,
     pub reviewer: Option<String>,
     pub commit: Option<String>,
     pub forum_post_id: Option<String>,
@@ -3329,6 +3341,7 @@ pub fn biocortex_retrieval_opt_in_authorization_decision_packet(
             .map(|status| {
                 status == "store_opt_in_search_wrapper_implemented"
                     || status == "authorization_decision_consumer_implemented"
+                    || status == "post_implementation_review_gate_implemented"
             })
             .unwrap_or(false);
 
@@ -3579,6 +3592,483 @@ pub fn biocortex_retrieval_opt_in_authorization_decision_packet(
         } else {
             "not_authorized"
         },
+        "runtime_adapter_approved": false,
+        "approval_writes_allowed": false,
+        "writes_approval": false,
+        "calls_memory_search": false,
+        "runs_biocortex": false,
+        "registers_embedding_backend": false,
+        "changes_memory_search_order": false,
+        "default_search_order_change_allowed": false,
+        "ordering_behavior_connected": false,
+        "may_change_search_order_now": false,
+        "may_implement_ordering_now": false,
+        "default_calls_unchanged": true,
+        "boundary": retrieval_boundary_payload(),
+    })
+}
+
+pub fn biocortex_retrieval_opt_in_post_implementation_review_gate(
+    opts: BioCortexRetrievalOptInPostImplementationReviewGateOptions,
+) -> Value {
+    let packet = opts.authorization_decision_packet;
+    let plan = opts.opt_in_plan;
+
+    let packet_schema_ok = value_str_eq(
+        packet.get("schema"),
+        BIOCORTEX_RETRIEVAL_OPT_IN_AUTHORIZATION_DECISION_PACKET_SCHEMA,
+    );
+    let packet_read_only = value_bool_is(packet.get("read_only"), true);
+    let packet_is_decision_consumer =
+        value_bool_is(packet.get("authorization_decision_consumer"), true);
+    let packet_implementation_authorized =
+        value_bool_is(packet.pointer("/boundary_check/implementation_authorized"), true);
+    let packet_approval_state_ok = value_str_eq(
+        packet.get("approval_state"),
+        "opt_in_implementation_authorized",
+    );
+    let packet_authorization_state_ok = value_str_eq(
+        packet.get("authorization_state"),
+        "authorized_for_opt_in_implementation",
+    );
+    let packet_review_required =
+        value_bool_is(packet.pointer("/required_next_gate/post_implementation_review_before_use"), true);
+    let packet_runtime_gate_required =
+        value_bool_is(packet.pointer("/required_next_gate/runtime_adapter_approval_required"), true);
+    let packet_order_gate_required = value_bool_is(
+        packet.pointer("/required_next_gate/ordering_behavior_connection_required"),
+        true,
+    );
+    let packet_not_runtime_approval = value_bool_is(
+        packet.pointer("/required_next_gate/this_packet_approves_runtime_adapter"),
+        false,
+    );
+    let packet_not_order_connection = value_bool_is(
+        packet.pointer("/required_next_gate/this_packet_connects_ordering_behavior"),
+        false,
+    );
+    let packet_runtime_not_approved =
+        value_bool_is(packet.get("runtime_adapter_approved"), false);
+    let packet_default_order_not_allowed =
+        value_bool_is(packet.get("default_search_order_change_allowed"), false);
+    let packet_approval_writes_false =
+        value_bool_is(packet.get("approval_writes_allowed"), false);
+    let packet_writes_false = value_bool_is(packet.get("writes_approval"), false);
+    let packet_calls_memory_search_false =
+        value_bool_is(packet.get("calls_memory_search"), false);
+    let packet_runs_biocortex_false = value_bool_is(packet.get("runs_biocortex"), false);
+    let packet_registers_backend_false =
+        value_bool_is(packet.get("registers_embedding_backend"), false);
+    let packet_changes_order_false =
+        value_bool_is(packet.get("changes_memory_search_order"), false);
+    let packet_ordering_connected_false =
+        value_bool_is(packet.get("ordering_behavior_connected"), false);
+    let packet_may_change_order_false =
+        value_bool_is(packet.get("may_change_search_order_now"), false);
+    let packet_may_implement_ordering_false =
+        value_bool_is(packet.get("may_implement_ordering_now"), false);
+
+    let plan_schema_ok = value_str_eq(
+        plan.get("schema"),
+        "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0",
+    );
+    let plan_status_ok = plan
+        .get("status")
+        .and_then(Value::as_str)
+        .map(|status| {
+            status == "authorization_decision_consumer_implemented"
+                || status == "post_implementation_review_gate_implemented"
+        })
+        .unwrap_or(false);
+    let plan_implementation_allowed =
+        value_bool_is(plan.get("implementation_allowed"), true);
+    let plan_store_wrapper_implemented =
+        value_bool_is(plan.get("store_opt_in_search_wrapper_implemented"), true);
+    let plan_decision_consumer_implemented =
+        value_bool_is(plan.get("authorization_decision_consumer_implemented"), true);
+    let plan_review_gate_implemented =
+        value_bool_is(plan.get("post_implementation_review_gate_implemented"), true);
+    let plan_runtime_not_approved =
+        value_bool_is(plan.get("runtime_adapter_approved"), false);
+    let plan_default_order_not_allowed =
+        value_bool_is(plan.get("default_search_order_change_allowed"), false);
+    let plan_ordering_connected_false =
+        value_bool_is(plan.get("ordering_behavior_connected"), false);
+    let plan_default_memory_search_unchanged =
+        value_bool_is(plan.get("default_memory_search_unchanged"), true);
+    let plan_requested_default_influence_none =
+        value_str_eq(plan.get("requested_default_influence_scope"), "none");
+    let plan_wrapper_returns_baseline = value_bool_is(
+        plan.pointer("/implemented_store_opt_in_search_wrapper/returns_baseline_order"),
+        true,
+    );
+    let plan_wrapper_redacted_only = value_bool_is(
+        plan.pointer("/implemented_store_opt_in_search_wrapper/redacted_audit_only"),
+        true,
+    );
+    let plan_wrapper_runs_biocortex_false = value_bool_is(
+        plan.pointer("/implemented_store_opt_in_search_wrapper/runs_biocortex"),
+        false,
+    );
+    let plan_wrapper_changes_order_false = value_bool_is(
+        plan.pointer("/implemented_store_opt_in_search_wrapper/changes_memory_search_order"),
+        false,
+    );
+    let plan_wrapper_ordering_connected_false = value_bool_is(
+        plan.pointer("/implemented_store_opt_in_search_wrapper/ordering_behavior_connected"),
+        false,
+    );
+    let plan_gate_block = plan
+        .get("implemented_post_implementation_review_gate")
+        .unwrap_or(&Value::Null);
+    let plan_gate_schema_ok = value_str_eq(
+        plan_gate_block.get("schema"),
+        BIOCORTEX_RETRIEVAL_OPT_IN_POST_IMPLEMENTATION_REVIEW_GATE_SCHEMA,
+    );
+    let plan_gate_cli_ok = value_str_eq(
+        plan_gate_block.get("cli"),
+        "agent-bridge bio-cortex retrieval-opt-in-post-implementation-review-gate",
+    );
+    let plan_gate_mcp_ok = value_str_eq(
+        plan_gate_block.get("mcp_tool"),
+        "biocortex_retrieval_opt_in_post_implementation_review_gate",
+    );
+    let plan_gate_read_only =
+        value_bool_is(plan_gate_block.get("read_only"), true);
+    let plan_gate_not_runtime_approval =
+        value_bool_is(plan_gate_block.get("runtime_adapter_approved"), false);
+    let plan_gate_not_default_order =
+        value_bool_is(plan_gate_block.get("default_search_order_change_allowed"), false);
+    let plan_gate_calls_memory_search_false =
+        value_bool_is(plan_gate_block.get("calls_memory_search"), false);
+    let plan_gate_runs_biocortex_false =
+        value_bool_is(plan_gate_block.get("runs_biocortex"), false);
+    let plan_gate_changes_order_false =
+        value_bool_is(plan_gate_block.get("changes_memory_search_order"), false);
+    let plan_gate_ordering_connected_false =
+        value_bool_is(plan_gate_block.get("ordering_behavior_connected"), false);
+    let plan_gate_may_change_order_false =
+        value_bool_is(plan_gate_block.get("may_change_search_order_now"), false);
+    let plan_gate_may_implement_ordering_false =
+        value_bool_is(plan_gate_block.get("may_implement_ordering_now"), false);
+
+    let mut blockers = Vec::new();
+    push_string_blocker(&mut blockers, packet_schema_ok, "packet_schema_invalid");
+    push_string_blocker(&mut blockers, packet_read_only, "packet_not_read_only");
+    push_string_blocker(
+        &mut blockers,
+        packet_is_decision_consumer,
+        "packet_not_authorization_decision_consumer",
+    );
+    push_string_blocker(
+        &mut blockers,
+        packet_implementation_authorized,
+        "packet_implementation_not_authorized",
+    );
+    push_string_blocker(
+        &mut blockers,
+        packet_approval_state_ok,
+        "packet_approval_state_not_implementation_authorized",
+    );
+    push_string_blocker(
+        &mut blockers,
+        packet_authorization_state_ok,
+        "packet_authorization_state_not_implementation_authorized",
+    );
+    push_string_blocker(
+        &mut blockers,
+        packet_review_required,
+        "packet_missing_post_implementation_review_requirement",
+    );
+    push_string_blocker(
+        &mut blockers,
+        packet_runtime_gate_required,
+        "packet_missing_runtime_adapter_review_gate",
+    );
+    push_string_blocker(
+        &mut blockers,
+        packet_order_gate_required,
+        "packet_missing_ordering_connection_gate",
+    );
+    push_string_blocker(
+        &mut blockers,
+        packet_not_runtime_approval,
+        "packet_claims_runtime_adapter_approval",
+    );
+    push_string_blocker(
+        &mut blockers,
+        packet_not_order_connection,
+        "packet_claims_ordering_connection",
+    );
+    push_string_blocker(
+        &mut blockers,
+        packet_runtime_not_approved,
+        "packet_runtime_adapter_approved",
+    );
+    push_string_blocker(
+        &mut blockers,
+        packet_default_order_not_allowed,
+        "packet_default_order_allowed",
+    );
+    push_string_blocker(
+        &mut blockers,
+        packet_approval_writes_false,
+        "packet_approval_writes_allowed",
+    );
+    push_string_blocker(&mut blockers, packet_writes_false, "packet_writes_approval");
+    push_string_blocker(
+        &mut blockers,
+        packet_calls_memory_search_false,
+        "packet_calls_memory_search",
+    );
+    push_string_blocker(
+        &mut blockers,
+        packet_runs_biocortex_false,
+        "packet_runs_biocortex",
+    );
+    push_string_blocker(
+        &mut blockers,
+        packet_registers_backend_false,
+        "packet_registers_embedding_backend",
+    );
+    push_string_blocker(
+        &mut blockers,
+        packet_changes_order_false,
+        "packet_changes_memory_search_order",
+    );
+    push_string_blocker(
+        &mut blockers,
+        packet_ordering_connected_false,
+        "packet_ordering_behavior_connected",
+    );
+    push_string_blocker(
+        &mut blockers,
+        packet_may_change_order_false,
+        "packet_may_change_search_order_now",
+    );
+    push_string_blocker(
+        &mut blockers,
+        packet_may_implement_ordering_false,
+        "packet_may_implement_ordering_now",
+    );
+    push_string_blocker(&mut blockers, plan_schema_ok, "plan_schema_invalid");
+    push_string_blocker(&mut blockers, plan_status_ok, "plan_status_unknown");
+    push_string_blocker(
+        &mut blockers,
+        plan_implementation_allowed,
+        "plan_implementation_not_allowed",
+    );
+    push_string_blocker(
+        &mut blockers,
+        plan_store_wrapper_implemented,
+        "plan_store_wrapper_not_implemented",
+    );
+    push_string_blocker(
+        &mut blockers,
+        plan_decision_consumer_implemented,
+        "plan_decision_consumer_not_implemented",
+    );
+    push_string_blocker(
+        &mut blockers,
+        plan_review_gate_implemented,
+        "plan_review_gate_not_recorded",
+    );
+    push_string_blocker(
+        &mut blockers,
+        plan_runtime_not_approved,
+        "plan_runtime_adapter_approved",
+    );
+    push_string_blocker(
+        &mut blockers,
+        plan_default_order_not_allowed,
+        "plan_default_order_allowed",
+    );
+    push_string_blocker(
+        &mut blockers,
+        plan_ordering_connected_false,
+        "plan_ordering_behavior_connected",
+    );
+    push_string_blocker(
+        &mut blockers,
+        plan_default_memory_search_unchanged,
+        "plan_default_memory_search_changed",
+    );
+    push_string_blocker(
+        &mut blockers,
+        plan_requested_default_influence_none,
+        "plan_requested_default_influence_not_none",
+    );
+    push_string_blocker(
+        &mut blockers,
+        plan_wrapper_returns_baseline,
+        "plan_wrapper_not_returning_baseline",
+    );
+    push_string_blocker(
+        &mut blockers,
+        plan_wrapper_redacted_only,
+        "plan_wrapper_audit_not_redacted_only",
+    );
+    push_string_blocker(
+        &mut blockers,
+        plan_wrapper_runs_biocortex_false,
+        "plan_wrapper_runs_biocortex",
+    );
+    push_string_blocker(
+        &mut blockers,
+        plan_wrapper_changes_order_false,
+        "plan_wrapper_changes_memory_search_order",
+    );
+    push_string_blocker(
+        &mut blockers,
+        plan_wrapper_ordering_connected_false,
+        "plan_wrapper_ordering_behavior_connected",
+    );
+    push_string_blocker(&mut blockers, plan_gate_schema_ok, "plan_gate_schema_invalid");
+    push_string_blocker(&mut blockers, plan_gate_cli_ok, "plan_gate_cli_mismatch");
+    push_string_blocker(&mut blockers, plan_gate_mcp_ok, "plan_gate_mcp_mismatch");
+    push_string_blocker(&mut blockers, plan_gate_read_only, "plan_gate_not_read_only");
+    push_string_blocker(
+        &mut blockers,
+        plan_gate_not_runtime_approval,
+        "plan_gate_runtime_adapter_approved",
+    );
+    push_string_blocker(
+        &mut blockers,
+        plan_gate_not_default_order,
+        "plan_gate_default_order_allowed",
+    );
+    push_string_blocker(
+        &mut blockers,
+        plan_gate_calls_memory_search_false,
+        "plan_gate_calls_memory_search",
+    );
+    push_string_blocker(
+        &mut blockers,
+        plan_gate_runs_biocortex_false,
+        "plan_gate_runs_biocortex",
+    );
+    push_string_blocker(
+        &mut blockers,
+        plan_gate_changes_order_false,
+        "plan_gate_changes_memory_search_order",
+    );
+    push_string_blocker(
+        &mut blockers,
+        plan_gate_ordering_connected_false,
+        "plan_gate_ordering_behavior_connected",
+    );
+    push_string_blocker(
+        &mut blockers,
+        plan_gate_may_change_order_false,
+        "plan_gate_may_change_search_order_now",
+    );
+    push_string_blocker(
+        &mut blockers,
+        plan_gate_may_implement_ordering_false,
+        "plan_gate_may_implement_ordering_now",
+    );
+
+    let ready_for_human_runtime_influence_review = blockers.is_empty();
+
+    json!({
+        "schema": BIOCORTEX_RETRIEVAL_OPT_IN_POST_IMPLEMENTATION_REVIEW_GATE_SCHEMA,
+        "generated_at": now_secs(),
+        "read_only": true,
+        "post_implementation_review_gate": true,
+        "implementation_stage": "post_implementation_review_gate_only",
+        "authorization_scope": "opt_in_experiment",
+        "purpose": "Check whether the implementation-only authorization evidence is ready for a separate human runtime-influence review; this packet does not approve runtime adapter influence or ordering behavior.",
+        "input_contract": {
+            "authorization_decision_packet_schema": packet.get("schema").cloned().unwrap_or(Value::Null),
+            "opt_in_plan_schema": plan.get("schema").cloned().unwrap_or(Value::Null),
+            "authorization_decision_packet_included": false,
+            "opt_in_plan_included": false,
+            "unknown_fields_ignored": true,
+            "raw_query_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+        },
+        "review_target": {
+            "reviewer": required_or_value(opts.reviewer),
+            "commit": required_or_value(opts.commit),
+            "forum_post_id": required_or_value(opts.forum_post_id),
+            "memory_key": required_or_value(opts.memory_key),
+        },
+        "evidence_summary": {
+            "authorization_decision_packet_schema": packet.get("schema").cloned().unwrap_or(Value::Null),
+            "authorization_decision_consumer": packet.get("authorization_decision_consumer").cloned().unwrap_or(Value::Null),
+            "implementation_authorized": packet
+                .pointer("/boundary_check/implementation_authorized")
+                .cloned()
+                .unwrap_or(Value::Null),
+            "approval_state": packet.get("approval_state").cloned().unwrap_or(Value::Null),
+            "authorization_state": packet.get("authorization_state").cloned().unwrap_or(Value::Null),
+            "runtime_adapter_approved": false,
+            "default_search_order_change_allowed": false,
+            "ordering_behavior_connected": false,
+            "post_implementation_review_required": packet
+                .pointer("/required_next_gate/post_implementation_review_before_use")
+                .cloned()
+                .unwrap_or(Value::Null),
+        },
+        "plan_summary": {
+            "schema": plan.get("schema").cloned().unwrap_or(Value::Null),
+            "status": plan.get("status").cloned().unwrap_or(Value::Null),
+            "implementation_allowed": plan.get("implementation_allowed").cloned().unwrap_or(Value::Null),
+            "store_opt_in_search_wrapper_implemented": plan.get("store_opt_in_search_wrapper_implemented").cloned().unwrap_or(Value::Null),
+            "authorization_decision_consumer_implemented": plan.get("authorization_decision_consumer_implemented").cloned().unwrap_or(Value::Null),
+            "post_implementation_review_gate_implemented": plan.get("post_implementation_review_gate_implemented").cloned().unwrap_or(Value::Null),
+            "default_memory_search_unchanged": plan.get("default_memory_search_unchanged").cloned().unwrap_or(Value::Null),
+            "runtime_adapter_approved": false,
+            "default_search_order_change_allowed": false,
+            "ordering_behavior_connected": false,
+        },
+        "review_readiness": {
+            "ready_for_human_runtime_influence_review": ready_for_human_runtime_influence_review,
+            "post_implementation_review_completed": false,
+            "runtime_adapter_review_completed": false,
+            "ordering_behavior_review_completed": false,
+            "this_packet_approves_runtime_adapter": false,
+            "this_packet_allows_default_search_order_change": false,
+            "this_packet_connects_ordering_behavior": false,
+        },
+        "boundary_check": {
+            "ready_for_human_runtime_influence_review": ready_for_human_runtime_influence_review,
+            "blockers": blockers,
+            "packet_schema_ok": packet_schema_ok,
+            "packet_implementation_authorized": packet_implementation_authorized,
+            "packet_runtime_adapter_still_not_approved": packet_runtime_not_approved,
+            "packet_default_order_still_not_allowed": packet_default_order_not_allowed,
+            "plan_schema_ok": plan_schema_ok,
+            "plan_status_ok": plan_status_ok,
+            "plan_review_gate_implemented": plan_review_gate_implemented,
+            "plan_runtime_adapter_still_not_approved": plan_runtime_not_approved,
+            "plan_default_order_still_not_allowed": plan_default_order_not_allowed,
+            "plan_ordering_behavior_connected_false": plan_ordering_connected_false,
+        },
+        "required_human_review": [
+            "Confirm the implementation matches the implementation-only authorization scope.",
+            "Confirm any runtime adapter influence remains disabled until separately approved.",
+            "Confirm default search order remains unchanged.",
+            "Confirm ordering behavior is not connected by this packet.",
+            "Record a separate human review decision before enabling any ordering path."
+        ],
+        "required_next_gate": {
+            "human_runtime_influence_review_required": true,
+            "runtime_adapter_approval_required": true,
+            "ordering_behavior_connection_required": true,
+            "this_packet_approves_runtime_adapter": false,
+            "this_packet_connects_ordering_behavior": false,
+            "this_packet_allows_default_search_order_change": false,
+        },
+        "review_state": if ready_for_human_runtime_influence_review {
+            "ready_for_human_runtime_influence_review"
+        } else {
+            "blocked"
+        },
+        "approval_state": "not_approved",
+        "authorization_state": "requires_separate_human_runtime_influence_review",
+        "implementation_allowed": false,
         "runtime_adapter_approved": false,
         "approval_writes_allowed": false,
         "writes_approval": false,
@@ -6824,6 +7314,49 @@ mod tests {
         })
     }
 
+    fn opt_in_post_implementation_review_plan_fixture() -> Value {
+        json!({
+            "schema": "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0",
+            "status": "post_implementation_review_gate_implemented",
+            "approval_state": "opt_in_implementation_authorized",
+            "runtime_adapter_approved": false,
+            "default_search_order_change_allowed": false,
+            "implementation_allowed": true,
+            "store_opt_in_search_wrapper_implemented": true,
+            "authorization_decision_consumer_implemented": true,
+            "post_implementation_review_gate_implemented": true,
+            "ordering_behavior_connected": false,
+            "requested_default_influence_scope": "none",
+            "default_memory_search_unchanged": true,
+            "implemented_store_opt_in_search_wrapper": {
+                "returns_baseline_order": true,
+                "redacted_audit_only": true,
+                "runs_biocortex": false,
+                "changes_memory_search_order": false,
+                "ordering_behavior_connected": false
+            },
+            "implemented_post_implementation_review_gate": {
+                "cli": "agent-bridge bio-cortex retrieval-opt-in-post-implementation-review-gate",
+                "mcp_tool": "biocortex_retrieval_opt_in_post_implementation_review_gate",
+                "schema": BIOCORTEX_RETRIEVAL_OPT_IN_POST_IMPLEMENTATION_REVIEW_GATE_SCHEMA,
+                "read_only": true,
+                "post_implementation_review_gate": true,
+                "runtime_adapter_approved": false,
+                "default_search_order_change_allowed": false,
+                "calls_memory_search": false,
+                "runs_biocortex": false,
+                "registers_embedding_backend": false,
+                "changes_memory_search_order": false,
+                "ordering_behavior_connected": false,
+                "may_change_search_order_now": false,
+                "may_implement_ordering_now": false
+            },
+            "raw_query": "secret plan raw query",
+            "raw_key": "secret_plan_key",
+            "content": "secret plan content"
+        })
+    }
+
     #[test]
     fn opt_in_authorization_decision_packet_authorizes_implementation_only() {
         let packet = biocortex_retrieval_opt_in_authorization_decision_packet(
@@ -6949,6 +7482,166 @@ mod tests {
         assert_eq!(packet["runtime_adapter_approved"], json!(false));
         assert_eq!(packet["default_search_order_change_allowed"], json!(false));
         assert_eq!(packet["writes_approval"], json!(false));
+        assert_eq!(packet["may_implement_ordering_now"], json!(false));
+    }
+
+    #[test]
+    fn opt_in_post_implementation_review_gate_prepares_review_without_approval() {
+        let mut request = opt_in_authorization_request_fixture();
+        request["opt_in_plan"]["status"] = json!("post_implementation_review_gate_implemented");
+        let decision_packet = biocortex_retrieval_opt_in_authorization_decision_packet(
+            BioCortexRetrievalOptInAuthorizationDecisionPacketOptions {
+                authorization_decision: opt_in_authorization_decision_fixture(),
+                authorization_request: request,
+                reviewer: Some("codex".to_string()),
+                commit: Some("decision-commit".to_string()),
+                forum_post_id: Some("103".to_string()),
+                memory_key: Some("decision-memory".to_string()),
+            },
+        );
+        assert_eq!(
+            decision_packet["boundary_check"]["implementation_authorized"],
+            json!(true)
+        );
+
+        let packet = biocortex_retrieval_opt_in_post_implementation_review_gate(
+            BioCortexRetrievalOptInPostImplementationReviewGateOptions {
+                authorization_decision_packet: decision_packet,
+                opt_in_plan: opt_in_post_implementation_review_plan_fixture(),
+                reviewer: Some("codex".to_string()),
+                commit: Some("review-gate-commit".to_string()),
+                forum_post_id: Some("103".to_string()),
+                memory_key: Some("review-gate-memory".to_string()),
+            },
+        );
+
+        assert_eq!(
+            packet["schema"],
+            json!(BIOCORTEX_RETRIEVAL_OPT_IN_POST_IMPLEMENTATION_REVIEW_GATE_SCHEMA)
+        );
+        assert_eq!(packet["read_only"], json!(true));
+        assert_eq!(packet["post_implementation_review_gate"], json!(true));
+        assert_eq!(
+            packet["implementation_stage"],
+            json!("post_implementation_review_gate_only")
+        );
+        assert_eq!(
+            packet["review_readiness"]["ready_for_human_runtime_influence_review"],
+            json!(true)
+        );
+        assert_eq!(
+            packet["review_readiness"]["post_implementation_review_completed"],
+            json!(false)
+        );
+        assert_eq!(
+            packet["review_readiness"]["this_packet_approves_runtime_adapter"],
+            json!(false)
+        );
+        assert_eq!(
+            packet["boundary_check"]["ready_for_human_runtime_influence_review"],
+            json!(true)
+        );
+        assert_eq!(
+            packet["boundary_check"]["blockers"]
+                .as_array()
+                .expect("blockers")
+                .len(),
+            0
+        );
+        assert_eq!(packet["review_state"], json!("ready_for_human_runtime_influence_review"));
+        assert_eq!(packet["approval_state"], json!("not_approved"));
+        assert_eq!(
+            packet["authorization_state"],
+            json!("requires_separate_human_runtime_influence_review")
+        );
+        assert_eq!(packet["implementation_allowed"], json!(false));
+        assert_eq!(packet["runtime_adapter_approved"], json!(false));
+        assert_eq!(packet["default_search_order_change_allowed"], json!(false));
+        assert_eq!(packet["approval_writes_allowed"], json!(false));
+        assert_eq!(packet["writes_approval"], json!(false));
+        assert_eq!(packet["calls_memory_search"], json!(false));
+        assert_eq!(packet["runs_biocortex"], json!(false));
+        assert_eq!(packet["changes_memory_search_order"], json!(false));
+        assert_eq!(packet["ordering_behavior_connected"], json!(false));
+        assert_eq!(packet["may_change_search_order_now"], json!(false));
+        assert_eq!(packet["may_implement_ordering_now"], json!(false));
+        assert_eq!(
+            packet["required_next_gate"]["this_packet_approves_runtime_adapter"],
+            json!(false)
+        );
+        assert_eq!(
+            packet["required_next_gate"]["this_packet_connects_ordering_behavior"],
+            json!(false)
+        );
+
+        let serialized = serde_json::to_string(&packet).expect("packet json");
+        assert!(!serialized.contains("secret decision raw query"));
+        assert!(!serialized.contains("secret_decision_key"));
+        assert!(!serialized.contains("secret request raw query"));
+        assert!(!serialized.contains("secret_request_key"));
+        assert!(!serialized.contains("secret plan raw query"));
+        assert!(!serialized.contains("secret_plan_key"));
+        assert!(!serialized.contains("secret plan content"));
+    }
+
+    #[test]
+    fn opt_in_post_implementation_review_gate_blocks_runtime_influence_claims() {
+        let decision_packet = biocortex_retrieval_opt_in_authorization_decision_packet(
+            BioCortexRetrievalOptInAuthorizationDecisionPacketOptions {
+                authorization_decision: opt_in_authorization_decision_fixture(),
+                authorization_request: opt_in_authorization_request_fixture(),
+                reviewer: None,
+                commit: None,
+                forum_post_id: None,
+                memory_key: None,
+            },
+        );
+        let mut decision_packet = decision_packet;
+        decision_packet["runtime_adapter_approved"] = json!(true);
+        decision_packet["default_search_order_change_allowed"] = json!(true);
+        decision_packet["ordering_behavior_connected"] = json!(true);
+        decision_packet["may_change_search_order_now"] = json!(true);
+
+        let mut plan = opt_in_post_implementation_review_plan_fixture();
+        plan["runtime_adapter_approved"] = json!(true);
+        plan["default_search_order_change_allowed"] = json!(true);
+        plan["ordering_behavior_connected"] = json!(true);
+        plan["implemented_post_implementation_review_gate"]["runtime_adapter_approved"] =
+            json!(true);
+
+        let packet = biocortex_retrieval_opt_in_post_implementation_review_gate(
+            BioCortexRetrievalOptInPostImplementationReviewGateOptions {
+                authorization_decision_packet: decision_packet,
+                opt_in_plan: plan,
+                reviewer: None,
+                commit: None,
+                forum_post_id: None,
+                memory_key: None,
+            },
+        );
+
+        assert_eq!(
+            packet["boundary_check"]["ready_for_human_runtime_influence_review"],
+            json!(false)
+        );
+        let blockers = packet["boundary_check"]["blockers"]
+            .as_array()
+            .expect("blockers");
+        assert!(blockers.contains(&json!("packet_runtime_adapter_approved")));
+        assert!(blockers.contains(&json!("packet_default_order_allowed")));
+        assert!(blockers.contains(&json!("packet_ordering_behavior_connected")));
+        assert!(blockers.contains(&json!("packet_may_change_search_order_now")));
+        assert!(blockers.contains(&json!("plan_runtime_adapter_approved")));
+        assert!(blockers.contains(&json!("plan_default_order_allowed")));
+        assert!(blockers.contains(&json!("plan_ordering_behavior_connected")));
+        assert!(blockers.contains(&json!("plan_gate_runtime_adapter_approved")));
+        assert_eq!(packet["review_state"], json!("blocked"));
+        assert_eq!(packet["approval_state"], json!("not_approved"));
+        assert_eq!(packet["runtime_adapter_approved"], json!(false));
+        assert_eq!(packet["default_search_order_change_allowed"], json!(false));
+        assert_eq!(packet["changes_memory_search_order"], json!(false));
+        assert_eq!(packet["ordering_behavior_connected"], json!(false));
+        assert_eq!(packet["may_change_search_order_now"], json!(false));
         assert_eq!(packet["may_implement_ordering_now"], json!(false));
     }
 

@@ -63,7 +63,7 @@ grep -q 'Authorization for one mode does not imply authorization for another mod
 opt_in_plan="docs/design/fixtures/biocortex-retrieval-opt-in-experiment-plan-2026-06-11.json"
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0"
-    and .status == "authorization_decision_consumer_implemented"
+    and .status == "post_implementation_review_gate_implemented"
     and .approval_state == "opt_in_implementation_authorized"
     and .runtime_adapter_approved == false
     and .default_search_order_change_allowed == false
@@ -84,6 +84,7 @@ jq -e '
     and .authorization_request_redacted_order_artifact_evidence_implemented == true
     and .store_opt_in_search_wrapper_implemented == true
     and .authorization_decision_consumer_implemented == true
+    and .post_implementation_review_gate_implemented == true
     and .ordering_behavior_connected == false
     and .requested_human_authorization_scope == "opt_in_experiment"
     and .requested_default_influence_scope == "none"
@@ -181,6 +182,38 @@ jq -e '
     and .implemented_authorization_decision_consumer.ordering_behavior_connected == false
     and .implemented_authorization_decision_consumer.may_change_search_order_now == false
     and .implemented_authorization_decision_consumer.may_implement_ordering_now == false
+    and .implemented_post_implementation_review_gate.cli == "agent-bridge bio-cortex retrieval-opt-in-post-implementation-review-gate"
+    and .implemented_post_implementation_review_gate.mcp_tool == "biocortex_retrieval_opt_in_post_implementation_review_gate"
+    and .implemented_post_implementation_review_gate.schema == "agent_bridge.biocortex_retrieval.opt_in_post_implementation_review_gate.v0"
+    and .implemented_post_implementation_review_gate.read_only == true
+    and .implemented_post_implementation_review_gate.post_implementation_review_gate == true
+    and .implemented_post_implementation_review_gate.implementation_stage == "post_implementation_review_gate_only"
+    and .implemented_post_implementation_review_gate.consumes_authorization_decision_packet_summary == true
+    and .implemented_post_implementation_review_gate.consumes_opt_in_plan_summary == true
+    and .implemented_post_implementation_review_gate.authorization_decision_packet_included == false
+    and .implemented_post_implementation_review_gate.opt_in_plan_included == false
+    and .implemented_post_implementation_review_gate.raw_query_included == false
+    and .implemented_post_implementation_review_gate.raw_keys_included == false
+    and .implemented_post_implementation_review_gate.content_included == false
+    and .implemented_post_implementation_review_gate.ready_for_human_runtime_influence_review == true
+    and .implemented_post_implementation_review_gate.post_implementation_review_completed == false
+    and .implemented_post_implementation_review_gate.runtime_adapter_review_completed == false
+    and .implemented_post_implementation_review_gate.ordering_behavior_review_completed == false
+    and .implemented_post_implementation_review_gate.approval_state == "not_approved"
+    and .implemented_post_implementation_review_gate.authorization_state == "requires_separate_human_runtime_influence_review"
+    and .implemented_post_implementation_review_gate.implementation_allowed == false
+    and .implemented_post_implementation_review_gate.runtime_adapter_approved == false
+    and .implemented_post_implementation_review_gate.default_search_order_change_allowed == false
+    and .implemented_post_implementation_review_gate.requires_separate_runtime_influence_review == true
+    and .implemented_post_implementation_review_gate.approval_writes_allowed == false
+    and .implemented_post_implementation_review_gate.writes_approval == false
+    and .implemented_post_implementation_review_gate.calls_memory_search == false
+    and .implemented_post_implementation_review_gate.runs_biocortex == false
+    and .implemented_post_implementation_review_gate.registers_embedding_backend == false
+    and .implemented_post_implementation_review_gate.changes_memory_search_order == false
+    and .implemented_post_implementation_review_gate.ordering_behavior_connected == false
+    and .implemented_post_implementation_review_gate.may_change_search_order_now == false
+    and .implemented_post_implementation_review_gate.may_implement_ordering_now == false
     and .implemented_dry_run_planner.cli == "agent-bridge bio-cortex retrieval-opt-in-dry-run"
     and .implemented_dry_run_planner.mcp_tool == "biocortex_retrieval_opt_in_dry_run"
     and .implemented_dry_run_planner.schema == "agent_bridge.biocortex_retrieval.opt_in_dry_run_plan.v0"
@@ -691,6 +724,10 @@ run cargo test -p ab-bridge --lib --no-default-features \
     opt_in_authorization_decision_packet_ -- --nocapture --test-threads=1
 run cargo test -p ab-bridge --lib --no-default-features \
     biocortex_retrieval_opt_in_authorization_decision_packet_ -- --nocapture
+run cargo test -p ab-bridge --lib --no-default-features \
+    opt_in_post_implementation_review_gate_ -- --nocapture --test-threads=1
+run cargo test -p ab-bridge --lib --no-default-features \
+    biocortex_retrieval_opt_in_post_implementation_review_gate_ -- --nocapture
 
 opt_in_status_disabled="$tmpdir/opt-in-status-disabled.json"
 run cargo run -p ab-bridge --no-default-features -- \
@@ -1284,13 +1321,14 @@ jq -e '
     and .writes_approval == false
     and .accepts_optional_order_diff_packet == true
     and .accepts_optional_redacted_order_artifact == true
-    and .opt_in_plan.status == "authorization_decision_consumer_implemented"
+    and .opt_in_plan.status == "post_implementation_review_gate_implemented"
     and .opt_in_plan.order_diff_packet_implemented == true
     and .opt_in_plan.authorization_request_order_diff_evidence_implemented == true
     and .opt_in_plan.redacted_order_artifact_implemented == true
     and .opt_in_plan.authorization_request_redacted_order_artifact_evidence_implemented == true
     and .opt_in_plan.store_opt_in_search_wrapper_implemented == true
     and .opt_in_plan.authorization_decision_consumer_implemented == true
+    and .opt_in_plan.post_implementation_review_gate_implemented == true
     and .opt_in_plan.implemented_gate_skeleton.ordering_behavior_connected == false
     and .opt_in_plan.implemented_gate_skeleton.may_change_search_order_now == false
     and .opt_in_plan.implemented_audit_shape.ordering_behavior_connected == false
@@ -1354,6 +1392,38 @@ jq -e '
     and .opt_in_plan.implemented_authorization_decision_consumer.ordering_behavior_connected == false
     and .opt_in_plan.implemented_authorization_decision_consumer.may_change_search_order_now == false
     and .opt_in_plan.implemented_authorization_decision_consumer.may_implement_ordering_now == false
+    and .opt_in_plan.implemented_post_implementation_review_gate.cli == "agent-bridge bio-cortex retrieval-opt-in-post-implementation-review-gate"
+    and .opt_in_plan.implemented_post_implementation_review_gate.mcp_tool == "biocortex_retrieval_opt_in_post_implementation_review_gate"
+    and .opt_in_plan.implemented_post_implementation_review_gate.schema == "agent_bridge.biocortex_retrieval.opt_in_post_implementation_review_gate.v0"
+    and .opt_in_plan.implemented_post_implementation_review_gate.read_only == true
+    and .opt_in_plan.implemented_post_implementation_review_gate.post_implementation_review_gate == true
+    and .opt_in_plan.implemented_post_implementation_review_gate.implementation_stage == "post_implementation_review_gate_only"
+    and .opt_in_plan.implemented_post_implementation_review_gate.consumes_authorization_decision_packet_summary == true
+    and .opt_in_plan.implemented_post_implementation_review_gate.consumes_opt_in_plan_summary == true
+    and .opt_in_plan.implemented_post_implementation_review_gate.authorization_decision_packet_included == false
+    and .opt_in_plan.implemented_post_implementation_review_gate.opt_in_plan_included == false
+    and .opt_in_plan.implemented_post_implementation_review_gate.raw_query_included == false
+    and .opt_in_plan.implemented_post_implementation_review_gate.raw_keys_included == false
+    and .opt_in_plan.implemented_post_implementation_review_gate.content_included == false
+    and .opt_in_plan.implemented_post_implementation_review_gate.ready_for_human_runtime_influence_review == true
+    and .opt_in_plan.implemented_post_implementation_review_gate.post_implementation_review_completed == false
+    and .opt_in_plan.implemented_post_implementation_review_gate.runtime_adapter_review_completed == false
+    and .opt_in_plan.implemented_post_implementation_review_gate.ordering_behavior_review_completed == false
+    and .opt_in_plan.implemented_post_implementation_review_gate.approval_state == "not_approved"
+    and .opt_in_plan.implemented_post_implementation_review_gate.authorization_state == "requires_separate_human_runtime_influence_review"
+    and .opt_in_plan.implemented_post_implementation_review_gate.implementation_allowed == false
+    and .opt_in_plan.implemented_post_implementation_review_gate.runtime_adapter_approved == false
+    and .opt_in_plan.implemented_post_implementation_review_gate.default_search_order_change_allowed == false
+    and .opt_in_plan.implemented_post_implementation_review_gate.requires_separate_runtime_influence_review == true
+    and .opt_in_plan.implemented_post_implementation_review_gate.approval_writes_allowed == false
+    and .opt_in_plan.implemented_post_implementation_review_gate.writes_approval == false
+    and .opt_in_plan.implemented_post_implementation_review_gate.calls_memory_search == false
+    and .opt_in_plan.implemented_post_implementation_review_gate.runs_biocortex == false
+    and .opt_in_plan.implemented_post_implementation_review_gate.registers_embedding_backend == false
+    and .opt_in_plan.implemented_post_implementation_review_gate.changes_memory_search_order == false
+    and .opt_in_plan.implemented_post_implementation_review_gate.ordering_behavior_connected == false
+    and .opt_in_plan.implemented_post_implementation_review_gate.may_change_search_order_now == false
+    and .opt_in_plan.implemented_post_implementation_review_gate.may_implement_ordering_now == false
     and .opt_in_plan.implemented_dry_run_planner.mcp_tool == "biocortex_retrieval_opt_in_dry_run"
     and .opt_in_plan.implemented_dry_run_planner.schema == "agent_bridge.biocortex_retrieval.opt_in_dry_run_plan.v0"
     and .opt_in_plan.implemented_dry_run_planner.read_only == true
@@ -1732,7 +1802,7 @@ jq -e '
     and .request_summary.runtime_adapter_approved == false
     and .request_summary.default_search_order_change_allowed == false
     and .request_summary.writes_approval == false
-    and .request_summary.opt_in_plan_status == "authorization_decision_consumer_implemented"
+    and .request_summary.opt_in_plan_status == "post_implementation_review_gate_implemented"
     and .authorized_implementation.may_implement_opt_in_experiment == true
     and .authorized_implementation.may_add_runtime_enable_env == "AB_BIOCORTEX_RETRIEVAL_OPT_IN"
     and .authorized_implementation.may_add_per_call_opt_in_surface == true
@@ -1769,6 +1839,87 @@ jq -e '
 ' "$opt_in_auth_decision_packet" >/dev/null
 if grep -q '很好！我授权\|verify runtime trial secret query\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_auth_decision_packet"; then
     echo "opt-in authorization decision packet leaked raw decision/request data" >&2
+    exit 1
+fi
+
+opt_in_post_implementation_review_gate="$tmpdir/opt-in-post-implementation-review-gate.json"
+run cargo run -p ab-bridge --no-default-features -- \
+    bio-cortex retrieval-opt-in-post-implementation-review-gate \
+    --authorization-decision-packet-json "$opt_in_auth_decision_packet" \
+    --opt-in-plan-json "$opt_in_plan" \
+    --reviewer verify-bundle \
+    --commit verify-dry-run-commit \
+    --forum-post-id verify-forum-post \
+    --memory-key verify-memory-key \
+    --json > "$opt_in_post_implementation_review_gate"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_post_implementation_review_gate.v0"
+    and .read_only == true
+    and .post_implementation_review_gate == true
+    and .implementation_stage == "post_implementation_review_gate_only"
+    and .authorization_scope == "opt_in_experiment"
+    and .input_contract.authorization_decision_packet_schema == "agent_bridge.biocortex_retrieval.opt_in_authorization_decision_packet.v0"
+    and .input_contract.opt_in_plan_schema == "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0"
+    and .input_contract.authorization_decision_packet_included == false
+    and .input_contract.opt_in_plan_included == false
+    and .input_contract.raw_query_included == false
+    and .input_contract.raw_keys_included == false
+    and .input_contract.content_included == false
+    and .evidence_summary.authorization_decision_consumer == true
+    and .evidence_summary.implementation_authorized == true
+    and .evidence_summary.approval_state == "opt_in_implementation_authorized"
+    and .evidence_summary.authorization_state == "authorized_for_opt_in_implementation"
+    and .evidence_summary.runtime_adapter_approved == false
+    and .evidence_summary.default_search_order_change_allowed == false
+    and .evidence_summary.ordering_behavior_connected == false
+    and .evidence_summary.post_implementation_review_required == true
+    and .plan_summary.status == "post_implementation_review_gate_implemented"
+    and .plan_summary.implementation_allowed == true
+    and .plan_summary.store_opt_in_search_wrapper_implemented == true
+    and .plan_summary.authorization_decision_consumer_implemented == true
+    and .plan_summary.post_implementation_review_gate_implemented == true
+    and .plan_summary.default_memory_search_unchanged == true
+    and .plan_summary.runtime_adapter_approved == false
+    and .plan_summary.default_search_order_change_allowed == false
+    and .plan_summary.ordering_behavior_connected == false
+    and .review_readiness.ready_for_human_runtime_influence_review == true
+    and .review_readiness.post_implementation_review_completed == false
+    and .review_readiness.runtime_adapter_review_completed == false
+    and .review_readiness.ordering_behavior_review_completed == false
+    and .review_readiness.this_packet_approves_runtime_adapter == false
+    and .review_readiness.this_packet_allows_default_search_order_change == false
+    and .review_readiness.this_packet_connects_ordering_behavior == false
+    and .boundary_check.ready_for_human_runtime_influence_review == true
+    and (.boundary_check.blockers | length) == 0
+    and .boundary_check.packet_runtime_adapter_still_not_approved == true
+    and .boundary_check.packet_default_order_still_not_allowed == true
+    and .boundary_check.plan_runtime_adapter_still_not_approved == true
+    and .boundary_check.plan_default_order_still_not_allowed == true
+    and .boundary_check.plan_ordering_behavior_connected_false == true
+    and .required_next_gate.human_runtime_influence_review_required == true
+    and .required_next_gate.runtime_adapter_approval_required == true
+    and .required_next_gate.ordering_behavior_connection_required == true
+    and .required_next_gate.this_packet_approves_runtime_adapter == false
+    and .required_next_gate.this_packet_connects_ordering_behavior == false
+    and .required_next_gate.this_packet_allows_default_search_order_change == false
+    and .review_state == "ready_for_human_runtime_influence_review"
+    and .approval_state == "not_approved"
+    and .authorization_state == "requires_separate_human_runtime_influence_review"
+    and .implementation_allowed == false
+    and .runtime_adapter_approved == false
+    and .approval_writes_allowed == false
+    and .writes_approval == false
+    and .calls_memory_search == false
+    and .runs_biocortex == false
+    and .registers_embedding_backend == false
+    and .changes_memory_search_order == false
+    and .default_search_order_change_allowed == false
+    and .ordering_behavior_connected == false
+    and .may_change_search_order_now == false
+    and .may_implement_ordering_now == false
+' "$opt_in_post_implementation_review_gate" >/dev/null
+if grep -q '很好！我授权\|verify runtime trial secret query\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_post_implementation_review_gate"; then
+    echo "opt-in post-implementation review gate leaked raw decision/request data" >&2
     exit 1
 fi
 test -s "$opt_in_auth_request/forum-post-template.md"

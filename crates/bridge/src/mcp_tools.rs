@@ -48,13 +48,16 @@ use crate::biocortex_shadow::{
     biocortex_replay_comparison, biocortex_retrieval_opt_in_audit_report,
     biocortex_retrieval_opt_in_authorization_decision_packet,
     biocortex_retrieval_opt_in_dry_run_plan, biocortex_retrieval_opt_in_execution_packet,
-    biocortex_retrieval_opt_in_order_diff_packet, biocortex_retrieval_opt_in_review_packet,
-    biocortex_retrieval_opt_in_redacted_order_artifact, biocortex_retrieval_opt_in_runtime_trial,
+    biocortex_retrieval_opt_in_order_diff_packet,
+    biocortex_retrieval_opt_in_post_implementation_review_gate,
+    biocortex_retrieval_opt_in_review_packet, biocortex_retrieval_opt_in_redacted_order_artifact,
+    biocortex_retrieval_opt_in_runtime_trial,
     biocortex_retrieval_opt_in_runtime_trial_review_packet, biocortex_shadow_digest,
     supported_benchmarks, BioCortexReplayComparisonOptions, BioCortexRetrievalCandidate,
     BioCortexRetrievalOptInAuditOptions, BioCortexRetrievalOptInAuthorizationDecisionPacketOptions,
     BioCortexRetrievalOptInDryRunOptions, BioCortexRetrievalOptInExecutionPacketOptions,
     BioCortexRetrievalOptInOrderDiffPacketOptions,
+    BioCortexRetrievalOptInPostImplementationReviewGateOptions,
     BioCortexRetrievalOptInRedactedOrderArtifactOptions,
     BioCortexRetrievalOptInReviewPacketOptions, BioCortexRetrievalOptInRuntimeTrialOptions,
     BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions, BioCortexShadowOptions,
@@ -26118,6 +26121,115 @@ impl McpTool for BioCortexRetrievalOptInAuthorizationDecisionPacketTool {
 }
 
 // ===========================================================================
+//  biocortex_retrieval_opt_in_post_implementation_review_gate — review gate
+// ===========================================================================
+
+/// Read-only BioCortex retrieval opt-in post-implementation review gate. This
+/// tool accepts the authorization decision packet plus the opt-in plan fixture
+/// and emits a readiness packet for a separate human runtime-influence review.
+/// It never approves runtime adapter influence, calls `memory_search`, runs
+/// BioCortex, or changes retrieval order.
+pub struct BioCortexRetrievalOptInPostImplementationReviewGateTool;
+
+impl BioCortexRetrievalOptInPostImplementationReviewGateTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for BioCortexRetrievalOptInPostImplementationReviewGateTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for BioCortexRetrievalOptInPostImplementationReviewGateTool {
+    fn name(&self) -> &'static str {
+        "biocortex_retrieval_opt_in_post_implementation_review_gate"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only BioCortex retrieval opt-in \
+                 post-implementation review gate. Accepts an authorization \
+                 decision packet and opt-in plan fixture, then emits readiness \
+                 for a separate human runtime-influence review. Does not call \
+                 memory_search, run BioCortex, mutate memory, include raw \
+                 query/keys/content, register an EmbeddingBackend, approve \
+                 runtime influence, or alter retrieval order."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["authorization_decision_packet", "opt_in_plan"],
+                "properties": {
+                    "authorization_decision_packet": {
+                        "type": "object",
+                        "description": "JSON object produced by biocortex_retrieval_opt_in_authorization_decision_packet. Unknown/raw fields are ignored."
+                    },
+                    "opt_in_plan": {
+                        "type": "object",
+                        "description": "Machine-readable opt-in experiment plan fixture. Unknown/raw fields are ignored."
+                    },
+                    "reviewer": {
+                        "type": "string",
+                        "description": "Optional reviewer identity or handle."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Optional implementation commit under review."
+                    },
+                    "forum_post_id": {
+                        "type": "string",
+                        "description": "Optional forum post id linking this review gate."
+                    },
+                    "memory_key": {
+                        "type": "string",
+                        "description": "Optional memory key linking this review gate."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let authorization_decision_packet = args
+            .get("authorization_decision_packet")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let opt_in_plan = args.get("opt_in_plan").cloned().unwrap_or(Value::Null);
+        let reviewer = args
+            .get("reviewer")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let commit = args
+            .get("commit")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let forum_post_id = args
+            .get("forum_post_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let memory_key = args
+            .get("memory_key")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let payload = biocortex_retrieval_opt_in_post_implementation_review_gate(
+            BioCortexRetrievalOptInPostImplementationReviewGateOptions {
+                authorization_decision_packet,
+                opt_in_plan,
+                reviewer,
+                commit,
+                forum_post_id,
+                memory_key,
+            },
+        );
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
 //   biocortex_retrieval_shadow — review-only retrieval side-signal report
 // ===========================================================================
 
@@ -37422,6 +37534,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Standard,
         Arc::new(BioCortexRetrievalOptInAuthorizationDecisionPacketTool::new()),
     );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexRetrievalOptInPostImplementationReviewGateTool::new()),
+    );
     #[cfg(feature = "biocortex-retrieval-shadow")]
     reg_if(
         &mut reg,
@@ -47346,6 +47464,176 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         );
         assert_eq!(
             v["required_next_gate"]["this_packet_approves_runtime_adapter"],
+            json!(false)
+        );
+    }
+
+    #[test]
+    fn biocortex_retrieval_opt_in_post_implementation_review_gate_schema_is_readonly() {
+        let tool = BioCortexRetrievalOptInPostImplementationReviewGateTool::new();
+        let schema = tool.schema();
+        assert_eq!(
+            schema.name,
+            "biocortex_retrieval_opt_in_post_implementation_review_gate"
+        );
+        assert!(schema.description.contains("Read-only"));
+        assert!(schema.description.contains("post-implementation review gate"));
+        assert!(schema.description.contains("Does not call memory_search"));
+        assert!(schema.description.contains("run BioCortex"));
+        assert!(schema.description.contains("approve runtime influence"));
+        assert!(schema.description.contains("alter retrieval order"));
+
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required");
+        assert!(required.contains(&json!("authorization_decision_packet")));
+        assert!(required.contains(&json!("opt_in_plan")));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("authorization_decision_packet").is_some());
+        assert!(props.get("opt_in_plan").is_some());
+        assert!(props.get("reviewer").is_some());
+        assert!(props.get("commit").is_some());
+        assert!(props.get("forum_post_id").is_some());
+        assert!(props.get("memory_key").is_some());
+        assert!(props.get("include_raw").is_none());
+        assert!(props.get("mutate").is_none());
+        assert!(props.get("memory_search").is_none());
+        assert!(props.get("raw_content").is_none());
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_post_implementation_review_gate_sanitizes_inputs() {
+        let tool = BioCortexRetrievalOptInPostImplementationReviewGateTool::new();
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(
+                json!({
+                    "authorization_decision_packet": {
+                        "schema": "agent_bridge.biocortex_retrieval.opt_in_authorization_decision_packet.v0",
+                        "read_only": true,
+                        "authorization_decision_consumer": true,
+                        "approval_state": "opt_in_implementation_authorized",
+                        "authorization_state": "authorized_for_opt_in_implementation",
+                        "boundary_check": {
+                            "implementation_authorized": true
+                        },
+                        "required_next_gate": {
+                            "post_implementation_review_before_use": true,
+                            "runtime_adapter_approval_required": true,
+                            "ordering_behavior_connection_required": true,
+                            "this_packet_approves_runtime_adapter": false,
+                            "this_packet_connects_ordering_behavior": false
+                        },
+                        "runtime_adapter_approved": false,
+                        "default_search_order_change_allowed": false,
+                        "approval_writes_allowed": false,
+                        "writes_approval": false,
+                        "calls_memory_search": false,
+                        "runs_biocortex": false,
+                        "registers_embedding_backend": false,
+                        "changes_memory_search_order": false,
+                        "ordering_behavior_connected": false,
+                        "may_change_search_order_now": false,
+                        "may_implement_ordering_now": false,
+                        "raw_query": "secret decision packet query",
+                        "raw_key": "secret_decision_packet_key",
+                        "content": "secret decision packet content"
+                    },
+                    "opt_in_plan": {
+                        "schema": "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0",
+                        "status": "post_implementation_review_gate_implemented",
+                        "implementation_allowed": true,
+                        "store_opt_in_search_wrapper_implemented": true,
+                        "authorization_decision_consumer_implemented": true,
+                        "post_implementation_review_gate_implemented": true,
+                        "runtime_adapter_approved": false,
+                        "default_search_order_change_allowed": false,
+                        "ordering_behavior_connected": false,
+                        "requested_default_influence_scope": "none",
+                        "default_memory_search_unchanged": true,
+                        "implemented_store_opt_in_search_wrapper": {
+                            "returns_baseline_order": true,
+                            "redacted_audit_only": true,
+                            "runs_biocortex": false,
+                            "changes_memory_search_order": false,
+                            "ordering_behavior_connected": false
+                        },
+                        "implemented_post_implementation_review_gate": {
+                            "cli": "agent-bridge bio-cortex retrieval-opt-in-post-implementation-review-gate",
+                            "mcp_tool": "biocortex_retrieval_opt_in_post_implementation_review_gate",
+                            "schema": "agent_bridge.biocortex_retrieval.opt_in_post_implementation_review_gate.v0",
+                            "read_only": true,
+                            "runtime_adapter_approved": false,
+                            "default_search_order_change_allowed": false,
+                            "calls_memory_search": false,
+                            "runs_biocortex": false,
+                            "registers_embedding_backend": false,
+                            "changes_memory_search_order": false,
+                            "ordering_behavior_connected": false,
+                            "may_change_search_order_now": false,
+                            "may_implement_ordering_now": false
+                        },
+                        "raw_query": "secret plan query",
+                        "raw_key": "secret_plan_key",
+                        "content": "secret plan content"
+                    },
+                    "reviewer": "codex",
+                    "commit": "review-gate-commit",
+                    "forum_post_id": "103",
+                    "memory_key": "review-gate-memory"
+                }),
+                &ctx,
+            )
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains("secret decision packet query"));
+        assert!(!text.contains("secret_decision_packet_key"));
+        assert!(!text.contains("secret decision packet content"));
+        assert!(!text.contains("secret plan query"));
+        assert!(!text.contains("secret_plan_key"));
+        assert!(!text.contains("secret plan content"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_post_implementation_review_gate.v0")
+        );
+        assert_eq!(v["read_only"], json!(true));
+        assert_eq!(v["post_implementation_review_gate"], json!(true));
+        assert_eq!(
+            v["review_readiness"]["ready_for_human_runtime_influence_review"],
+            json!(true)
+        );
+        assert_eq!(v["approval_state"], json!("not_approved"));
+        assert_eq!(v["implementation_allowed"], json!(false));
+        assert_eq!(v["runtime_adapter_approved"], json!(false));
+        assert_eq!(v["default_search_order_change_allowed"], json!(false));
+        assert_eq!(v["writes_approval"], json!(false));
+        assert_eq!(v["calls_memory_search"], json!(false));
+        assert_eq!(v["runs_biocortex"], json!(false));
+        assert_eq!(v["changes_memory_search_order"], json!(false));
+        assert_eq!(v["ordering_behavior_connected"], json!(false));
+        assert_eq!(v["may_implement_ordering_now"], json!(false));
+        assert_eq!(
+            v["boundary_check"]["ready_for_human_runtime_influence_review"],
+            json!(true)
+        );
+        assert_eq!(
+            v["required_next_gate"]["this_packet_approves_runtime_adapter"],
+            json!(false)
+        );
+        assert_eq!(
+            v["required_next_gate"]["this_packet_connects_ordering_behavior"],
             json!(false)
         );
     }

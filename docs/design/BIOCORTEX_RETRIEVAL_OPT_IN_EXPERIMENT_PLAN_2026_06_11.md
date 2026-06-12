@@ -17,7 +17,10 @@ authorization request bundle can optionally include its summary-only evidence.
 The store layer now has a baseline-preserving opt-in search wrapper with a
 redacted audit summary. A read-only authorization decision consumer now turns
 the human implementation authorization record into a machine-checkable
-implementation-only gate.
+implementation-only gate. A read-only post-implementation review gate now
+checks whether that implementation-only evidence is ready for a separate human
+runtime-influence review, without approving runtime adapter influence or
+ordering behavior.
 Ordering behavior is not implemented and not approved.
 
 ```json
@@ -43,6 +46,7 @@ Ordering behavior is not implemented and not approved.
   "authorization_request_redacted_order_artifact_evidence_implemented": true,
   "store_opt_in_search_wrapper_implemented": true,
   "authorization_decision_consumer_implemented": true,
+  "post_implementation_review_gate_implemented": true,
   "ordering_behavior_connected": false
 }
 ```
@@ -384,6 +388,30 @@ This makes the recorded human authorization machine-checkable while preserving
 the separation between "implementation work is authorized" and "runtime adapter
 influence is approved." The latter still requires a separate post-implementation
 review and explicit ordering-behavior connection.
+
+Slice 17 landed a read-only post-implementation review gate:
+
+- CLI:
+  `agent-bridge bio-cortex retrieval-opt-in-post-implementation-review-gate`;
+- MCP tool:
+  `biocortex_retrieval_opt_in_post_implementation_review_gate`;
+- packet schema:
+  `agent_bridge.biocortex_retrieval.opt_in_post_implementation_review_gate.v0`;
+- consumes the authorization decision packet summary and opt-in plan summary;
+- does not include the raw decision packet or raw opt-in plan payload;
+- reports `ready_for_human_runtime_influence_review=true` only when the
+  implementation-only authorization evidence is intact, the store wrapper is
+  baseline-preserving, and the plan records this review gate;
+- keeps `approval_state=not_approved`, `runtime_adapter_approved=false`,
+  `approval_writes_allowed=false`, `writes_approval=false`,
+  `calls_memory_search=false`, `runs_biocortex=false`,
+  `changes_memory_search_order=false`, `ordering_behavior_connected=false`, and
+  `may_implement_ordering_now=false`.
+
+This gate is deliberately not a runtime approval. It creates the next review
+packet boundary: after implementation exists, a separate human runtime-influence
+review still has to decide whether any BioCortex side-signal may affect an
+explicitly opted-in return order.
 
 ## Fail-Open Rules
 
