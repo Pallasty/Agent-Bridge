@@ -26330,9 +26330,10 @@ impl McpTool for BioCortexRetrievalOptInPostImplementationReviewGateTool {
 
 /// Read-only BioCortex retrieval opt-in runtime-influence review request. This
 /// tool accepts the post-implementation review gate plus redacted order artifact
-/// and emits a human review request for explicit opt-in FTS influence. It never
-/// approves runtime adapter influence, calls `memory_search`, runs BioCortex,
-/// or changes retrieval order.
+/// and may accept a redacted evidence aggregate summary. It emits a human
+/// review request for explicit opt-in FTS influence. It never approves runtime
+/// adapter influence, calls `memory_search`, runs BioCortex, or changes
+/// retrieval order.
 pub struct BioCortexRetrievalOptInRuntimeInfluenceReviewRequestTool;
 
 impl BioCortexRetrievalOptInRuntimeInfluenceReviewRequestTool {
@@ -26358,11 +26359,12 @@ impl McpTool for BioCortexRetrievalOptInRuntimeInfluenceReviewRequestTool {
             name: self.name().into(),
             description: "Read-only BioCortex retrieval opt-in \
                  runtime-influence review request. Accepts a post-implementation \
-                 review gate and redacted order artifact, then emits a request \
-                 for separate human review of explicit opt-in FTS influence. \
-                 Does not call memory_search, run BioCortex, mutate memory, \
-                 include raw query/keys/content, register an EmbeddingBackend, \
-                 approve runtime influence, or alter retrieval order."
+                 review gate, redacted order artifact, and optional redacted \
+                 evidence aggregate, then emits a request for separate human \
+                 review of explicit opt-in FTS influence. Does not call \
+                 memory_search, run BioCortex, mutate memory, include raw \
+                 query/keys/content, register an EmbeddingBackend, approve \
+                 runtime influence, or alter retrieval order."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -26375,6 +26377,10 @@ impl McpTool for BioCortexRetrievalOptInRuntimeInfluenceReviewRequestTool {
                     "redacted_order_artifact": {
                         "type": "object",
                         "description": "JSON object produced by biocortex_retrieval_opt_in_redacted_order_artifact. Unknown/raw fields are ignored."
+                    },
+                    "redacted_evidence_aggregate": {
+                        "type": "object",
+                        "description": "Optional JSON object produced by biocortex_retrieval_opt_in_redacted_evidence_aggregate. Unknown/raw fields are ignored; the input body is not copied to output."
                     },
                     "reviewer": {
                         "type": "string",
@@ -26406,6 +26412,7 @@ impl McpTool for BioCortexRetrievalOptInRuntimeInfluenceReviewRequestTool {
             .get("redacted_order_artifact")
             .cloned()
             .unwrap_or(Value::Null);
+        let redacted_evidence_aggregate = args.get("redacted_evidence_aggregate").cloned();
         let reviewer = args
             .get("reviewer")
             .and_then(Value::as_str)
@@ -26426,6 +26433,7 @@ impl McpTool for BioCortexRetrievalOptInRuntimeInfluenceReviewRequestTool {
             BioCortexRetrievalOptInRuntimeInfluenceReviewRequestOptions {
                 post_implementation_review_gate,
                 redacted_order_artifact,
+                redacted_evidence_aggregate,
                 reviewer,
                 commit,
                 forum_post_id,
@@ -48487,6 +48495,9 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(schema
             .description
             .contains("runtime-influence review request"));
+        assert!(schema
+            .description
+            .contains("optional redacted evidence aggregate"));
         assert!(schema.description.contains("Does not call memory_search"));
         assert!(schema.description.contains("run BioCortex"));
         assert!(schema
@@ -48502,6 +48513,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             .expect("required");
         assert!(required.contains(&json!("post_implementation_review_gate")));
         assert!(required.contains(&json!("redacted_order_artifact")));
+        assert!(!required.contains(&json!("redacted_evidence_aggregate")));
         let props = schema
             .input_schema
             .get("properties")
@@ -48509,6 +48521,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             .expect("properties");
         assert!(props.get("post_implementation_review_gate").is_some());
         assert!(props.get("redacted_order_artifact").is_some());
+        assert!(props.get("redacted_evidence_aggregate").is_some());
         assert!(props.get("reviewer").is_some());
         assert!(props.get("commit").is_some());
         assert!(props.get("forum_post_id").is_some());
@@ -48602,6 +48615,50 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
                         "raw_key": "secret_artifact_key",
                         "content": "secret artifact content"
                     },
+                    "redacted_evidence_aggregate": {
+                        "schema": "agent_bridge.biocortex_retrieval.opt_in_redacted_evidence_aggregate.v0",
+                        "read_only": true,
+                        "redacted_evidence_aggregate": true,
+                        "input_contract": {
+                            "raw_queries_included": false,
+                            "raw_keys_included": false,
+                            "content_included": false,
+                            "side_signal_raw_included": false
+                        },
+                        "movement_evidence": {
+                            "raw_flags_all_false": true,
+                            "movement_observed": true
+                        },
+                        "coverage_evidence": {
+                            "raw_flags_all_false": true,
+                            "expanded_coverage_observed": true
+                        },
+                        "interpretation": {
+                            "aggregate_evidence_ready": true,
+                            "controlled_rank_movement_observed": true,
+                            "expanded_coverage_without_additional_movement": true,
+                            "default_influence_ready": false,
+                            "human_review_required": true,
+                            "review_state": "redacted_aggregate_ready"
+                        },
+                        "approval_state": "evidence_aggregate_only",
+                        "authorization_state": "does_not_grant_runtime_influence",
+                        "approval_writes_allowed": false,
+                        "writes_approval": false,
+                        "calls_memory_search": false,
+                        "runs_biocortex": false,
+                        "registers_embedding_backend": false,
+                        "changes_memory_search_order": false,
+                        "default_search_order_change_allowed": false,
+                        "default_calls_unchanged": true,
+                        "raw_queries_included": false,
+                        "raw_keys_included": false,
+                        "content_included": false,
+                        "side_signal_raw_included": false,
+                        "raw_query": "secret aggregate query",
+                        "raw_key": "secret_aggregate_key",
+                        "content": "secret aggregate content"
+                    },
                     "reviewer": "codex",
                     "commit": "runtime-review-request-commit",
                     "forum_post_id": "104",
@@ -48621,6 +48678,9 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(!text.contains("secret artifact query"));
         assert!(!text.contains("secret_artifact_key"));
         assert!(!text.contains("secret artifact content"));
+        assert!(!text.contains("secret aggregate query"));
+        assert!(!text.contains("secret_aggregate_key"));
+        assert!(!text.contains("secret aggregate content"));
 
         let v: Value = serde_json::from_str(&text).expect("valid json");
         assert_eq!(
@@ -48645,6 +48705,14 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert_eq!(v["input_contract"]["raw_keys_included"], json!(false));
         assert_eq!(v["input_contract"]["content_included"], json!(false));
         assert_eq!(
+            v["input_contract"]["redacted_evidence_aggregate_schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_redacted_evidence_aggregate.v0")
+        );
+        assert_eq!(
+            v["input_contract"]["redacted_evidence_aggregate_included"],
+            json!(false)
+        );
+        assert_eq!(
             v["requested_authorization"]["request_runtime_adapter_review"],
             json!(true)
         );
@@ -48665,11 +48733,39 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             json!(false)
         );
         assert_eq!(
+            v["requested_authorization"]["accepts_redacted_evidence_aggregate"],
+            json!(true)
+        );
+        assert_eq!(
+            v["requested_authorization"]["requires_redacted_evidence_aggregate"],
+            json!(false)
+        );
+        assert_eq!(
             v["requested_authorization"]["this_packet_grants_request"],
             json!(false)
         );
         assert_eq!(
+            v["evidence_summary"]["redacted_evidence_aggregate_provided"],
+            json!(true)
+        );
+        assert_eq!(
+            v["evidence_summary"]["redacted_evidence_aggregate_ready"],
+            json!(true)
+        );
+        assert_eq!(
+            v["evidence_summary"]["aggregate_review_state"],
+            json!("redacted_aggregate_ready")
+        );
+        assert_eq!(
             v["boundary_check"]["runtime_influence_review_request_ready"],
+            json!(true)
+        );
+        assert_eq!(
+            v["boundary_check"]["redacted_evidence_aggregate_provided"],
+            json!(true)
+        );
+        assert_eq!(
+            v["boundary_check"]["redacted_evidence_aggregate_ready"],
             json!(true)
         );
         assert_eq!(v["boundary_check"]["blockers"], json!([]));

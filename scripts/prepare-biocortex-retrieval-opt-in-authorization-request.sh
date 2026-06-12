@@ -692,8 +692,12 @@ jq -e '
     and .opt_in_plan.implemented_runtime_influence_review_request.implementation_stage == "runtime_influence_review_request_only"
     and .opt_in_plan.implemented_runtime_influence_review_request.consumes_post_implementation_review_gate_summary == true
     and .opt_in_plan.implemented_runtime_influence_review_request.consumes_redacted_order_artifact_summary == true
+    and .opt_in_plan.implemented_runtime_influence_review_request.accepts_redacted_evidence_aggregate_summary == true
+    and .opt_in_plan.implemented_runtime_influence_review_request.requires_aggregate_ready_when_provided == true
     and .opt_in_plan.implemented_runtime_influence_review_request.post_implementation_review_gate_included == false
     and .opt_in_plan.implemented_runtime_influence_review_request.redacted_order_artifact_included == false
+    and .opt_in_plan.implemented_runtime_influence_review_request.redacted_evidence_aggregate_included == false
+    and .opt_in_plan.implemented_runtime_influence_review_request.keeps_default_influence_unready == true
     and .opt_in_plan.implemented_runtime_influence_review_request.raw_query_included == false
     and .opt_in_plan.implemented_runtime_influence_review_request.raw_keys_included == false
     and .opt_in_plan.implemented_runtime_influence_review_request.content_included == false

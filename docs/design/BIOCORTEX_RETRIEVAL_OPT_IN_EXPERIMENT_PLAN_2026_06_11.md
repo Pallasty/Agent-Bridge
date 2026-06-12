@@ -641,6 +641,24 @@ Slice 26 added a redacted evidence aggregate:
 - default `memory_search`, hybrid search, semantic search, approval state, and
   embedding backend registration remain unchanged.
 
+Slice 27 wired the redacted evidence aggregate into the runtime-influence review
+request as optional evidence:
+
+- CLI:
+  `agent-bridge bio-cortex retrieval-opt-in-runtime-influence-review-request`
+  now accepts optional `--redacted-evidence-aggregate-json`;
+- MCP tool:
+  `biocortex_retrieval_opt_in_runtime_influence_review_request` now accepts
+  optional `redacted_evidence_aggregate`;
+- when provided, the request validates that the aggregate is read-only,
+  aggregate-ready, redacted, review-only, default-influence-unready, and still
+  requires human review;
+- the request copies only schema/readiness/interpretation summaries, never the
+  aggregate input body or raw fixture/query/key/content fields;
+- the aggregate-backed request remains `approval_state=not_approved`, does not
+  grant runtime influence, and does not connect ordering behavior or change
+  default search order.
+
 ## Fail-Open Rules
 
 The experiment must return the baseline list for:

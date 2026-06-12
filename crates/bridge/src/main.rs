@@ -2772,11 +2772,11 @@ enum BioCortexOp {
     },
     /// Prepare a human runtime-influence review request without approval.
     ///
-    /// This consumes the post-implementation review gate and redacted order
-    /// artifact summaries. It requests a separate human review for explicit
-    /// opt-in FTS runtime influence only; it does not approve runtime adapter
-    /// influence, call `memory_search`, run BioCortex, or change retrieval
-    /// order.
+    /// This consumes the post-implementation review gate, redacted order
+    /// artifact summary, and optional redacted evidence aggregate. It requests
+    /// a separate human review for explicit opt-in FTS runtime influence only;
+    /// it does not approve runtime adapter influence, call `memory_search`, run
+    /// BioCortex, or change retrieval order.
     RetrievalOptInRuntimeInfluenceReviewRequest {
         /// JSON file produced by retrieval-opt-in-post-implementation-review-gate.
         #[arg(long = "post-implementation-review-gate-json")]
@@ -2784,6 +2784,9 @@ enum BioCortexOp {
         /// JSON file produced by retrieval-opt-in-redacted-order-artifact.
         #[arg(long = "redacted-order-artifact-json")]
         redacted_order_artifact_json: PathBuf,
+        /// Optional JSON file produced by retrieval-opt-in-redacted-evidence-aggregate.
+        #[arg(long = "redacted-evidence-aggregate-json")]
+        redacted_evidence_aggregate_json: Option<PathBuf>,
         /// Reviewer identity or handle.
         #[arg(long)]
         reviewer: Option<String>,
@@ -5017,6 +5020,7 @@ async fn real_main() -> Result<()> {
             BioCortexOp::RetrievalOptInRuntimeInfluenceReviewRequest {
                 post_implementation_review_gate_json,
                 redacted_order_artifact_json,
+                redacted_evidence_aggregate_json,
                 reviewer,
                 commit,
                 forum_post_id,
@@ -5026,9 +5030,11 @@ async fn real_main() -> Result<()> {
                 run_biocortex_retrieval_opt_in_runtime_influence_review_request(
                     post_implementation_review_gate_json,
                     redacted_order_artifact_json,
+                    redacted_evidence_aggregate_json.as_deref(),
                     BioCortexRetrievalOptInRuntimeInfluenceReviewRequestOptions {
                         post_implementation_review_gate: Value::Null,
                         redacted_order_artifact: Value::Null,
+                        redacted_evidence_aggregate: None,
                         reviewer: reviewer.clone(),
                         commit: commit.clone(),
                         forum_post_id: forum_post_id.clone(),
@@ -9735,6 +9741,7 @@ async fn run_biocortex_retrieval_opt_in_post_implementation_review_gate(
 async fn run_biocortex_retrieval_opt_in_runtime_influence_review_request(
     post_implementation_review_gate_json: &std::path::Path,
     redacted_order_artifact_json: &std::path::Path,
+    redacted_evidence_aggregate_json: Option<&std::path::Path>,
     mut opts: BioCortexRetrievalOptInRuntimeInfluenceReviewRequestOptions,
     as_json: bool,
 ) -> Result<()> {
@@ -9758,6 +9765,19 @@ async fn run_biocortex_retrieval_opt_in_runtime_influence_review_request(
             "parse opt-in redacted order artifact JSON at {redacted_order_artifact_json:?}: {e}"
         )
     })?;
+    if let Some(redacted_evidence_aggregate_json) = redacted_evidence_aggregate_json {
+        let aggregate_body = std::fs::read_to_string(redacted_evidence_aggregate_json).map_err(|e| {
+            anyhow::anyhow!(
+                "read opt-in redacted evidence aggregate JSON at {redacted_evidence_aggregate_json:?}: {e}"
+            )
+        })?;
+        opts.redacted_evidence_aggregate =
+            Some(serde_json::from_str(&aggregate_body).map_err(|e| {
+                anyhow::anyhow!(
+                    "parse opt-in redacted evidence aggregate JSON at {redacted_evidence_aggregate_json:?}: {e}"
+                )
+            })?);
+    }
     let payload = biocortex_retrieval_opt_in_runtime_influence_review_request(opts);
     if as_json {
         println!("{}", serde_json::to_string_pretty(&payload)?);
@@ -9781,6 +9801,15 @@ async fn run_biocortex_retrieval_opt_in_runtime_influence_review_request(
         shadow_json_display(payload.get("runtime_adapter_approved"), "false"),
         shadow_json_display(payload.get("default_search_order_change_allowed"), "false"),
         shadow_json_display(payload.get("ordering_behavior_connected"), "false")
+    );
+    let evidence = payload.get("evidence_summary").unwrap_or(&Value::Null);
+    println!(
+        "redacted_evidence_aggregate_provided={} redacted_evidence_aggregate_ready={}",
+        shadow_json_display(
+            evidence.get("redacted_evidence_aggregate_provided"),
+            "false"
+        ),
+        shadow_json_display(evidence.get("redacted_evidence_aggregate_ready"), "false")
     );
     println!(
         "blockers={} calls_memory_search={} runs_biocortex={} changes_memory_search_order={}",
