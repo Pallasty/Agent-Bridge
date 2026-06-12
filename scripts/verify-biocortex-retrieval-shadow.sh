@@ -61,6 +61,28 @@ grep -q 'return baseline list' "$contract_doc"
 grep -q 'Authorization for one mode does not imply authorization for another mode' "$contract_doc"
 
 opt_in_plan="docs/design/fixtures/biocortex-retrieval-opt-in-experiment-plan-2026-06-11.json"
+opt_in_batch_query_cases="docs/design/fixtures/biocortex-retrieval-opt-in-batch-diagnostic-queries-2026-06-12.json"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_batch_diagnostic_query_cases.v0"
+    and .read_only == true
+    and .input_boundary.raw_queries_are_fixture_inputs == true
+    and .input_boundary.raw_queries_may_be_read_by_cli == true
+    and .input_boundary.raw_queries_must_not_be_returned_by_batch_diagnostics == true
+    and .input_boundary.raw_keys_included == false
+    and .input_boundary.content_included == false
+    and .input_boundary.side_signal_raw_included == false
+    and .input_boundary.decision_packet_included == false
+    and (.query_cases | length) == 6
+    and ([.query_cases[].class_label] | sort) == ["approval_gate","baseline_retrieval","fail_open","mcp_surface","rank_movement","runtime_adapter"]
+    and .expected_batch_contract.schema == "agent_bridge.biocortex_retrieval.opt_in_batch_diagnostics.v0"
+    and .expected_batch_contract.query_count == 6
+    and .expected_batch_contract.raw_queries_included == false
+    and .expected_batch_contract.raw_keys_included == false
+    and .expected_batch_contract.content_included == false
+    and .expected_batch_contract.side_signal_raw_included == false
+    and .expected_batch_contract.default_search_order_change_allowed == false
+    and .expected_batch_contract.default_calls_unchanged == true
+' "$opt_in_batch_query_cases" >/dev/null
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0"
     and .status == "store_opt_in_runtime_adapter_connection_implemented"
@@ -227,6 +249,8 @@ jq -e '
     and .implemented_store_opt_in_runtime_adapter_connection.default_calls_unchanged == true
     and .implemented_store_opt_in_runtime_adapter_connection.explicit_opt_in_fts_runtime_adapter_connected == true
     and .implemented_store_opt_in_batch_diagnostics.cli == "agent-bridge bio-cortex retrieval-opt-in-batch-diagnostics"
+    and .implemented_store_opt_in_batch_diagnostics.cli_accepts_query_cases_json == true
+    and .implemented_store_opt_in_batch_diagnostics.query_cases_fixture == "docs/design/fixtures/biocortex-retrieval-opt-in-batch-diagnostic-queries-2026-06-12.json"
     and .implemented_store_opt_in_batch_diagnostics.mcp_tool == "biocortex_retrieval_opt_in_batch_diagnostics"
     and .implemented_store_opt_in_batch_diagnostics.schema == "agent_bridge.biocortex_retrieval.opt_in_batch_diagnostics.v0"
     and .implemented_store_opt_in_batch_diagnostics.implementation_stage == "store_opt_in_batch_diagnostics"
@@ -1612,6 +1636,8 @@ jq -e '
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.default_calls_unchanged == true
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.explicit_opt_in_fts_runtime_adapter_connected == true
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.cli == "agent-bridge bio-cortex retrieval-opt-in-batch-diagnostics"
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.cli_accepts_query_cases_json == true
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.query_cases_fixture == "docs/design/fixtures/biocortex-retrieval-opt-in-batch-diagnostic-queries-2026-06-12.json"
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.mcp_tool == "biocortex_retrieval_opt_in_batch_diagnostics"
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.schema == "agent_bridge.biocortex_retrieval.opt_in_batch_diagnostics.v0"
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.implementation_stage == "store_opt_in_batch_diagnostics"
@@ -2573,10 +2599,7 @@ run env AGENT_BRIDGE_DB="$tmpdir/opt-in-batch-diagnostics-disabled.db" \
     cargo run -p ab-bridge --no-default-features -- \
     bio-cortex retrieval-opt-in-batch-diagnostics \
     --runtime-influence-decision-packet-json "$opt_in_runtime_influence_decision_packet" \
-    --query "verify batch diagnostics secret query one" \
-    --query-class "Runtime Adapter" \
-    --query "verify batch diagnostics secret query two" \
-    --query-class "Memory Search" \
+    --query-cases-json "$opt_in_batch_query_cases" \
     --per-call-opt-in \
     --limit 3 \
     --attempt-id verify-batch-diagnostics-disabled \
@@ -2586,24 +2609,23 @@ jq -e '
     .schema == "agent_bridge.biocortex_retrieval.opt_in_batch_diagnostics.v0"
     and .implementation_stage == "store_opt_in_batch_diagnostics"
     and .status == "completed"
-    and .attempt.query_count == 2
+    and .attempt.query_count == 6
     and .input_contract.runtime_influence_decision_packet_included == false
     and .input_contract.raw_queries_included == false
     and .input_contract.raw_keys_included == false
     and .input_contract.content_included == false
     and .input_contract.side_signal_raw_included == false
-    and .summary.query_count == 2
-    and .summary.baseline_completed_count == 2
-    and .summary.baseline_empty_count == 2
+    and .summary.query_count == 6
+    and .summary.baseline_completed_count == 6
+    and .summary.baseline_empty_count == 6
     and .summary.adapter_allowed_count == 0
     and .summary.side_signal_attempted_count == 0
     and .summary.side_signal_ok_count == 0
     and .summary.actual_order_changed_count == 0
     and .summary.raw_flagged_count == 0
-    and (.bucket_summary | length) == 2
-    and ([.bucket_summary[].class_label] | index("runtime_adapter"))
-    and ([.bucket_summary[].class_label] | index("memory_search"))
-    and (.query_results | length) == 2
+    and (.bucket_summary | length) == 6
+    and ([.bucket_summary[].class_label] | sort) == ["approval_gate","baseline_retrieval","fail_open","mcp_surface","rank_movement","runtime_adapter"]
+    and (.query_results | length) == 6
     and ([.query_results[].movement_class] | unique) == ["preflight_blocked"]
     and ([.query_results[].preflight.adapter_allowed] | unique) == [false]
     and ([.query_results[].baseline.key_count] | unique) == [0]
@@ -2621,7 +2643,7 @@ jq -e '
     and .default_search_order_change_allowed == false
     and .default_calls_unchanged == true
 ' "$opt_in_batch_diagnostics_disabled" >/dev/null
-if grep -q 'verify batch diagnostics secret query\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_batch_diagnostics_disabled"; then
+if grep -q 'biocortex opt-in runtime adapter\|runtime influence decision packet\|memory search baseline recall\|redacted order artifact movement\|agent bridge mcp tool registry\|agent bridge mcp\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_batch_diagnostics_disabled"; then
     echo "opt-in batch diagnostics disabled path leaked raw query/key/content data" >&2
     exit 1
 fi
@@ -2632,8 +2654,7 @@ run env AGENT_BRIDGE_DB="$tmpdir/opt-in-batch-diagnostics-empty.db" \
     cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
     bio-cortex retrieval-opt-in-batch-diagnostics \
     --runtime-influence-decision-packet-json "$opt_in_runtime_influence_decision_packet" \
-    --query "verify batch diagnostics ready secret query" \
-    --query-class "Ready Empty" \
+    --query-cases-json "$opt_in_batch_query_cases" \
     --per-call-opt-in \
     --checkout "$biocortex_rs" \
     --limit 3 \
@@ -2642,28 +2663,28 @@ run env AGENT_BRIDGE_DB="$tmpdir/opt-in-batch-diagnostics-empty.db" \
     --json > "$opt_in_batch_diagnostics_empty"
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.opt_in_batch_diagnostics.v0"
-    and .summary.query_count == 1
-    and .summary.baseline_completed_count == 1
-    and .summary.baseline_empty_count == 1
+    and .summary.query_count == 6
+    and .summary.baseline_completed_count == 6
+    and .summary.baseline_empty_count == 6
     and .summary.adapter_allowed_count == 0
     and .summary.side_signal_attempted_count == 0
     and .summary.runs_biocortex_count == 0
-    and .summary.default_calls_unchanged_count == 1
-    and .query_results[0].class_label == "ready_empty"
-    and .query_results[0].movement_class == "preflight_blocked"
-    and .query_results[0].preflight.compile_feature_enabled == true
-    and .query_results[0].preflight.runtime_enabled == true
-    and .query_results[0].preflight.operator_disabled == false
-    and .query_results[0].preflight.decision_packet_authorized == true
-    and .query_results[0].side_signal.attempted == false
-    and .query_results[0].runs_biocortex == false
+    and .summary.default_calls_unchanged_count == 6
+    and ([.query_results[].class_label] | sort) == ["approval_gate","baseline_retrieval","fail_open","mcp_surface","rank_movement","runtime_adapter"]
+    and ([.query_results[].movement_class] | unique) == ["preflight_blocked"]
+    and ([.query_results[].preflight.compile_feature_enabled] | unique) == [true]
+    and ([.query_results[].preflight.runtime_enabled] | unique) == [true]
+    and ([.query_results[].preflight.operator_disabled] | unique) == [false]
+    and ([.query_results[].preflight.decision_packet_authorized] | unique) == [true]
+    and ([.query_results[].side_signal.attempted] | unique) == [false]
+    and ([.query_results[].runs_biocortex] | unique) == [false]
     and .safety.calls_memory_search_all == true
     and .safety.runs_biocortex_any == false
     and .safety.raw_flags_all_false == true
     and .default_search_order_change_allowed == false
     and .default_calls_unchanged == true
 ' "$opt_in_batch_diagnostics_empty" >/dev/null
-if grep -q 'verify batch diagnostics ready secret query\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_batch_diagnostics_empty"; then
+if grep -q 'biocortex opt-in runtime adapter\|runtime influence decision packet\|memory search baseline recall\|redacted order artifact movement\|agent bridge mcp tool registry\|agent bridge mcp\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_batch_diagnostics_empty"; then
     echo "opt-in batch diagnostics empty path leaked raw query/key/content data" >&2
     exit 1
 fi

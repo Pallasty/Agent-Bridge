@@ -2892,6 +2892,10 @@ enum BioCortexOp {
         /// Optional bucket label for the corresponding --query. May be repeated.
         #[arg(long = "query-class")]
         query_classes: Vec<String>,
+        /// JSON file containing query cases. Accepts a bare array or an object
+        /// with `query_cases` / `queries`.
+        #[arg(long = "query-cases-json")]
+        query_cases_json: Option<PathBuf>,
         /// Optional tag filter forwarded to baseline memory_search. May be repeated.
         #[arg(long = "tag")]
         tags_any: Vec<String>,
@@ -4988,6 +4992,7 @@ async fn real_main() -> Result<()> {
                 runtime_influence_decision_packet_json,
                 queries,
                 query_classes,
+                query_cases_json,
                 tags_any,
                 limit,
                 mode,
@@ -5000,14 +5005,11 @@ async fn real_main() -> Result<()> {
                 commit,
                 json,
             } => {
-                let query_cases = queries
-                    .iter()
-                    .enumerate()
-                    .map(|(idx, query)| BioCortexRetrievalOptInBatchQueryCase {
-                        query: query.clone(),
-                        class_label: query_classes.get(idx).cloned(),
-                    })
-                    .collect::<Vec<_>>();
+                let query_cases = load_biocortex_batch_query_cases(
+                    query_cases_json.as_deref(),
+                    queries,
+                    query_classes,
+                )?;
                 run_biocortex_retrieval_opt_in_batch_diagnostics(
                     runtime_influence_decision_packet_json,
                     BioCortexRetrievalOptInBatchDiagnosticsOptions {
@@ -9841,6 +9843,60 @@ async fn run_biocortex_retrieval_opt_in_batch_diagnostics(
         }
     }
     Ok(())
+}
+
+fn load_biocortex_batch_query_cases(
+    query_cases_json: Option<&std::path::Path>,
+    queries: &[String],
+    query_classes: &[String],
+) -> Result<Vec<BioCortexRetrievalOptInBatchQueryCase>> {
+    let mut cases = Vec::new();
+    if let Some(path) = query_cases_json {
+        let body = std::fs::read_to_string(path).map_err(|e| {
+            anyhow::anyhow!("read batch diagnostics query cases JSON at {path:?}: {e}")
+        })?;
+        let value: Value = serde_json::from_str(&body).map_err(|e| {
+            anyhow::anyhow!("parse batch diagnostics query cases JSON at {path:?}: {e}")
+        })?;
+        let Some(values) = batch_query_case_array(&value) else {
+            return Err(anyhow::anyhow!(
+                "batch diagnostics query cases JSON at {path:?} must be an array or contain query_cases/queries array"
+            ));
+        };
+        for value in values {
+            if let Some(query) = value.as_str() {
+                cases.push(BioCortexRetrievalOptInBatchQueryCase {
+                    query: query.to_string(),
+                    class_label: None,
+                });
+            } else if let Some(query) = value.get("query").and_then(Value::as_str) {
+                cases.push(BioCortexRetrievalOptInBatchQueryCase {
+                    query: query.to_string(),
+                    class_label: value
+                        .get("class_label")
+                        .or_else(|| value.get("class"))
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                });
+            }
+        }
+    }
+    cases.extend(queries.iter().enumerate().map(|(idx, query)| {
+        BioCortexRetrievalOptInBatchQueryCase {
+            query: query.clone(),
+            class_label: query_classes.get(idx).cloned(),
+        }
+    }));
+    Ok(cases)
+}
+
+fn batch_query_case_array(value: &Value) -> Option<&Vec<Value>> {
+    value.as_array().or_else(|| {
+        value
+            .get("query_cases")
+            .and_then(Value::as_array)
+            .or_else(|| value.get("queries").and_then(Value::as_array))
+    })
 }
 
 #[cfg(feature = "biocortex-retrieval-shadow")]

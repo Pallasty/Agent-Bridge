@@ -510,6 +510,8 @@ jq -e '
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.default_calls_unchanged == true
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.explicit_opt_in_fts_runtime_adapter_connected == true
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.cli == "agent-bridge bio-cortex retrieval-opt-in-batch-diagnostics"
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.cli_accepts_query_cases_json == true
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.query_cases_fixture == "docs/design/fixtures/biocortex-retrieval-opt-in-batch-diagnostic-queries-2026-06-12.json"
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.mcp_tool == "biocortex_retrieval_opt_in_batch_diagnostics"
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.schema == "agent_bridge.biocortex_retrieval.opt_in_batch_diagnostics.v0"
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.implementation_stage == "store_opt_in_batch_diagnostics"

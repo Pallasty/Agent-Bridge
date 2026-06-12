@@ -540,10 +540,13 @@ Slice 22 added a redacted batch diagnostics artifact over the same protected
 store trial:
 
 - CLI: `agent-bridge bio-cortex retrieval-opt-in-batch-diagnostics`;
+- CLI accepts reusable query-case JSON via `--query-cases-json`;
 - MCP tool: `biocortex_retrieval_opt_in_batch_diagnostics`;
 - packet schema:
   `agent_bridge.biocortex_retrieval.opt_in_batch_diagnostics.v0`;
 - implementation stage: `store_opt_in_batch_diagnostics`;
+- query-case fixture:
+  `docs/design/fixtures/biocortex-retrieval-opt-in-batch-diagnostic-queries-2026-06-12.json`;
 - each query reuses the protected store-trial gate, including the runtime
   influence decision packet, `per_call_opt_in`, feature/env gates, baseline
   recall, side-signal coverage threshold, and fail-open behavior;
