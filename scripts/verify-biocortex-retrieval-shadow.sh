@@ -1111,6 +1111,10 @@ run env AB_BIOCORTEX_RS="$biocortex_rs" AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
     biocortex_retrieval_opt_in_store_trial_ -- --nocapture --test-threads=1
 run cargo test -p ab-bridge --lib --no-default-features \
     biocortex_retrieval_opt_in_runtime_readiness_packet_ -- --nocapture
+run cargo test -p ab-bridge --lib --no-default-features \
+    opt_in_runtime_transition_gate_ -- --nocapture
+run cargo test -p ab-bridge --lib --no-default-features \
+    biocortex_retrieval_opt_in_runtime_transition_gate_ -- --nocapture
 run "$repo_root/scripts/verify-biocortex-runtime-readiness-mcp.sh"
 
 opt_in_status_disabled="$tmpdir/opt-in-status-disabled.json"

@@ -163,6 +163,65 @@ def batch_fixture():
     }
 
 
+def runtime_readiness_packet_fixture():
+    return {
+        "schema": "agent_bridge.biocortex_retrieval.opt_in_runtime_readiness_packet.v0",
+        "read_only": True,
+        "runtime_readiness_packet": True,
+        "implementation_stage": "controlled_opt_in_runtime_readiness_packet",
+        "authorization_scope": "explicit_opt_in_fts_runtime_influence",
+        "status": "completed",
+        "input_contract": {
+            "runtime_influence_decision_packet_included": False,
+            "store_trial_included": False,
+            "batch_diagnostics_included": False,
+            "raw_queries_included": False,
+            "raw_keys_included": False,
+            "content_included": False,
+            "side_signal_raw_included": False,
+            "human_decision_text_included": False,
+        },
+        "readiness": {
+            "control_plane_ready": True,
+            "may_accept_controlled_explicit_opt_in_fts_calls": True,
+            "live_probe_state": "control_plane_ready_no_live_candidates",
+            "live_probe_has_candidates": False,
+            "live_order_influence_ready": False,
+            "default_influence_ready": False,
+            "may_change_default_memory_search_order": False,
+        },
+        "boundary_check": {
+            "runtime_readiness_ready": True,
+            "blockers": [],
+            "requires_per_call_opt_in": True,
+            "requires_operator_disable_absent": True,
+            "requires_fail_open_to_baseline": True,
+            "requires_redacted_audit_only": True,
+            "requires_baseline_candidate_recall": True,
+            "this_packet_grants_new_authorization": False,
+            "this_packet_changes_return_order": False,
+            "this_packet_allows_default_search_order_change": False,
+        },
+        "approval_writes_allowed": False,
+        "writes_approval": False,
+        "calls_memory_search": False,
+        "runs_biocortex": False,
+        "registers_embedding_backend": False,
+        "changes_memory_search_order": False,
+        "default_search_order_change_allowed": False,
+        "default_calls_unchanged": True,
+        "raw_queries_included": False,
+        "raw_keys_included": False,
+        "content_included": False,
+        "side_signal_raw_included": False,
+        "human_decision_text_included": False,
+        "raw_query": "secret transition readiness query",
+        "raw_key": "secret_transition_readiness_key",
+        "content": "secret transition readiness content",
+        "human_decision_text": "secret transition human decision",
+    }
+
+
 messages = [
     {
         "jsonrpc": "2.0",
@@ -196,6 +255,36 @@ messages = [
             },
         },
     },
+    {
+        "jsonrpc": "2.0",
+        "id": 4,
+        "method": "tools/call",
+        "params": {
+            "name": "biocortex_retrieval_opt_in_runtime_transition_gate",
+            "arguments": {
+                "runtime_readiness_packet": runtime_readiness_packet_fixture(),
+                "mode": "fts",
+                "per_call_opt_in": True,
+                "reviewer": "verify-biocortex-runtime-readiness-mcp",
+                "commit": "mcp-smoke",
+                "forum_post_id": "mcp-smoke",
+                "memory_key": "mcp-smoke",
+            },
+        },
+    },
+    {
+        "jsonrpc": "2.0",
+        "id": 5,
+        "method": "tools/call",
+        "params": {
+            "name": "biocortex_retrieval_opt_in_runtime_transition_gate",
+            "arguments": {
+                "runtime_readiness_packet": runtime_readiness_packet_fixture(),
+                "mode": "hybrid",
+                "operator_disabled": True,
+            },
+        },
+    },
 ]
 
 with open(path, "w", encoding="utf-8") as f:
@@ -217,9 +306,10 @@ import json
 import sys
 
 output_path, stderr_path = sys.argv[1:3]
-tool_name = "biocortex_retrieval_opt_in_runtime_readiness_packet"
+readiness_tool_name = "biocortex_retrieval_opt_in_runtime_readiness_packet"
+transition_tool_name = "biocortex_retrieval_opt_in_runtime_transition_gate"
 listed_tools = []
-call_text = None
+call_texts = {}
 errors = []
 
 with open(output_path, encoding="utf-8", errors="replace") as f:
@@ -239,18 +329,20 @@ with open(output_path, encoding="utf-8", errors="replace") as f:
                 for tool in message.get("result", {}).get("tools", [])
                 if isinstance(tool, dict)
             ]
-        if message.get("id") == 3:
+        if message.get("id") in {3, 4, 5}:
             if message.get("error"):
                 errors.append(f"tools/call error: {message['error']}")
             for item in message.get("result", {}).get("content", []):
                 if isinstance(item, dict) and isinstance(item.get("text"), str):
-                    call_text = item["text"]
+                    call_texts[message["id"]] = item["text"]
                     break
 
-if tool_name not in listed_tools:
-    errors.append(f"{tool_name} missing from tools/list")
-if call_text is None:
-    errors.append("missing tools/call text result")
+for tool_name in [readiness_tool_name, transition_tool_name]:
+    if tool_name not in listed_tools:
+        errors.append(f"{tool_name} missing from tools/list")
+for message_id in [3, 4, 5]:
+    if message_id not in call_texts:
+        errors.append(f"missing tools/call text result for id={message_id}")
 if errors:
     print("FAIL: " + "; ".join(errors), file=sys.stderr)
     print(open(stderr_path, encoding="utf-8", errors="replace").read()[-4000:], file=sys.stderr)
@@ -267,12 +359,17 @@ for forbidden in [
     "secret readiness batch query",
     "secret_readiness_batch_key",
     "secret readiness batch content",
+    "secret transition readiness query",
+    "secret_transition_readiness_key",
+    "secret transition readiness content",
+    "secret transition human decision",
 ]:
-    if forbidden in call_text:
-        print(f"FAIL: MCP readiness output leaked {forbidden}", file=sys.stderr)
-        sys.exit(1)
+    for message_id, call_text in call_texts.items():
+        if forbidden in call_text:
+            print(f"FAIL: MCP output id={message_id} leaked {forbidden}", file=sys.stderr)
+            sys.exit(1)
 
-payload = json.loads(call_text)
+payload = json.loads(call_texts[3])
 expected = {
     "schema": "agent_bridge.biocortex_retrieval.opt_in_runtime_readiness_packet.v0",
     "read_only": True,
@@ -308,8 +405,115 @@ if actual != expected:
     print(json.dumps({"actual": actual, "expected": expected}, indent=2), file=sys.stderr)
     sys.exit(1)
 
+transition_payload = json.loads(call_texts[4])
+transition_expected = {
+    "schema": "agent_bridge.biocortex_retrieval.opt_in_runtime_transition_gate.v0",
+    "read_only": True,
+    "runtime_transition_gate": True,
+    "status": "transition_allowed",
+    "mode": "fts",
+    "mode_authorized": True,
+    "per_call_opt_in": True,
+    "operator_disabled": False,
+    "transition_allowed": True,
+    "may_run_runtime_adapter_for_explicit_opt_in_fts": True,
+    "runtime_transition_allowed": True,
+    "blockers": [],
+    "calls_memory_search": False,
+    "runs_biocortex": False,
+    "changes_memory_search_order": False,
+    "default_search_order_change_allowed": False,
+}
+transition_actual = {
+    "schema": transition_payload.get("schema"),
+    "read_only": transition_payload.get("read_only"),
+    "runtime_transition_gate": transition_payload.get("runtime_transition_gate"),
+    "status": transition_payload.get("status"),
+    "mode": transition_payload.get("requested_transition", {}).get("mode"),
+    "mode_authorized": transition_payload.get("requested_transition", {}).get("mode_authorized"),
+    "per_call_opt_in": transition_payload.get("requested_transition", {}).get("per_call_opt_in"),
+    "operator_disabled": transition_payload.get("requested_transition", {}).get("operator_disabled"),
+    "transition_allowed": transition_payload.get("transition", {}).get("transition_allowed"),
+    "may_run_runtime_adapter_for_explicit_opt_in_fts": transition_payload.get("transition", {}).get(
+        "may_run_runtime_adapter_for_explicit_opt_in_fts"
+    ),
+    "runtime_transition_allowed": transition_payload.get("boundary_check", {}).get(
+        "runtime_transition_allowed"
+    ),
+    "blockers": transition_payload.get("boundary_check", {}).get("blockers"),
+    "calls_memory_search": transition_payload.get("calls_memory_search"),
+    "runs_biocortex": transition_payload.get("runs_biocortex"),
+    "changes_memory_search_order": transition_payload.get("changes_memory_search_order"),
+    "default_search_order_change_allowed": transition_payload.get(
+        "default_search_order_change_allowed"
+    ),
+}
+if transition_actual != transition_expected:
+    print("FAIL: unexpected MCP transition allowed payload", file=sys.stderr)
+    print(
+        json.dumps(
+            {"actual": transition_actual, "expected": transition_expected},
+            indent=2,
+        ),
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+blocked_payload = json.loads(call_texts[5])
+blocked_blockers = blocked_payload.get("boundary_check", {}).get("blockers") or []
+blocked_required = [
+    "requested_mode_not_authorized",
+    "per_call_opt_in_missing",
+    "operator_disabled",
+]
+blocked_expected = {
+    "schema": "agent_bridge.biocortex_retrieval.opt_in_runtime_transition_gate.v0",
+    "status": "blocked",
+    "mode": "hybrid",
+    "mode_authorized": False,
+    "per_call_opt_in": False,
+    "operator_disabled": True,
+    "hybrid_requested": True,
+    "transition_allowed": False,
+    "runtime_transition_allowed": False,
+    "required_blockers_present": all(item in blocked_blockers for item in blocked_required),
+    "calls_memory_search": False,
+    "runs_biocortex": False,
+    "changes_memory_search_order": False,
+    "default_search_order_change_allowed": False,
+}
+blocked_actual = {
+    "schema": blocked_payload.get("schema"),
+    "status": blocked_payload.get("status"),
+    "mode": blocked_payload.get("requested_transition", {}).get("mode"),
+    "mode_authorized": blocked_payload.get("requested_transition", {}).get("mode_authorized"),
+    "per_call_opt_in": blocked_payload.get("requested_transition", {}).get("per_call_opt_in"),
+    "operator_disabled": blocked_payload.get("requested_transition", {}).get("operator_disabled"),
+    "hybrid_requested": blocked_payload.get("requested_transition", {}).get(
+        "hybrid_retrieval_influence_requested"
+    ),
+    "transition_allowed": blocked_payload.get("transition", {}).get("transition_allowed"),
+    "runtime_transition_allowed": blocked_payload.get("boundary_check", {}).get(
+        "runtime_transition_allowed"
+    ),
+    "required_blockers_present": all(item in blocked_blockers for item in blocked_required),
+    "calls_memory_search": blocked_payload.get("calls_memory_search"),
+    "runs_biocortex": blocked_payload.get("runs_biocortex"),
+    "changes_memory_search_order": blocked_payload.get("changes_memory_search_order"),
+    "default_search_order_change_allowed": blocked_payload.get(
+        "default_search_order_change_allowed"
+    ),
+}
+if blocked_actual != blocked_expected:
+    print("FAIL: unexpected MCP transition blocked payload", file=sys.stderr)
+    print(
+        json.dumps({"actual": blocked_actual, "expected": blocked_expected}, indent=2),
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
 print(
-    "OK: BioCortex runtime readiness MCP tools/list and tools/call smoke passed "
+    "OK: BioCortex runtime readiness + transition MCP tools/list and tools/call smoke passed "
     f"(tools={len(listed_tools)})"
 )
 PY

@@ -52,6 +52,7 @@ use crate::biocortex_shadow::{
     biocortex_retrieval_opt_in_post_implementation_review_gate,
     biocortex_retrieval_opt_in_redacted_order_artifact, biocortex_retrieval_opt_in_review_packet,
     biocortex_retrieval_opt_in_runtime_readiness_packet,
+    biocortex_retrieval_opt_in_runtime_transition_gate,
     biocortex_retrieval_opt_in_runtime_influence_decision_packet,
     biocortex_retrieval_opt_in_runtime_influence_review_request,
     biocortex_retrieval_opt_in_runtime_trial,
@@ -66,11 +67,13 @@ use crate::biocortex_shadow::{
     BioCortexRetrievalOptInRedactedOrderArtifactOptions,
     BioCortexRetrievalOptInReviewPacketOptions,
     BioCortexRetrievalOptInRuntimeReadinessPacketOptions,
+    BioCortexRetrievalOptInRuntimeTransitionGateOptions,
     BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketOptions,
     BioCortexRetrievalOptInRuntimeInfluenceReviewRequestOptions,
     BioCortexRetrievalOptInRuntimeTrialOptions,
     BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions,
     BioCortexRetrievalOptInStoreTrialOptions, BioCortexShadowOptions, BIOCORTEX_CHECKOUT_ENV,
+    BIOCORTEX_RETRIEVAL_DISABLE_ENV,
 };
 #[cfg(feature = "biocortex-retrieval-shadow")]
 use crate::biocortex_shadow::{biocortex_retrieval_shadow_report, BioCortexRetrievalShadowOptions};
@@ -27082,6 +27085,153 @@ impl McpTool for BioCortexRetrievalOptInRuntimeReadinessPacketTool {
     }
 }
 
+// ===========================================================================
+//  biocortex_retrieval_opt_in_runtime_transition_gate - readiness-gated switch
+// ===========================================================================
+
+/// Read-only BioCortex retrieval opt-in runtime-transition gate. This tool
+/// consumes a runtime-readiness packet and reports whether a requested
+/// explicit opt-in FTS transition may proceed. It never calls `memory_search`,
+/// runs BioCortex, writes approval, exposes raw data, or changes default order.
+pub struct BioCortexRetrievalOptInRuntimeTransitionGateTool;
+
+impl BioCortexRetrievalOptInRuntimeTransitionGateTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for BioCortexRetrievalOptInRuntimeTransitionGateTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn mcp_env_truthy(key: &str) -> bool {
+    std::env::var(key)
+        .ok()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
+#[async_trait]
+impl McpTool for BioCortexRetrievalOptInRuntimeTransitionGateTool {
+    fn name(&self) -> &'static str {
+        "biocortex_retrieval_opt_in_runtime_transition_gate"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only BioCortex retrieval opt-in runtime-transition \
+                 gate. Consumes a runtime-readiness packet and checks that the \
+                 requested transition is explicit per-call FTS, readiness-gated, \
+                 and not operator-disabled. Does not call memory_search, run \
+                 BioCortex, mutate memory, write approval, include raw query/keys/\
+                 content or human decision text, register an EmbeddingBackend, \
+                 allow default search order changes, or alter retrieval order."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["runtime_readiness_packet"],
+                "properties": {
+                    "runtime_readiness_packet": {
+                        "type": "object",
+                        "description": "JSON object produced by biocortex_retrieval_opt_in_runtime_readiness_packet. The tool consumes only safe summary fields and does not echo the packet."
+                    },
+                    "mode": {
+                        "type": "string",
+                        "default": "fts",
+                        "description": "Requested retrieval mode. Only fts can pass this transition gate."
+                    },
+                    "per_call_opt_in": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Required explicit per-call opt-in bit."
+                    },
+                    "operator_disabled": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Treat the operator disable switch as active for this gate. The environment variable AB_BIOCORTEX_RETRIEVAL_DISABLE is also honored."
+                    },
+                    "reviewer": {
+                        "type": "string",
+                        "description": "Optional reviewer identity or handle."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Optional implementation commit under review."
+                    },
+                    "forum_post_id": {
+                        "type": "string",
+                        "description": "Optional forum post id linking this transition gate."
+                    },
+                    "memory_key": {
+                        "type": "string",
+                        "description": "Optional memory key linking this transition gate."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let runtime_readiness_packet = args
+            .get("runtime_readiness_packet")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let mode = args
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("fts")
+            .to_string();
+        let per_call_opt_in = args
+            .get("per_call_opt_in")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let operator_disabled = args
+            .get("operator_disabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            || mcp_env_truthy(BIOCORTEX_RETRIEVAL_DISABLE_ENV);
+        let reviewer = args
+            .get("reviewer")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let commit = args
+            .get("commit")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let forum_post_id = args
+            .get("forum_post_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let memory_key = args
+            .get("memory_key")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+
+        let payload = biocortex_retrieval_opt_in_runtime_transition_gate(
+            BioCortexRetrievalOptInRuntimeTransitionGateOptions {
+                runtime_readiness_packet,
+                mode,
+                per_call_opt_in,
+                operator_disabled,
+                reviewer,
+                commit,
+                forum_post_id,
+                memory_key,
+            },
+        );
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
 fn biocortex_batch_query_cases_from_args(
     args: &Value,
 ) -> Vec<BioCortexRetrievalOptInBatchQueryCase> {
@@ -38468,6 +38618,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Standard,
         Arc::new(BioCortexRetrievalOptInRuntimeReadinessPacketTool::new()),
     );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexRetrievalOptInRuntimeTransitionGateTool::new()),
+    );
     #[cfg(feature = "biocortex-retrieval-shadow")]
     reg_if(
         &mut reg,
@@ -49814,6 +49970,208 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert_eq!(v["calls_memory_search"], json!(false));
         assert_eq!(v["runs_biocortex"], json!(false));
         assert_eq!(v["registers_embedding_backend"], json!(false));
+        assert_eq!(v["changes_memory_search_order"], json!(false));
+        assert_eq!(v["default_search_order_change_allowed"], json!(false));
+    }
+
+    fn biocortex_runtime_transition_readiness_fixture() -> Value {
+        biocortex_retrieval_opt_in_runtime_readiness_packet(
+            BioCortexRetrievalOptInRuntimeReadinessPacketOptions {
+                runtime_influence_decision_packet: biocortex_runtime_readiness_decision_fixture(),
+                store_trial: biocortex_runtime_readiness_store_trial_fixture(),
+                batch_diagnostics: biocortex_runtime_readiness_batch_fixture(),
+                reviewer: Some("codex".to_string()),
+                commit: Some("runtime-readiness-commit".to_string()),
+                forum_post_id: Some("104".to_string()),
+                memory_key: Some("runtime-readiness-memory".to_string()),
+            },
+        )
+    }
+
+    #[test]
+    fn biocortex_retrieval_opt_in_runtime_transition_gate_schema_is_readonly() {
+        let tool = BioCortexRetrievalOptInRuntimeTransitionGateTool::new();
+        let schema = tool.schema();
+        assert_eq!(
+            schema.name,
+            "biocortex_retrieval_opt_in_runtime_transition_gate"
+        );
+        assert!(schema.description.contains("Read-only"));
+        assert!(schema.description.contains("runtime-transition"));
+        assert!(schema.description.contains("Does not call memory_search"));
+        assert!(schema.description.contains("run BioCortex"));
+        assert!(schema.description.contains("human decision text"));
+        assert!(schema.description.contains("alter retrieval order"));
+
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required");
+        assert!(required.contains(&json!("runtime_readiness_packet")));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("runtime_readiness_packet").is_some());
+        assert!(props.get("mode").is_some());
+        assert!(props.get("per_call_opt_in").is_some());
+        assert!(props.get("operator_disabled").is_some());
+        assert!(props.get("reviewer").is_some());
+        assert!(props.get("commit").is_some());
+        assert!(props.get("forum_post_id").is_some());
+        assert!(props.get("memory_key").is_some());
+        assert!(props.get("include_raw").is_none());
+        assert!(props.get("mutate").is_none());
+        assert!(props.get("memory_search").is_none());
+        assert!(props.get("raw_content").is_none());
+
+        let names: Vec<String> = build_registry_with_policy(
+            Hub::builder().build(),
+            ToolPolicy {
+                set: ToolSet::Profile,
+                profile: ToolProfile::Standard,
+            },
+        )
+        .list()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
+        assert!(names.contains(&schema.name));
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_runtime_transition_gate_sanitizes_inputs() {
+        let tool = BioCortexRetrievalOptInRuntimeTransitionGateTool::new();
+        let mut readiness = biocortex_runtime_transition_readiness_fixture();
+        readiness["raw_query"] = json!("secret transition mcp readiness query");
+        readiness["raw_key"] = json!("secret_transition_mcp_readiness_key");
+        readiness["content"] = json!("secret transition mcp readiness content");
+        readiness["human_decision_text"] = json!("secret transition mcp human decision");
+
+        let out = tool
+            .execute(
+                json!({
+                    "runtime_readiness_packet": readiness,
+                    "mode": "fts",
+                    "per_call_opt_in": true,
+                    "reviewer": "codex",
+                    "commit": "runtime-transition-commit",
+                    "forum_post_id": "104",
+                    "memory_key": "runtime-transition-memory"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let text = match out.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains("secret transition mcp readiness query"));
+        assert!(!text.contains("secret_transition_mcp_readiness_key"));
+        assert!(!text.contains("secret transition mcp readiness content"));
+        assert!(!text.contains("secret transition mcp human decision"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_runtime_transition_gate.v0")
+        );
+        assert_eq!(v["read_only"], json!(true));
+        assert_eq!(v["runtime_transition_gate"], json!(true));
+        assert_eq!(
+            v["implementation_stage"],
+            json!("readiness_gated_runtime_transition_gate")
+        );
+        assert_eq!(v["status"], json!("transition_allowed"));
+        assert_eq!(
+            v["input_contract"]["runtime_readiness_packet_included"],
+            json!(false)
+        );
+        assert_eq!(
+            v["requested_transition"]["mode"],
+            json!("fts")
+        );
+        assert_eq!(
+            v["requested_transition"]["mode_authorized"],
+            json!(true)
+        );
+        assert_eq!(
+            v["requested_transition"]["per_call_opt_in"],
+            json!(true)
+        );
+        assert_eq!(
+            v["requested_transition"]["operator_disabled"],
+            json!(false)
+        );
+        assert_eq!(
+            v["transition"]["transition_allowed"],
+            json!(true)
+        );
+        assert_eq!(
+            v["transition"]["may_run_runtime_adapter_for_explicit_opt_in_fts"],
+            json!(true)
+        );
+        assert_eq!(
+            v["boundary_check"]["runtime_transition_allowed"],
+            json!(true)
+        );
+        assert_eq!(v["boundary_check"]["blockers"], json!([]));
+        assert_eq!(v["approval_writes_allowed"], json!(false));
+        assert_eq!(v["writes_approval"], json!(false));
+        assert_eq!(v["calls_memory_search"], json!(false));
+        assert_eq!(v["runs_biocortex"], json!(false));
+        assert_eq!(v["registers_embedding_backend"], json!(false));
+        assert_eq!(v["changes_memory_search_order"], json!(false));
+        assert_eq!(v["default_search_order_change_allowed"], json!(false));
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_runtime_transition_gate_blocks_non_fts() {
+        let tool = BioCortexRetrievalOptInRuntimeTransitionGateTool::new();
+        let out = tool
+            .execute(
+                json!({
+                    "runtime_readiness_packet": biocortex_runtime_transition_readiness_fixture(),
+                    "mode": "hybrid",
+                    "operator_disabled": true
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let text = match out.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(v["status"], json!("blocked"));
+        assert_eq!(v["requested_transition"]["mode"], json!("hybrid"));
+        assert_eq!(v["requested_transition"]["mode_authorized"], json!(false));
+        assert_eq!(v["requested_transition"]["per_call_opt_in"], json!(false));
+        assert_eq!(v["requested_transition"]["operator_disabled"], json!(true));
+        assert_eq!(
+            v["requested_transition"]["hybrid_retrieval_influence_requested"],
+            json!(true)
+        );
+        assert_eq!(
+            v["transition"]["transition_allowed"],
+            json!(false)
+        );
+        assert_eq!(
+            v["boundary_check"]["runtime_transition_allowed"],
+            json!(false)
+        );
+        let blockers = v["boundary_check"]["blockers"]
+            .as_array()
+            .expect("blockers");
+        assert!(blockers.contains(&json!("requested_mode_not_authorized")));
+        assert!(blockers.contains(&json!("per_call_opt_in_missing")));
+        assert!(blockers.contains(&json!("operator_disabled")));
+        assert_eq!(v["calls_memory_search"], json!(false));
+        assert_eq!(v["runs_biocortex"], json!(false));
         assert_eq!(v["changes_memory_search_order"], json!(false));
         assert_eq!(v["default_search_order_change_allowed"], json!(false));
     }
