@@ -27393,9 +27393,10 @@ impl McpTool for BioCortexRetrievalOptInGatedBatchDiagnosticsTool {
 
 /// Read-only BioCortex retrieval opt-in runtime-readiness packet. This tool
 /// consumes aggregate-backed runtime-influence decision, store-trial, and
-/// batch-diagnostics summaries to report whether the explicit opt-in FTS
-/// control plane is ready. It never calls `memory_search`, runs BioCortex,
-/// writes approval, exposes raw query/key/content data, or changes ordering.
+/// legacy or transition-gated batch-diagnostics summaries to report whether
+/// the explicit opt-in FTS control plane is ready. It never calls
+/// `memory_search`, runs BioCortex, writes approval, exposes raw
+/// query/key/content data, or changes ordering.
 pub struct BioCortexRetrievalOptInRuntimeReadinessPacketTool;
 
 impl BioCortexRetrievalOptInRuntimeReadinessPacketTool {
@@ -27421,9 +27422,10 @@ impl McpTool for BioCortexRetrievalOptInRuntimeReadinessPacketTool {
             name: self.name().into(),
             description: "Read-only BioCortex retrieval opt-in runtime-readiness \
                  packet. Consumes aggregate-backed runtime-influence decision, \
-                 store-trial, and batch-diagnostics summaries to report whether \
-                 the explicit opt-in FTS control plane is ready. Distinguishes \
-                 empty live probes from blocked control-plane state. Does not \
+                 store-trial, and legacy or transition-gated batch-diagnostics \
+                 summaries to report whether the explicit opt-in FTS control \
+                 plane is ready. Distinguishes empty live probes from blocked \
+                 control-plane state. Does not \
                  call memory_search, run BioCortex, mutate memory, write approval, \
                  include raw query/keys/content or human decision text, register \
                  an EmbeddingBackend, allow default search order changes, or \
@@ -27447,7 +27449,7 @@ impl McpTool for BioCortexRetrievalOptInRuntimeReadinessPacketTool {
                     },
                     "batch_diagnostics": {
                         "type": "object",
-                        "description": "JSON object produced by biocortex_retrieval_opt_in_batch_diagnostics. The tool consumes only safe aggregate fields and does not echo query rows."
+                        "description": "JSON object produced by biocortex_retrieval_opt_in_batch_diagnostics or biocortex_retrieval_opt_in_gated_batch_diagnostics. The tool consumes only safe aggregate fields and does not echo query rows."
                     },
                     "reviewer": {
                         "type": "string",

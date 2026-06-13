@@ -7429,10 +7429,21 @@ pub fn biocortex_retrieval_opt_in_runtime_readiness_packet(
     ) && value_bool_is(store_trial.get("default_calls_unchanged"), true)
         && value_bool_is(store_trial.get("changes_memory_search_order"), false);
 
-    let batch_schema_ok = value_str_eq(
+    let batch_legacy_schema_ok = value_str_eq(
         batch.get("schema"),
         BIOCORTEX_RETRIEVAL_OPT_IN_BATCH_DIAGNOSTICS_SCHEMA,
     );
+    let batch_gated_schema_ok = value_str_eq(
+        batch.get("schema"),
+        BIOCORTEX_RETRIEVAL_OPT_IN_GATED_BATCH_DIAGNOSTICS_SCHEMA,
+    );
+    let batch_schema_ok = batch_legacy_schema_ok || batch_gated_schema_ok;
+    let batch_transition_gated = batch_gated_schema_ok;
+    let batch_evidence_source = if batch_transition_gated {
+        "runtime_transition_gated_batch_diagnostics"
+    } else {
+        "store_opt_in_batch_diagnostics"
+    };
     let batch_input_contract_ok = value_bool_is(
         batch.pointer("/input_contract/accepts_aggregate_backed_decision_packet"),
         true,
@@ -7445,7 +7456,11 @@ pub fn biocortex_retrieval_opt_in_runtime_readiness_packet(
     ) && value_bool_is(
         batch.pointer("/input_contract/aggregate_evidence_summary_included"),
         false,
-    );
+    ) && (!batch_transition_gated
+        || value_bool_is(
+            batch.pointer("/input_contract/requires_transition_gate_allowed"),
+            true,
+        ));
     let batch_query_results = batch
         .get("query_results")
         .and_then(Value::as_array)
@@ -7463,10 +7478,41 @@ pub fn biocortex_retrieval_opt_in_runtime_readiness_packet(
         .pointer("/summary/baseline_empty_count")
         .and_then(Value::as_u64)
         .unwrap_or(0);
-    let batch_adapter_allowed_count = batch
-        .pointer("/summary/adapter_allowed_count")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
+    let batch_transition_gate_allowed_count = if batch_transition_gated {
+        batch
+            .pointer("/summary/transition_gate_allowed_count")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+    } else {
+        0
+    };
+    let batch_transition_gate_blocked_count = if batch_transition_gated {
+        batch
+            .pointer("/summary/transition_gate_blocked_count")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+    } else {
+        0
+    };
+    let batch_store_trial_called_count = if batch_transition_gated {
+        batch
+            .pointer("/summary/store_trial_called_count")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+    } else {
+        0
+    };
+    let batch_adapter_allowed_count = if batch_transition_gated {
+        batch
+            .pointer("/summary/store_trial_adapter_allowed_count")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+    } else {
+        batch
+            .pointer("/summary/adapter_allowed_count")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+    };
     let batch_side_signal_ok_count = batch
         .pointer("/summary/side_signal_ok_count")
         .and_then(Value::as_u64)
@@ -7477,6 +7523,10 @@ pub fn biocortex_retrieval_opt_in_runtime_readiness_packet(
         .unwrap_or(0);
     let batch_actual_order_changed_count = batch
         .pointer("/summary/actual_order_changed_count")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let batch_calls_memory_search_count = batch
+        .pointer("/summary/calls_memory_search_count")
         .and_then(Value::as_u64)
         .unwrap_or(0);
     let batch_raw_absent = value_bool_is(batch.get("raw_queries_included"), false)
@@ -7494,42 +7544,83 @@ pub fn biocortex_retrieval_opt_in_runtime_readiness_packet(
     let batch_default_safe = value_bool_is(batch.get("default_search_order_change_allowed"), false)
         && value_bool_is(batch.get("default_calls_unchanged"), true)
         && value_bool_is(batch.pointer("/safety/default_calls_unchanged_all"), true);
-    let batch_aggregate_preflight_ok = !batch_query_results.is_empty()
-        && batch_query_results.iter().all(|row| {
-            value_bool_is(row.pointer("/preflight/decision_packet_authorized"), true)
-                && value_bool_is(
-                    row.pointer("/preflight/decision_packet_aggregate_backed"),
+    let batch_transition_gate_ok = !batch_transition_gated
+        || (!batch_query_results.is_empty()
+            && batch_transition_gate_allowed_count == batch_query_count
+            && batch_transition_gate_blocked_count == 0
+            && value_bool_is(batch.pointer("/safety/transition_gate_allowed_all"), true));
+    let batch_aggregate_preflight_ok = if batch_transition_gated {
+        !batch_query_results.is_empty()
+            && batch_transition_gate_ok
+            && batch_store_trial_called_count == batch_transition_gate_allowed_count
+            && value_bool_is(batch.pointer("/safety/store_trial_called_all"), true)
+    } else {
+        !batch_query_results.is_empty()
+            && batch_query_results.iter().all(|row| {
+                value_bool_is(row.pointer("/preflight/decision_packet_authorized"), true)
+                    && value_bool_is(
+                        row.pointer("/preflight/decision_packet_aggregate_backed"),
+                        true,
+                    )
+                    && value_bool_is(
+                        row.pointer("/preflight/decision_packet_aggregate_review_evidence_ready"),
+                        true,
+                    )
+                    && value_bool_is(
+                        row.pointer("/preflight/legacy_decision_packet_without_aggregate_allowed"),
+                        false,
+                    )
+                    && value_bool_is(
+                        row.pointer("/preflight/decision_packet_aggregate_safe_for_trial"),
+                        true,
+                    )
+            })
+    };
+    let batch_preflight_acceptable = if batch_transition_gated {
+        !batch_query_results.is_empty()
+            && batch_query_results.iter().all(|row| {
+                let transition_allowed = value_bool_is(
+                    row.pointer("/transition_preflight/transition_gate_allowed"),
                     true,
-                )
-                && value_bool_is(
-                    row.pointer("/preflight/decision_packet_aggregate_review_evidence_ready"),
-                    true,
-                )
-                && value_bool_is(
-                    row.pointer("/preflight/legacy_decision_packet_without_aggregate_allowed"),
-                    false,
-                )
-                && value_bool_is(
-                    row.pointer("/preflight/decision_packet_aggregate_safe_for_trial"),
-                    true,
-                )
-        });
-    let batch_preflight_acceptable = !batch_query_results.is_empty()
-        && batch_query_results.iter().all(|row| {
-            if value_bool_is(row.pointer("/preflight/adapter_allowed"), true) {
-                row.pointer("/preflight/blocker_count")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(0)
-                    == 0
-            } else {
-                row.pointer("/baseline/key_count").and_then(Value::as_u64) == Some(0)
-                    && row
-                        .pointer("/preflight/blocker_count")
+                );
+                let store_trial_called = value_bool_is(row.pointer("/store_trial/called"), true);
+                if !transition_allowed || !store_trial_called {
+                    false
+                } else if value_bool_is(row.pointer("/store_trial/runtime_adapter_allowed"), true)
+                {
+                    row.pointer("/store_trial/runtime_preflight_blocker_count")
                         .and_then(Value::as_u64)
                         .unwrap_or(0)
-                        == 1
-            }
-        });
+                        == 0
+                } else {
+                    row.pointer("/store_trial/baseline_key_count")
+                        .and_then(Value::as_u64)
+                        == Some(0)
+                        && row
+                            .pointer("/store_trial/runtime_preflight_blocker_count")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(0)
+                            >= 1
+                }
+            })
+    } else {
+        !batch_query_results.is_empty()
+            && batch_query_results.iter().all(|row| {
+                if value_bool_is(row.pointer("/preflight/adapter_allowed"), true) {
+                    row.pointer("/preflight/blocker_count")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0)
+                        == 0
+                } else {
+                    row.pointer("/baseline/key_count").and_then(Value::as_u64) == Some(0)
+                        && row
+                            .pointer("/preflight/blocker_count")
+                            .and_then(Value::as_u64)
+                            .unwrap_or(0)
+                            == 1
+                }
+            })
+    };
 
     let live_probe_has_candidates =
         batch_query_count > 0 && batch_baseline_empty_count < batch_query_count;
@@ -7638,6 +7729,11 @@ pub fn biocortex_retrieval_opt_in_runtime_readiness_packet(
     );
     push_string_blocker(
         &mut blockers,
+        !batch_transition_gated || batch_transition_gate_ok,
+        "batch_transition_gate_not_allowed",
+    );
+    push_string_blocker(
+        &mut blockers,
         batch_aggregate_preflight_ok,
         "batch_query_aggregate_evidence_not_ready",
     );
@@ -7673,6 +7769,8 @@ pub fn biocortex_retrieval_opt_in_runtime_readiness_packet(
             "runtime_influence_decision_packet_schema": decision.get("schema").cloned().unwrap_or(Value::Null),
             "store_trial_schema": store_trial.get("schema").cloned().unwrap_or(Value::Null),
             "batch_diagnostics_schema": batch.get("schema").cloned().unwrap_or(Value::Null),
+            "batch_diagnostics_evidence_source": batch_evidence_source,
+            "batch_diagnostics_transition_gated": batch_transition_gated,
             "runtime_influence_decision_packet_included": false,
             "store_trial_included": false,
             "batch_diagnostics_included": false,
@@ -7716,17 +7814,26 @@ pub fn biocortex_retrieval_opt_in_runtime_readiness_packet(
         },
         "batch_summary": {
             "schema_ok": batch_schema_ok,
+            "legacy_schema_ok": batch_legacy_schema_ok,
+            "gated_schema_ok": batch_gated_schema_ok,
+            "evidence_source": batch_evidence_source,
+            "transition_gated": batch_transition_gated,
+            "transition_gate_ok": batch_transition_gate_ok,
             "input_contract_ok": batch_input_contract_ok,
             "raw_inputs_absent": batch_raw_absent,
             "aggregate_preflight_ok": batch_aggregate_preflight_ok,
             "preflight_acceptable": batch_preflight_acceptable,
             "query_count": batch_query_count,
+            "transition_gate_allowed_count": batch_transition_gate_allowed_count,
+            "transition_gate_blocked_count": batch_transition_gate_blocked_count,
+            "store_trial_called_count": batch_store_trial_called_count,
             "baseline_completed_count": batch_baseline_completed_count,
             "baseline_empty_count": batch_baseline_empty_count,
             "adapter_allowed_count": batch_adapter_allowed_count,
             "side_signal_ok_count": batch_side_signal_ok_count,
             "experimental_source_count": batch_experimental_source_count,
             "actual_order_changed_count": batch_actual_order_changed_count,
+            "calls_memory_search_count": batch_calls_memory_search_count,
             "default_order_safe": batch_default_safe,
         },
         "readiness": {
@@ -13455,6 +13562,104 @@ mod tests {
         assert!(!serialized.contains("secret readiness batch query"));
         assert!(!serialized.contains("secret_readiness_batch_key"));
         assert!(!serialized.contains("secret readiness batch content"));
+    }
+
+    #[tokio::test]
+    async fn opt_in_runtime_readiness_packet_accepts_gated_batch_evidence() {
+        let _env = EnvRestore::capture(&[BIOCORTEX_RETRIEVAL_DISABLE_ENV]);
+        std::env::remove_var(BIOCORTEX_RETRIEVAL_DISABLE_ENV);
+        let decision_packet = biocortex_retrieval_opt_in_runtime_influence_decision_packet(
+            BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketOptions {
+                runtime_influence_review_request:
+                    opt_in_aggregate_backed_runtime_influence_review_request_fixture(),
+                runtime_influence_decision: opt_in_runtime_influence_decision_fixture(),
+                reviewer: Some("codex".to_string()),
+                commit: Some("runtime-decision-commit".to_string()),
+                forum_post_id: Some("104".to_string()),
+                memory_key: Some("runtime-decision-memory".to_string()),
+            },
+        );
+        let (store, dir) = empty_sqlite_store("runtime-readiness-gated-batch").await;
+        let gated_batch = biocortex_retrieval_opt_in_gated_batch_diagnostics(
+            &store,
+            BioCortexRetrievalOptInGatedBatchDiagnosticsOptions {
+                runtime_transition_gate: opt_in_runtime_transition_gate_fixture(),
+                runtime_influence_decision_packet: decision_packet.clone(),
+                queries: vec![
+                    BioCortexRetrievalOptInBatchQueryCase {
+                        query: "secret readiness gated batch query one".to_string(),
+                        class_label: Some("Gated One".to_string()),
+                    },
+                    BioCortexRetrievalOptInBatchQueryCase {
+                        query: "secret readiness gated batch query two".to_string(),
+                        class_label: Some("Gated Two".to_string()),
+                    },
+                ],
+                tags_any: vec![],
+                limit: 3,
+                mode: "fts".to_string(),
+                per_call_opt_in: true,
+                checkout: None,
+                timeout_ms: 1_000,
+                coverage_threshold: 0.5,
+                blend_alpha: CANDIDATE_STRONG_RETRIEVAL_ALPHA,
+                attempt_id: Some("readiness-gated-batch".to_string()),
+                commit: Some("runtime-transition-commit".to_string()),
+            },
+        )
+        .await;
+
+        let packet = biocortex_retrieval_opt_in_runtime_readiness_packet(
+            BioCortexRetrievalOptInRuntimeReadinessPacketOptions {
+                runtime_influence_decision_packet: decision_packet,
+                store_trial: opt_in_runtime_readiness_store_trial_fixture(),
+                batch_diagnostics: gated_batch,
+                reviewer: Some("codex".to_string()),
+                commit: Some("runtime-readiness-gated-batch-commit".to_string()),
+                forum_post_id: Some("104".to_string()),
+                memory_key: Some("runtime-readiness-gated-batch-memory".to_string()),
+            },
+        );
+
+        assert_eq!(packet["readiness"]["control_plane_ready"], json!(true));
+        assert_eq!(
+            packet["input_contract"]["batch_diagnostics_evidence_source"],
+            json!("runtime_transition_gated_batch_diagnostics")
+        );
+        assert_eq!(
+            packet["input_contract"]["batch_diagnostics_transition_gated"],
+            json!(true)
+        );
+        assert_eq!(packet["batch_summary"]["gated_schema_ok"], json!(true));
+        assert_eq!(
+            packet["batch_summary"]["evidence_source"],
+            json!("runtime_transition_gated_batch_diagnostics")
+        );
+        assert_eq!(packet["batch_summary"]["transition_gated"], json!(true));
+        assert_eq!(packet["batch_summary"]["transition_gate_ok"], json!(true));
+        assert_eq!(
+            packet["batch_summary"]["transition_gate_allowed_count"],
+            json!(2)
+        );
+        assert_eq!(
+            packet["batch_summary"]["transition_gate_blocked_count"],
+            json!(0)
+        );
+        assert_eq!(packet["batch_summary"]["store_trial_called_count"], json!(2));
+        assert_eq!(packet["batch_summary"]["calls_memory_search_count"], json!(2));
+        assert_eq!(
+            packet["readiness"]["live_probe_state"],
+            json!("control_plane_ready_no_live_candidates")
+        );
+        assert_eq!(packet["calls_memory_search"], json!(false));
+        assert_eq!(packet["runs_biocortex"], json!(false));
+        assert_eq!(packet["changes_memory_search_order"], json!(false));
+        assert_eq!(packet["default_search_order_change_allowed"], json!(false));
+
+        let serialized = serde_json::to_string(&packet).expect("readiness json");
+        assert!(!serialized.contains("secret readiness gated batch query one"));
+        assert!(!serialized.contains("secret readiness gated batch query two"));
+        let _ = tokio::fs::remove_dir_all(dir).await;
     }
 
     #[test]

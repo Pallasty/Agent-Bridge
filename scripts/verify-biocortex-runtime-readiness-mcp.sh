@@ -163,6 +163,89 @@ def batch_fixture():
     }
 
 
+def gated_batch_fixture():
+    return {
+        "schema": "agent_bridge.biocortex_retrieval.opt_in_gated_batch_diagnostics.v0",
+        "gated_batch_diagnostics": True,
+        "implementation_stage": "runtime_transition_gated_batch_diagnostics",
+        "status": "completed",
+        "input_contract": {
+            "runtime_transition_gate_included": False,
+            "runtime_influence_decision_packet_included": False,
+            "requires_transition_gate_allowed": True,
+            "accepts_aggregate_backed_decision_packet": True,
+            "requires_aggregate_ready_when_provided": True,
+            "redacted_evidence_aggregate_included": False,
+            "aggregate_evidence_summary_included": False,
+            "raw_queries_included": False,
+            "raw_keys_included": False,
+            "content_included": False,
+            "side_signal_raw_included": False,
+        },
+        "summary": {
+            "query_count": 1,
+            "transition_gate_allowed_count": 1,
+            "transition_gate_blocked_count": 0,
+            "store_trial_called_count": 1,
+            "store_trial_adapter_allowed_count": 0,
+            "baseline_completed_count": 1,
+            "baseline_empty_count": 1,
+            "side_signal_ok_count": 0,
+            "experimental_source_count": 0,
+            "actual_order_changed_count": 0,
+            "calls_memory_search_count": 1,
+            "default_calls_unchanged_count": 1,
+        },
+        "query_results": [
+            {
+                "transition_preflight": {
+                    "transition_gate_allowed": True,
+                    "blocker_count": 0,
+                },
+                "store_trial": {
+                    "called": True,
+                    "runtime_adapter_allowed": False,
+                    "runtime_preflight_blocker_count": 1,
+                    "baseline_completed": True,
+                    "baseline_key_count": 0,
+                    "side_signal_status": "not_attempted",
+                    "returned_order_source": "baseline",
+                    "actual_return_order_changed": False,
+                },
+                "calls_memory_search": True,
+                "runs_biocortex": False,
+                "changes_memory_search_order": False,
+                "default_calls_unchanged": True,
+                "raw_query": "secret readiness gated batch query",
+                "raw_key": "secret_readiness_gated_batch_key",
+                "content": "secret readiness gated batch content",
+            }
+        ],
+        "safety": {
+            "transition_gate_allowed_all": True,
+            "transition_gate_blocked_all": False,
+            "store_trial_called_all": True,
+            "calls_memory_search_all": True,
+            "runs_biocortex_any": False,
+            "default_calls_unchanged_all": True,
+            "raw_flags_all_false": True,
+        },
+        "boundary": {
+            "gate_consumed": True,
+            "calls_memory_search": True,
+        },
+        "calls_memory_search": True,
+        "runs_biocortex": False,
+        "changes_memory_search_order": False,
+        "default_search_order_change_allowed": False,
+        "default_calls_unchanged": True,
+        "raw_queries_included": False,
+        "raw_keys_included": False,
+        "content_included": False,
+        "side_signal_raw_included": False,
+    }
+
+
 def runtime_readiness_packet_fixture():
     return {
         "schema": "agent_bridge.biocortex_retrieval.opt_in_runtime_readiness_packet.v0",
@@ -389,6 +472,23 @@ messages = [
             },
         },
     },
+    {
+        "jsonrpc": "2.0",
+        "id": 8,
+        "method": "tools/call",
+        "params": {
+            "name": "biocortex_retrieval_opt_in_runtime_readiness_packet",
+            "arguments": {
+                "runtime_influence_decision_packet": decision_fixture(),
+                "store_trial": store_trial_fixture(),
+                "batch_diagnostics": gated_batch_fixture(),
+                "reviewer": "verify-biocortex-runtime-readiness-mcp",
+                "commit": "mcp-smoke-gated-batch-readiness",
+                "forum_post_id": "mcp-smoke-gated-batch-readiness",
+                "memory_key": "mcp-smoke-gated-batch-readiness",
+            },
+        },
+    },
 ]
 
 with open(path, "w", encoding="utf-8") as f:
@@ -435,7 +535,7 @@ with open(output_path, encoding="utf-8", errors="replace") as f:
                 for tool in message.get("result", {}).get("tools", [])
                 if isinstance(tool, dict)
             ]
-        if message.get("id") in {3, 4, 5, 6, 7}:
+        if message.get("id") in {3, 4, 5, 6, 7, 8}:
             if message.get("error"):
                 errors.append(f"tools/call error: {message['error']}")
             for item in message.get("result", {}).get("content", []):
@@ -451,7 +551,7 @@ for tool_name in [
 ]:
     if tool_name not in listed_tools:
         errors.append(f"{tool_name} missing from tools/list")
-for message_id in [3, 4, 5, 6, 7]:
+for message_id in [3, 4, 5, 6, 7, 8]:
     if message_id not in call_texts:
         errors.append(f"missing tools/call text result for id={message_id}")
 if errors:
@@ -479,6 +579,9 @@ for forbidden in [
     "secret gated transition gate content",
     "secret gated mcp smoke query",
     "secret gated batch mcp smoke query",
+    "secret readiness gated batch query",
+    "secret_readiness_gated_batch_key",
+    "secret readiness gated batch content",
 ]:
     for message_id, call_text in call_texts.items():
         if forbidden in call_text:
@@ -519,6 +622,78 @@ actual = {
 if actual != expected:
     print("FAIL: unexpected MCP readiness payload", file=sys.stderr)
     print(json.dumps({"actual": actual, "expected": expected}, indent=2), file=sys.stderr)
+    sys.exit(1)
+
+gated_readiness_payload = json.loads(call_texts[8])
+gated_readiness_expected = {
+    "schema": "agent_bridge.biocortex_retrieval.opt_in_runtime_readiness_packet.v0",
+    "control_plane_ready": True,
+    "batch_evidence_source": "runtime_transition_gated_batch_diagnostics",
+    "batch_transition_gated": True,
+    "batch_gated_schema_ok": True,
+    "batch_transition_gate_ok": True,
+    "batch_transition_gate_allowed_count": 1,
+    "batch_transition_gate_blocked_count": 0,
+    "batch_store_trial_called_count": 1,
+    "batch_calls_memory_search_count": 1,
+    "runtime_readiness_ready": True,
+    "blockers": [],
+    "calls_memory_search": False,
+    "runs_biocortex": False,
+    "changes_memory_search_order": False,
+    "default_search_order_change_allowed": False,
+}
+gated_readiness_actual = {
+    "schema": gated_readiness_payload.get("schema"),
+    "control_plane_ready": gated_readiness_payload.get("readiness", {}).get(
+        "control_plane_ready"
+    ),
+    "batch_evidence_source": gated_readiness_payload.get("batch_summary", {}).get(
+        "evidence_source"
+    ),
+    "batch_transition_gated": gated_readiness_payload.get("batch_summary", {}).get(
+        "transition_gated"
+    ),
+    "batch_gated_schema_ok": gated_readiness_payload.get("batch_summary", {}).get(
+        "gated_schema_ok"
+    ),
+    "batch_transition_gate_ok": gated_readiness_payload.get("batch_summary", {}).get(
+        "transition_gate_ok"
+    ),
+    "batch_transition_gate_allowed_count": gated_readiness_payload.get(
+        "batch_summary", {}
+    ).get("transition_gate_allowed_count"),
+    "batch_transition_gate_blocked_count": gated_readiness_payload.get(
+        "batch_summary", {}
+    ).get("transition_gate_blocked_count"),
+    "batch_store_trial_called_count": gated_readiness_payload.get("batch_summary", {}).get(
+        "store_trial_called_count"
+    ),
+    "batch_calls_memory_search_count": gated_readiness_payload.get(
+        "batch_summary", {}
+    ).get("calls_memory_search_count"),
+    "runtime_readiness_ready": gated_readiness_payload.get("boundary_check", {}).get(
+        "runtime_readiness_ready"
+    ),
+    "blockers": gated_readiness_payload.get("boundary_check", {}).get("blockers"),
+    "calls_memory_search": gated_readiness_payload.get("calls_memory_search"),
+    "runs_biocortex": gated_readiness_payload.get("runs_biocortex"),
+    "changes_memory_search_order": gated_readiness_payload.get(
+        "changes_memory_search_order"
+    ),
+    "default_search_order_change_allowed": gated_readiness_payload.get(
+        "default_search_order_change_allowed"
+    ),
+}
+if gated_readiness_actual != gated_readiness_expected:
+    print("FAIL: unexpected MCP gated-batch readiness payload", file=sys.stderr)
+    print(
+        json.dumps(
+            {"actual": gated_readiness_actual, "expected": gated_readiness_expected},
+            indent=2,
+        ),
+        file=sys.stderr,
+    )
     sys.exit(1)
 
 transition_payload = json.loads(call_texts[4])

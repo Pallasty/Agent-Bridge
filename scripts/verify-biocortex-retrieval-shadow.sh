@@ -3716,6 +3716,8 @@ jq -e '
     and .input_contract.runtime_influence_decision_packet_included == false
     and .input_contract.store_trial_included == false
     and .input_contract.batch_diagnostics_included == false
+    and .input_contract.batch_diagnostics_evidence_source == "store_opt_in_batch_diagnostics"
+    and .input_contract.batch_diagnostics_transition_gated == false
     and .input_contract.requires_aggregate_backed_decision_packet == true
     and .input_contract.requires_downstream_aggregate_preflight == true
     and .input_contract.raw_queries_included == false
@@ -3735,6 +3737,11 @@ jq -e '
     and .store_trial_summary.blockers_without_live_data == []
     and .batch_summary.aggregate_preflight_ok == true
     and .batch_summary.preflight_acceptable == true
+    and .batch_summary.evidence_source == "store_opt_in_batch_diagnostics"
+    and .batch_summary.transition_gated == false
+    and .batch_summary.legacy_schema_ok == true
+    and .batch_summary.gated_schema_ok == false
+    and .batch_summary.transition_gate_ok == true
     and .batch_summary.query_count == 6
     and .batch_summary.baseline_empty_count == 6
     and .batch_summary.adapter_allowed_count == 0
@@ -4038,6 +4045,66 @@ jq -e '
 ' "$opt_in_gated_batch_diagnostics_empty_with_aggregate" >/dev/null
 if grep -q 'verify gated batch allowed secret query one\|verify gated batch allowed secret query two\|verify gated store trial allowed secret query\|verify aggregate-backed store trial ready secret query\|cortexdelta\|axonalpha\|expanded_corpus_baseline_focus\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_gated_batch_diagnostics_empty_with_aggregate"; then
     echo "opt-in gated batch diagnostics allowed path leaked raw query/key/content data" >&2
+    exit 1
+fi
+
+opt_in_runtime_readiness_packet_with_gated_batch="$tmpdir/opt-in-runtime-readiness-packet-with-gated-batch.json"
+run cargo run -p ab-bridge --no-default-features -- \
+    bio-cortex retrieval-opt-in-runtime-readiness-packet \
+    --runtime-influence-decision-packet-json "$opt_in_runtime_influence_decision_packet_with_aggregate" \
+    --store-trial-json "$opt_in_store_trial_empty_with_aggregate" \
+    --batch-diagnostics-json "$opt_in_gated_batch_diagnostics_empty_with_aggregate" \
+    --reviewer verify-bundle \
+    --commit verify-dry-run-commit \
+    --forum-post-id verify-forum-post \
+    --memory-key verify-memory-key-gated-batch \
+    --json > "$opt_in_runtime_readiness_packet_with_gated_batch"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_runtime_readiness_packet.v0"
+    and .read_only == true
+    and .runtime_readiness_packet == true
+    and .status == "completed"
+    and .input_contract.runtime_influence_decision_packet_included == false
+    and .input_contract.store_trial_included == false
+    and .input_contract.batch_diagnostics_included == false
+    and .input_contract.batch_diagnostics_evidence_source == "runtime_transition_gated_batch_diagnostics"
+    and .input_contract.batch_diagnostics_transition_gated == true
+    and .input_contract.raw_queries_included == false
+    and .input_contract.raw_keys_included == false
+    and .input_contract.content_included == false
+    and .input_contract.side_signal_raw_included == false
+    and .batch_summary.schema_ok == true
+    and .batch_summary.legacy_schema_ok == false
+    and .batch_summary.gated_schema_ok == true
+    and .batch_summary.evidence_source == "runtime_transition_gated_batch_diagnostics"
+    and .batch_summary.transition_gated == true
+    and .batch_summary.transition_gate_ok == true
+    and .batch_summary.transition_gate_allowed_count == 2
+    and .batch_summary.transition_gate_blocked_count == 0
+    and .batch_summary.store_trial_called_count == 2
+    and .batch_summary.calls_memory_search_count == 2
+    and .batch_summary.aggregate_preflight_ok == true
+    and .batch_summary.preflight_acceptable == true
+    and .batch_summary.query_count == 2
+    and .batch_summary.baseline_empty_count == 2
+    and .readiness.control_plane_ready == true
+    and .readiness.live_probe_state == "control_plane_ready_no_live_candidates"
+    and .readiness.live_order_influence_ready == false
+    and .readiness.may_accept_controlled_explicit_opt_in_fts_calls == true
+    and .boundary_check.runtime_readiness_ready == true
+    and .boundary_check.blockers == []
+    and .calls_memory_search == false
+    and .runs_biocortex == false
+    and .changes_memory_search_order == false
+    and .default_search_order_change_allowed == false
+    and .default_calls_unchanged == true
+    and .raw_queries_included == false
+    and .raw_keys_included == false
+    and .content_included == false
+    and .side_signal_raw_included == false
+' "$opt_in_runtime_readiness_packet_with_gated_batch" >/dev/null
+if grep -q 'verify gated batch allowed secret query one\|verify gated batch allowed secret query two\|verify gated store trial allowed secret query\|verify aggregate-backed store trial ready secret query\|cortexdelta\|axonalpha\|expanded_corpus_baseline_focus\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_runtime_readiness_packet_with_gated_batch"; then
+    echo "opt-in runtime readiness packet with gated batch leaked raw query/key/content data" >&2
     exit 1
 fi
 

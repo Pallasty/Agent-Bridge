@@ -3054,8 +3054,8 @@ enum BioCortexOp {
     /// Summarize controlled explicit opt-in runtime readiness.
     ///
     /// This consumes only safe summaries from an aggregate-backed
-    /// runtime-influence decision packet, one store trial, and one batch
-    /// diagnostics run. It reports operator readiness without calling
+    /// runtime-influence decision packet, one store trial, and one legacy or
+    /// transition-gated batch diagnostics run. It reports operator readiness without calling
     /// `memory_search`, running BioCortex, writing approval state, or changing
     /// default retrieval order.
     RetrievalOptInRuntimeReadinessPacket {
@@ -3065,7 +3065,8 @@ enum BioCortexOp {
         /// JSON file produced by retrieval-opt-in-store-trial.
         #[arg(long = "store-trial-json")]
         store_trial_json: PathBuf,
-        /// JSON file produced by retrieval-opt-in-batch-diagnostics.
+        /// JSON file produced by retrieval-opt-in-batch-diagnostics or
+        /// retrieval-opt-in-gated-batch-diagnostics.
         #[arg(long = "batch-diagnostics-json")]
         batch_diagnostics_json: PathBuf,
         /// Reviewer identity or handle.
@@ -10607,6 +10608,11 @@ fn run_biocortex_retrieval_opt_in_runtime_readiness_packet(
             payload.pointer("/readiness/default_influence_ready"),
             "false"
         )
+    );
+    println!(
+        "batch_evidence_source={} transition_gated={}",
+        shadow_json_display(payload.pointer("/batch_summary/evidence_source"), "-"),
+        shadow_json_display(payload.pointer("/batch_summary/transition_gated"), "false")
     );
     let boundary = payload.get("boundary_check").unwrap_or(&Value::Null);
     println!(
