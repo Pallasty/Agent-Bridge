@@ -1478,6 +1478,9 @@ fn extract_candidate_preview(records: &[ObservationRecord], limit: usize) -> Vec
             break;
         }
         let sid = record.sid.as_deref().unwrap_or("?").to_string();
+        if !is_reviewable_session_id(&sid) {
+            continue;
+        }
         match record.ev.as_deref() {
             Some("UserPromptSubmit") => {
                 let prompt = record.prompt.as_deref().unwrap_or_default();
@@ -1533,6 +1536,14 @@ fn extract_candidate_preview(records: &[ObservationRecord], limit: usize) -> Vec
         }
     }
     candidates
+}
+
+fn is_reviewable_session_id(sid: &str) -> bool {
+    sid.len() >= 16
+        && sid.contains('-')
+        && sid
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '-')
 }
 
 fn summarize(
@@ -1753,6 +1764,8 @@ fn is_executable(path: &Path) -> bool {
 mod tests {
     use super::*;
 
+    const TEST_SID: &str = "019e0000-0000-7000-8000-000000000001";
+
     fn write_jsonl(path: &Path, rows: &[Value]) {
         let mut text = String::new();
         for row in rows {
@@ -1864,14 +1877,20 @@ mod tests {
             &log,
             &[
                 json!({
-                    "ts": 1.0,
+                    "ts": 0.5,
                     "sid": "s1",
+                    "ev": "UserPromptSubmit",
+                    "prompt": "不对，这条 synthetic session 不应进入候选"
+                }),
+                json!({
+                    "ts": 1.0,
+                    "sid": TEST_SID,
                     "ev": "UserPromptSubmit",
                     "prompt": "不对，应该改成 secret prompt detail"
                 }),
                 json!({
                     "ts": 2.0,
-                    "sid": "s1",
+                    "sid": TEST_SID,
                     "ev": "PostToolUse",
                     "tool": "Bash",
                     "err": true,
@@ -1881,7 +1900,7 @@ mod tests {
                 }),
                 json!({
                     "ts": 3.0,
-                    "sid": "s1",
+                    "sid": TEST_SID,
                     "ev": "PostToolUse",
                     "tool": "Bash",
                     "err": false,
@@ -1913,6 +1932,7 @@ mod tests {
         );
         assert_eq!(preview["candidate_count"], json!(2));
         assert_eq!(preview["candidates"][0]["kind"], json!("correction_prompt"));
+        assert_eq!(preview["candidates"][0]["session_id"], json!(TEST_SID));
         assert_eq!(
             preview["candidates"][1]["kind"],
             json!("clean_error_resolution")
@@ -1939,13 +1959,13 @@ mod tests {
             &[
                 json!({
                     "ts": 1.0,
-                    "sid": "s1",
+                    "sid": TEST_SID,
                     "ev": "UserPromptSubmit",
                     "prompt": "错了，应该改成 secret review prompt"
                 }),
                 json!({
                     "ts": 2.0,
-                    "sid": "s1",
+                    "sid": TEST_SID,
                     "ev": "PostToolUse",
                     "tool": "Bash",
                     "err": true,
@@ -1955,7 +1975,7 @@ mod tests {
                 }),
                 json!({
                     "ts": 3.0,
-                    "sid": "s1",
+                    "sid": TEST_SID,
                     "ev": "PostToolUse",
                     "tool": "Bash",
                     "err": false,
@@ -2037,7 +2057,7 @@ mod tests {
             &log,
             &[json!({
                 "ts": 1.0,
-                "sid": "s1",
+                "sid": TEST_SID,
                 "ev": "UserPromptSubmit",
                 "prompt": "不对，应该改成 secret decision prompt"
             })],
@@ -2115,7 +2135,7 @@ mod tests {
             &log,
             &[json!({
                 "ts": 1.0,
-                "sid": "s1",
+                "sid": TEST_SID,
                 "ev": "UserPromptSubmit",
                 "prompt": "应该改成 secret preflight prompt"
             })],
@@ -2207,7 +2227,7 @@ mod tests {
             &log,
             &[json!({
                 "ts": 1.0,
-                "sid": "s1",
+                "sid": TEST_SID,
                 "ev": "UserPromptSubmit",
                 "prompt": "不对，应该改成 secret write prompt"
             })],
@@ -2282,7 +2302,7 @@ mod tests {
             &log,
             &[json!({
                 "ts": 1.0,
-                "sid": "s1",
+                "sid": TEST_SID,
                 "ev": "UserPromptSubmit",
                 "prompt": "不对，应该改成 secret status prompt"
             })],

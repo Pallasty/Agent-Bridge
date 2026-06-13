@@ -83,6 +83,8 @@ work rather than block normal Agent-Bridge startup.
 Phase 1 candidate preview is also read-only: it reports redacted correction and
 clean error-resolution candidates for human review, but does not write memories,
 persist a review queue, or include raw prompt/tool input/output bodies.
+Synthetic or malformed session ids are ignored so local test fixtures do not
+enter the human-review packet.
 
 `agent-bridge instinct review-packet` turns the same redacted candidates into a
 human-review packet. It is a dry-run preview unless `--write` is passed; even
