@@ -43,7 +43,9 @@ now grants only explicit opt-in FTS runtime influence while keeping default,
 hybrid, and semantic influence unauthorized. Post-decision runtime readiness now
 confirms that the formal decision packet can drive the gated store/readiness
 chain to `ready_for_controlled_explicit_opt_in_fts_trial` without changing
-default retrieval order.
+default retrieval order. A follow-up post-runtime-evidence-backed decision
+packet now tightens that chain so the final readiness/gate/status surfaces all
+report `post_runtime_evidence_summary_ready=true`.
 
 ```json
 {
@@ -78,7 +80,9 @@ default retrieval order.
   "runtime_influence_review_request_summary_landed": true,
   "runtime_influence_authorization_decision_landed": true,
   "post_decision_runtime_readiness_recorded": true,
+  "post_runtime_evidence_backed_decision_recorded": true,
   "controlled_explicit_opt_in_fts_trial_ready": true,
+  "post_runtime_evidence_backed_controlled_trial_ready": true,
   "explicit_opt_in_fts_runtime_influence_authorized": true,
   "ordering_behavior_connected": false,
   "explicit_opt_in_fts_ordering_behavior_connected": true,
@@ -808,6 +812,33 @@ Slice 34 records post-decision runtime readiness:
 - the status surface reports
   `ready_for_controlled_explicit_opt_in_fts_trial` with no blockers;
 - default `memory_search`, hybrid search, semantic search, approval state,
+  raw query/key/content redaction, and default search order remain unchanged.
+
+Slice 35 records a post-runtime-evidence-backed decision/readiness chain:
+
+- the committed document is
+  `docs/design/BIOCORTEX_RETRIEVAL_POST_RUNTIME_EVIDENCE_BACKED_DECISION_2026_06_13.md`;
+- the committed machine-readable summary is
+  `docs/design/fixtures/biocortex-retrieval-post-runtime-evidence-backed-decision-2026-06-13.json`;
+- the local evidence directory is
+  `target/biocortex-post-runtime-evidence-20260613`;
+- `retrieval-opt-in-evidence-summary` reports
+  `review_state=post_runtime_evidence_ready`,
+  `runtime_readiness_requirement_met=true`, and
+  `readiness_gated_batch_evidence_ready=true`;
+- the follow-up runtime-influence review request reports
+  `post_runtime_evidence_summary_ready=true` while still granting nothing;
+- the follow-up runtime-influence decision packet reports
+  `post_runtime_evidence_summary_backed_review_request=true`,
+  `post_runtime_evidence_summary_ready=true`, and
+  `post_runtime_evidence_summary_state=post_runtime_evidence_ready`;
+- downstream store trial, readiness packet, transition gate, gated store, gated
+  batch, and status surfaces were replayed with the post-runtime-backed
+  decision packet;
+- the final status surface again reports
+  `ready_for_controlled_explicit_opt_in_fts_trial`, now with
+  `post_runtime_evidence_summary_ready=true`;
+- default `memory_search`, hybrid search, semantic search, approval writes,
   raw query/key/content redaction, and default search order remain unchanged.
 
 ## Fail-Open Rules
