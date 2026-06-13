@@ -66,6 +66,8 @@ ECC 的 `ECC_HOOK_PROFILE=minimal|standard|strict` 是上述 toggle 的**便利�
 # 跑只读审计快照：python3 scripts/instinct_density_audit.py
 # JSON 输出：python3 scripts/instinct_density_audit.py --json
 # Phase 1 候选预览：agent-bridge instinct candidates --limit 20 --json
+# Phase 1 人工审核包预览：agent-bridge instinct review-packet --limit 20 --json
+# 显式写出脱敏 JSON/Markdown 审核材料：agent-bridge instinct review-packet --limit 20 --write
 ```
 
 `agent-bridge doctor` and the MCP `capabilities` tool also expose the observer
@@ -76,6 +78,15 @@ work rather than block normal Agent-Bridge startup.
 Phase 1 candidate preview is also read-only: it reports redacted correction and
 clean error-resolution candidates for human review, but does not write memories,
 persist a review queue, or include raw prompt/tool input/output bodies.
+
+`agent-bridge instinct review-packet` turns the same redacted candidates into a
+human-review packet. It is a dry-run preview unless `--write` is passed; even
+when writing packet files, it only creates private local JSON/Markdown review
+materials and still does not write memory, persist an approval queue, auto-apply
+anything, or include raw prompt/tool payload bodies. The default review
+directory is `/Data/agent-bridge/instinct-review` when `/Data` is available, or
+`~/.cache/agent-bridge/instinct-review` otherwise; `AB_INSTINCT_REVIEW_DIR` can
+override it.
 
 Security posture: the observer sidecar is local-only and private by default.
 The hook honors `AB_INSTINCT_OBSERVER_LOG`; otherwise it prefers

@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -166,6 +167,19 @@ pub fn observer_candidate_preview(limit: usize) -> Value {
     observer_candidate_preview_for_path(&default_observer_log_path(), limit)
 }
 
+pub fn default_review_dir_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("AB_INSTINCT_REVIEW_DIR") {
+        return PathBuf::from(path);
+    }
+    if Path::new("/Data").is_dir() {
+        return PathBuf::from("/Data/agent-bridge/instinct-review");
+    }
+    home_dir()
+        .join(".cache")
+        .join("agent-bridge")
+        .join("instinct-review")
+}
+
 pub fn observer_candidate_preview_for_path(log_path: &Path, limit: usize) -> Value {
     let records = load_records(log_path);
     let analyzed = analyze_records(&records);
@@ -210,6 +224,117 @@ pub fn observer_candidate_preview_for_path(log_path: &Path, limit: usize) -> Val
         },
         "candidates": candidates,
     })
+}
+
+pub fn observer_review_packet(
+    limit: usize,
+    reviewer: Option<&str>,
+    out_dir: Option<&Path>,
+    write: bool,
+) -> std::io::Result<Value> {
+    let now_unix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    observer_review_packet_for_paths(
+        &default_observer_log_path(),
+        out_dir.unwrap_or(&default_review_dir_path()),
+        limit,
+        reviewer,
+        now_unix,
+        write,
+    )
+}
+
+pub fn observer_review_packet_for_paths(
+    log_path: &Path,
+    out_dir: &Path,
+    limit: usize,
+    reviewer: Option<&str>,
+    now_unix: u64,
+    write: bool,
+) -> std::io::Result<Value> {
+    let preview = observer_candidate_preview_for_path(log_path, limit);
+    let candidate_count = preview
+        .get("candidate_count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let packet_id = format!("instinct-review-{now_unix}");
+    let json_path = out_dir.join(format!("{packet_id}.json"));
+    let markdown_path = out_dir.join(format!("{packet_id}.md"));
+    let status = if write {
+        if candidate_count > 0 {
+            "written"
+        } else {
+            "written_no_candidates"
+        }
+    } else if candidate_count > 0 {
+        "preview_only"
+    } else {
+        "preview_no_candidates"
+    };
+
+    let mut packet = json!({
+        "schema": "agent_bridge.instinct_observer.phase1_review_packet.v0",
+        "packet_id": packet_id,
+        "generated_at_unix": now_unix,
+        "phase": "phase1_human_review_packet",
+        "status": status,
+        "dry_run": !write,
+        "reviewer": reviewer,
+        "review_dir": out_dir.display().to_string(),
+        "json_path": json_path.display().to_string(),
+        "markdown_path": markdown_path.display().to_string(),
+        "source_log_path": log_path.display().to_string(),
+        "candidate_count": candidate_count,
+        "writes_files": write,
+        "writes_memory": false,
+        "persists_review_queue": false,
+        "auto_apply_allowed": false,
+        "human_review_required": true,
+        "raw_prompt_included": false,
+        "raw_tool_input_included": false,
+        "raw_tool_output_included": false,
+        "human_review_checklist": [
+            "Open the Markdown packet and inspect each candidate id.",
+            "Use the local observer log only when more context is needed.",
+            "Approve only lessons that are stable, non-secret, and reusable.",
+            "Reject or defer ambiguous candidates.",
+            "Run a separate explicit command before any memory write."
+        ],
+        "allowed_review_actions": [
+            "approve_candidate_for_future_explicit_memory_write",
+            "reject_candidate",
+            "defer_candidate_pending_more_context"
+        ],
+        "blocked_actions": [
+            "auto_write_memory",
+            "auto_apply_without_human_review",
+            "include_raw_prompt_or_tool_payload",
+            "treat_packet_as_approval_queue"
+        ],
+        "recommended_next_step": if candidate_count > 0 {
+            "review_markdown_packet_before_any_memory_write"
+        } else {
+            "wait_for_more_observations"
+        },
+        "candidate_preview": preview,
+    });
+
+    if write {
+        std::fs::create_dir_all(out_dir)?;
+        set_private_dir_permissions(out_dir)?;
+        packet["written"] = json!(true);
+        let markdown = render_review_packet_markdown(&packet);
+        let body = serde_json::to_string_pretty(&packet)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        write_private_file(&json_path, body.as_bytes())?;
+        write_private_file(&markdown_path, markdown.as_bytes())?;
+    } else {
+        packet["written"] = json!(false);
+    }
+
+    Ok(packet)
 }
 
 pub fn rotate_observer_log(dry_run: bool) -> std::io::Result<Value> {
@@ -258,6 +383,132 @@ pub fn rotate_observer_log_for_path(
         "max_bytes": OBSERVER_MAX_BYTES,
         "rotation_recommended": log_bytes >= OBSERVER_MAX_BYTES,
     }))
+}
+
+fn render_review_packet_markdown(packet: &Value) -> String {
+    let mut out = String::new();
+    out.push_str("# Instinct Observer Review Packet\n\n");
+    out.push_str(&format!(
+        "- packet_id: `{}`\n",
+        value_str(packet.get("packet_id"))
+    ));
+    out.push_str(&format!(
+        "- generated_at_unix: `{}`\n",
+        value_str(packet.get("generated_at_unix"))
+    ));
+    out.push_str(&format!(
+        "- status: `{}`\n",
+        value_str(packet.get("status"))
+    ));
+    out.push_str(&format!(
+        "- candidate_count: `{}`\n",
+        value_str(packet.get("candidate_count"))
+    ));
+    out.push_str(&format!(
+        "- reviewer: `{}`\n",
+        value_str(packet.get("reviewer"))
+    ));
+
+    out.push_str("\n## Boundary\n\n");
+    out.push_str("- writes_memory: `false`\n");
+    out.push_str("- persists_review_queue: `false`\n");
+    out.push_str("- auto_apply_allowed: `false`\n");
+    out.push_str("- raw_prompt_included: `false`\n");
+    out.push_str("- raw_tool_input_included: `false`\n");
+    out.push_str("- raw_tool_output_included: `false`\n");
+
+    out.push_str("\n## Candidates\n\n");
+    if let Some(candidates) = packet
+        .pointer("/candidate_preview/candidates")
+        .and_then(|v| v.as_array())
+    {
+        if candidates.is_empty() {
+            out.push_str("_No candidates in this packet._\n");
+        }
+        for candidate in candidates {
+            out.push_str(&format!(
+                "### {} `{}`\n\n",
+                value_str(candidate.get("candidate_id")),
+                value_str(candidate.get("kind"))
+            ));
+            out.push_str(&format!(
+                "- review_state: `{}`\n",
+                value_str(candidate.get("review_state"))
+            ));
+            out.push_str(&format!(
+                "- session_id: `{}`\n",
+                value_str(candidate.get("session_id"))
+            ));
+            if let Some(tool) = candidate.get("tool") {
+                out.push_str(&format!("- tool: `{}`\n", value_str(Some(tool))));
+            }
+            if let Some(cues) = candidate.get("matched_cues").and_then(|v| v.as_array()) {
+                let joined = cues
+                    .iter()
+                    .map(|cue| value_str(Some(cue)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                out.push_str(&format!("- matched_cues: `{joined}`\n"));
+            }
+            out.push_str("- decision: `[ ] approve` `[ ] reject` `[ ] defer`\n");
+            out.push_str("- reviewer_note:\n\n");
+        }
+    }
+
+    out.push_str("\n## Review Checklist\n\n");
+    if let Some(items) = packet
+        .get("human_review_checklist")
+        .and_then(|v| v.as_array())
+    {
+        for item in items {
+            out.push_str(&format!("- [ ] {}\n", value_str(Some(item))));
+        }
+    }
+    out.push_str("\nNo memory write is authorized by this packet.\n");
+    out
+}
+
+fn value_str(value: Option<&Value>) -> String {
+    match value {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Number(n)) => n.to_string(),
+        Some(Value::Bool(b)) => b.to_string(),
+        Some(Value::Null) | None => "-".to_string(),
+        Some(other) => other.to_string(),
+    }
+}
+
+fn write_private_file(path: &Path, body: &[u8]) -> std::io::Result<()> {
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(path)?;
+    file.write_all(body)?;
+    set_private_file_permissions(path)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_private_dir_permissions(path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+}
+
+#[cfg(not(unix))]
+fn set_private_dir_permissions(_path: &Path) -> std::io::Result<()> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_private_file_permissions(path: &Path) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+}
+
+#[cfg(not(unix))]
+fn set_private_file_permissions(_path: &Path) -> std::io::Result<()> {
+    Ok(())
 }
 
 fn observer_log_archive_path(log_path: &Path, now_unix: u64) -> PathBuf {
@@ -887,6 +1138,104 @@ mod tests {
         assert!(!text.contains("secret failing output"));
         assert!(!text.contains("secret fixed command"));
         assert!(!text.contains("secret fixed output"));
+    }
+
+    #[test]
+    fn observer_review_packet_writes_redacted_private_review_files_only_when_requested() {
+        let tmp = tempfile::tempdir().unwrap();
+        let log = tmp.path().join("observations.jsonl");
+        let out_dir = tmp.path().join("review");
+        write_jsonl(
+            &log,
+            &[
+                json!({
+                    "ts": 1.0,
+                    "sid": "s1",
+                    "ev": "UserPromptSubmit",
+                    "prompt": "错了，应该改成 secret review prompt"
+                }),
+                json!({
+                    "ts": 2.0,
+                    "sid": "s1",
+                    "ev": "PostToolUse",
+                    "tool": "Bash",
+                    "err": true,
+                    "err_source": "exit_code",
+                    "in": "secret review failing command",
+                    "out": "secret review failing output"
+                }),
+                json!({
+                    "ts": 3.0,
+                    "sid": "s1",
+                    "ev": "PostToolUse",
+                    "tool": "Bash",
+                    "err": false,
+                    "in": "secret review fixed command",
+                    "out": "secret review fixed output"
+                }),
+            ],
+        );
+
+        let dry_run = observer_review_packet_for_paths(
+            &log,
+            &out_dir,
+            20,
+            Some("tester"),
+            1_780_747_010,
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            dry_run["schema"],
+            "agent_bridge.instinct_observer.phase1_review_packet.v0"
+        );
+        assert_eq!(dry_run["dry_run"], json!(true));
+        assert_eq!(dry_run["written"], json!(false));
+        assert_eq!(dry_run["writes_files"], json!(false));
+        assert_eq!(dry_run["writes_memory"], json!(false));
+        assert!(
+            !out_dir.exists(),
+            "dry-run must not create a review directory"
+        );
+
+        let packet = observer_review_packet_for_paths(
+            &log,
+            &out_dir,
+            20,
+            Some("tester"),
+            1_780_747_011,
+            true,
+        )
+        .unwrap();
+        assert_eq!(packet["dry_run"], json!(false));
+        assert_eq!(packet["written"], json!(true));
+        assert_eq!(packet["writes_files"], json!(true));
+        assert_eq!(packet["writes_memory"], json!(false));
+        assert_eq!(packet["persists_review_queue"], json!(false));
+        assert_eq!(packet["candidate_count"], json!(2));
+
+        let json_path = PathBuf::from(packet["json_path"].as_str().unwrap());
+        let markdown_path = PathBuf::from(packet["markdown_path"].as_str().unwrap());
+        assert!(json_path.exists());
+        assert!(markdown_path.exists());
+        assert_eq!(mode_octal(&out_dir).as_deref(), Some("700"));
+        assert_eq!(mode_octal(&json_path).as_deref(), Some("600"));
+        assert_eq!(mode_octal(&markdown_path).as_deref(), Some("600"));
+
+        let json_body = std::fs::read_to_string(json_path).unwrap();
+        let written_packet: Value = serde_json::from_str(&json_body).unwrap();
+        assert_eq!(written_packet["written"], json!(true));
+        let body = format!(
+            "{}\n{}",
+            json_body,
+            std::fs::read_to_string(markdown_path).unwrap()
+        );
+        assert!(!body.contains("secret review prompt"));
+        assert!(!body.contains("secret review failing command"));
+        assert!(!body.contains("secret review failing output"));
+        assert!(!body.contains("secret review fixed command"));
+        assert!(!body.contains("secret review fixed output"));
+        assert!(body.contains("No memory write is authorized"));
     }
 
     #[test]

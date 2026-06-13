@@ -321,6 +321,28 @@ enum InstinctOp {
         #[arg(long)]
         json: bool,
     },
+    /// Build a redacted human review packet from Phase 1 candidates. Preview
+    /// only by default; --write writes JSON + Markdown and still never writes
+    /// memories.
+    ReviewPacket {
+        /// Maximum candidate rows to include.
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        /// Optional reviewer label recorded in the packet.
+        #[arg(long)]
+        reviewer: Option<String>,
+        /// Optional output directory for --write. Defaults to the private
+        /// instinct review sidecar directory.
+        #[arg(long)]
+        out_dir: Option<PathBuf>,
+        /// Write JSON + Markdown packet files. Without this flag the command is
+        /// a dry-run preview.
+        #[arg(long)]
+        write: bool,
+        /// Emit raw JSON payload instead of a compact command line summary.
+        #[arg(long)]
+        json: bool,
+    },
     /// Rotate the local instinct observer JSONL log by renaming it to a
     /// timestamped archive path. The hook recreates a fresh log on its next
     /// event.
@@ -5912,6 +5934,60 @@ async fn real_main() -> Result<()> {
                             );
                         }
                     }
+                }
+                Ok(())
+            }
+            InstinctOp::ReviewPacket {
+                limit,
+                reviewer,
+                out_dir,
+                write,
+                json,
+            } => {
+                let packet = instinct::observer_review_packet(
+                    *limit,
+                    reviewer.as_deref(),
+                    out_dir.as_deref(),
+                    *write,
+                )
+                .context("build instinct observer review packet")?;
+                if *json {
+                    println!("{}", serde_json::to_string_pretty(&packet)?);
+                } else {
+                    println!(
+                        "instinct review packet: status={} candidates={} written={} next={}",
+                        packet
+                            .get("status")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown"),
+                        packet
+                            .get("candidate_count")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0),
+                        packet
+                            .get("written")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false),
+                        packet
+                            .get("recommended_next_step")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown"),
+                    );
+                    println!(
+                        "json={} markdown={} memory_write={}",
+                        packet
+                            .get("json_path")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("-"),
+                        packet
+                            .get("markdown_path")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("-"),
+                        packet
+                            .get("writes_memory")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false),
+                    );
                 }
                 Ok(())
             }
