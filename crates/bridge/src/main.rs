@@ -2522,6 +2522,18 @@ enum BioCortexOp {
         /// Optional latency in milliseconds for audit-shape previews.
         #[arg(long)]
         latency_ms: Option<f64>,
+        /// Optional JSON file produced by `retrieval-opt-in-runtime-readiness-packet --json`.
+        #[arg(long = "runtime-readiness-packet-json")]
+        runtime_readiness_packet_json: Option<PathBuf>,
+        /// Optional JSON file produced by `retrieval-opt-in-runtime-transition-gate --json`.
+        #[arg(long = "runtime-transition-gate-json")]
+        runtime_transition_gate_json: Option<PathBuf>,
+        /// Optional JSON file produced by `retrieval-opt-in-gated-store-trial --json`.
+        #[arg(long = "gated-store-trial-json")]
+        gated_store_trial_json: Option<PathBuf>,
+        /// Optional JSON file produced by `retrieval-opt-in-gated-batch-diagnostics --json`.
+        #[arg(long = "gated-batch-diagnostics-json")]
+        gated_batch_diagnostics_json: Option<PathBuf>,
         /// Emit raw JSON instead of pretty text.
         #[arg(long)]
         json: bool,
@@ -4984,8 +4996,28 @@ async fn real_main() -> Result<()> {
                 side_signal_status,
                 fallback_reason,
                 latency_ms,
+                runtime_readiness_packet_json,
+                runtime_transition_gate_json,
+                gated_store_trial_json,
+                gated_batch_diagnostics_json,
                 json,
             } => {
+                let runtime_readiness_packet = read_optional_json_file(
+                    runtime_readiness_packet_json.as_deref(),
+                    "runtime readiness packet",
+                )?;
+                let runtime_transition_gate = read_optional_json_file(
+                    runtime_transition_gate_json.as_deref(),
+                    "runtime transition gate",
+                )?;
+                let gated_store_trial = read_optional_json_file(
+                    gated_store_trial_json.as_deref(),
+                    "gated store trial",
+                )?;
+                let gated_batch_diagnostics = read_optional_json_file(
+                    gated_batch_diagnostics_json.as_deref(),
+                    "gated batch diagnostics",
+                )?;
                 run_biocortex_retrieval_opt_in_status(
                     BioCortexRetrievalOptInAuditOptions {
                         mode: mode.clone(),
@@ -4995,6 +5027,10 @@ async fn real_main() -> Result<()> {
                         side_signal_status: side_signal_status.clone(),
                         fallback_reason: fallback_reason.clone(),
                         latency_ms: *latency_ms,
+                        runtime_readiness_packet,
+                        runtime_transition_gate,
+                        gated_store_trial,
+                        gated_batch_diagnostics,
                     },
                     *json,
                 )
@@ -9456,7 +9492,32 @@ async fn run_biocortex_retrieval_opt_in_status(
         shadow_json_display(payload.get("may_change_search_order_now"), "false"),
         shadow_json_display(payload.get("changes_memory_search_order"), "false")
     );
+    let controlled = payload
+        .get("controlled_trial_readiness")
+        .unwrap_or(&Value::Null);
+    println!(
+        "controlled_trial_status={} ready={} evidence_provided={} blockers={}",
+        shadow_json_display(controlled.get("status"), "-"),
+        shadow_json_display(controlled.get("ready_for_controlled_trial"), "false"),
+        shadow_json_display(controlled.get("evidence_provided"), "false"),
+        controlled
+            .get("blockers")
+            .and_then(Value::as_array)
+            .map(|items| items.len().to_string())
+            .unwrap_or_else(|| "0".to_string())
+    );
     Ok(())
+}
+
+fn read_optional_json_file(path: Option<&std::path::Path>, label: &str) -> Result<Option<Value>> {
+    let Some(path) = path else {
+        return Ok(None);
+    };
+    let body = std::fs::read_to_string(path)
+        .map_err(|e| anyhow::anyhow!("read opt-in {label} JSON at {path:?}: {e}"))?;
+    serde_json::from_str(&body)
+        .map(Some)
+        .map_err(|e| anyhow::anyhow!("parse opt-in {label} JSON at {path:?}: {e}"))
 }
 
 async fn run_biocortex_retrieval_opt_in_dry_run(

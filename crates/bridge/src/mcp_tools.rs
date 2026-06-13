@@ -25658,6 +25658,22 @@ impl McpTool for BioCortexRetrievalOptInStatusTool {
                     "latency_ms": {
                         "type": "number",
                         "description": "Optional latency in milliseconds for audit-shape previews."
+                    },
+                    "runtime_readiness_packet": {
+                        "type": "object",
+                        "description": "Optional JSON object produced by biocortex_retrieval_opt_in_runtime_readiness_packet. The status tool consumes only safe summary fields and never echoes the packet."
+                    },
+                    "runtime_transition_gate": {
+                        "type": "object",
+                        "description": "Optional JSON object produced by biocortex_retrieval_opt_in_runtime_transition_gate. The status tool consumes only safe summary fields and never echoes the gate."
+                    },
+                    "gated_store_trial": {
+                        "type": "object",
+                        "description": "Optional JSON object produced by biocortex_retrieval_opt_in_gated_store_trial. The status tool consumes only safe summary fields and never echoes query data."
+                    },
+                    "gated_batch_diagnostics": {
+                        "type": "object",
+                        "description": "Optional JSON object produced by biocortex_retrieval_opt_in_gated_batch_diagnostics. The status tool consumes only safe summary fields and never echoes query rows."
                     }
                 }
             }),
@@ -25694,6 +25710,10 @@ impl McpTool for BioCortexRetrievalOptInStatusTool {
             .and_then(Value::as_str)
             .map(str::to_string);
         let latency_ms = args.get("latency_ms").and_then(Value::as_f64);
+        let runtime_readiness_packet = args.get("runtime_readiness_packet").cloned();
+        let runtime_transition_gate = args.get("runtime_transition_gate").cloned();
+        let gated_store_trial = args.get("gated_store_trial").cloned();
+        let gated_batch_diagnostics = args.get("gated_batch_diagnostics").cloned();
 
         let payload =
             biocortex_retrieval_opt_in_audit_report(BioCortexRetrievalOptInAuditOptions {
@@ -25704,6 +25724,10 @@ impl McpTool for BioCortexRetrievalOptInStatusTool {
                 side_signal_status,
                 fallback_reason,
                 latency_ms,
+                runtime_readiness_packet,
+                runtime_transition_gate,
+                gated_store_trial,
+                gated_batch_diagnostics,
             });
         Ok(ToolResult::json_text(&payload))
     }

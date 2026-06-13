@@ -4892,6 +4892,84 @@ if grep -q 'verify evidence-summary transition gated batch secret query\|verify 
     exit 1
 fi
 
+opt_in_status_controlled_trial_readiness="$tmpdir/opt-in-status-controlled-trial-readiness.json"
+run env AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
+    cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
+    bio-cortex retrieval-opt-in-status \
+    --mode fts \
+    --per-call-opt-in \
+    --query "verify controlled status secret query" \
+    --baseline-key verify_controlled_status_secret_key \
+    --runtime-readiness-packet-json "$opt_in_runtime_readiness_packet_with_evidence_summary" \
+    --runtime-transition-gate-json "$opt_in_runtime_transition_gate_with_evidence_summary" \
+    --gated-store-trial-json "$opt_in_gated_store_trial_with_evidence_summary_transition" \
+    --gated-batch-diagnostics-json "$opt_in_gated_batch_diagnostics_with_evidence_summary_transition" \
+    --json > "$opt_in_status_controlled_trial_readiness"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_call_audit.v0"
+    and .mode == "fts"
+    and .mode_authorized == true
+    and .gate.status == "ready_for_explicit_opt_in_experiment"
+    and .controlled_trial_readiness.schema == "agent_bridge.biocortex_retrieval.controlled_trial_readiness_summary.v0"
+    and .controlled_trial_readiness.evidence_provided == true
+    and .controlled_trial_readiness.status == "ready_for_controlled_explicit_opt_in_fts_trial"
+    and .controlled_trial_readiness.ready_for_controlled_trial == true
+    and .controlled_trial_readiness.blockers == []
+    and .controlled_trial_readiness.requested_mode == "fts"
+    and .controlled_trial_readiness.requested_per_call_opt_in == true
+    and .controlled_trial_readiness.status_request_ok == true
+    and .controlled_trial_readiness.runtime_readiness_packet.provided == true
+    and .controlled_trial_readiness.runtime_readiness_packet.schema_ok == true
+    and .controlled_trial_readiness.runtime_readiness_packet.control_plane_ready == true
+    and .controlled_trial_readiness.runtime_readiness_packet.boundary_ready == true
+    and .controlled_trial_readiness.runtime_readiness_packet.side_effects_absent == true
+    and .controlled_trial_readiness.runtime_readiness_packet.ready == true
+    and .controlled_trial_readiness.runtime_readiness_packet.post_runtime_evidence_summary_backed == true
+    and .controlled_trial_readiness.runtime_readiness_packet.post_runtime_evidence_summary_ready == true
+    and .controlled_trial_readiness.runtime_readiness_packet.post_runtime_evidence_summary_state == "post_runtime_evidence_ready"
+    and .controlled_trial_readiness.runtime_readiness_packet.post_runtime_batch_evidence_source == "runtime_transition_gated_batch_diagnostics"
+    and .controlled_trial_readiness.runtime_transition_gate.provided == true
+    and .controlled_trial_readiness.runtime_transition_gate.schema_ok == true
+    and .controlled_trial_readiness.runtime_transition_gate.request_ok == true
+    and .controlled_trial_readiness.runtime_transition_gate.transition_allowed == true
+    and .controlled_trial_readiness.runtime_transition_gate.side_effects_absent == true
+    and .controlled_trial_readiness.runtime_transition_gate.ready == true
+    and .controlled_trial_readiness.runtime_transition_gate.post_runtime_evidence_summary_backed == true
+    and .controlled_trial_readiness.runtime_transition_gate.post_runtime_evidence_summary_ready == true
+    and .controlled_trial_readiness.runtime_transition_gate.post_runtime_evidence_summary_state == "post_runtime_evidence_ready"
+    and .controlled_trial_readiness.runtime_transition_gate.post_runtime_batch_evidence_source == "runtime_transition_gated_batch_diagnostics"
+    and .controlled_trial_readiness.gated_store_trial.provided == true
+    and .controlled_trial_readiness.gated_store_trial.schema_ok == true
+    and .controlled_trial_readiness.gated_store_trial.gate_consumed == true
+    and .controlled_trial_readiness.gated_store_trial.ready == true
+    and .controlled_trial_readiness.gated_store_trial.post_runtime_evidence_summary_ready == true
+    and .controlled_trial_readiness.gated_store_trial.store_trial_called == true
+    and .controlled_trial_readiness.gated_store_trial.calls_memory_search == true
+    and .controlled_trial_readiness.gated_store_trial.changes_memory_search_order == false
+    and .controlled_trial_readiness.gated_batch_diagnostics.provided == true
+    and .controlled_trial_readiness.gated_batch_diagnostics.schema_ok == true
+    and .controlled_trial_readiness.gated_batch_diagnostics.ready == true
+    and .controlled_trial_readiness.gated_batch_diagnostics.post_runtime_evidence_summary_ready == true
+    and .controlled_trial_readiness.gated_batch_diagnostics.query_count == 1
+    and .controlled_trial_readiness.gated_batch_diagnostics.transition_gate_allowed_count == 1
+    and .controlled_trial_readiness.gated_batch_diagnostics.store_trial_called_count == 1
+    and .controlled_trial_readiness.gated_batch_diagnostics.calls_memory_search_count == 1
+    and .controlled_trial_readiness.status_surface_calls_memory_search == false
+    and .controlled_trial_readiness.status_surface_runs_biocortex == false
+    and .controlled_trial_readiness.status_surface_changes_memory_search_order == false
+    and .controlled_trial_readiness.raw_packets_included == false
+    and .controlled_trial_readiness.raw_queries_included == false
+    and .controlled_trial_readiness.raw_keys_included == false
+    and .controlled_trial_readiness.content_included == false
+    and .changes_memory_search_order == false
+    and .default_search_order_change_allowed == false
+    and .default_calls_unchanged == true
+' "$opt_in_status_controlled_trial_readiness" >/dev/null
+if grep -q 'verify controlled status secret query\|verify_controlled_status_secret_key\|verify evidence-summary transition gated batch secret query\|verify evidence-summary transition gated store trial secret query\|verify evidence-summary store trial ready secret query\|verify evidence-summary gated batch secret query one\|verify evidence-summary gated batch secret query two\|verify evidence-summary gated store trial secret query\|secret evidence summary raw query\|secret_evidence_summary_key\|secret evidence summary content\|verify gated batch allowed secret query one\|verify gated batch allowed secret query two\|verify gated store trial allowed secret query\|verify aggregate-backed store trial ready secret query\|cortexdelta\|axonalpha\|expanded_corpus_baseline_focus\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_status_controlled_trial_readiness"; then
+    echo "opt-in status controlled trial readiness leaked raw query/key/content data" >&2
+    exit 1
+fi
+
 opt_in_gated_batch_diagnostics_blocked="$tmpdir/opt-in-gated-batch-diagnostics-blocked.json"
 run env AGENT_BRIDGE_DB="$tmpdir/opt-in-gated-batch-diagnostics-blocked.db" \
     cargo run -p ab-bridge --no-default-features -- \
