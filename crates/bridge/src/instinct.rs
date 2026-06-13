@@ -666,6 +666,117 @@ pub fn observer_memory_write_plan_for_path(
     }))
 }
 
+pub fn observer_review_status(
+    review_dir: Option<&Path>,
+    decisions_path: Option<&Path>,
+    limit: usize,
+) -> std::io::Result<Value> {
+    observer_review_status_for_paths(
+        review_dir.unwrap_or(&default_review_dir_path()),
+        decisions_path.unwrap_or(&default_review_decisions_path()),
+        limit,
+    )
+}
+
+pub fn observer_review_status_for_paths(
+    review_dir: &Path,
+    decisions_path: &Path,
+    limit: usize,
+) -> std::io::Result<Value> {
+    let mut packets = Vec::new();
+    let mut preflights = Vec::new();
+    let mut parse_errors = Vec::new();
+    if review_dir.is_dir() {
+        for entry in std::fs::read_dir(review_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                continue;
+            }
+            match std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|body| serde_json::from_str::<Value>(&body).ok())
+            {
+                Some(value) => {
+                    let schema = value.get("schema").and_then(|v| v.as_str()).unwrap_or("");
+                    let mut compact = json!({
+                        "path": path.display().to_string(),
+                        "schema": schema,
+                        "generated_at_unix": value.get("generated_at_unix").cloned().unwrap_or(Value::Null),
+                    });
+                    match schema {
+                        "agent_bridge.instinct_observer.phase1_review_packet.v0" => {
+                            compact["packet_id"] =
+                                value.get("packet_id").cloned().unwrap_or(Value::Null);
+                            compact["candidate_count"] =
+                                value.get("candidate_count").cloned().unwrap_or(Value::Null);
+                            compact["written"] =
+                                value.get("written").cloned().unwrap_or(Value::Null);
+                            packets.push(compact);
+                        }
+                        "agent_bridge.instinct_observer.phase1_memory_write_preflight.v0" => {
+                            compact["preflight_id"] =
+                                value.get("preflight_id").cloned().unwrap_or(Value::Null);
+                            compact["candidate_id"] =
+                                value.get("candidate_id").cloned().unwrap_or(Value::Null);
+                            compact["ready_for_separate_memory_write"] = value
+                                .get("ready_for_separate_memory_write")
+                                .cloned()
+                                .unwrap_or(Value::Null);
+                            compact["written"] =
+                                value.get("written").cloned().unwrap_or(Value::Null);
+                            compact["memory_key"] = value
+                                .pointer("/memory_draft/key")
+                                .cloned()
+                                .unwrap_or(Value::Null);
+                            preflights.push(compact);
+                        }
+                        _ => {}
+                    }
+                }
+                None => parse_errors.push(path.display().to_string()),
+            }
+        }
+    }
+
+    sort_generated_desc(&mut packets);
+    sort_generated_desc(&mut preflights);
+    let decisions = load_review_decisions(decisions_path)?;
+    let mut decision_counts: BTreeMap<String, u64> = BTreeMap::new();
+    for decision in &decisions {
+        let key = decision
+            .get("decision")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string();
+        *decision_counts.entry(key).or_default() += 1;
+    }
+
+    Ok(json!({
+        "schema": "agent_bridge.instinct_observer.phase1_review_status.v0",
+        "read_only": true,
+        "review_dir": review_dir.display().to_string(),
+        "decisions_path": decisions_path.display().to_string(),
+        "review_dir_exists": review_dir.is_dir(),
+        "decisions_log_exists": decisions_path.is_file(),
+        "packet_count": packets.len(),
+        "decision_count": decisions.len(),
+        "preflight_count": preflights.len(),
+        "ready_preflight_count": preflights
+            .iter()
+            .filter(|p| p.get("ready_for_separate_memory_write").and_then(|v| v.as_bool()).unwrap_or(false))
+            .count(),
+        "decision_counts": decision_counts,
+        "parse_error_count": parse_errors.len(),
+        "parse_errors": parse_errors,
+        "writes_memory": false,
+        "auto_apply_allowed": false,
+        "latest_packets": packets.into_iter().take(limit).collect::<Vec<_>>(),
+        "latest_decisions": decisions.into_iter().rev().take(limit).collect::<Vec<_>>(),
+        "latest_preflights": preflights.into_iter().take(limit).collect::<Vec<_>>(),
+    }))
+}
+
 pub fn rotate_observer_log(dry_run: bool) -> std::io::Result<Value> {
     let now_unix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -913,12 +1024,35 @@ fn latest_decision_for_candidate(
     decisions_path: &Path,
     candidate_id: &str,
 ) -> std::io::Result<Option<Value>> {
+    let decisions = load_review_decisions(decisions_path)?;
+    let mut latest: Option<Value> = None;
+    for value in decisions
+        .into_iter()
+        .filter(|value| value.get("candidate_id").and_then(|v| v.as_str()) == Some(candidate_id))
+    {
+        let current_ts = value
+            .get("generated_at_unix")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let latest_ts = latest
+            .as_ref()
+            .and_then(|v| v.get("generated_at_unix"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        if latest.is_none() || current_ts >= latest_ts {
+            latest = Some(value);
+        }
+    }
+    Ok(latest)
+}
+
+fn load_review_decisions(decisions_path: &Path) -> std::io::Result<Vec<Value>> {
     let text = match std::fs::read_to_string(decisions_path) {
         Ok(text) => text,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(e),
     };
-    let mut latest: Option<Value> = None;
+    let mut decisions = Vec::new();
     for line in text.lines().filter(|line| !line.trim().is_empty()) {
         let value: Value = serde_json::from_str(line)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
@@ -927,22 +1061,26 @@ fn latest_decision_for_candidate(
         {
             continue;
         }
-        if value.get("candidate_id").and_then(|v| v.as_str()) == Some(candidate_id) {
-            let current_ts = value
+        decisions.push(value);
+    }
+    decisions.sort_by_key(|value| {
+        value
+            .get("generated_at_unix")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0)
+    });
+    Ok(decisions)
+}
+
+fn sort_generated_desc(items: &mut [Value]) {
+    items.sort_by_key(|value| {
+        std::cmp::Reverse(
+            value
                 .get("generated_at_unix")
                 .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            let latest_ts = latest
-                .as_ref()
-                .and_then(|v| v.get("generated_at_unix"))
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
-            if latest.is_none() || current_ts >= latest_ts {
-                latest = Some(value);
-            }
-        }
-    }
-    Ok(latest)
+                .unwrap_or(0),
+        )
+    });
 }
 
 fn memory_preflight_blocked_reasons(
@@ -2026,6 +2164,75 @@ mod tests {
         );
         let text = serde_json::to_string(&write_plan).unwrap();
         assert!(!text.contains("secret write prompt"));
+    }
+
+    #[test]
+    fn observer_review_status_summarizes_packets_decisions_and_preflights() {
+        let tmp = tempfile::tempdir().unwrap();
+        let log = tmp.path().join("observations.jsonl");
+        let out_dir = tmp.path().join("review");
+        let decisions = out_dir.join("decisions.jsonl");
+        write_jsonl(
+            &log,
+            &[json!({
+                "ts": 1.0,
+                "sid": "s1",
+                "ev": "UserPromptSubmit",
+                "prompt": "不对，应该改成 secret status prompt"
+            })],
+        );
+        let packet = observer_review_packet_for_paths(
+            &log,
+            &out_dir,
+            20,
+            Some("tester"),
+            1_780_747_050,
+            true,
+        )
+        .unwrap();
+        let packet_json = PathBuf::from(packet["json_path"].as_str().unwrap());
+        observer_review_decision_for_paths(
+            &packet_json,
+            &decisions,
+            "instinct-candidate-0001",
+            "approve",
+            Some("tester"),
+            Some("stable enough"),
+            1_780_747_051,
+            true,
+        )
+        .unwrap();
+        observer_memory_preflight_for_paths(
+            &packet_json,
+            &decisions,
+            &out_dir,
+            "instinct-candidate-0001",
+            Some("lesson:instinct-status-test"),
+            Some("lesson"),
+            Some("Human-authored status lesson."),
+            1_780_747_052,
+            true,
+        )
+        .unwrap();
+
+        let status = observer_review_status_for_paths(&out_dir, &decisions, 10).unwrap();
+        assert_eq!(
+            status["schema"],
+            "agent_bridge.instinct_observer.phase1_review_status.v0"
+        );
+        assert_eq!(status["read_only"], json!(true));
+        assert_eq!(status["writes_memory"], json!(false));
+        assert_eq!(status["packet_count"], json!(1));
+        assert_eq!(status["decision_count"], json!(1));
+        assert_eq!(status["preflight_count"], json!(1));
+        assert_eq!(status["ready_preflight_count"], json!(1));
+        assert_eq!(status["decision_counts"]["approve"], json!(1));
+        assert_eq!(
+            status["latest_preflights"][0]["memory_key"],
+            json!("lesson:instinct-status-test")
+        );
+        let text = serde_json::to_string(&status).unwrap();
+        assert!(!text.contains("secret status prompt"));
     }
 
     #[test]

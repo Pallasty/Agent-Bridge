@@ -442,6 +442,24 @@ enum InstinctOp {
         #[arg(long)]
         json: bool,
     },
+    /// Read-only summary of instinct review packets, decisions, and
+    /// preflights in the private review sidecar directory.
+    ReviewStatus {
+        /// Optional review directory. Defaults to the private instinct review
+        /// sidecar directory.
+        #[arg(long)]
+        review_dir: Option<PathBuf>,
+        /// Optional decisions JSONL path. Defaults to decisions.jsonl under the
+        /// private instinct review sidecar directory.
+        #[arg(long)]
+        decisions: Option<PathBuf>,
+        /// Maximum recent rows per section.
+        #[arg(long, default_value_t = 10)]
+        limit: usize,
+        /// Emit raw JSON payload instead of a compact command line summary.
+        #[arg(long)]
+        json: bool,
+    },
     /// Rotate the local instinct observer JSONL log by renaming it to a
     /// timestamped archive path. The hook recreates a fresh log on its next
     /// event.
@@ -6284,6 +6302,62 @@ async fn real_main() -> Result<()> {
                         plan.get("recommended_next_step")
                             .and_then(|v| v.as_str())
                             .unwrap_or("unknown"),
+                    );
+                }
+                Ok(())
+            }
+            InstinctOp::ReviewStatus {
+                review_dir,
+                decisions,
+                limit,
+                json,
+            } => {
+                let status = instinct::observer_review_status(
+                    review_dir.as_deref(),
+                    decisions.as_deref(),
+                    *limit,
+                )
+                .context("read instinct observer review status")?;
+                if *json {
+                    println!("{}", serde_json::to_string_pretty(&status)?);
+                } else {
+                    println!(
+                        "instinct review status: packets={} decisions={} preflights={} ready={} parse_errors={} memory_write={}",
+                        status
+                            .get("packet_count")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0),
+                        status
+                            .get("decision_count")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0),
+                        status
+                            .get("preflight_count")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0),
+                        status
+                            .get("ready_preflight_count")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0),
+                        status
+                            .get("parse_error_count")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0),
+                        status
+                            .get("writes_memory")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false),
+                    );
+                    println!(
+                        "review_dir={} decisions={}",
+                        status
+                            .get("review_dir")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("-"),
+                        status
+                            .get("decisions_path")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("-"),
                     );
                 }
                 Ok(())
