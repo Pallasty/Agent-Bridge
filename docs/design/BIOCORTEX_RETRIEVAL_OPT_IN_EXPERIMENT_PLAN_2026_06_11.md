@@ -45,7 +45,10 @@ confirms that the formal decision packet can drive the gated store/readiness
 chain to `ready_for_controlled_explicit_opt_in_fts_trial` without changing
 default retrieval order. A follow-up post-runtime-evidence-backed decision
 packet now tightens that chain so the final readiness/gate/status surfaces all
-report `post_runtime_evidence_summary_ready=true`.
+report `post_runtime_evidence_summary_ready=true`. A non-production
+live-candidate fixture then proves that the post-runtime-backed final gate can
+run BioCortex and move the protected explicit opt-in FTS order while default
+retrieval remains unchanged.
 
 ```json
 {
@@ -81,8 +84,10 @@ report `post_runtime_evidence_summary_ready=true`.
   "runtime_influence_authorization_decision_landed": true,
   "post_decision_runtime_readiness_recorded": true,
   "post_runtime_evidence_backed_decision_recorded": true,
+  "post_runtime_live_candidate_fixture_recorded": true,
   "controlled_explicit_opt_in_fts_trial_ready": true,
   "post_runtime_evidence_backed_controlled_trial_ready": true,
+  "post_runtime_live_candidate_evidence_ready": true,
   "explicit_opt_in_fts_runtime_influence_authorized": true,
   "ordering_behavior_connected": false,
   "explicit_opt_in_fts_ordering_behavior_connected": true,
@@ -838,6 +843,33 @@ Slice 35 records a post-runtime-evidence-backed decision/readiness chain:
 - the final status surface again reports
   `ready_for_controlled_explicit_opt_in_fts_trial`, now with
   `post_runtime_evidence_summary_ready=true`;
+- default `memory_search`, hybrid search, semantic search, approval writes,
+  raw query/key/content redaction, and default search order remain unchanged.
+
+Slice 36 records a non-production live-candidate fixture under the
+post-runtime-backed final gate:
+
+- the committed document is
+  `docs/design/BIOCORTEX_RETRIEVAL_POST_RUNTIME_LIVE_CANDIDATE_FIXTURE_2026_06_13.md`;
+- the committed machine-readable summary is
+  `docs/design/fixtures/biocortex-retrieval-post-runtime-live-candidate-fixture-2026-06-13.json`;
+- the local evidence directory is
+  `target/biocortex-post-runtime-live-candidate-20260613`;
+- the controlled fixture seeded two non-production memories and met expected
+  movement evidence;
+- the final gated store trial consumed the post-runtime-backed transition gate,
+  saw two baseline candidates, allowed the runtime adapter, received
+  side-signal status `ok`, ran BioCortex, and returned an experimental order;
+- the final gated batch diagnostics reports one query, zero empty baselines,
+  one adapter-allowed side-signal-ok row, one BioCortex run, and one actual
+  order movement;
+- the live-candidate evidence summary reports
+  `review_state=post_runtime_evidence_ready`,
+  `batch_diagnostic_class=movement_observed`, and
+  `evidence_ready=true`;
+- `retrieval-opt-in-status` intentionally reports this live-candidate artifact
+  set as blocked because controlled-readiness status accepts no-order-change
+  readiness evidence, while this fixture proves protected opt-in order movement;
 - default `memory_search`, hybrid search, semantic search, approval writes,
   raw query/key/content redaction, and default search order remain unchanged.
 
