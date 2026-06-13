@@ -115,6 +115,12 @@ struct SessionWorking {
 }
 
 pub fn default_observer_log_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("AB_INSTINCT_OBSERVER_LOG") {
+        return PathBuf::from(path);
+    }
+    if Path::new("/Data").is_dir() {
+        return PathBuf::from("/Data/agent-bridge/instinct-probe/observations.jsonl");
+    }
     home_dir()
         .join(".cache")
         .join("agent-bridge")
@@ -689,7 +695,10 @@ mod tests {
 
         let plan = rotate_observer_log_for_path(&log, 1_780_747_000, true).unwrap();
 
-        assert_eq!(plan["schema"], "agent_bridge_instinct_observer_log_rotation.v0");
+        assert_eq!(
+            plan["schema"],
+            "agent_bridge_instinct_observer_log_rotation.v0"
+        );
         assert_eq!(plan["dry_run"], json!(true));
         assert_eq!(plan["action"], "rotate_log");
         assert_eq!(plan["status"], "would_rotate");
@@ -712,7 +721,10 @@ mod tests {
 
         let plan = rotate_observer_log_for_path(&log, 1_780_747_001, false).unwrap();
 
-        assert_eq!(plan["schema"], "agent_bridge_instinct_observer_log_rotation.v0");
+        assert_eq!(
+            plan["schema"],
+            "agent_bridge_instinct_observer_log_rotation.v0"
+        );
         assert_eq!(plan["dry_run"], json!(false));
         assert_eq!(plan["action"], "rotate_log");
         assert_eq!(plan["status"], "rotated");

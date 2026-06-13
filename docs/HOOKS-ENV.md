@@ -60,7 +60,9 @@ ECC 的 `ECC_HOOK_PROFILE=minimal|standard|strict` 是上述 toggle 的**便利�
 
 ```sh
 # 关闭：AB_INSTINCT_OBSERVER=0（或从 settings.json 摘掉两处 hook 条目）
-# 清数据：rm -f ~/.cache/agent-bridge/instinct-probe/observations.jsonl
+# 默认路径：有 /Data 时用 /Data/agent-bridge/instinct-probe/observations.jsonl
+# 覆盖路径：AB_INSTINCT_OBSERVER_LOG=/path/to/observations.jsonl
+# 清数据：rm -f "${AB_INSTINCT_OBSERVER_LOG:-/Data/agent-bridge/instinct-probe/observations.jsonl}"
 # 跑只读审计快照：python3 scripts/instinct_density_audit.py
 # JSON 输出：python3 scripts/instinct_density_audit.py --json
 ```
@@ -71,7 +73,9 @@ probe is optional, and `NO_SIGNAL` / `INSUFFICIENT_SESSIONS` should block miner
 work rather than block normal Agent-Bridge startup.
 
 Security posture: the observer sidecar is local-only and private by default.
-The hook creates `~/.cache/agent-bridge/instinct-probe` as `0700` and
-`observations.jsonl` as `0600`, and `doctor` warns if an older file keeps wider
-permissions. The sidecar may contain prompt/tool summaries, so do not make it
-group/world-readable.
+The hook honors `AB_INSTINCT_OBSERVER_LOG`; otherwise it prefers
+`/Data/agent-bridge/instinct-probe/observations.jsonl` when `/Data` is writable,
+falling back to `~/.cache/agent-bridge/instinct-probe/observations.jsonl`. The
+hook creates the sidecar directory as `0700` and `observations.jsonl` as `0600`,
+and `doctor` warns if an older file keeps wider permissions. The sidecar may
+contain prompt/tool summaries, so do not make it group/world-readable.
