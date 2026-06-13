@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 //! agent-bridge daemon — Unix socket JSON-RPC server.
 //!
 //! Routes incoming RPC calls to backend traits (Notifier, AgentRuntime, ...).
