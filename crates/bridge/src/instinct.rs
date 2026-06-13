@@ -58,6 +58,10 @@ struct ObservationRecord {
     err: Option<bool>,
     err_source: Option<Value>,
     stderr_nonempty: Option<bool>,
+    #[serde(rename = "in")]
+    input_brief: Option<String>,
+    #[serde(rename = "out")]
+    output_brief: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
@@ -155,6 +159,56 @@ pub fn observer_status_json() -> Value {
             "enabled": std::env::var("AB_INSTINCT_OBSERVER").unwrap_or_else(|_| "1".to_string()) != "0",
             "error": e.to_string()
         })
+    })
+}
+
+pub fn observer_candidate_preview(limit: usize) -> Value {
+    observer_candidate_preview_for_path(&default_observer_log_path(), limit)
+}
+
+pub fn observer_candidate_preview_for_path(log_path: &Path, limit: usize) -> Value {
+    let records = load_records(log_path);
+    let analyzed = analyze_records(&records);
+    let summary = summarize(&records, analyzed);
+    let verdict = verdict_for(
+        summary.mean_clean_mineable_per_session,
+        summary.per_session.len(),
+    );
+    let candidates = extract_candidate_preview(&records, limit);
+    let candidate_count = candidates.len();
+
+    json!({
+        "schema": "agent_bridge.instinct_observer.phase1_candidate_preview.v0",
+        "read_only": true,
+        "phase": "phase1_candidate_preview",
+        "status": if candidate_count > 0 { "candidates_available" } else { "no_candidates" },
+        "log_path": log_path.display().to_string(),
+        "limit": limit,
+        "candidate_count": candidate_count,
+        "density_gate": {
+            "verdict": verdict,
+            "gate": format!("mean>={MINEABLE_MEAN_GATE:.1} over >={MIN_SESSIONS} sessions"),
+            "sessions": summary.per_session.len(),
+            "total_clean_mineable": summary.total_clean_mineable,
+            "mean_clean_mineable_per_session": summary.mean_clean_mineable_per_session,
+        },
+        "boundary_check": {
+            "writes_memory": false,
+            "writes_files": false,
+            "persists_review_queue": false,
+            "auto_apply_allowed": false,
+            "human_review_required": true,
+            "raw_prompt_included": false,
+            "raw_tool_input_included": false,
+            "raw_tool_output_included": false,
+            "candidate_previews_are_redacted": true,
+        },
+        "recommended_next_step": if candidate_count > 0 {
+            "human_review_candidates_before_any_memory_write"
+        } else {
+            "wait_for_more_observations"
+        },
+        "candidates": candidates,
     })
 }
 
@@ -369,6 +423,78 @@ fn analyze_records(records: &[ObservationRecord]) -> BTreeMap<String, SessionSig
         .collect()
 }
 
+fn extract_candidate_preview(records: &[ObservationRecord], limit: usize) -> Vec<Value> {
+    let mut sorted = records.to_vec();
+    sorted.sort_by(|a, b| {
+        a.ts.unwrap_or(0.0)
+            .partial_cmp(&b.ts.unwrap_or(0.0))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    let mut candidates = Vec::new();
+    let mut pending_errors: HashMap<(String, String), ObservationRecord> = HashMap::new();
+    for record in &sorted {
+        if candidates.len() >= limit {
+            break;
+        }
+        let sid = record.sid.as_deref().unwrap_or("?").to_string();
+        match record.ev.as_deref() {
+            Some("UserPromptSubmit") => {
+                let prompt = record.prompt.as_deref().unwrap_or_default();
+                let cues = matched_correction_cues(prompt);
+                if !cues.is_empty() {
+                    candidates.push(json!({
+                        "candidate_id": format!("instinct-candidate-{:04}", candidates.len() + 1),
+                        "kind": "correction_prompt",
+                        "review_state": "pending_human_review",
+                        "session_id": sid,
+                        "event_at_unix": record.ts,
+                        "matched_cues": cues,
+                        "prompt_chars": prompt.chars().count(),
+                        "raw_prompt_included": false,
+                        "requires_local_log_lookup": true,
+                        "proposed_memory_write": {
+                            "kind": "lesson_or_correction",
+                            "auto_write_allowed": false
+                        }
+                    }));
+                }
+            }
+            Some("PostToolUse") => {
+                let tool = record.tool.as_deref().unwrap_or("?").to_string();
+                let key = (sid.clone(), tool.clone());
+                if is_clean_error(record) {
+                    pending_errors.insert(key, record.clone());
+                } else if let Some(failed) = pending_errors.remove(&key) {
+                    candidates.push(json!({
+                        "candidate_id": format!("instinct-candidate-{:04}", candidates.len() + 1),
+                        "kind": "clean_error_resolution",
+                        "review_state": "pending_human_review",
+                        "session_id": sid,
+                        "tool": tool,
+                        "failed_at_unix": failed.ts,
+                        "resolved_at_unix": record.ts,
+                        "err_source": failed.err_source.clone(),
+                        "failed_input_summary_available": failed.input_brief.as_ref().is_some_and(|s| !s.trim().is_empty()),
+                        "failed_output_summary_available": failed.output_brief.as_ref().is_some_and(|s| !s.trim().is_empty()),
+                        "resolved_input_summary_available": record.input_brief.as_ref().is_some_and(|s| !s.trim().is_empty()),
+                        "resolved_output_summary_available": record.output_brief.as_ref().is_some_and(|s| !s.trim().is_empty()),
+                        "raw_tool_input_included": false,
+                        "raw_tool_output_included": false,
+                        "requires_local_log_lookup": true,
+                        "proposed_memory_write": {
+                            "kind": "error_pattern_or_lesson",
+                            "auto_write_allowed": false
+                        }
+                    }));
+                }
+            }
+            _ => {}
+        }
+    }
+    candidates
+}
+
 fn summarize(
     records: &[ObservationRecord],
     per_session: BTreeMap<String, SessionSignalSummary>,
@@ -425,10 +551,16 @@ fn summarize(
 }
 
 fn classify_prompt(text: &str) -> bool {
+    !matched_correction_cues(text).is_empty()
+}
+
+fn matched_correction_cues(text: &str) -> Vec<&'static str> {
     let low = text.to_lowercase();
     CORRECTION_CUES
         .iter()
-        .any(|cue| text.contains(cue) || low.contains(cue))
+        .copied()
+        .filter(|cue| text.contains(cue) || low.contains(cue))
+        .collect()
 }
 
 fn is_clean_error(record: &ObservationRecord) -> bool {
@@ -682,6 +814,79 @@ mod tests {
         assert_eq!(status.mean_clean_mineable_per_session, 1.0);
         assert_eq!(status.verdict, "DENSITY_OK_PROCEED_PHASE1");
         assert_eq!(status.recommendation, "review_before_phase1_miner");
+    }
+
+    #[test]
+    fn observer_candidate_preview_reports_redacted_phase1_candidates() {
+        let tmp = tempfile::tempdir().unwrap();
+        let log = tmp.path().join("observations.jsonl");
+        write_jsonl(
+            &log,
+            &[
+                json!({
+                    "ts": 1.0,
+                    "sid": "s1",
+                    "ev": "UserPromptSubmit",
+                    "prompt": "不对，应该改成 secret prompt detail"
+                }),
+                json!({
+                    "ts": 2.0,
+                    "sid": "s1",
+                    "ev": "PostToolUse",
+                    "tool": "Bash",
+                    "err": true,
+                    "err_source": "exit_code",
+                    "in": "secret failing command",
+                    "out": "secret failing output"
+                }),
+                json!({
+                    "ts": 3.0,
+                    "sid": "s1",
+                    "ev": "PostToolUse",
+                    "tool": "Bash",
+                    "err": false,
+                    "in": "secret fixed command",
+                    "out": "secret fixed output"
+                }),
+            ],
+        );
+
+        let preview = observer_candidate_preview_for_path(&log, 20);
+
+        assert_eq!(
+            preview["schema"],
+            json!("agent_bridge.instinct_observer.phase1_candidate_preview.v0")
+        );
+        assert_eq!(preview["read_only"], json!(true));
+        assert_eq!(preview["boundary_check"]["writes_memory"], json!(false));
+        assert_eq!(
+            preview["boundary_check"]["persists_review_queue"],
+            json!(false)
+        );
+        assert_eq!(
+            preview["boundary_check"]["raw_prompt_included"],
+            json!(false)
+        );
+        assert_eq!(
+            preview["boundary_check"]["raw_tool_output_included"],
+            json!(false)
+        );
+        assert_eq!(preview["candidate_count"], json!(2));
+        assert_eq!(preview["candidates"][0]["kind"], json!("correction_prompt"));
+        assert_eq!(
+            preview["candidates"][1]["kind"],
+            json!("clean_error_resolution")
+        );
+        assert_eq!(
+            preview["candidates"][1]["failed_input_summary_available"],
+            json!(true)
+        );
+        let text = serde_json::to_string(&preview).unwrap();
+        assert!(!text.contains("secret prompt detail"));
+        assert!(!text.contains("secret failing command"));
+        assert!(!text.contains("secret failing output"));
+        assert!(!text.contains("secret fixed command"));
+        assert!(!text.contains("secret fixed output"));
     }
 
     #[test]

@@ -65,12 +65,17 @@ ECC 的 `ECC_HOOK_PROFILE=minimal|standard|strict` 是上述 toggle 的**便利�
 # 清数据：rm -f "${AB_INSTINCT_OBSERVER_LOG:-/Data/agent-bridge/instinct-probe/observations.jsonl}"
 # 跑只读审计快照：python3 scripts/instinct_density_audit.py
 # JSON 输出：python3 scripts/instinct_density_audit.py --json
+# Phase 1 候选预览：agent-bridge instinct candidates --limit 20 --json
 ```
 
 `agent-bridge doctor` and the MCP `capabilities` tool also expose the observer
 as read-only operational state. Missing or empty logs are not warnings: the
 probe is optional, and `NO_SIGNAL` / `INSUFFICIENT_SESSIONS` should block miner
 work rather than block normal Agent-Bridge startup.
+
+Phase 1 candidate preview is also read-only: it reports redacted correction and
+clean error-resolution candidates for human review, but does not write memories,
+persist a review queue, or include raw prompt/tool input/output bodies.
 
 Security posture: the observer sidecar is local-only and private by default.
 The hook honors `AB_INSTINCT_OBSERVER_LOG`; otherwise it prefers

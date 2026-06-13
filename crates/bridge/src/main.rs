@@ -311,6 +311,16 @@ enum ShellKind {
 
 #[derive(Subcommand, Debug)]
 enum InstinctOp {
+    /// Build a read-only Phase 1 candidate preview from the observer sidecar
+    /// log. Does not write memories or persist a review queue.
+    Candidates {
+        /// Maximum candidate rows to return.
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        /// Emit raw JSON payload instead of a compact command line summary.
+        #[arg(long)]
+        json: bool,
+    },
     /// Rotate the local instinct observer JSONL log by renaming it to a
     /// timestamped archive path. The hook recreates a fresh log on its next
     /// event.
@@ -5855,6 +5865,56 @@ async fn real_main() -> Result<()> {
     // Instinct observer maintenance — pure local sidecar file operation.
     if let Cmd::Instinct { op } = &cmd {
         return match op {
+            InstinctOp::Candidates { limit, json } => {
+                let preview = instinct::observer_candidate_preview(*limit);
+                if *json {
+                    println!("{}", serde_json::to_string_pretty(&preview)?);
+                } else {
+                    println!(
+                        "instinct observer candidates: status={} count={} gate={} next={}",
+                        preview
+                            .get("status")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown"),
+                        preview
+                            .get("candidate_count")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0),
+                        preview
+                            .pointer("/density_gate/verdict")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown"),
+                        preview
+                            .get("recommended_next_step")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown"),
+                    );
+                    if let Some(candidates) = preview.get("candidates").and_then(|v| v.as_array()) {
+                        for candidate in candidates.iter().take(10) {
+                            println!(
+                                "- {} {} session={} state={}",
+                                candidate
+                                    .get("candidate_id")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("?"),
+                                candidate
+                                    .get("kind")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("?"),
+                                candidate
+                                    .get("session_id")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("?"),
+                                candidate
+                                    .get("review_state")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("?"),
+                            );
+                        }
+                    }
+                }
+                Ok(())
+            }
             InstinctOp::RotateLog { dry_run, json } => {
                 let plan = instinct::rotate_observer_log(*dry_run)
                     .context("rotate instinct observer log")?;
