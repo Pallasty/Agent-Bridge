@@ -6,7 +6,7 @@
 
 use ab_store::StateStore;
 use anyhow::{Context, Result};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;

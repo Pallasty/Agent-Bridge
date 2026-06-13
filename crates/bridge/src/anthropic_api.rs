@@ -75,7 +75,9 @@ impl AnthropicClient {
             (k, AuthMode::XApiKey)
         } else if let Ok(t) = std::env::var("ANTHROPIC_AUTH_TOKEN") {
             if t.is_empty() {
-                return Err(Error::Backend("ANTHROPIC_AUTH_TOKEN is set but empty".into()));
+                return Err(Error::Backend(
+                    "ANTHROPIC_AUTH_TOKEN is set but empty".into(),
+                ));
             }
             (t, AuthMode::Bearer)
         } else {

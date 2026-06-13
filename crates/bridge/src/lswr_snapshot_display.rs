@@ -2,8 +2,8 @@ use crate::lswr_snapshot_consumer::{
     ConsumerFeedback, ConsumerRollback, ConsumerVerification, ReadOnlyBridgeConsumerSummary,
 };
 use crate::lswr_snapshot_report_acceptance::{
-    ReadOnlyBridgeAcceptanceGate, ReadOnlyBridgeAcceptanceMatrix,
-    build_readonly_bridge_acceptance_matrix,
+    build_readonly_bridge_acceptance_matrix, ReadOnlyBridgeAcceptanceGate,
+    ReadOnlyBridgeAcceptanceMatrix,
 };
 use crate::lswr_snapshot_report_packet::ReadOnlyBridgeReportPacket;
 use serde::{Deserialize, Serialize};
@@ -442,7 +442,11 @@ fn tone_for_verdict(verdict: &str) -> &'static str {
 }
 
 fn bool_text(value: bool) -> &'static str {
-    if value { "true" } else { "false" }
+    if value {
+        "true"
+    } else {
+        "false"
+    }
 }
 
 fn join_or_none(values: &[String]) -> String {

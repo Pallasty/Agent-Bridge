@@ -57,9 +57,11 @@ pub(crate) mod onnx {
     /// Chinese-dominant memory corpus. Returns (model, stable-name, needs-e5-prefix).
     fn select_model() -> (EmbeddingModel, &'static str, bool) {
         match std::env::var("AGENT_BRIDGE_ONNX_MODEL").ok().as_deref() {
-            Some("e5-small") | Some("multilingual-e5-small") => {
-                (EmbeddingModel::MultilingualE5Small, "multilingual-e5-small", true)
-            }
+            Some("e5-small") | Some("multilingual-e5-small") => (
+                EmbeddingModel::MultilingualE5Small,
+                "multilingual-e5-small",
+                true,
+            ),
             _ => (EmbeddingModel::AllMiniLML6V2, "all-MiniLM-L6-v2", false),
         }
     }
@@ -127,7 +129,10 @@ pub(crate) mod onnx {
         let model = match build() {
             Ok(m) => m,
             Err(e) => {
-                warn!("fastembed local model dir {} incomplete: {e}", dir.display());
+                warn!(
+                    "fastembed local model dir {} incomplete: {e}",
+                    dir.display()
+                );
                 return None;
             }
         };
@@ -143,7 +148,10 @@ pub(crate) mod onnx {
                 Some(e)
             }
             Err(e) => {
-                warn!("fastembed user-defined load failed for {}: {e}", dir.display());
+                warn!(
+                    "fastembed user-defined load failed for {}: {e}",
+                    dir.display()
+                );
                 None
             }
         }

@@ -133,7 +133,8 @@ impl RateLimiter {
     /// — caller should fire the alert. Also records the new sighting.
     pub(crate) fn check_and_record(&mut self, key: String, now: Instant) -> bool {
         // Garbage-collect entries outside the window.
-        self.seen.retain(|(_, t)| now.duration_since(*t) <= self.window);
+        self.seen
+            .retain(|(_, t)| now.duration_since(*t) <= self.window);
         if self.seen.iter().any(|(k, _)| k == &key) {
             return false;
         }
@@ -264,9 +265,7 @@ pub fn s1_check_and_alert() -> Vec<ProcessFd> {
     }
     let alert = Alert::new(AlertKind::FdDeleted)
         .with_process_inventory(inv.clone())
-        .with_suggested_action(
-            "agent-bridge rescue-snapshot --canonical && sibling kill+respawn",
-        )
+        .with_suggested_action("agent-bridge rescue-snapshot --canonical && sibling kill+respawn")
         .with_next_steps(vec![
             "see lesson_state_db_deleted_inode_vs_phantom_diagnosis".into(),
             "see lesson_split_brain_forum_id_collision".into(),
@@ -426,10 +425,7 @@ pub fn compute_s234_drops(prev: S234Counts, current: S234Counts) -> Vec<S234Drop
 ///   empty (still in window).
 /// - calls at `>= S234_WINDOW_SECS` compare current vs anchor, rotate
 ///   anchor to `(now, current)`, and return the drop set.
-pub fn s234_check_against_snapshot(
-    current: S234Counts,
-    now: SystemTime,
-) -> Vec<S234DropEvent> {
+pub fn s234_check_against_snapshot(current: S234Counts, now: SystemTime) -> Vec<S234DropEvent> {
     let mut guard = match s234_last_snapshot().lock() {
         Ok(g) => g,
         Err(_) => return Vec::new(),
@@ -456,12 +452,7 @@ pub fn s234_check_against_snapshot(
     let limit_now = Instant::now();
     let mut out = Vec::new();
     for ev in events {
-        let sig = format!(
-            "{}:{}->{}",
-            ev.signal.as_str(),
-            ev.before,
-            ev.after
-        );
+        let sig = format!("{}:{}->{}", ev.signal.as_str(), ev.before, ev.after);
         let allow = match rate_limiter().lock() {
             Ok(mut g) => g.check_and_record(sig, limit_now),
             Err(_) => true,
@@ -592,8 +583,8 @@ mod tests {
     fn cmdline_argv0_self_returns_test_runner() {
         // /proc/self/cmdline is readable in normal test env. The token
         // we get back depends on cargo's harness; just assert non-empty.
-        let argv0 = read_proc_cmdline_argv0(std::process::id())
-            .expect("/proc/self/cmdline readable");
+        let argv0 =
+            read_proc_cmdline_argv0(std::process::id()).expect("/proc/self/cmdline readable");
         assert!(!argv0.is_empty());
     }
 
@@ -670,10 +661,7 @@ mod tests {
     #[ignore = "wet-test: depends on live host /proc; run with --ignored"]
     fn s1_wet_test_against_live_proc() {
         let inv = s1_enum_deleted_state_db_fds();
-        eprintln!(
-            "[S1 wet-test] live /proc inventory: {} entries",
-            inv.len()
-        );
+        eprintln!("[S1 wet-test] live /proc inventory: {} entries", inv.len());
         for p in &inv {
             eprintln!("  pid={} fd={} target={}", p.pid, p.fd, p.target);
         }
@@ -826,8 +814,8 @@ mod tests {
         _reset_s234_snapshot_for_tests();
         let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
         let _ = s234_check_against_snapshot(mk_counts(100, 5, 200), t0); // seed
-        // 60s later (well within the 5-min window); even with a clear
-        // drop, the helper must wait for the window to elapse.
+                                                                         // 60s later (well within the 5-min window); even with a clear
+                                                                         // drop, the helper must wait for the window to elapse.
         let t1 = t0 + Duration::from_secs(60);
         let out = s234_check_against_snapshot(mk_counts(50, 5, 200), t1);
         assert!(out.is_empty(), "within-window must not fire (got {out:?})");
@@ -871,7 +859,10 @@ mod tests {
         assert!(body.contains("non-DB-anomaly"), "tier annotation present");
         // Fully-unexplained drop (S4 has no lifecycle counterpart) → no
         // benign-archival line.
-        assert!(!body.contains("[lifecycle]"), "no lifecycle line when fully unexplained");
+        assert!(
+            !body.contains("[lifecycle]"),
+            "no lifecycle line when fully unexplained"
+        );
     }
 
     // ─── S2 conservation check (thread 27 #813) ────────────────────────
@@ -919,7 +910,10 @@ mod tests {
             body.contains("[retired] 50 → 70 (+20)"),
             "retired evidence in body"
         );
-        assert!(body.contains("[lifecycle]"), "partial explanation surfaces lifecycle line");
+        assert!(
+            body.contains("[lifecycle]"),
+            "partial explanation surfaces lifecycle line"
+        );
         assert!(body.contains("20 of 30"), "shows explained/raw split");
     }
 

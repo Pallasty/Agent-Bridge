@@ -61,17 +61,15 @@ pub fn temporal_bonus(edge_type: &str) -> f64 {
 use crate::{
     AgentMessageRecord, AgentPresenceRecord, AgentPresenceUpsert, CoactivationEdge,
     CoactivationStats, CodebaseIndexStats, CodebaseSymbol, CompactPolicy, DecayUnusedStats,
-    HebbianCluster, MisrankRow, ReinforceActiveStats, SignalFidelityStats,
     ForumExportResult, ForumImportReport, ForumPostExport, ForumPostOutcome, ForumPostRecord,
-    ForumThreadExport, ForumThreadRecord, GraphTopology, IdentityWindow, ImportConflictPolicy,
-    ImportReport,
-    McpToolCallFilter, McpToolCallRow, McpToolCallStats, McpToolErrorRecord, McpToolSourceStats,
-    MemoryCosineHit, MemoryEdge, MemoryEdgeExport, MemoryExportFilter, MemoryExportResult,
-    MemoryListSort, MemoryQueryRecord, MemoryQueryStats, MemoryRecord, MemorySearchHit,
-    MemoryStats, NotificationRecord, OverlapPair, PlanRecord, PlanStep, ReplayAuditRow,
-    ReplayAuditStats, S234Counts, SessionFilter, StateStore, StoredSession, WaypointRow,
-    WaypointStats, MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP,
-    MEMORY_QUERY_LOG_RING_CAP, STDIO_CAP,
+    ForumThreadExport, ForumThreadRecord, GraphTopology, HebbianCluster, IdentityWindow,
+    ImportConflictPolicy, ImportReport, McpToolCallFilter, McpToolCallRow, McpToolCallStats,
+    McpToolErrorRecord, McpToolSourceStats, MemoryCosineHit, MemoryEdge, MemoryEdgeExport,
+    MemoryExportFilter, MemoryExportResult, MemoryListSort, MemoryQueryRecord, MemoryQueryStats,
+    MemoryRecord, MemorySearchHit, MemoryStats, MisrankRow, NotificationRecord, OverlapPair,
+    PlanRecord, PlanStep, ReinforceActiveStats, ReplayAuditRow, ReplayAuditStats, S234Counts,
+    SessionFilter, SignalFidelityStats, StateStore, StoredSession, WaypointRow, WaypointStats,
+    MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP, MEMORY_QUERY_LOG_RING_CAP, STDIO_CAP,
 };
 use tokio_rusqlite::rusqlite::OptionalExtension;
 
@@ -1494,8 +1492,7 @@ impl SqliteStore {
                 let tx = c.unchecked_transaction()?;
                 let mut n = 0u64;
                 let mut skipped = 0u64;
-                let mut exists = tx
-                    .prepare("SELECT 1 FROM memories WHERE key = ?1 LIMIT 1")?;
+                let mut exists = tx.prepare("SELECT 1 FROM memories WHERE key = ?1 LIMIT 1")?;
                 for e in parsed {
                     let from = e.from_key.trim();
                     let to = e.to_key.trim();
@@ -1662,9 +1659,7 @@ fn orphan_fp_classify(name: &str, kind: &str, file_path: &str) -> (bool, &'stati
     // unqualified name starts with `test_` is a test target.
     let last_seg = name.rsplit("::").next().unwrap_or(name);
     let last_seg = last_seg.rsplit('.').next().unwrap_or(last_seg);
-    if (kind == "def" || kind == "method" || kind == "function")
-        && last_seg.starts_with("test_")
-    {
+    if (kind == "def" || kind == "method" || kind == "function") && last_seg.starts_with("test_") {
         return (true, "pytest convention");
     }
     (false, "")
@@ -1770,8 +1765,7 @@ fn compute_signal_fidelity_from_rows(
     // Decay-unused's default floor is 0.1; allow ε so a single
     // post-floor reinforce (0.1 + 0.05 = 0.15) doesn't escape the
     // "at floor" bucket immediately.
-    let n_floor_importance =
-        importances.iter().filter(|i| **i <= 0.11).count() as u64;
+    let n_floor_importance = importances.iter().filter(|i| **i <= 0.11).count() as u64;
 
     let rank_importance = avg_tie_ranks(&importances);
     let rank_access = avg_tie_ranks(&accesses);
@@ -1786,7 +1780,10 @@ fn compute_signal_fidelity_from_rows(
     let (spearman_r_touched, n_touched) = if touched.len() >= 2 {
         let ti: Vec<f64> = touched.iter().map(|(_, i, _)| *i).collect();
         let ta: Vec<f64> = touched.iter().map(|(_, _, a)| *a).collect();
-        (pearson(&avg_tie_ranks(&ti), &avg_tie_ranks(&ta)), touched.len() as u64)
+        (
+            pearson(&avg_tie_ranks(&ti), &avg_tie_ranks(&ta)),
+            touched.len() as u64,
+        )
     } else {
         (f64::NAN, touched.len() as u64)
     };
@@ -1804,8 +1801,11 @@ fn compute_signal_fidelity_from_rows(
         })
         .collect();
 
-    all_misranks
-        .sort_by(|a, b| a.rank_diff.partial_cmp(&b.rank_diff).unwrap_or(std::cmp::Ordering::Equal));
+    all_misranks.sort_by(|a, b| {
+        a.rank_diff
+            .partial_cmp(&b.rank_diff)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let under_reinforced: Vec<MisrankRow> = all_misranks
         .iter()
         .take(top_n)
@@ -1813,8 +1813,11 @@ fn compute_signal_fidelity_from_rows(
         .cloned()
         .collect();
 
-    all_misranks
-        .sort_by(|a, b| b.rank_diff.partial_cmp(&a.rank_diff).unwrap_or(std::cmp::Ordering::Equal));
+    all_misranks.sort_by(|a, b| {
+        b.rank_diff
+            .partial_cmp(&a.rank_diff)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     let over_promoted: Vec<MisrankRow> = all_misranks
         .iter()
         .take(top_n)
@@ -2422,31 +2425,33 @@ impl StateStore for SqliteStore {
         let cutoff = now_secs().saturating_sub(window_secs.clamp(60, 31_536_000));
         let rows = self
             .conn
-            .call(move |c| -> RusqliteResult<Vec<crate::SemanticEventRecord>> {
-                let mut stmt = c.prepare(
-                    "SELECT ts, actor, source, action, target, verdict_status,
+            .call(
+                move |c| -> RusqliteResult<Vec<crate::SemanticEventRecord>> {
+                    let mut stmt = c.prepare(
+                        "SELECT ts, actor, source, action, target, verdict_status,
                             verdict_method, evidence, facts
                        FROM semantic_events
                       WHERE ts >= ?1
                       ORDER BY ts DESC, id DESC LIMIT ?2",
-                )?;
-                let rows = stmt
-                    .query_map(params![cutoff, limit], |row| {
-                        Ok(crate::SemanticEventRecord {
-                            ts: row.get(0)?,
-                            actor: row.get(1)?,
-                            source: row.get(2)?,
-                            action: row.get(3)?,
-                            target: row.get(4)?,
-                            verdict_status: row.get(5)?,
-                            verdict_method: row.get(6)?,
-                            evidence: row.get(7)?,
-                            facts: row.get(8)?,
-                        })
-                    })?
-                    .collect::<std::result::Result<Vec<_>, _>>()?;
-                Ok(rows)
-            })
+                    )?;
+                    let rows = stmt
+                        .query_map(params![cutoff, limit], |row| {
+                            Ok(crate::SemanticEventRecord {
+                                ts: row.get(0)?,
+                                actor: row.get(1)?,
+                                source: row.get(2)?,
+                                action: row.get(3)?,
+                                target: row.get(4)?,
+                                verdict_status: row.get(5)?,
+                                verdict_method: row.get(6)?,
+                                evidence: row.get(7)?,
+                                facts: row.get(8)?,
+                            })
+                        })?
+                        .collect::<std::result::Result<Vec<_>, _>>()?;
+                    Ok(rows)
+                },
+            )
             .await
             .map_err(|e| Error::Backend(format!("recent_semantic_events: {e}")))?;
         Ok(rows)
@@ -2505,12 +2510,8 @@ impl StateStore for SqliteStore {
         window_secs: i64,
         top_n: u32,
     ) -> Result<Vec<McpToolCallStats>> {
-        self.mcp_tool_call_stats_filtered(
-            window_secs,
-            top_n,
-            McpToolCallFilter::default(),
-        )
-        .await
+        self.mcp_tool_call_stats_filtered(window_secs, top_n, McpToolCallFilter::default())
+            .await
     }
 
     async fn mcp_tool_call_stats_filtered(
@@ -2550,10 +2551,8 @@ impl StateStore for SqliteStore {
                        AND (?7 IS NULL OR COALESCE(codex_host, 'legacy') = ?7)
                      ORDER BY tool_name",
                 )?;
-                let mut buckets: std::collections::HashMap<
-                    String,
-                    Vec<(u32, bool, u32)>,
-                > = std::collections::HashMap::new();
+                let mut buckets: std::collections::HashMap<String, Vec<(u32, bool, u32)>> =
+                    std::collections::HashMap::new();
                 let iter = stmt.query_map(
                     params![
                         cutoff,
@@ -2633,12 +2632,8 @@ impl StateStore for SqliteStore {
         window_secs: i64,
         top_n: u32,
     ) -> Result<Vec<McpToolSourceStats>> {
-        self.mcp_tool_source_stats_filtered(
-            window_secs,
-            top_n,
-            McpToolCallFilter::default(),
-        )
-        .await
+        self.mcp_tool_source_stats_filtered(window_secs, top_n, McpToolCallFilter::default())
+            .await
     }
 
     async fn mcp_tool_source_stats_filtered(
@@ -2783,20 +2778,27 @@ impl StateStore for SqliteStore {
         let key_for_preflight = key.clone();
         let existing: Option<(String, Vec<u8>, String)> = self
             .conn
-            .call(move |c| -> RusqliteResult<Option<(String, Vec<u8>, String)>> {
-                let mut stmt = c.prepare(
-                    "SELECT content, embedding, version_vector FROM memories WHERE key = ?1",
-                )?;
-                let mut rows = stmt.query(params![key_for_preflight])?;
-                if let Some(row) = rows.next()? {
-                    let existing_content: String = row.get(0)?;
-                    let existing_emb: Option<Vec<u8>> = row.get(1)?;
-                    let existing_vv: String = row.get::<_, Option<String>>(2)?.unwrap_or_default();
-                    Ok(Some((existing_content, existing_emb.unwrap_or_default(), existing_vv)))
-                } else {
-                    Ok(None)
-                }
-            })
+            .call(
+                move |c| -> RusqliteResult<Option<(String, Vec<u8>, String)>> {
+                    let mut stmt = c.prepare(
+                        "SELECT content, embedding, version_vector FROM memories WHERE key = ?1",
+                    )?;
+                    let mut rows = stmt.query(params![key_for_preflight])?;
+                    if let Some(row) = rows.next()? {
+                        let existing_content: String = row.get(0)?;
+                        let existing_emb: Option<Vec<u8>> = row.get(1)?;
+                        let existing_vv: String =
+                            row.get::<_, Option<String>>(2)?.unwrap_or_default();
+                        Ok(Some((
+                            existing_content,
+                            existing_emb.unwrap_or_default(),
+                            existing_vv,
+                        )))
+                    } else {
+                        Ok(None)
+                    }
+                },
+            )
             .await
             .map_err(|e| Error::Backend(format!("memory_save preflight: {e}")))?;
 
@@ -2833,7 +2835,10 @@ impl StateStore for SqliteStore {
                 // HashBackend/OnnxBackend default impl ignores the key
                 // and behaves identically to pre-P-γ `embed()`.
                 let vec = backend.perceive(&content, &key);
-                (crate::vector::encode_embedding(&vec), Some(backend.name().to_string()))
+                (
+                    crate::vector::encode_embedding(&vec),
+                    Some(backend.name().to_string()),
+                )
             }
         };
 
@@ -3793,10 +3798,7 @@ impl StateStore for SqliteStore {
                     |row| row.get(0),
                 )?;
                 if !dry_run {
-                    tx.execute(
-                        &delete_sql,
-                        rusqlite::params_from_iter(sql_params.iter()),
-                    )?;
+                    tx.execute(&delete_sql, rusqlite::params_from_iter(sql_params.iter()))?;
                 }
                 tx.commit()?;
                 Ok(count_n as u64)
@@ -3930,16 +3932,10 @@ impl StateStore for SqliteStore {
             .conn
             .call(move |c| -> RusqliteResult<u64> {
                 let tx = c.unchecked_transaction()?;
-                let count_n: i64 = tx.query_row(
-                    &count_sql,
-                    rusqlite::params![cutoff, cap],
-                    |row| row.get(0),
-                )?;
+                let count_n: i64 =
+                    tx.query_row(&count_sql, rusqlite::params![cutoff, cap], |row| row.get(0))?;
                 if !dry_run && count_n > 0 {
-                    tx.execute(
-                        &update_sql,
-                        rusqlite::params![now, cutoff, cap],
-                    )?;
+                    tx.execute(&update_sql, rusqlite::params![now, cutoff, cap])?;
                 }
                 tx.commit()?;
                 Ok(count_n as u64)
@@ -4058,23 +4054,15 @@ impl StateStore for SqliteStore {
                     .map(|m| {
                         let d = adj
                             .get(m)
-                            .map(|nbrs| {
-                                nbrs.iter().filter(|n| in_set.contains(*n)).count()
-                            })
+                            .map(|nbrs| nbrs.iter().filter(|n| in_set.contains(*n)).count())
                             .unwrap_or(0);
                         (m.clone(), d)
                     })
-                    .max_by(|(ak, ad), (bk, bd)| {
-                        ad.cmp(bd).then_with(|| bk.cmp(ak))
-                    })
+                    .max_by(|(ak, ad), (bk, bd)| ad.cmp(bd).then_with(|| bk.cmp(ak)))
                     .map(|(k, _)| k)
                     .unwrap_or_default();
                 let size = members.len() as u64;
-                HebbianCluster {
-                    hub,
-                    members,
-                    size,
-                }
+                HebbianCluster { hub, members, size }
             })
             .collect();
         clusters.sort_by(|a, b| b.size.cmp(&a.size).then_with(|| a.hub.cmp(&b.hub)));
@@ -4144,15 +4132,15 @@ impl StateStore for SqliteStore {
             .conn
             .call(move |c| -> RusqliteResult<ReplayAuditStats> {
                 // Aggregate over active replay summaries.
-                let (
-                    total,
-                    never,
-                    once,
-                    multi,
-                    stale_dead,
-                    sum_ac,
-                    sum_age,
-                ): (i64, i64, i64, i64, i64, f64, f64) = c.query_row(
+                let (total, never, once, multi, stale_dead, sum_ac, sum_age): (
+                    i64,
+                    i64,
+                    i64,
+                    i64,
+                    i64,
+                    f64,
+                    f64,
+                ) = c.query_row(
                     "SELECT
                         COUNT(*),
                         SUM(CASE WHEN access_count = 0 THEN 1 ELSE 0 END),
@@ -4292,28 +4280,25 @@ impl StateStore for SqliteStore {
                           GROUP BY sg.key",
                     )?;
                     let mut rows: Vec<WaypointRow> = wp_stmt
-                        .query_map(
-                            params![TAG_LIKE, SUMMARIZES, waypoint_window_secs],
-                            |row| {
-                                let leading = row.get::<_, i64>(1)?.max(0) as u64;
-                                let trailing = row.get::<_, i64>(2)?.max(0) as u64;
-                                let pairs = row.get::<_, i64>(3)?.max(0) as u64;
-                                let classification = if leading > trailing {
-                                    "gateway"
-                                } else if trailing > leading {
-                                    "trailing"
-                                } else {
-                                    "ambiguous"
-                                };
-                                Ok(WaypointRow {
-                                    key: row.get(0)?,
-                                    leading_pairs: leading,
-                                    trailing_pairs: trailing,
-                                    pairs_total: pairs,
-                                    classification: classification.into(),
-                                })
-                            },
-                        )?
+                        .query_map(params![TAG_LIKE, SUMMARIZES, waypoint_window_secs], |row| {
+                            let leading = row.get::<_, i64>(1)?.max(0) as u64;
+                            let trailing = row.get::<_, i64>(2)?.max(0) as u64;
+                            let pairs = row.get::<_, i64>(3)?.max(0) as u64;
+                            let classification = if leading > trailing {
+                                "gateway"
+                            } else if trailing > leading {
+                                "trailing"
+                            } else {
+                                "ambiguous"
+                            };
+                            Ok(WaypointRow {
+                                key: row.get(0)?,
+                                leading_pairs: leading,
+                                trailing_pairs: trailing,
+                                pairs_total: pairs,
+                                classification: classification.into(),
+                            })
+                        })?
                         .filter_map(|r| r.ok())
                         .collect();
 
@@ -4381,7 +4366,10 @@ impl StateStore for SqliteStore {
                     )?;
                     let sizes: std::collections::HashMap<String, u64> = size_stmt
                         .query_map(params![SUMMARIZES, TAG_LIKE], |row| {
-                            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?.max(0) as u64))
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, i64>(1)?.max(0) as u64,
+                            ))
                         })?
                         .filter_map(|r| r.ok())
                         .collect();
@@ -4581,13 +4569,9 @@ impl StateStore for SqliteStore {
                 drop(stmt_deg);
                 // Align to canonical bucket order so diff is stable across
                 // snapshots even when some buckets are empty.
-                let canonical = [
-                    "0", "1", "2-3", "4-5", "6-10", "11-20", "21+",
-                ];
-                let raw_map: std::collections::HashMap<String, u64> = raw_buckets
-                    .iter()
-                    .cloned()
-                    .collect();
+                let canonical = ["0", "1", "2-3", "4-5", "6-10", "11-20", "21+"];
+                let raw_map: std::collections::HashMap<String, u64> =
+                    raw_buckets.iter().cloned().collect();
                 let degree_histogram: Vec<(String, u64)> = canonical
                     .iter()
                     .map(|b| ((*b).to_string(), raw_map.get(*b).copied().unwrap_or(0)))
@@ -4903,8 +4887,7 @@ impl StateStore for SqliteStore {
                     })?;
                     mapped.collect::<RusqliteResult<Vec<_>>>()
                 } else {
-                    let placeholders: Vec<&str> =
-                        (0..exclude_owned.len()).map(|_| "?").collect();
+                    let placeholders: Vec<&str> = (0..exclude_owned.len()).map(|_| "?").collect();
                     let sql = format!(
                         "SELECT key, importance, access_count
                            FROM memories
@@ -4913,16 +4896,14 @@ impl StateStore for SqliteStore {
                         placeholders.join(",")
                     );
                     let mut stmt = c.prepare(&sql)?;
-                    let mapped = stmt.query_map(
-                        rusqlite::params_from_iter(exclude_owned.iter()),
-                        |row| {
+                    let mapped =
+                        stmt.query_map(rusqlite::params_from_iter(exclude_owned.iter()), |row| {
                             Ok((
                                 row.get::<_, String>(0)?,
                                 row.get::<_, f64>(1)?,
                                 row.get::<_, i64>(2)?,
                             ))
-                        },
-                    )?;
+                        })?;
                     mapped.collect::<RusqliteResult<Vec<_>>>()
                 }
             })
@@ -4985,7 +4966,12 @@ impl StateStore for SqliteStore {
                 )?;
                 let keys: Vec<String> = stmt
                     .query_map(
-                        params![min_uses_i, cutoff_lat, grace_cutoff, DURABLE_IMPORTANCE_FLOOR],
+                        params![
+                            min_uses_i,
+                            cutoff_lat,
+                            grace_cutoff,
+                            DURABLE_IMPORTANCE_FLOOR
+                        ],
                         |r| r.get::<_, String>(0),
                     )?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -5438,9 +5424,7 @@ impl StateStore for SqliteStore {
                 Ok(collected)
             })
             .await
-            .map_err(|e| {
-                Error::Backend(format!("memory_embedding_backend_counts: {e}"))
-            })?;
+            .map_err(|e| Error::Backend(format!("memory_embedding_backend_counts: {e}")))?;
         Ok(rows)
     }
 
@@ -5671,11 +5655,7 @@ impl StateStore for SqliteStore {
         Ok(hits)
     }
 
-    async fn memory_top_k_cosine(
-        &self,
-        query: &str,
-        k: u32,
-    ) -> Result<Vec<MemoryCosineHit>> {
+    async fn memory_top_k_cosine(&self, query: &str, k: u32) -> Result<Vec<MemoryCosineHit>> {
         if query.trim().is_empty() || k == 0 {
             return Ok(Vec::new());
         }
@@ -5731,7 +5711,10 @@ impl StateStore for SqliteStore {
                     return None;
                 }
                 let cosine = crate::vector::cosine_similarity(&query_vec, &stored_vec);
-                Some(MemoryCosineHit { record: rec, cosine })
+                Some(MemoryCosineHit {
+                    record: rec,
+                    cosine,
+                })
             })
             .collect();
 
@@ -5773,9 +5756,8 @@ impl StateStore for SqliteStore {
             .map(crate::vector::encode_embedding);
 
         // Generate all (a, b) pairs with a < b.
-        let mut pairs: Vec<(String, String)> = Vec::with_capacity(
-            keys_owned.len() * (keys_owned.len() - 1) / 2,
-        );
+        let mut pairs: Vec<(String, String)> =
+            Vec::with_capacity(keys_owned.len() * (keys_owned.len() - 1) / 2);
         for i in 0..keys_owned.len() {
             for j in (i + 1)..keys_owned.len() {
                 pairs.push((keys_owned[i].clone(), keys_owned[j].clone()));
@@ -5849,11 +5831,7 @@ impl StateStore for SqliteStore {
     /// v21 α — return top-N co-activation edges for a memory key,
     /// ordered by count DESC. Returns the *other* key in each pair
     /// (so caller doesn't have to filter).
-    async fn top_coactivation(
-        &self,
-        key: &str,
-        limit: u32,
-    ) -> Result<Vec<CoactivationEdge>> {
+    async fn top_coactivation(&self, key: &str, limit: u32) -> Result<Vec<CoactivationEdge>> {
         let key_owned = key.to_string();
         let lim = limit as i64;
         self.conn
@@ -5984,8 +5962,15 @@ impl StateStore for SqliteStore {
                          top_hit_created_at, duration_us, source, at)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                     rusqlite::params![
-                        kind, query, tags_json, hit_count, top_hit_age_secs,
-                        top_hit_created_at, duration_us, source, at
+                        kind,
+                        query,
+                        tags_json,
+                        hit_count,
+                        top_hit_age_secs,
+                        top_hit_created_at,
+                        duration_us,
+                        source,
+                        at
                     ],
                 )?;
                 // Ring-buffer prune: keep at most MEMORY_QUERY_LOG_RING_CAP rows.
@@ -6045,10 +6030,13 @@ impl StateStore for SqliteStore {
 
                 let age_sum: i64 = rows.iter().filter_map(|(_, _, a, _)| *a).sum();
                 let age_n = rows.iter().filter(|(_, _, a, _)| a.is_some()).count() as f64;
-                let avg_top_hit_age_secs = if age_n > 0.0 { age_sum as f64 / age_n } else { 0.0 };
+                let avg_top_hit_age_secs = if age_n > 0.0 {
+                    age_sum as f64 / age_n
+                } else {
+                    0.0
+                };
 
-                let mut durations: Vec<i64> =
-                    rows.iter().map(|(_, d, _, _)| *d).collect();
+                let mut durations: Vec<i64> = rows.iter().map(|(_, d, _, _)| *d).collect();
                 durations.sort_unstable();
                 let p50 = pct_idx(&durations, 0.50);
                 let p95 = pct_idx(&durations, 0.95);
@@ -6136,9 +6124,8 @@ impl StateStore for SqliteStore {
                     |row| row.get(0),
                 )?;
 
-                let mut stmt_counts = c.prepare(
-                    "SELECT count FROM memory_coactivation ORDER BY count DESC",
-                )?;
+                let mut stmt_counts =
+                    c.prepare("SELECT count FROM memory_coactivation ORDER BY count DESC")?;
                 let all_counts: Vec<i64> = stmt_counts
                     .query_map([], |row| row.get::<_, i64>(0))?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -6157,7 +6144,11 @@ impl StateStore for SqliteStore {
                 } else {
                     0.0
                 };
-                let ratio = if median > 0.0 { top10_avg / median } else { 0.0 };
+                let ratio = if median > 0.0 {
+                    top10_avg / median
+                } else {
+                    0.0
+                };
 
                 let mut stmt_top = c.prepare(
                     "SELECT key_a, key_b, count, first_at, last_at
@@ -6235,11 +6226,7 @@ impl StateStore for SqliteStore {
     /// forum_posts (post count, kind distribution, avg body length) +
     /// memories (saves in window). Powers `agent-bridge dream identity`
     /// delta reports.
-    async fn identity_window(
-        &self,
-        window_start: i64,
-        window_end: i64,
-    ) -> Result<IdentityWindow> {
+    async fn identity_window(&self, window_start: i64, window_end: i64) -> Result<IdentityWindow> {
         self.conn
             .call(move |c| -> RusqliteResult<IdentityWindow> {
                 // Tool call totals + ok rate.
@@ -6261,10 +6248,9 @@ impl StateStore for SqliteStore {
                       LIMIT 10",
                 )?;
                 let top_tools: Vec<(String, u64)> = stmt_top
-                    .query_map(
-                        rusqlite::params![window_start, window_end],
-                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64)),
-                    )?
+                    .query_map(rusqlite::params![window_start, window_end], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64))
+                    })?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
                 drop(stmt_top);
 
@@ -6286,10 +6272,9 @@ impl StateStore for SqliteStore {
                    ORDER BY kind ASC",
                 )?;
                 let forum_kinds: Vec<(String, u64)> = stmt_kinds
-                    .query_map(
-                        rusqlite::params![window_start, window_end],
-                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64)),
-                    )?
+                    .query_map(rusqlite::params![window_start, window_end], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64))
+                    })?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
                 drop(stmt_kinds);
 
@@ -6377,9 +6362,7 @@ impl StateStore for SqliteStore {
         only_stale: bool,
     ) -> Result<usize> {
         let cap = batch_size.max(1).min(1000);
-        let current_backend = crate::embedding::default_backend()
-            .name()
-            .to_string();
+        let current_backend = crate::embedding::default_backend().name().to_string();
         let stale_flag = only_stale;
         let backend_arg = current_backend.clone();
         let to_update: Vec<(String, String)> = self
@@ -6550,54 +6533,54 @@ impl StateStore for SqliteStore {
         let root_for_walk = root.clone();
         let (all_symbols, all_imports, all_calls, indexed_files) =
             tokio::task::spawn_blocking(move || {
-            // Walk source files; prune non-source trees at directory level.
-            let mut symbols: Vec<CodebaseSymbol> = Vec::new();
-            let mut imports: Vec<crate::CodebaseImport> = Vec::new();
-            let mut calls: Vec<crate::CodebaseCall> = Vec::new();
-            let mut count = 0u32;
-            for entry in WalkDir::new(&root_for_walk)
-                .follow_links(false)
-                .into_iter()
-                .filter_entry(|e| {
-                    let name = e.file_name().to_str().unwrap_or("");
-                    !matches!(
-                        name,
-                        ".git"
-                            | "target"
-                            | "node_modules"
-                            | ".venv"
-                            | "__pycache__"
-                            | ".mypy_cache"
-                            | "dist"
-                            | "build"
-                    )
-                })
-                .filter_map(|e| e.ok())
-                .filter(|e| e.file_type().is_file())
-            {
-                let path = entry.path();
-                let lang = match detect_language(path) {
-                    Some(l) => l,
-                    None => continue,
-                };
-                if !langs.is_empty() && !langs.iter().any(|l| l.as_str() == lang) {
-                    continue;
+                // Walk source files; prune non-source trees at directory level.
+                let mut symbols: Vec<CodebaseSymbol> = Vec::new();
+                let mut imports: Vec<crate::CodebaseImport> = Vec::new();
+                let mut calls: Vec<crate::CodebaseCall> = Vec::new();
+                let mut count = 0u32;
+                for entry in WalkDir::new(&root_for_walk)
+                    .follow_links(false)
+                    .into_iter()
+                    .filter_entry(|e| {
+                        let name = e.file_name().to_str().unwrap_or("");
+                        !matches!(
+                            name,
+                            ".git"
+                                | "target"
+                                | "node_modules"
+                                | ".venv"
+                                | "__pycache__"
+                                | ".mypy_cache"
+                                | "dist"
+                                | "build"
+                        )
+                    })
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.file_type().is_file())
+                {
+                    let path = entry.path();
+                    let lang = match detect_language(path) {
+                        Some(l) => l,
+                        None => continue,
+                    };
+                    if !langs.is_empty() && !langs.iter().any(|l| l.as_str() == lang) {
+                        continue;
+                    }
+                    let file_path_str = path.to_string_lossy().to_string();
+                    if let Ok(content) = std::fs::read_to_string(path) {
+                        symbols.extend(extract_symbols(&content, &file_path_str, lang));
+                        imports.extend(extract_imports(&content, &file_path_str, lang));
+                        calls.extend(extract_calls(&content, &file_path_str, lang));
+                        count += 1;
+                    }
                 }
-                let file_path_str = path.to_string_lossy().to_string();
-                if let Ok(content) = std::fs::read_to_string(path) {
-                    symbols.extend(extract_symbols(&content, &file_path_str, lang));
-                    imports.extend(extract_imports(&content, &file_path_str, lang));
-                    calls.extend(extract_calls(&content, &file_path_str, lang));
-                    count += 1;
-                }
-            }
-            // Embeddings are filled by `codebase_reindex_embeddings` (call
-            // it after this returns); rows ship with embedding=NULL so the
-            // walk stays fast and embed cost is opt-in.
-            (symbols, imports, calls, count)
-        })
-        .await
-        .map_err(|e| Error::Backend(format!("codebase_index blocking: {e}")))?;
+                // Embeddings are filled by `codebase_reindex_embeddings` (call
+                // it after this returns); rows ship with embedding=NULL so the
+                // walk stays fast and embed cost is opt-in.
+                (symbols, imports, calls, count)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("codebase_index blocking: {e}")))?;
 
         let symbol_count = all_symbols.len() as u32;
         let import_count = all_imports.len() as u32;
@@ -6798,7 +6781,8 @@ impl StateStore for SqliteStore {
         if callee_substr.is_none() && caller_substr.is_none() {
             return Err(Error::Backend(
                 "codebase_calls_for: at least one of callee_substr or \
-                 caller_substr is required".into(),
+                 caller_substr is required"
+                    .into(),
             ));
         }
         let callee_f = callee_substr.map(|s| format!("%{}%", s));
@@ -6820,18 +6804,15 @@ impl StateStore for SqliteStore {
                      LIMIT ?5",
                 )?;
                 let rows = stmt
-                    .query_map(
-                        params![callee_f, caller_f, root_f, file_f, lim],
-                        |row| {
-                            Ok(crate::CodebaseCall {
-                                file_path: row.get(0)?,
-                                line: row.get::<_, i64>(1)? as u32,
-                                language: row.get(2)?,
-                                caller: row.get(3)?,
-                                callee: row.get(4)?,
-                            })
-                        },
-                    )?
+                    .query_map(params![callee_f, caller_f, root_f, file_f, lim], |row| {
+                        Ok(crate::CodebaseCall {
+                            file_path: row.get(0)?,
+                            line: row.get::<_, i64>(1)? as u32,
+                            language: row.get(2)?,
+                            caller: row.get(3)?,
+                            callee: row.get(4)?,
+                        })
+                    })?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
                 Ok(rows)
             })
@@ -6884,8 +6865,7 @@ impl StateStore for SqliteStore {
         }
 
         let mut out: Vec<crate::ResolvedCall> = Vec::new();
-        let mut seen: std::collections::HashSet<(String, u32)> =
-            std::collections::HashSet::new();
+        let mut seen: std::collections::HashSet<(String, u32)> = std::collections::HashSet::new();
 
         // Direct fallback: any call whose `callee` equals the target
         // literally is a hit — regardless of imports. Catches the
@@ -6907,21 +6887,18 @@ impl StateStore for SqliteStore {
                          ORDER BY file_path, line",
                     )?;
                     let rows: Vec<crate::ResolvedCall> = stmt
-                        .query_map(
-                            params![target_clone, root_f_clone, file_f_clone],
-                            |row| {
-                                Ok(crate::ResolvedCall {
-                                    file_path: row.get(0)?,
-                                    line: row.get::<_, i64>(1)? as u32,
-                                    language: row.get(2)?,
-                                    caller: row.get(3)?,
-                                    callee: row.get(4)?,
-                                    resolved_callee: String::new(),
-                                    via_alias: None,
-                                    via_import: String::new(),
-                                })
-                            },
-                        )?
+                        .query_map(params![target_clone, root_f_clone, file_f_clone], |row| {
+                            Ok(crate::ResolvedCall {
+                                file_path: row.get(0)?,
+                                line: row.get::<_, i64>(1)? as u32,
+                                language: row.get(2)?,
+                                caller: row.get(3)?,
+                                callee: row.get(4)?,
+                                resolved_callee: String::new(),
+                                via_alias: None,
+                                via_import: String::new(),
+                            })
+                        })?
                         .collect::<std::result::Result<Vec<_>, _>>()?;
                     Ok(rows)
                 })
@@ -6933,9 +6910,7 @@ impl StateStore for SqliteStore {
                 if seen.insert((row.file_path.clone(), row.line)) {
                     out.push(row);
                     if out.len() >= lim {
-                        out.sort_by(|a, b| {
-                            a.file_path.cmp(&b.file_path).then(a.line.cmp(&b.line))
-                        });
+                        out.sort_by(|a, b| a.file_path.cmp(&b.file_path).then(a.line.cmp(&b.line)));
                         return Ok(out);
                     }
                 }
@@ -6972,12 +6947,7 @@ impl StateStore for SqliteStore {
                     )?;
                     let imports: Vec<(String, String, Option<String>, String)> = imp_stmt
                         .query_map(
-                            params![
-                                prefix_clone,
-                                prefix_wildcard,
-                                root_f_clone,
-                                file_f_clone
-                            ],
+                            params![prefix_clone, prefix_wildcard, root_f_clone, file_f_clone],
                             |row| {
                                 Ok((
                                     row.get::<_, String>(0)?,
@@ -7033,17 +7003,14 @@ impl StateStore for SqliteStore {
                             format!("{local_name}{import_sep}{suffix_in_import_sep}")
                         };
                         let calls: Vec<(i64, String, String, String)> = call_stmt
-                            .query_map(
-                                params![file_path, expected_callee],
-                                |row| {
-                                    Ok((
-                                        row.get::<_, i64>(0)?,
-                                        row.get::<_, String>(1)?,
-                                        row.get::<_, String>(2)?,
-                                        row.get::<_, String>(3)?,
-                                    ))
-                                },
-                            )?
+                            .query_map(params![file_path, expected_callee], |row| {
+                                Ok((
+                                    row.get::<_, i64>(0)?,
+                                    row.get::<_, String>(1)?,
+                                    row.get::<_, String>(2)?,
+                                    row.get::<_, String>(3)?,
+                                ))
+                            })?
                             .collect::<std::result::Result<Vec<_>, _>>()?;
                         for (line, language, caller, callee) in calls {
                             local_out.push(crate::ResolvedCall {
@@ -7067,9 +7034,7 @@ impl StateStore for SqliteStore {
                 if seen.insert((row.file_path.clone(), row.line)) {
                     out.push(row);
                     if out.len() >= lim {
-                        out.sort_by(|a, b| {
-                            a.file_path.cmp(&b.file_path).then(a.line.cmp(&b.line))
-                        });
+                        out.sort_by(|a, b| a.file_path.cmp(&b.file_path).then(a.line.cmp(&b.line)));
                         return Ok(out);
                     }
                 }
@@ -7222,11 +7187,7 @@ impl StateStore for SqliteStore {
                     }
                 }
 
-                let kinds_placeholder = FN_KINDS
-                    .iter()
-                    .map(|_| "?")
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                let kinds_placeholder = FN_KINDS.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
                 let sym_sql = format!(
                     "SELECT name, kind, file_path, language, line
                      FROM codebase_symbols
@@ -7242,18 +7203,15 @@ impl StateStore for SqliteStore {
                     sym_params.push(k);
                 }
                 let candidate_rows: Vec<(String, String, String, String, i64)> = sym_stmt
-                    .query_map(
-                        rusqlite::params_from_iter(sym_params.iter()),
-                        |row| {
-                            Ok((
-                                row.get::<_, String>(0)?,
-                                row.get::<_, String>(1)?,
-                                row.get::<_, String>(2)?,
-                                row.get::<_, String>(3)?,
-                                row.get::<_, i64>(4)?,
-                            ))
-                        },
-                    )?
+                    .query_map(rusqlite::params_from_iter(sym_params.iter()), |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, i64>(4)?,
+                        ))
+                    })?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
                 let mut orphan_functions: Vec<crate::OrphanFunction> = Vec::new();
                 for (name, kind, file_path, language, line) in candidate_rows {
@@ -7345,10 +7303,7 @@ impl StateStore for SqliteStore {
                     )?;
                     let rows = stmt
                         .query_map([], |row| {
-                            Ok((
-                                row.get::<_, String>(0)?,
-                                row.get::<_, i64>(1)? as u64,
-                            ))
+                            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as u64))
                         })?
                         .collect::<std::result::Result<Vec<_>, _>>()?;
                     Ok(rows)
@@ -7682,10 +7637,8 @@ impl StateStore for SqliteStore {
                     swept_total = swept_total.saturating_add(n as u64);
                 }
                 // Reap dead rows after all halvings complete.
-                let pruned: usize = tx.execute(
-                    "DELETE FROM memory_coactivation WHERE count < 1",
-                    [],
-                )?;
+                let pruned: usize =
+                    tx.execute("DELETE FROM memory_coactivation WHERE count < 1", [])?;
                 tx.commit()?;
                 Ok(crate::DecayCoactivationStats {
                     swept: swept_total,
@@ -7696,7 +7649,6 @@ impl StateStore for SqliteStore {
             .await
             .map_err(|e| Error::Backend(format!("decay_coactivation_once: {e}")))
     }
-
 
     // ─── v8: cloud-run lifecycle (warp-oz) ──────────────────────────────
 
@@ -8037,7 +7989,9 @@ impl StateStore for SqliteStore {
             ));
         }
         if body.trim().is_empty() {
-            return Err(Error::Backend("forum_post: 'body' must be non-empty".into()));
+            return Err(Error::Backend(
+                "forum_post: 'body' must be non-empty".into(),
+            ));
         }
         let kind_norm = match kind {
             "" | "msg" => "msg",
@@ -8059,42 +8013,41 @@ impl StateStore for SqliteStore {
         let now = now_secs();
 
         let outcome = match thread_id {
-            Some(tid) => {
-                self.conn
-                    .call(move |c| -> RusqliteResult<ForumPostOutcome> {
-                        let exists: i64 = c.query_row(
-                            "SELECT COUNT(*) FROM forum_threads WHERE id=?1",
-                            params![tid],
-                            |r| r.get(0),
-                        )?;
-                        if exists == 0 {
-                            return Err(tokio_rusqlite::rusqlite::Error::QueryReturnedNoRows);
-                        }
-                        c.execute(
-                            "INSERT INTO forum_posts \
+            Some(tid) => self
+                .conn
+                .call(move |c| -> RusqliteResult<ForumPostOutcome> {
+                    let exists: i64 = c.query_row(
+                        "SELECT COUNT(*) FROM forum_threads WHERE id=?1",
+                        params![tid],
+                        |r| r.get(0),
+                    )?;
+                    if exists == 0 {
+                        return Err(tokio_rusqlite::rusqlite::Error::QueryReturnedNoRows);
+                    }
+                    c.execute(
+                        "INSERT INTO forum_posts \
                              (thread_id, author, kind, body, refs_json, created_at) \
                              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                            params![tid, author, kind_norm, body, refs_json, now],
-                        )?;
-                        let pid = c.last_insert_rowid();
-                        c.execute(
-                            "UPDATE forum_threads SET last_post_at=?1 WHERE id=?2",
-                            params![now, tid],
-                        )?;
-                        Ok(ForumPostOutcome {
-                            thread_id: tid,
-                            post_id: pid,
-                            created_thread: false,
-                        })
+                        params![tid, author, kind_norm, body, refs_json, now],
+                    )?;
+                    let pid = c.last_insert_rowid();
+                    c.execute(
+                        "UPDATE forum_threads SET last_post_at=?1 WHERE id=?2",
+                        params![now, tid],
+                    )?;
+                    Ok(ForumPostOutcome {
+                        thread_id: tid,
+                        post_id: pid,
+                        created_thread: false,
                     })
-                    .await
-                    .map_err(|e| match e {
-                        tokio_rusqlite::Error::Error(
-                            tokio_rusqlite::rusqlite::Error::QueryReturnedNoRows,
-                        ) => Error::Backend(format!("forum_post: thread_id={tid} not found")),
-                        other => Error::Backend(format!("forum_post append: {other}")),
-                    })?
-            }
+                })
+                .await
+                .map_err(|e| match e {
+                    tokio_rusqlite::Error::Error(
+                        tokio_rusqlite::rusqlite::Error::QueryReturnedNoRows,
+                    ) => Error::Backend(format!("forum_post: thread_id={tid} not found")),
+                    other => Error::Backend(format!("forum_post append: {other}")),
+                })?,
             None => {
                 let board_s = board
                     .filter(|s| !s.is_empty())
@@ -8307,7 +8260,9 @@ impl StateStore for SqliteStore {
         let row = self
             .conn
             .call(
-                move |c| -> RusqliteResult<Option<(i64, i64, String, String, String, Option<String>, i64)>> {
+                move |c| -> RusqliteResult<
+                    Option<(i64, i64, String, String, String, Option<String>, i64)>,
+                > {
                     let mut stmt = c.prepare(
                         "SELECT id, thread_id, author, kind, body, refs_json, created_at \
                          FROM forum_posts WHERE id = ?1",
@@ -8331,21 +8286,23 @@ impl StateStore for SqliteStore {
             .await
             .map_err(|e| Error::Backend(format!("forum_post_get: {e}")))?;
 
-        Ok(row.map(|(id, thread_id, author, kind, body, refs_json, created_at)| {
-            let refs = match refs_json {
-                Some(s) => serde_json::from_str(&s).unwrap_or(serde_json::Value::Null),
-                None => serde_json::Value::Null,
-            };
-            ForumPostRecord {
-                id,
-                thread_id,
-                author,
-                kind,
-                body,
-                refs,
-                created_at,
-            }
-        }))
+        Ok(row.map(
+            |(id, thread_id, author, kind, body, refs_json, created_at)| {
+                let refs = match refs_json {
+                    Some(s) => serde_json::from_str(&s).unwrap_or(serde_json::Value::Null),
+                    None => serde_json::Value::Null,
+                };
+                ForumPostRecord {
+                    id,
+                    thread_id,
+                    author,
+                    kind,
+                    body,
+                    refs,
+                    created_at,
+                }
+            },
+        ))
     }
 
     async fn forum_subscribe(
@@ -8433,7 +8390,9 @@ impl StateStore for SqliteStore {
         limit: u32,
     ) -> Result<Vec<ForumThreadRecord>> {
         if board.trim().is_empty() {
-            return Err(Error::Backend("forum_list_threads: 'board' required".into()));
+            return Err(Error::Backend(
+                "forum_list_threads: 'board' required".into(),
+            ));
         }
         let board_s = board.to_string();
         let status_f = status.map(|s| s.to_string());
@@ -8590,8 +8549,17 @@ impl StateStore for SqliteStore {
             .map_err(|e| Error::Backend(format!("forum_digest_threads: {e}")))?;
 
         let mut out = Vec::with_capacity(rows.len());
-        for (id, board, title, created_by, created_at, last_post_at, status, tags_json, post_count) in
-            rows
+        for (
+            id,
+            board,
+            title,
+            created_by,
+            created_at,
+            last_post_at,
+            status,
+            tags_json,
+            post_count,
+        ) in rows
         {
             let tags: Vec<String> = match tags_json {
                 Some(s) => serde_json::from_str(&s).unwrap_or_default(),
@@ -8613,11 +8581,7 @@ impl StateStore for SqliteStore {
         Ok(out)
     }
 
-    async fn forum_recent_posts(
-        &self,
-        thread_id: i64,
-        limit: u32,
-    ) -> Result<Vec<ForumPostRecord>> {
+    async fn forum_recent_posts(&self, thread_id: i64, limit: u32) -> Result<Vec<ForumPostRecord>> {
         let lim = i64::from(limit.clamp(1, 500));
         let rows = self
             .conn
@@ -8667,10 +8631,7 @@ impl StateStore for SqliteStore {
         Ok(posts)
     }
 
-    async fn forum_export(
-        &self,
-        out_path: &std::path::Path,
-    ) -> Result<ForumExportResult> {
+    async fn forum_export(&self, out_path: &std::path::Path) -> Result<ForumExportResult> {
         let threads: Vec<ForumThreadExport> = self
             .conn
             .call(move |c| -> RusqliteResult<Vec<ForumThreadExport>> {
@@ -8773,10 +8734,7 @@ impl StateStore for SqliteStore {
         })
     }
 
-    async fn forum_import(
-        &self,
-        in_path: &std::path::Path,
-    ) -> Result<ForumImportReport> {
+    async fn forum_import(&self, in_path: &std::path::Path) -> Result<ForumImportReport> {
         let raw = match tokio::fs::read_to_string(in_path).await {
             Ok(s) => s,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -8820,9 +8778,8 @@ impl StateStore for SqliteStore {
                             (board, title, created_by, created_at, last_post_at, status, tags_json)
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
                     )?;
-                    let mut bump_last_post = tx.prepare(
-                        "UPDATE forum_threads SET last_post_at=?1 WHERE id=?2",
-                    )?;
+                    let mut bump_last_post =
+                        tx.prepare("UPDATE forum_threads SET last_post_at=?1 WHERE id=?2")?;
                     let mut find_post = tx.prepare(
                         "SELECT 1 FROM forum_posts
                          WHERE thread_id=?1 AND author=?2 AND created_at=?3 AND body=?4
@@ -8878,10 +8835,7 @@ impl StateStore for SqliteStore {
                                 rep.posts_skipped += 1;
                                 continue;
                             }
-                            let refs_json = p
-                                .refs
-                                .as_ref()
-                                .map(|v| v.to_string());
+                            let refs_json = p.refs.as_ref().map(|v| v.to_string());
                             insert_post.execute(params![
                                 thread_id,
                                 &p.author,
@@ -9095,9 +9049,7 @@ impl StateStore for SqliteStore {
                     },
                 )?;
                 let (sid, nm, desc, ver, url, nd, proj, rl, tg, cd, p, cap_s, sk_s, st, hb) = row;
-                let capabilities = cap_s
-                    .as_deref()
-                    .and_then(|s| serde_json::from_str(s).ok());
+                let capabilities = cap_s.as_deref().and_then(|s| serde_json::from_str(s).ok());
                 let skills = sk_s.as_deref().and_then(|s| serde_json::from_str(s).ok());
                 Ok(AgentPresenceRecord {
                     session_id: sid,
@@ -9188,9 +9140,7 @@ impl StateStore for SqliteStore {
 
         let mut out = Vec::with_capacity(rows.len());
         for (sid, nm, desc, ver, url, nd, proj, rl, tg, cd, p, cap_s, sk_s, st, hb) in rows {
-            let capabilities = cap_s
-                .as_deref()
-                .and_then(|s| serde_json::from_str(s).ok());
+            let capabilities = cap_s.as_deref().and_then(|s| serde_json::from_str(s).ok());
             let skills = sk_s.as_deref().and_then(|s| serde_json::from_str(s).ok());
             out.push(AgentPresenceRecord {
                 session_id: sid,
@@ -9213,10 +9163,7 @@ impl StateStore for SqliteStore {
         Ok(out)
     }
 
-    async fn agent_presence_get(
-        &self,
-        session_id: &str,
-    ) -> Result<Option<AgentPresenceRecord>> {
+    async fn agent_presence_get(&self, session_id: &str) -> Result<Option<AgentPresenceRecord>> {
         let session_id = session_id.to_string();
         let row = self
             .conn
@@ -9256,9 +9203,7 @@ impl StateStore for SqliteStore {
 
         Ok(row.map(
             |(sid, nm, desc, ver, url, nd, proj, rl, tg, cd, p, cap_s, sk_s, st, hb)| {
-                let capabilities = cap_s
-                    .as_deref()
-                    .and_then(|s| serde_json::from_str(s).ok());
+                let capabilities = cap_s.as_deref().and_then(|s| serde_json::from_str(s).ok());
                 let skills = sk_s.as_deref().and_then(|s| serde_json::from_str(s).ok());
                 AgentPresenceRecord {
                     session_id: sid,
@@ -9325,8 +9270,10 @@ impl StateStore for SqliteStore {
         let counts = self
             .conn
             .call(move |c| -> RusqliteResult<S234Counts> {
-                let kind_params: Vec<&dyn rusqlite::ToSql> =
-                    CATALOG_KINDS_C3.iter().map(|s| s as &dyn rusqlite::ToSql).collect();
+                let kind_params: Vec<&dyn rusqlite::ToSql> = CATALOG_KINDS_C3
+                    .iter()
+                    .map(|s| s as &dyn rusqlite::ToSql)
+                    .collect();
                 let memories_active: i64 = c.query_row(
                     &active_query,
                     rusqlite::params_from_iter(kind_params.iter()),
@@ -9372,33 +9319,35 @@ impl SqliteStore {
         // Load all matching symbols with embeddings (no name filter — semantic scoring does that).
         let rows = self
             .conn
-            .call(move |c| -> RusqliteResult<Vec<(CodebaseSymbol, Option<Vec<u8>>)>> {
-                let mut stmt = c.prepare(
-                    "SELECT file_path, line, col, kind, name, signature, language, embedding
+            .call(
+                move |c| -> RusqliteResult<Vec<(CodebaseSymbol, Option<Vec<u8>>)>> {
+                    let mut stmt = c.prepare(
+                        "SELECT file_path, line, col, kind, name, signature, language, embedding
                      FROM codebase_symbols
                      WHERE (?1 IS NULL OR kind = ?1)
                        AND (?2 IS NULL OR root_path = ?2)
                        AND (?3 IS NULL OR file_path LIKE ?3)",
-                )?;
-                let rows = stmt
-                    .query_map(params![kind_f, root_f, file_f], |row| {
-                        Ok((
-                            CodebaseSymbol {
-                                file_path: row.get(0)?,
-                                line: row.get::<_, i64>(1)? as u32,
-                                col: row.get::<_, i64>(2)? as u32,
-                                kind: row.get(3)?,
-                                name: row.get(4)?,
-                                signature: row.get(5)?,
-                                language: row.get(6)?,
-                                score: None,
-                            },
-                            row.get::<_, Option<Vec<u8>>>(7)?,
-                        ))
-                    })?
-                    .collect::<std::result::Result<Vec<_>, _>>()?;
-                Ok(rows)
-            })
+                    )?;
+                    let rows = stmt
+                        .query_map(params![kind_f, root_f, file_f], |row| {
+                            Ok((
+                                CodebaseSymbol {
+                                    file_path: row.get(0)?,
+                                    line: row.get::<_, i64>(1)? as u32,
+                                    col: row.get::<_, i64>(2)? as u32,
+                                    kind: row.get(3)?,
+                                    name: row.get(4)?,
+                                    signature: row.get(5)?,
+                                    language: row.get(6)?,
+                                    score: None,
+                                },
+                                row.get::<_, Option<Vec<u8>>>(7)?,
+                            ))
+                        })?
+                        .collect::<std::result::Result<Vec<_>, _>>()?;
+                    Ok(rows)
+                },
+            )
             .await
             .map_err(|e| Error::Backend(format!("codebase_search_semantic load: {e}")))?;
 
@@ -9419,7 +9368,12 @@ impl SqliteStore {
         scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
         let mut seen = std::collections::HashSet::new();
         scored.retain(|(_, sym)| {
-            seen.insert((sym.file_path.clone(), sym.line, sym.kind.clone(), sym.name.clone()))
+            seen.insert((
+                sym.file_path.clone(),
+                sym.line,
+                sym.kind.clone(),
+                sym.name.clone(),
+            ))
         });
         scored.truncate(lim);
 
@@ -9431,10 +9385,7 @@ impl SqliteStore {
     /// with its cofires degree. Ordered by degree DESC then key ASC for
     /// deterministic audit reporting. Used by `dream substrate-corr-audit`
     /// to enumerate the keys it must score.
-    pub async fn cofires_keys_with_min_degree(
-        &self,
-        min_count: u32,
-    ) -> Result<Vec<(String, u32)>> {
+    pub async fn cofires_keys_with_min_degree(&self, min_count: u32) -> Result<Vec<(String, u32)>> {
         let min = min_count as i64;
         let rows = self
             .conn
@@ -9565,8 +9516,12 @@ mod tests {
         let mut existing: ExistingMetaT = std::collections::HashMap::new();
         existing.insert("k1".to_string(), (100, Default::default()));
         existing.insert("k2".to_string(), (200, Default::default()));
-        let actions =
-            plan_import_actions(&parsed, &empty_vvs(parsed.len()), &existing, ImportConflictPolicy::Skip);
+        let actions = plan_import_actions(
+            &parsed,
+            &empty_vvs(parsed.len()),
+            &existing,
+            ImportConflictPolicy::Skip,
+        );
         assert_eq!(actions, vec![ImportAction::Skip, ImportAction::Skip]);
     }
 
@@ -9575,8 +9530,12 @@ mod tests {
         let parsed = vec![mk_record("new", 500), mk_record("known", 200)];
         let mut existing: ExistingMetaT = std::collections::HashMap::new();
         existing.insert("known".to_string(), (200, Default::default()));
-        let actions =
-            plan_import_actions(&parsed, &empty_vvs(parsed.len()), &existing, ImportConflictPolicy::Skip);
+        let actions = plan_import_actions(
+            &parsed,
+            &empty_vvs(parsed.len()),
+            &existing,
+            ImportConflictPolicy::Skip,
+        );
         assert_eq!(actions, vec![ImportAction::Insert, ImportAction::Skip]);
     }
 
@@ -9791,7 +9750,9 @@ mod tests {
         rec.content = "v0".into();
         a.memory_save(&rec).await.expect("A save v0");
         let exp0 = base.join("a0.jsonl");
-        a.memory_export(&export_all(), &exp0).await.expect("A export0");
+        a.memory_export(&export_all(), &exp0)
+            .await
+            .expect("A export0");
         let r = b
             .memory_import(&exp0, ImportConflictPolicy::VersionVectorMerge, None)
             .await
@@ -9807,23 +9768,30 @@ mod tests {
 
         // 3. Sync A -> B: the two vectors are concurrent -> conflict copy.
         let exp_a = base.join("a1.jsonl");
-        a.memory_export(&export_all(), &exp_a).await.expect("A export1");
+        a.memory_export(&export_all(), &exp_a)
+            .await
+            .expect("A export1");
         let rep = b
             .memory_import(&exp_a, ImportConflictPolicy::VersionVectorMerge, None)
             .await
             .expect("B merge");
-        assert_eq!(rep.conflict_copies, 1, "concurrent edit => one conflict copy");
-        assert_eq!(rep.updated, 0, "B's canonical row must NOT be LWW-overwritten");
+        assert_eq!(
+            rep.conflict_copies, 1,
+            "concurrent edit => one conflict copy"
+        );
+        assert_eq!(
+            rep.updated, 0,
+            "B's canonical row must NOT be LWW-overwritten"
+        );
 
         // 4. Both versions survive on B: canonical = vB, conflict copy = vA.
         let (canonical, conflict_count, conflict_content) = b
             .conn
             .call(|c| -> RusqliteResult<(String, i64, String)> {
-                let canonical: String = c.query_row(
-                    "SELECT content FROM memories WHERE key='shared'",
-                    [],
-                    |r| r.get(0),
-                )?;
+                let canonical: String =
+                    c.query_row("SELECT content FROM memories WHERE key='shared'", [], |r| {
+                        r.get(0)
+                    })?;
                 let conflict_count: i64 = c.query_row(
                     "SELECT COUNT(*) FROM memories WHERE key LIKE 'shared#conflict-%'",
                     [],
@@ -9883,7 +9851,9 @@ mod tests {
         b.memory_save(&kb).await.expect("B save kb");
 
         let exp_a = base.join("a.jsonl");
-        a.memory_export(&export_all(), &exp_a).await.expect("A export");
+        a.memory_export(&export_all(), &exp_a)
+            .await
+            .expect("A export");
         let rep = b
             .memory_import(&exp_a, ImportConflictPolicy::VersionVectorMerge, None)
             .await
@@ -9952,7 +9922,10 @@ mod tests {
             })
             .await
             .expect("read reused");
-        assert_eq!(reused, sentinel, "sentinel must survive same-content re-save");
+        assert_eq!(
+            reused, sentinel,
+            "sentinel must survive same-content re-save"
+        );
 
         // Different content → must recompute (sentinel overwritten).
         rec.content = "different content now".into();
@@ -9969,7 +9942,10 @@ mod tests {
             })
             .await
             .expect("read recomputed");
-        assert_ne!(recomputed, sentinel, "sentinel must be replaced on content change");
+        assert_ne!(
+            recomputed, sentinel,
+            "sentinel must be replaced on content change"
+        );
         assert_eq!(recomputed.len(), crate::vector::VECTOR_DIM * 4);
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
@@ -10230,7 +10206,10 @@ mod tests {
             .await
             .expect("gc dry-run");
         assert_eq!(dry_cleared, 51, "dry-run must project the same clear count");
-        assert_eq!(dry_retained, 51, "dry-run must project the same retain count");
+        assert_eq!(
+            dry_retained, 51,
+            "dry-run must project the same retain count"
+        );
         let still_there = store
             .agent_inbox_fetch("b", None, false, 200)
             .await
@@ -10957,9 +10936,15 @@ mod tests {
             superseded_by: None,
         };
 
-        store.memory_save(&mk("stale_a")).await.expect("save stale_a");
+        store
+            .memory_save(&mk("stale_a"))
+            .await
+            .expect("save stale_a");
         store.memory_save(&mk("null_b")).await.expect("save null_b");
-        store.memory_save(&mk("fresh_c")).await.expect("save fresh_c");
+        store
+            .memory_save(&mk("fresh_c"))
+            .await
+            .expect("save fresh_c");
 
         // Pre-seed backend tags: stale_a gets a wrong tag, null_b gets NULL,
         // fresh_c stays at the default-stamped current backend name.
@@ -11032,7 +11017,10 @@ mod tests {
             .memory_reindex_embeddings(100, false)
             .await
             .expect("reindex null");
-        assert_eq!(n_null, 0, "no NULL embeddings remain; reindex must return 0");
+        assert_eq!(
+            n_null, 0,
+            "no NULL embeddings remain; reindex must return 0"
+        );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
@@ -11101,8 +11089,14 @@ mod tests {
             trigger_pattern: None,
             superseded_by: None,
         };
-        store.memory_save(&mk("loose_a", "fact")).await.expect("save a");
-        store.memory_save(&mk("loose_b", "note")).await.expect("save b");
+        store
+            .memory_save(&mk("loose_a", "fact"))
+            .await
+            .expect("save a");
+        store
+            .memory_save(&mk("loose_b", "note"))
+            .await
+            .expect("save b");
         store
             .memory_link("loose_a", "loose_b", "relates", 1.0)
             .await
@@ -11182,13 +11176,22 @@ mod tests {
             trigger_pattern: None,
             superseded_by: None,
         };
-        store.memory_save(&mk("a_lesson", "lesson")).await.expect("save lesson");
-        store.memory_save(&mk("b_decision", "decision")).await.expect("save decision");
+        store
+            .memory_save(&mk("a_lesson", "lesson"))
+            .await
+            .expect("save lesson");
+        store
+            .memory_save(&mk("b_decision", "decision"))
+            .await
+            .expect("save decision");
         store
             .memory_save(&mk("c_outcome", "present_outcome"))
             .await
             .expect("save outcome");
-        store.memory_save(&mk("d_skill", "skill")).await.expect("save skill");
+        store
+            .memory_save(&mk("d_skill", "skill"))
+            .await
+            .expect("save skill");
 
         let topo = store.graph_topology().await.expect("topology");
         // Only the two working kinds count toward the coverage denominator;
@@ -11238,8 +11241,14 @@ mod tests {
             trigger_pattern: None,
             superseded_by: None,
         };
-        store.memory_save(&mk("loose_a", "fact")).await.expect("save a");
-        store.memory_save(&mk("loose_b", "note")).await.expect("save b");
+        store
+            .memory_save(&mk("loose_a", "fact"))
+            .await
+            .expect("save a");
+        store
+            .memory_save(&mk("loose_b", "note"))
+            .await
+            .expect("save b");
         store
             .memory_link("loose_a", "loose_b", "relates", 1.0)
             .await
@@ -11518,7 +11527,10 @@ mod tests {
             trigger_pattern: None,
             superseded_by: None,
         };
-        store.memory_save(&confusable).await.expect("save confusable");
+        store
+            .memory_save(&confusable)
+            .await
+            .expect("save confusable");
         let v3_still = store
             .memory_get("summary_v3_qwen")
             .await
@@ -11555,10 +11567,7 @@ mod tests {
             key: "rec_a".to_string(),
             kind: "lesson".to_string(),
             content: "alpha".to_string(),
-            tags: vec![
-                "dedupe:cluster:k7".to_string(),
-                "p5_replay".to_string(),
-            ],
+            tags: vec!["dedupe:cluster:k7".to_string(), "p5_replay".to_string()],
             related_keys: vec![],
             scope: None,
             created_at: 0,
@@ -11585,9 +11594,7 @@ mod tests {
         let dedupe_keys: Vec<(String, Option<String>)> = store
             .conn
             .call(|c| -> RusqliteResult<Vec<(String, Option<String>)>> {
-                let mut stmt = c.prepare(
-                    "SELECT key, dedupe_key FROM memories ORDER BY key",
-                )?;
+                let mut stmt = c.prepare("SELECT key, dedupe_key FROM memories ORDER BY key")?;
                 let rows = stmt
                     .query_map([], |row| {
                         Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
@@ -11608,7 +11615,11 @@ mod tests {
 
         // Behavioral check: rec_a was superseded by rec_b via the indexed
         // lookup (mirrors the existing supersede test, scoped to this case).
-        let rec_a_after = store.memory_get("rec_a").await.expect("get").expect("exists");
+        let rec_a_after = store
+            .memory_get("rec_a")
+            .await
+            .expect("get")
+            .expect("exists");
         assert_eq!(rec_a_after.status, "superseded");
         assert_eq!(rec_a_after.superseded_by.as_deref(), Some("rec_b"));
 
@@ -11664,10 +11675,7 @@ mod tests {
                     key: "legacy_row".to_string(),
                     kind: "lesson".to_string(),
                     content: "written before v23".to_string(),
-                    tags: vec![
-                        "dedupe:cluster:legacyk".to_string(),
-                        "p5".to_string(),
-                    ],
+                    tags: vec!["dedupe:cluster:legacyk".to_string(), "p5".to_string()],
                     related_keys: vec![],
                     scope: None,
                     created_at: 0,
@@ -11861,7 +11869,11 @@ mod tests {
             "stale active record must be skipped — not revive the tombstone"
         );
         assert!(
-            store_b.memory_get("tomb_x").await.expect("get b2").is_none(),
+            store_b
+                .memory_get("tomb_x")
+                .await
+                .expect("get b2")
+                .is_none(),
             "tombstone must survive a stale-jsonl reimport (regression guard)"
         );
 
@@ -12114,7 +12126,11 @@ mod tests {
                 )?;
                 let rows: RusqliteResult<Vec<(String, String, i64)>> = s
                     .query_map([], |r| {
-                        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
+                        Ok((
+                            r.get::<_, String>(0)?,
+                            r.get::<_, String>(1)?,
+                            r.get::<_, i64>(2)?,
+                        ))
                     })?
                     .collect();
                 rows
@@ -12188,12 +12204,30 @@ mod tests {
             superseded_by: None,
         };
         // 3 stubs (auto_curated), 2 real, 1 misc-tagged.
-        store.memory_save(&mk("stub_a", &["auto_curated", "implicit"])).await.expect("save");
-        store.memory_save(&mk("stub_b", &["auto_curated"])).await.expect("save");
-        store.memory_save(&mk("stub_c", &["auto_curated"])).await.expect("save");
-        store.memory_save(&mk("real_x", &["topic"])).await.expect("save");
-        store.memory_save(&mk("real_y", &["topic"])).await.expect("save");
-        store.memory_save(&mk("misc_m", &["junk"])).await.expect("save");
+        store
+            .memory_save(&mk("stub_a", &["auto_curated", "implicit"]))
+            .await
+            .expect("save");
+        store
+            .memory_save(&mk("stub_b", &["auto_curated"]))
+            .await
+            .expect("save");
+        store
+            .memory_save(&mk("stub_c", &["auto_curated"]))
+            .await
+            .expect("save");
+        store
+            .memory_save(&mk("real_x", &["topic"]))
+            .await
+            .expect("save");
+        store
+            .memory_save(&mk("real_y", &["topic"]))
+            .await
+            .expect("save");
+        store
+            .memory_save(&mk("misc_m", &["junk"]))
+            .await
+            .expect("save");
 
         // Edge layout:
         // - stub_a → stub_b  (relates) — DEGENERATE, prune
@@ -12266,9 +12300,7 @@ mod tests {
             .expect("read remaining");
         assert_eq!(remaining.len(), 5);
         for (f, t, ty) in &remaining {
-            let degenerate = ty == "relates"
-                && f.starts_with("stub_")
-                && t.starts_with("stub_");
+            let degenerate = ty == "relates" && f.starts_with("stub_") && t.starts_with("stub_");
             assert!(
                 !degenerate,
                 "remaining edge {}→{} ({}) should have been pruned",
@@ -12380,8 +12412,7 @@ mod tests {
                         .collect::<Vec<_>>()
                         .join(",")
                 );
-                let mut p: Vec<rusqlite::types::Value> =
-                    vec![rusqlite::types::Value::Integer(old)];
+                let mut p: Vec<rusqlite::types::Value> = vec![rusqlite::types::Value::Integer(old)];
                 p.extend(
                     backdate_keys
                         .into_iter()
@@ -12466,12 +12497,10 @@ mod tests {
         let archived_keys: Vec<String> = store
             .conn
             .call(|c| {
-                let mut s = c.prepare(
-                    "SELECT key FROM memories WHERE status='archived' ORDER BY key",
-                )?;
-                let rows: RusqliteResult<Vec<String>> = s
-                    .query_map([], |r| r.get::<_, String>(0))?
-                    .collect();
+                let mut s =
+                    c.prepare("SELECT key FROM memories WHERE status='archived' ORDER BY key")?;
+                let rows: RusqliteResult<Vec<String>> =
+                    s.query_map([], |r| r.get::<_, String>(0))?.collect();
                 rows
             })
             .await
@@ -12532,7 +12561,9 @@ mod tests {
                 .as_nanos()
         ));
         tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
-        let store = SqliteStore::open(&temp_dir.join("c.db")).await.expect("open");
+        let store = SqliteStore::open(&temp_dir.join("c.db"))
+            .await
+            .expect("open");
 
         let now = now_secs();
         let mk = |key: &str, importance: f64, related: Vec<String>| MemoryRecord {
@@ -12553,17 +12584,29 @@ mod tests {
             superseded_by: None,
         };
         // junk: low importance, no links, no edges → the only eligible row.
-        store.memory_save(&mk("junk_old", 0.2, vec![])).await.expect("save");
+        store
+            .memory_save(&mk("junk_old", 0.2, vec![]))
+            .await
+            .expect("save");
         // durable by importance.
-        store.memory_save(&mk("durable_imp", 0.8, vec![])).await.expect("save");
+        store
+            .memory_save(&mk("durable_imp", 0.8, vec![]))
+            .await
+            .expect("save");
         // durable by related_keys (note: related_keys does NOT create edges).
         store
             .memory_save(&mk("durable_linked", 0.2, vec!["junk_old".into()]))
             .await
             .expect("save");
         // durable by edge.
-        store.memory_save(&mk("edge_a", 0.2, vec![])).await.expect("save");
-        store.memory_save(&mk("edge_b", 0.2, vec![])).await.expect("save");
+        store
+            .memory_save(&mk("edge_a", 0.2, vec![]))
+            .await
+            .expect("save");
+        store
+            .memory_save(&mk("edge_b", 0.2, vec![]))
+            .await
+            .expect("save");
         store
             .memory_link("edge_a", "edge_b", "relates", 1.0)
             .await
@@ -12572,7 +12615,13 @@ mod tests {
         // Backdate created_at + last_accessed_at so every row clears the
         // age/access window (memory_save stamps both to now).
         let old = now - 200 * 86_400;
-        let keys_all = vec!["junk_old", "durable_imp", "durable_linked", "edge_a", "edge_b"];
+        let keys_all = vec![
+            "junk_old",
+            "durable_imp",
+            "durable_linked",
+            "edge_a",
+            "edge_b",
+        ];
         store
             .conn
             .call(move |c| -> RusqliteResult<usize> {
@@ -12627,8 +12676,16 @@ mod tests {
             Some("tombstoned"),
             "compact must TOMBSTONE the junk row, not hard-DELETE it"
         );
-        assert_eq!(get("durable_imp"), Some("active"), "high-importance row survives");
-        assert_eq!(get("durable_linked"), Some("active"), "author-linked row survives");
+        assert_eq!(
+            get("durable_imp"),
+            Some("active"),
+            "high-importance row survives"
+        );
+        assert_eq!(
+            get("durable_linked"),
+            Some("active"),
+            "author-linked row survives"
+        );
         assert_eq!(get("edge_a"), Some("active"), "connected row survives");
         assert_eq!(get("edge_b"), Some("active"), "connected row survives");
 
@@ -12653,7 +12710,9 @@ mod tests {
                 .as_nanos()
         ));
         tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
-        let store = SqliteStore::open(&temp_dir.join("d.db")).await.expect("open");
+        let store = SqliteStore::open(&temp_dir.join("d.db"))
+            .await
+            .expect("open");
 
         let now = now_secs();
         let mk = |key: &str, related: Vec<String>| MemoryRecord {
@@ -12672,7 +12731,10 @@ mod tests {
             trigger_pattern: None,
             superseded_by: None,
         };
-        store.memory_save(&mk("isolated_low", vec![])).await.expect("save");
+        store
+            .memory_save(&mk("isolated_low", vec![]))
+            .await
+            .expect("save");
         store
             .memory_save(&mk("linked_low", vec!["isolated_low".into()]))
             .await
@@ -12711,8 +12773,14 @@ mod tests {
             .expect("backdate");
 
         // 0.1 × 0.5^(365/30) ≈ 2e-5 << 0.05 → all 4 would archive without the guard.
-        let archived = store.memory_decay_importance(30.0, 0.05).await.expect("decay");
-        assert_eq!(archived, 1, "only the isolated low-importance row is archived");
+        let archived = store
+            .memory_decay_importance(30.0, 0.05)
+            .await
+            .expect("decay");
+        assert_eq!(
+            archived, 1,
+            "only the isolated low-importance row is archived"
+        );
 
         let statuses = store
             .conn
@@ -12730,8 +12798,16 @@ mod tests {
                 .find(|(key, _)| key == k)
                 .map(|(_, s)| s.as_str())
         };
-        assert_eq!(get("isolated_low"), Some("archived"), "isolated low row archived");
-        assert_eq!(get("linked_low"), Some("active"), "author-linked row spared");
+        assert_eq!(
+            get("isolated_low"),
+            Some("archived"),
+            "isolated low row archived"
+        );
+        assert_eq!(
+            get("linked_low"),
+            Some("active"),
+            "author-linked row spared"
+        );
         assert_eq!(get("hub_a"), Some("active"), "connected row spared");
         assert_eq!(get("hub_b"), Some("active"), "connected row spared");
 
@@ -12815,7 +12891,10 @@ mod tests {
             .expect("decay 1");
         assert_eq!(archived1, 0, "row survives the first decay (0.2 > 0.01)");
         let imp1 = read_imp(store.clone()).await;
-        assert!((imp1 - 0.2).abs() < 1e-3, "one decay ≈ 0.8*0.25 = 0.2, got {imp1}");
+        assert!(
+            (imp1 - 0.2).abs() < 1e-3,
+            "one decay ≈ 0.8*0.25 = 0.2, got {imp1}"
+        );
 
         // Second call, ~no elapsed wall-clock → must NOT decay again.
         let _ = store
@@ -12970,10 +13049,7 @@ mod tests {
             .await
             .expect("verify");
         assert_eq!(status, "active");
-        assert_eq!(
-            updated_at, frozen,
-            "no-op must not touch updated_at"
-        );
+        assert_eq!(updated_at, frozen, "no-op must not touch updated_at");
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
@@ -13191,9 +13267,18 @@ mod tests {
                 .await
                 .expect("save");
         }
-        store.memory_link("a", "b", "cofires", 0.7).await.expect("ab");
-        store.memory_link("b", "c", "co_referenced", 0.4).await.expect("bc");
-        store.memory_link("x", "y", "cofires", 0.7).await.expect("xy");
+        store
+            .memory_link("a", "b", "cofires", 0.7)
+            .await
+            .expect("ab");
+        store
+            .memory_link("b", "c", "co_referenced", 0.4)
+            .await
+            .expect("bc");
+        store
+            .memory_link("x", "y", "cofires", 0.7)
+            .await
+            .expect("xy");
 
         let clusters = store.hebbian_clusters(2).await.expect("probe");
         assert_eq!(clusters.len(), 2);
@@ -13246,9 +13331,18 @@ mod tests {
                 .await
                 .expect("save");
         }
-        store.memory_link("a", "b", "cofires", 0.7).await.expect("ab");
-        store.memory_link("b", "c", "cofires", 0.7).await.expect("bc");
-        store.memory_link("x", "y", "cofires", 0.7).await.expect("xy");
+        store
+            .memory_link("a", "b", "cofires", 0.7)
+            .await
+            .expect("ab");
+        store
+            .memory_link("b", "c", "cofires", 0.7)
+            .await
+            .expect("bc");
+        store
+            .memory_link("x", "y", "cofires", 0.7)
+            .await
+            .expect("xy");
 
         let clusters = store.hebbian_clusters(3).await.expect("probe");
         assert_eq!(clusters.len(), 1);
@@ -13339,11 +13433,26 @@ mod tests {
         // a—b, a—c, a—d  (hub a has deg 3)
         // b—c                  (b/c gain one more → deg 2 each; d stays 1)
         // z—w (single periphery edge, deg 1 each)
-        store.memory_link("a", "b", "cofires", 0.7).await.expect("ab");
-        store.memory_link("a", "c", "cofires", 0.7).await.expect("ac");
-        store.memory_link("a", "d", "cofires", 0.7).await.expect("ad");
-        store.memory_link("b", "c", "cofires", 0.7).await.expect("bc");
-        store.memory_link("z", "w", "cofires", 0.7).await.expect("zw");
+        store
+            .memory_link("a", "b", "cofires", 0.7)
+            .await
+            .expect("ab");
+        store
+            .memory_link("a", "c", "cofires", 0.7)
+            .await
+            .expect("ac");
+        store
+            .memory_link("a", "d", "cofires", 0.7)
+            .await
+            .expect("ad");
+        store
+            .memory_link("b", "c", "cofires", 0.7)
+            .await
+            .expect("bc");
+        store
+            .memory_link("z", "w", "cofires", 0.7)
+            .await
+            .expect("zw");
 
         // Add a non-cofires edge that must NOT count.
         store
@@ -13477,9 +13586,7 @@ mod tests {
                      )",
                 )?;
                 let rows: RusqliteResult<Vec<(String, String)>> = s
-                    .query_map([], |r| {
-                        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
-                    })?
+                    .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
                     .collect();
                 rows
             })
@@ -13487,12 +13594,27 @@ mod tests {
             .expect("collect statuses")
             .into_iter()
             .collect();
-        assert_eq!(statuses.get("aged_archived_a").map(String::as_str), Some("tombstoned"));
-        assert_eq!(statuses.get("aged_archived_b").map(String::as_str), Some("tombstoned"));
-        assert_eq!(statuses.get("fresh_archived").map(String::as_str), Some("archived"));
+        assert_eq!(
+            statuses.get("aged_archived_a").map(String::as_str),
+            Some("tombstoned")
+        );
+        assert_eq!(
+            statuses.get("aged_archived_b").map(String::as_str),
+            Some("tombstoned")
+        );
+        assert_eq!(
+            statuses.get("fresh_archived").map(String::as_str),
+            Some("archived")
+        );
         assert_eq!(statuses.get("live_row").map(String::as_str), Some("active"));
-        assert_eq!(statuses.get("tomb_already").map(String::as_str), Some("tombstoned"));
-        assert_eq!(statuses.get("super_row").map(String::as_str), Some("superseded"));
+        assert_eq!(
+            statuses.get("tomb_already").map(String::as_str),
+            Some("tombstoned")
+        );
+        assert_eq!(
+            statuses.get("super_row").map(String::as_str),
+            Some("superseded")
+        );
 
         let bumped: i64 = store
             .conn
@@ -14006,7 +14128,16 @@ mod tests {
             .await
             .is_err());
         assert!(store
-            .forum_post(Some(out1.thread_id), None, None, "cc-A", "msg", "  ", None, None)
+            .forum_post(
+                Some(out1.thread_id),
+                None,
+                None,
+                "cc-A",
+                "msg",
+                "  ",
+                None,
+                None
+            )
             .await
             .is_err());
 
@@ -14081,12 +14212,30 @@ mod tests {
             .expect("create");
         let p1 = t.post_id;
         let p2 = store
-            .forum_post(Some(t.thread_id), None, None, "cc-A", "msg", "post-2", None, None)
+            .forum_post(
+                Some(t.thread_id),
+                None,
+                None,
+                "cc-A",
+                "msg",
+                "post-2",
+                None,
+                None,
+            )
             .await
             .expect("p2")
             .post_id;
         let p3 = store
-            .forum_post(Some(t.thread_id), None, None, "cc-B", "msg", "post-3", None, None)
+            .forum_post(
+                Some(t.thread_id),
+                None,
+                None,
+                "cc-B",
+                "msg",
+                "post-3",
+                None,
+                None,
+            )
             .await
             .expect("p3")
             .post_id;
@@ -14146,7 +14295,16 @@ mod tests {
     async fn forum_list_threads_unread_counts() {
         let (dir, store) = fresh_store("list").await;
         let t1 = store
-            .forum_post(None, Some("general"), Some("T1"), "cc-A", "msg", "a", None, None)
+            .forum_post(
+                None,
+                Some("general"),
+                Some("T1"),
+                "cc-A",
+                "msg",
+                "a",
+                None,
+                None,
+            )
             .await
             .expect("t1")
             .thread_id;
@@ -14155,7 +14313,16 @@ mod tests {
             .await
             .expect("t1.2");
         let t2 = store
-            .forum_post(None, Some("general"), Some("T2"), "cc-A", "msg", "a", None, None)
+            .forum_post(
+                None,
+                Some("general"),
+                Some("T2"),
+                "cc-A",
+                "msg",
+                "a",
+                None,
+                None,
+            )
             .await
             .expect("t2")
             .thread_id;
@@ -14244,20 +14411,14 @@ mod tests {
         assert_eq!(first.session_id, "host-a:agent-bridge:main");
         assert_eq!(first.started_at, first.last_heartbeat_at);
         assert_eq!(first.pid, Some(1234));
-        assert_eq!(
-            first.capabilities,
-            Some(serde_json::json!({"forum": true}))
-        );
+        assert_eq!(first.capabilities, Some(serde_json::json!({"forum": true})));
 
         // Sleep a moment to ensure heartbeat changes.
         tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
 
         // Heartbeat-only refresh: omit everything except session_id.
         let second = store
-            .agent_presence_announce(
-                "host-a:agent-bridge:main",
-                AgentPresenceUpsert::default(),
-            )
+            .agent_presence_announce("host-a:agent-bridge:main", AgentPresenceUpsert::default())
             .await
             .expect("heartbeat");
         assert_eq!(second.name, "agent-bridge main", "kept prior name");
@@ -14411,18 +14572,12 @@ mod tests {
             .expect("reply");
 
         let out_file = dir_a.join("forum.jsonl");
-        let exp = store_a
-            .forum_export(&out_file)
-            .await
-            .expect("export");
+        let exp = store_a.forum_export(&out_file).await.expect("export");
         assert_eq!(exp.threads_written, 1);
         assert_eq!(exp.posts_written, 2);
 
         // Import into store-B (cold, no overlap) → both rows materialise.
-        let rep1 = store_b
-            .forum_import(&out_file)
-            .await
-            .expect("import cold");
+        let rep1 = store_b.forum_import(&out_file).await.expect("import cold");
         assert_eq!(rep1.threads_inserted, 1);
         assert_eq!(rep1.threads_matched, 0);
         assert_eq!(rep1.posts_inserted, 2);
@@ -14444,10 +14599,7 @@ mod tests {
         // Re-importing the same file on store-B must be a no-op (matched
         // thread + skipped posts). This is the property that makes the
         // Stop hook safe to fire repeatedly.
-        let rep2 = store_b
-            .forum_import(&out_file)
-            .await
-            .expect("import warm");
+        let rep2 = store_b.forum_import(&out_file).await.expect("import warm");
         assert_eq!(rep2.threads_inserted, 0);
         assert_eq!(rep2.threads_matched, 1);
         assert_eq!(rep2.posts_inserted, 0);
@@ -14632,7 +14784,9 @@ mod tests {
                     |r| r.get(0),
                 )?;
                 let post_created =
-                    c.query_row("SELECT created_at FROM forum_posts LIMIT 1", [], |r| r.get(0))?;
+                    c.query_row("SELECT created_at FROM forum_posts LIMIT 1", [], |r| {
+                        r.get(0)
+                    })?;
                 Ok((version, bad_count, mem_created, post_created))
             })
             .await
@@ -14730,9 +14884,15 @@ mod tests {
         // observation: exp(-30/7) ≈ 0.0136
         // fact:        exp(-30/30) = 0.3679
         // decision:    exp(-30/90) ≈ 0.7165
-        assert!(obs < 0.05, "observation 30d old should be heavily decayed: {obs}");
+        assert!(
+            obs < 0.05,
+            "observation 30d old should be heavily decayed: {obs}"
+        );
         assert!(dec > 0.7, "decision 30d old should still rank high: {dec}");
-        assert!(obs < fact && fact < dec, "ordering observation < fact < decision");
+        assert!(
+            obs < fact && fact < dec,
+            "ordering observation < fact < decision"
+        );
 
         // Sanity: same kind, recent vs old. Today's observation > 30d-old observation.
         let obs_now = memory_score(now, 0, now, "observation");
@@ -14831,16 +14991,17 @@ mod tests {
 
         store
             .record_coactivation(
-                &["alpha".to_string(), "bravo".to_string(), "charlie".to_string()],
+                &[
+                    "alpha".to_string(),
+                    "bravo".to_string(),
+                    "charlie".to_string(),
+                ],
                 None,
             )
             .await
             .expect("rec 1");
         store
-            .record_coactivation(
-                &["bravo".to_string(), "delta".to_string()],
-                None,
-            )
+            .record_coactivation(&["bravo".to_string(), "delta".to_string()], None)
             .await
             .expect("rec 2");
 
@@ -14856,11 +15017,13 @@ mod tests {
         for e in &edges {
             assert!(
                 e.key_a == "alpha" || e.key_a == "bravo" || e.key_a == "charlie",
-                "key_a {} not in input set", e.key_a
+                "key_a {} not in input set",
+                e.key_a
             );
             assert!(
                 e.key_b == "alpha" || e.key_b == "bravo" || e.key_b == "charlie",
-                "key_b {} not in input set", e.key_b
+                "key_b {} not in input set",
+                e.key_b
             );
             assert_ne!(e.key_a, "delta");
             assert_ne!(e.key_b, "delta");
@@ -15059,10 +15222,7 @@ mod tests {
         }
         for _ in 0..3 {
             store
-                .record_coactivation(
-                    &["papa".to_string(), "quebec".to_string()],
-                    None,
-                )
+                .record_coactivation(&["papa".to_string(), "quebec".to_string()], None)
                 .await
                 .expect("record p+q");
         }
@@ -15356,11 +15516,26 @@ mod tests {
                 .await
                 .expect("save");
         }
-        store.memory_link("a", "b", "cofires", 0.8).await.expect("link");
-        store.memory_link("b", "c", "cofires", 0.8).await.expect("link");
-        store.memory_link("c", "d", "co_referenced", 0.4).await.expect("link");
-        store.memory_link("a", "c", "relates", 1.0).await.expect("link");
-        store.memory_link("d", "e", "derived_from", 0.8).await.expect("link");
+        store
+            .memory_link("a", "b", "cofires", 0.8)
+            .await
+            .expect("link");
+        store
+            .memory_link("b", "c", "cofires", 0.8)
+            .await
+            .expect("link");
+        store
+            .memory_link("c", "d", "co_referenced", 0.4)
+            .await
+            .expect("link");
+        store
+            .memory_link("a", "c", "relates", 1.0)
+            .await
+            .expect("link");
+        store
+            .memory_link("d", "e", "derived_from", 0.8)
+            .await
+            .expect("link");
 
         let r = store
             .memory_substrate_audit(86_400 * 7)
@@ -15427,11 +15602,20 @@ mod tests {
             store.memory_save(&rec(k, kind)).await.expect("save");
         }
         // a–b: live edge between two active non-skill memories → both count.
-        store.memory_link("a", "b", "cofires", 0.8).await.expect("link");
+        store
+            .memory_link("a", "b", "cofires", 0.8)
+            .await
+            .expect("link");
         // s1–s2: edge between two skill rows → excluded from num + denom.
-        store.memory_link("s1", "s2", "cofires", 0.8).await.expect("link");
+        store
+            .memory_link("s1", "s2", "cofires", 0.8)
+            .await
+            .expect("link");
         // d–s1: d's only L2 edge points at a skill node → not live coverage.
-        store.memory_link("d", "s1", "cofires", 0.8).await.expect("link");
+        store
+            .memory_link("d", "s1", "cofires", 0.8)
+            .await
+            .expect("link");
         // c has no L2 edge at all.
 
         let r = store
@@ -15500,7 +15684,10 @@ mod tests {
         assert_eq!(r.m4_retire.archived, 1);
         assert_eq!(r.m4_retire.tombstoned, 1);
         assert_eq!(r.m4_retire.superseded, 0);
-        assert!((r.m4_retire.archived_fraction - 0.2).abs() < 1e-9, "1/5 archived");
+        assert!(
+            (r.m4_retire.archived_fraction - 0.2).abs() < 1e-9,
+            "1/5 archived"
+        );
         assert!(r.m4_retire.delta.is_approximate, "row-timestamp fallback");
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
@@ -15525,10 +15712,7 @@ mod tests {
             .conn
             .call(|c| -> RusqliteResult<()> {
                 let now = 1_000_000_i64;
-                for (key, backend) in [
-                    ("a", "onnx:all-MiniLM-L6-v2"),
-                    ("b", "hash:fnv1a-384"),
-                ] {
+                for (key, backend) in [("a", "onnx:all-MiniLM-L6-v2"), ("b", "hash:fnv1a-384")] {
                     c.execute(
                         "INSERT INTO memories
                            (key, kind, content, tags, related_keys, scope,
@@ -15574,13 +15758,7 @@ mod tests {
     // key_a / key_b, and CHECK(key_a < key_b). So seeds must (a) insert
     // matching memory rows and (b) order the keys lexically.
 
-    async fn seed_pair_for_decay(
-        store: &SqliteStore,
-        a: &str,
-        b: &str,
-        count: i64,
-        last_at: i64,
-    ) {
+    async fn seed_pair_for_decay(store: &SqliteStore, a: &str, b: &str, count: i64, last_at: i64) {
         for k in [a, b] {
             store
                 .memory_save(&crate::MemoryRecord {
@@ -15864,10 +16042,7 @@ mod tests {
         }
         for _ in 0..3 {
             store
-                .record_coactivation(
-                    &["mike".to_string(), "november".to_string()],
-                    None,
-                )
+                .record_coactivation(&["mike".to_string(), "november".to_string()], None)
                 .await
                 .expect("record m+n");
         }
@@ -15977,7 +16152,14 @@ mod tests {
         // Sanity: codebase_search(mode=semantic) now returns rows (was 0
         // before because all embeddings were NULL).
         let hits = store
-            .codebase_search("function that opens a browser", None, None, None, 10, "semantic")
+            .codebase_search(
+                "function that opens a browser",
+                None,
+                None,
+                None,
+                10,
+                "semantic",
+            )
             .await
             .expect("search");
         assert!(
@@ -15990,9 +16172,14 @@ mod tests {
 
     // ── Phase 0 memory telemetry: record_memory_query / memory_query_stats ──
 
-    fn mk_query_record(kind: &str, q: &str, hits: u32, age: Option<i64>, dur_us: u32, at: i64)
-        -> MemoryQueryRecord
-    {
+    fn mk_query_record(
+        kind: &str,
+        q: &str,
+        hits: u32,
+        age: Option<i64>,
+        dur_us: u32,
+        at: i64,
+    ) -> MemoryQueryRecord {
         MemoryQueryRecord {
             kind: kind.to_string(),
             query: q.to_string(),
@@ -16021,18 +16208,72 @@ mod tests {
 
         let now = now_secs();
         // 4 hits + 2 misses, mixed kinds, varying durations
-        store.record_memory_query(&mk_query_record("search_fts", "rust", 3, Some(86_400), 1500, now - 60))
-            .await.expect("rec 1");
-        store.record_memory_query(&mk_query_record("search_fts", "rust", 1, Some(7200), 800, now - 50))
-            .await.expect("rec 2");
-        store.record_memory_query(&mk_query_record("search_hybrid", "warp ipc", 2, Some(3600), 2200, now - 40))
-            .await.expect("rec 3");
-        store.record_memory_query(&mk_query_record("search_semantic", "neural net", 1, Some(43_200), 4500, now - 30))
-            .await.expect("rec 4");
-        store.record_memory_query(&mk_query_record("search_fts", "nonsense_xyz", 0, None, 600, now - 20))
-            .await.expect("rec 5 (miss)");
-        store.record_memory_query(&mk_query_record("get", "unknown_key", 0, None, 200, now - 10))
-            .await.expect("rec 6 (miss)");
+        store
+            .record_memory_query(&mk_query_record(
+                "search_fts",
+                "rust",
+                3,
+                Some(86_400),
+                1500,
+                now - 60,
+            ))
+            .await
+            .expect("rec 1");
+        store
+            .record_memory_query(&mk_query_record(
+                "search_fts",
+                "rust",
+                1,
+                Some(7200),
+                800,
+                now - 50,
+            ))
+            .await
+            .expect("rec 2");
+        store
+            .record_memory_query(&mk_query_record(
+                "search_hybrid",
+                "warp ipc",
+                2,
+                Some(3600),
+                2200,
+                now - 40,
+            ))
+            .await
+            .expect("rec 3");
+        store
+            .record_memory_query(&mk_query_record(
+                "search_semantic",
+                "neural net",
+                1,
+                Some(43_200),
+                4500,
+                now - 30,
+            ))
+            .await
+            .expect("rec 4");
+        store
+            .record_memory_query(&mk_query_record(
+                "search_fts",
+                "nonsense_xyz",
+                0,
+                None,
+                600,
+                now - 20,
+            ))
+            .await
+            .expect("rec 5 (miss)");
+        store
+            .record_memory_query(&mk_query_record(
+                "get",
+                "unknown_key",
+                0,
+                None,
+                200,
+                now - 10,
+            ))
+            .await
+            .expect("rec 6 (miss)");
 
         let stats = store.memory_query_stats(3600).await.expect("stats");
         assert_eq!(stats.total_queries, 6);
@@ -16056,8 +16297,11 @@ mod tests {
 
         // top miss queries: nonsense_xyz once, unknown_key once
         assert_eq!(stats.top_miss_queries.len(), 2);
-        let miss_keys: std::collections::HashSet<_> =
-            stats.top_miss_queries.iter().map(|(k, _)| k.clone()).collect();
+        let miss_keys: std::collections::HashSet<_> = stats
+            .top_miss_queries
+            .iter()
+            .map(|(k, _)| k.clone())
+            .collect();
         assert!(miss_keys.contains("nonsense_xyz"));
         assert!(miss_keys.contains("unknown_key"));
 
@@ -16078,10 +16322,28 @@ mod tests {
         let store = SqliteStore::open(&db_path).await.expect("open");
 
         let now = now_secs();
-        store.record_memory_query(&mk_query_record("search_fts", "old", 1, Some(60), 500, now - 7200))
-            .await.expect("old"); // 2h ago
-        store.record_memory_query(&mk_query_record("search_fts", "new", 1, Some(60), 500, now - 60))
-            .await.expect("new"); // 60s ago
+        store
+            .record_memory_query(&mk_query_record(
+                "search_fts",
+                "old",
+                1,
+                Some(60),
+                500,
+                now - 7200,
+            ))
+            .await
+            .expect("old"); // 2h ago
+        store
+            .record_memory_query(&mk_query_record(
+                "search_fts",
+                "new",
+                1,
+                Some(60),
+                500,
+                now - 60,
+            ))
+            .await
+            .expect("new"); // 60s ago
 
         // 1-hour window: only "new" should count
         let stats = store.memory_query_stats(3600).await.expect("stats");
@@ -16112,9 +16374,17 @@ mod tests {
         let overshoot = cap + 5;
         let now = now_secs();
         for i in 0..overshoot {
-            store.record_memory_query(
-                &mk_query_record("search_fts", &format!("q{i}"), 1, Some(60), 500, now)
-            ).await.expect("rec");
+            store
+                .record_memory_query(&mk_query_record(
+                    "search_fts",
+                    &format!("q{i}"),
+                    1,
+                    Some(60),
+                    500,
+                    now,
+                ))
+                .await
+                .expect("rec");
         }
 
         let count: i64 = store
@@ -16327,9 +16597,7 @@ mod tests {
         assert_eq!(hits_combo[0].file_path, "/repoA/src/main.rs");
 
         // No filters at all — explicit error per API contract.
-        let none = store
-            .codebase_calls_for(None, None, None, None, 50)
-            .await;
+        let none = store.codebase_calls_for(None, None, None, None, 50).await;
         assert!(none.is_err());
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
@@ -16366,14 +16634,63 @@ mod tests {
                        (file_path, line, language, caller, callee, root_path, indexed_at)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)",
                 )?;
-                call_stmt.execute(params!["/repoA/a.rs", 10_i64, "rust", "main", "helper", "/repoA"])?;
-                call_stmt.execute(params!["/repoA/a.rs", 12_i64, "rust", "main", "helper", "/repoA"])?;
-                call_stmt.execute(params!["/repoA/b.rs", 5_i64, "rust", "Foo::bar", "helper", "/repoA"])?;
-                call_stmt.execute(params!["/repoA/b.rs", 6_i64, "rust", "Foo::bar", "println", "/repoA"])?;
-                call_stmt.execute(params!["/repoA/c.py", 1_i64, "python", "do_work", "logger.info", "/repoA"])?;
-                call_stmt.execute(params!["/repoA/c.py", 2_i64, "python", "do_work", "logger.info", "/repoA"])?;
+                call_stmt.execute(params![
+                    "/repoA/a.rs",
+                    10_i64,
+                    "rust",
+                    "main",
+                    "helper",
+                    "/repoA"
+                ])?;
+                call_stmt.execute(params![
+                    "/repoA/a.rs",
+                    12_i64,
+                    "rust",
+                    "main",
+                    "helper",
+                    "/repoA"
+                ])?;
+                call_stmt.execute(params![
+                    "/repoA/b.rs",
+                    5_i64,
+                    "rust",
+                    "Foo::bar",
+                    "helper",
+                    "/repoA"
+                ])?;
+                call_stmt.execute(params![
+                    "/repoA/b.rs",
+                    6_i64,
+                    "rust",
+                    "Foo::bar",
+                    "println",
+                    "/repoA"
+                ])?;
+                call_stmt.execute(params![
+                    "/repoA/c.py",
+                    1_i64,
+                    "python",
+                    "do_work",
+                    "logger.info",
+                    "/repoA"
+                ])?;
+                call_stmt.execute(params![
+                    "/repoA/c.py",
+                    2_i64,
+                    "python",
+                    "do_work",
+                    "logger.info",
+                    "/repoA"
+                ])?;
                 // 1 call in /repoB — separate root, must not bleed into A's stats.
-                call_stmt.execute(params!["/repoB/main.rs", 1_i64, "rust", "main", "noop", "/repoB"])?;
+                call_stmt.execute(params![
+                    "/repoB/main.rs",
+                    1_i64,
+                    "rust",
+                    "main",
+                    "noop",
+                    "/repoB"
+                ])?;
 
                 // Symbols: 4 function-like in /repoA.
                 //   `main` (fn) — called via `main` (last seg matches),
@@ -16386,10 +16703,42 @@ mod tests {
                        (root_path, file_path, line, kind, name, signature, language, indexed_at)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)",
                 )?;
-                sym_stmt.execute(params!["/repoA", "/repoA/a.rs", 1_i64, "fn", "main", "fn main()", "rust"])?;
-                sym_stmt.execute(params!["/repoA", "/repoA/b.rs", 1_i64, "fn", "helper", "fn helper()", "rust"])?;
-                sym_stmt.execute(params!["/repoA", "/repoA/b.rs", 20_i64, "fn", "Foo::bar", "fn bar()", "rust"])?;
-                sym_stmt.execute(params!["/repoA", "/repoA/b.rs", 30_i64, "fn", "unused_fn", "fn unused_fn()", "rust"])?;
+                sym_stmt.execute(params![
+                    "/repoA",
+                    "/repoA/a.rs",
+                    1_i64,
+                    "fn",
+                    "main",
+                    "fn main()",
+                    "rust"
+                ])?;
+                sym_stmt.execute(params![
+                    "/repoA",
+                    "/repoA/b.rs",
+                    1_i64,
+                    "fn",
+                    "helper",
+                    "fn helper()",
+                    "rust"
+                ])?;
+                sym_stmt.execute(params![
+                    "/repoA",
+                    "/repoA/b.rs",
+                    20_i64,
+                    "fn",
+                    "Foo::bar",
+                    "fn bar()",
+                    "rust"
+                ])?;
+                sym_stmt.execute(params![
+                    "/repoA",
+                    "/repoA/b.rs",
+                    30_i64,
+                    "fn",
+                    "unused_fn",
+                    "fn unused_fn()",
+                    "rust"
+                ])?;
                 Ok(())
             })
             .await
@@ -16456,10 +16805,22 @@ mod tests {
             .iter()
             .map(|o| o.name.clone())
             .collect();
-        assert!(!names.contains("helper"), "helper is called, must not be orphan");
-        assert!(names.contains("Foo::bar"), "Foo::bar last-seg bar not called, must be orphan");
-        assert!(names.contains("unused_fn"), "unused_fn never called, must be orphan");
-        assert!(names.contains("main"), "main is not a callee anywhere, must be orphan");
+        assert!(
+            !names.contains("helper"),
+            "helper is called, must not be orphan"
+        );
+        assert!(
+            names.contains("Foo::bar"),
+            "Foo::bar last-seg bar not called, must be orphan"
+        );
+        assert!(
+            names.contains("unused_fn"),
+            "unused_fn never called, must be orphan"
+        );
+        assert!(
+            names.contains("main"),
+            "main is not a callee anywhere, must be orphan"
+        );
 
         // /repoB scope check — total_calls should be 1 in repoB.
         let b_stats = store
@@ -16468,7 +16829,11 @@ mod tests {
             .expect("repoB stats");
         assert_eq!(b_stats.total_calls, 1);
         assert_eq!(b_stats.distinct_caller_files, 1);
-        assert_eq!(b_stats.orphan_functions.len(), 0, "no symbols seeded for repoB");
+        assert_eq!(
+            b_stats.orphan_functions.len(),
+            0,
+            "no symbols seeded for repoB"
+        );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
@@ -16532,7 +16897,12 @@ mod tests {
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1)",
                 )?;
                 call_stmt.execute(params![
-                    "/repo/src/lib.rs", 1_i64, "rust", "outer", "called_fn", "/repo"
+                    "/repo/src/lib.rs",
+                    1_i64,
+                    "rust",
+                    "outer",
+                    "called_fn",
+                    "/repo"
                 ])?;
 
                 // 6 function-like symbols, none of which are called:
@@ -16548,34 +16918,71 @@ mod tests {
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 1)",
                 )?;
                 sym_stmt.execute(params![
-                    "/repo", "/repo/src/lib.rs", 1_i64, "fn", "bare_orphan", "fn bare_orphan()", "rust"
+                    "/repo",
+                    "/repo/src/lib.rs",
+                    1_i64,
+                    "fn",
+                    "bare_orphan",
+                    "fn bare_orphan()",
+                    "rust"
                 ])?;
                 sym_stmt.execute(params![
-                    "/repo", "/repo/src/main.rs", 1_i64, "fn", "main", "fn main()", "rust"
+                    "/repo",
+                    "/repo/src/main.rs",
+                    1_i64,
+                    "fn",
+                    "main",
+                    "fn main()",
+                    "rust"
                 ])?;
                 sym_stmt.execute(params![
-                    "/repo", "/repo/tests/integration.rs", 1_i64, "fn", "in_tests_dir",
-                    "fn in_tests_dir()", "rust"
+                    "/repo",
+                    "/repo/tests/integration.rs",
+                    1_i64,
+                    "fn",
+                    "in_tests_dir",
+                    "fn in_tests_dir()",
+                    "rust"
                 ])?;
                 sym_stmt.execute(params![
-                    "/repo", "/repo/src/foo_test.rs", 1_i64, "fn", "in_test_file",
-                    "fn in_test_file()", "rust"
+                    "/repo",
+                    "/repo/src/foo_test.rs",
+                    1_i64,
+                    "fn",
+                    "in_test_file",
+                    "fn in_test_file()",
+                    "rust"
                 ])?;
                 sym_stmt.execute(params![
-                    "/repo", "/repo/src/foo.spec.ts", 1_i64, "function", "in_spec_ts",
-                    "function in_spec_ts()", "ts"
+                    "/repo",
+                    "/repo/src/foo.spec.ts",
+                    1_i64,
+                    "function",
+                    "in_spec_ts",
+                    "function in_spec_ts()",
+                    "ts"
                 ])?;
                 sym_stmt.execute(params![
-                    "/repo", "/repo/src/util.py", 1_i64, "def", "test_pytest_thing",
-                    "def test_pytest_thing()", "python"
+                    "/repo",
+                    "/repo/src/util.py",
+                    1_i64,
+                    "def",
+                    "test_pytest_thing",
+                    "def test_pytest_thing()",
+                    "python"
                 ])?;
                 // P22 — test_fn kind (tagged at extraction time when
                 // `#[test]`-like attr precedes the fn). Lives in regular
                 // source files (not in tests/ dir) — kind alone must
                 // route it to likely-FP.
                 sym_stmt.execute(params![
-                    "/repo", "/repo/src/lib.rs", 100_i64, "test_fn",
-                    "unit_check", "fn unit_check()", "rust"
+                    "/repo",
+                    "/repo/src/lib.rs",
+                    100_i64,
+                    "test_fn",
+                    "unit_check",
+                    "fn unit_check()",
+                    "rust"
                 ])?;
                 Ok(())
             })
@@ -16593,7 +17000,9 @@ mod tests {
             .map(|o| (o.name.clone(), o))
             .collect();
 
-        let bare = by_name.get("bare_orphan").expect("bare_orphan must be orphan");
+        let bare = by_name
+            .get("bare_orphan")
+            .expect("bare_orphan must be orphan");
         assert!(!bare.likely_fp, "bare_orphan must NOT be likely-FP");
         assert_eq!(bare.likely_fp_reason, "");
 
@@ -16601,15 +17010,21 @@ mod tests {
         assert!(main_row.likely_fp, "main must be likely-FP");
         assert_eq!(main_row.likely_fp_reason, "main entry");
 
-        let in_tests = by_name.get("in_tests_dir").expect("in_tests_dir must be orphan");
+        let in_tests = by_name
+            .get("in_tests_dir")
+            .expect("in_tests_dir must be orphan");
         assert!(in_tests.likely_fp);
         assert_eq!(in_tests.likely_fp_reason, "test file");
 
-        let in_test = by_name.get("in_test_file").expect("in_test_file must be orphan");
+        let in_test = by_name
+            .get("in_test_file")
+            .expect("in_test_file must be orphan");
         assert!(in_test.likely_fp);
         assert_eq!(in_test.likely_fp_reason, "test file");
 
-        let in_spec = by_name.get("in_spec_ts").expect("in_spec_ts must be orphan");
+        let in_spec = by_name
+            .get("in_spec_ts")
+            .expect("in_spec_ts must be orphan");
         assert!(in_spec.likely_fp);
         assert_eq!(in_spec.likely_fp_reason, "test file");
 
@@ -16622,7 +17037,9 @@ mod tests {
         // P22 — test_fn kind takes precedence over file-path filters
         // (it would be in src/lib.rs which doesn't match any test-path
         // heuristic, but the kind itself tags it).
-        let unit_row = by_name.get("unit_check").expect("unit_check must be orphan");
+        let unit_row = by_name
+            .get("unit_check")
+            .expect("unit_check must be orphan");
         assert!(unit_row.likely_fp);
         assert_eq!(unit_row.likely_fp_reason, "#[test] attr");
 
@@ -16732,25 +17149,25 @@ mod tests {
                        (file_path, line, language, caller, callee, root_path, indexed_at)
                      VALUES (?1, ?2, 'rust', ?3, ?4, '/repo', 1)",
                 )?;
+                call_stmt.execute(params!["/repo/a.rs", 5_i64, "user_a", "SqliteStore::new",])?;
+                call_stmt.execute(params!["/repo/b.rs", 7_i64, "user_b", "Baz::new",])?;
                 call_stmt.execute(params![
-                    "/repo/a.rs", 5_i64, "user_a", "SqliteStore::new",
-                ])?;
-                call_stmt.execute(params![
-                    "/repo/b.rs", 7_i64, "user_b", "Baz::new",
-                ])?;
-                call_stmt.execute(params![
-                    "/repo/c.rs", 9_i64, "user_c", "store::SqliteStore::new",
+                    "/repo/c.rs",
+                    9_i64,
+                    "user_c",
+                    "store::SqliteStore::new",
                 ])?;
                 // Negative — different callee in /repo/a.rs that should NOT
                 // resolve to SqliteStore::new.
-                call_stmt.execute(params![
-                    "/repo/a.rs", 11_i64, "user_a", "println",
-                ])?;
+                call_stmt.execute(params!["/repo/a.rs", 11_i64, "user_a", "println",])?;
                 // Direct — file with no relevant import that calls the
                 // full path verbatim. Should be caught by the direct
                 // fallback (via_import="<direct>").
                 call_stmt.execute(params![
-                    "/repo/d.rs", 3_i64, "user_d", "crate::store::SqliteStore::new",
+                    "/repo/d.rs",
+                    3_i64,
+                    "user_d",
+                    "crate::store::SqliteStore::new",
                 ])?;
                 Ok(())
             })
@@ -16758,12 +17175,7 @@ mod tests {
             .expect("seed rows");
 
         let hits = store
-            .codebase_callers(
-                "crate::store::SqliteStore::new",
-                None,
-                Some("/repo"),
-                50,
-            )
+            .codebase_callers("crate::store::SqliteStore::new", None, Some("/repo"), 50)
             .await
             .expect("codebase_callers");
         // Expect 4 resolved hits (a + b + c via aliases + d via direct).
@@ -16800,9 +17212,7 @@ mod tests {
         assert_eq!(d.via_import, "<direct>");
 
         // Empty target → error.
-        let err = store
-            .codebase_callers("", None, None, 10)
-            .await;
+        let err = store.codebase_callers("", None, None, 10).await;
         assert!(err.is_err());
 
         // No matching imports → empty result.
@@ -16880,17 +17290,27 @@ mod tests {
                      VALUES (?1, ?2, ?3, ?4, ?5, '/repo', 1)",
                 )?;
                 call_stmt.execute(params![
-                    "/repo/a.ts", 5_i64, "typescript", "user_a", "fs.readFileSync",
+                    "/repo/a.ts",
+                    5_i64,
+                    "typescript",
+                    "user_a",
+                    "fs.readFileSync",
                 ])?;
                 call_stmt.execute(params![
-                    "/repo/b.py", 7_i64, "python", "user_b", "path.join",
+                    "/repo/b.py",
+                    7_i64,
+                    "python",
+                    "user_b",
+                    "path.join",
                 ])?;
-                call_stmt.execute(params![
-                    "/repo/c.py", 9_i64, "python", "user_c", "np.array",
-                ])?;
+                call_stmt.execute(params!["/repo/c.py", 9_i64, "python", "user_c", "np.array",])?;
                 // Negative — different callee in a.ts.
                 call_stmt.execute(params![
-                    "/repo/a.ts", 11_i64, "typescript", "user_a", "console.log",
+                    "/repo/a.ts",
+                    11_i64,
+                    "typescript",
+                    "user_a",
+                    "console.log",
                 ])?;
                 Ok(())
             })
@@ -16970,25 +17390,13 @@ mod tests {
                      VALUES (?1, ?2, 'rust', ?3, ?4, '/repo', 1)",
                 )?;
                 // Chain
-                call_stmt.execute(params![
-                    "/repo/a.rs", 5_i64, "caller_a", "target_fn",
-                ])?;
-                call_stmt.execute(params![
-                    "/repo/b.rs", 5_i64, "caller_b", "caller_a",
-                ])?;
-                call_stmt.execute(params![
-                    "/repo/c.rs", 5_i64, "caller_c", "caller_b",
-                ])?;
+                call_stmt.execute(params!["/repo/a.rs", 5_i64, "caller_a", "target_fn",])?;
+                call_stmt.execute(params!["/repo/b.rs", 5_i64, "caller_b", "caller_a",])?;
+                call_stmt.execute(params!["/repo/c.rs", 5_i64, "caller_c", "caller_b",])?;
                 // Cycle + entry-point to target
-                call_stmt.execute(params![
-                    "/repo/x.rs", 5_i64, "caller_x", "caller_y",
-                ])?;
-                call_stmt.execute(params![
-                    "/repo/y.rs", 5_i64, "caller_y", "caller_x",
-                ])?;
-                call_stmt.execute(params![
-                    "/repo/y.rs", 7_i64, "caller_y", "target_fn",
-                ])?;
+                call_stmt.execute(params!["/repo/x.rs", 5_i64, "caller_x", "caller_y",])?;
+                call_stmt.execute(params!["/repo/y.rs", 5_i64, "caller_y", "caller_x",])?;
+                call_stmt.execute(params!["/repo/y.rs", 7_i64, "caller_y", "target_fn",])?;
                 Ok(())
             })
             .await
@@ -17074,7 +17482,10 @@ mod tests {
         // its emitting call site is in /repo/x.rs not /repo/y.rs. Closure
         // here is just {caller_y}.
         assert_eq!(
-            y_only.iter().map(|n| n.qualified_name.as_str()).collect::<Vec<_>>(),
+            y_only
+                .iter()
+                .map(|n| n.qualified_name.as_str())
+                .collect::<Vec<_>>(),
             vec!["caller_y"],
             "y.rs filter closure: {y_only:#?}"
         );
@@ -17090,7 +17501,10 @@ mod tests {
             .codebase_impact("nonexistent_fn", 3, 50, None, Some("/repo"))
             .await
             .expect("impact unknown");
-        assert!(empty.is_empty(), "unknown target should be empty: {empty:#?}");
+        assert!(
+            empty.is_empty(),
+            "unknown target should be empty: {empty:#?}"
+        );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
@@ -17327,18 +17741,17 @@ mod tests {
             .expect("decay");
         assert_eq!(stats.decayed, 1);
         let imp = read_importance(&store, "near_floor_c").await;
-        assert!((imp - 0.1).abs() < 1e-9, "imp={imp} (expected clamp to floor)");
+        assert!(
+            (imp - 0.1).abs() < 1e-9,
+            "imp={imp} (expected clamp to floor)"
+        );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
     /// Helper: insert a `p5_replay` summary linked via `summarizes` to
     /// a set of source memories. Used by the overlap-pass tests below.
-    async fn seed_summary_with_sources(
-        store: &SqliteStore,
-        summary_key: &str,
-        sources: &[&str],
-    ) {
+    async fn seed_summary_with_sources(store: &SqliteStore, summary_key: &str, sources: &[&str]) {
         use crate::MemoryRecord;
         let mut tags = vec!["p5_replay".to_string()];
         tags.push(format!("dedupe:cluster:{summary_key}"));
@@ -17413,10 +17826,7 @@ mod tests {
         seed_summary_with_sources(&store, "summ_a", &["src1", "src2", "src3"]).await;
         seed_summary_with_sources(&store, "summ_b", &["src1", "src2", "src3"]).await;
 
-        let stats = store
-            .replay_audit_stats(7, 0, 0.5)
-            .await
-            .expect("audit");
+        let stats = store.replay_audit_stats(7, 0, 0.5).await.expect("audit");
         assert_eq!(stats.overlap_pairs.len(), 1, "exactly one pair expected");
         let p = &stats.overlap_pairs[0];
         assert_eq!(p.key_a, "summ_a");
@@ -17447,10 +17857,7 @@ mod tests {
         seed_summary_with_sources(&store, "ovl_b", &["s1", "s2", "s5", "s6"]).await;
         seed_summary_with_sources(&store, "ovl_c", &["s1", "s2", "s3", "s4", "s7"]).await;
 
-        let stats = store
-            .replay_audit_stats(7, 0, 0.5)
-            .await
-            .expect("audit");
+        let stats = store.replay_audit_stats(7, 0, 0.5).await.expect("audit");
         assert_eq!(stats.overlap_pairs.len(), 1, "only A↔C >= 0.5");
         let p = &stats.overlap_pairs[0];
         assert_eq!(p.key_a, "ovl_a");
@@ -17459,10 +17866,7 @@ mod tests {
         assert!((p.jaccard - 0.8).abs() < 1e-9, "jaccard={}", p.jaccard);
 
         // Lower the threshold — both pairs touching B should now appear.
-        let stats_lo = store
-            .replay_audit_stats(7, 0, 0.1)
-            .await
-            .expect("audit lo");
+        let stats_lo = store.replay_audit_stats(7, 0, 0.1).await.expect("audit lo");
         assert_eq!(stats_lo.overlap_pairs.len(), 3, "all pairs >= 0.1");
         // Top should still be (a, c) at J=0.8.
         assert_eq!(stats_lo.overlap_pairs[0].key_a, "ovl_a");
@@ -17484,10 +17888,7 @@ mod tests {
         seed_summary_with_sources(&store, "z_a", &["src1", "src2"]).await;
         seed_summary_with_sources(&store, "z_b", &["src1", "src2"]).await;
 
-        let stats = store
-            .replay_audit_stats(7, 0, 0.0)
-            .await
-            .expect("audit");
+        let stats = store.replay_audit_stats(7, 0, 0.0).await.expect("audit");
         assert!(
             stats.overlap_pairs.is_empty(),
             "overlap_min_jaccard=0 must disable the pass"
@@ -17536,10 +17937,7 @@ mod tests {
                 .expect("link manual");
         }
 
-        let stats = store
-            .replay_audit_stats(7, 0, 0.5)
-            .await
-            .expect("audit");
+        let stats = store.replay_audit_stats(7, 0, 0.5).await.expect("audit");
         assert!(
             stats.overlap_pairs.is_empty(),
             "manual_summary lacks p5_replay tag and must not surface"
@@ -17623,7 +18021,10 @@ mod tests {
         assert_eq!(stats.reinforced, 1);
         assert_eq!(stats.skipped_at_ceiling, 0);
         let imp = read_importance(&store, "hot_x").await;
-        assert!((imp - 0.25).abs() < 1e-9, "imp={imp} (expected 0.20 + 0.05)");
+        assert!(
+            (imp - 0.25).abs() < 1e-9,
+            "imp={imp} (expected 0.20 + 0.05)"
+        );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
@@ -17694,12 +18095,7 @@ mod tests {
         let day = 86_400_i64;
         // last_accessed_at=0 means never read — bootstrap insert pattern,
         // must not be reinforced even if access_count somehow non-zero.
-        import_reinforce_fixture(
-            &store,
-            &temp_dir,
-            &[("ghost_c", 0, 10, 0.3, "active")],
-        )
-        .await;
+        import_reinforce_fixture(&store, &temp_dir, &[("ghost_c", 0, 10, 0.3, "active")]).await;
 
         let stats = store
             .memory_reinforce_active(7 * day, 5, 0.05, 0.95)
@@ -17910,7 +18306,11 @@ mod tests {
 
         let stats = store.signal_fidelity_stats(5).await.expect("fidelity");
         assert_eq!(stats.total_active, 4);
-        assert!((stats.spearman_r - 1.0).abs() < 1e-9, "r={}", stats.spearman_r);
+        assert!(
+            (stats.spearman_r - 1.0).abs() < 1e-9,
+            "r={}",
+            stats.spearman_r
+        );
         // No misranks expected on perfect correlation.
         assert!(
             stats.under_reinforced.is_empty(),
@@ -17942,7 +18342,11 @@ mod tests {
         .await;
 
         let stats = store.signal_fidelity_stats(5).await.expect("fidelity");
-        assert!((stats.spearman_r - (-1.0)).abs() < 1e-9, "r={}", stats.spearman_r);
+        assert!(
+            (stats.spearman_r - (-1.0)).abs() < 1e-9,
+            "r={}",
+            stats.spearman_r
+        );
         // hot_unloved is the under-reinforced extreme.
         assert_eq!(stats.under_reinforced[0].key, "hot_unloved");
         // cold_loved is the over-promoted extreme.
@@ -17960,7 +18364,11 @@ mod tests {
             .expect("open store");
         let stats = store.signal_fidelity_stats(5).await.expect("fidelity");
         assert_eq!(stats.total_active, 0);
-        assert!(stats.spearman_r.is_nan(), "expected NaN, got {}", stats.spearman_r);
+        assert!(
+            stats.spearman_r.is_nan(),
+            "expected NaN, got {}",
+            stats.spearman_r
+        );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
@@ -18021,7 +18429,8 @@ mod tests {
         assert!(hits.len() >= 2, "expected ≥2 hits, got {}", hits.len());
         // Higher importance must come first.
         assert_eq!(
-            hits[0].record.key, "high_imp",
+            hits[0].record.key,
+            "high_imp",
             "high-importance row should rank first; got {:?}",
             hits.iter().map(|h| &h.record.key).collect::<Vec<_>>()
         );
@@ -18115,7 +18524,10 @@ mod tests {
         assert!(!audit.content_included);
 
         let serialized = serde_json::to_string(&audit).expect("serialize audit");
-        assert!(!serialized.contains(secret_key), "audit leaked raw memory key");
+        assert!(
+            !serialized.contains(secret_key),
+            "audit leaked raw memory key"
+        );
         assert!(!serialized.contains(secret_query), "audit leaked raw query");
         assert!(
             !serialized.contains("secret optin content"),
@@ -18410,7 +18822,11 @@ mod tests {
     async fn latest_daily_snapshot_pair_returns_none_when_empty() {
         let (store, temp_dir) = open_zeta16_store().await;
         let pair = store.latest_daily_snapshot_pair().await.expect("query");
-        assert!(pair.is_none(), "expected None on empty store, got {:?}", pair);
+        assert!(
+            pair.is_none(),
+            "expected None on empty store, got {:?}",
+            pair
+        );
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
@@ -18421,7 +18837,11 @@ mod tests {
         let (store, temp_dir) = open_zeta16_store().await;
         insert_snapshot(&store, "snapshot_daily_20260512_0342", 100, "active").await;
         let pair = store.latest_daily_snapshot_pair().await.expect("query");
-        assert!(pair.is_none(), "expected None with single row, got {:?}", pair);
+        assert!(
+            pair.is_none(),
+            "expected None with single row, got {:?}",
+            pair
+        );
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
@@ -18460,7 +18880,7 @@ mod tests {
         insert_snapshot(&store, "snapshot_daily_dead", 350, "tombstoned").await;
         insert_snapshot(&store, "snapshot_daily_old_dead", 400, "archived").await;
         insert_snapshot(&store, "snapshot_manual_xyz", 500, "active").await; // wrong prefix
-        // Wrong kind: insert manually with kind=memory not snapshot.
+                                                                             // Wrong kind: insert manually with kind=memory not snapshot.
         store
             .conn
             .call(|c| -> RusqliteResult<usize> {
@@ -18770,10 +19190,10 @@ mod tests {
             .expect("search");
         assert!(hits.len() >= 2, "expected ≥2 hits, got {}", hits.len());
         assert_eq!(
-            hits[0].record.kind, "feedback",
+            hits[0].record.kind,
+            "feedback",
             "feedback row should rank first; got {:?}",
-            hits
-                .iter()
+            hits.iter()
                 .map(|h| (&h.record.key, &h.record.kind))
                 .collect::<Vec<_>>()
         );

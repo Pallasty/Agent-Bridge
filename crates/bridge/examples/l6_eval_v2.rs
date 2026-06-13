@@ -48,18 +48,15 @@ struct Row {
 }
 
 const STOPWORDS: &[&str] = &[
-    "the", "a", "an", "of", "in", "on", "at", "to", "for", "with", "by",
-    "from", "as", "is", "are", "was", "were", "be", "been", "being",
-    "have", "has", "had", "do", "does", "did", "but", "or", "and", "if",
-    "then", "else", "when", "where", "why", "how", "what", "which", "who",
-    "whom", "this", "that", "these", "those", "it", "its", "they", "them",
-    "their", "we", "us", "our", "you", "your", "i", "me", "my", "can",
-    "could", "should", "would", "may", "might", "must", "shall", "will",
-    "about", "into", "out", "up", "down", "over", "under", "again",
-    "further", "more", "most", "other", "some", "such", "no", "nor",
-    "not", "only", "own", "same", "so", "than", "too", "very", "just",
-    "now", "use", "uses", "used", "using", "via", "between", "after",
-    "before", "during",
+    "the", "a", "an", "of", "in", "on", "at", "to", "for", "with", "by", "from", "as", "is", "are",
+    "was", "were", "be", "been", "being", "have", "has", "had", "do", "does", "did", "but", "or",
+    "and", "if", "then", "else", "when", "where", "why", "how", "what", "which", "who", "whom",
+    "this", "that", "these", "those", "it", "its", "they", "them", "their", "we", "us", "our",
+    "you", "your", "i", "me", "my", "can", "could", "should", "would", "may", "might", "must",
+    "shall", "will", "about", "into", "out", "up", "down", "over", "under", "again", "further",
+    "more", "most", "other", "some", "such", "no", "nor", "not", "only", "own", "same", "so",
+    "than", "too", "very", "just", "now", "use", "uses", "used", "using", "via", "between",
+    "after", "before", "during",
 ];
 
 fn is_stopword(t: &str) -> bool {
@@ -91,7 +88,8 @@ fn is_distinctive(t: &str) -> bool {
     }
     if t.len() >= 7
         && t.len() <= 40
-        && t.chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c.to_ascii_lowercase()))
+        && t.chars()
+            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c.to_ascii_lowercase()))
         && t.chars().any(|c| c.is_ascii_alphabetic())
     {
         return true;
@@ -180,7 +178,10 @@ fn signal_cosine_novelty(hits: &[MemoryCosineHit]) -> f32 {
     if hits.is_empty() {
         return 1.0;
     }
-    let max_cos = hits.iter().map(|h| h.cosine).fold(f32::NEG_INFINITY, f32::max);
+    let max_cos = hits
+        .iter()
+        .map(|h| h.cosine)
+        .fold(f32::NEG_INFINITY, f32::max);
     (1.0 - max_cos).clamp(0.0, 1.0)
 }
 
@@ -193,7 +194,9 @@ fn signal_entity_presence(query: &str, hits: &[MemoryCosineHit]) -> (f32, usize)
     let mut absent = 0;
     for id in &ids {
         let lower = id.to_lowercase();
-        let any = hits.iter().any(|h| h.record.content.to_lowercase().contains(&lower));
+        let any = hits
+            .iter()
+            .any(|h| h.record.content.to_lowercase().contains(&lower));
         if !any {
             absent += 1;
         }
@@ -249,8 +252,12 @@ fn sweep(name: &str, rows: &[Row], get: impl Fn(&Row) -> f32, total_g: usize, to
         println!(
             "| {:.2} | {:.0}% ({}/{}) | {:.0}% ({}/{}) | {:+.3} | {} | {} |",
             thr,
-            sens * 100.0, tp, total_f,
-            (1.0 - spec) * 100.0, fp, total_g,
+            sens * 100.0,
+            tp,
+            total_f,
+            (1.0 - spec) * 100.0,
+            fp,
+            total_g,
             j,
             if sens >= 0.60 { "✓" } else { "✗" },
             if (1.0 - spec) <= 0.25 { "✓" } else { "✗" }
@@ -275,7 +282,12 @@ async fn main() -> anyhow::Result<()> {
         .and_then(|s| s.parse().ok())
         .unwrap_or(5);
 
-    eprintln!("L6 eval v2 — db={} corpus={} k={}", db_path.display(), corpus_path.display(), k);
+    eprintln!(
+        "L6 eval v2 — db={} corpus={} k={}",
+        db_path.display(),
+        corpus_path.display(),
+        k
+    );
     let corpus_raw = std::fs::read_to_string(&corpus_path)?;
     let items: Vec<CorpusItem> = corpus_raw
         .lines()
@@ -295,12 +307,23 @@ async fn main() -> anyhow::Result<()> {
         let s0 = signal_cosine_novelty(&hits);
         let (sa, sa_n) = signal_entity_presence(&item.query, &hits);
         let (sb, sb_n) = signal_content_overlap(&item.query, &hits);
-        rows.push(Row { item: item.clone(), s0, sa, sa_n, sb, sb_n });
+        rows.push(Row {
+            item: item.clone(),
+            s0,
+            sa,
+            sa_n,
+            sb,
+            sb_n,
+        });
     }
 
     println!("# L6 v2 — three-signal comparison");
     println!();
-    println!("Backend: all-MiniLM-L6-v2 (ONNX) | k={} | corpus={} items", k, items.len());
+    println!(
+        "Backend: all-MiniLM-L6-v2 (ONNX) | k={} | corpus={} items",
+        k,
+        items.len()
+    );
     println!();
     println!("## Per-item, all three signals");
     println!();
@@ -322,7 +345,10 @@ async fn main() -> anyhow::Result<()> {
     // Best joint pass across all (signal, threshold) pairs.
     let mut best: Option<(String, f32, f32, f32, f32)> = None;
     for (name, get) in [
-        ("S0 cosine-novelty", Box::new(|r: &Row| r.s0) as Box<dyn Fn(&Row) -> f32>),
+        (
+            "S0 cosine-novelty",
+            Box::new(|r: &Row| r.s0) as Box<dyn Fn(&Row) -> f32>,
+        ),
         ("S-A entity-presence", Box::new(|r: &Row| r.sa)),
         ("S-B content-overlap", Box::new(|r: &Row| r.sb)),
     ] {
@@ -362,7 +388,11 @@ async fn main() -> anyhow::Result<()> {
         Some((name, thr, sens, fpr, j)) => {
             println!(
                 "**{} at threshold {:.2}** — detect {:.1}% / FP {:.1}% / J={:.3}",
-                name, thr, sens * 100.0, fpr * 100.0, j
+                name,
+                thr,
+                sens * 100.0,
+                fpr * 100.0,
+                j
             );
         }
         None => {

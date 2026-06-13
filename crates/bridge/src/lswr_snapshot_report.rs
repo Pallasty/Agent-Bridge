@@ -252,7 +252,11 @@ fn join_or_none(values: &[String]) -> String {
 }
 
 fn bool_text(value: bool) -> &'static str {
-    if value { "true" } else { "false" }
+    if value {
+        "true"
+    } else {
+        "false"
+    }
 }
 
 fn one_line(value: &str) -> String {

@@ -101,8 +101,8 @@ pub fn find_daemon_pid() -> Option<u32> {
         }
         let argv0 = String::from_utf8_lossy(tokens[0]);
         let argv0_token = argv0.split_whitespace().next().unwrap_or(&argv0);
-        let suspect = argv0_token.ends_with("agent-bridge.real")
-            || argv0_token.ends_with("agent-bridge");
+        let suspect =
+            argv0_token.ends_with("agent-bridge.real") || argv0_token.ends_with("agent-bridge");
         if !suspect {
             continue;
         }
@@ -144,9 +144,7 @@ pub fn enum_state_db_fds(pid: u32) -> Vec<(u32, String)> {
             // Strip a trailing " (deleted)" marker that Linux appends
             // when the file was unlinked but the FD is still held — we
             // want to rescue these too, that's the whole point.
-            let base = fname
-                .strip_suffix(" (deleted)")
-                .unwrap_or(fname);
+            let base = fname.strip_suffix(" (deleted)").unwrap_or(fname);
             if STATE_DB_SUFFIXES.contains(&base) {
                 out.push((fd_num, target));
             }
@@ -225,10 +223,7 @@ pub fn default_recovery_dir() -> PathBuf {
 /// `hex16` suffix in the returned string so consumers can distinguish).
 fn hash_file(path: &Path) -> io::Result<String> {
     // Try sha256sum first (Linux + macOS coreutils ship it).
-    if let Ok(out) = std::process::Command::new("sha256sum")
-        .arg(path)
-        .output()
-    {
+    if let Ok(out) = std::process::Command::new("sha256sum").arg(path).output() {
         if out.status.success() {
             let s = String::from_utf8_lossy(&out.stdout);
             if let Some(hex) = s.split_whitespace().next() {
@@ -248,10 +243,7 @@ fn hash_file(path: &Path) -> io::Result<String> {
 /// Perform the rescue. `daemon_pid` is caller-provided so the impl is
 /// testable without a real running daemon; production callers fetch
 /// via [`find_daemon_pid`] first.
-pub fn rescue_snapshot(
-    daemon_pid: u32,
-    ttl_secs: u64,
-) -> Result<RescueReport, RescueError> {
+pub fn rescue_snapshot(daemon_pid: u32, ttl_secs: u64) -> Result<RescueReport, RescueError> {
     let self_pid = std::process::id();
     let outcome = locks::acquire(
         "state.db.rescue",
@@ -263,7 +255,9 @@ pub fn rescue_snapshot(
     let (lock_path, _lock, status, force_broke_backup) = match outcome {
         AcquireOutcome::Acquired { lock_path, lock } => (lock_path, lock, "acquired", None),
         AcquireOutcome::Attached { lock, .. } => {
-            let existing = lock.artifact_path.unwrap_or_else(|| PathBuf::from("<unknown>"));
+            let existing = lock
+                .artifact_path
+                .unwrap_or_else(|| PathBuf::from("<unknown>"));
             return Err(RescueError::Attached(existing));
         }
         AcquireOutcome::ForceBroke {
@@ -518,7 +512,10 @@ mod tests {
             // Lock file exists and points at the canonical state.db.
             let lock = locks::read_lock(&report.lock_path).unwrap().unwrap();
             assert!(lock.artifact_path.is_some());
-            assert_eq!(lock.artifact_sha256.as_deref(), Some(report.combined_sha256.as_str()));
+            assert_eq!(
+                lock.artifact_sha256.as_deref(),
+                Some(report.combined_sha256.as_str())
+            );
         });
     }
 }

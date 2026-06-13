@@ -50,8 +50,7 @@ use crate::biocortex_shadow::{
     biocortex_retrieval_opt_in_batch_diagnostics, biocortex_retrieval_opt_in_dry_run_plan,
     biocortex_retrieval_opt_in_execution_packet,
     biocortex_retrieval_opt_in_gated_batch_diagnostics,
-    biocortex_retrieval_opt_in_gated_store_trial,
-    biocortex_retrieval_opt_in_order_diff_packet,
+    biocortex_retrieval_opt_in_gated_store_trial, biocortex_retrieval_opt_in_order_diff_packet,
     biocortex_retrieval_opt_in_post_implementation_review_gate,
     biocortex_retrieval_opt_in_redacted_order_artifact, biocortex_retrieval_opt_in_review_packet,
     biocortex_retrieval_opt_in_runtime_influence_decision_packet,
@@ -50996,7 +50995,10 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             v["input_contract"]["human_decision_text_included"],
             json!(false)
         );
-        assert_eq!(v["decision_summary"]["runtime_influence_authorized"], json!(true));
+        assert_eq!(
+            v["decision_summary"]["runtime_influence_authorized"],
+            json!(true)
+        );
         assert_eq!(v["store_trial_summary"]["baseline_key_count"], json!(0));
         assert_eq!(v["batch_summary"]["query_count"], json!(1));
         assert_eq!(v["readiness"]["control_plane_ready"], json!(true));
@@ -51004,23 +51006,14 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             v["readiness"]["live_probe_state"],
             json!("control_plane_ready_no_live_candidates")
         );
-        assert_eq!(
-            v["readiness"]["live_order_influence_ready"],
-            json!(false)
-        );
+        assert_eq!(v["readiness"]["live_order_influence_ready"], json!(false));
         assert_eq!(
             v["readiness"]["may_accept_controlled_explicit_opt_in_fts_calls"],
             json!(true)
         );
-        assert_eq!(
-            v["boundary_check"]["runtime_readiness_ready"],
-            json!(true)
-        );
+        assert_eq!(v["boundary_check"]["runtime_readiness_ready"], json!(true));
         assert_eq!(v["boundary_check"]["blockers"], json!([]));
-        assert_eq!(
-            v["approval_state"],
-            json!("runtime_readiness_only")
-        );
+        assert_eq!(v["approval_state"], json!("runtime_readiness_only"));
         assert_eq!(v["writes_approval"], json!(false));
         assert_eq!(v["calls_memory_search"], json!(false));
         assert_eq!(v["runs_biocortex"], json!(false));
@@ -51160,26 +51153,11 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             v["input_contract"]["runtime_readiness_packet_included"],
             json!(false)
         );
-        assert_eq!(
-            v["requested_transition"]["mode"],
-            json!("fts")
-        );
-        assert_eq!(
-            v["requested_transition"]["mode_authorized"],
-            json!(true)
-        );
-        assert_eq!(
-            v["requested_transition"]["per_call_opt_in"],
-            json!(true)
-        );
-        assert_eq!(
-            v["requested_transition"]["operator_disabled"],
-            json!(false)
-        );
-        assert_eq!(
-            v["transition"]["transition_allowed"],
-            json!(true)
-        );
+        assert_eq!(v["requested_transition"]["mode"], json!("fts"));
+        assert_eq!(v["requested_transition"]["mode_authorized"], json!(true));
+        assert_eq!(v["requested_transition"]["per_call_opt_in"], json!(true));
+        assert_eq!(v["requested_transition"]["operator_disabled"], json!(false));
+        assert_eq!(v["transition"]["transition_allowed"], json!(true));
         assert_eq!(
             v["transition"]["may_run_runtime_adapter_for_explicit_opt_in_fts"],
             json!(true)
@@ -51226,10 +51204,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             v["requested_transition"]["hybrid_retrieval_influence_requested"],
             json!(true)
         );
-        assert_eq!(
-            v["transition"]["transition_allowed"],
-            json!(false)
-        );
+        assert_eq!(v["transition"]["transition_allowed"], json!(false));
         assert_eq!(
             v["boundary_check"]["runtime_transition_allowed"],
             json!(false)

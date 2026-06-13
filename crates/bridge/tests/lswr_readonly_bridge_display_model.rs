@@ -1,6 +1,6 @@
 use ab_bridge::lswr_snapshot_display::{
-    LSWR_READONLY_BRIDGE_DISPLAY_MODEL_SCHEMA, ReadOnlyBridgeDisplayModel,
     build_readonly_bridge_display_model, build_readonly_bridge_display_model_from_packet,
+    ReadOnlyBridgeDisplayModel, LSWR_READONLY_BRIDGE_DISPLAY_MODEL_SCHEMA,
 };
 use ab_bridge::lswr_snapshot_report::render_readonly_bridge_report;
 use ab_bridge::lswr_snapshot_report_acceptance::build_readonly_bridge_acceptance_matrix;

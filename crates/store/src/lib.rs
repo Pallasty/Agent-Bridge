@@ -616,7 +616,11 @@ fn biocortex_opt_in_apply_side_signal(
     side_signal_alpha: f32,
     side_signal_coverage_threshold: f64,
     gate_allows_ordering: bool,
-) -> (Vec<MemorySearchHit>, BioCortexRetrievalOptInSideSignalSummary, bool) {
+) -> (
+    Vec<MemorySearchHit>,
+    BioCortexRetrievalOptInSideSignalSummary,
+    bool,
+) {
     let candidate_count = baseline_hits.len();
     let alpha = if side_signal_alpha.is_finite() && side_signal_alpha >= 0.0 {
         side_signal_alpha
@@ -2201,12 +2205,8 @@ pub trait StateStore: Send + Sync {
         window_secs: i64,
         top_n: u32,
     ) -> Result<Vec<McpToolSourceStats>> {
-        self.mcp_tool_source_stats_filtered(
-            window_secs,
-            top_n,
-            McpToolCallFilter::default(),
-        )
-        .await
+        self.mcp_tool_source_stats_filtered(window_secs, top_n, McpToolCallFilter::default())
+            .await
     }
 
     /// Group recent MCP traffic by source/client/profile/model attribution,
@@ -2718,11 +2718,7 @@ pub trait StateStore: Send + Sync {
     /// `introspect_recall` novelty = `1 - max(cosine)`) where the raw
     /// geometric signal is the point. Default impl returns empty (back-
     /// compat — non-SQLite stores quietly produce no novelty signal).
-    async fn memory_top_k_cosine(
-        &self,
-        query: &str,
-        k: u32,
-    ) -> Result<Vec<MemoryCosineHit>> {
+    async fn memory_top_k_cosine(&self, query: &str, k: u32) -> Result<Vec<MemoryCosineHit>> {
         let _ = (query, k);
         Ok(Vec::new())
     }
@@ -2748,11 +2744,7 @@ pub trait StateStore: Send + Sync {
     /// v21 α — Synaptic Trace: return the top-N co-activation edges for
     /// a given memory key, ordered by count DESC. Default returns empty
     /// so older stores keep compiling.
-    async fn top_coactivation(
-        &self,
-        _key: &str,
-        _limit: u32,
-    ) -> Result<Vec<CoactivationEdge>> {
+    async fn top_coactivation(&self, _key: &str, _limit: u32) -> Result<Vec<CoactivationEdge>> {
         Ok(Vec::new())
     }
 
@@ -2828,11 +2820,7 @@ pub trait StateStore: Send + Sync {
     /// window. Powers `agent-bridge dream identity` (vision principle 5:
     /// "literal answer to non-continuous medium continuity"). Default
     /// returns an empty window so older stores keep compiling.
-    async fn identity_window(
-        &self,
-        window_start: i64,
-        window_end: i64,
-    ) -> Result<IdentityWindow> {
+    async fn identity_window(&self, window_start: i64, window_end: i64) -> Result<IdentityWindow> {
         Ok(IdentityWindow {
             window_start,
             window_end,
@@ -2935,9 +2923,7 @@ pub trait StateStore: Send + Sync {
         refs: Option<&serde_json::Value>,
         tags: Option<&[String]>,
     ) -> Result<ForumPostOutcome> {
-        let _ = (
-            thread_id, board, title, author, kind, body, refs, tags,
-        );
+        let _ = (thread_id, board, title, author, kind, body, refs, tags);
         Err(ab_core::Error::Backend("forum_post not implemented".into()))
     }
 
@@ -3040,11 +3026,7 @@ pub trait StateStore: Send + Sync {
     /// `forum_digest`'s per-thread extraction so high-volume threads reflect
     /// current state, not their opening posts. Returned newest-first; callers
     /// that need chronological order should sort by id. Default impl errors.
-    async fn forum_recent_posts(
-        &self,
-        thread_id: i64,
-        limit: u32,
-    ) -> Result<Vec<ForumPostRecord>> {
+    async fn forum_recent_posts(&self, thread_id: i64, limit: u32) -> Result<Vec<ForumPostRecord>> {
         let _ = (thread_id, limit);
         Err(ab_core::Error::Backend(
             "forum_recent_posts not implemented".into(),
@@ -3056,10 +3038,7 @@ pub trait StateStore: Send + Sync {
     /// per line; posts are nested inside their thread. Subscriptions are not
     /// included (each device has its own read cursors). Used by
     /// `agent-bridge sync` for cross-device collaboration.
-    async fn forum_export(
-        &self,
-        out_path: &std::path::Path,
-    ) -> Result<ForumExportResult> {
+    async fn forum_export(&self, out_path: &std::path::Path) -> Result<ForumExportResult> {
         let _ = out_path;
         Err(ab_core::Error::Backend(
             "forum_export not implemented".into(),
@@ -3071,10 +3050,7 @@ pub trait StateStore: Send + Sync {
     /// title)`; posts are matched by `(thread, author, created_at, body)`.
     /// On match, existing local row is reused; on no match, new row is
     /// inserted. `last_post_at` is updated to `max(local, remote)`.
-    async fn forum_import(
-        &self,
-        in_path: &std::path::Path,
-    ) -> Result<ForumImportReport> {
+    async fn forum_import(&self, in_path: &std::path::Path) -> Result<ForumImportReport> {
         let _ = in_path;
         Err(ab_core::Error::Backend(
             "forum_import not implemented".into(),
@@ -3125,10 +3101,7 @@ pub trait StateStore: Send + Sync {
     /// `session_identity` to auto-tag when a fresh sibling already holds
     /// the proposed canonical id. Default impl returns `Ok(None)` so
     /// non-SQLite backends fall back to the pure-helper behavior.
-    async fn agent_presence_get(
-        &self,
-        session_id: &str,
-    ) -> Result<Option<AgentPresenceRecord>> {
+    async fn agent_presence_get(&self, session_id: &str) -> Result<Option<AgentPresenceRecord>> {
         let _ = session_id;
         Ok(None)
     }
@@ -3236,13 +3209,7 @@ pub trait StateStore: Send + Sync {
         root_path: Option<&str>,
         limit: u32,
     ) -> Result<Vec<CodebaseCall>> {
-        let _ = (
-            callee_substr,
-            caller_substr,
-            file_filter,
-            root_path,
-            limit,
-        );
+        let _ = (callee_substr, caller_substr, file_filter, root_path, limit);
         Err(ab_core::Error::Backend(
             "codebase_calls_for not implemented".into(),
         ))
@@ -3313,8 +3280,7 @@ pub trait StateStore: Send + Sync {
         let per_hop_limit = per_hop_limit.clamp(1, 500);
 
         let mut closure: Vec<ImpactNode> = Vec::new();
-        let mut visited: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
+        let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
         // Frontier of (callee_to_lookup, hop_to_record) — hop=1 for
         // direct callers of `target`, hop=N+1 after one BFS expansion.
         let mut frontier: Vec<(String, u32)> = vec![(target.to_string(), 1)];
@@ -3372,11 +3338,7 @@ pub trait StateStore: Send + Sync {
     /// `top_n` caps the size of `hot_callees`, `hot_callers`,
     /// `orphan_functions`, and `fan_out_files`. The per-language and
     /// total counts are always full.
-    async fn codebase_call_stats(
-        &self,
-        root_path: &str,
-        top_n: u32,
-    ) -> Result<CodebaseCallStats> {
+    async fn codebase_call_stats(&self, root_path: &str, top_n: u32) -> Result<CodebaseCallStats> {
         let _ = (root_path, top_n);
         Err(ab_core::Error::Backend(
             "codebase_call_stats not implemented".into(),
@@ -3391,10 +3353,7 @@ pub trait StateStore: Send + Sync {
     /// Default-safe to pass `7 * 86400` (7 days).
     ///
     /// Default impl errors so non-sqlite backends opt in explicitly.
-    async fn memory_substrate_audit(
-        &self,
-        window_secs: u64,
-    ) -> Result<SubstrateAuditReport> {
+    async fn memory_substrate_audit(&self, window_secs: u64) -> Result<SubstrateAuditReport> {
         let _ = window_secs;
         Err(ab_core::Error::Backend(
             "memory_substrate_audit not implemented".into(),

@@ -221,8 +221,11 @@ async fn run_dispatch_loop(
 
         if req.jsonrpc != "2.0" {
             if let Some(id) = req.id.clone() {
-                let _ =
-                    resp_tx.send(McpResponse::error(id, INVALID_REQUEST, "jsonrpc must be '2.0'"));
+                let _ = resp_tx.send(McpResponse::error(
+                    id,
+                    INVALID_REQUEST,
+                    "jsonrpc must be '2.0'",
+                ));
             }
             continue;
         }
@@ -1143,7 +1146,11 @@ mod tests {
         )
         .await
         .expect("a panicking tool must return promptly, not hang the request");
-        assert_eq!(resps.len(), 1, "exactly one response for the panicking call");
+        assert_eq!(
+            resps.len(),
+            1,
+            "exactly one response for the panicking call"
+        );
         assert_eq!(resps[0].id, json!(1));
         assert!(
             resps[0].error.is_some() && resps[0].result.is_none(),

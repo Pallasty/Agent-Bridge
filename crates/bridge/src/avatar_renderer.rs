@@ -488,7 +488,9 @@ mod grounding_wiring_tests {
         let grounding = &payload["grounding"];
         assert_eq!(grounding["ok"], json!(false));
         assert_eq!(grounding["observability_only"], json!(true));
-        let violations = grounding["violations"].as_array().expect("violations array");
+        let violations = grounding["violations"]
+            .as_array()
+            .expect("violations array");
         assert!(violations
             .iter()
             .any(|v| v["field"] == "mood" && v["issue"] == "decorative"));

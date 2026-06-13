@@ -43,7 +43,11 @@ pub fn load_at_startup() {
         extract_kv(&content, "Tailscale API", &["Client ID", "Client id"])
     });
     set_if_unset("TAILSCALE_OAUTH_CLIENT_SECRET", || {
-        extract_kv(&content, "Tailscale API", &["Client secret", "Client Secret"])
+        extract_kv(
+            &content,
+            "Tailscale API",
+            &["Client secret", "Client Secret"],
+        )
     });
     set_if_unset("GITHUB_TOKEN", || {
         extract_bare_token(&content, "Github PAT", &["github_pat_", "ghp_", "gho_"])
@@ -310,22 +314,13 @@ curl ...
     fn extract_inline_after_skips_token_below_16_chars() {
         // Sanity: short token still extracted by inline_after (no min-length gate).
         let s = "# X\nFoo: ab\n";
-        assert_eq!(
-            extract_inline_after(s, "X", "Foo"),
-            Some("ab".to_string())
-        );
+        assert_eq!(extract_inline_after(s, "X", "Foo"), Some("ab".to_string()));
     }
 
     #[test]
     fn missing_section_returns_none() {
-        assert_eq!(
-            extract_kv(SAMPLE, "Nonexistent", &["x"]),
-            None
-        );
-        assert_eq!(
-            extract_bare_token(SAMPLE, "Nonexistent", &["x_"]),
-            None
-        );
+        assert_eq!(extract_kv(SAMPLE, "Nonexistent", &["x"]), None);
+        assert_eq!(extract_bare_token(SAMPLE, "Nonexistent", &["x_"]), None);
     }
 
     #[test]

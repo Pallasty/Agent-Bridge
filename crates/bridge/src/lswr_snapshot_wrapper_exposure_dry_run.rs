@@ -1,6 +1,6 @@
 use crate::lswr_snapshot_wrapper_descriptor::{
-    LSWR_READONLY_BRIDGE_WRAPPER_DESCRIPTOR_SCHEMA, ReadOnlyBridgeWrapperDescriptor,
-    build_readonly_bridge_wrapper_descriptor,
+    build_readonly_bridge_wrapper_descriptor, ReadOnlyBridgeWrapperDescriptor,
+    LSWR_READONLY_BRIDGE_WRAPPER_DESCRIPTOR_SCHEMA,
 };
 use serde::{Deserialize, Serialize};
 
@@ -303,5 +303,9 @@ fn check(
 }
 
 fn bool_text(value: bool) -> &'static str {
-    if value { "true" } else { "false" }
+    if value {
+        "true"
+    } else {
+        "false"
+    }
 }

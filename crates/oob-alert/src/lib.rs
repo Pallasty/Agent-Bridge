@@ -250,15 +250,14 @@ mod tests {
 
         assert!(path.exists(), "alert file must exist");
         assert!(
-            path.file_name().unwrap().to_string_lossy().ends_with(".json"),
+            path.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .ends_with(".json"),
             "alert filename ends with .json"
         );
         assert!(
-            !path
-                .file_name()
-                .unwrap()
-                .to_string_lossy()
-                .starts_with('.'),
+            !path.file_name().unwrap().to_string_lossy().starts_with('.'),
             "atomic-rename target must NOT keep the dotfile prefix"
         );
 
@@ -268,7 +267,10 @@ mod tests {
         assert_eq!(parsed.kind, AlertKind::FdDeleted);
         assert_eq!(parsed.process_inventory.len(), 2);
         assert_eq!(parsed.process_inventory[0].pid, 1318355);
-        assert_eq!(parsed.suggested_action, "agent-bridge rescue-snapshot --canonical");
+        assert_eq!(
+            parsed.suggested_action,
+            "agent-bridge rescue-snapshot --canonical"
+        );
         assert_eq!(parsed.next_steps.len(), 1);
     }
 

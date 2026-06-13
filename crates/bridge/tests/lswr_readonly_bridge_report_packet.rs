@@ -1,7 +1,7 @@
 use ab_bridge::lswr_snapshot_consumer::ReadOnlyBridgeConsumerSummary;
 use ab_bridge::lswr_snapshot_report_packet::{
-    LSWR_READONLY_BRIDGE_REPORT_PACKET_SCHEMA, ReadOnlyBridgeReportPacket,
-    build_readonly_bridge_report_packet,
+    build_readonly_bridge_report_packet, ReadOnlyBridgeReportPacket,
+    LSWR_READONLY_BRIDGE_REPORT_PACKET_SCHEMA,
 };
 
 const CONSUMER_SUMMARY_JSON: &str =

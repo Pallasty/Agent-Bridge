@@ -66,7 +66,11 @@ impl SecurityPolicy {
     pub fn check(&self, cap: Cap) -> Result<(), String> {
         let (allowed, tool, var) = match cap {
             Cap::ShellExec => (self.allow_shell_exec, "shell_exec", "AB_ALLOW_SHELL_EXEC"),
-            Cap::AgentSpawn => (self.allow_agent_spawn, "agent_spawn", "AB_ALLOW_AGENT_SPAWN"),
+            Cap::AgentSpawn => (
+                self.allow_agent_spawn,
+                "agent_spawn",
+                "AB_ALLOW_AGENT_SPAWN",
+            ),
             Cap::TerminalWrite => (
                 self.allow_terminal_write,
                 "terminal_write",

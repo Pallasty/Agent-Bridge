@@ -210,8 +210,7 @@ pub fn compositor_wlroots_signal(
 /// Choose a body backend from detected compositor info, with a reason string.
 /// Pure + total: every environment gets an explicit verdict (no silent gap).
 pub fn recommend_backend(info: &CompositorInfo) -> BackendRecommendation {
-    let on_wayland =
-        info.has_wayland_display || info.session_type.as_deref() == Some("wayland");
+    let on_wayland = info.has_wayland_display || info.session_type.as_deref() == Some("wayland");
 
     if let Some(sig) = info.wlroots_signal.as_deref() {
         if on_wayland {
@@ -345,12 +344,7 @@ mod tests {
 
     #[test]
     fn wlroots_on_wayland_picks_native_transparent() {
-        let rec = recommend_backend(&info(
-            Some("wayland"),
-            Some("sway"),
-            true,
-            Some("SWAYSOCK"),
-        ));
+        let rec = recommend_backend(&info(Some("wayland"), Some("sway"), true, Some("SWAYSOCK")));
         assert_eq!(rec.backend, AvatarBackend::NativeTransparent);
         assert!(rec.transparency_available);
     }

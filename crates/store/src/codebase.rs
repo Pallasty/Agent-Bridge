@@ -272,7 +272,7 @@ fn is_rust_test_attr_line(s: &str) -> bool {
     // Match against common test attribute names. The `[` is fixed at
     // index 1; check the body for known patterns.
     let body = &s[2..]; // strip "#["
-    // Drop trailing `]...` so we look only at the attribute payload.
+                        // Drop trailing `]...` so we look only at the attribute payload.
     let body = body.split(']').next().unwrap_or(body).trim();
     // Strip arguments to get the bare attribute name.
     let name = body.split('(').next().unwrap_or(body).trim();
@@ -351,7 +351,14 @@ fn extract_rust(content: &str, file_path: &str) -> Vec<CodebaseSymbol> {
             // Emit the impl symbol itself.  Name carries the implementing
             // type; signature retains the original line so the trait info
             // (when present) is still searchable.
-            out.push(make(file_path, (i + 1) as u32, "impl", type_name.clone(), t, "rust"));
+            out.push(make(
+                file_path,
+                (i + 1) as u32,
+                "impl",
+                type_name.clone(),
+                t,
+                "rust",
+            ));
             // Push scope only when the impl's body opens on this line.
             // Otherwise hold it as `pending_impl` until we see the `{` on a
             // subsequent line (multi-line `where` clauses).
@@ -413,7 +420,14 @@ fn extract_rust(content: &str, file_path: &str) -> Vec<CodebaseSymbol> {
                 kind
             };
             pending_test_attr = false;
-            out.push(make(file_path, (i + 1) as u32, final_kind, emit_name, t, "rust"));
+            out.push(make(
+                file_path,
+                (i + 1) as u32,
+                final_kind,
+                emit_name,
+                t,
+                "rust",
+            ));
         } else {
             // Any other code line clears the pending attribute flag —
             // attributes only apply to the immediately-following item.
@@ -510,11 +524,7 @@ fn split_as_alias(item: &str) -> (String, Option<String>) {
     if let Some(idx) = trimmed.rfind(" as ") {
         let path = trimmed[..idx].trim();
         let alias = trimmed[idx + 4..].trim();
-        if !alias.is_empty()
-            && alias
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_')
-        {
+        if !alias.is_empty() && alias.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
             return (path.to_string(), Some(alias.to_string()));
         }
     }
@@ -723,11 +733,7 @@ fn is_rust_ident_char(c: u8) -> bool {
 /// `:`). Returns the new index past the closing `>`. If the input
 /// doesn't match `::<`, returns `i` unchanged.
 fn skip_rust_turbofish(bytes: &[u8], i: usize) -> usize {
-    if i + 2 >= bytes.len()
-        || bytes[i] != b':'
-        || bytes[i + 1] != b':'
-        || bytes[i + 2] != b'<'
-    {
+    if i + 2 >= bytes.len() || bytes[i] != b':' || bytes[i + 1] != b':' || bytes[i + 2] != b'<' {
         return i;
     }
     let mut k = i + 3;
@@ -940,9 +946,11 @@ fn mask_strings_and_comments(content: &str) -> String {
             State::Normal => {
                 // Raw string: `r"…"`, `r#"…"#`, `r##"…"##`, etc., or
                 // byte raw `br"…"`, `br#"…"#`. Check word boundary.
-                let before_ok = i == 0
-                    || (!bytes[i - 1].is_ascii_alphanumeric() && bytes[i - 1] != b'_');
-                if before_ok && (c == b'r' || (c == b'b' && i + 1 < bytes.len() && bytes[i + 1] == b'r')) {
+                let before_ok =
+                    i == 0 || (!bytes[i - 1].is_ascii_alphanumeric() && bytes[i - 1] != b'_');
+                if before_ok
+                    && (c == b'r' || (c == b'b' && i + 1 < bytes.len() && bytes[i + 1] == b'r'))
+                {
                     let r_start = if c == b'b' { i + 1 } else { i };
                     let mut k = r_start + 1;
                     let mut hashes = 0;
@@ -971,10 +979,7 @@ fn mask_strings_and_comments(content: &str) -> String {
                         i += 3;
                         continue;
                     }
-                    if i + 3 < bytes.len()
-                        && bytes[i + 1] == b'\\'
-                        && bytes[i + 3] == b'\''
-                    {
+                    if i + 3 < bytes.len() && bytes[i + 1] == b'\\' && bytes[i + 3] == b'\'' {
                         out.push('\'');
                         out.push(' ');
                         out.push(' ');
@@ -1257,11 +1262,7 @@ fn split_python_as(item: &str) -> (String, Option<String>) {
     if let Some(idx) = trimmed.rfind(" as ") {
         let path = trimmed[..idx].trim();
         let alias = trimmed[idx + 4..].trim();
-        if !alias.is_empty()
-            && alias
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_')
-        {
+        if !alias.is_empty() && alias.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
             return (path.to_string(), Some(alias.to_string()));
         }
     }
@@ -1652,7 +1653,10 @@ fn try_ts_static_form(
     // Side-effect-only: `import 'mod';`. Has no `from` keyword and the
     // body after `import ` is a single string literal.
     if is_import && find_ts_from_keyword(buf).is_none() {
-        let rest = buf["import".len()..].trim_start().trim_end_matches(';').trim();
+        let rest = buf["import".len()..]
+            .trim_start()
+            .trim_end_matches(';')
+            .trim();
         if !rest.is_empty() {
             let rb = rest.as_bytes();
             if matches!(rb[0], b'"' | b'\'' | b'`') {
@@ -1692,7 +1696,13 @@ fn try_ts_static_form(
         .unwrap_or(clause_body);
 
     emit_ts_clause_rows(
-        clause_body, &module, raw_full, line_no, language, file_path, out,
+        clause_body,
+        &module,
+        raw_full,
+        line_no,
+        language,
+        file_path,
+        out,
     );
 }
 
@@ -1759,11 +1769,7 @@ fn emit_ts_call_imports(
 /// `require('…')` calls. Convention mirrors Python: named imports become
 /// `module.name`, namespace imports become `module.*`, default and
 /// side-effect imports use the bare module specifier.
-pub fn extract_ts_imports(
-    content: &str,
-    file_path: &str,
-    language: &str,
-) -> Vec<CodebaseImport> {
+pub fn extract_ts_imports(content: &str, file_path: &str, language: &str) -> Vec<CodebaseImport> {
     let mut out = Vec::new();
     let lines: Vec<&str> = content.lines().collect();
     let mut i = 0usize;
@@ -1781,8 +1787,7 @@ pub fn extract_ts_imports(
         // mis-attribute their line number to the function declaration.
         let mut buf = stripped.to_string();
         let mut end_line_idx = i;
-        let needs_aggregation =
-            stripped.starts_with("import") || stripped.starts_with("export");
+        let needs_aggregation = stripped.starts_with("import") || stripped.starts_with("export");
         if needs_aggregation {
             while buf.matches('{').count() > buf.matches('}').count()
                 && end_line_idx + 1 < lines.len()
@@ -1915,11 +1920,9 @@ pub fn extract_go_imports(content: &str, file_path: &str) -> Vec<CodebaseImport>
                 let mut closed = false;
                 while k < lines.len() {
                     let inner_raw = lines[k];
-                    let inner_strip = strip_ts_line_comment(
-                        &strip_ts_block_comments(inner_raw),
-                    )
-                    .trim()
-                    .to_string();
+                    let inner_strip = strip_ts_line_comment(&strip_ts_block_comments(inner_raw))
+                        .trim()
+                        .to_string();
                     if inner_strip.starts_with(')') {
                         closed = true;
                         i = k + 1;
@@ -2013,7 +2016,14 @@ fn extract_python(content: &str, file_path: &str) -> Vec<CodebaseSymbol> {
                 } else {
                     ("def", name)
                 };
-                out.push(make(file_path, (i + 1) as u32, kind, emit_name, t, "python"));
+                out.push(make(
+                    file_path,
+                    (i + 1) as u32,
+                    kind,
+                    emit_name,
+                    t,
+                    "python",
+                ));
             }
             continue;
         }
@@ -2151,12 +2161,9 @@ fn mask_python_strings_and_comments(content: &str) -> String {
                 }
                 // Word-boundary: chars before `i` must not be ident chars,
                 // otherwise `er"foo"` isn't actually a string prefix.
-                let before_ok = i == 0
-                    || (!bytes[i - 1].is_ascii_alphanumeric() && bytes[i - 1] != b'_');
-                if k > i
-                    && before_ok
-                    && k < bytes.len()
-                    && (bytes[k] == b'"' || bytes[k] == b'\'')
+                let before_ok =
+                    i == 0 || (!bytes[i - 1].is_ascii_alphanumeric() && bytes[i - 1] != b'_');
+                if k > i && before_ok && k < bytes.len() && (bytes[k] == b'"' || bytes[k] == b'\'')
                 {
                     // Emit prefix chars verbatim, fall through with i = k.
                     for j in i..k {
@@ -2490,10 +2497,7 @@ pub fn extract_python_calls(content: &str, file_path: &str) -> Vec<CodebaseCall>
                 .collect();
             if !name.is_empty() {
                 // Build qualified caller from current scope chain.
-                let prefix: Vec<&str> = scope_stack
-                    .iter()
-                    .map(|s| s.qualified.as_str())
-                    .collect();
+                let prefix: Vec<&str> = scope_stack.iter().map(|s| s.qualified.as_str()).collect();
                 let qualified = if let Some(last) = prefix.last() {
                     format!("{last}.{name}")
                 } else {
@@ -3235,10 +3239,7 @@ pub fn extract_go_calls(content: &str, file_path: &str) -> Vec<CodebaseCall> {
             // detection allows `defer foo()` to walk past `defer`
             // (which is keyword-filtered) and then re-enter at `foo`.
             // No special handling needed beyond the keyword filter.
-            let caller = fn_stack
-                .last()
-                .map(|s| s.qualified.as_str())
-                .unwrap_or("");
+            let caller = fn_stack.last().map(|s| s.qualified.as_str()).unwrap_or("");
             extract_go_calls_from_line(raw, line_no, caller, file_path, &mut out);
         }
 
@@ -3424,9 +3425,7 @@ fn extract_ts_calls_from_line(
         // Method call: `.NAME(` (or `?.NAME(` optional chain).
         if c == b'.'
             && i + 1 < bytes.len()
-            && (bytes[i + 1].is_ascii_alphabetic()
-                || bytes[i + 1] == b'_'
-                || bytes[i + 1] == b'$')
+            && (bytes[i + 1].is_ascii_alphabetic() || bytes[i + 1] == b'_' || bytes[i + 1] == b'$')
         {
             let start = i + 1;
             let mut j = start;
@@ -3517,11 +3516,7 @@ fn extract_ts_calls_from_line(
 ///   • Object-literal methods (`{ method() {} }`) likewise.
 ///   • Decorator lines (`@decorator(args)`) emit calls but don't gate
 ///     the following declaration.
-pub fn extract_ts_calls(
-    content: &str,
-    file_path: &str,
-    language: &str,
-) -> Vec<CodebaseCall> {
+pub fn extract_ts_calls(content: &str, file_path: &str, language: &str) -> Vec<CodebaseCall> {
     let masked = mask_ts_strings_and_comments(content);
     let content = masked.as_str();
     let mut out = Vec::new();
@@ -3672,10 +3667,16 @@ fn free_fn() {}
         assert_eq!(syms[1].kind, "impl");
         assert_eq!(syms[1].name, "Foo");
         assert_eq!(syms[2].kind, "fn");
-        assert_eq!(syms[2].name, "Foo::bar", "inherent impl method gets Type::method");
+        assert_eq!(
+            syms[2].name, "Foo::bar",
+            "inherent impl method gets Type::method"
+        );
         assert_eq!(syms[3].name, "Foo::baz");
         // Free fn after the impl block closes must not be qualified.
-        assert_eq!(syms[4].name, "free_fn", "free fn after impl must not inherit scope");
+        assert_eq!(
+            syms[4].name, "free_fn",
+            "free fn after impl must not inherit scope"
+        );
     }
 
     #[test]
@@ -3817,7 +3818,10 @@ impl B {
         assert_eq!(syms[0].name, "A");
         assert_eq!(syms[1].name, "A::a_method");
         assert_eq!(syms[2].name, "B");
-        assert_eq!(syms[3].name, "B::b_method", "second impl methods qualified by B, not A");
+        assert_eq!(
+            syms[3].name, "B::b_method",
+            "second impl methods qualified by B, not A"
+        );
     }
 
     #[test]
@@ -3836,7 +3840,10 @@ impl Foo {
         let syms = extract_rust(src, "c.rs");
         assert_eq!(syms.len(), 3, "got {syms:#?}");
         assert_eq!(syms[1].name, "Foo::complicated");
-        assert_eq!(syms[2].name, "Foo::simple", "second method still qualified despite intervening braces");
+        assert_eq!(
+            syms[2].name, "Foo::simple",
+            "second method still qualified despite intervening braces"
+        );
     }
 
     #[test]
@@ -4081,8 +4088,7 @@ use crate::{
 
     #[test]
     fn py_import_multiple_with_per_item_alias() {
-        let imps =
-            extract_python_imports("import a, b as x, c.d\n", "f.py");
+        let imps = extract_python_imports("import a, b as x, c.d\n", "f.py");
         assert_eq!(imps.len(), 3);
         assert_eq!(imps[0].target, "a");
         assert_eq!(imps[1].target, "b");
@@ -4099,10 +4105,7 @@ use crate::{
 
     #[test]
     fn py_from_module_import_multiple() {
-        let imps = extract_python_imports(
-            "from os import path, getcwd, mkdir\n",
-            "f.py",
-        );
+        let imps = extract_python_imports("from os import path, getcwd, mkdir\n", "f.py");
         assert_eq!(imps.len(), 3);
         let targets: Vec<&str> = imps.iter().map(|i| i.target.as_str()).collect();
         assert_eq!(targets, ["os.path", "os.getcwd", "os.mkdir"]);
@@ -4125,8 +4128,7 @@ use crate::{
 
     #[test]
     fn py_from_relative_dotted_package() {
-        let imps =
-            extract_python_imports("from .pkg.sub import bar, baz\n", "f.py");
+        let imps = extract_python_imports("from .pkg.sub import bar, baz\n", "f.py");
         assert_eq!(imps.len(), 2);
         assert_eq!(imps[0].target, ".pkg.sub.bar");
         assert_eq!(imps[1].target, ".pkg.sub.baz");
@@ -4154,7 +4156,12 @@ from typing import (
         let targets: Vec<&str> = imps.iter().map(|i| i.target.as_str()).collect();
         assert_eq!(
             targets,
-            ["typing.Any", "typing.Dict", "typing.List", "typing.Optional"]
+            [
+                "typing.Any",
+                "typing.Dict",
+                "typing.List",
+                "typing.Optional"
+            ]
         );
         assert_eq!(imps[3].alias.as_deref(), Some("Opt"));
         // All four should report the line where `from` started.
@@ -4195,11 +4202,7 @@ x = 'from os import path'
 
     #[test]
     fn ts_import_namespace() {
-        let imps = extract_ts_imports(
-            "import * as path from 'node:path';\n",
-            "f.ts",
-            "typescript",
-        );
+        let imps = extract_ts_imports("import * as path from 'node:path';\n", "f.ts", "typescript");
         assert_eq!(imps.len(), 1);
         assert_eq!(imps[0].target, "node:path.*");
         assert_eq!(imps[0].alias.as_deref(), Some("path"));
@@ -4246,11 +4249,7 @@ x = 'from os import path'
 
     #[test]
     fn ts_import_default_plus_namespace() {
-        let imps = extract_ts_imports(
-            "import fs, * as fsAll from 'fs';\n",
-            "f.ts",
-            "typescript",
-        );
+        let imps = extract_ts_imports("import fs, * as fsAll from 'fs';\n", "f.ts", "typescript");
         assert_eq!(imps.len(), 2);
         assert_eq!(imps[0].target, "fs");
         assert_eq!(imps[0].alias.as_deref(), Some("fs"));
@@ -4294,7 +4293,10 @@ import {
         let imps = extract_ts_imports(src, "f.tsx", "typescript");
         assert_eq!(imps.len(), 3, "got {imps:#?}");
         let targets: Vec<&str> = imps.iter().map(|i| i.target.as_str()).collect();
-        assert_eq!(targets, ["react.useState", "react.useEffect", "react.Fragment"]);
+        assert_eq!(
+            targets,
+            ["react.useState", "react.useEffect", "react.Fragment"]
+        );
         assert_eq!(imps[1].alias.as_deref(), Some("useFx"));
         // All three should report the line where `import` started.
         assert!(imps.iter().all(|i| i.line == 1));
@@ -4323,11 +4325,7 @@ import {
 
     #[test]
     fn ts_export_star_as_from() {
-        let imps = extract_ts_imports(
-            "export * as utils from './utils';\n",
-            "f.ts",
-            "typescript",
-        );
+        let imps = extract_ts_imports("export * as utils from './utils';\n", "f.ts", "typescript");
         assert_eq!(imps.len(), 1);
         assert_eq!(imps[0].target, "./utils.*");
         assert_eq!(imps[0].alias.as_deref(), Some("utils"));
@@ -4335,11 +4333,7 @@ import {
 
     #[test]
     fn ts_require_cjs() {
-        let imps = extract_ts_imports(
-            "const lodash = require('lodash');\n",
-            "f.js",
-            "javascript",
-        );
+        let imps = extract_ts_imports("const lodash = require('lodash');\n", "f.js", "javascript");
         assert_eq!(imps.len(), 1);
         assert_eq!(imps[0].target, "lodash");
         assert_eq!(imps[0].language, "javascript");
@@ -4347,11 +4341,7 @@ import {
 
     #[test]
     fn ts_dynamic_import() {
-        let imps = extract_ts_imports(
-            "const m = await import('./lazy');\n",
-            "f.ts",
-            "typescript",
-        );
+        let imps = extract_ts_imports("const m = await import('./lazy');\n", "f.ts", "typescript");
         assert_eq!(imps.len(), 1);
         assert_eq!(imps[0].target, "./lazy");
     }
@@ -4426,8 +4416,7 @@ function isWSL(): boolean {
 
     #[test]
     fn go_import_blank_side_effect() {
-        let imps =
-            extract_go_imports("import _ \"github.com/lib/pq\"\n", "f.go");
+        let imps = extract_go_imports("import _ \"github.com/lib/pq\"\n", "f.go");
         assert_eq!(imps.len(), 1);
         assert_eq!(imps[0].target, "github.com/lib/pq");
         assert_eq!(imps[0].alias.as_deref(), Some("_"));
@@ -4539,10 +4528,7 @@ func importHandler() {}
 
     #[test]
     fn go_import_url_with_path_segments() {
-        let imps = extract_go_imports(
-            "import \"github.com/user/repo/sub/pkg\"\n",
-            "f.go",
-        );
+        let imps = extract_go_imports("import \"github.com/user/repo/sub/pkg\"\n", "f.go");
         assert_eq!(imps.len(), 1);
         assert_eq!(imps[0].target, "github.com/user/repo/sub/pkg");
     }
@@ -5110,7 +5096,10 @@ def real_def():
         // `configure_logging()` at module scope → caller="".
         // `inside_def()` at function scope → caller="real_def".
         assert_eq!(calls.len(), 2, "got {calls:#?}");
-        let cfg = calls.iter().find(|c| c.callee == "configure_logging").unwrap();
+        let cfg = calls
+            .iter()
+            .find(|c| c.callee == "configure_logging")
+            .unwrap();
         assert_eq!(cfg.caller, "");
         let inside = calls.iter().find(|c| c.callee == "inside_def").unwrap();
         assert_eq!(inside.caller, "real_def");
@@ -5196,7 +5185,10 @@ class Foo:
         assert_eq!(calls.len(), 2, "got {calls:#?}");
         let u = calls.iter().find(|c| c.callee == "util").unwrap();
         assert_eq!(u.caller, "Foo.bar");
-        let h = calls.iter().find(|c| c.callee == "other_mod.helper").unwrap();
+        let h = calls
+            .iter()
+            .find(|c| c.callee == "other_mod.helper")
+            .unwrap();
         assert_eq!(h.caller, "Foo.bar");
     }
 
@@ -5507,7 +5499,10 @@ end }`
         let calls = extract_go_calls(src, "g.go");
         assert_eq!(calls.len(), 1, "got {calls:#?}");
         assert_eq!(calls[0].callee, "later");
-        assert_eq!(calls[0].caller, "main", "scope must survive multi-line raw string");
+        assert_eq!(
+            calls[0].caller, "main",
+            "scope must survive multi-line raw string"
+        );
     }
 
     #[test]

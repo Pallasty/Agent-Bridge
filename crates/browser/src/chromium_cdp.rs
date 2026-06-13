@@ -42,9 +42,7 @@ use chromiumoxide::cdp::browser_protocol::page::{
     CaptureScreenshotFormat, CreateIsolatedWorldParams, FrameId, FrameTree, GetFrameTreeParams,
     Viewport,
 };
-use chromiumoxide::cdp::browser_protocol::target::{
-    GetTargetsParams, TargetInfo,
-};
+use chromiumoxide::cdp::browser_protocol::target::{GetTargetsParams, TargetInfo};
 use chromiumoxide::cdp::js_protocol::runtime::{
     CallFunctionOnParams, EvaluateParams, ReleaseObjectParams,
 };
@@ -213,22 +211,18 @@ impl ChromiumCdpBackend {
         let raw = std::fs::read_to_string(&port_file).ok()?;
         let port: u16 = raw.lines().next()?.trim().parse().ok()?;
         let http_url = format!("http://127.0.0.1:{port}");
-        let connect = match tokio::time::timeout(
-            CONNECT_TIMEOUT,
-            Browser::connect(http_url.clone()),
-        )
-        .await
-        {
-            Ok(r) => r,
-            Err(_) => {
-                debug!(
-                    http_url,
-                    timeout_s = CONNECT_TIMEOUT.as_secs(),
-                    "adopt connect timed out → fall through to fresh launch"
-                );
-                return None;
-            }
-        };
+        let connect =
+            match tokio::time::timeout(CONNECT_TIMEOUT, Browser::connect(http_url.clone())).await {
+                Ok(r) => r,
+                Err(_) => {
+                    debug!(
+                        http_url,
+                        timeout_s = CONNECT_TIMEOUT.as_secs(),
+                        "adopt connect timed out → fall through to fresh launch"
+                    );
+                    return None;
+                }
+            };
         match connect {
             Ok((browser, mut handler)) => {
                 tokio::spawn(async move {
@@ -308,7 +302,9 @@ impl ChromiumCdpBackend {
             match std::fs::remove_file(&p) {
                 Ok(()) => debug!(path = %p.display(), "removed stale Singleton artifact"),
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => warn!(path = %p.display(), error = %e, "could not remove stale Singleton artifact"),
+                Err(e) => {
+                    warn!(path = %p.display(), error = %e, "could not remove stale Singleton artifact")
+                }
             }
         }
         info!(profile = %user_data.display(), "chrome user-data-dir");
@@ -318,18 +314,17 @@ impl ChromiumCdpBackend {
             .build()
             .map_err(|e| Error::Backend(format!("BrowserConfig build: {e}")))?;
 
-        let (browser, mut handler) = match tokio::time::timeout(LAUNCH_TIMEOUT, Browser::launch(cfg))
-            .await
-        {
-            Ok(r) => r.map_err(|e| Error::Backend(format!("chrome launch: {e}")))?,
-            Err(_) => {
-                return Err(Error::Backend(format!(
-                    "chrome launch timed out after {}s (no DevTools endpoint — likely a \
+        let (browser, mut handler) =
+            match tokio::time::timeout(LAUNCH_TIMEOUT, Browser::launch(cfg)).await {
+                Ok(r) => r.map_err(|e| Error::Backend(format!("chrome launch: {e}")))?,
+                Err(_) => {
+                    return Err(Error::Backend(format!(
+                        "chrome launch timed out after {}s (no DevTools endpoint — likely a \
                      wedged/zombie chrome holding the profile); refusing to hang the MCP loop",
-                    LAUNCH_TIMEOUT.as_secs()
-                )))
-            }
-        };
+                        LAUNCH_TIMEOUT.as_secs()
+                    )))
+                }
+            };
 
         tokio::spawn(async move {
             while let Some(item) = handler.next().await {
@@ -478,7 +473,10 @@ impl BrowserBackend for ChromiumCdpBackend {
         let v = probe.result.result.value.ok_or_else(|| {
             Error::Backend(format!("click_by_ref {node_ref}: probe returned no value"))
         })?;
-        let connected = v.get("connected").and_then(|b| b.as_bool()).unwrap_or(false);
+        let connected = v
+            .get("connected")
+            .and_then(|b| b.as_bool())
+            .unwrap_or(false);
         let disabled = v.get("disabled").and_then(|b| b.as_bool()).unwrap_or(false);
         let w = v.get("w").and_then(|n| n.as_f64()).unwrap_or(0.0);
         let h = v.get("h").and_then(|n| n.as_f64()).unwrap_or(0.0);
@@ -542,12 +540,7 @@ impl BrowserBackend for ChromiumCdpBackend {
         Ok(Bytes::from(png))
     }
 
-    async fn upload_file(
-        &self,
-        page: &PageId,
-        selector: &str,
-        files: Vec<String>,
-    ) -> Result<()> {
+    async fn upload_file(&self, page: &PageId, selector: &str, files: Vec<String>) -> Result<()> {
         if files.is_empty() {
             return Err(Error::InvalidArgument("files is empty".into()));
         }
@@ -762,7 +755,10 @@ impl BrowserBackend for ChromiumCdpBackend {
         let mut existing: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
         for entry in self.pages.iter() {
-            existing.insert(entry.value().target_id().as_ref().to_string(), entry.key().clone());
+            existing.insert(
+                entry.value().target_id().as_ref().to_string(),
+                entry.key().clone(),
+            );
         }
 
         let mut out = Vec::with_capacity(live.len());
@@ -957,9 +953,7 @@ impl BrowserBackend for ChromiumCdpBackend {
             if let Some(obj) = entry.as_object_mut() {
                 obj.insert(
                     "kind".into(),
-                    serde_json::Value::String(
-                        if idx == 0 { "main" } else { "frame" }.into(),
-                    ),
+                    serde_json::Value::String(if idx == 0 { "main" } else { "frame" }.into()),
                 );
             }
         }
@@ -998,11 +992,9 @@ impl BrowserBackend for ChromiumCdpBackend {
         // and don't appear in Page.getFrameTree. Match by exact target_id
         // OR by URL substring.
         if let Ok(targets_resp) = browser.execute(GetTargetsParams::default()).await {
-            let oopif: Option<&TargetInfo> = targets_resp
-                .result
-                .target_infos
-                .iter()
-                .find(|ti| ti.r#type == "iframe" && oopif_matches(ti, frame_id, frame_url_substring));
+            let oopif: Option<&TargetInfo> = targets_resp.result.target_infos.iter().find(|ti| {
+                ti.r#type == "iframe" && oopif_matches(ti, frame_id, frame_url_substring)
+            });
             if let Some(ti) = oopif {
                 // chromiumoxide 0.9.1's flatten-session response routing has
                 // a known issue: even after `attachToTarget(flatten=true)` and
@@ -1017,12 +1009,7 @@ impl BrowserBackend for ChromiumCdpBackend {
                 // chromiumoxide's session multiplexing entirely. The
                 // connection lives only for the duration of this one call.
                 let browser_ws = browser.websocket_address().clone();
-                return eval_in_oopif_via_raw_cdp(
-                    &browser_ws,
-                    ti.target_id.inner(),
-                    js,
-                )
-                .await;
+                return eval_in_oopif_via_raw_cdp(&browser_ws, ti.target_id.inner(), js).await;
             }
         }
 
@@ -1059,9 +1046,7 @@ impl BrowserBackend for ChromiumCdpBackend {
                     .frame_id(target_fid)
                     .world_name("agent-bridge-iso")
                     .build()
-                    .map_err(|e| {
-                        Error::Backend(format!("createIsolatedWorld build: {e}"))
-                    })?,
+                    .map_err(|e| Error::Backend(format!("createIsolatedWorld build: {e}")))?,
             )
             .await
             .map_err(|e| Error::Backend(format!("createIsolatedWorld: {e}")))?;
@@ -1115,7 +1100,12 @@ impl BrowserBackend for ChromiumCdpBackend {
     ) -> Result<serde_json::Value> {
         let p = match self.pages.get(page.as_str()) {
             Some(p) => p.clone(),
-            None => return Err(Error::NotFound(format!("page not tracked: {}", page.as_str()))),
+            None => {
+                return Err(Error::NotFound(format!(
+                    "page not tracked: {}",
+                    page.as_str()
+                )))
+            }
         };
         if let Some(sel) = selector {
             let el = p
@@ -1140,7 +1130,12 @@ impl BrowserBackend for ChromiumCdpBackend {
     async fn hover(&self, page: &PageId, selector: &str) -> Result<()> {
         let p = match self.pages.get(page.as_str()) {
             Some(p) => p.clone(),
-            None => return Err(Error::NotFound(format!("page not tracked: {}", page.as_str()))),
+            None => {
+                return Err(Error::NotFound(format!(
+                    "page not tracked: {}",
+                    page.as_str()
+                )))
+            }
         };
         let el = p
             .find_element(selector.to_string())
@@ -1256,9 +1251,7 @@ impl BrowserBackend for ChromiumCdpBackend {
             match captures.get(&key) {
                 Some((s, _abort)) => s.clone(),
                 None => {
-                    return Err(Error::NotFound(format!(
-                        "no active capture on page: {key}"
-                    )));
+                    return Err(Error::NotFound(format!("no active capture on page: {key}")));
                 }
             }
         };
@@ -1272,11 +1265,8 @@ impl BrowserBackend for ChromiumCdpBackend {
         }
         // Slow path: wait up to until_ms for first arrival.
         if until_ms > 0 {
-            let _ = tokio::time::timeout(
-                Duration::from_millis(until_ms),
-                state.arrival.notified(),
-            )
-            .await;
+            let _ = tokio::time::timeout(Duration::from_millis(until_ms), state.arrival.notified())
+                .await;
         }
         Ok(drain_buffer(&state, max_results).await)
     }
@@ -1299,7 +1289,12 @@ impl BrowserBackend for ChromiumCdpBackend {
     async fn reload(&self, page: &PageId) -> Result<()> {
         let p = match self.pages.get(page.as_str()) {
             Some(p) => p.clone(),
-            None => return Err(Error::NotFound(format!("page not tracked: {}", page.as_str()))),
+            None => {
+                return Err(Error::NotFound(format!(
+                    "page not tracked: {}",
+                    page.as_str()
+                )))
+            }
         };
         p.reload()
             .await
@@ -1443,11 +1438,7 @@ async fn run_capture_pump(
 
 /// Walk a [`FrameTree`] (root + child_frames) into a flat `Vec` of
 /// JSON `{frame_id, url, name, parent_id}` rows. Invoked by `list_frames`.
-fn flatten_frame_tree(
-    tree: &FrameTree,
-    parent_id: Option<&str>,
-    out: &mut Vec<serde_json::Value>,
-) {
+fn flatten_frame_tree(tree: &FrameTree, parent_id: Option<&str>, out: &mut Vec<serde_json::Value>) {
     let frame = &tree.frame;
     out.push(serde_json::json!({
         "frame_id": frame.id.inner(),
@@ -1579,11 +1570,14 @@ async fn eval_in_oopif_via_raw_cdp(
     // browser_ws looks like "ws://127.0.0.1:38149/devtools/browser/<browser-id>".
     // Strip everything from "/devtools/" onward to get the prefix, then
     // re-append the per-target path.
-    let prefix = browser_ws.rsplit_once("/devtools/").map(|(p, _)| p).ok_or_else(|| {
-        Error::Backend(format!(
-            "browser websocket address has no /devtools/ segment: {browser_ws}"
-        ))
-    })?;
+    let prefix = browser_ws
+        .rsplit_once("/devtools/")
+        .map(|(p, _)| p)
+        .ok_or_else(|| {
+            Error::Backend(format!(
+                "browser websocket address has no /devtools/ segment: {browser_ws}"
+            ))
+        })?;
     let target_ws = format!("{prefix}/devtools/page/{target_id}");
 
     let mut conn = Connection::<CdpEventMessage>::connect(target_ws.as_str())
@@ -1616,8 +1610,7 @@ async fn eval_in_oopif_via_raw_cdp(
                 "OOPIF connection closed before response".into(),
             ));
         };
-        let msg =
-            item.map_err(|e| Error::Backend(format!("OOPIF connection error: {e}")))?;
+        let msg = item.map_err(|e| Error::Backend(format!("OOPIF connection error: {e}")))?;
         match msg {
             Message::Response(resp) if resp.id == call_id => {
                 if let Some(err) = resp.error {
@@ -1630,10 +1623,11 @@ async fn eval_in_oopif_via_raw_cdp(
                 if let Some(ex) = result.get("exceptionDetails") {
                     let url = ex.get("url").and_then(|v| v.as_str()).unwrap_or("(inline)");
                     let line = ex.get("lineNumber").and_then(|v| v.as_i64()).unwrap_or(0);
-                    let col =
-                        ex.get("columnNumber").and_then(|v| v.as_i64()).unwrap_or(0);
-                    let head =
-                        ex.get("text").and_then(|v| v.as_str()).unwrap_or("(no text)");
+                    let col = ex.get("columnNumber").and_then(|v| v.as_i64()).unwrap_or(0);
+                    let head = ex
+                        .get("text")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("(no text)");
                     let detail = ex
                         .get("exception")
                         .and_then(|e| e.get("description"))
@@ -1787,8 +1781,18 @@ mod tests {
     #[test]
     fn interactive_roles_are_clickable() {
         for r in [
-            "button", "link", "textbox", "searchbox", "checkbox", "radio", "combobox", "tab",
-            "switch", "option", "menuitem", "treeitem",
+            "button",
+            "link",
+            "textbox",
+            "searchbox",
+            "checkbox",
+            "radio",
+            "combobox",
+            "tab",
+            "switch",
+            "option",
+            "menuitem",
+            "treeitem",
         ] {
             assert!(is_interactive(r), "{r} should be interactive");
         }

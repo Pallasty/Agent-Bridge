@@ -1,17 +1,15 @@
 use ab_bridge::mcp_tools::{
-    LSWR_READONLY_BRIDGE_DISPLAY_MCP_SURFACE_REPORT_SCHEMA,
     lswr_readonly_bridge_display_mcp_surface_report,
+    LSWR_READONLY_BRIDGE_DISPLAY_MCP_SURFACE_REPORT_SCHEMA,
 };
 use serde_json::Value;
 
-const MCP_SURFACE_JSON: &str =
-    include_str!("fixtures/lswr_readonly_bridge_mcp_surface_v0.json");
+const MCP_SURFACE_JSON: &str = include_str!("fixtures/lswr_readonly_bridge_mcp_surface_v0.json");
 
 #[test]
 fn mcp_surface_fixture_matches_builder() {
     let report = lswr_readonly_bridge_display_mcp_surface_report();
-    let expected: Value =
-        serde_json::from_str(MCP_SURFACE_JSON).expect("mcp surface fixture json");
+    let expected: Value = serde_json::from_str(MCP_SURFACE_JSON).expect("mcp surface fixture json");
 
     assert_eq!(report, expected);
 }
@@ -25,7 +23,10 @@ fn mcp_surface_reports_all_only_visibility() {
         LSWR_READONLY_BRIDGE_DISPLAY_MCP_SURFACE_REPORT_SCHEMA
     );
     assert_eq!(report["verdict"], "passed");
-    assert_eq!(report["visible_in"], serde_json::json!(["profile-all", "all-dev"]));
+    assert_eq!(
+        report["visible_in"],
+        serde_json::json!(["profile-all", "all-dev"])
+    );
 
     assert_profile(&report, "profile-all", true);
     assert_profile(&report, "all-dev", true);
@@ -46,18 +47,24 @@ fn mcp_surface_schema_is_explicit_packet_only() {
     assert_eq!(schema["forbidden_input_keys_absent"], true);
     assert_eq!(schema["description_mentions_read_only"], true);
     assert_eq!(schema["description_mentions_explicit"], true);
-    assert!(schema["input_schema"]["properties"].get("report_packet").is_some());
-    assert!(schema["input_schema"]["properties"].get("packet_path").is_none());
-    assert!(schema["input_schema"]["properties"].get("live_runtime").is_none());
-    assert!(schema["input_schema"]["properties"].get("gui_capture").is_none());
+    assert!(schema["input_schema"]["properties"]
+        .get("report_packet")
+        .is_some());
+    assert!(schema["input_schema"]["properties"]
+        .get("packet_path")
+        .is_none());
+    assert!(schema["input_schema"]["properties"]
+        .get("live_runtime")
+        .is_none());
+    assert!(schema["input_schema"]["properties"]
+        .get("gui_capture")
+        .is_none());
 }
 
 #[test]
 fn mcp_surface_markdown_lists_profiles_and_checks() {
     let report = lswr_readonly_bridge_display_mcp_surface_report();
-    let markdown = report["report_markdown"]
-        .as_str()
-        .expect("report markdown");
+    let markdown = report["report_markdown"].as_str().expect("report markdown");
 
     assert!(markdown.contains("# LSWR Read-Only Bridge MCP Surface"));
     assert!(markdown.contains("`profile-all`: registered=`true` expected=`true`"));
@@ -86,4 +93,3 @@ fn assert_profile(report: &Value, label: &str, expected_registered: bool) {
     assert_eq!(row["expected_registered"], expected_registered);
     assert_eq!(row["matches_expected"], true);
 }
-

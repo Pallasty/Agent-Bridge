@@ -64,10 +64,7 @@ impl GitHubClient {
         Ok(Self { token, http })
     }
 
-    fn auth_headers(
-        &self,
-        rb: reqwest::RequestBuilder,
-    ) -> reqwest::RequestBuilder {
+    fn auth_headers(&self, rb: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
         rb.header("Authorization", format!("Bearer {}", self.token))
             .header("Accept", "application/vnd.github+json")
             .header("X-GitHub-Api-Version", API_VERSION)
@@ -81,9 +78,8 @@ impl GitHubClient {
         per_page: u32,
         labels: Option<&str>,
     ) -> Result<Vec<IssueSummary>> {
-        let mut url = format!(
-            "{API_BASE}/repos/{owner}/{repo}/issues?state={state}&per_page={per_page}"
-        );
+        let mut url =
+            format!("{API_BASE}/repos/{owner}/{repo}/issues?state={state}&per_page={per_page}");
         if let Some(l) = labels.filter(|s| !s.is_empty()) {
             url.push_str(&format!("&labels={}", urlencoding(l)));
         }
@@ -153,9 +149,8 @@ impl GitHubClient {
         state: &str,
         per_page: u32,
     ) -> Result<Vec<PullSummary>> {
-        let url = format!(
-            "{API_BASE}/repos/{owner}/{repo}/pulls?state={state}&per_page={per_page}"
-        );
+        let url =
+            format!("{API_BASE}/repos/{owner}/{repo}/pulls?state={state}&per_page={per_page}");
         let resp = self
             .auth_headers(self.http.get(&url))
             .send()

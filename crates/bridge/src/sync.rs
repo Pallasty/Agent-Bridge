@@ -21,10 +21,10 @@
 //! runs an initial sync.
 
 use ab_store::{
-    ImportConflictPolicy, MemoryExportFilter, MemoryRecord, SqliteStore, StateStore,
-    default_db_path, node_id_from_name,
+    default_db_path, node_id_from_name, ImportConflictPolicy, MemoryExportFilter, MemoryRecord,
+    SqliteStore, StateStore,
 };
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{anyhow, bail, Context, Result};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};

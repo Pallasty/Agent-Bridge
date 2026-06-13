@@ -76,9 +76,8 @@ impl GitLabClient {
         labels: Option<&str>,
     ) -> Result<Vec<GlIssueSummary>> {
         let proj = project_segment(project);
-        let mut url = format!(
-            "{API_BASE}/projects/{proj}/issues?state={state}&per_page={per_page}"
-        );
+        let mut url =
+            format!("{API_BASE}/projects/{proj}/issues?state={state}&per_page={per_page}");
         if let Some(l) = labels.filter(|s| !s.is_empty()) {
             url.push_str(&format!("&labels={}", urlencoding(l)));
         }
@@ -144,9 +143,8 @@ impl GitLabClient {
         per_page: u32,
     ) -> Result<Vec<GlMrSummary>> {
         let proj = project_segment(project);
-        let url = format!(
-            "{API_BASE}/projects/{proj}/merge_requests?state={state}&per_page={per_page}"
-        );
+        let url =
+            format!("{API_BASE}/projects/{proj}/merge_requests?state={state}&per_page={per_page}");
         let resp = self
             .auth_headers(self.http.get(&url))
             .send()

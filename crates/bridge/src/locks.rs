@@ -287,10 +287,7 @@ pub fn acquire(
                 None => {
                     return Err(LockError::Read {
                         path: path.clone(),
-                        source: io::Error::new(
-                            io::ErrorKind::Other,
-                            "lock vanished mid-race",
-                        ),
+                        source: io::Error::new(io::ErrorKind::Other, "lock vanished mid-race"),
                     })
                 }
             }
@@ -418,7 +415,11 @@ mod tests {
             let live_pid = std::process::id();
             let out = acquire("test.resource.c", live_pid, "test/live", 600).expect("second");
             match out {
-                AcquireOutcome::ForceBroke { lock, old_lock_backup, .. } => {
+                AcquireOutcome::ForceBroke {
+                    lock,
+                    old_lock_backup,
+                    ..
+                } => {
                     assert_eq!(lock.owner_pid, live_pid);
                     assert!(old_lock_backup.exists(), "backup must persist");
                 }
@@ -445,10 +446,14 @@ mod tests {
             };
             write_lock_atomic(&path, &aged).unwrap();
 
-            let out = acquire("test.resource.d", std::process::id(), "test/fresh", 600)
-                .expect("second");
+            let out =
+                acquire("test.resource.d", std::process::id(), "test/fresh", 600).expect("second");
             match out {
-                AcquireOutcome::ForceBroke { lock, old_lock_backup, .. } => {
+                AcquireOutcome::ForceBroke {
+                    lock,
+                    old_lock_backup,
+                    ..
+                } => {
                     assert_eq!(lock.owner_cmd, "test/fresh");
                     assert!(old_lock_backup.exists());
                 }
@@ -517,10 +522,18 @@ impl std::fmt::Debug for AcquireOutcome {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             AcquireOutcome::Acquired { lock, .. } => {
-                write!(f, "Acquired(resource={}, pid={})", lock.resource, lock.owner_pid)
+                write!(
+                    f,
+                    "Acquired(resource={}, pid={})",
+                    lock.resource, lock.owner_pid
+                )
             }
             AcquireOutcome::Attached { lock, .. } => {
-                write!(f, "Attached(resource={}, pid={})", lock.resource, lock.owner_pid)
+                write!(
+                    f,
+                    "Attached(resource={}, pid={})",
+                    lock.resource, lock.owner_pid
+                )
             }
             AcquireOutcome::ForceBroke { lock, .. } => write!(
                 f,

@@ -1,9 +1,9 @@
 use crate::lswr_snapshot_wrapper_descriptor::{
-    ReadOnlyBridgeWrapperDescriptor, build_readonly_bridge_wrapper_descriptor,
+    build_readonly_bridge_wrapper_descriptor, ReadOnlyBridgeWrapperDescriptor,
 };
 use crate::lswr_snapshot_wrapper_exposure_dry_run::{
-    ReadOnlyBridgeWrapperExposureDryRun, WrapperExposureCheck,
-    build_readonly_bridge_wrapper_exposure_dry_run,
+    build_readonly_bridge_wrapper_exposure_dry_run, ReadOnlyBridgeWrapperExposureDryRun,
+    WrapperExposureCheck,
 };
 use serde::{Deserialize, Serialize};
 
@@ -286,7 +286,11 @@ fn preflight_guidance(verdict: &str, dry_run: &ReadOnlyBridgeWrapperExposureDryR
 }
 
 fn verdict_text(ok: bool) -> &'static str {
-    if ok { "passed" } else { "failed" }
+    if ok {
+        "passed"
+    } else {
+        "failed"
+    }
 }
 
 fn tone_for_verdict(verdict: &str) -> &'static str {
@@ -297,5 +301,9 @@ fn tone_for_verdict(verdict: &str) -> &'static str {
 }
 
 fn bool_text(value: bool) -> &'static str {
-    if value { "true" } else { "false" }
+    if value {
+        "true"
+    } else {
+        "false"
+    }
 }

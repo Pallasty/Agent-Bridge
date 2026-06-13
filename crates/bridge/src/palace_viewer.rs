@@ -38,7 +38,6 @@
 
 use ab_store::{MemoryListSort, MemoryQueryRecord, MemoryRecord, StateStore};
 use anyhow::{Context, Result};
-use base64::{engine::general_purpose, Engine as _};
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -49,6 +48,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use base64::{engine::general_purpose, Engine as _};
 use serde::{de, Deserialize};
 use serde_json::{json, Value};
 use std::collections::{hash_map::DefaultHasher, HashSet, VecDeque};
@@ -128,7 +128,10 @@ pub async fn run(
         .route("/api/lineage/:key", get(api_lineage))
         .route("/api/coactivation-peers/:key", get(api_coactivation_peers))
         .route("/api/embedding-stats", get(api_embedding_stats))
-        .route("/api/canvas-chat-attachment", post(api_canvas_chat_attachment))
+        .route(
+            "/api/canvas-chat-attachment",
+            post(api_canvas_chat_attachment),
+        )
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(listen)
@@ -210,13 +213,14 @@ where
     match raw.trim().to_ascii_lowercase().as_str() {
         "" | "1" | "true" | "yes" | "y" | "on" => Ok(true),
         "0" | "false" | "no" | "n" | "off" => Ok(false),
-        other => Err(de::Error::custom(format!("invalid boolish value `{other}`"))),
+        other => Err(de::Error::custom(format!(
+            "invalid boolish value `{other}`"
+        ))),
     }
 }
 
 const PALACE_ORPHAN_SKIP_TAGS: &[&str] = &["auto_curated", "alert", "ttl:7d"];
-const PALACE_ORPHAN_SKIP_KINDS: &[&str] =
-    &["alert", "work_memory", "session_handoff", "snapshot"];
+const PALACE_ORPHAN_SKIP_KINDS: &[&str] = &["alert", "work_memory", "session_handoff", "snapshot"];
 
 #[derive(Debug, Clone)]
 struct PalaceLinkSuggestion {
@@ -302,7 +306,11 @@ fn palace_tag_is_useful_for_atlas(tag: &str) -> bool {
 }
 
 fn palace_region_for_memory(mem: &MemoryRecord) -> String {
-    if let Some(tag) = mem.tags.iter().find(|tag| palace_tag_is_useful_for_atlas(tag)) {
+    if let Some(tag) = mem
+        .tags
+        .iter()
+        .find(|tag| palace_tag_is_useful_for_atlas(tag))
+    {
         return palace_slug(tag);
     }
 
@@ -561,10 +569,7 @@ fn preview_palace_orphan_candidates(
     preview
 }
 
-fn palace_orphan_row_status(
-    row: &PalaceOrphanCandidatePreviewRow,
-    threshold: f64,
-) -> &'static str {
+fn palace_orphan_row_status(row: &PalaceOrphanCandidatePreviewRow, threshold: f64) -> &'static str {
     match row.suggestions.first() {
         Some(top) if top.confidence >= threshold => "would_link",
         Some(_) => "low_score",
@@ -676,9 +681,9 @@ fn extract_links(content: &str) -> Vec<String> {
 
     // Tokenize on any char that isn't a valid filename char. This catches
     // both `(name.md)` (parens are separators) and bare `name.md` in prose.
-    for token in content.split(|c: char| {
-        !c.is_ascii_alphanumeric() && c != '_' && c != '-' && c != '.'
-    }) {
+    for token in
+        content.split(|c: char| !c.is_ascii_alphanumeric() && c != '_' && c != '-' && c != '.')
+    {
         let Some(stem) = token.strip_suffix(".md") else {
             continue;
         };
@@ -1077,7 +1082,8 @@ async fn api_semantic_events(
 }
 
 fn vi64(v: &Value) -> Option<i64> {
-    v.as_i64().or_else(|| v.as_u64().and_then(|n| i64::try_from(n).ok()))
+    v.as_i64()
+        .or_else(|| v.as_u64().and_then(|n| i64::try_from(n).ok()))
 }
 
 fn palace_graph_stats(graph: &Value) -> Value {
@@ -1347,12 +1353,12 @@ async fn api_memory(
 ) -> Result<Json<Value>, (StatusCode, String)> {
     // sqlite lookup — auto-bumps access_count + last_accessed_at.
     let started = std::time::Instant::now();
-    if let Some(m) = s
-        .store
-        .memory_get(&key)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("memory_get: {e}")))?
-    {
+    if let Some(m) = s.store.memory_get(&key).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("memory_get: {e}"),
+        )
+    })? {
         // Phase 0 telemetry: log the click into `memory_query_log` so
         // `dream replay-audit` (and downstream attention analyses) can
         // see Palace navigation, not just MCP tool calls. Without this
@@ -1380,7 +1386,6 @@ async fn api_memory(
         tokio::spawn(async move {
             let _ = store_for_log.record_memory_query(&rec).await;
         });
-
 
         // Feed the rolling click window → co-activation. Best-effort: any
         // failure here just skips the recording, never blocks the read.
@@ -1451,11 +1456,12 @@ async fn api_memory_tombstone(
     State(s): State<AppState>,
     Path(key): Path<String>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
-    let deleted = s
-        .store
-        .memory_delete(&key)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("memory_delete: {e}")))?;
+    let deleted = s.store.memory_delete(&key).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("memory_delete: {e}"),
+        )
+    })?;
     Ok(Json(json!({ "ok": true, "key": key, "deleted": deleted })))
 }
 
@@ -1768,7 +1774,9 @@ async fn api_canvas_chat_attachment(
         .unwrap_or(0);
     let mut rand_hex = String::with_capacity(8);
     for _ in 0..8 {
-        let r: u8 = (now_ms as u8).wrapping_mul(31).wrapping_add(rand_hex.len() as u8 * 7);
+        let r: u8 = (now_ms as u8)
+            .wrapping_mul(31)
+            .wrapping_add(rand_hex.len() as u8 * 7);
         rand_hex.push_str(&format!("{:x}", r % 16));
     }
     // Mix in a tiny entropy from the byte content itself so two pastes
@@ -1779,9 +1787,12 @@ async fn api_canvas_chat_attachment(
         .fold(0u32, |a, b| a.wrapping_mul(131).wrapping_add(*b as u32));
     let filename = format!("{:013}-{:08x}.{}", now_ms, content_hash, ext);
     let path = dir.join(&filename);
-    tokio::fs::write(&path, &bytes)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("write {path:?}: {e}")))?;
+    tokio::fs::write(&path, &bytes).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("write {path:?}: {e}"),
+        )
+    })?;
 
     Ok(Json(json!({
         "ok": true,
@@ -1836,11 +1847,19 @@ fn sanitize_kind_slug(raw: &str) -> String {
         .chars()
         .map(|c| {
             let c = c.to_ascii_lowercase();
-            if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
         })
         .take(24)
         .collect();
-    if lower.is_empty() { "memory".into() } else { lower }
+    if lower.is_empty() {
+        "memory".into()
+    } else {
+        lower
+    }
 }
 
 /// Create a new sqlite memory authored from the Palace, linked back to
@@ -1917,15 +1936,22 @@ async fn api_annotate(
         superseded_by: None,
     };
 
-    s.store
-        .memory_save(&mem)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("memory_save: {e}")))?;
+    s.store.memory_save(&mem).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("memory_save: {e}"),
+        )
+    })?;
 
     s.store
         .memory_link(&key, &target, &edge_type, weight)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("memory_link: {e}")))?;
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("memory_link: {e}"),
+            )
+        })?;
 
     // Optional lineage edge (fork chain). Skip silently if parent_key is
     // missing or empty, or points at this same memory (self-edge guard).
@@ -2071,8 +2097,12 @@ async fn serve_report(
         return Err((StatusCode::BAD_REQUEST, "invalid filename".to_string()));
     }
     let path = dir.join(&filename);
-    let body = fs::read(&path)
-        .map_err(|_| (StatusCode::NOT_FOUND, format!("report not found: {filename}")))?;
+    let body = fs::read(&path).map_err(|_| {
+        (
+            StatusCode::NOT_FOUND,
+            format!("report not found: {filename}"),
+        )
+    })?;
     Ok((
         [(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8")],
         body,
@@ -2089,12 +2119,8 @@ fn is_safe_report_filename(name: &str) -> bool {
     // Restrict the rest of the alphabet to a sane subset — file names we
     // generate are date-keyed (`promote-YYYY-MM-DD.html`) but allow tags
     // and underscores for future report kinds.
-    name.chars().all(|c| {
-        c.is_ascii_alphanumeric()
-            || c == '-'
-            || c == '_'
-            || c == '.'
-    })
+    name.chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
 }
 
 // ── Canvas chat endpoint (B-mode discussion with spawned Claude Code) ────
@@ -2119,7 +2145,7 @@ fn is_safe_report_filename(name: &str) -> bool {
 
 #[derive(Deserialize)]
 struct ChatMessage {
-    role: String,    // "user" | "assistant"
+    role: String, // "user" | "assistant"
     content: String,
 }
 
@@ -2199,9 +2225,12 @@ async fn api_canvas_chat(
     cmd.stderr(std::process::Stdio::piped());
 
     let started = SystemTime::now();
-    let child = cmd
-        .spawn()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("spawn claude: {e}")))?;
+    let child = cmd.spawn().map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("spawn claude: {e}"),
+        )
+    })?;
 
     let output = match tokio::time::timeout(
         std::time::Duration::from_secs(timeout),
@@ -2226,10 +2255,7 @@ async fn api_canvas_chat(
 
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-    let elapsed_ms = started
-        .elapsed()
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
+    let elapsed_ms = started.elapsed().map(|d| d.as_millis() as u64).unwrap_or(0);
 
     if !output.status.success() {
         // Surface stderr but truncated — don't leak huge logs to the
@@ -2290,9 +2316,8 @@ async fn api_canvas_chat_stream(
 
     let (tx, rx) = mpsc::unbounded_channel::<SseEvent>();
     let send_err = |tx: &mpsc::UnboundedSender<SseEvent>, msg: String| {
-        let _ = tx.send(
-            SseEvent::default().data(json!({"type":"error","message":msg}).to_string()),
-        );
+        let _ =
+            tx.send(SseEvent::default().data(json!({"type":"error","message":msg}).to_string()));
     };
 
     // Build the prompt now (uses State; can't move S into the spawn).
@@ -2346,9 +2371,8 @@ async fn api_canvas_chat_stream(
         let started = SystemTime::now();
         if let Some(msg) = validation_err {
             send_err(&tx, msg);
-            let _ = tx.send(
-                SseEvent::default().data(json!({"type":"done","elapsed_ms":0}).to_string()),
-            );
+            let _ = tx
+                .send(SseEvent::default().data(json!({"type":"done","elapsed_ms":0}).to_string()));
             return;
         }
         let mut cmd = tokio::process::Command::new("claude");
@@ -2365,8 +2389,7 @@ async fn api_canvas_chat_stream(
             Err(e) => {
                 send_err(&tx, format!("spawn claude: {e}"));
                 let _ = tx.send(
-                    SseEvent::default()
-                        .data(json!({"type":"done","elapsed_ms":0}).to_string()),
+                    SseEvent::default().data(json!({"type":"done","elapsed_ms":0}).to_string()),
                 );
                 return;
             }
@@ -2376,8 +2399,7 @@ async fn api_canvas_chat_stream(
             None => {
                 send_err(&tx, "no stdout pipe".to_string());
                 let _ = tx.send(
-                    SseEvent::default()
-                        .data(json!({"type":"done","elapsed_ms":0}).to_string()),
+                    SseEvent::default().data(json!({"type":"done","elapsed_ms":0}).to_string()),
                 );
                 return;
             }
@@ -2434,14 +2456,16 @@ async fn api_canvas_chat_stream(
                                 event.get("index").and_then(|v| v.as_i64()),
                                 delta.get("partial_json").and_then(|v| v.as_str()),
                             ) {
-                                let _ = tx.send(SseEvent::default().data(
-                                    json!({
-                                        "type": "tool_args_delta",
-                                        "index": idx,
-                                        "chunk": chunk,
-                                    })
-                                    .to_string(),
-                                ));
+                                let _ = tx.send(
+                                    SseEvent::default().data(
+                                        json!({
+                                            "type": "tool_args_delta",
+                                            "index": idx,
+                                            "chunk": chunk,
+                                        })
+                                        .to_string(),
+                                    ),
+                                );
                             }
                         }
                         // signature_delta etc. — silently skipped for v1;
@@ -2476,15 +2500,17 @@ async fn api_canvas_chat_stream(
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("")
                                 .to_string();
-                            let _ = tx.send(SseEvent::default().data(
-                                json!({
-                                    "type": "tool_start",
-                                    "index": idx,
-                                    "name": name,
-                                    "id": id,
-                                })
-                                .to_string(),
-                            ));
+                            let _ = tx.send(
+                                SseEvent::default().data(
+                                    json!({
+                                        "type": "tool_start",
+                                        "index": idx,
+                                        "name": name,
+                                        "id": id,
+                                    })
+                                    .to_string(),
+                                ),
+                            );
                         }
                     }
                     // Block end — if it was a tool_use, emit tool_stop so
@@ -2496,9 +2522,10 @@ async fn api_canvas_chat_stream(
                         };
                         if let Some(kind) = block_kind_by_index.get(&idx) {
                             if kind == "tool_use" {
-                                let _ = tx.send(SseEvent::default().data(
-                                    json!({"type":"tool_stop","index":idx}).to_string(),
-                                ));
+                                let _ = tx.send(
+                                    SseEvent::default()
+                                        .data(json!({"type":"tool_stop","index":idx}).to_string()),
+                                );
                             }
                         }
                     }
@@ -2511,13 +2538,10 @@ async fn api_canvas_chat_stream(
             }
         };
 
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(timeout),
-            async {
-                read_fut.await;
-                child.wait().await
-            },
-        )
+        let result = tokio::time::timeout(std::time::Duration::from_secs(timeout), async {
+            read_fut.await;
+            child.wait().await
+        })
         .await;
 
         let elapsed_ms = started.elapsed().map(|d| d.as_millis() as u64).unwrap_or(0);
@@ -2531,7 +2555,10 @@ async fn api_canvas_chat_stream(
             Ok(Ok(status)) => {
                 send_err(
                     &tx,
-                    format!("claude exited code={:?} after {elapsed_ms}ms", status.code()),
+                    format!(
+                        "claude exited code={:?} after {elapsed_ms}ms",
+                        status.code()
+                    ),
                 );
                 let _ = tx.send(
                     SseEvent::default()
@@ -2572,11 +2599,7 @@ async fn build_focus_block(s: &AppState, key: &str) -> String {
         };
         return format!(
             "**{}** ({})  importance {:.2}{}\n\n{}",
-            m.key,
-            m.kind,
-            m.importance,
-            tags,
-            m.content,
+            m.key, m.kind, m.importance, tags, m.content,
         );
     }
     // Markdown fallback — same lookup the side panel uses.
@@ -2605,12 +2628,7 @@ async fn build_neighbor_block(s: &AppState, key: &str) -> String {
     // weight desc, take top N.
     let mut filtered: Vec<_> = nbrs
         .into_iter()
-        .filter(|e| {
-            !matches!(
-                e.edge_type.as_str(),
-                "coactivation"
-            )
-        })
+        .filter(|e| !matches!(e.edge_type.as_str(), "coactivation"))
         .collect();
     filtered.sort_by(|a, b| {
         b.weight
@@ -2680,7 +2698,11 @@ fn format_history(history: &[ChatMessage]) -> String {
     }
     let mut out = String::new();
     for m in history {
-        let label = if m.role == "user" { "USER" } else { "ASSISTANT" };
+        let label = if m.role == "user" {
+            "USER"
+        } else {
+            "ASSISTANT"
+        };
         out.push_str(&format!("**{}**: {}\n\n", label, m.content));
     }
     out
@@ -2746,15 +2768,8 @@ mod tests {
         let all = vec![source, anchor, blacklisted_target, blacklisted_source];
         let keys_with_edges = HashSet::from(["memory_anchor".to_string()]);
 
-        let preview = preview_palace_orphan_candidates(
-            &all,
-            &keys_with_edges,
-            None,
-            0.85,
-            20,
-            10,
-            3,
-        );
+        let preview =
+            preview_palace_orphan_candidates(&all, &keys_with_edges, None, 0.85, 20, 10, 3);
 
         assert_eq!(preview.skipped_blacklisted_orphan, 2);
         assert_eq!(preview.would_link, 1);
@@ -2881,10 +2896,7 @@ mod tests {
         .unwrap();
 
         let report = build_palace_semantic_events(&graph, &q);
-        assert_eq!(
-            report["schema"],
-            "agent_bridge.semantic_bus.palace_diff.v0"
-        );
+        assert_eq!(report["schema"], "agent_bridge.semantic_bus.palace_diff.v0");
         assert_eq!(report["verification"]["verdict"], "verified");
         assert_eq!(
             report["verification"]["verified_to"],
@@ -2909,7 +2921,10 @@ mod tests {
         assert_eq!(report["diff"]["current"]["fresh_nodes"], 1);
         assert_eq!(report["diff"]["current"]["stale_nodes"], 1);
         assert_eq!(report["events"][0]["event_type"], "palace.graph.observed");
-        assert_eq!(report["events"][1]["event_type"], "palace.graph.diff.changed");
+        assert_eq!(
+            report["events"][1]["event_type"],
+            "palace.graph.diff.changed"
+        );
         assert_eq!(
             report["events"][1]["source_event_ids"][0],
             report["events"][0]["event_id"]

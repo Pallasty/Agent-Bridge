@@ -353,7 +353,11 @@ impl Multiplexer for TmuxBackend {
         // (launch falsely reports "already live"). Quoting passes the literal
         // `=session` through to tmux on both zsh and bash/sh. Wet-test found:
         // bash never expands `=`, so this only bit the real cross-node path.
-        format!("{} has-session -t {}", self.bin, shq(&format!("={session}")))
+        format!(
+            "{} has-session -t {}",
+            self.bin,
+            shq(&format!("={session}"))
+        )
     }
 
     fn list_cmd(&self) -> String {
@@ -368,7 +372,11 @@ impl Multiplexer for TmuxBackend {
         // Quote `=session` for the same zsh equals-expansion reason as has_cmd;
         // unquoted, a remote zsh would mangle it and the kill silently no-ops
         // (exit 0, session left alive as an orphan).
-        format!("{} kill-session -t {}", self.bin, shq(&format!("={session}")))
+        format!(
+            "{} kill-session -t {}",
+            self.bin,
+            shq(&format!("={session}"))
+        )
     }
 }
 
@@ -518,8 +526,16 @@ pub async fn capture_snapshot(
         Duration::from_secs(15),
     )
     .await;
-    let meta_s = if meta.ok() { meta.stdout } else { String::new() };
-    let styled_s = if styled.ok() { styled.stdout } else { String::new() };
+    let meta_s = if meta.ok() {
+        meta.stdout
+    } else {
+        String::new()
+    };
+    let styled_s = if styled.ok() {
+        styled.stdout
+    } else {
+        String::new()
+    };
     Ok(PaneSnapshot::parse(&meta_s, &plain.stdout, &styled_s))
 }
 
@@ -949,16 +965,22 @@ mod tests {
             bin: "tmux".to_string(),
         };
         // Pane targets are bare; session targets are exact-matched (`=`).
-        assert!(b.send_cmd("ab__p__r", "hi", true).contains("send-keys -t ab__p__r -l"));
+        assert!(b
+            .send_cmd("ab__p__r", "hi", true)
+            .contains("send-keys -t ab__p__r -l"));
         assert!(!b.send_cmd("ab__p__r", "hi", true).contains("-t =ab__p__r"));
         assert!(b.send_cmd("ab__p__r", "hi", true).contains("Enter"));
         assert!(!b.send_cmd("ab__p__r", "hi", false).contains("Enter"));
-        assert!(b.capture_cmd("ab__p__r", 10).contains("capture-pane -p -t ab__p__r"));
+        assert!(b
+            .capture_cmd("ab__p__r", 10)
+            .contains("capture-pane -p -t ab__p__r"));
         // `=session` must be SINGLE-QUOTED: an unquoted leading `=` is mangled
         // by a remote zsh login shell (equals-expansion), which made has_session
         // read true for absent sessions and kill silently no-op. Regression guard.
         assert!(b.has_cmd("ab__p__r").contains("has-session -t '=ab__p__r'"));
-        assert!(b.kill_cmd("ab__p__r").contains("kill-session -t '=ab__p__r'"));
+        assert!(b
+            .kill_cmd("ab__p__r")
+            .contains("kill-session -t '=ab__p__r'"));
         assert!(!b.has_cmd("ab__p__r").contains("has-session -t =ab__p__r"));
         assert!(!b.kill_cmd("ab__p__r").contains("kill-session -t =ab__p__r"));
         let launch = b.launch_cmd(
@@ -1123,10 +1145,16 @@ mod tests {
             .expect("send");
         tokio::time::sleep(Duration::from_millis(400)).await;
         let cap = capture(&target, &mux, &session, 20).await.expect("capture");
-        assert!(cap.contains("STEER_E2E_OK"), "capture missing marker: {cap:?}");
+        assert!(
+            cap.contains("STEER_E2E_OK"),
+            "capture missing marker: {cap:?}"
+        );
 
         let listed = list_steer_sessions(&target, &mux).await.expect("list");
-        assert!(listed.contains(&session), "list missing session: {listed:?}");
+        assert!(
+            listed.contains(&session),
+            "list missing session: {listed:?}"
+        );
 
         kill(&target, &mux, &session).await.expect("kill");
         assert!(!has_session(&target, &mux, &session).await);

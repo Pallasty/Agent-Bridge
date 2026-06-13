@@ -7,7 +7,7 @@
 //! optional file-render gate writes the same self-describing HTML that `present`
 //! would write so D1 can test the sink contract without opening runtime lanes.
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -700,12 +700,10 @@ mod tests {
         let packet = world_envelope_to_present_packet("world_query", &envelope, opts());
         assert_eq!(packet["verdict"], "not_verified");
         assert_eq!(packet["reason"], "world_host_unreachable");
-        assert!(
-            packet["summary"]
-                .as_str()
-                .expect("summary")
-                .contains("could not verify")
-        );
+        assert!(packet["summary"]
+            .as_str()
+            .expect("summary")
+            .contains("could not verify"));
         assert!(packet["provenance"]["verified_to"].is_null());
         assert_eq!(packet["ingestion"]["allowed"], false);
     }
@@ -730,12 +728,10 @@ mod tests {
         let packet = world_envelope_to_present_packet("world_visibility_query", &envelope, opts());
         assert_eq!(packet["verdict"], "blocked");
         assert_eq!(packet["reason"], "world_host_non_loopback_rejected");
-        assert!(
-            packet["summary"]
-                .as_str()
-                .expect("summary")
-                .contains("blocked")
-        );
+        assert!(packet["summary"]
+            .as_str()
+            .expect("summary")
+            .contains("blocked"));
         assert_eq!(
             packet["machine_payload"]["source_reason"],
             "world_host_non_loopback_rejected"
@@ -1141,7 +1137,10 @@ mod tests {
         let listed = crate::present::list_artifacts(&dir, 10, Some("html"));
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].id, file.id);
-        assert_eq!(listed[0].artifact_path, file.artifact_path.display().to_string());
+        assert_eq!(
+            listed[0].artifact_path,
+            file.artifact_path.display().to_string()
+        );
         assert_eq!(listed[0].kind.as_deref(), Some("html"));
         assert!(listed[0].dual_encoding);
         assert_eq!(listed[0].bytes, html.len() as u64);

@@ -377,7 +377,12 @@ fn render_table(data: &Value) -> String {
             .map(|r| {
                 let cells: String = cols
                     .iter()
-                    .map(|c| format!("<td>{}</td>", r.get(c).map(value_to_cell).unwrap_or_default()))
+                    .map(|c| {
+                        format!(
+                            "<td>{}</td>",
+                            r.get(c).map(value_to_cell).unwrap_or_default()
+                        )
+                    })
                     .collect();
                 format!("<tr>{cells}</tr>")
             })
@@ -537,7 +542,11 @@ fn build_html_impl(
     // markdown_table, which carries no caller payload), else the caller payload.
     // For kind=table the enhancement payload IS the caller payload → bytes
     // unchanged.
-    let payload_for_embed: Option<&Value> = if interactive_on { enh.as_ref() } else { payload };
+    let payload_for_embed: Option<&Value> = if interactive_on {
+        enh.as_ref()
+    } else {
+        payload
+    };
     let payload_script = match payload_for_embed {
         Some(p) => format!(
             "<script type=\"application/json\" id=\"ab-payload\">{}</script>",
@@ -674,7 +683,11 @@ pub fn md_table_to_payload(src: &str) -> Option<Value> {
 ///     payload, so the embedded bytes are unchanged from E1.
 ///   - `markdown_table`: the artifact parsed via [`md_table_to_payload`].
 ///   - everything else (html/svg/mermaid, or a non-keyed table): `None`.
-pub fn enhancement_payload(kind: PresentKind, artifact: &str, payload: Option<&Value>) -> Option<Value> {
+pub fn enhancement_payload(
+    kind: PresentKind,
+    artifact: &str,
+    payload: Option<&Value>,
+) -> Option<Value> {
     match kind {
         PresentKind::Table => match payload.and_then(|p| p.as_array()) {
             Some(arr) if !arr.is_empty() && arr.iter().all(Value::is_object) => {
@@ -1131,7 +1144,10 @@ pub fn parse_dashboard_readback(v: &Value) -> DashboardReadback {
         other => other.clone(),
     };
     DashboardReadback {
-        rendered: obj.get("rendered").and_then(Value::as_bool).unwrap_or(false),
+        rendered: obj
+            .get("rendered")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         chain_head: obj
             .get("chain_head")
             .and_then(Value::as_str)
@@ -1220,8 +1236,7 @@ pub fn build_dashboard_html(snapshot: &Value, title: Option<&str>) -> String {
         ));
     }
     if rows_html.is_empty() {
-        rows_html =
-            "<tr><td colspan=\"6\"><em>no artifacts in window</em></td></tr>".to_string();
+        rows_html = "<tr><td colspan=\"6\"><em>no artifacts in window</em></td></tr>".to_string();
     }
 
     // The human-render region. #ab-chain-head is the readback target — it MUST be
@@ -1347,7 +1362,10 @@ pub fn outcome_gate(
     }
     if let Some(e) = embody_status {
         if e != "embodied" && e != "not_applicable" {
-            return (false, format!("embody_status={e} (need embodied|not_applicable)"));
+            return (
+                false,
+                format!("embody_status={e} (need embodied|not_applicable)"),
+            );
         }
     }
     if let Some(i) = interactive_status {
@@ -1363,10 +1381,7 @@ pub fn outcome_gate(
     // card carries no verified human label (fail-closed — timeout is never approval).
     if let Some(d) = decision {
         if d != "approved" && d != "rejected" {
-            return (
-                false,
-                format!("decision={d} (need approved|rejected)"),
-            );
+            return (false, format!("decision={d} (need approved|rejected)"));
         }
     }
     (true, "verified".to_string())
@@ -1548,7 +1563,14 @@ pub fn outcomes_memory_drift_snapshot(
             }
         }
 
-        let hash = outcomes_drift_hash(artifact_id, ts, verify_status, gate_reason, represented, &prev);
+        let hash = outcomes_drift_hash(
+            artifact_id,
+            ts,
+            verify_status,
+            gate_reason,
+            represented,
+            &prev,
+        );
         let mut ev = serde_json::json!({
             "artifact_id": artifact_id,
             "ts": ts,
@@ -1585,8 +1607,14 @@ pub fn outcomes_memory_drift_snapshot(
                     "proposed_key".into(),
                     Value::String(format!("outcome_{artifact_id}")),
                 );
-                obj.insert("proposed_kind".into(), Value::String("present_outcome".into()));
-                obj.insert("proposed_scope".into(), Value::String(format!("outcome:{artifact_id}")));
+                obj.insert(
+                    "proposed_kind".into(),
+                    Value::String("present_outcome".into()),
+                );
+                obj.insert(
+                    "proposed_scope".into(),
+                    Value::String(format!("outcome:{artifact_id}")),
+                );
                 obj.insert("proposed_tags".into(), Value::Array(proposed_tags));
             }
         }
@@ -1717,7 +1745,10 @@ mod tests {
         // Already-structured values pass through untouched; a genuine non-JSON
         // string stays a string (it is not a structured payload to decode).
         assert_eq!(normalize_payload(&structured), structured);
-        assert_eq!(normalize_payload(&json!("just a label")), json!("just a label"));
+        assert_eq!(
+            normalize_payload(&json!("just a label")),
+            json!("just a label")
+        );
 
         // End-to-end: normalize → build_html → extract recovers the object in
         // ONE parse (extract_ab_payload does a single from_str), proving the
@@ -1882,7 +1913,13 @@ mod tests {
         let prov_t = json!({"generated_by": "present/v0", "kind": "table", "ts": 111});
         write_artifact_atomic(
             &dir.join("aaaaaaaaaaaaaaaa.html"),
-            &build_html(PresentKind::Table, "", None, Some(&json!([{"x": 1}])), Some(&prov_t)),
+            &build_html(
+                PresentKind::Table,
+                "",
+                None,
+                Some(&json!([{"x": 1}])),
+                Some(&prov_t),
+            ),
         )
         .unwrap();
         let prov_h = json!({"generated_by": "present/v0", "kind": "html", "ts": 222});
@@ -1921,7 +1958,11 @@ mod tests {
         assert!(is_enhanceable(PresentKind::Table, "", Some(&objs)));
         // non-table kind, array-of-arrays, empty array, no payload → not enhanceable
         assert!(!is_enhanceable(PresentKind::Html, "", Some(&objs)));
-        assert!(!is_enhanceable(PresentKind::Table, "", Some(&json!([[1, 2], [3, 4]]))));
+        assert!(!is_enhanceable(
+            PresentKind::Table,
+            "",
+            Some(&json!([[1, 2], [3, 4]]))
+        ));
         assert!(!is_enhanceable(PresentKind::Table, "", Some(&json!([]))));
         assert!(!is_enhanceable(PresentKind::Table, "", None));
         // markdown_table is enhanceable via its ARTIFACT (header + >=1 row), never
@@ -1945,7 +1986,8 @@ mod tests {
     #[test]
     fn e2_interactive_table_adds_controls_keeps_payload() {
         let payload = json!([{"name": "e5", "dims": 384}, {"name": "minilm", "dims": 384}]);
-        let html = build_html_interactive(PresentKind::Table, "", Some("dims"), Some(&payload), None);
+        let html =
+            build_html_interactive(PresentKind::Table, "", Some("dims"), Some(&payload), None);
         assert!(html.contains("id=\"ab-controls\""));
         assert!(html.contains("id=\"ab-view\""));
         assert!(html.contains("<script id=\"ab-runtime\">"));
@@ -2017,7 +2059,14 @@ mod tests {
     // control → Dead; a live+reversible filter → Verified; <2 rows → Skipped.
     #[test]
     fn e2_classify_interactivity_truth_table() {
-        let live = InteractSignature { drove: true, reason: None, rowcount0: 5, filtered_changed: true, restored: true, sorted_changed: true };
+        let live = InteractSignature {
+            drove: true,
+            reason: None,
+            rowcount0: 5,
+            filtered_changed: true,
+            restored: true,
+            sorted_changed: true,
+        };
         assert_eq!(classify_interactivity(&live), InteractStatus::Verified);
 
         // sort didn't change (e.g. degenerate) but filter+restore held → still Verified.
@@ -2026,19 +2075,41 @@ mod tests {
         assert_eq!(classify_interactivity(&no_sort), InteractStatus::Verified);
 
         // dead control: driving the filter changed nothing.
-        let dead = InteractSignature { drove: true, rowcount0: 5, filtered_changed: false, restored: true, ..Default::default() };
+        let dead = InteractSignature {
+            drove: true,
+            rowcount0: 5,
+            filtered_changed: false,
+            restored: true,
+            ..Default::default()
+        };
         assert_eq!(classify_interactivity(&dead), InteractStatus::Dead);
 
         // one-way wipe: filter changed but never restored → Dead (the falsifier's point).
-        let wipe = InteractSignature { drove: true, rowcount0: 5, filtered_changed: true, restored: false, ..Default::default() };
+        let wipe = InteractSignature {
+            drove: true,
+            rowcount0: 5,
+            filtered_changed: true,
+            restored: false,
+            ..Default::default()
+        };
         assert_eq!(classify_interactivity(&wipe), InteractStatus::Dead);
 
         // no control found at all → Dead.
-        let none = InteractSignature { drove: false, reason: Some("no-control".into()), ..Default::default() };
+        let none = InteractSignature {
+            drove: false,
+            reason: Some("no-control".into()),
+            ..Default::default()
+        };
         assert_eq!(classify_interactivity(&none), InteractStatus::Dead);
 
         // too few rows to prove a filter → Skipped, not Dead.
-        let one = InteractSignature { drove: true, rowcount0: 1, filtered_changed: false, restored: true, ..Default::default() };
+        let one = InteractSignature {
+            drove: true,
+            rowcount0: 1,
+            filtered_changed: false,
+            restored: true,
+            ..Default::default()
+        };
         assert_eq!(classify_interactivity(&one), InteractStatus::Skipped);
     }
 
@@ -2060,23 +2131,57 @@ mod tests {
     // terminate its own <script> early.
     #[test]
     fn e2_runtime_js_canary() {
-        for needle in ["ab-payload", "ab-view", "ab-controls", "data-ab-filter", "addEventListener"] {
+        for needle in [
+            "ab-payload",
+            "ab-view",
+            "ab-controls",
+            "data-ab-filter",
+            "addEventListener",
+        ] {
             assert!(AB_RUNTIME_JS.contains(needle), "runtime missing {needle}");
         }
-        assert!(!AB_RUNTIME_JS.contains("setTimeout"), "runtime must re-render synchronously");
-        assert!(!AB_RUNTIME_JS.contains("requestAnimationFrame"), "runtime must re-render synchronously");
-        assert!(!AB_RUNTIME_JS.contains("</script>"), "runtime must not terminate its own script tag");
+        assert!(
+            !AB_RUNTIME_JS.contains("setTimeout"),
+            "runtime must re-render synchronously"
+        );
+        assert!(
+            !AB_RUNTIME_JS.contains("requestAnimationFrame"),
+            "runtime must re-render synchronously"
+        );
+        assert!(
+            !AB_RUNTIME_JS.contains("</script>"),
+            "runtime must not terminate its own script tag"
+        );
     }
 
     // Canary: the probe drives both controls and returns exactly the keys
     // parse_interact_signature reads (cheap guard against silent drift).
     #[test]
     fn e2_drive_js_canary() {
-        for needle in ["ab-view", "ab-controls", "data-ab-filter", "'input'", "MouseEvent", "click"] {
-            assert!(INTERACT_DRIVE_JS.contains(needle), "drive-js missing {needle}");
+        for needle in [
+            "ab-view",
+            "ab-controls",
+            "data-ab-filter",
+            "'input'",
+            "MouseEvent",
+            "click",
+        ] {
+            assert!(
+                INTERACT_DRIVE_JS.contains(needle),
+                "drive-js missing {needle}"
+            );
         }
-        for key in ["drove", "rowcount0", "filtered_changed", "restored", "sorted_changed"] {
-            assert!(INTERACT_DRIVE_JS.contains(key), "drive-js missing key {key}");
+        for key in [
+            "drove",
+            "rowcount0",
+            "filtered_changed",
+            "restored",
+            "sorted_changed",
+        ] {
+            assert!(
+                INTERACT_DRIVE_JS.contains(key),
+                "drive-js missing key {key}"
+            );
         }
         assert!(!INTERACT_DRIVE_JS.contains("</script>"));
     }
@@ -2248,15 +2353,36 @@ mod tests {
     // semantics would be a lie.
     #[test]
     fn e3_implied_verify_status_is_honest() {
-        assert_eq!(EmbodyStatus::Embodied.implied_verify_status(), VerifyStatus::RenderedOk);
+        assert_eq!(
+            EmbodyStatus::Embodied.implied_verify_status(),
+            VerifyStatus::RenderedOk
+        );
         // Stale RENDERED (it's only behind) → render axis ok; embody rung gates it.
-        assert_eq!(EmbodyStatus::Stale.implied_verify_status(), VerifyStatus::RenderedOk);
-        assert_eq!(EmbodyStatus::NotApplicable.implied_verify_status(), VerifyStatus::RenderedOk);
+        assert_eq!(
+            EmbodyStatus::Stale.implied_verify_status(),
+            VerifyStatus::RenderedOk
+        );
+        assert_eq!(
+            EmbodyStatus::NotApplicable.implied_verify_status(),
+            VerifyStatus::RenderedOk
+        );
         // Dead produced nothing visible → blank, never rendered_ok.
-        assert_eq!(EmbodyStatus::Dead.implied_verify_status(), VerifyStatus::Blank);
-        assert_eq!(EmbodyStatus::NoBrowser.implied_verify_status(), VerifyStatus::NoBrowser);
-        assert_eq!(EmbodyStatus::Error.implied_verify_status(), VerifyStatus::Error);
-        assert_eq!(EmbodyStatus::Skipped.implied_verify_status(), VerifyStatus::Skipped);
+        assert_eq!(
+            EmbodyStatus::Dead.implied_verify_status(),
+            VerifyStatus::Blank
+        );
+        assert_eq!(
+            EmbodyStatus::NoBrowser.implied_verify_status(),
+            VerifyStatus::NoBrowser
+        );
+        assert_eq!(
+            EmbodyStatus::Error.implied_verify_status(),
+            VerifyStatus::Error
+        );
+        assert_eq!(
+            EmbodyStatus::Skipped.implied_verify_status(),
+            VerifyStatus::Skipped
+        );
 
         // Composition with outcome_gate: a dashboard outcome carries BOTH axes.
         // Embodied → eligible; Stale → rendered_ok render axis but rejected on the
@@ -2279,7 +2405,10 @@ mod tests {
             None,
         );
         assert!(!ok);
-        assert!(why.contains("embody_status=stale"), "rejected on embody rung, got: {why}");
+        assert!(
+            why.contains("embody_status=stale"),
+            "rejected on embody rung, got: {why}"
+        );
         // Dead → rejected on the render axis (blank), before embody even matters.
         let dead = EmbodyStatus::Dead;
         let (ok2, why2) = outcome_gate(
@@ -2289,19 +2418,24 @@ mod tests {
             None,
         );
         assert!(!ok2);
-        assert!(why2.contains("verify_status=blank"), "rejected on render rung, got: {why2}");
+        assert!(
+            why2.contains("verify_status=blank"),
+            "rejected on render rung, got: {why2}"
+        );
     }
 
     // parse_dashboard_readback tolerates object OR stringified JSON (mirrors parse_metrics)
     // and trims the head text.
     #[test]
     fn e3_parse_dashboard_readback_string_and_object() {
-        let s =
-            parse_dashboard_readback(&json!("{\"rendered\":true,\"chain_head\":\"deadbeef\",\"rows\":4}"));
+        let s = parse_dashboard_readback(&json!(
+            "{\"rendered\":true,\"chain_head\":\"deadbeef\",\"rows\":4}"
+        ));
         assert!(s.rendered);
         assert_eq!(s.chain_head, "deadbeef");
         assert_eq!(s.rows, 4);
-        let o = parse_dashboard_readback(&json!({"rendered": false, "chain_head": " x ", "rows": 0}));
+        let o =
+            parse_dashboard_readback(&json!({"rendered": false, "chain_head": " x ", "rows": 0}));
         assert!(!o.rendered);
         assert_eq!(o.chain_head, "x");
     }
@@ -2311,10 +2445,16 @@ mod tests {
     #[test]
     fn e3_dashboard_readback_js_canary() {
         for needle in ["ab-render", "ab-chain-head", "ab-events", "getClientRects"] {
-            assert!(DASHBOARD_READBACK_JS.contains(needle), "readback-js missing {needle}");
+            assert!(
+                DASHBOARD_READBACK_JS.contains(needle),
+                "readback-js missing {needle}"
+            );
         }
         for key in ["rendered", "chain_head", "rows"] {
-            assert!(DASHBOARD_READBACK_JS.contains(key), "readback-js missing key {key}");
+            assert!(
+                DASHBOARD_READBACK_JS.contains(key),
+                "readback-js missing key {key}"
+            );
         }
         assert!(!DASHBOARD_READBACK_JS.contains("</script>"));
     }
@@ -2331,7 +2471,13 @@ mod tests {
         let prov = json!({"generated_by": "present/v0", "kind": "table", "ts": 111});
         write_artifact_atomic(
             &dir.join("aaaaaaaaaaaaaaaa.html"),
-            &build_html(PresentKind::Table, "", None, Some(&json!([{"x": 1}])), Some(&prov)),
+            &build_html(
+                PresentKind::Table,
+                "",
+                None,
+                Some(&json!([{"x": 1}])),
+                Some(&prov),
+            ),
         )
         .unwrap();
         // a dashboard file sitting alongside the real artifacts must be skipped.
@@ -2388,7 +2534,10 @@ mod tests {
             "a human Reject is still a verified decision outcome"
         );
         let (ok, why) = outcome_gate("rendered_ok", None, None, Some("timed_out"));
-        assert!(!ok && why.contains("decision=timed_out"), "timeout is never approval");
+        assert!(
+            !ok && why.contains("decision=timed_out"),
+            "timeout is never approval"
+        );
         let (ok, why) = outcome_gate("rendered_ok", None, None, Some("dead"));
         assert!(!ok && why.contains("decision=dead"));
     }
@@ -2408,17 +2557,33 @@ mod tests {
         assert_eq!(strict["total_records"], json!(4));
         assert_eq!(strict["eligible_count"], json!(2));
         assert_eq!(strict["rejected_count"], json!(2));
-        assert_eq!(strict["outcomes"].as_array().unwrap().len(), 2, "verified_only surfaces only eligible");
+        assert_eq!(
+            strict["outcomes"].as_array().unwrap().len(),
+            2,
+            "verified_only surfaces only eligible"
+        );
         assert_eq!(strict["outcomes"][0]["artifact_id"], json!("a"));
         assert_eq!(strict["outcomes"][0]["eligible"], json!(true));
 
         let full = present_outcomes_projection(&records, false);
         assert_eq!(full["eligible_count"], json!(2));
-        assert_eq!(full["outcomes"].as_array().unwrap().len(), 4, "verified_only=false surfaces all, annotated");
+        assert_eq!(
+            full["outcomes"].as_array().unwrap().len(),
+            4,
+            "verified_only=false surfaces all, annotated"
+        );
         // each surfaced row carries the gate verdict + reason.
-        let b = full["outcomes"].as_array().unwrap().iter().find(|r| r["artifact_id"] == json!("b")).unwrap();
+        let b = full["outcomes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["artifact_id"] == json!("b"))
+            .unwrap();
         assert_eq!(b["eligible"], json!(false));
-        assert!(b["gate_reason"].as_str().unwrap().contains("verify_status=blank"));
+        assert!(b["gate_reason"]
+            .as_str()
+            .unwrap()
+            .contains("verify_status=blank"));
     }
 
     // Sidecar write → read roundtrip, newest-first, window-filtered.
@@ -2429,13 +2594,27 @@ mod tests {
             std::process::id(),
             now_unix()
         ));
-        write_outcome_sidecar(&dir, "old", &json!({"artifact_id": "old", "verify_status": "rendered_ok", "ts": 100})).unwrap();
-        write_outcome_sidecar(&dir, "new", &json!({"artifact_id": "new", "verify_status": "rendered_ok", "ts": 300})).unwrap();
+        write_outcome_sidecar(
+            &dir,
+            "old",
+            &json!({"artifact_id": "old", "verify_status": "rendered_ok", "ts": 100}),
+        )
+        .unwrap();
+        write_outcome_sidecar(
+            &dir,
+            "new",
+            &json!({"artifact_id": "new", "verify_status": "rendered_ok", "ts": 300}),
+        )
+        .unwrap();
         // a non-sidecar file must be ignored.
         write_artifact_atomic(&dir.join("decoy.html"), "<p>x</p>").unwrap();
 
         let all = read_outcome_records(&dir, 50, 0);
-        assert_eq!(all.len(), 2, "reads both sidecars, ignores non-sidecar files");
+        assert_eq!(
+            all.len(),
+            2,
+            "reads both sidecars, ignores non-sidecar files"
+        );
         assert_eq!(all[0]["artifact_id"], json!("new"), "newest-first");
 
         let windowed = read_outcome_records(&dir, 50, 200);
@@ -2477,7 +2656,7 @@ mod tests {
         let mut probe: HashMap<String, Vec<String>> = HashMap::new();
         probe.insert("aaa1".into(), vec!["outcome_aaa1".into()]); // represented
         probe.insert("bbb2".into(), vec![]); // missing
-        // ccc3 absent from map → missing
+                                             // ccc3 absent from map → missing
         let snap = outcomes_memory_drift_snapshot(&recs, &probe, &empty_mentions(), 999, 86400);
         assert_eq!(snap["verified_count"], json!(3));
         assert_eq!(snap["represented_count"], json!(1));
@@ -2510,7 +2689,8 @@ mod tests {
         let mut approval = vrec("appr00001234", 1);
         approval["action_tool"] = json!("present_await_decision");
         approval["decision"] = json!("approved");
-        let snap = outcomes_memory_drift_snapshot(&[approval], &HashMap::new(), &empty_mentions(), 0, 1);
+        let snap =
+            outcomes_memory_drift_snapshot(&[approval], &HashMap::new(), &empty_mentions(), 0, 1);
         let tags = snap["events"][0]["proposed_tags"].as_array().unwrap();
         assert!(tags.iter().any(|t| t == "decision:approved"));
     }
@@ -2520,8 +2700,10 @@ mod tests {
         // LOW fix: a keyless (empty artifact_id) record must NOT advertise a
         // proposed candidate (build_outcome_memory refuses it).
         use std::collections::HashMap;
-        let keyless = json!({"ts": 1u64, "verify_status": "rendered_ok", "gate_reason": "verified"});
-        let snap = outcomes_memory_drift_snapshot(&[keyless], &HashMap::new(), &empty_mentions(), 0, 1);
+        let keyless =
+            json!({"ts": 1u64, "verify_status": "rendered_ok", "gate_reason": "verified"});
+        let snap =
+            outcomes_memory_drift_snapshot(&[keyless], &HashMap::new(), &empty_mentions(), 0, 1);
         assert!(snap["events"][0].get("proposed_key").is_none());
     }
 
@@ -2533,8 +2715,16 @@ mod tests {
         let recs = vec![vrec("dup00001234", 1), vrec("dup00001234", 2)];
         let snap = outcomes_memory_drift_snapshot(&recs, &HashMap::new(), &empty_mentions(), 0, 1);
         assert_eq!(snap["verified_count"], json!(1), "distinct artifacts");
-        assert_eq!(snap["drift"], json!(1), "one write closes the loop, not two");
-        assert_eq!(snap["event_count"], json!(2), "but both records still audited");
+        assert_eq!(
+            snap["drift"],
+            json!(1),
+            "one write closes the loop, not two"
+        );
+        assert_eq!(
+            snap["event_count"],
+            json!(2),
+            "but both records still audited"
+        );
     }
 
     #[test]
@@ -2543,15 +2733,18 @@ mod tests {
         use std::collections::HashMap;
         let probe: HashMap<String, Vec<String>> = HashMap::new();
         let a = vec![vrec("id1", 1), vrec("id2", 2)];
-        let h1 = outcomes_memory_drift_snapshot(&a, &probe, &empty_mentions(), 0, 1)["chain_head"].clone();
+        let h1 = outcomes_memory_drift_snapshot(&a, &probe, &empty_mentions(), 0, 1)["chain_head"]
+            .clone();
         // reorder by giving id2 an earlier ts so sort order flips
         let b = vec![vrec("id1", 5), vrec("id2", 2)];
-        let h2 = outcomes_memory_drift_snapshot(&b, &probe, &empty_mentions(), 0, 1)["chain_head"].clone();
+        let h2 = outcomes_memory_drift_snapshot(&b, &probe, &empty_mentions(), 0, 1)["chain_head"]
+            .clone();
         assert_ne!(h1, h2, "different ts ordering must change chain_head");
         // flip a represented bit → chain changes (represented is in the hash)
         let mut p: HashMap<String, Vec<String>> = HashMap::new();
         p.insert("id1".into(), vec!["outcome_id1".into()]);
-        let h3 = outcomes_memory_drift_snapshot(&a, &p, &empty_mentions(), 0, 1)["chain_head"].clone();
+        let h3 =
+            outcomes_memory_drift_snapshot(&a, &p, &empty_mentions(), 0, 1)["chain_head"].clone();
         assert_ne!(h1, h3, "flipping represented must change chain_head");
     }
 
@@ -2600,7 +2793,11 @@ mod tests {
         mentions.insert("mention01234".into(), vec!["some_lesson_key".into()]);
         let snap = outcomes_memory_drift_snapshot(&recs, &probe, &mentions, 0, 1);
         assert_eq!(snap["represented_count"], json!(0));
-        assert_eq!(snap["drift"], json!(1), "a mere mention is not representation");
+        assert_eq!(
+            snap["drift"],
+            json!(1),
+            "a mere mention is not representation"
+        );
         assert_eq!(snap["events"][0]["mentions"], json!(["some_lesson_key"]));
     }
 
@@ -2609,7 +2806,8 @@ mod tests {
         // T6 (honesty): legacy/synthetic records that omit embody_status remain
         // visible as a real gap; present()-origin records now stamp n/a instead.
         let recs = vec![vrec("noembody1234", 1)]; // vrec has no embody_status
-        let snap = outcomes_memory_drift_snapshot(&recs, &empty_mentions(), &empty_mentions(), 0, 1);
+        let snap =
+            outcomes_memory_drift_snapshot(&recs, &empty_mentions(), &empty_mentions(), 0, 1);
         assert_eq!(snap["embody_status_absent"], json!(1));
         assert_eq!(snap["embody_not_applicable"], json!(0));
     }
@@ -2621,11 +2819,25 @@ mod tests {
         let mut a2 = vrec("plainna1234", 2);
         a2["embody_status"] = json!("not_applicable");
         let legacy = vrec("legacy000001", 3);
-        let snap = outcomes_memory_drift_snapshot(&[a1, a2, legacy], &empty_mentions(), &empty_mentions(), 0, 1);
+        let snap = outcomes_memory_drift_snapshot(
+            &[a1, a2, legacy],
+            &empty_mentions(),
+            &empty_mentions(),
+            0,
+            1,
+        );
         assert_eq!(snap["event_count"], json!(3));
         assert_eq!(snap["verified_count"], json!(2), "distinct artifacts");
-        assert_eq!(snap["embody_not_applicable"], json!(1), "duplicate n/a artifact counted once");
-        assert_eq!(snap["embody_status_absent"], json!(1), "legacy absent artifact counted once");
+        assert_eq!(
+            snap["embody_not_applicable"],
+            json!(1),
+            "duplicate n/a artifact counted once"
+        );
+        assert_eq!(
+            snap["embody_status_absent"],
+            json!(1),
+            "legacy absent artifact counted once"
+        );
     }
 
     #[test]
@@ -2650,14 +2862,23 @@ mod tests {
         let na_projection = present_outcomes_projection(&na_raw, true);
         let legacy_records = legacy_projection["outcomes"].as_array().unwrap().clone();
         let na_records = na_projection["outcomes"].as_array().unwrap().clone();
-        assert_eq!(legacy_records.len(), na_records.len(), "eligible cohort size unchanged");
+        assert_eq!(
+            legacy_records.len(),
+            na_records.len(),
+            "eligible cohort size unchanged"
+        );
 
         let mut represented: HashMap<String, Vec<String>> = HashMap::new();
         represented.insert("represented1".into(), vec!["outcome_represented1".into()]);
-        let legacy_snap = outcomes_memory_drift_snapshot(&legacy_records, &represented, &empty_mentions(), 0, 1);
-        let na_snap = outcomes_memory_drift_snapshot(&na_records, &represented, &empty_mentions(), 0, 1);
+        let legacy_snap =
+            outcomes_memory_drift_snapshot(&legacy_records, &represented, &empty_mentions(), 0, 1);
+        let na_snap =
+            outcomes_memory_drift_snapshot(&na_records, &represented, &empty_mentions(), 0, 1);
         assert_eq!(legacy_snap["verified_count"], na_snap["verified_count"]);
-        assert_eq!(legacy_snap["represented_count"], na_snap["represented_count"]);
+        assert_eq!(
+            legacy_snap["represented_count"],
+            na_snap["represented_count"]
+        );
         assert_eq!(legacy_snap["drift"], na_snap["drift"]);
         assert_eq!(legacy_snap["embody_status_absent"], json!(2));
         assert_eq!(na_snap["embody_status_absent"], json!(0));

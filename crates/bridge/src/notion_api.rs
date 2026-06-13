@@ -22,7 +22,7 @@ pub struct NotionClient {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchHit {
-    pub object: String,    // "page" | "database"
+    pub object: String, // "page" | "database"
     pub id: String,
     pub url: String,
     pub title: Option<String>,
@@ -188,7 +188,11 @@ fn parse_search_hit(v: &serde_json::Value) -> SearchHit {
             .and_then(|x| x.as_str())
             .unwrap_or("")
             .to_string(),
-        id: v.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+        id: v
+            .get("id")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string(),
         url: v
             .get("url")
             .and_then(|x| x.as_str())
@@ -212,10 +216,7 @@ fn parse_page_meta(v: &serde_json::Value) -> PageMeta {
     let parent = v.get("parent");
     let (parent_kind, parent_id) = match parent {
         Some(p) => {
-            let kind = p
-                .get("type")
-                .and_then(|x| x.as_str())
-                .map(String::from);
+            let kind = p.get("type").and_then(|x| x.as_str()).map(String::from);
             let id = kind
                 .as_deref()
                 .and_then(|k| p.get(k))
@@ -226,7 +227,11 @@ fn parse_page_meta(v: &serde_json::Value) -> PageMeta {
         None => (None, None),
     };
     PageMeta {
-        id: v.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+        id: v
+            .get("id")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string(),
         url: v
             .get("url")
             .and_then(|x| x.as_str())
@@ -276,7 +281,11 @@ fn extract_title(v: &serde_json::Value) -> Option<String> {
         .filter_map(|seg| seg.get("plain_text").and_then(|x| x.as_str()))
         .collect::<Vec<_>>()
         .join("");
-    if s.is_empty() { None } else { Some(s) }
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
 }
 
 #[cfg(test)]
@@ -285,7 +294,8 @@ mod tests {
 
     #[test]
     fn parse_page_with_workspace_parent() {
-        let v: serde_json::Value = serde_json::from_str(r#"{
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{
             "id":"abc-123",
             "url":"https://notion.so/abc-123",
             "archived":false,
@@ -295,7 +305,9 @@ mod tests {
             "properties":{
                 "title":{"type":"title","title":[{"plain_text":"Hello "},{"plain_text":"World"}]}
             }
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
         let m = parse_page_meta(&v);
         assert_eq!(m.id, "abc-123");
         assert_eq!(m.title.as_deref(), Some("Hello World"));
@@ -305,7 +317,8 @@ mod tests {
 
     #[test]
     fn parse_database_item_with_named_title_prop() {
-        let v: serde_json::Value = serde_json::from_str(r#"{
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{
             "id":"xyz",
             "url":"https://notion.so/xyz",
             "archived":false,
@@ -315,7 +328,9 @@ mod tests {
                 "Status":{"type":"select"},
                 "Name":{"type":"title","title":[{"plain_text":"Task A"}]}
             }
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
         let m = parse_page_meta(&v);
         assert_eq!(m.title.as_deref(), Some("Task A"));
         assert_eq!(m.parent_kind.as_deref(), Some("database_id"));

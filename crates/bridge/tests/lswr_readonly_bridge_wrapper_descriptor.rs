@@ -1,6 +1,6 @@
 use ab_bridge::lswr_snapshot_wrapper_descriptor::{
-    LSWR_READONLY_BRIDGE_WRAPPER_DESCRIPTOR_SCHEMA, ReadOnlyBridgeWrapperDescriptor,
-    build_readonly_bridge_wrapper_descriptor,
+    build_readonly_bridge_wrapper_descriptor, ReadOnlyBridgeWrapperDescriptor,
+    LSWR_READONLY_BRIDGE_WRAPPER_DESCRIPTOR_SCHEMA,
 };
 
 const WRAPPER_DESCRIPTOR_JSON: &str =
@@ -57,16 +57,12 @@ fn wrapper_descriptor_disallows_mutation_and_runtime_capabilities() {
     assert!(disallowed.iter().any(|capability| capability == "patch"));
     assert!(disallowed.iter().any(|capability| capability == "action"));
     assert!(disallowed.iter().any(|capability| capability == "invoke"));
-    assert!(
-        disallowed
-            .iter()
-            .any(|capability| capability == "runtime_launch")
-    );
-    assert!(
-        disallowed
-            .iter()
-            .any(|capability| capability == "host_path_read")
-    );
+    assert!(disallowed
+        .iter()
+        .any(|capability| capability == "runtime_launch"));
+    assert!(disallowed
+        .iter()
+        .any(|capability| capability == "host_path_read"));
     assert!(descriptor.output_contract.contains_report_markdown);
     assert!(descriptor.output_contract.contains_display_readback);
     assert!(!descriptor.output_contract.contains_mutating_handles);

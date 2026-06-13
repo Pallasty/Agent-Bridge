@@ -57,7 +57,10 @@ impl PiperVoiceConfig {
             .unwrap_or(DEFAULT_SAMPLE_RATE);
         let inf = v.get("inference");
         let f = |k: &str, d: f32| -> f32 {
-            inf.and_then(|i| i.get(k)).and_then(|x| x.as_f64()).map(|x| x as f32).unwrap_or(d)
+            inf.and_then(|i| i.get(k))
+                .and_then(|x| x.as_f64())
+                .map(|x| x as f32)
+                .unwrap_or(d)
         };
         Ok(Self {
             sample_rate,
@@ -83,7 +86,9 @@ pub fn parse_phoneme_id_lines(stdout: &str) -> Result<Vec<Vec<i64>>, TtsError> {
         let arr = v
             .get("phoneme_ids")
             .and_then(|a| a.as_array())
-            .ok_or_else(|| TtsError::Phonemize("piper_phonemize line has no phoneme_ids array".into()))?;
+            .ok_or_else(|| {
+                TtsError::Phonemize("piper_phonemize line has no phoneme_ids array".into())
+            })?;
         let ids: Vec<i64> = arr.iter().filter_map(|x| x.as_i64()).collect();
         if !ids.is_empty() {
             out.push(ids);
@@ -106,7 +111,10 @@ impl PiperPhonemizer {
     /// one phoneme-id sequence per sentence.
     pub fn phoneme_id_lines(&self, text: &str) -> Result<Vec<Vec<i64>>, TtsError> {
         if !self.bin.is_file() {
-            return Err(TtsError::Phonemize(format!("piper_phonemize not found: {:?}", self.bin)));
+            return Err(TtsError::Phonemize(format!(
+                "piper_phonemize not found: {:?}",
+                self.bin
+            )));
         }
         let mut cmd = Command::new(&self.bin);
         cmd.arg("-l")
@@ -149,7 +157,9 @@ impl PiperPhonemizer {
     /// `libpiper_phonemize.so` + `libespeak-ng.so` without clobbering system libs.
     fn ld_library_path(&self) -> String {
         match std::env::var("LD_LIBRARY_PATH") {
-            Ok(existing) if !existing.is_empty() => format!("{}:{}", self.lib_dir.display(), existing),
+            Ok(existing) if !existing.is_empty() => {
+                format!("{}:{}", self.lib_dir.display(), existing)
+            }
             _ => self.lib_dir.display().to_string(),
         }
     }
@@ -221,7 +231,12 @@ impl PiperBackend {
         let phonemize = resolve_phonemize_bin()?;
         let lib_dir = std::env::var("AB_TTS_PIPER_LIBDIR")
             .map(PathBuf::from)
-            .unwrap_or_else(|_| phonemize.parent().map(|p| p.to_path_buf()).unwrap_or_default());
+            .unwrap_or_else(|_| {
+                phonemize
+                    .parent()
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_default()
+            });
         let espeak_data = std::env::var("AB_TTS_PIPER_ESPEAK_DATA")
             .map(PathBuf::from)
             .unwrap_or_else(|_| lib_dir.join("espeak-ng-data"));
@@ -238,7 +253,11 @@ impl PiperBackend {
             .map_err(|e| TtsError::Inference(format!("input_lengths tensor: {e}")))?;
         let scales_t = Tensor::from_array((
             vec![3i64],
-            vec![self.config.noise_scale, self.config.length_scale, self.config.noise_w],
+            vec![
+                self.config.noise_scale,
+                self.config.length_scale,
+                self.config.noise_w,
+            ],
         ))
         .map_err(|e| TtsError::Inference(format!("scales tensor: {e}")))?;
 
@@ -292,7 +311,9 @@ impl TtsBackend for PiperBackend {
 }
 
 fn intra_threads() -> usize {
-    std::thread::available_parallelism().map(|n| n.get().min(4)).unwrap_or(2)
+    std::thread::available_parallelism()
+        .map(|n| n.get().min(4))
+        .unwrap_or(2)
 }
 
 /// `<model>.onnx` → `<model>.onnx.json` (piper's sidecar config convention).
@@ -324,7 +345,9 @@ fn resolve_model() -> Result<PathBuf, TtsError> {
         return if pb.is_file() {
             Ok(pb)
         } else {
-            Err(TtsError::Model(format!("AB_TTS_PIPER_MODEL={pb:?} is not a file")))
+            Err(TtsError::Model(format!(
+                "AB_TTS_PIPER_MODEL={pb:?} is not a file"
+            )))
         };
     }
     let pb = cache_dir().join(MODEL_FILE);
@@ -342,7 +365,9 @@ fn resolve_phonemize_bin() -> Result<PathBuf, TtsError> {
         return if pb.is_file() {
             Ok(pb)
         } else {
-            Err(TtsError::Phonemize(format!("AB_TTS_PIPER_PHONEMIZE={pb:?} is not a file")))
+            Err(TtsError::Phonemize(format!(
+                "AB_TTS_PIPER_PHONEMIZE={pb:?} is not a file"
+            )))
         };
     }
     let pb = cache_dir().join("piper").join("piper_phonemize");
@@ -393,7 +418,10 @@ mod tests {
     fn phoneme_id_lines_missing_array_is_honest_error() {
         // a line without phoneme_ids must error, never silently fabricate ids
         let r = parse_phoneme_id_lines("{\"phonemes\":[\"h\"],\"text\":\"h\"}");
-        assert!(matches!(r, Err(TtsError::Phonemize(_))), "expected Phonemize error, got {r:?}");
+        assert!(
+            matches!(r, Err(TtsError::Phonemize(_))),
+            "expected Phonemize error, got {r:?}"
+        );
         // non-JSON line errors too
         assert!(parse_phoneme_id_lines("not json").is_err());
     }
