@@ -38,7 +38,9 @@ sanitized side-signal into the store wrapper. Default `memory_search`, hybrid,
 and semantic paths remain unchanged. A focused controlled-trial runner now
 emits aggregate-backed review-request evidence for commit
 `34bf2e3a3ee74135f6774381c094e3ad64bb2289`; the durable review request remains
-request-only and grants no runtime influence.
+request-only and grants no runtime influence. A separate authorization decision
+now grants only explicit opt-in FTS runtime influence while keeping default,
+hybrid, and semantic influence unauthorized.
 
 ```json
 {
@@ -71,6 +73,8 @@ request-only and grants no runtime influence.
   "controlled_trial_runner_implemented": true,
   "controlled_trial_runner_clean_worktree_verified": true,
   "runtime_influence_review_request_summary_landed": true,
+  "runtime_influence_authorization_decision_landed": true,
+  "explicit_opt_in_fts_runtime_influence_authorized": true,
   "ordering_behavior_connected": false,
   "explicit_opt_in_fts_ordering_behavior_connected": true,
   "explicit_opt_in_fts_runtime_adapter_connected": true
@@ -85,6 +89,11 @@ Runtime-influence review request summary:
 
 - `docs/design/BIOCORTEX_RETRIEVAL_RUNTIME_INFLUENCE_REVIEW_REQUEST_2026_06_13.md`
 - `docs/design/fixtures/biocortex-retrieval-runtime-influence-review-request-summary-2026-06-13.json`
+
+Runtime-influence authorization decision:
+
+- `docs/design/BIOCORTEX_RETRIEVAL_RUNTIME_INFLUENCE_AUTHORIZATION_DECISION_2026_06_13.md`
+- `docs/design/fixtures/biocortex-retrieval-runtime-influence-authorization-decision-2026-06-13.json`
 
 Authorization request packet:
 
@@ -751,6 +760,26 @@ Slice 32 records the aggregate-backed runtime-influence review request:
   `this_packet_grants_request=false`;
 - the controlled-trial runner was verified from a clean temporary worktree
   after helper script calls were changed to explicit `bash` invocation.
+
+Slice 33 records the separate runtime-influence authorization decision:
+
+- the committed decision document is
+  `docs/design/BIOCORTEX_RETRIEVAL_RUNTIME_INFLUENCE_AUTHORIZATION_DECISION_2026_06_13.md`;
+- the committed decision fixture is
+  `docs/design/fixtures/biocortex-retrieval-runtime-influence-authorization-decision-2026-06-13.json`;
+- the authorized scope is exactly `explicit_opt_in_fts_runtime_influence`;
+- the decision authorizes runtime adapter use and ordering connection only for
+  explicit per-call FTS opt-in paths;
+- the formal decision fixture was consumed by
+  `retrieval-opt-in-runtime-influence-decision-packet`, producing
+  `target/biocortex-runtime-influence-decision-20260613/runtime-influence-decision-packet.json`;
+- it still keeps `default_search_order_change_allowed=false`,
+  `default_retrieval_influence_authorized=false`,
+  `hybrid_retrieval_influence_authorized=false`, and
+  `semantic_retrieval_influence_authorized=false`;
+- the decision packet consumer must still produce a read-only control-plane
+  packet before downstream store-trial or runtime-readiness evidence is treated
+  as authorized.
 
 ## Fail-Open Rules
 

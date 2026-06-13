@@ -1,0 +1,43 @@
+{
+  "schema": "agent_bridge.biocortex_retrieval.opt_in_runtime_influence_review_decision.v0",
+  "decision": "authorized",
+  "authorization_state": "authorized",
+  "authorized_scope": "explicit_opt_in_fts_runtime_influence",
+  "human_decision_text": "Operator authorized continuing from the aggregate-backed runtime-influence review request on 2026-06-13. Authorization is limited to explicit opt-in FTS runtime influence and preserves all default/hybrid/semantic prohibitions.",
+  "reviewed_artifacts": {
+    "review_request_doc": "docs/design/BIOCORTEX_RETRIEVAL_RUNTIME_INFLUENCE_REVIEW_REQUEST_2026_06_13.md",
+    "review_request_summary": "docs/design/fixtures/biocortex-retrieval-runtime-influence-review-request-summary-2026-06-13.json",
+    "implementation_commit_under_review": "34bf2e3a3ee74135f6774381c094e3ad64bb2289",
+    "review_request_commit": "aa9955cec9907035f7bacc85e16b56d73f2aeec9",
+    "controlled_trial_summary": "target/biocortex-runtime-review-request-20260613/controlled-trial-summary.json"
+  },
+  "runtime_adapter_approved": true,
+  "ordering_behavior_connection_authorized": true,
+  "default_search_order_change_allowed": false,
+  "default_retrieval_influence_authorized": false,
+  "hybrid_retrieval_influence_authorized": false,
+  "semantic_retrieval_influence_authorized": false,
+  "authorized_runtime_influence": {
+    "may_run_runtime_adapter_for_explicit_opt_in_fts": true,
+    "may_connect_ordering_behavior_for_explicit_opt_in_fts": true,
+    "may_affect_only_explicitly_opted_in_fts_calls": true,
+    "requires_per_call_opt_in": true,
+    "must_keep_baseline_candidate_recall": true,
+    "must_keep_default_calls_unchanged": true,
+    "must_keep_redacted_audit_only": true,
+    "must_keep_operator_disable": "AB_BIOCORTEX_RETRIEVAL_DISABLE",
+    "must_return_baseline_without_per_call_opt_in": true,
+    "must_fail_open_to_baseline": true
+  },
+  "not_authorized": [
+    "default_search_order_change_allowed",
+    "default_retrieval_influence_fts",
+    "default_retrieval_influence_hybrid",
+    "default_retrieval_influence_semantic",
+    "hybrid_retrieval_influence",
+    "semantic_retrieval_influence",
+    "affecting_calls_without_explicit_opt_in",
+    "approval_writes",
+    "embedding_backend_registration"
+  ]
+}
