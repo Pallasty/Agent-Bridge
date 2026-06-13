@@ -482,6 +482,9 @@ jq -e '
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.requires_runtime_influence_decision_packet == true
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.requires_decision_packet_runtime_adapter_approved == true
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.requires_decision_packet_ordering_connection_authorized == true
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.accepts_aggregate_backed_decision_packet == true
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.requires_aggregate_ready_when_provided == true
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.legacy_decision_packet_without_aggregate_allowed == true
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.requires_per_call_opt_in == true
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.requires_compile_feature_enabled == true
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.requires_runtime_enabled == true
@@ -497,6 +500,8 @@ jq -e '
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.mutates_ab_memory == false
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.registers_embedding_backend == false
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.writes_approval == false
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.redacted_evidence_aggregate_included == false
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.aggregate_evidence_summary_included == false
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.raw_query_included == false
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.raw_keys_included == false
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.content_included == false
@@ -517,6 +522,9 @@ jq -e '
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.implementation_stage == "store_opt_in_batch_diagnostics"
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.authorized_scope == "explicit_opt_in_fts_runtime_influence"
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.reuses_store_trial_gate == true
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.accepts_aggregate_backed_decision_packet == true
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.requires_aggregate_ready_when_provided == true
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.legacy_decision_packet_without_aggregate_allowed == true
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.calls_memory_search == true
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.runs_biocortex_only_when_store_trial_allows == true
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.calls_store_opt_in_wrapper == true
@@ -531,6 +539,8 @@ jq -e '
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.mutates_ab_memory == false
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.registers_embedding_backend == false
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.writes_approval == false
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.redacted_evidence_aggregate_included == false
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.aggregate_evidence_summary_included == false
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.default_memory_search_unchanged == true
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.default_search_order_change_allowed == false
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.default_calls_unchanged == true

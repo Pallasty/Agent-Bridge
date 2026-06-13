@@ -266,6 +266,9 @@ jq -e '
     and .implemented_store_opt_in_runtime_adapter_connection.requires_runtime_influence_decision_packet == true
     and .implemented_store_opt_in_runtime_adapter_connection.requires_decision_packet_runtime_adapter_approved == true
     and .implemented_store_opt_in_runtime_adapter_connection.requires_decision_packet_ordering_connection_authorized == true
+    and .implemented_store_opt_in_runtime_adapter_connection.accepts_aggregate_backed_decision_packet == true
+    and .implemented_store_opt_in_runtime_adapter_connection.requires_aggregate_ready_when_provided == true
+    and .implemented_store_opt_in_runtime_adapter_connection.legacy_decision_packet_without_aggregate_allowed == true
     and .implemented_store_opt_in_runtime_adapter_connection.requires_per_call_opt_in == true
     and .implemented_store_opt_in_runtime_adapter_connection.requires_compile_feature_enabled == true
     and .implemented_store_opt_in_runtime_adapter_connection.requires_runtime_enabled == true
@@ -281,6 +284,8 @@ jq -e '
     and .implemented_store_opt_in_runtime_adapter_connection.mutates_ab_memory == false
     and .implemented_store_opt_in_runtime_adapter_connection.registers_embedding_backend == false
     and .implemented_store_opt_in_runtime_adapter_connection.writes_approval == false
+    and .implemented_store_opt_in_runtime_adapter_connection.redacted_evidence_aggregate_included == false
+    and .implemented_store_opt_in_runtime_adapter_connection.aggregate_evidence_summary_included == false
     and .implemented_store_opt_in_runtime_adapter_connection.raw_query_included == false
     and .implemented_store_opt_in_runtime_adapter_connection.raw_keys_included == false
     and .implemented_store_opt_in_runtime_adapter_connection.content_included == false
@@ -301,6 +306,9 @@ jq -e '
     and .implemented_store_opt_in_batch_diagnostics.implementation_stage == "store_opt_in_batch_diagnostics"
     and .implemented_store_opt_in_batch_diagnostics.authorized_scope == "explicit_opt_in_fts_runtime_influence"
     and .implemented_store_opt_in_batch_diagnostics.reuses_store_trial_gate == true
+    and .implemented_store_opt_in_batch_diagnostics.accepts_aggregate_backed_decision_packet == true
+    and .implemented_store_opt_in_batch_diagnostics.requires_aggregate_ready_when_provided == true
+    and .implemented_store_opt_in_batch_diagnostics.legacy_decision_packet_without_aggregate_allowed == true
     and .implemented_store_opt_in_batch_diagnostics.calls_memory_search == true
     and .implemented_store_opt_in_batch_diagnostics.runs_biocortex_only_when_store_trial_allows == true
     and .implemented_store_opt_in_batch_diagnostics.calls_store_opt_in_wrapper == true
@@ -315,6 +323,8 @@ jq -e '
     and .implemented_store_opt_in_batch_diagnostics.mutates_ab_memory == false
     and .implemented_store_opt_in_batch_diagnostics.registers_embedding_backend == false
     and .implemented_store_opt_in_batch_diagnostics.writes_approval == false
+    and .implemented_store_opt_in_batch_diagnostics.redacted_evidence_aggregate_included == false
+    and .implemented_store_opt_in_batch_diagnostics.aggregate_evidence_summary_included == false
     and .implemented_store_opt_in_batch_diagnostics.default_memory_search_unchanged == true
     and .implemented_store_opt_in_batch_diagnostics.default_search_order_change_allowed == false
     and .implemented_store_opt_in_batch_diagnostics.default_calls_unchanged == true
@@ -1751,6 +1761,9 @@ jq -e '
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.requires_runtime_influence_decision_packet == true
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.requires_decision_packet_runtime_adapter_approved == true
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.requires_decision_packet_ordering_connection_authorized == true
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.accepts_aggregate_backed_decision_packet == true
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.requires_aggregate_ready_when_provided == true
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.legacy_decision_packet_without_aggregate_allowed == true
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.requires_per_call_opt_in == true
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.requires_compile_feature_enabled == true
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.requires_runtime_enabled == true
@@ -1766,6 +1779,8 @@ jq -e '
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.mutates_ab_memory == false
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.registers_embedding_backend == false
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.writes_approval == false
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.redacted_evidence_aggregate_included == false
+    and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.aggregate_evidence_summary_included == false
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.raw_query_included == false
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.raw_keys_included == false
     and .opt_in_plan.implemented_store_opt_in_runtime_adapter_connection.content_included == false
@@ -1786,6 +1801,9 @@ jq -e '
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.implementation_stage == "store_opt_in_batch_diagnostics"
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.authorized_scope == "explicit_opt_in_fts_runtime_influence"
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.reuses_store_trial_gate == true
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.accepts_aggregate_backed_decision_packet == true
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.requires_aggregate_ready_when_provided == true
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.legacy_decision_packet_without_aggregate_allowed == true
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.calls_memory_search == true
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.runs_biocortex_only_when_store_trial_allows == true
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.calls_store_opt_in_wrapper == true
@@ -1800,6 +1818,8 @@ jq -e '
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.mutates_ab_memory == false
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.registers_embedding_backend == false
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.writes_approval == false
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.redacted_evidence_aggregate_included == false
+    and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.aggregate_evidence_summary_included == false
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.default_memory_search_unchanged == true
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.default_search_order_change_allowed == false
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.default_calls_unchanged == true
@@ -2791,11 +2811,23 @@ jq -e '
     .schema == "agent_bridge.biocortex_retrieval.opt_in_store_trial.v0"
     and .implementation_stage == "store_opt_in_runtime_adapter_connection"
     and .authorization_scope == "explicit_opt_in_fts_runtime_influence"
+    and .input_contract.accepts_aggregate_backed_decision_packet == true
+    and .input_contract.requires_aggregate_ready_when_provided == true
+    and .input_contract.redacted_evidence_aggregate_included == false
+    and .input_contract.aggregate_evidence_summary_included == false
     and .runtime_preflight.adapter_allowed == false
     and (.runtime_preflight.blockers | index("compile_feature_disabled"))
     and (.runtime_preflight.blockers | index("runtime_disabled"))
     and (.runtime_preflight.blockers | index("baseline_empty"))
     and .runtime_preflight.decision_packet_authorized == true
+    and .runtime_preflight.decision_packet_aggregate_backed == false
+    and .runtime_preflight.decision_packet_aggregate_review_evidence_ready == false
+    and .runtime_preflight.legacy_decision_packet_without_aggregate_allowed == true
+    and .runtime_preflight.decision_packet_aggregate_contract_ok == true
+    and .runtime_preflight.decision_packet_aggregate_summary_redacted == true
+    and .runtime_preflight.decision_packet_aggregate_safe_for_trial == true
+    and .runtime_preflight.decision_packet_aggregate_default_influence_ready == false
+    and .runtime_preflight.decision_packet_aggregate_human_review_required == true
     and .runtime_preflight.baseline_completed == true
     and .baseline_order.key_count == 0
     and .baseline_order.raw_keys_included == false
@@ -2836,10 +2868,18 @@ run env AGENT_BRIDGE_DB="$tmpdir/opt-in-store-trial-empty.db" \
     --json > "$opt_in_store_trial_empty"
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.opt_in_store_trial.v0"
+    and .input_contract.accepts_aggregate_backed_decision_packet == true
+    and .input_contract.requires_aggregate_ready_when_provided == true
+    and .input_contract.redacted_evidence_aggregate_included == false
+    and .input_contract.aggregate_evidence_summary_included == false
     and .runtime_preflight.compile_feature_enabled == true
     and .runtime_preflight.runtime_enabled == true
     and .runtime_preflight.operator_disabled == false
     and .runtime_preflight.decision_packet_authorized == true
+    and .runtime_preflight.decision_packet_aggregate_backed == false
+    and .runtime_preflight.decision_packet_aggregate_review_evidence_ready == false
+    and .runtime_preflight.legacy_decision_packet_without_aggregate_allowed == true
+    and .runtime_preflight.decision_packet_aggregate_safe_for_trial == true
     and .runtime_preflight.adapter_allowed == false
     and (.runtime_preflight.blockers | index("baseline_empty"))
     and .baseline_order.completed == true
@@ -2879,6 +2919,10 @@ jq -e '
     and .status == "completed"
     and .attempt.query_count == 6
     and .input_contract.runtime_influence_decision_packet_included == false
+    and .input_contract.accepts_aggregate_backed_decision_packet == true
+    and .input_contract.requires_aggregate_ready_when_provided == true
+    and .input_contract.redacted_evidence_aggregate_included == false
+    and .input_contract.aggregate_evidence_summary_included == false
     and .input_contract.raw_queries_included == false
     and .input_contract.raw_keys_included == false
     and .input_contract.content_included == false
@@ -2896,6 +2940,10 @@ jq -e '
     and (.query_results | length) == 6
     and ([.query_results[].movement_class] | unique) == ["preflight_blocked"]
     and ([.query_results[].preflight.adapter_allowed] | unique) == [false]
+    and ([.query_results[].preflight.decision_packet_aggregate_backed] | unique) == [false]
+    and ([.query_results[].preflight.decision_packet_aggregate_review_evidence_ready] | unique) == [false]
+    and ([.query_results[].preflight.legacy_decision_packet_without_aggregate_allowed] | unique) == [true]
+    and ([.query_results[].preflight.decision_packet_aggregate_safe_for_trial] | unique) == [true]
     and ([.query_results[].baseline.key_count] | unique) == [0]
     and ([.query_results[].raw_query_included] | unique) == [false]
     and ([.query_results[].raw_keys_included] | unique) == [false]
@@ -2931,6 +2979,10 @@ run env AGENT_BRIDGE_DB="$tmpdir/opt-in-batch-diagnostics-empty.db" \
     --json > "$opt_in_batch_diagnostics_empty"
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.opt_in_batch_diagnostics.v0"
+    and .input_contract.accepts_aggregate_backed_decision_packet == true
+    and .input_contract.requires_aggregate_ready_when_provided == true
+    and .input_contract.redacted_evidence_aggregate_included == false
+    and .input_contract.aggregate_evidence_summary_included == false
     and .summary.query_count == 6
     and .summary.baseline_completed_count == 6
     and .summary.baseline_empty_count == 6
@@ -2944,6 +2996,10 @@ jq -e '
     and ([.query_results[].preflight.runtime_enabled] | unique) == [true]
     and ([.query_results[].preflight.operator_disabled] | unique) == [false]
     and ([.query_results[].preflight.decision_packet_authorized] | unique) == [true]
+    and ([.query_results[].preflight.decision_packet_aggregate_backed] | unique) == [false]
+    and ([.query_results[].preflight.decision_packet_aggregate_review_evidence_ready] | unique) == [false]
+    and ([.query_results[].preflight.legacy_decision_packet_without_aggregate_allowed] | unique) == [true]
+    and ([.query_results[].preflight.decision_packet_aggregate_safe_for_trial] | unique) == [true]
     and ([.query_results[].side_signal.attempted] | unique) == [false]
     and ([.query_results[].runs_biocortex] | unique) == [false]
     and .safety.calls_memory_search_all == true
@@ -3477,6 +3533,97 @@ jq -e '
 ' "$opt_in_runtime_influence_decision_packet_with_aggregate" >/dev/null
 if grep -q 'cortexdelta\|cortexepsilon\|cortexzeta\|cortexeta\|cortextheta\|cortexiota\|controlled_order_baseline_high\|controlled_order_biocortex_target\|target anchor\|baseline anchor\|axonalpha\|axonbeta\|axongamma\|axondelta\|axonepsilon\|axonzeta\|dendritealpha\|dendritebeta\|dendritegamma\|dendritedelta\|dendriteepsilon\|dendritezeta\|gliaalph\|gliabet\|gliagam\|gliadel\|gliaeps\|gliazet\|myelinalpha\|myelinbeta\|myelingamma\|myelindelta\|myelinepsilon\|myelinzeta\|synapsealpha\|synapsebeta\|synapsegamma\|synapsedelta\|synapseepsilon\|synapsezeta\|expanded_corpus_baseline_focus\|expanded_corpus_target_span\|baseline focus\|target span\|biocortex opt-in runtime adapter\|runtime influence decision packet\|memory search baseline recall\|redacted order artifact movement\|agent bridge mcp tool registry\|agent bridge mcp\|verify runtime influence decision secret wording\|verify runtime influence decision secret query\|verify_runtime_influence_decision_secret_key\|verify runtime influence decision secret content\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_runtime_influence_decision_packet_with_aggregate"; then
     echo "opt-in aggregate-backed runtime influence decision packet leaked raw query/key/content data" >&2
+    exit 1
+fi
+
+opt_in_store_trial_empty_with_aggregate="$tmpdir/opt-in-store-trial-empty-with-aggregate.json"
+run env AGENT_BRIDGE_DB="$tmpdir/opt-in-store-trial-empty-with-aggregate.db" \
+    AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
+    cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
+    bio-cortex retrieval-opt-in-store-trial \
+    --runtime-influence-decision-packet-json "$opt_in_runtime_influence_decision_packet_with_aggregate" \
+    --query "verify aggregate-backed store trial ready secret query" \
+    --per-call-opt-in \
+    --checkout "$biocortex_rs" \
+    --limit 3 \
+    --attempt-id verify-store-trial-empty-with-aggregate \
+    --commit verify-dry-run-commit \
+    --json > "$opt_in_store_trial_empty_with_aggregate"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_store_trial.v0"
+    and .input_contract.accepts_aggregate_backed_decision_packet == true
+    and .input_contract.requires_aggregate_ready_when_provided == true
+    and .input_contract.redacted_evidence_aggregate_included == false
+    and .input_contract.aggregate_evidence_summary_included == false
+    and .runtime_preflight.compile_feature_enabled == true
+    and .runtime_preflight.runtime_enabled == true
+    and .runtime_preflight.operator_disabled == false
+    and .runtime_preflight.decision_packet_authorized == true
+    and .runtime_preflight.decision_packet_aggregate_backed == true
+    and .runtime_preflight.decision_packet_aggregate_review_evidence_ready == true
+    and .runtime_preflight.legacy_decision_packet_without_aggregate_allowed == false
+    and .runtime_preflight.decision_packet_aggregate_contract_ok == true
+    and .runtime_preflight.decision_packet_aggregate_summary_redacted == true
+    and .runtime_preflight.decision_packet_aggregate_safe_for_trial == true
+    and .runtime_preflight.decision_packet_aggregate_review_evidence_state == "redacted_aggregate_ready"
+    and .runtime_preflight.decision_packet_aggregate_default_influence_ready == false
+    and .runtime_preflight.decision_packet_aggregate_human_review_required == true
+    and .runtime_preflight.adapter_allowed == false
+    and (.runtime_preflight.blockers | index("baseline_empty"))
+    and .side_signal.attempted == false
+    and .runs_biocortex == false
+    and .raw_query_included == false
+    and .raw_keys_included == false
+    and .content_included == false
+    and .default_search_order_change_allowed == false
+    and .default_calls_unchanged == true
+' "$opt_in_store_trial_empty_with_aggregate" >/dev/null
+if grep -q 'verify aggregate-backed store trial ready secret query\|cortexdelta\|axonalpha\|expanded_corpus_baseline_focus\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_store_trial_empty_with_aggregate"; then
+    echo "opt-in aggregate-backed store trial empty path leaked raw query/key/content data" >&2
+    exit 1
+fi
+
+opt_in_batch_diagnostics_empty_with_aggregate="$tmpdir/opt-in-batch-diagnostics-empty-with-aggregate.json"
+run env AGENT_BRIDGE_DB="$tmpdir/opt-in-batch-diagnostics-empty-with-aggregate.db" \
+    AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
+    cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
+    bio-cortex retrieval-opt-in-batch-diagnostics \
+    --runtime-influence-decision-packet-json "$opt_in_runtime_influence_decision_packet_with_aggregate" \
+    --query-cases-json "$opt_in_batch_query_cases" \
+    --per-call-opt-in \
+    --checkout "$biocortex_rs" \
+    --limit 3 \
+    --attempt-id verify-batch-diagnostics-empty-with-aggregate \
+    --commit verify-dry-run-commit \
+    --json > "$opt_in_batch_diagnostics_empty_with_aggregate"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_batch_diagnostics.v0"
+    and .input_contract.accepts_aggregate_backed_decision_packet == true
+    and .input_contract.requires_aggregate_ready_when_provided == true
+    and .input_contract.redacted_evidence_aggregate_included == false
+    and .input_contract.aggregate_evidence_summary_included == false
+    and .summary.query_count == 6
+    and .summary.baseline_completed_count == 6
+    and .summary.baseline_empty_count == 6
+    and .summary.adapter_allowed_count == 0
+    and .summary.side_signal_attempted_count == 0
+    and .summary.runs_biocortex_count == 0
+    and ([.query_results[].preflight.decision_packet_authorized] | unique) == [true]
+    and ([.query_results[].preflight.decision_packet_aggregate_backed] | unique) == [true]
+    and ([.query_results[].preflight.decision_packet_aggregate_review_evidence_ready] | unique) == [true]
+    and ([.query_results[].preflight.legacy_decision_packet_without_aggregate_allowed] | unique) == [false]
+    and ([.query_results[].preflight.decision_packet_aggregate_safe_for_trial] | unique) == [true]
+    and ([.query_results[].preflight.adapter_allowed] | unique) == [false]
+    and ([.query_results[].side_signal.attempted] | unique) == [false]
+    and ([.query_results[].runs_biocortex] | unique) == [false]
+    and .safety.calls_memory_search_all == true
+    and .safety.runs_biocortex_any == false
+    and .safety.raw_flags_all_false == true
+    and .default_search_order_change_allowed == false
+    and .default_calls_unchanged == true
+' "$opt_in_batch_diagnostics_empty_with_aggregate" >/dev/null
+if grep -q 'biocortex opt-in runtime adapter\|runtime influence decision packet\|memory search baseline recall\|redacted order artifact movement\|agent bridge mcp tool registry\|agent bridge mcp\|verify runtime influence decision secret wording\|verify runtime influence decision secret query\|verify_runtime_influence_decision_secret_key\|verify runtime influence decision secret content\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_batch_diagnostics_empty_with_aggregate"; then
+    echo "opt-in aggregate-backed batch diagnostics empty path leaked raw query/key/content data" >&2
     exit 1
 fi
 test -s "$opt_in_auth_request/forum-post-template.md"

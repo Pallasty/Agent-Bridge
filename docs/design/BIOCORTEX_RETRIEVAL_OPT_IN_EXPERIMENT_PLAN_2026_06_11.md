@@ -676,6 +676,21 @@ decision packet:
   semantic retrieval, approval writes, BioCortex runs, memory search calls, or an
   embedding backend registration.
 
+Slice 29 wires the aggregate-backed decision packet into the downstream store
+trial preflight:
+
+- `retrieval-opt-in-store-trial` and `retrieval-opt-in-batch-diagnostics` now
+  declare that they accept aggregate-backed runtime-influence decision packets;
+- if a decision packet claims aggregate-backed evidence, store-trial preflight
+  requires the aggregate evidence summary to be ready, redacted, safe for the
+  decision, default-influence-unready, and still human-review-gated;
+- legacy decision packets without aggregate evidence remain allowed for the
+  bootstrap evidence loop that produces the aggregate in the first place;
+- batch diagnostics now surfaces per-query aggregate-backed/legacy preflight
+  booleans copied from the store-trial summary;
+- no aggregate body, review request body, runtime decision body, raw query, raw
+  memory key, memory content, or raw side-signal row is returned.
+
 ## Fail-Open Rules
 
 The experiment must return the baseline list for:

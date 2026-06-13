@@ -5723,6 +5723,64 @@ pub async fn biocortex_retrieval_opt_in_store_trial(
                 packet.pointer("/input_contract/human_decision_text_included"),
                 false,
             );
+    let packet_aggregate_backed = value_bool_is(
+        packet.pointer("/request_summary/aggregate_backed_review_request"),
+        true,
+    ) || value_bool_is(
+        packet.pointer("/boundary_check/aggregate_backed_review_request"),
+        true,
+    );
+    let packet_aggregate_contract_ok = value_bool_is(
+        packet.pointer("/input_contract/accepts_aggregate_backed_review_request"),
+        true,
+    ) && value_bool_is(
+        packet.pointer("/input_contract/requires_aggregate_ready_when_provided"),
+        true,
+    ) && value_bool_is(
+        packet.pointer("/input_contract/redacted_evidence_aggregate_included"),
+        false,
+    );
+    let packet_aggregate_ready = value_bool_is(
+        packet.pointer("/boundary_check/aggregate_review_evidence_ready"),
+        true,
+    ) && value_bool_is(
+        packet.pointer("/request_summary/redacted_evidence_aggregate_ready"),
+        true,
+    ) && value_str_eq(
+        packet.pointer("/request_summary/aggregate_review_evidence_state"),
+        "redacted_aggregate_ready",
+    );
+    let packet_aggregate_default_influence_not_ready = value_bool_is(
+        packet.pointer("/request_summary/aggregate_default_influence_ready"),
+        false,
+    ) && value_bool_is(
+        packet.pointer("/request_summary/default_influence_ready"),
+        false,
+    );
+    let packet_aggregate_human_review_required = value_bool_is(
+        packet.pointer("/request_summary/aggregate_human_review_required"),
+        true,
+    );
+    let packet_aggregate_summary_redacted = value_bool_is(
+        packet.pointer("/request_summary/redacted_evidence_aggregate_summary_included"),
+        false,
+    ) && value_bool_is(
+        packet.pointer("/boundary_check/aggregate_summary_redacted"),
+        true,
+    );
+    let packet_aggregate_safe_for_trial = if packet_aggregate_backed {
+        packet_aggregate_contract_ok
+            && packet_aggregate_ready
+            && packet_aggregate_default_influence_not_ready
+            && packet_aggregate_human_review_required
+            && packet_aggregate_summary_redacted
+            && value_bool_is(
+                packet.pointer("/boundary_check/aggregate_safe_for_decision"),
+                true,
+            )
+    } else {
+        true
+    };
 
     let compile_feature_enabled = cfg!(feature = "biocortex-retrieval-opt-in");
     let runtime_enabled = env_truthy(BIOCORTEX_RETRIEVAL_OPT_IN_ENABLE_ENV);
@@ -5861,6 +5919,38 @@ pub async fn biocortex_retrieval_opt_in_store_trial(
         packet_input_raw_absent,
         "decision_packet_raw_input_included",
     );
+    if packet_aggregate_backed {
+        push_string_blocker(
+            &mut blockers,
+            packet_aggregate_contract_ok,
+            "decision_packet_aggregate_contract_unexpected",
+        );
+        push_string_blocker(
+            &mut blockers,
+            packet_aggregate_ready,
+            "decision_packet_aggregate_review_evidence_not_ready",
+        );
+        push_string_blocker(
+            &mut blockers,
+            packet_aggregate_default_influence_not_ready,
+            "decision_packet_aggregate_default_influence_ready",
+        );
+        push_string_blocker(
+            &mut blockers,
+            packet_aggregate_human_review_required,
+            "decision_packet_aggregate_missing_human_review_requirement",
+        );
+        push_string_blocker(
+            &mut blockers,
+            packet_aggregate_summary_redacted,
+            "decision_packet_aggregate_summary_not_redacted",
+        );
+        push_string_blocker(
+            &mut blockers,
+            packet_aggregate_safe_for_trial,
+            "decision_packet_aggregate_not_safe_for_trial",
+        );
+    }
     push_string_blocker(&mut blockers, mode_authorized, "mode_not_authorized");
     push_string_blocker(
         &mut blockers,
@@ -6028,6 +6118,10 @@ pub async fn biocortex_retrieval_opt_in_store_trial(
         "input_contract": {
             "runtime_influence_decision_packet_schema": packet.get("schema").cloned().unwrap_or(Value::Null),
             "runtime_influence_decision_packet_included": false,
+            "accepts_aggregate_backed_decision_packet": true,
+            "requires_aggregate_ready_when_provided": true,
+            "redacted_evidence_aggregate_included": false,
+            "aggregate_evidence_summary_included": false,
             "unknown_fields_ignored": true,
             "raw_query_included": false,
             "raw_keys_included": false,
@@ -6042,6 +6136,29 @@ pub async fn biocortex_retrieval_opt_in_store_trial(
             "runtime_enabled": runtime_enabled,
             "operator_disabled": operator_disabled,
             "decision_packet_authorized": packet_authorized,
+            "decision_packet_aggregate_backed": packet_aggregate_backed,
+            "decision_packet_aggregate_review_evidence_ready": packet_aggregate_backed
+                && packet_aggregate_safe_for_trial,
+            "legacy_decision_packet_without_aggregate_allowed": !packet_aggregate_backed,
+            "decision_packet_aggregate_contract_ok": !packet_aggregate_backed
+                || packet_aggregate_contract_ok,
+            "decision_packet_aggregate_summary_redacted": !packet_aggregate_backed
+                || packet_aggregate_summary_redacted,
+            "decision_packet_aggregate_safe_for_trial": packet_aggregate_safe_for_trial,
+            "decision_packet_aggregate_review_evidence_state": packet
+                .pointer("/request_summary/aggregate_review_evidence_state")
+                .cloned()
+                .unwrap_or(Value::Null),
+            "decision_packet_aggregate_default_influence_ready": if packet_aggregate_backed {
+                packet
+                    .pointer("/request_summary/aggregate_default_influence_ready")
+                    .cloned()
+                    .unwrap_or(Value::Bool(false))
+            } else {
+                Value::Bool(false)
+            },
+            "decision_packet_aggregate_human_review_required": !packet_aggregate_backed
+                || packet_aggregate_human_review_required,
             "mode_authorized": mode_authorized,
             "baseline_completed": baseline_completed,
             "baseline_error_redacted": baseline_error.is_some(),
@@ -6235,6 +6352,10 @@ pub async fn biocortex_retrieval_opt_in_batch_diagnostics(
         "input_contract": {
             "runtime_influence_decision_packet_schema": runtime_influence_decision_packet.get("schema").cloned().unwrap_or(Value::Null),
             "runtime_influence_decision_packet_included": false,
+            "accepts_aggregate_backed_decision_packet": true,
+            "requires_aggregate_ready_when_provided": true,
+            "redacted_evidence_aggregate_included": false,
+            "aggregate_evidence_summary_included": false,
             "raw_queries_included": false,
             "raw_keys_included": false,
             "content_included": false,
@@ -6425,6 +6546,10 @@ fn batch_trial_summary(
             "runtime_enabled": trial.pointer("/runtime_preflight/runtime_enabled").cloned().unwrap_or(Value::Bool(false)),
             "operator_disabled": trial.pointer("/runtime_preflight/operator_disabled").cloned().unwrap_or(Value::Bool(false)),
             "decision_packet_authorized": trial.pointer("/runtime_preflight/decision_packet_authorized").cloned().unwrap_or(Value::Bool(false)),
+            "decision_packet_aggregate_backed": trial.pointer("/runtime_preflight/decision_packet_aggregate_backed").cloned().unwrap_or(Value::Bool(false)),
+            "decision_packet_aggregate_review_evidence_ready": trial.pointer("/runtime_preflight/decision_packet_aggregate_review_evidence_ready").cloned().unwrap_or(Value::Bool(false)),
+            "legacy_decision_packet_without_aggregate_allowed": trial.pointer("/runtime_preflight/legacy_decision_packet_without_aggregate_allowed").cloned().unwrap_or(Value::Bool(true)),
+            "decision_packet_aggregate_safe_for_trial": trial.pointer("/runtime_preflight/decision_packet_aggregate_safe_for_trial").cloned().unwrap_or(Value::Bool(true)),
         },
         "baseline": {
             "completed": trial.pointer("/baseline_order/completed").cloned().unwrap_or(Value::Bool(false)),
@@ -10943,6 +11068,175 @@ mod tests {
             json!(false)
         );
         assert_eq!(packet["may_implement_ordering_now"], json!(false));
+    }
+
+    async fn empty_sqlite_store(label: &str) -> (ab_store::SqliteStore, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!(
+            "ab-biocortex-shadow-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        tokio::fs::create_dir_all(&dir).await.expect("mkdir");
+        let store = ab_store::SqliteStore::open(&dir.join("state.db"))
+            .await
+            .expect("open sqlite store");
+        (store, dir)
+    }
+
+    #[tokio::test]
+    async fn opt_in_store_trial_reports_aggregate_backed_decision_packet_preflight() {
+        let packet = biocortex_retrieval_opt_in_runtime_influence_decision_packet(
+            BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketOptions {
+                runtime_influence_review_request:
+                    opt_in_aggregate_backed_runtime_influence_review_request_fixture(),
+                runtime_influence_decision: opt_in_runtime_influence_decision_fixture(),
+                reviewer: Some("codex".to_string()),
+                commit: Some("runtime-decision-commit".to_string()),
+                forum_post_id: Some("104".to_string()),
+                memory_key: Some("runtime-decision-memory".to_string()),
+            },
+        );
+        let (store, dir) = empty_sqlite_store("aggregate-store-trial").await;
+
+        let trial = biocortex_retrieval_opt_in_store_trial(
+            &store,
+            BioCortexRetrievalOptInStoreTrialOptions {
+                runtime_influence_decision_packet: packet,
+                query: "secret aggregate-backed store trial query".to_string(),
+                tags_any: vec![],
+                limit: 3,
+                mode: "fts".to_string(),
+                per_call_opt_in: true,
+                checkout: None,
+                timeout_ms: 1_000,
+                coverage_threshold: 0.5,
+                blend_alpha: CANDIDATE_STRONG_RETRIEVAL_ALPHA,
+                attempt_id: Some("aggregate-store-trial".to_string()),
+                commit: Some("runtime-decision-commit".to_string()),
+            },
+        )
+        .await;
+
+        assert_eq!(
+            trial["input_contract"]["accepts_aggregate_backed_decision_packet"],
+            json!(true)
+        );
+        assert_eq!(
+            trial["input_contract"]["redacted_evidence_aggregate_included"],
+            json!(false)
+        );
+        assert_eq!(
+            trial["input_contract"]["aggregate_evidence_summary_included"],
+            json!(false)
+        );
+        assert_eq!(
+            trial["runtime_preflight"]["decision_packet_authorized"],
+            json!(true)
+        );
+        assert_eq!(
+            trial["runtime_preflight"]["decision_packet_aggregate_backed"],
+            json!(true)
+        );
+        assert_eq!(
+            trial["runtime_preflight"]["decision_packet_aggregate_review_evidence_ready"],
+            json!(true)
+        );
+        assert_eq!(
+            trial["runtime_preflight"]["legacy_decision_packet_without_aggregate_allowed"],
+            json!(false)
+        );
+        assert_eq!(
+            trial["runtime_preflight"]["decision_packet_aggregate_safe_for_trial"],
+            json!(true)
+        );
+        assert_eq!(
+            trial["runtime_preflight"]["decision_packet_aggregate_review_evidence_state"],
+            json!("redacted_aggregate_ready")
+        );
+        assert_eq!(
+            trial["runtime_preflight"]["decision_packet_aggregate_default_influence_ready"],
+            json!(false)
+        );
+        assert_eq!(
+            trial["runtime_preflight"]["decision_packet_aggregate_human_review_required"],
+            json!(true)
+        );
+        assert_eq!(trial["runtime_preflight"]["adapter_allowed"], json!(false));
+        assert!(trial["runtime_preflight"]["blockers"]
+            .as_array()
+            .expect("blockers")
+            .contains(&json!("baseline_empty")));
+        assert_eq!(trial["runs_biocortex"], json!(false));
+
+        let serialized = serde_json::to_string(&trial).expect("trial json");
+        assert!(!serialized.contains("secret aggregate-backed store trial query"));
+        let _ = tokio::fs::remove_dir_all(dir).await;
+    }
+
+    #[tokio::test]
+    async fn opt_in_store_trial_blocks_bad_aggregate_backed_decision_packet() {
+        let mut packet = biocortex_retrieval_opt_in_runtime_influence_decision_packet(
+            BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketOptions {
+                runtime_influence_review_request:
+                    opt_in_aggregate_backed_runtime_influence_review_request_fixture(),
+                runtime_influence_decision: opt_in_runtime_influence_decision_fixture(),
+                reviewer: None,
+                commit: None,
+                forum_post_id: None,
+                memory_key: None,
+            },
+        );
+        packet["boundary_check"]["aggregate_review_evidence_ready"] = json!(false);
+        packet["boundary_check"]["aggregate_safe_for_decision"] = json!(false);
+        let (store, dir) = empty_sqlite_store("bad-aggregate-store-trial").await;
+
+        let trial = biocortex_retrieval_opt_in_store_trial(
+            &store,
+            BioCortexRetrievalOptInStoreTrialOptions {
+                runtime_influence_decision_packet: packet,
+                query: "secret bad aggregate store trial query".to_string(),
+                tags_any: vec![],
+                limit: 3,
+                mode: "fts".to_string(),
+                per_call_opt_in: true,
+                checkout: None,
+                timeout_ms: 1_000,
+                coverage_threshold: 0.5,
+                blend_alpha: CANDIDATE_STRONG_RETRIEVAL_ALPHA,
+                attempt_id: Some("bad-aggregate-store-trial".to_string()),
+                commit: None,
+            },
+        )
+        .await;
+
+        assert_eq!(
+            trial["runtime_preflight"]["decision_packet_aggregate_backed"],
+            json!(true)
+        );
+        assert_eq!(
+            trial["runtime_preflight"]["decision_packet_aggregate_review_evidence_ready"],
+            json!(false)
+        );
+        assert_eq!(
+            trial["runtime_preflight"]["decision_packet_aggregate_safe_for_trial"],
+            json!(false)
+        );
+        let blockers = trial["runtime_preflight"]["blockers"]
+            .as_array()
+            .expect("blockers");
+        assert!(blockers.contains(&json!(
+            "decision_packet_aggregate_review_evidence_not_ready"
+        )));
+        assert!(blockers.contains(&json!("decision_packet_aggregate_not_safe_for_trial")));
+        assert_eq!(trial["runtime_preflight"]["adapter_allowed"], json!(false));
+        assert_eq!(trial["runs_biocortex"], json!(false));
+
+        let serialized = serde_json::to_string(&trial).expect("trial json");
+        assert!(!serialized.contains("secret bad aggregate store trial query"));
+        let _ = tokio::fs::remove_dir_all(dir).await;
     }
 
     struct EnvRestore {
