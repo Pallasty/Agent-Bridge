@@ -48,7 +48,9 @@ use crate::biocortex_shadow::{
     biocortex_replay_comparison, biocortex_retrieval_opt_in_audit_report,
     biocortex_retrieval_opt_in_authorization_decision_packet,
     biocortex_retrieval_opt_in_batch_diagnostics, biocortex_retrieval_opt_in_dry_run_plan,
-    biocortex_retrieval_opt_in_execution_packet, biocortex_retrieval_opt_in_gated_store_trial,
+    biocortex_retrieval_opt_in_execution_packet,
+    biocortex_retrieval_opt_in_gated_batch_diagnostics,
+    biocortex_retrieval_opt_in_gated_store_trial,
     biocortex_retrieval_opt_in_order_diff_packet,
     biocortex_retrieval_opt_in_post_implementation_review_gate,
     biocortex_retrieval_opt_in_redacted_order_artifact, biocortex_retrieval_opt_in_review_packet,
@@ -62,6 +64,7 @@ use crate::biocortex_shadow::{
     BioCortexRetrievalOptInAuthorizationDecisionPacketOptions,
     BioCortexRetrievalOptInBatchDiagnosticsOptions, BioCortexRetrievalOptInBatchQueryCase,
     BioCortexRetrievalOptInDryRunOptions, BioCortexRetrievalOptInExecutionPacketOptions,
+    BioCortexRetrievalOptInGatedBatchDiagnosticsOptions,
     BioCortexRetrievalOptInGatedStoreTrialOptions, BioCortexRetrievalOptInOrderDiffPacketOptions,
     BioCortexRetrievalOptInPostImplementationReviewGateOptions,
     BioCortexRetrievalOptInRedactedOrderArtifactOptions,
@@ -27166,6 +27169,225 @@ impl McpTool for BioCortexRetrievalOptInBatchDiagnosticsTool {
 }
 
 // ===========================================================================
+//  biocortex_retrieval_opt_in_gated_batch_diagnostics — transition-gated batch
+// ===========================================================================
+
+/// Transition-gated batch diagnostics for explicit opt-in BioCortex store
+/// trials. Every query consumes the same runtime-transition gate before it may
+/// call the protected store-trial path.
+pub struct BioCortexRetrievalOptInGatedBatchDiagnosticsTool {
+    hub: Hub,
+}
+
+impl BioCortexRetrievalOptInGatedBatchDiagnosticsTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for BioCortexRetrievalOptInGatedBatchDiagnosticsTool {
+    fn name(&self) -> &'static str {
+        "biocortex_retrieval_opt_in_gated_batch_diagnostics"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Transition-gated batch diagnostics for explicit \
+                 opt-in BioCortex store trials. Consumes a runtime-transition \
+                 gate before each query may call the protected store-trial \
+                 path. Blocked gates return only redacted transition evidence \
+                 and do not call memory_search or BioCortex. Does not mutate \
+                 memory, register an EmbeddingBackend, expose raw queries/keys/\
+                 content, or affect default memory_search."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": [
+                    "runtime_transition_gate",
+                    "runtime_influence_decision_packet",
+                    "per_call_opt_in"
+                ],
+                "properties": {
+                    "runtime_transition_gate": {
+                        "type": "object",
+                        "description": "JSON object produced by biocortex_retrieval_opt_in_runtime_transition_gate. The tool consumes only safe summary fields and does not echo the gate."
+                    },
+                    "runtime_influence_decision_packet": {
+                        "type": "object",
+                        "description": "JSON object produced by biocortex_retrieval_opt_in_runtime_influence_decision_packet. The tool consumes only safe summary fields and does not echo the packet."
+                    },
+                    "queries": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "FTS queries to diagnose. Output includes only query hashes."
+                    },
+                    "query_cases": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["query"],
+                            "properties": {
+                                "query": {
+                                    "type": "string",
+                                    "description": "FTS query. Output includes only a query hash."
+                                },
+                                "class_label": {
+                                    "type": "string",
+                                    "description": "Optional operator-defined bucket label. It is normalized before output."
+                                }
+                            }
+                        },
+                        "description": "Optional query cases with sanitized bucket labels."
+                    },
+                    "tags_any": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Optional tag filter forwarded to each baseline memory_search after the transition gate passes. Output includes only the filter count."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100,
+                        "default": 10,
+                        "description": "Maximum baseline candidates per query."
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["fts", "hybrid", "semantic"],
+                        "default": "fts",
+                        "description": "Retrieval mode. Only fts is authorized for runtime influence."
+                    },
+                    "per_call_opt_in": {
+                        "type": "boolean",
+                        "description": "Required explicit per-call opt-in bit for every query."
+                    },
+                    "checkout_path": {
+                        "type": "string",
+                        "description": "Optional local biocortex-rs checkout. Defaults to AB_BIOCORTEX_RS, sibling checkout paths, then /tmp/biocortex-rs-ab-eval."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 600000,
+                        "default": 120000,
+                        "description": "External side-signal adapter timeout per query in milliseconds."
+                    },
+                    "coverage_threshold": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "default": 0.8,
+                        "description": "Minimum matched side-signal coverage required before the store wrapper may return experimental order."
+                    },
+                    "blend_alpha": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "default": 0.8,
+                        "description": "Blend weight passed to the protected store wrapper."
+                    },
+                    "attempt_id": {
+                        "type": "string",
+                        "description": "Optional batch attempt id for audit correlation."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Optional implementation commit under review."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = self
+            .hub
+            .store
+            .as_ref()
+            .ok_or_else(|| ab_core::Error::Backend("store unavailable".into()))?;
+        let runtime_transition_gate = args
+            .get("runtime_transition_gate")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let runtime_influence_decision_packet = args
+            .get("runtime_influence_decision_packet")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let queries = biocortex_batch_query_cases_from_args(&args);
+        let tags_any = args
+            .get("tags_any")
+            .cloned()
+            .map(serde_json::from_value::<Vec<String>>)
+            .transpose()
+            .map_err(|e| ab_core::Error::Backend(format!("parse tags_any: {e}")))?
+            .unwrap_or_default();
+        let limit = args
+            .get("limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(10)
+            .clamp(1, 100) as u32;
+        let mode = args
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("fts")
+            .to_string();
+        let per_call_opt_in = args
+            .get("per_call_opt_in")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let checkout = args
+            .get("checkout_path")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from);
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(120_000);
+        let coverage_threshold = args
+            .get("coverage_threshold")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.8);
+        let blend_alpha = args
+            .get("blend_alpha")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.8) as f32;
+        let attempt_id = args
+            .get("attempt_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let commit = args
+            .get("commit")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+
+        let payload = biocortex_retrieval_opt_in_gated_batch_diagnostics(
+            store.as_ref(),
+            BioCortexRetrievalOptInGatedBatchDiagnosticsOptions {
+                runtime_transition_gate,
+                runtime_influence_decision_packet,
+                queries,
+                tags_any,
+                limit,
+                mode,
+                per_call_opt_in,
+                checkout,
+                timeout_ms,
+                coverage_threshold,
+                blend_alpha,
+                attempt_id,
+                commit,
+            },
+        )
+        .await;
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
 //  biocortex_retrieval_opt_in_runtime_readiness_packet - readiness summary
 // ===========================================================================
 
@@ -38834,6 +39056,14 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Standard,
         Arc::new(BioCortexRetrievalOptInGatedStoreTrialTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexRetrievalOptInGatedBatchDiagnosticsTool::new(
+            hub.clone(),
+        )),
     );
     #[cfg(feature = "biocortex-retrieval-shadow")]
     reg_if(
@@ -50584,6 +50814,177 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             json!(false)
         );
         assert_eq!(v["raw_query_included"], json!(false));
+        assert_eq!(v["raw_keys_included"], json!(false));
+        assert_eq!(v["content_included"], json!(false));
+
+        let _ = tokio::fs::remove_dir_all(temp_dir).await;
+    }
+
+    #[test]
+    fn biocortex_retrieval_opt_in_gated_batch_diagnostics_schema_is_registered() {
+        let tool = BioCortexRetrievalOptInGatedBatchDiagnosticsTool::new(Hub::builder().build());
+        let schema = tool.schema();
+        assert_eq!(
+            schema.name,
+            "biocortex_retrieval_opt_in_gated_batch_diagnostics"
+        );
+        assert!(schema.description.contains("Transition-gated"));
+        assert!(schema.description.contains("Blocked gates"));
+        assert!(schema.description.contains("default memory_search"));
+
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required");
+        assert!(required.contains(&json!("runtime_transition_gate")));
+        assert!(required.contains(&json!("runtime_influence_decision_packet")));
+        assert!(required.contains(&json!("per_call_opt_in")));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("runtime_transition_gate").is_some());
+        assert!(props.get("runtime_influence_decision_packet").is_some());
+        assert!(props.get("queries").is_some());
+        assert!(props.get("query_cases").is_some());
+        assert!(props.get("tags_any").is_some());
+        assert!(props.get("limit").is_some());
+        assert!(props.get("checkout_path").is_some());
+        assert!(props.get("mutate").is_none());
+        assert!(props.get("raw_content").is_none());
+
+        let names: Vec<String> = build_registry_with_policy(
+            Hub::builder().build(),
+            ToolPolicy {
+                set: ToolSet::Profile,
+                profile: ToolProfile::Standard,
+            },
+        )
+        .list()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
+        assert!(names.contains(&schema.name));
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_gated_batch_diagnostics_blocks_before_memory_search() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let secret_query = "secret gated batch mcp blocked query";
+        let secret_key = "secret_gated_batch_mcp_blocked_key";
+        let secret_content = "secret gated batch mcp blocked content should not leak";
+        save_store_trial_memory(&hub, secret_key, 0.9, secret_content).await;
+
+        let mut gate = biocortex_runtime_transition_gate_fixture();
+        gate["status"] = json!("blocked");
+        gate["transition"]["transition_allowed"] = json!(false);
+        gate["transition"]["may_call_controlled_store_trial"] = json!(false);
+        gate["boundary_check"]["runtime_transition_allowed"] = json!(false);
+        gate["boundary_check"]["blockers"] = json!(["forced_transition_block"]);
+
+        let tool = BioCortexRetrievalOptInGatedBatchDiagnosticsTool::new(hub);
+        let out = tool
+            .execute(
+                json!({
+                    "runtime_transition_gate": gate,
+                    "runtime_influence_decision_packet": biocortex_store_trial_authorized_decision_packet_fixture(),
+                    "queries": [secret_query],
+                    "per_call_opt_in": true,
+                    "limit": 5,
+                    "attempt_id": "blocked-gated-batch-diagnostics"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let text = match out.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains(secret_query));
+        assert!(!text.contains(secret_key));
+        assert!(!text.contains(secret_content));
+        assert!(!text.contains("secret store trial packet query"));
+        assert!(!text.contains("secret_store_trial_packet_key"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_gated_batch_diagnostics.v0")
+        );
+        assert_eq!(v["status"], json!("transition_gate_blocked"));
+        assert_eq!(v["summary"]["transition_gate_blocked_count"], json!(1));
+        assert_eq!(v["summary"]["store_trial_called_count"], json!(0));
+        assert_eq!(v["summary"]["calls_memory_search_count"], json!(0));
+        assert_eq!(v["safety"]["transition_gate_blocked_all"], json!(true));
+        assert_eq!(v["safety"]["store_trial_called_any"], json!(false));
+        assert_eq!(v["calls_memory_search"], json!(false));
+        assert_eq!(v["runs_biocortex"], json!(false));
+        assert_eq!(v["changes_memory_search_order"], json!(false));
+        assert_eq!(v["raw_queries_included"], json!(false));
+        assert_eq!(v["raw_keys_included"], json!(false));
+        assert_eq!(v["content_included"], json!(false));
+
+        let _ = tokio::fs::remove_dir_all(temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_gated_batch_diagnostics_consumes_gate() {
+        let prior_enable = std::env::var("AB_BIOCORTEX_RETRIEVAL_OPT_IN").ok();
+        let prior_disable = std::env::var("AB_BIOCORTEX_RETRIEVAL_DISABLE").ok();
+        std::env::remove_var("AB_BIOCORTEX_RETRIEVAL_OPT_IN");
+        std::env::remove_var("AB_BIOCORTEX_RETRIEVAL_DISABLE");
+
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let secret_query = "secret gated batch mcp allowed query";
+        let secret_key = "secret_gated_batch_mcp_allowed_key";
+        let secret_content = "secret gated batch mcp allowed content should not leak";
+        save_store_trial_memory(&hub, secret_key, 0.9, secret_content).await;
+
+        let tool = BioCortexRetrievalOptInGatedBatchDiagnosticsTool::new(hub);
+        let out = tool
+            .execute(
+                json!({
+                    "runtime_transition_gate": biocortex_runtime_transition_gate_fixture(),
+                    "runtime_influence_decision_packet": biocortex_store_trial_authorized_decision_packet_fixture(),
+                    "queries": [secret_query],
+                    "per_call_opt_in": true,
+                    "limit": 5,
+                    "attempt_id": "allowed-gated-batch-diagnostics"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        restore_env_var("AB_BIOCORTEX_RETRIEVAL_OPT_IN", prior_enable);
+        restore_env_var("AB_BIOCORTEX_RETRIEVAL_DISABLE", prior_disable);
+
+        let text = match out.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains(secret_query));
+        assert!(!text.contains(secret_key));
+        assert!(!text.contains(secret_content));
+        assert!(!text.contains("secret store trial packet query"));
+        assert!(!text.contains("secret_store_trial_packet_key"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(v["status"], json!("completed"));
+        assert_eq!(v["summary"]["transition_gate_allowed_count"], json!(1));
+        assert_eq!(v["summary"]["store_trial_called_count"], json!(1));
+        assert_eq!(v["summary"]["calls_memory_search_count"], json!(1));
+        assert_eq!(v["summary"]["baseline_completed_count"], json!(1));
+        assert_eq!(v["safety"]["transition_gate_allowed_all"], json!(true));
+        assert_eq!(v["safety"]["store_trial_called_all"], json!(true));
+        assert_eq!(v["safety"]["calls_memory_search_all"], json!(true));
+        assert_eq!(v["calls_memory_search"], json!(true));
+        assert_eq!(v["runs_biocortex"], json!(false));
+        assert_eq!(v["changes_memory_search_order"], json!(false));
+        assert!(v["query_results"][0]["store_trial"]["baseline_key_count"].is_number());
+        assert_eq!(v["raw_queries_included"], json!(false));
         assert_eq!(v["raw_keys_included"], json!(false));
         assert_eq!(v["content_included"], json!(false));
 

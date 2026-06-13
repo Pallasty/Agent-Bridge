@@ -373,6 +373,22 @@ messages = [
             },
         },
     },
+    {
+        "jsonrpc": "2.0",
+        "id": 7,
+        "method": "tools/call",
+        "params": {
+            "name": "biocortex_retrieval_opt_in_gated_batch_diagnostics",
+            "arguments": {
+                "runtime_transition_gate": blocked_runtime_transition_gate_fixture(),
+                "runtime_influence_decision_packet": decision_fixture(),
+                "queries": ["secret gated batch mcp smoke query"],
+                "mode": "hybrid",
+                "per_call_opt_in": False,
+                "attempt_id": "mcp-smoke-blocked-gated-batch-diagnostics",
+            },
+        },
+    },
 ]
 
 with open(path, "w", encoding="utf-8") as f:
@@ -397,6 +413,7 @@ output_path, stderr_path = sys.argv[1:3]
 readiness_tool_name = "biocortex_retrieval_opt_in_runtime_readiness_packet"
 transition_tool_name = "biocortex_retrieval_opt_in_runtime_transition_gate"
 gated_tool_name = "biocortex_retrieval_opt_in_gated_store_trial"
+gated_batch_tool_name = "biocortex_retrieval_opt_in_gated_batch_diagnostics"
 listed_tools = []
 call_texts = {}
 errors = []
@@ -418,7 +435,7 @@ with open(output_path, encoding="utf-8", errors="replace") as f:
                 for tool in message.get("result", {}).get("tools", [])
                 if isinstance(tool, dict)
             ]
-        if message.get("id") in {3, 4, 5, 6}:
+        if message.get("id") in {3, 4, 5, 6, 7}:
             if message.get("error"):
                 errors.append(f"tools/call error: {message['error']}")
             for item in message.get("result", {}).get("content", []):
@@ -426,10 +443,15 @@ with open(output_path, encoding="utf-8", errors="replace") as f:
                     call_texts[message["id"]] = item["text"]
                     break
 
-for tool_name in [readiness_tool_name, transition_tool_name, gated_tool_name]:
+for tool_name in [
+    readiness_tool_name,
+    transition_tool_name,
+    gated_tool_name,
+    gated_batch_tool_name,
+]:
     if tool_name not in listed_tools:
         errors.append(f"{tool_name} missing from tools/list")
-for message_id in [3, 4, 5, 6]:
+for message_id in [3, 4, 5, 6, 7]:
     if message_id not in call_texts:
         errors.append(f"missing tools/call text result for id={message_id}")
 if errors:
@@ -456,6 +478,7 @@ for forbidden in [
     "secret_gated_transition_gate_key",
     "secret gated transition gate content",
     "secret gated mcp smoke query",
+    "secret gated batch mcp smoke query",
 ]:
     for message_id, call_text in call_texts.items():
         if forbidden in call_text:
@@ -659,8 +682,68 @@ if gated_actual != gated_expected:
     )
     sys.exit(1)
 
+gated_batch_payload = json.loads(call_texts[7])
+gated_batch_expected = {
+    "schema": "agent_bridge.biocortex_retrieval.opt_in_gated_batch_diagnostics.v0",
+    "status": "transition_gate_blocked",
+    "query_count": 1,
+    "transition_gate_blocked_count": 1,
+    "store_trial_called_count": 0,
+    "calls_memory_search_count": 0,
+    "transition_gate_blocked_all": True,
+    "store_trial_called_any": False,
+    "calls_memory_search": False,
+    "runs_biocortex": False,
+    "changes_memory_search_order": False,
+    "default_search_order_change_allowed": False,
+    "default_calls_unchanged": True,
+    "raw_queries_included": False,
+    "raw_keys_included": False,
+    "content_included": False,
+}
+gated_batch_actual = {
+    "schema": gated_batch_payload.get("schema"),
+    "status": gated_batch_payload.get("status"),
+    "query_count": gated_batch_payload.get("summary", {}).get("query_count"),
+    "transition_gate_blocked_count": gated_batch_payload.get("summary", {}).get(
+        "transition_gate_blocked_count"
+    ),
+    "store_trial_called_count": gated_batch_payload.get("summary", {}).get(
+        "store_trial_called_count"
+    ),
+    "calls_memory_search_count": gated_batch_payload.get("summary", {}).get(
+        "calls_memory_search_count"
+    ),
+    "transition_gate_blocked_all": gated_batch_payload.get("safety", {}).get(
+        "transition_gate_blocked_all"
+    ),
+    "store_trial_called_any": gated_batch_payload.get("safety", {}).get(
+        "store_trial_called_any"
+    ),
+    "calls_memory_search": gated_batch_payload.get("calls_memory_search"),
+    "runs_biocortex": gated_batch_payload.get("runs_biocortex"),
+    "changes_memory_search_order": gated_batch_payload.get("changes_memory_search_order"),
+    "default_search_order_change_allowed": gated_batch_payload.get(
+        "default_search_order_change_allowed"
+    ),
+    "default_calls_unchanged": gated_batch_payload.get("default_calls_unchanged"),
+    "raw_queries_included": gated_batch_payload.get("raw_queries_included"),
+    "raw_keys_included": gated_batch_payload.get("raw_keys_included"),
+    "content_included": gated_batch_payload.get("content_included"),
+}
+if gated_batch_actual != gated_batch_expected:
+    print("FAIL: unexpected MCP gated batch diagnostics blocked payload", file=sys.stderr)
+    print(
+        json.dumps(
+            {"actual": gated_batch_actual, "expected": gated_batch_expected},
+            indent=2,
+        ),
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
 print(
-    "OK: BioCortex runtime readiness + transition + gated store trial MCP tools/list and tools/call smoke passed "
+    "OK: BioCortex runtime readiness + transition + gated store/batch MCP tools/list and tools/call smoke passed "
     f"(tools={len(listed_tools)})"
 )
 PY

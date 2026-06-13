@@ -58,6 +58,8 @@ pub const BIOCORTEX_RETRIEVAL_OPT_IN_GATED_STORE_TRIAL_SCHEMA: &str =
     "agent_bridge.biocortex_retrieval.opt_in_gated_store_trial.v0";
 pub const BIOCORTEX_RETRIEVAL_OPT_IN_BATCH_DIAGNOSTICS_SCHEMA: &str =
     "agent_bridge.biocortex_retrieval.opt_in_batch_diagnostics.v0";
+pub const BIOCORTEX_RETRIEVAL_OPT_IN_GATED_BATCH_DIAGNOSTICS_SCHEMA: &str =
+    "agent_bridge.biocortex_retrieval.opt_in_gated_batch_diagnostics.v0";
 pub const BIOCORTEX_RETRIEVAL_OPT_IN_RUNTIME_READINESS_PACKET_SCHEMA: &str =
     "agent_bridge.biocortex_retrieval.opt_in_runtime_readiness_packet.v0";
 pub const BIOCORTEX_RETRIEVAL_OPT_IN_RUNTIME_TRANSITION_GATE_SCHEMA: &str =
@@ -306,6 +308,23 @@ pub struct BioCortexRetrievalOptInBatchDiagnosticsOptions {
 }
 
 #[derive(Debug, Clone)]
+pub struct BioCortexRetrievalOptInGatedBatchDiagnosticsOptions {
+    pub runtime_transition_gate: Value,
+    pub runtime_influence_decision_packet: Value,
+    pub queries: Vec<BioCortexRetrievalOptInBatchQueryCase>,
+    pub tags_any: Vec<String>,
+    pub limit: u32,
+    pub mode: String,
+    pub per_call_opt_in: bool,
+    pub checkout: Option<PathBuf>,
+    pub timeout_ms: u64,
+    pub coverage_threshold: f64,
+    pub blend_alpha: f32,
+    pub attempt_id: Option<String>,
+    pub commit: Option<String>,
+}
+
+#[derive(Debug, Clone)]
 pub struct BioCortexRetrievalOptInRuntimeReadinessPacketOptions {
     pub runtime_influence_decision_packet: Value,
     pub store_trial: Value,
@@ -493,6 +512,26 @@ impl Default for BioCortexRetrievalOptInGatedStoreTrialOptions {
             runtime_transition_gate: Value::Null,
             runtime_influence_decision_packet: Value::Null,
             query: String::new(),
+            tags_any: Vec::new(),
+            limit: 10,
+            mode: "fts".to_string(),
+            per_call_opt_in: false,
+            checkout: None,
+            timeout_ms: DEFAULT_TIMEOUT_MS,
+            coverage_threshold: 0.8,
+            blend_alpha: CANDIDATE_STRONG_RETRIEVAL_ALPHA,
+            attempt_id: None,
+            commit: None,
+        }
+    }
+}
+
+impl Default for BioCortexRetrievalOptInGatedBatchDiagnosticsOptions {
+    fn default() -> Self {
+        Self {
+            runtime_transition_gate: Value::Null,
+            runtime_influence_decision_packet: Value::Null,
+            queries: Vec::new(),
             tags_any: Vec::new(),
             limit: 10,
             mode: "fts".to_string(),
@@ -7018,6 +7057,221 @@ pub async fn biocortex_retrieval_opt_in_batch_diagnostics(
     })
 }
 
+pub async fn biocortex_retrieval_opt_in_gated_batch_diagnostics(
+    store: &dyn StateStore,
+    opts: BioCortexRetrievalOptInGatedBatchDiagnosticsOptions,
+) -> Value {
+    let queries = opts
+        .queries
+        .into_iter()
+        .filter_map(|case| {
+            let query = case.query.trim().to_string();
+            if query.is_empty() {
+                None
+            } else {
+                Some(BioCortexRetrievalOptInBatchQueryCase {
+                    query,
+                    class_label: case.class_label,
+                })
+            }
+        })
+        .take(50)
+        .collect::<Vec<_>>();
+    let mode = normalize_token(&opts.mode);
+    let limit = opts.limit.clamp(1, 100);
+    let timeout_ms = opts.timeout_ms.clamp(1_000, 600_000);
+    let coverage_threshold = opts.coverage_threshold.clamp(0.0, 1.0);
+    let blend_alpha = if opts.blend_alpha.is_finite() && opts.blend_alpha >= 0.0 {
+        opts.blend_alpha.clamp(0.0, 1.0)
+    } else {
+        CANDIDATE_STRONG_RETRIEVAL_ALPHA
+    };
+    let tag_filter_count = opts
+        .tags_any
+        .iter()
+        .map(|tag| tag.trim())
+        .filter(|tag| !tag.is_empty())
+        .count();
+    let runtime_transition_gate = opts.runtime_transition_gate;
+    let runtime_influence_decision_packet = opts.runtime_influence_decision_packet;
+    let attempt_id = opts.attempt_id.clone();
+    let commit = opts.commit.clone();
+
+    let mut query_results = Vec::with_capacity(queries.len());
+    let mut bucket_stats = BTreeMap::<String, GatedBatchBucketStats>::new();
+    let mut summary = GatedBatchBucketStats::default();
+
+    for (idx, case) in queries.into_iter().enumerate() {
+        let class_label = safe_batch_class_label(case.class_label.as_deref());
+        let trial_attempt_id = attempt_id.as_ref().map(|id| format!("{id}:q{}", idx + 1));
+        let trial = biocortex_retrieval_opt_in_gated_store_trial(
+            store,
+            BioCortexRetrievalOptInGatedStoreTrialOptions {
+                runtime_transition_gate: runtime_transition_gate.clone(),
+                runtime_influence_decision_packet: runtime_influence_decision_packet.clone(),
+                query: case.query,
+                tags_any: opts.tags_any.clone(),
+                limit,
+                mode: mode.clone(),
+                per_call_opt_in: opts.per_call_opt_in,
+                checkout: opts.checkout.clone(),
+                timeout_ms,
+                coverage_threshold,
+                blend_alpha,
+                attempt_id: trial_attempt_id,
+                commit: commit.clone(),
+            },
+        )
+        .await;
+        let movement_class = gated_batch_movement_class(&trial).to_string();
+        let result = gated_batch_trial_summary(idx, &class_label, &movement_class, &trial);
+        summary.add_gated_trial(&trial);
+        bucket_stats
+            .entry(class_label)
+            .or_default()
+            .add_gated_trial(&trial);
+        query_results.push(result);
+    }
+
+    let bucket_summary = bucket_stats
+        .into_iter()
+        .map(|(class_label, stats)| stats.to_value(Some(class_label)))
+        .collect::<Vec<_>>();
+    let raw_flags_all_false = query_results.iter().all(|row| {
+        value_bool_is(row.get("raw_query_included"), false)
+            && value_bool_is(row.get("raw_queries_included"), false)
+            && value_bool_is(row.get("raw_keys_included"), false)
+            && value_bool_is(row.get("content_included"), false)
+            && value_bool_is(row.get("side_signal_raw_included"), false)
+    });
+    let query_count = query_results.len();
+    let no_queries = query_count == 0;
+    let all_transition_blocked =
+        query_count > 0 && summary.transition_gate_blocked_count == query_count;
+
+    let status = if no_queries {
+        "empty_batch"
+    } else if all_transition_blocked {
+        "transition_gate_blocked"
+    } else {
+        "completed"
+    };
+    let attempt = json!({
+        "attempt_id": required_or_value(attempt_id),
+        "commit": required_or_value(commit),
+        "mode": mode,
+        "per_call_opt_in": opts.per_call_opt_in,
+        "limit": limit,
+        "query_count": query_count,
+        "tag_filter_count": tag_filter_count,
+        "coverage_threshold": round3(coverage_threshold),
+        "blend_alpha": blend_alpha,
+    });
+    let input_contract = json!({
+        "runtime_transition_gate_schema": runtime_transition_gate.get("schema").cloned().unwrap_or(Value::Null),
+        "runtime_transition_gate_included": false,
+        "runtime_influence_decision_packet_schema": runtime_influence_decision_packet.get("schema").cloned().unwrap_or(Value::Null),
+        "runtime_influence_decision_packet_included": false,
+        "requires_transition_gate_allowed": true,
+        "accepts_aggregate_backed_decision_packet": true,
+        "requires_aggregate_ready_when_provided": true,
+        "redacted_evidence_aggregate_included": false,
+        "aggregate_evidence_summary_included": false,
+        "raw_queries_included": false,
+        "raw_keys_included": false,
+        "content_included": false,
+        "side_signal_raw_included": false,
+        "query_classes_sanitized": true,
+    });
+    let summary_value = summary.to_value(None);
+    let safety = json!({
+        "transition_gate_blocked_any": summary.transition_gate_blocked_count > 0,
+        "transition_gate_blocked_all": query_count > 0 && summary.transition_gate_blocked_count == query_count,
+        "transition_gate_allowed_any": summary.transition_gate_allowed_count > 0,
+        "transition_gate_allowed_all": query_count > 0 && summary.transition_gate_allowed_count == query_count,
+        "store_trial_called_any": summary.store_trial_called_count > 0,
+        "store_trial_called_all": query_count > 0 && summary.store_trial_called_count == query_count,
+        "calls_memory_search_any": summary.calls_memory_search_count > 0,
+        "calls_memory_search_all": query_count > 0 && summary.calls_memory_search_count == query_count,
+        "runs_biocortex_any": summary.runs_biocortex_count > 0,
+        "changes_memory_search_order_any": summary.contract_changes_order_count > 0,
+        "actual_return_order_changed_any": summary.actual_order_changed_count > 0,
+        "default_calls_unchanged_all": query_count == 0 || summary.default_calls_unchanged_count == query_count,
+        "raw_query_included": false,
+        "raw_queries_included": false,
+        "raw_keys_included": false,
+        "content_included": false,
+        "side_signal_raw_included": false,
+        "raw_flags_all_false": raw_flags_all_false,
+    });
+    let approval_state = if all_transition_blocked {
+        "transition_gate_blocked"
+    } else {
+        "transition_gate_consumed_batch_diagnostics"
+    };
+    let authorization_state = if all_transition_blocked {
+        "blocked"
+    } else {
+        "readiness_gated_explicit_opt_in_fts_batch_runtime_entry"
+    };
+    let calls_memory_search = summary.calls_memory_search_count > 0;
+    let runs_biocortex = summary.runs_biocortex_count > 0;
+    let changes_memory_search_order = summary.contract_changes_order_count > 0;
+    let actual_return_order_changed = summary.actual_order_changed_count > 0;
+    let default_calls_unchanged =
+        query_count == 0 || summary.default_calls_unchanged_count == query_count;
+    let boundary = json!({
+        "mode": "runtime_transition_gated_batch_diagnostics",
+        "read_only": true,
+        "gate_required": true,
+        "gate_consumed": summary.transition_gate_allowed_count > 0,
+        "calls_memory_search": calls_memory_search,
+        "runs_external_side_signal": runs_biocortex,
+        "writes_temp_corpus": runs_biocortex,
+        "links_biocortex_into_ab_runtime": false,
+        "registers_embedding_backend": false,
+        "calls_set_default_backend": false,
+        "mutates_ab_memory": false,
+        "writes_embeddings": false,
+        "writes_coactivation": false,
+        "writes_graph_edges": false,
+        "changes_memory_search_order": changes_memory_search_order,
+        "default_search_order_changed": false,
+    });
+
+    json!({
+        "schema": BIOCORTEX_RETRIEVAL_OPT_IN_GATED_BATCH_DIAGNOSTICS_SCHEMA,
+        "generated_at": now_secs(),
+        "gated_batch_diagnostics": true,
+        "implementation_stage": "runtime_transition_gated_batch_diagnostics",
+        "authorization_scope": "explicit_opt_in_fts_runtime_influence",
+        "purpose": "Batch redacted diagnostics that consume a runtime transition gate before any query may call the protected explicit opt-in FTS store trial.",
+        "status": status,
+        "attempt": attempt,
+        "input_contract": input_contract,
+        "summary": summary_value,
+        "bucket_summary": bucket_summary,
+        "query_results": query_results,
+        "safety": safety,
+        "approval_state": approval_state,
+        "authorization_state": authorization_state,
+        "approval_writes_allowed": false,
+        "writes_approval": false,
+        "calls_memory_search": calls_memory_search,
+        "runs_biocortex": runs_biocortex,
+        "registers_embedding_backend": false,
+        "changes_memory_search_order": changes_memory_search_order,
+        "actual_return_order_changed": actual_return_order_changed,
+        "default_search_order_change_allowed": false,
+        "default_calls_unchanged": default_calls_unchanged,
+        "raw_queries_included": false,
+        "raw_keys_included": false,
+        "content_included": false,
+        "side_signal_raw_included": false,
+        "boundary": boundary,
+    })
+}
+
 pub fn biocortex_retrieval_opt_in_runtime_readiness_packet(
     opts: BioCortexRetrievalOptInRuntimeReadinessPacketOptions,
 ) -> Value {
@@ -7988,6 +8242,156 @@ impl BatchBucketStats {
     }
 }
 
+#[derive(Default)]
+struct GatedBatchBucketStats {
+    query_count: usize,
+    transition_gate_allowed_count: usize,
+    transition_gate_blocked_count: usize,
+    store_trial_called_count: usize,
+    store_trial_adapter_allowed_count: usize,
+    store_trial_preflight_blocked_count: usize,
+    baseline_completed_count: usize,
+    baseline_empty_count: usize,
+    side_signal_attempted_count: usize,
+    side_signal_ok_count: usize,
+    experimental_source_count: usize,
+    baseline_returned_count: usize,
+    hash_matches_baseline_count: usize,
+    contract_changes_order_count: usize,
+    actual_order_changed_count: usize,
+    calls_memory_search_count: usize,
+    runs_biocortex_count: usize,
+    default_calls_unchanged_count: usize,
+    raw_flagged_count: usize,
+    coverage_sum: f64,
+    coverage_count: usize,
+}
+
+impl GatedBatchBucketStats {
+    fn add_gated_trial(&mut self, trial: &Value) {
+        self.query_count += 1;
+        if value_bool_is(
+            trial.pointer("/runtime_transition_preflight/transition_gate_allowed"),
+            true,
+        ) {
+            self.transition_gate_allowed_count += 1;
+        } else {
+            self.transition_gate_blocked_count += 1;
+        }
+        if value_bool_is(trial.get("store_trial_called"), true) {
+            self.store_trial_called_count += 1;
+        }
+        if value_bool_is(
+            trial.pointer("/store_trial_summary/runtime_adapter_allowed"),
+            true,
+        ) {
+            self.store_trial_adapter_allowed_count += 1;
+        }
+        let blocker_count = trial
+            .pointer("/store_trial_summary/runtime_preflight_blocker_count")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        if value_bool_is(trial.get("store_trial_called"), true) && blocker_count > 0 {
+            self.store_trial_preflight_blocked_count += 1;
+        }
+        if value_bool_is(trial.pointer("/store_trial_summary/baseline_completed"), true) {
+            self.baseline_completed_count += 1;
+        }
+        if trial
+            .pointer("/store_trial_summary/baseline_key_count")
+            .and_then(Value::as_u64)
+            == Some(0)
+        {
+            self.baseline_empty_count += 1;
+        }
+        if value_bool_is(trial.pointer("/store_trial_summary/side_signal_attempted"), true) {
+            self.side_signal_attempted_count += 1;
+        }
+        if value_str_eq(trial.pointer("/store_trial_summary/side_signal_status"), "ok") {
+            self.side_signal_ok_count += 1;
+        }
+        if value_str_eq(
+            trial.pointer("/store_trial_summary/returned_order_source"),
+            "experimental",
+        ) {
+            self.experimental_source_count += 1;
+        }
+        if value_bool_is(trial.pointer("/store_trial_summary/baseline_returned"), true) {
+            self.baseline_returned_count += 1;
+        }
+        if value_bool_is(trial.pointer("/store_trial_summary/hash_matches_baseline"), true) {
+            self.hash_matches_baseline_count += 1;
+        }
+        if value_bool_is(
+            trial.pointer("/store_trial_summary/contract_changes_memory_search_order"),
+            true,
+        ) {
+            self.contract_changes_order_count += 1;
+        }
+        if value_bool_is(trial.pointer("/store_trial_summary/actual_return_order_changed"), true) {
+            self.actual_order_changed_count += 1;
+        }
+        if value_bool_is(trial.get("calls_memory_search"), true) {
+            self.calls_memory_search_count += 1;
+        }
+        if value_bool_is(trial.get("runs_biocortex"), true) {
+            self.runs_biocortex_count += 1;
+        }
+        if value_bool_is(trial.get("default_calls_unchanged"), true) {
+            self.default_calls_unchanged_count += 1;
+        }
+        let raw_flagged = value_bool_is(trial.get("raw_query_included"), true)
+            || value_bool_is(trial.get("raw_queries_included"), true)
+            || value_bool_is(trial.get("raw_keys_included"), true)
+            || value_bool_is(trial.get("content_included"), true)
+            || value_bool_is(trial.get("side_signal_raw_included"), true);
+        if raw_flagged {
+            self.raw_flagged_count += 1;
+        }
+        if let Some(coverage) = trial
+            .pointer("/store_trial_summary/side_signal_coverage")
+            .and_then(Value::as_f64)
+        {
+            self.coverage_sum += coverage;
+            self.coverage_count += 1;
+        }
+    }
+
+    fn to_value(&self, class_label: Option<String>) -> Value {
+        let avg_coverage = if self.coverage_count > 0 {
+            round3(self.coverage_sum / self.coverage_count as f64)
+        } else {
+            0.0
+        };
+        let mut value = json!({
+            "query_count": self.query_count,
+            "transition_gate_allowed_count": self.transition_gate_allowed_count,
+            "transition_gate_blocked_count": self.transition_gate_blocked_count,
+            "store_trial_called_count": self.store_trial_called_count,
+            "store_trial_adapter_allowed_count": self.store_trial_adapter_allowed_count,
+            "store_trial_preflight_blocked_count": self.store_trial_preflight_blocked_count,
+            "baseline_completed_count": self.baseline_completed_count,
+            "baseline_empty_count": self.baseline_empty_count,
+            "side_signal_attempted_count": self.side_signal_attempted_count,
+            "side_signal_ok_count": self.side_signal_ok_count,
+            "experimental_source_count": self.experimental_source_count,
+            "baseline_returned_count": self.baseline_returned_count,
+            "hash_matches_baseline_count": self.hash_matches_baseline_count,
+            "contract_changes_order_count": self.contract_changes_order_count,
+            "actual_order_changed_count": self.actual_order_changed_count,
+            "calls_memory_search_count": self.calls_memory_search_count,
+            "runs_biocortex_count": self.runs_biocortex_count,
+            "default_calls_unchanged_count": self.default_calls_unchanged_count,
+            "raw_flagged_count": self.raw_flagged_count,
+            "avg_coverage": avg_coverage,
+        });
+        if let Some(class_label) = class_label {
+            value["class_label"] = json!(class_label);
+        }
+        value
+    }
+}
+
 fn batch_trial_summary(
     idx: usize,
     class_label: &str,
@@ -8046,6 +8450,58 @@ fn batch_trial_summary(
     })
 }
 
+fn gated_batch_trial_summary(
+    idx: usize,
+    class_label: &str,
+    movement_class: &str,
+    trial: &Value,
+) -> Value {
+    json!({
+        "index": idx,
+        "class_label": class_label,
+        "query_hash": trial.get("query_hash").cloned().unwrap_or(Value::Null),
+        "status": trial.get("status").cloned().unwrap_or(Value::Null),
+        "movement_class": movement_class,
+        "transition_preflight": {
+            "transition_gate_allowed": trial.pointer("/runtime_transition_preflight/transition_gate_allowed").cloned().unwrap_or(Value::Bool(false)),
+            "blocker_count": trial.pointer("/runtime_transition_preflight/blockers").and_then(Value::as_array).map(|items| items.len()).unwrap_or(0),
+            "gate_schema_ok": trial.pointer("/runtime_transition_preflight/gate_schema_ok").cloned().unwrap_or(Value::Bool(false)),
+            "gate_status_allowed": trial.pointer("/runtime_transition_preflight/gate_status_allowed").cloned().unwrap_or(Value::Bool(false)),
+            "gate_boundary_allowed": trial.pointer("/runtime_transition_preflight/gate_boundary_allowed").cloned().unwrap_or(Value::Bool(false)),
+            "gate_transition_allowed": trial.pointer("/runtime_transition_preflight/gate_transition_allowed").cloned().unwrap_or(Value::Bool(false)),
+            "operator_disabled_now": trial.pointer("/runtime_transition_preflight/operator_disabled_now").cloned().unwrap_or(Value::Bool(false)),
+            "query_present": trial.pointer("/runtime_transition_preflight/query_present").cloned().unwrap_or(Value::Bool(false)),
+        },
+        "store_trial": {
+            "called": trial.get("store_trial_called").cloned().unwrap_or(Value::Bool(false)),
+            "status": trial.pointer("/store_trial_summary/status").cloned().unwrap_or(Value::Null),
+            "runtime_adapter_allowed": trial.pointer("/store_trial_summary/runtime_adapter_allowed").cloned().unwrap_or(Value::Bool(false)),
+            "runtime_preflight_blocker_count": trial.pointer("/store_trial_summary/runtime_preflight_blocker_count").cloned().unwrap_or_else(|| json!(0)),
+            "baseline_completed": trial.pointer("/store_trial_summary/baseline_completed").cloned().unwrap_or(Value::Bool(false)),
+            "baseline_key_count": trial.pointer("/store_trial_summary/baseline_key_count").cloned().unwrap_or_else(|| json!(0)),
+            "side_signal_attempted": trial.pointer("/store_trial_summary/side_signal_attempted").cloned().unwrap_or(Value::Bool(false)),
+            "side_signal_status": trial.pointer("/store_trial_summary/side_signal_status").cloned().unwrap_or(Value::Null),
+            "side_signal_coverage": trial.pointer("/store_trial_summary/side_signal_coverage").cloned().unwrap_or(Value::Null),
+            "returned_order_source": trial.pointer("/store_trial_summary/returned_order_source").cloned().unwrap_or(Value::Null),
+            "baseline_returned": trial.pointer("/store_trial_summary/baseline_returned").cloned().unwrap_or(Value::Bool(true)),
+            "contract_changes_memory_search_order": trial.pointer("/store_trial_summary/contract_changes_memory_search_order").cloned().unwrap_or(Value::Bool(false)),
+            "actual_return_order_changed": trial.pointer("/store_trial_summary/actual_return_order_changed").cloned().unwrap_or(Value::Bool(false)),
+            "hash_matches_baseline": trial.pointer("/store_trial_summary/hash_matches_baseline").cloned().unwrap_or(Value::Bool(true)),
+            "fallback_reason": trial.pointer("/store_trial_summary/fallback_reason").cloned().unwrap_or(Value::Null),
+        },
+        "calls_memory_search": trial.get("calls_memory_search").cloned().unwrap_or(Value::Bool(false)),
+        "runs_biocortex": trial.get("runs_biocortex").cloned().unwrap_or(Value::Bool(false)),
+        "changes_memory_search_order": trial.get("changes_memory_search_order").cloned().unwrap_or(Value::Bool(false)),
+        "actual_return_order_changed": trial.get("actual_return_order_changed").cloned().unwrap_or(Value::Bool(false)),
+        "default_calls_unchanged": trial.get("default_calls_unchanged").cloned().unwrap_or(Value::Bool(true)),
+        "raw_query_included": false,
+        "raw_queries_included": false,
+        "raw_keys_included": false,
+        "content_included": false,
+        "side_signal_raw_included": false,
+    })
+}
+
 fn batch_movement_class(trial: &Value) -> &'static str {
     if !value_bool_is(trial.pointer("/runtime_preflight/baseline_completed"), true) {
         "baseline_unavailable"
@@ -8061,6 +8517,36 @@ fn batch_movement_class(trial: &Value) -> &'static str {
     } else if value_str_eq(trial.pointer("/returned_order/source"), "experimental") {
         "experimental_aligned_with_baseline"
     } else if value_bool_is(trial.pointer("/returned_order/baseline_returned"), true) {
+        "baseline_returned"
+    } else {
+        "unknown"
+    }
+}
+
+fn gated_batch_movement_class(trial: &Value) -> &'static str {
+    if !value_bool_is(
+        trial.pointer("/runtime_transition_preflight/transition_gate_allowed"),
+        true,
+    ) {
+        "transition_gate_blocked"
+    } else if !value_bool_is(trial.get("store_trial_called"), true) {
+        "store_trial_not_called"
+    } else if !value_bool_is(
+        trial.pointer("/store_trial_summary/runtime_adapter_allowed"),
+        true,
+    ) {
+        "store_trial_preflight_blocked"
+    } else if !value_str_eq(trial.pointer("/store_trial_summary/side_signal_status"), "ok") {
+        "side_signal_unavailable"
+    } else if value_bool_is(trial.pointer("/store_trial_summary/actual_return_order_changed"), true)
+    {
+        "experimental_moved_order"
+    } else if value_str_eq(
+        trial.pointer("/store_trial_summary/returned_order_source"),
+        "experimental",
+    ) {
+        "experimental_aligned_with_baseline"
+    } else if value_bool_is(trial.pointer("/store_trial_summary/baseline_returned"), true) {
         "baseline_returned"
     } else {
         "unknown"
@@ -13303,6 +13789,150 @@ mod tests {
 
         let serialized = serde_json::to_string(&trial).expect("gated trial json");
         assert!(!serialized.contains("secret gated store trial allowed query"));
+        let _ = tokio::fs::remove_dir_all(dir).await;
+    }
+
+    #[tokio::test]
+    async fn opt_in_gated_batch_diagnostics_blocks_all_queries_before_memory_search() {
+        let mut gate = opt_in_runtime_transition_gate_fixture();
+        gate["status"] = json!("blocked");
+        gate["transition"]["transition_allowed"] = json!(false);
+        gate["transition"]["may_call_controlled_store_trial"] = json!(false);
+        gate["boundary_check"]["runtime_transition_allowed"] = json!(false);
+        gate["boundary_check"]["blockers"] = json!(["forced_transition_block"]);
+        let (store, dir) = empty_sqlite_store("gated-batch-diagnostics-blocked").await;
+
+        let batch = biocortex_retrieval_opt_in_gated_batch_diagnostics(
+            &store,
+            BioCortexRetrievalOptInGatedBatchDiagnosticsOptions {
+                runtime_transition_gate: gate,
+                runtime_influence_decision_packet: Value::Null,
+                queries: vec![
+                    BioCortexRetrievalOptInBatchQueryCase {
+                        query: "secret gated batch blocked query one".to_string(),
+                        class_label: Some("Blocked One".to_string()),
+                    },
+                    BioCortexRetrievalOptInBatchQueryCase {
+                        query: "secret gated batch blocked query two".to_string(),
+                        class_label: Some("Blocked Two".to_string()),
+                    },
+                ],
+                tags_any: vec![],
+                limit: 3,
+                mode: "fts".to_string(),
+                per_call_opt_in: true,
+                checkout: None,
+                timeout_ms: 1_000,
+                coverage_threshold: 0.5,
+                blend_alpha: CANDIDATE_STRONG_RETRIEVAL_ALPHA,
+                attempt_id: Some("gated-batch-blocked".to_string()),
+                commit: None,
+            },
+        )
+        .await;
+
+        assert_eq!(
+            batch["schema"],
+            json!(BIOCORTEX_RETRIEVAL_OPT_IN_GATED_BATCH_DIAGNOSTICS_SCHEMA)
+        );
+        assert_eq!(batch["status"], json!("transition_gate_blocked"));
+        assert_eq!(batch["summary"]["query_count"], json!(2));
+        assert_eq!(batch["summary"]["transition_gate_blocked_count"], json!(2));
+        assert_eq!(batch["summary"]["store_trial_called_count"], json!(0));
+        assert_eq!(batch["summary"]["calls_memory_search_count"], json!(0));
+        assert_eq!(batch["safety"]["transition_gate_blocked_all"], json!(true));
+        assert_eq!(batch["safety"]["store_trial_called_any"], json!(false));
+        assert_eq!(batch["calls_memory_search"], json!(false));
+        assert_eq!(batch["runs_biocortex"], json!(false));
+        assert_eq!(batch["changes_memory_search_order"], json!(false));
+        assert_eq!(batch["boundary"]["gate_consumed"], json!(false));
+
+        let first = &batch["query_results"][0];
+        assert_eq!(first["movement_class"], json!("transition_gate_blocked"));
+        assert_eq!(first["store_trial"]["called"], json!(false));
+        assert_eq!(
+            first["transition_preflight"]["transition_gate_allowed"],
+            json!(false)
+        );
+
+        let serialized = serde_json::to_string(&batch).expect("gated batch json");
+        assert!(!serialized.contains("secret gated batch blocked query one"));
+        assert!(!serialized.contains("secret gated batch blocked query two"));
+        let _ = tokio::fs::remove_dir_all(dir).await;
+    }
+
+    #[tokio::test]
+    async fn opt_in_gated_batch_diagnostics_consumes_gate_per_query() {
+        let _env = EnvRestore::capture(&[BIOCORTEX_RETRIEVAL_DISABLE_ENV]);
+        std::env::remove_var(BIOCORTEX_RETRIEVAL_DISABLE_ENV);
+        let decision_packet = biocortex_retrieval_opt_in_runtime_influence_decision_packet(
+            BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketOptions {
+                runtime_influence_review_request:
+                    opt_in_aggregate_backed_runtime_influence_review_request_fixture(),
+                runtime_influence_decision: opt_in_runtime_influence_decision_fixture(),
+                reviewer: Some("codex".to_string()),
+                commit: Some("runtime-decision-commit".to_string()),
+                forum_post_id: Some("104".to_string()),
+                memory_key: Some("runtime-decision-memory".to_string()),
+            },
+        );
+        let (store, dir) = empty_sqlite_store("gated-batch-diagnostics-allowed").await;
+
+        let batch = biocortex_retrieval_opt_in_gated_batch_diagnostics(
+            &store,
+            BioCortexRetrievalOptInGatedBatchDiagnosticsOptions {
+                runtime_transition_gate: opt_in_runtime_transition_gate_fixture(),
+                runtime_influence_decision_packet: decision_packet,
+                queries: vec![
+                    BioCortexRetrievalOptInBatchQueryCase {
+                        query: "secret gated batch allowed query one".to_string(),
+                        class_label: Some("Allowed One".to_string()),
+                    },
+                    BioCortexRetrievalOptInBatchQueryCase {
+                        query: "secret gated batch allowed query two".to_string(),
+                        class_label: Some("Allowed Two".to_string()),
+                    },
+                ],
+                tags_any: vec![],
+                limit: 3,
+                mode: "fts".to_string(),
+                per_call_opt_in: true,
+                checkout: None,
+                timeout_ms: 1_000,
+                coverage_threshold: 0.5,
+                blend_alpha: CANDIDATE_STRONG_RETRIEVAL_ALPHA,
+                attempt_id: Some("gated-batch-allowed".to_string()),
+                commit: Some("runtime-transition-commit".to_string()),
+            },
+        )
+        .await;
+
+        assert_eq!(batch["status"], json!("completed"));
+        assert_eq!(batch["summary"]["query_count"], json!(2));
+        assert_eq!(batch["summary"]["transition_gate_allowed_count"], json!(2));
+        assert_eq!(batch["summary"]["transition_gate_blocked_count"], json!(0));
+        assert_eq!(batch["summary"]["store_trial_called_count"], json!(2));
+        assert_eq!(batch["summary"]["calls_memory_search_count"], json!(2));
+        assert_eq!(batch["safety"]["transition_gate_allowed_all"], json!(true));
+        assert_eq!(batch["safety"]["store_trial_called_all"], json!(true));
+        assert_eq!(batch["safety"]["calls_memory_search_all"], json!(true));
+        assert_eq!(batch["calls_memory_search"], json!(true));
+        assert_eq!(batch["runs_biocortex"], json!(false));
+        assert_eq!(batch["changes_memory_search_order"], json!(false));
+        assert_eq!(batch["boundary"]["gate_consumed"], json!(true));
+
+        let first = &batch["query_results"][0];
+        assert_eq!(first["movement_class"], json!("store_trial_preflight_blocked"));
+        assert_eq!(first["store_trial"]["called"], json!(true));
+        assert_eq!(
+            first["transition_preflight"]["transition_gate_allowed"],
+            json!(true)
+        );
+        assert_eq!(first["store_trial"]["baseline_key_count"], json!(0));
+
+        let serialized = serde_json::to_string(&batch).expect("gated batch json");
+        assert!(!serialized.contains("secret gated batch allowed query one"));
+        assert!(!serialized.contains("secret gated batch allowed query two"));
         let _ = tokio::fs::remove_dir_all(dir).await;
     }
 

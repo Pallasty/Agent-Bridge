@@ -3980,6 +3980,108 @@ if grep -q 'verify gated store trial blocked secret query\|verify aggregate-back
     echo "opt-in gated store trial blocked path leaked raw query/key/content data" >&2
     exit 1
 fi
+
+opt_in_gated_batch_diagnostics_empty_with_aggregate="$tmpdir/opt-in-gated-batch-diagnostics-empty-with-aggregate.json"
+run env AGENT_BRIDGE_DB="$tmpdir/opt-in-gated-batch-diagnostics-empty-with-aggregate.db" \
+    AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
+    cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
+    bio-cortex retrieval-opt-in-gated-batch-diagnostics \
+    --runtime-transition-gate-json "$opt_in_runtime_transition_gate" \
+    --runtime-influence-decision-packet-json "$opt_in_runtime_influence_decision_packet_with_aggregate" \
+    --query "verify gated batch allowed secret query one" \
+    --query-class "allowed one" \
+    --query "verify gated batch allowed secret query two" \
+    --query-class "allowed two" \
+    --per-call-opt-in \
+    --checkout "$biocortex_rs" \
+    --limit 3 \
+    --attempt-id verify-gated-batch-diagnostics-empty-with-aggregate \
+    --commit verify-dry-run-commit \
+    --json > "$opt_in_gated_batch_diagnostics_empty_with_aggregate"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_gated_batch_diagnostics.v0"
+    and .gated_batch_diagnostics == true
+    and .implementation_stage == "runtime_transition_gated_batch_diagnostics"
+    and .status == "completed"
+    and .input_contract.runtime_transition_gate_included == false
+    and .input_contract.runtime_influence_decision_packet_included == false
+    and .input_contract.requires_transition_gate_allowed == true
+    and .input_contract.raw_queries_included == false
+    and .input_contract.raw_keys_included == false
+    and .input_contract.content_included == false
+    and .summary.query_count == 2
+    and .summary.transition_gate_allowed_count == 2
+    and .summary.transition_gate_blocked_count == 0
+    and .summary.store_trial_called_count == 2
+    and .summary.calls_memory_search_count == 2
+    and .summary.runs_biocortex_count == 0
+    and .summary.default_calls_unchanged_count == 2
+    and .safety.transition_gate_allowed_all == true
+    and .safety.store_trial_called_all == true
+    and .safety.calls_memory_search_all == true
+    and .safety.runs_biocortex_any == false
+    and .safety.raw_flags_all_false == true
+    and ([.query_results[].transition_preflight.transition_gate_allowed] | unique) == [true]
+    and ([.query_results[].store_trial.called] | unique) == [true]
+    and ([.query_results[].calls_memory_search] | unique) == [true]
+    and .calls_memory_search == true
+    and .runs_biocortex == false
+    and .changes_memory_search_order == false
+    and .default_search_order_change_allowed == false
+    and .default_calls_unchanged == true
+    and .raw_queries_included == false
+    and .raw_keys_included == false
+    and .content_included == false
+    and .side_signal_raw_included == false
+    and .boundary.gate_consumed == true
+    and .boundary.calls_memory_search == true
+' "$opt_in_gated_batch_diagnostics_empty_with_aggregate" >/dev/null
+if grep -q 'verify gated batch allowed secret query one\|verify gated batch allowed secret query two\|verify gated store trial allowed secret query\|verify aggregate-backed store trial ready secret query\|cortexdelta\|axonalpha\|expanded_corpus_baseline_focus\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_gated_batch_diagnostics_empty_with_aggregate"; then
+    echo "opt-in gated batch diagnostics allowed path leaked raw query/key/content data" >&2
+    exit 1
+fi
+
+opt_in_gated_batch_diagnostics_blocked="$tmpdir/opt-in-gated-batch-diagnostics-blocked.json"
+run env AGENT_BRIDGE_DB="$tmpdir/opt-in-gated-batch-diagnostics-blocked.db" \
+    cargo run -p ab-bridge --no-default-features -- \
+    bio-cortex retrieval-opt-in-gated-batch-diagnostics \
+    --runtime-transition-gate-json "$opt_in_runtime_transition_gate_blocked" \
+    --runtime-influence-decision-packet-json "$opt_in_runtime_influence_decision_packet_with_aggregate" \
+    --query "verify gated batch blocked secret query" \
+    --mode hybrid \
+    --json > "$opt_in_gated_batch_diagnostics_blocked"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_gated_batch_diagnostics.v0"
+    and .status == "transition_gate_blocked"
+    and .summary.query_count == 1
+    and .summary.transition_gate_allowed_count == 0
+    and .summary.transition_gate_blocked_count == 1
+    and .summary.store_trial_called_count == 0
+    and .summary.calls_memory_search_count == 0
+    and .summary.runs_biocortex_count == 0
+    and .safety.transition_gate_blocked_all == true
+    and .safety.store_trial_called_any == false
+    and .safety.calls_memory_search_any == false
+    and .safety.raw_flags_all_false == true
+    and .query_results[0].movement_class == "transition_gate_blocked"
+    and .query_results[0].transition_preflight.transition_gate_allowed == false
+    and .query_results[0].store_trial.called == false
+    and .calls_memory_search == false
+    and .runs_biocortex == false
+    and .changes_memory_search_order == false
+    and .default_search_order_change_allowed == false
+    and .default_calls_unchanged == true
+    and .raw_queries_included == false
+    and .raw_keys_included == false
+    and .content_included == false
+    and .side_signal_raw_included == false
+    and .boundary.gate_consumed == false
+    and .boundary.calls_memory_search == false
+' "$opt_in_gated_batch_diagnostics_blocked" >/dev/null
+if grep -q 'verify gated batch blocked secret query\|verify gated store trial blocked secret query\|verify aggregate-backed store trial ready secret query\|cortexdelta\|axonalpha\|expanded_corpus_baseline_focus\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_gated_batch_diagnostics_blocked"; then
+    echo "opt-in gated batch diagnostics blocked path leaked raw query/key/content data" >&2
+    exit 1
+fi
 test -s "$opt_in_auth_request/forum-post-template.md"
 test -s "$opt_in_auth_request/memory-note-template.md"
 
