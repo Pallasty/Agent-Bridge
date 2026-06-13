@@ -391,6 +391,40 @@ enum InstinctOp {
         #[arg(long)]
         json: bool,
     },
+    /// Build a dry-run memory-write preflight for an approved candidate. This
+    /// validates the review packet + latest decision and never writes memory.
+    MemoryPreflight {
+        /// Review packet JSON produced by `instinct review-packet --write`.
+        #[arg(long)]
+        packet_json: PathBuf,
+        /// Candidate id inside the review packet, e.g. instinct-candidate-0001.
+        #[arg(long)]
+        candidate_id: String,
+        /// Optional decisions JSONL path. Defaults to decisions.jsonl under the
+        /// private instinct review sidecar directory.
+        #[arg(long)]
+        decisions: Option<PathBuf>,
+        /// Human-authored memory key for the later explicit memory write.
+        #[arg(long)]
+        memory_key: Option<String>,
+        /// Human-authored memory kind for the later explicit memory write.
+        #[arg(long)]
+        memory_kind: Option<String>,
+        /// Human-authored memory body for the later explicit memory write.
+        #[arg(long)]
+        memory_body: Option<String>,
+        /// Optional output directory for --write. Defaults to the private
+        /// instinct review sidecar directory.
+        #[arg(long)]
+        out_dir: Option<PathBuf>,
+        /// Write JSON + Markdown preflight files. Without this flag the command
+        /// is a dry-run preview.
+        #[arg(long)]
+        write: bool,
+        /// Emit raw JSON payload instead of a compact command line summary.
+        #[arg(long)]
+        json: bool,
+    },
     /// Rotate the local instinct observer JSONL log by renaming it to a
     /// timestamped archive path. The hook recreates a fresh log on its next
     /// event.
@@ -6092,6 +6126,76 @@ async fn real_main() -> Result<()> {
                             .and_then(|v| v.as_str())
                             .unwrap_or("-"),
                         record
+                            .get("recommended_next_step")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown"),
+                    );
+                }
+                Ok(())
+            }
+            InstinctOp::MemoryPreflight {
+                packet_json,
+                candidate_id,
+                decisions,
+                memory_key,
+                memory_kind,
+                memory_body,
+                out_dir,
+                write,
+                json,
+            } => {
+                let packet = instinct::observer_memory_preflight(
+                    packet_json,
+                    decisions.as_deref(),
+                    candidate_id,
+                    memory_key.as_deref(),
+                    memory_kind.as_deref(),
+                    memory_body.as_deref(),
+                    out_dir.as_deref(),
+                    *write,
+                )
+                .context("build instinct observer memory write preflight")?;
+                if *json {
+                    println!("{}", serde_json::to_string_pretty(&packet)?);
+                } else {
+                    println!(
+                        "instinct memory preflight: status={} candidate={} approved={} ready={} written={} memory_write={}",
+                        packet
+                            .get("status")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown"),
+                        packet
+                            .get("candidate_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("?"),
+                        packet
+                            .get("approved_by_human_decision")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false),
+                        packet
+                            .get("ready_for_separate_memory_write")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false),
+                        packet
+                            .get("written")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false),
+                        packet
+                            .get("writes_memory")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false),
+                    );
+                    println!(
+                        "json={} markdown={} next={}",
+                        packet
+                            .get("json_path")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("-"),
+                        packet
+                            .get("markdown_path")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("-"),
+                        packet
                             .get("recommended_next_step")
                             .and_then(|v| v.as_str())
                             .unwrap_or("unknown"),

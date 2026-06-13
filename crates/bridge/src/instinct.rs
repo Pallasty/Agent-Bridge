@@ -451,6 +451,134 @@ pub fn observer_review_decision_for_paths(
     Ok(record)
 }
 
+pub fn observer_memory_preflight(
+    packet_json: &Path,
+    decisions_path: Option<&Path>,
+    candidate_id: &str,
+    memory_key: Option<&str>,
+    memory_kind: Option<&str>,
+    memory_body: Option<&str>,
+    out_dir: Option<&Path>,
+    write: bool,
+) -> std::io::Result<Value> {
+    let now_unix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    observer_memory_preflight_for_paths(
+        packet_json,
+        decisions_path.unwrap_or(&default_review_decisions_path()),
+        out_dir.unwrap_or(&default_review_dir_path()),
+        candidate_id,
+        memory_key,
+        memory_kind,
+        memory_body,
+        now_unix,
+        write,
+    )
+}
+
+pub fn observer_memory_preflight_for_paths(
+    packet_json: &Path,
+    decisions_path: &Path,
+    out_dir: &Path,
+    candidate_id: &str,
+    memory_key: Option<&str>,
+    memory_kind: Option<&str>,
+    memory_body: Option<&str>,
+    now_unix: u64,
+    write: bool,
+) -> std::io::Result<Value> {
+    let body = std::fs::read_to_string(packet_json)?;
+    let packet: Value = serde_json::from_str(&body)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    ensure_review_packet_schema(&packet)?;
+    let candidate = find_candidate(&packet, candidate_id)?;
+    let decision = latest_decision_for_candidate(decisions_path, candidate_id)?;
+    let decision_status = decision
+        .as_ref()
+        .and_then(|v| v.get("decision"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("missing");
+    let approved = decision_status == "approve";
+    let has_key = memory_key.is_some_and(|s| !s.trim().is_empty());
+    let has_kind = memory_kind.is_some_and(|s| !s.trim().is_empty());
+    let has_body = memory_body.is_some_and(|s| !s.trim().is_empty());
+    let draft_complete = has_key && has_kind && has_body;
+    let ready = approved && draft_complete;
+    let preflight_id = format!("instinct-memory-preflight-{now_unix}-{candidate_id}");
+    let json_path = out_dir.join(format!("{preflight_id}.json"));
+    let markdown_path = out_dir.join(format!("{preflight_id}.md"));
+    let blocked_reasons = memory_preflight_blocked_reasons(approved, has_key, has_kind, has_body);
+    let status = if ready {
+        if write {
+            "written_ready_for_separate_memory_write"
+        } else {
+            "ready_for_separate_memory_write"
+        }
+    } else if write {
+        "written_blocked"
+    } else {
+        "blocked"
+    };
+
+    let mut packet_out = json!({
+        "schema": "agent_bridge.instinct_observer.phase1_memory_write_preflight.v0",
+        "preflight_id": preflight_id,
+        "generated_at_unix": now_unix,
+        "dry_run": !write,
+        "status": status,
+        "review_packet_id": packet.get("packet_id").cloned().unwrap_or(Value::Null),
+        "review_packet_path": packet_json.display().to_string(),
+        "decisions_path": decisions_path.display().to_string(),
+        "candidate_id": candidate_id,
+        "candidate_kind": candidate.get("kind").cloned().unwrap_or(Value::Null),
+        "candidate_session_id": candidate.get("session_id").cloned().unwrap_or(Value::Null),
+        "latest_decision": decision.unwrap_or(Value::Null),
+        "approved_by_human_decision": approved,
+        "draft_complete": draft_complete,
+        "ready_for_separate_memory_write": ready,
+        "blocked_reasons": blocked_reasons,
+        "memory_draft": {
+            "key": memory_key,
+            "kind": memory_kind,
+            "body": memory_body,
+            "body_chars": memory_body.map(|s| s.chars().count()).unwrap_or(0),
+            "source": "human_supplied_cli_fields"
+        },
+        "json_path": json_path.display().to_string(),
+        "markdown_path": markdown_path.display().to_string(),
+        "writes_files": write,
+        "writes_memory": false,
+        "persists_review_queue": false,
+        "auto_apply_allowed": false,
+        "raw_prompt_included": false,
+        "raw_tool_input_included": false,
+        "raw_tool_output_included": false,
+        "memory_write_requires_separate_command": true,
+        "recommended_next_step": if ready {
+            "run_separate_explicit_memory_write_command"
+        } else {
+            "record_approve_decision_and_supply_memory_draft"
+        },
+    });
+
+    if write {
+        std::fs::create_dir_all(out_dir)?;
+        set_private_dir_permissions(out_dir)?;
+        packet_out["written"] = json!(true);
+        let markdown = render_memory_preflight_markdown(&packet_out);
+        let body = serde_json::to_string_pretty(&packet_out)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        write_private_file(&json_path, body.as_bytes())?;
+        write_private_file(&markdown_path, markdown.as_bytes())?;
+    } else {
+        packet_out["written"] = json!(false);
+    }
+
+    Ok(packet_out)
+}
+
 pub fn rotate_observer_log(dry_run: bool) -> std::io::Result<Value> {
     let now_unix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -582,6 +710,67 @@ fn render_review_packet_markdown(packet: &Value) -> String {
     out
 }
 
+fn render_memory_preflight_markdown(packet: &Value) -> String {
+    let mut out = String::new();
+    out.push_str("# Instinct Memory Write Preflight\n\n");
+    out.push_str(&format!(
+        "- preflight_id: `{}`\n",
+        value_str(packet.get("preflight_id"))
+    ));
+    out.push_str(&format!(
+        "- status: `{}`\n",
+        value_str(packet.get("status"))
+    ));
+    out.push_str(&format!(
+        "- candidate_id: `{}`\n",
+        value_str(packet.get("candidate_id"))
+    ));
+    out.push_str(&format!(
+        "- approved_by_human_decision: `{}`\n",
+        value_str(packet.get("approved_by_human_decision"))
+    ));
+    out.push_str(&format!(
+        "- ready_for_separate_memory_write: `{}`\n",
+        value_str(packet.get("ready_for_separate_memory_write"))
+    ));
+
+    out.push_str("\n## Boundary\n\n");
+    out.push_str("- writes_memory: `false`\n");
+    out.push_str("- auto_apply_allowed: `false`\n");
+    out.push_str("- raw_prompt_included: `false`\n");
+    out.push_str("- raw_tool_input_included: `false`\n");
+    out.push_str("- raw_tool_output_included: `false`\n");
+    out.push_str("- memory_write_requires_separate_command: `true`\n");
+
+    out.push_str("\n## Memory Draft\n\n");
+    let draft = packet.get("memory_draft").unwrap_or(&Value::Null);
+    out.push_str(&format!("- key: `{}`\n", value_str(draft.get("key"))));
+    out.push_str(&format!("- kind: `{}`\n", value_str(draft.get("kind"))));
+    out.push_str(&format!(
+        "- body_chars: `{}`\n",
+        value_str(draft.get("body_chars"))
+    ));
+    if let Some(body) = draft.get("body").and_then(|v| v.as_str()) {
+        out.push_str("\n```text\n");
+        out.push_str(body);
+        out.push_str("\n```\n");
+    } else {
+        out.push_str("\n_No memory body supplied._\n");
+    }
+
+    out.push_str("\n## Blocked Reasons\n\n");
+    if let Some(reasons) = packet.get("blocked_reasons").and_then(|v| v.as_array()) {
+        if reasons.is_empty() {
+            out.push_str("- none\n");
+        }
+        for reason in reasons {
+            out.push_str(&format!("- `{}`\n", value_str(Some(reason))));
+        }
+    }
+    out.push_str("\nThis packet does not write memory.\n");
+    out
+}
+
 fn value_str(value: Option<&Value>) -> String {
     match value {
         Some(Value::String(s)) => s.clone(),
@@ -590,6 +779,93 @@ fn value_str(value: Option<&Value>) -> String {
         Some(Value::Null) | None => "-".to_string(),
         Some(other) => other.to_string(),
     }
+}
+
+fn ensure_review_packet_schema(packet: &Value) -> std::io::Result<()> {
+    let packet_schema = packet.get("schema").and_then(|v| v.as_str()).unwrap_or("");
+    if packet_schema == "agent_bridge.instinct_observer.phase1_review_packet.v0" {
+        Ok(())
+    } else {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "packet_json is not an instinct phase1 review packet",
+        ))
+    }
+}
+
+fn find_candidate<'a>(packet: &'a Value, candidate_id: &str) -> std::io::Result<&'a Value> {
+    packet
+        .pointer("/candidate_preview/candidates")
+        .and_then(|v| v.as_array())
+        .and_then(|items| {
+            items.iter().find(|candidate| {
+                candidate.get("candidate_id").and_then(|v| v.as_str()) == Some(candidate_id)
+            })
+        })
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("candidate not found in review packet: {candidate_id}"),
+            )
+        })
+}
+
+fn latest_decision_for_candidate(
+    decisions_path: &Path,
+    candidate_id: &str,
+) -> std::io::Result<Option<Value>> {
+    let text = match std::fs::read_to_string(decisions_path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    let mut latest: Option<Value> = None;
+    for line in text.lines().filter(|line| !line.trim().is_empty()) {
+        let value: Value = serde_json::from_str(line)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        if value.get("schema").and_then(|v| v.as_str())
+            != Some("agent_bridge.instinct_observer.phase1_review_decision.v0")
+        {
+            continue;
+        }
+        if value.get("candidate_id").and_then(|v| v.as_str()) == Some(candidate_id) {
+            let current_ts = value
+                .get("generated_at_unix")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            let latest_ts = latest
+                .as_ref()
+                .and_then(|v| v.get("generated_at_unix"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            if latest.is_none() || current_ts >= latest_ts {
+                latest = Some(value);
+            }
+        }
+    }
+    Ok(latest)
+}
+
+fn memory_preflight_blocked_reasons(
+    approved: bool,
+    has_key: bool,
+    has_kind: bool,
+    has_body: bool,
+) -> Vec<&'static str> {
+    let mut reasons = Vec::new();
+    if !approved {
+        reasons.push("latest_decision_is_not_approve");
+    }
+    if !has_key {
+        reasons.push("missing_memory_key");
+    }
+    if !has_kind {
+        reasons.push("missing_memory_kind");
+    }
+    if !has_body {
+        reasons.push("missing_memory_body");
+    }
+    reasons
 }
 
 fn normalize_review_decision(decision: &str) -> std::io::Result<&'static str> {
@@ -1452,6 +1728,98 @@ mod tests {
         assert_eq!(rows[0]["decision"], json!("approve"));
         assert_eq!(rows[0]["writes_memory"], json!(false));
         assert!(!body.contains("secret decision prompt"));
+    }
+
+    #[test]
+    fn observer_memory_preflight_requires_approved_decision_and_human_draft() {
+        let tmp = tempfile::tempdir().unwrap();
+        let log = tmp.path().join("observations.jsonl");
+        let out_dir = tmp.path().join("review");
+        let decisions = out_dir.join("decisions.jsonl");
+        write_jsonl(
+            &log,
+            &[json!({
+                "ts": 1.0,
+                "sid": "s1",
+                "ev": "UserPromptSubmit",
+                "prompt": "应该改成 secret preflight prompt"
+            })],
+        );
+        let packet = observer_review_packet_for_paths(
+            &log,
+            &out_dir,
+            20,
+            Some("tester"),
+            1_780_747_030,
+            true,
+        )
+        .unwrap();
+        let packet_json = PathBuf::from(packet["json_path"].as_str().unwrap());
+
+        let blocked = observer_memory_preflight_for_paths(
+            &packet_json,
+            &decisions,
+            &out_dir,
+            "instinct-candidate-0001",
+            Some("lesson:instinct-test"),
+            Some("lesson"),
+            Some("Human-authored reusable lesson."),
+            1_780_747_031,
+            false,
+        )
+        .unwrap();
+        assert_eq!(blocked["approved_by_human_decision"], json!(false));
+        assert_eq!(blocked["ready_for_separate_memory_write"], json!(false));
+        assert_eq!(blocked["writes_memory"], json!(false));
+        assert_eq!(
+            blocked["blocked_reasons"],
+            json!(["latest_decision_is_not_approve"])
+        );
+
+        observer_review_decision_for_paths(
+            &packet_json,
+            &decisions,
+            "instinct-candidate-0001",
+            "approve",
+            Some("tester"),
+            Some("stable enough"),
+            1_780_747_032,
+            true,
+        )
+        .unwrap();
+
+        let preflight = observer_memory_preflight_for_paths(
+            &packet_json,
+            &decisions,
+            &out_dir,
+            "instinct-candidate-0001",
+            Some("lesson:instinct-test"),
+            Some("lesson"),
+            Some("Human-authored reusable lesson."),
+            1_780_747_033,
+            true,
+        )
+        .unwrap();
+        assert_eq!(preflight["approved_by_human_decision"], json!(true));
+        assert_eq!(preflight["draft_complete"], json!(true));
+        assert_eq!(preflight["ready_for_separate_memory_write"], json!(true));
+        assert_eq!(preflight["writes_memory"], json!(false));
+        assert_eq!(preflight["written"], json!(true));
+
+        let json_path = PathBuf::from(preflight["json_path"].as_str().unwrap());
+        let markdown_path = PathBuf::from(preflight["markdown_path"].as_str().unwrap());
+        assert!(json_path.exists());
+        assert!(markdown_path.exists());
+        assert_eq!(mode_octal(&json_path).as_deref(), Some("600"));
+        assert_eq!(mode_octal(&markdown_path).as_deref(), Some("600"));
+        let body = format!(
+            "{}\n{}",
+            std::fs::read_to_string(json_path).unwrap(),
+            std::fs::read_to_string(markdown_path).unwrap()
+        );
+        assert!(!body.contains("secret preflight prompt"));
+        assert!(body.contains("Human-authored reusable lesson."));
+        assert!(body.contains("This packet does not write memory"));
     }
 
     #[test]
