@@ -14,7 +14,7 @@ non-production store.
 The runner expects an already authorized explicit opt-in FTS runtime influence
 decision plus a runtime-readiness / transition-gate pair. It then:
 
-  1. seeds the canonical controlled-order fixture into an isolated SQLite DB;
+  1. seeds a controlled-order fixture into an isolated SQLite DB;
   2. proves the protected path can call BioCortex and move explicit opt-in FTS order;
   3. proves the transition-gated store and batch surfaces carry the same movement;
   4. verifies the conservative status surface remains side-effect free;
@@ -31,7 +31,7 @@ Flags:
   --decision-packet PATH      Runtime influence decision packet JSON.
   --readiness-packet PATH     Runtime readiness packet JSON.
   --transition-gate PATH      Runtime transition gate JSON.
-  --fixture PATH              Controlled-order fixture JSON.
+  --fixture PATH              Controlled-order fixture JSON. Default: canonical single-case fixture.
   --reviewer TEXT             Reviewer label stored in redacted packets. Default: post-runtime-live-candidate-runner.
   --commit REF                Commit label stored in redacted packets. Default: current HEAD.
   -h, --help                  Show this help.
@@ -110,7 +110,7 @@ assert_json() {
 
 leak_guard() {
     local file="$1"
-    local pattern='controlled trial runtime query|controlled_trial_runtime_key|controlled trial runtime content|cortexdelta|cortexepsilon|cortexzeta|cortexeta|cortextheta|cortexiota|controlled_order_baseline_high|controlled_order_biocortex_target|target anchor|baseline anchor|post_runtime_live_candidate_status_key|axonalpha|axonbeta|axongamma|axondelta|axonepsilon|axonzeta|dendritealpha|dendritebeta|dendritegamma|dendritedelta|dendriteepsilon|dendritezeta|gliaalph|gliabet|gliagam|gliadel|gliaeps|gliazet|myelinalpha|myelinbeta|myelingamma|myelindelta|myelinepsilon|myelinzeta|synapsealpha|synapsebeta|synapsegamma|synapsedelta|synapseepsilon|synapsezeta|expanded_corpus_baseline_focus|expanded_corpus_target_span|baseline focus|target span'
+    local pattern='controlled trial runtime query|controlled_trial_runtime_key|controlled trial runtime content|cortexdelta|cortexepsilon|cortexzeta|cortexeta|cortextheta|cortexiota|controlled_order_baseline_high|controlled_order_biocortex_target|multi_case_baseline_high|multi_case_biocortex_target|target anchor|baseline anchor|post_runtime_live_candidate_status_key|axonalpha|axonbeta|axongamma|axondelta|axonepsilon|axonzeta|dendritealpha|dendritebeta|dendritegamma|dendritedelta|dendriteepsilon|dendritezeta|gliaalph|gliabet|gliagam|gliadel|gliaeps|gliazet|myelinalpha|myelinbeta|myelingamma|myelindelta|myelinepsilon|myelinzeta|synapsealpha|synapsebeta|synapsegamma|synapsedelta|synapseepsilon|synapsezeta|expanded_corpus_baseline_focus|expanded_corpus_target_span|baseline focus|target span'
     if grep -Eiq "$pattern" "$file"; then
         echo "redacted artifact leaked raw fixture/query/key/content data: $file" >&2
         exit 1

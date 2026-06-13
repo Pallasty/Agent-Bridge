@@ -50,7 +50,9 @@ live-candidate fixture then proves that the post-runtime-backed final gate can
 run BioCortex and move the protected explicit opt-in FTS order while default
 retrieval remains unchanged. A reusable post-runtime live-candidate runner now
 replays that proof end-to-end and emits checked redacted artifacts without
-manual command assembly.
+manual command assembly. The same runner now has a multi-case fixture that
+observes three protected explicit opt-in order movements across three batch
+query cases.
 
 ```json
 {
@@ -89,6 +91,8 @@ manual command assembly.
   "post_runtime_live_candidate_fixture_recorded": true,
   "post_runtime_live_candidate_runner_landed": true,
   "post_runtime_live_candidate_runner_verified": true,
+  "post_runtime_multi_case_live_candidate_fixture_recorded": true,
+  "post_runtime_multi_case_live_candidate_evidence_ready": true,
   "controlled_explicit_opt_in_fts_trial_ready": true,
   "post_runtime_evidence_backed_controlled_trial_ready": true,
   "post_runtime_live_candidate_evidence_ready": true,
@@ -118,6 +122,12 @@ Post-runtime live-candidate runner:
 - `scripts/run-biocortex-post-runtime-live-candidate.sh`
 - `docs/design/BIOCORTEX_RETRIEVAL_POST_RUNTIME_LIVE_CANDIDATE_RUNNER_2026_06_13.md`
 - `docs/design/fixtures/biocortex-retrieval-post-runtime-live-candidate-runner-2026-06-13.json`
+
+Post-runtime multi-case live-candidate fixture:
+
+- `docs/design/BIOCORTEX_RETRIEVAL_POST_RUNTIME_MULTI_CASE_LIVE_CANDIDATE_2026_06_13.md`
+- `docs/design/fixtures/biocortex-retrieval-post-runtime-multi-case-live-candidate-fixture-2026-06-13.json`
+- `docs/design/fixtures/biocortex-retrieval-post-runtime-multi-case-live-candidate-2026-06-13.json`
 
 Authorization request packet:
 
@@ -901,6 +911,30 @@ Slice 37 adds a reusable post-runtime live-candidate runner:
   `status=post_runtime_live_candidate_evidence_ready`,
   `runs_biocortex=true`, protected opt-in order movement, and
   `review_state=post_runtime_evidence_ready`;
+- the status surface remains side-effect free and intentionally reports
+  `blocked` for this movement artifact set;
+- runner summary/report leak guards passed for raw query text, raw memory keys,
+  memory contents, and raw side-signal rows;
+- default `memory_search`, hybrid search, semantic search, approval writes,
+  raw query/key/content redaction, and default search order remain unchanged.
+
+Slice 38 adds a multi-case post-runtime live-candidate fixture:
+
+- committed fixture:
+  `docs/design/fixtures/biocortex-retrieval-post-runtime-multi-case-live-candidate-fixture-2026-06-13.json`;
+- committed document:
+  `docs/design/BIOCORTEX_RETRIEVAL_POST_RUNTIME_MULTI_CASE_LIVE_CANDIDATE_2026_06_13.md`;
+- committed machine-readable summary:
+  `docs/design/fixtures/biocortex-retrieval-post-runtime-multi-case-live-candidate-2026-06-13.json`;
+- local evidence directory:
+  `target/biocortex-post-runtime-multi-case-live-candidate-20260613`;
+- the reusable live-candidate runner replayed the fixture and reported
+  `status=post_runtime_live_candidate_evidence_ready`;
+- the controlled fixture summary reports `query_count=3`,
+  `runs_biocortex_count=3`, and `actual_order_changed_count=3`;
+- the gated batch summary reports `query_count=3`,
+  `runs_biocortex_count=3`, `baseline_empty_count=0`, and
+  `actual_order_changed_count=3`;
 - the status surface remains side-effect free and intentionally reports
   `blocked` for this movement artifact set;
 - runner summary/report leak guards passed for raw query text, raw memory keys,
