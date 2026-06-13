@@ -130,7 +130,7 @@ jq -e '
 ' "$opt_in_controlled_order_fixture" >/dev/null
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0"
-    and .status == "store_opt_in_runtime_adapter_connection_implemented"
+    and .status == "runtime_readiness_packet_implemented"
     and .approval_state == "opt_in_implementation_authorized"
     and .runtime_adapter_approved == false
     and .default_search_order_change_allowed == false
@@ -156,6 +156,7 @@ jq -e '
     and .runtime_influence_decision_packet_implemented == true
     and .store_opt_in_order_connection_implemented == true
     and .store_opt_in_runtime_adapter_connection_implemented == true
+    and .runtime_readiness_packet_implemented == true
     and .ordering_behavior_connected == false
     and .explicit_opt_in_fts_ordering_behavior_connected == true
     and .explicit_opt_in_fts_runtime_adapter_connected == true
@@ -328,6 +329,35 @@ jq -e '
     and .implemented_store_opt_in_batch_diagnostics.default_memory_search_unchanged == true
     and .implemented_store_opt_in_batch_diagnostics.default_search_order_change_allowed == false
     and .implemented_store_opt_in_batch_diagnostics.default_calls_unchanged == true
+    and .implemented_runtime_readiness_packet.cli == "agent-bridge bio-cortex retrieval-opt-in-runtime-readiness-packet"
+    and .implemented_runtime_readiness_packet.schema == "agent_bridge.biocortex_retrieval.opt_in_runtime_readiness_packet.v0"
+    and .implemented_runtime_readiness_packet.implementation_stage == "controlled_opt_in_runtime_readiness_packet"
+    and .implemented_runtime_readiness_packet.authorized_scope == "explicit_opt_in_fts_runtime_influence"
+    and .implemented_runtime_readiness_packet.consumes_aggregate_backed_decision_packet_summary == true
+    and .implemented_runtime_readiness_packet.consumes_store_trial_summary == true
+    and .implemented_runtime_readiness_packet.consumes_batch_diagnostics_summary == true
+    and .implemented_runtime_readiness_packet.requires_aggregate_backed_decision_packet == true
+    and .implemented_runtime_readiness_packet.requires_downstream_aggregate_preflight == true
+    and .implemented_runtime_readiness_packet.distinguishes_empty_live_probe_from_blocked_control_plane == true
+    and .implemented_runtime_readiness_packet.can_report_control_plane_ready_without_live_candidates == true
+    and .implemented_runtime_readiness_packet.can_grant_new_authorization == false
+    and .implemented_runtime_readiness_packet.may_change_default_memory_search_order == false
+    and .implemented_runtime_readiness_packet.default_influence_ready == false
+    and .implemented_runtime_readiness_packet.runtime_influence_decision_packet_included == false
+    and .implemented_runtime_readiness_packet.store_trial_included == false
+    and .implemented_runtime_readiness_packet.batch_diagnostics_included == false
+    and .implemented_runtime_readiness_packet.raw_queries_included == false
+    and .implemented_runtime_readiness_packet.raw_keys_included == false
+    and .implemented_runtime_readiness_packet.content_included == false
+    and .implemented_runtime_readiness_packet.side_signal_raw_included == false
+    and .implemented_runtime_readiness_packet.human_decision_text_included == false
+    and .implemented_runtime_readiness_packet.calls_memory_search == false
+    and .implemented_runtime_readiness_packet.runs_biocortex == false
+    and .implemented_runtime_readiness_packet.registers_embedding_backend == false
+    and .implemented_runtime_readiness_packet.changes_memory_search_order == false
+    and .implemented_runtime_readiness_packet.writes_approval == false
+    and .implemented_runtime_readiness_packet.default_search_order_change_allowed == false
+    and .implemented_runtime_readiness_packet.default_calls_unchanged == true
     and .implemented_store_opt_in_controlled_order_fixture.cli == "agent-bridge bio-cortex retrieval-opt-in-controlled-order-fixture"
     and .implemented_store_opt_in_controlled_order_fixture.fixture == "docs/design/fixtures/biocortex-retrieval-opt-in-controlled-order-fixture-2026-06-12.json"
     and .implemented_store_opt_in_controlled_order_fixture.schema == "agent_bridge.biocortex_retrieval.opt_in_controlled_order_fixture_run.v0"
@@ -1672,7 +1702,7 @@ jq -e '
     and .writes_approval == false
     and .accepts_optional_order_diff_packet == true
     and .accepts_optional_redacted_order_artifact == true
-    and .opt_in_plan.status == "store_opt_in_runtime_adapter_connection_implemented"
+    and .opt_in_plan.status == "runtime_readiness_packet_implemented"
     and .opt_in_plan.order_diff_packet_implemented == true
     and .opt_in_plan.authorization_request_order_diff_evidence_implemented == true
     and .opt_in_plan.redacted_order_artifact_implemented == true
@@ -1684,6 +1714,7 @@ jq -e '
     and .opt_in_plan.runtime_influence_decision_packet_implemented == true
     and .opt_in_plan.store_opt_in_order_connection_implemented == true
     and .opt_in_plan.store_opt_in_runtime_adapter_connection_implemented == true
+    and .opt_in_plan.runtime_readiness_packet_implemented == true
     and .opt_in_plan.ordering_behavior_connected == false
     and .opt_in_plan.explicit_opt_in_fts_ordering_behavior_connected == true
     and .opt_in_plan.explicit_opt_in_fts_runtime_adapter_connected == true
@@ -1823,6 +1854,35 @@ jq -e '
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.default_memory_search_unchanged == true
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.default_search_order_change_allowed == false
     and .opt_in_plan.implemented_store_opt_in_batch_diagnostics.default_calls_unchanged == true
+    and .opt_in_plan.implemented_runtime_readiness_packet.cli == "agent-bridge bio-cortex retrieval-opt-in-runtime-readiness-packet"
+    and .opt_in_plan.implemented_runtime_readiness_packet.schema == "agent_bridge.biocortex_retrieval.opt_in_runtime_readiness_packet.v0"
+    and .opt_in_plan.implemented_runtime_readiness_packet.implementation_stage == "controlled_opt_in_runtime_readiness_packet"
+    and .opt_in_plan.implemented_runtime_readiness_packet.authorized_scope == "explicit_opt_in_fts_runtime_influence"
+    and .opt_in_plan.implemented_runtime_readiness_packet.consumes_aggregate_backed_decision_packet_summary == true
+    and .opt_in_plan.implemented_runtime_readiness_packet.consumes_store_trial_summary == true
+    and .opt_in_plan.implemented_runtime_readiness_packet.consumes_batch_diagnostics_summary == true
+    and .opt_in_plan.implemented_runtime_readiness_packet.requires_aggregate_backed_decision_packet == true
+    and .opt_in_plan.implemented_runtime_readiness_packet.requires_downstream_aggregate_preflight == true
+    and .opt_in_plan.implemented_runtime_readiness_packet.distinguishes_empty_live_probe_from_blocked_control_plane == true
+    and .opt_in_plan.implemented_runtime_readiness_packet.can_report_control_plane_ready_without_live_candidates == true
+    and .opt_in_plan.implemented_runtime_readiness_packet.can_grant_new_authorization == false
+    and .opt_in_plan.implemented_runtime_readiness_packet.may_change_default_memory_search_order == false
+    and .opt_in_plan.implemented_runtime_readiness_packet.default_influence_ready == false
+    and .opt_in_plan.implemented_runtime_readiness_packet.runtime_influence_decision_packet_included == false
+    and .opt_in_plan.implemented_runtime_readiness_packet.store_trial_included == false
+    and .opt_in_plan.implemented_runtime_readiness_packet.batch_diagnostics_included == false
+    and .opt_in_plan.implemented_runtime_readiness_packet.raw_queries_included == false
+    and .opt_in_plan.implemented_runtime_readiness_packet.raw_keys_included == false
+    and .opt_in_plan.implemented_runtime_readiness_packet.content_included == false
+    and .opt_in_plan.implemented_runtime_readiness_packet.side_signal_raw_included == false
+    and .opt_in_plan.implemented_runtime_readiness_packet.human_decision_text_included == false
+    and .opt_in_plan.implemented_runtime_readiness_packet.calls_memory_search == false
+    and .opt_in_plan.implemented_runtime_readiness_packet.runs_biocortex == false
+    and .opt_in_plan.implemented_runtime_readiness_packet.registers_embedding_backend == false
+    and .opt_in_plan.implemented_runtime_readiness_packet.changes_memory_search_order == false
+    and .opt_in_plan.implemented_runtime_readiness_packet.writes_approval == false
+    and .opt_in_plan.implemented_runtime_readiness_packet.default_search_order_change_allowed == false
+    and .opt_in_plan.implemented_runtime_readiness_packet.default_calls_unchanged == true
     and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.cli == "agent-bridge bio-cortex retrieval-opt-in-controlled-order-fixture"
     and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.fixture == "docs/design/fixtures/biocortex-retrieval-opt-in-controlled-order-fixture-2026-06-12.json"
     and .opt_in_plan.implemented_store_opt_in_controlled_order_fixture.schema == "agent_bridge.biocortex_retrieval.opt_in_controlled_order_fixture_run.v0"
@@ -2425,7 +2485,7 @@ jq -e '
     and .request_summary.runtime_adapter_approved == false
     and .request_summary.default_search_order_change_allowed == false
     and .request_summary.writes_approval == false
-    and .request_summary.opt_in_plan_status == "store_opt_in_runtime_adapter_connection_implemented"
+    and .request_summary.opt_in_plan_status == "runtime_readiness_packet_implemented"
     and .authorized_implementation.may_implement_opt_in_experiment == true
     and .authorized_implementation.may_add_runtime_enable_env == "AB_BIOCORTEX_RETRIEVAL_OPT_IN"
     and .authorized_implementation.may_add_per_call_opt_in_surface == true
@@ -2496,7 +2556,7 @@ jq -e '
     and .evidence_summary.default_search_order_change_allowed == false
     and .evidence_summary.ordering_behavior_connected == false
     and .evidence_summary.post_implementation_review_required == true
-    and .plan_summary.status == "store_opt_in_runtime_adapter_connection_implemented"
+    and .plan_summary.status == "runtime_readiness_packet_implemented"
     and .plan_summary.implementation_allowed == true
     and .plan_summary.store_opt_in_search_wrapper_implemented == true
     and .plan_summary.authorization_decision_consumer_implemented == true
@@ -2505,6 +2565,7 @@ jq -e '
     and .plan_summary.runtime_influence_decision_packet_implemented == true
     and .plan_summary.store_opt_in_order_connection_implemented == true
     and .plan_summary.store_opt_in_runtime_adapter_connection_implemented == true
+    and .plan_summary.runtime_readiness_packet_implemented == true
     and .plan_summary.explicit_opt_in_fts_runtime_adapter_connected == true
     and .plan_summary.default_memory_search_unchanged == true
     and .plan_summary.runtime_adapter_approved == false
@@ -3624,6 +3685,79 @@ jq -e '
 ' "$opt_in_batch_diagnostics_empty_with_aggregate" >/dev/null
 if grep -q 'biocortex opt-in runtime adapter\|runtime influence decision packet\|memory search baseline recall\|redacted order artifact movement\|agent bridge mcp tool registry\|agent bridge mcp\|verify runtime influence decision secret wording\|verify runtime influence decision secret query\|verify_runtime_influence_decision_secret_key\|verify runtime influence decision secret content\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_batch_diagnostics_empty_with_aggregate"; then
     echo "opt-in aggregate-backed batch diagnostics empty path leaked raw query/key/content data" >&2
+    exit 1
+fi
+
+opt_in_runtime_readiness_packet="$tmpdir/opt-in-runtime-readiness-packet.json"
+run cargo run -p ab-bridge --no-default-features -- \
+    bio-cortex retrieval-opt-in-runtime-readiness-packet \
+    --runtime-influence-decision-packet-json "$opt_in_runtime_influence_decision_packet_with_aggregate" \
+    --store-trial-json "$opt_in_store_trial_empty_with_aggregate" \
+    --batch-diagnostics-json "$opt_in_batch_diagnostics_empty_with_aggregate" \
+    --reviewer verify-bundle \
+    --commit verify-dry-run-commit \
+    --forum-post-id verify-forum-post \
+    --memory-key verify-memory-key \
+    --json > "$opt_in_runtime_readiness_packet"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_runtime_readiness_packet.v0"
+    and .read_only == true
+    and .runtime_readiness_packet == true
+    and .implementation_stage == "controlled_opt_in_runtime_readiness_packet"
+    and .input_contract.runtime_influence_decision_packet_included == false
+    and .input_contract.store_trial_included == false
+    and .input_contract.batch_diagnostics_included == false
+    and .input_contract.requires_aggregate_backed_decision_packet == true
+    and .input_contract.requires_downstream_aggregate_preflight == true
+    and .input_contract.raw_queries_included == false
+    and .input_contract.raw_keys_included == false
+    and .input_contract.content_included == false
+    and .input_contract.side_signal_raw_included == false
+    and .input_contract.human_decision_text_included == false
+    and .decision_summary.runtime_influence_authorized == true
+    and .decision_summary.aggregate_backed_review_request == true
+    and .decision_summary.aggregate_review_evidence_ready == true
+    and .decision_summary.aggregate_safe_for_decision == true
+    and .decision_summary.aggregate_default_influence_ready == false
+    and .decision_summary.aggregate_human_review_required == true
+    and .store_trial_summary.aggregate_preflight_ok == true
+    and .store_trial_summary.preflight_acceptable == true
+    and .store_trial_summary.blockers == ["baseline_empty"]
+    and .store_trial_summary.blockers_without_live_data == []
+    and .batch_summary.aggregate_preflight_ok == true
+    and .batch_summary.preflight_acceptable == true
+    and .batch_summary.query_count == 6
+    and .batch_summary.baseline_empty_count == 6
+    and .batch_summary.adapter_allowed_count == 0
+    and .batch_summary.side_signal_ok_count == 0
+    and .readiness.control_plane_ready == true
+    and .readiness.live_probe_state == "control_plane_ready_no_live_candidates"
+    and .readiness.live_probe_has_candidates == false
+    and .readiness.live_order_influence_ready == false
+    and .readiness.may_accept_controlled_explicit_opt_in_fts_calls == true
+    and .readiness.may_change_default_memory_search_order == false
+    and .readiness.default_influence_ready == false
+    and .boundary_check.runtime_readiness_ready == true
+    and .boundary_check.blockers == []
+    and .boundary_check.this_packet_grants_new_authorization == false
+    and .boundary_check.this_packet_changes_return_order == false
+    and .boundary_check.this_packet_allows_default_search_order_change == false
+    and .approval_state == "runtime_readiness_only"
+    and .approval_writes_allowed == false
+    and .writes_approval == false
+    and .calls_memory_search == false
+    and .runs_biocortex == false
+    and .registers_embedding_backend == false
+    and .changes_memory_search_order == false
+    and .default_search_order_change_allowed == false
+    and .default_calls_unchanged == true
+    and .raw_queries_included == false
+    and .raw_keys_included == false
+    and .content_included == false
+    and .side_signal_raw_included == false
+' "$opt_in_runtime_readiness_packet" >/dev/null
+if grep -q 'verify aggregate-backed store trial ready secret query\|biocortex opt-in runtime adapter\|runtime influence decision packet\|memory search baseline recall\|redacted order artifact movement\|agent bridge mcp tool registry\|agent bridge mcp\|verify runtime influence decision secret wording\|verify runtime influence decision secret query\|verify_runtime_influence_decision_secret_key\|verify runtime influence decision secret content\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_runtime_readiness_packet"; then
+    echo "opt-in runtime readiness packet leaked raw query/key/content data" >&2
     exit 1
 fi
 test -s "$opt_in_auth_request/forum-post-template.md"

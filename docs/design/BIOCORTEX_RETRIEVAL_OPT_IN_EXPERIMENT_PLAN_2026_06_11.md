@@ -691,6 +691,23 @@ trial preflight:
 - no aggregate body, review request body, runtime decision body, raw query, raw
   memory key, memory content, or raw side-signal row is returned.
 
+Slice 30 adds a read-only runtime readiness packet:
+
+- `agent-bridge bio-cortex retrieval-opt-in-runtime-readiness-packet` consumes
+  an aggregate-backed runtime-influence decision packet, a store-trial summary,
+  and a batch-diagnostics summary;
+- it reports `control_plane_ready` separately from `live_probe_state`, so an
+  empty live store becomes `control_plane_ready_no_live_candidates` instead of a
+  false runtime failure;
+- it requires aggregate-backed decision evidence and downstream aggregate
+  preflight readiness before controlled explicit opt-in FTS calls are reported
+  acceptable;
+- it never calls `memory_search`, runs BioCortex, writes approval state,
+  registers an embedding backend, or changes default retrieval order;
+- it does not include the decision packet body, store-trial body,
+  batch-diagnostics body, aggregate body, review request body, human decision
+  text, raw query, raw key, memory content, or raw side-signal row.
+
 ## Fail-Open Rules
 
 The experiment must return the baseline list for:
