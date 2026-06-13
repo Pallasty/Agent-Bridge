@@ -8,8 +8,7 @@ use ab_bridge::biocortex_shadow::{
     biocortex_retrieval_opt_in_batch_diagnostics, biocortex_retrieval_opt_in_dry_run_plan,
     biocortex_retrieval_opt_in_execution_packet,
     biocortex_retrieval_opt_in_gated_batch_diagnostics,
-    biocortex_retrieval_opt_in_gated_store_trial,
-    biocortex_retrieval_opt_in_order_diff_packet,
+    biocortex_retrieval_opt_in_gated_store_trial, biocortex_retrieval_opt_in_order_diff_packet,
     biocortex_retrieval_opt_in_post_implementation_review_gate,
     biocortex_retrieval_opt_in_redacted_order_artifact, biocortex_retrieval_opt_in_review_packet,
     biocortex_retrieval_opt_in_runtime_influence_decision_packet,
@@ -3184,6 +3183,9 @@ enum BioCortexOp {
         /// JSON file produced by retrieval-opt-in-controlled-order-fixture.
         #[arg(long = "controlled-order-fixture-run-json")]
         controlled_order_fixture_run_json: PathBuf,
+        /// Optional JSON file produced by retrieval-opt-in-runtime-readiness-packet.
+        #[arg(long = "runtime-readiness-packet-json")]
+        runtime_readiness_packet_json: Option<PathBuf>,
         /// Reviewer identity or handle.
         #[arg(long)]
         reviewer: Option<String>,
@@ -5504,6 +5506,7 @@ async fn real_main() -> Result<()> {
             BioCortexOp::RetrievalOptInEvidenceSummary {
                 batch_diagnostics_json,
                 controlled_order_fixture_run_json,
+                runtime_readiness_packet_json,
                 reviewer,
                 commit,
                 forum_post_id,
@@ -5512,6 +5515,7 @@ async fn real_main() -> Result<()> {
             } => run_biocortex_retrieval_opt_in_evidence_summary(
                 batch_diagnostics_json,
                 controlled_order_fixture_run_json,
+                runtime_readiness_packet_json.as_deref(),
                 reviewer.clone(),
                 commit.clone(),
                 forum_post_id.clone(),
@@ -10706,6 +10710,10 @@ fn run_biocortex_retrieval_opt_in_runtime_transition_gate(
 
 const BIOCORTEX_RETRIEVAL_OPT_IN_BATCH_DIAGNOSTICS_SCHEMA: &str =
     "agent_bridge.biocortex_retrieval.opt_in_batch_diagnostics.v0";
+const BIOCORTEX_RETRIEVAL_OPT_IN_GATED_BATCH_DIAGNOSTICS_SCHEMA: &str =
+    "agent_bridge.biocortex_retrieval.opt_in_gated_batch_diagnostics.v0";
+const BIOCORTEX_RETRIEVAL_OPT_IN_RUNTIME_READINESS_PACKET_SCHEMA: &str =
+    "agent_bridge.biocortex_retrieval.opt_in_runtime_readiness_packet.v0";
 const BIOCORTEX_RETRIEVAL_OPT_IN_EVIDENCE_SUMMARY_SCHEMA: &str =
     "agent_bridge.biocortex_retrieval.opt_in_evidence_summary.v0";
 const BIOCORTEX_RETRIEVAL_OPT_IN_REDACTED_EVIDENCE_AGGREGATE_SCHEMA: &str =
@@ -10925,6 +10933,7 @@ async fn run_biocortex_retrieval_opt_in_controlled_order_fixture(
 fn run_biocortex_retrieval_opt_in_evidence_summary(
     batch_diagnostics_json: &std::path::Path,
     controlled_order_fixture_run_json: &std::path::Path,
+    runtime_readiness_packet_json: Option<&std::path::Path>,
     reviewer: Option<String>,
     commit: Option<String>,
     forum_post_id: Option<String>,
@@ -10937,11 +10946,30 @@ fn run_biocortex_retrieval_opt_in_evidence_summary(
         controlled_order_fixture_run_json,
         "opt-in controlled order fixture run JSON",
     )?;
+    let runtime_readiness = if let Some(path) = runtime_readiness_packet_json {
+        Some(load_biocortex_redacted_json(
+            path,
+            "opt-in runtime readiness packet JSON",
+        )?)
+    } else {
+        None
+    };
 
-    let batch_schema_ok = evidence_json_str_eq(
+    let batch_legacy_schema_ok = evidence_json_str_eq(
         batch.get("schema"),
         BIOCORTEX_RETRIEVAL_OPT_IN_BATCH_DIAGNOSTICS_SCHEMA,
     );
+    let batch_gated_schema_ok = evidence_json_str_eq(
+        batch.get("schema"),
+        BIOCORTEX_RETRIEVAL_OPT_IN_GATED_BATCH_DIAGNOSTICS_SCHEMA,
+    );
+    let batch_schema_ok = batch_legacy_schema_ok || batch_gated_schema_ok;
+    let batch_transition_gated = batch_gated_schema_ok;
+    let batch_evidence_source = if batch_transition_gated {
+        "runtime_transition_gated_batch_diagnostics"
+    } else {
+        "store_opt_in_batch_diagnostics"
+    };
     let controlled_schema_ok = evidence_json_str_eq(
         controlled.get("schema"),
         BIOCORTEX_RETRIEVAL_OPT_IN_CONTROLLED_ORDER_FIXTURE_RUN_SCHEMA,
@@ -10951,7 +10979,18 @@ fn run_biocortex_retrieval_opt_in_evidence_summary(
     let batch_query_count = evidence_json_u64(batch_summary.get("query_count"));
     let batch_baseline_completed = evidence_json_u64(batch_summary.get("baseline_completed_count"));
     let batch_baseline_empty = evidence_json_u64(batch_summary.get("baseline_empty_count"));
-    let batch_adapter_allowed = evidence_json_u64(batch_summary.get("adapter_allowed_count"));
+    let batch_transition_gate_allowed =
+        evidence_json_u64(batch_summary.get("transition_gate_allowed_count"));
+    let batch_transition_gate_blocked =
+        evidence_json_u64(batch_summary.get("transition_gate_blocked_count"));
+    let batch_store_trial_called = evidence_json_u64(batch_summary.get("store_trial_called_count"));
+    let batch_calls_memory_search =
+        evidence_json_u64(batch_summary.get("calls_memory_search_count"));
+    let batch_adapter_allowed = if batch_transition_gated {
+        evidence_json_u64(batch_summary.get("store_trial_adapter_allowed_count"))
+    } else {
+        evidence_json_u64(batch_summary.get("adapter_allowed_count"))
+    };
     let batch_side_signal_ok = evidence_json_u64(batch_summary.get("side_signal_ok_count"));
     let batch_experimental_source =
         evidence_json_u64(batch_summary.get("experimental_source_count"));
@@ -10963,6 +11002,19 @@ fn run_biocortex_retrieval_opt_in_evidence_summary(
             && evidence_json_bool_is(batch.get("content_included"), false)
             && evidence_json_bool_is(batch.get("side_signal_raw_included"), false);
     let batch_movement_observed = batch_actual_moved > 0;
+    let batch_transition_gate_ok = !batch_transition_gated
+        || (batch_query_count > 0
+            && batch_transition_gate_allowed == batch_query_count
+            && batch_transition_gate_blocked == 0
+            && evidence_json_bool_is(batch.pointer("/safety/transition_gate_allowed_all"), true));
+    let batch_gated_downstream_called = !batch_transition_gated
+        || (batch_store_trial_called == batch_transition_gate_allowed
+            && evidence_json_bool_is(batch.pointer("/safety/store_trial_called_all"), true));
+    let batch_gated_diagnostics_ready = batch_transition_gated
+        && batch_schema_ok
+        && batch_raw_flags_all_false
+        && batch_transition_gate_ok
+        && batch_gated_downstream_called;
     let batch_diagnostic_class = if batch_movement_observed {
         "movement_observed"
     } else if batch_experimental_source > 0 {
@@ -11012,6 +11064,121 @@ fn run_biocortex_retrieval_opt_in_evidence_summary(
             );
     let controlled_movement_observed =
         controlled_schema_ok && controlled_expected_met && controlled_actual_moved > 0;
+    let runtime_readiness_value = runtime_readiness.as_ref();
+    let runtime_readiness_provided = runtime_readiness_value.is_some();
+    let runtime_readiness_schema_ok = runtime_readiness_value
+        .map(|value| {
+            evidence_json_str_eq(
+                value.get("schema"),
+                BIOCORTEX_RETRIEVAL_OPT_IN_RUNTIME_READINESS_PACKET_SCHEMA,
+            )
+        })
+        .unwrap_or(false);
+    let runtime_readiness_marker_ok = runtime_readiness_value
+        .map(|value| evidence_json_bool_is(value.get("runtime_readiness_packet"), true))
+        .unwrap_or(false);
+    let runtime_readiness_ready = runtime_readiness_value
+        .map(|value| {
+            evidence_json_bool_is(
+                value.pointer("/boundary_check/runtime_readiness_ready"),
+                true,
+            )
+        })
+        .unwrap_or(false);
+    let runtime_readiness_control_plane_ready = runtime_readiness_value
+        .map(|value| evidence_json_bool_is(value.pointer("/readiness/control_plane_ready"), true))
+        .unwrap_or(false);
+    let runtime_readiness_live_order_influence_ready = runtime_readiness_value
+        .map(|value| {
+            evidence_json_bool_is(value.pointer("/readiness/live_order_influence_ready"), true)
+        })
+        .unwrap_or(false);
+    let runtime_readiness_may_accept_controlled = runtime_readiness_value
+        .map(|value| {
+            evidence_json_bool_is(
+                value.pointer("/readiness/may_accept_controlled_explicit_opt_in_fts_calls"),
+                true,
+            )
+        })
+        .unwrap_or(false);
+    let runtime_readiness_default_influence_blocked = runtime_readiness_value
+        .map(|value| {
+            evidence_json_bool_is(value.pointer("/readiness/default_influence_ready"), false)
+        })
+        .unwrap_or(false);
+    let runtime_readiness_batch_evidence_source = runtime_readiness_value
+        .and_then(|value| value.pointer("/batch_summary/evidence_source"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let runtime_readiness_batch_transition_gated = runtime_readiness_value
+        .map(|value| evidence_json_bool_is(value.pointer("/batch_summary/transition_gated"), true))
+        .unwrap_or(false);
+    let runtime_readiness_batch_schema_ok = runtime_readiness_value
+        .map(|value| evidence_json_bool_is(value.pointer("/batch_summary/schema_ok"), true))
+        .unwrap_or(false);
+    let runtime_readiness_batch_transition_gate_ok = runtime_readiness_value
+        .map(|value| {
+            evidence_json_bool_is(value.pointer("/batch_summary/transition_gate_ok"), true)
+        })
+        .unwrap_or(false);
+    let runtime_readiness_raw_flags_all_false = runtime_readiness_value
+        .map(|value| {
+            evidence_json_bool_is(value.get("raw_queries_included"), false)
+                && evidence_json_bool_is(value.get("raw_keys_included"), false)
+                && evidence_json_bool_is(value.get("content_included"), false)
+                && evidence_json_bool_is(value.get("side_signal_raw_included"), false)
+                && evidence_json_bool_is(value.get("human_decision_text_included"), false)
+                && evidence_json_bool_is(
+                    value.pointer("/input_contract/raw_queries_included"),
+                    false,
+                )
+                && evidence_json_bool_is(value.pointer("/input_contract/raw_keys_included"), false)
+                && evidence_json_bool_is(value.pointer("/input_contract/content_included"), false)
+                && evidence_json_bool_is(
+                    value.pointer("/input_contract/side_signal_raw_included"),
+                    false,
+                )
+                && evidence_json_bool_is(
+                    value.pointer("/input_contract/human_decision_text_included"),
+                    false,
+                )
+        })
+        .unwrap_or(false);
+    let runtime_readiness_default_safe = runtime_readiness_value
+        .map(|value| {
+            evidence_json_bool_is(value.get("default_search_order_change_allowed"), false)
+                && evidence_json_bool_is(value.get("default_calls_unchanged"), true)
+                && evidence_json_bool_is(value.get("calls_memory_search"), false)
+                && evidence_json_bool_is(value.get("runs_biocortex"), false)
+                && evidence_json_bool_is(value.get("changes_memory_search_order"), false)
+        })
+        .unwrap_or(false);
+    let runtime_readiness_matches_batch = runtime_readiness_value
+        .map(|_| {
+            runtime_readiness_batch_evidence_source == batch_evidence_source
+                && runtime_readiness_batch_transition_gated == batch_transition_gated
+        })
+        .unwrap_or(false);
+    let runtime_readiness_gated_batch_evidence_ready = runtime_readiness_provided
+        && runtime_readiness_schema_ok
+        && runtime_readiness_marker_ok
+        && runtime_readiness_ready
+        && runtime_readiness_batch_schema_ok
+        && runtime_readiness_batch_transition_gated
+        && runtime_readiness_batch_transition_gate_ok
+        && runtime_readiness_matches_batch
+        && runtime_readiness_raw_flags_all_false
+        && runtime_readiness_default_safe;
+    let runtime_readiness_requirement_met = !runtime_readiness_provided
+        || (runtime_readiness_schema_ok
+            && runtime_readiness_marker_ok
+            && runtime_readiness_ready
+            && runtime_readiness_control_plane_ready
+            && runtime_readiness_may_accept_controlled
+            && runtime_readiness_default_influence_blocked
+            && runtime_readiness_matches_batch
+            && runtime_readiness_raw_flags_all_false
+            && runtime_readiness_default_safe);
     let runtime_adapter_connection_evidence = batch_adapter_allowed > 0
         || controlled_adapter_allowed > 0
         || controlled_side_signal_ok > 0;
@@ -11019,7 +11186,8 @@ fn run_biocortex_retrieval_opt_in_evidence_summary(
         && controlled_schema_ok
         && batch_raw_flags_all_false
         && controlled_raw_flags_all_false
-        && controlled_movement_observed;
+        && controlled_movement_observed
+        && runtime_readiness_requirement_met;
     let recommended_next_step = if evidence_ready {
         "expand_non_production_corpus"
     } else {
@@ -11045,9 +11213,18 @@ fn run_biocortex_retrieval_opt_in_evidence_summary(
         "memory_key": optional_string_json(memory_key),
         "input_contract": {
             "batch_diagnostics_schema": batch.get("schema").cloned().unwrap_or(Value::Null),
+            "batch_diagnostics_legacy_schema_ok": batch_legacy_schema_ok,
+            "batch_diagnostics_gated_schema_ok": batch_gated_schema_ok,
+            "batch_diagnostics_evidence_source": batch_evidence_source,
+            "batch_diagnostics_transition_gated": batch_transition_gated,
             "controlled_order_fixture_run_schema": controlled.get("schema").cloned().unwrap_or(Value::Null),
+            "runtime_readiness_packet_schema": runtime_readiness_value
+                .and_then(|value| value.get("schema").cloned())
+                .unwrap_or(Value::Null),
             "batch_diagnostics_included": false,
             "controlled_order_fixture_run_included": false,
+            "runtime_readiness_packet_included": false,
+            "runtime_readiness_packet_provided": runtime_readiness_provided,
             "unknown_fields_ignored": true,
             "raw_queries_included": false,
             "raw_keys_included": false,
@@ -11056,6 +11233,15 @@ fn run_biocortex_retrieval_opt_in_evidence_summary(
         },
         "batch_diagnostics": {
             "schema_ok": batch_schema_ok,
+            "legacy_schema_ok": batch_legacy_schema_ok,
+            "gated_schema_ok": batch_gated_schema_ok,
+            "evidence_source": batch_evidence_source,
+            "transition_gated": batch_transition_gated,
+            "transition_gate_ok": batch_transition_gate_ok,
+            "transition_gate_allowed_count": batch_transition_gate_allowed,
+            "transition_gate_blocked_count": batch_transition_gate_blocked,
+            "store_trial_called_count": batch_store_trial_called,
+            "calls_memory_search_count": batch_calls_memory_search,
             "query_count": batch_query_count,
             "baseline_completed_count": batch_baseline_completed,
             "baseline_empty_count": batch_baseline_empty,
@@ -11079,9 +11265,45 @@ fn run_biocortex_retrieval_opt_in_evidence_summary(
             "raw_flags_all_false": controlled_raw_flags_all_false,
             "movement_observed": controlled_movement_observed,
         },
+        "runtime_readiness": {
+            "provided": runtime_readiness_provided,
+            "schema_ok": runtime_readiness_schema_ok,
+            "runtime_readiness_packet": runtime_readiness_marker_ok,
+            "runtime_readiness_ready": runtime_readiness_ready,
+            "control_plane_ready": runtime_readiness_control_plane_ready,
+            "live_order_influence_ready": runtime_readiness_live_order_influence_ready,
+            "may_accept_controlled_explicit_opt_in_fts_calls": runtime_readiness_may_accept_controlled,
+            "default_influence_ready": !runtime_readiness_default_influence_blocked,
+            "batch_evidence_source": if runtime_readiness_provided {
+                Value::String(runtime_readiness_batch_evidence_source.to_string())
+            } else {
+                Value::Null
+            },
+            "batch_transition_gated": runtime_readiness_batch_transition_gated,
+            "batch_schema_ok": runtime_readiness_batch_schema_ok,
+            "batch_transition_gate_ok": runtime_readiness_batch_transition_gate_ok,
+            "raw_flags_all_false": runtime_readiness_raw_flags_all_false,
+            "default_order_safe": runtime_readiness_default_safe,
+            "matches_batch_diagnostics": runtime_readiness_matches_batch,
+            "gated_batch_evidence_ready": runtime_readiness_gated_batch_evidence_ready,
+        },
         "interpretation": {
             "batch_diagnostics_raw_safe": batch_raw_flags_all_false,
+            "batch_diagnostics_transition_gated": batch_transition_gated,
+            "batch_diagnostics_evidence_source": batch_evidence_source,
+            "gated_batch_diagnostics_ready": batch_gated_diagnostics_ready,
             "controlled_order_raw_safe": controlled_raw_flags_all_false,
+            "runtime_readiness_packet_provided": runtime_readiness_provided,
+            "runtime_readiness_packet_ready": runtime_readiness_ready,
+            "runtime_readiness_requirement_met": runtime_readiness_requirement_met,
+            "readiness_batch_evidence_source": if runtime_readiness_provided {
+                Value::String(runtime_readiness_batch_evidence_source.to_string())
+            } else {
+                Value::Null
+            },
+            "readiness_batch_transition_gated": runtime_readiness_batch_transition_gated,
+            "readiness_matches_batch_diagnostics": runtime_readiness_matches_batch,
+            "readiness_gated_batch_evidence_ready": runtime_readiness_gated_batch_evidence_ready,
             "runtime_adapter_connection_evidence": runtime_adapter_connection_evidence,
             "batch_alignment_or_preflight_evidence": !batch_movement_observed,
             "controlled_rank_movement_observed": controlled_movement_observed,
@@ -11127,6 +11349,23 @@ fn run_biocortex_retrieval_opt_in_evidence_summary(
         "batch_queries={} batch_moved={} controlled_moved={} controlled_expected_met={}",
         batch_query_count, batch_actual_moved, controlled_actual_moved, controlled_expected_met
     );
+    if runtime_readiness_provided {
+        println!(
+            "runtime_readiness_ready={} readiness_batch_source={} transition_gated={}",
+            shadow_json_display(
+                payload.pointer("/runtime_readiness/runtime_readiness_ready"),
+                "false"
+            ),
+            shadow_json_display(
+                payload.pointer("/runtime_readiness/batch_evidence_source"),
+                "-"
+            ),
+            shadow_json_display(
+                payload.pointer("/runtime_readiness/batch_transition_gated"),
+                "false"
+            )
+        );
+    }
     println!(
         "recommended_next_step={} raw_flags batch={} controlled={}",
         shadow_json_display(

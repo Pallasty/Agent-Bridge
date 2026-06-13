@@ -4108,6 +4108,119 @@ if grep -q 'verify gated batch allowed secret query one\|verify gated batch allo
     exit 1
 fi
 
+opt_in_evidence_summary_with_gated_readiness="$tmpdir/opt-in-evidence-summary-with-gated-readiness.json"
+run cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
+    bio-cortex retrieval-opt-in-evidence-summary \
+    --batch-diagnostics-json "$opt_in_gated_batch_diagnostics_empty_with_aggregate" \
+    --controlled-order-fixture-run-json "$opt_in_controlled_order" \
+    --runtime-readiness-packet-json "$opt_in_runtime_readiness_packet_with_gated_batch" \
+    --reviewer verify-bundle \
+    --commit verify-dry-run-commit \
+    --forum-post-id verify-forum-post \
+    --memory-key verify-memory-key-gated-readiness-summary \
+    --json > "$opt_in_evidence_summary_with_gated_readiness"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_evidence_summary.v0"
+    and .read_only == true
+    and .evidence_summary == true
+    and .implementation_stage == "post_runtime_evidence_summary"
+    and .authorization_scope == "explicit_opt_in_fts_runtime_influence"
+    and .input_contract.batch_diagnostics_schema == "agent_bridge.biocortex_retrieval.opt_in_gated_batch_diagnostics.v0"
+    and .input_contract.batch_diagnostics_legacy_schema_ok == false
+    and .input_contract.batch_diagnostics_gated_schema_ok == true
+    and .input_contract.batch_diagnostics_evidence_source == "runtime_transition_gated_batch_diagnostics"
+    and .input_contract.batch_diagnostics_transition_gated == true
+    and .input_contract.controlled_order_fixture_run_schema == "agent_bridge.biocortex_retrieval.opt_in_controlled_order_fixture_run.v0"
+    and .input_contract.runtime_readiness_packet_schema == "agent_bridge.biocortex_retrieval.opt_in_runtime_readiness_packet.v0"
+    and .input_contract.batch_diagnostics_included == false
+    and .input_contract.controlled_order_fixture_run_included == false
+    and .input_contract.runtime_readiness_packet_included == false
+    and .input_contract.runtime_readiness_packet_provided == true
+    and .input_contract.raw_queries_included == false
+    and .input_contract.raw_keys_included == false
+    and .input_contract.content_included == false
+    and .input_contract.side_signal_raw_included == false
+    and .batch_diagnostics.schema_ok == true
+    and .batch_diagnostics.legacy_schema_ok == false
+    and .batch_diagnostics.gated_schema_ok == true
+    and .batch_diagnostics.evidence_source == "runtime_transition_gated_batch_diagnostics"
+    and .batch_diagnostics.transition_gated == true
+    and .batch_diagnostics.transition_gate_ok == true
+    and .batch_diagnostics.transition_gate_allowed_count == 2
+    and .batch_diagnostics.transition_gate_blocked_count == 0
+    and .batch_diagnostics.store_trial_called_count == 2
+    and .batch_diagnostics.calls_memory_search_count == 2
+    and .batch_diagnostics.query_count == 2
+    and .batch_diagnostics.baseline_empty_count == 2
+    and .batch_diagnostics.adapter_allowed_count == 0
+    and .batch_diagnostics.actual_order_changed_count == 0
+    and .batch_diagnostics.raw_flags_all_false == true
+    and .batch_diagnostics.movement_observed == false
+    and .batch_diagnostics.diagnostic_class == "preflight_or_baseline_empty"
+    and .controlled_order.schema_ok == true
+    and .controlled_order.expected_met == true
+    and .controlled_order.seeded_memory_count == 2
+    and .controlled_order.query_count == 1
+    and .controlled_order.adapter_allowed_count == 1
+    and .controlled_order.side_signal_ok_count == 1
+    and .controlled_order.experimental_source_count == 1
+    and .controlled_order.actual_order_changed_count == 1
+    and .controlled_order.raw_flags_all_false == true
+    and .controlled_order.movement_observed == true
+    and .runtime_readiness.provided == true
+    and .runtime_readiness.schema_ok == true
+    and .runtime_readiness.runtime_readiness_packet == true
+    and .runtime_readiness.runtime_readiness_ready == true
+    and .runtime_readiness.control_plane_ready == true
+    and .runtime_readiness.live_order_influence_ready == false
+    and .runtime_readiness.may_accept_controlled_explicit_opt_in_fts_calls == true
+    and .runtime_readiness.default_influence_ready == false
+    and .runtime_readiness.batch_evidence_source == "runtime_transition_gated_batch_diagnostics"
+    and .runtime_readiness.batch_transition_gated == true
+    and .runtime_readiness.batch_schema_ok == true
+    and .runtime_readiness.batch_transition_gate_ok == true
+    and .runtime_readiness.raw_flags_all_false == true
+    and .runtime_readiness.default_order_safe == true
+    and .runtime_readiness.matches_batch_diagnostics == true
+    and .runtime_readiness.gated_batch_evidence_ready == true
+    and .interpretation.batch_diagnostics_raw_safe == true
+    and .interpretation.batch_diagnostics_transition_gated == true
+    and .interpretation.batch_diagnostics_evidence_source == "runtime_transition_gated_batch_diagnostics"
+    and .interpretation.gated_batch_diagnostics_ready == true
+    and .interpretation.controlled_order_raw_safe == true
+    and .interpretation.runtime_readiness_packet_provided == true
+    and .interpretation.runtime_readiness_packet_ready == true
+    and .interpretation.runtime_readiness_requirement_met == true
+    and .interpretation.readiness_batch_evidence_source == "runtime_transition_gated_batch_diagnostics"
+    and .interpretation.readiness_batch_transition_gated == true
+    and .interpretation.readiness_matches_batch_diagnostics == true
+    and .interpretation.readiness_gated_batch_evidence_ready == true
+    and .interpretation.runtime_adapter_connection_evidence == true
+    and .interpretation.controlled_rank_movement_observed == true
+    and .interpretation.evidence_ready == true
+    and .interpretation.default_influence_ready == false
+    and .interpretation.recommended_next_step == "expand_non_production_corpus"
+    and .interpretation.review_state == "post_runtime_evidence_ready"
+    and .approval_state == "evidence_summary_only"
+    and .authorization_state == "does_not_grant_runtime_influence"
+    and .approval_writes_allowed == false
+    and .writes_approval == false
+    and .calls_memory_search == false
+    and .runs_biocortex == false
+    and .registers_embedding_backend == false
+    and .changes_memory_search_order == false
+    and .default_search_order_change_allowed == false
+    and .default_calls_unchanged == true
+    and .raw_queries_included == false
+    and .raw_keys_included == false
+    and .content_included == false
+    and .side_signal_raw_included == false
+' "$opt_in_evidence_summary_with_gated_readiness" >/dev/null
+if grep -q 'verify gated batch allowed secret query one\|verify gated batch allowed secret query two\|verify gated store trial allowed secret query\|verify aggregate-backed store trial ready secret query\|cortexdelta\|cortexepsilon\|cortexzeta\|cortexeta\|cortextheta\|cortexiota\|controlled_order_baseline_high\|controlled_order_biocortex_target\|target anchor\|baseline anchor\|axonalpha\|expanded_corpus_baseline_focus\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_evidence_summary_with_gated_readiness"; then
+    echo "opt-in evidence summary with gated readiness leaked raw query/key/content data" >&2
+    exit 1
+fi
+
 opt_in_gated_batch_diagnostics_blocked="$tmpdir/opt-in-gated-batch-diagnostics-blocked.json"
 run env AGENT_BRIDGE_DB="$tmpdir/opt-in-gated-batch-diagnostics-blocked.db" \
     cargo run -p ab-bridge --no-default-features -- \
