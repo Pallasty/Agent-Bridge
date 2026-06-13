@@ -708,6 +708,23 @@ Slice 30 adds a read-only runtime readiness packet:
   batch-diagnostics body, aggregate body, review request body, human decision
   text, raw query, raw key, memory content, or raw side-signal row.
 
+Slice 31 adds a lightweight controlled-trial runner:
+
+- `scripts/run-biocortex-controlled-trial.sh` extracts the focused controlled
+  trial path from the full verifier;
+- it builds the baseline-preserving trial/review evidence, implementation
+  authorization gate, runtime-influence review/decision packets, movement
+  fixture run, expanded-coverage fixture run, and redacted evidence aggregate;
+- it writes raw fixture inputs only under the selected output directory's
+  `inputs/` subdirectory and runs leak guards over the redacted outputs;
+- it emits `controlled-trial-summary.json` and `CONTROLLED_TRIAL_REPORT.md`
+  with movement, coverage, aggregate readiness, and default-order safety;
+- it uses only caller-selected non-production `AGENT_BRIDGE_DB` paths for
+  fixture memory writes;
+- it does not write approval state, mutate the default Agent-Bridge DB,
+  register an embedding backend, change default retrieval order, or grant
+  default influence.
+
 ## Fail-Open Rules
 
 The experiment must return the baseline list for:
