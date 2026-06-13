@@ -4793,6 +4793,105 @@ if grep -q 'verify evidence-summary store trial ready secret query\|verify evide
     exit 1
 fi
 
+opt_in_gated_store_trial_with_evidence_summary_transition="$tmpdir/opt-in-gated-store-trial-with-evidence-summary-transition.json"
+run env AGENT_BRIDGE_DB="$tmpdir/opt-in-gated-store-trial-with-evidence-summary-transition.db" \
+    AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
+    cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
+    bio-cortex retrieval-opt-in-gated-store-trial \
+    --runtime-transition-gate-json "$opt_in_runtime_transition_gate_with_evidence_summary" \
+    --runtime-influence-decision-packet-json "$opt_in_runtime_influence_decision_packet_with_evidence_summary" \
+    --query "verify evidence-summary transition gated store trial secret query" \
+    --per-call-opt-in \
+    --checkout "$biocortex_rs" \
+    --limit 3 \
+    --attempt-id verify-gated-store-trial-with-evidence-summary-transition \
+    --commit verify-dry-run-commit \
+    --json > "$opt_in_gated_store_trial_with_evidence_summary_transition"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_gated_store_trial.v0"
+    and .status == "transition_gate_consumed"
+    and .runtime_transition_preflight.transition_gate_allowed == true
+    and .runtime_transition_preflight.blockers == []
+    and .runtime_transition_preflight.gate_post_runtime_evidence_summary_backed == true
+    and .runtime_transition_preflight.gate_post_runtime_evidence_summary_ready == true
+    and .runtime_transition_preflight.gate_legacy_decision_packet_without_post_runtime_evidence_summary_allowed == false
+    and .runtime_transition_preflight.gate_post_runtime_evidence_summary_state == "post_runtime_evidence_ready"
+    and .runtime_transition_preflight.gate_post_runtime_batch_evidence_source == "runtime_transition_gated_batch_diagnostics"
+    and .runtime_transition_preflight.gate_post_runtime_readiness_gated_batch_evidence_ready == true
+    and .runtime_transition_preflight.gate_post_runtime_batch_transition_gated == true
+    and .runtime_transition_preflight.gate_store_post_runtime_evidence_preflight_ok == true
+    and .runtime_transition_preflight.gate_batch_post_runtime_evidence_preflight_ok == true
+    and .store_trial_summary.decision_packet_post_runtime_evidence_summary_backed == true
+    and .store_trial_summary.decision_packet_post_runtime_evidence_summary_ready == true
+    and .store_trial_summary.legacy_decision_packet_without_post_runtime_evidence_summary_allowed == false
+    and .store_trial_summary.decision_packet_post_runtime_evidence_summary_safe_for_trial == true
+    and .store_trial_summary.decision_packet_post_runtime_evidence_summary_state == "post_runtime_evidence_ready"
+    and .store_trial_called == true
+    and .calls_memory_search == true
+    and .runs_biocortex == false
+    and .changes_memory_search_order == false
+    and .default_search_order_change_allowed == false
+    and .default_calls_unchanged == true
+    and .raw_query_included == false
+    and .raw_keys_included == false
+    and .content_included == false
+    and .side_signal_raw_included == false
+' "$opt_in_gated_store_trial_with_evidence_summary_transition" >/dev/null
+if grep -q 'verify evidence-summary transition gated store trial secret query\|verify evidence-summary store trial ready secret query\|verify evidence-summary gated batch secret query one\|verify evidence-summary gated batch secret query two\|verify evidence-summary gated store trial secret query\|secret evidence summary raw query\|secret_evidence_summary_key\|secret evidence summary content\|verify gated batch allowed secret query one\|verify gated batch allowed secret query two\|verify gated store trial allowed secret query\|verify aggregate-backed store trial ready secret query\|cortexdelta\|axonalpha\|expanded_corpus_baseline_focus\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_gated_store_trial_with_evidence_summary_transition"; then
+    echo "opt-in gated store trial evidence-summary transition path leaked raw query/key/content data" >&2
+    exit 1
+fi
+
+opt_in_gated_batch_diagnostics_with_evidence_summary_transition="$tmpdir/opt-in-gated-batch-diagnostics-with-evidence-summary-transition.json"
+run env AGENT_BRIDGE_DB="$tmpdir/opt-in-gated-batch-diagnostics-with-evidence-summary-transition.db" \
+    AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
+    cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
+    bio-cortex retrieval-opt-in-gated-batch-diagnostics \
+    --runtime-transition-gate-json "$opt_in_runtime_transition_gate_with_evidence_summary" \
+    --runtime-influence-decision-packet-json "$opt_in_runtime_influence_decision_packet_with_evidence_summary" \
+    --query "verify evidence-summary transition gated batch secret query" \
+    --query-class "evidence summary transition" \
+    --per-call-opt-in \
+    --checkout "$biocortex_rs" \
+    --limit 3 \
+    --attempt-id verify-gated-batch-diagnostics-with-evidence-summary-transition \
+    --commit verify-dry-run-commit \
+    --json > "$opt_in_gated_batch_diagnostics_with_evidence_summary_transition"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_gated_batch_diagnostics.v0"
+    and .status == "completed"
+    and .summary.query_count == 1
+    and .summary.transition_gate_allowed_count == 1
+    and .summary.store_trial_called_count == 1
+    and .summary.calls_memory_search_count == 1
+    and .safety.transition_gate_allowed_all == true
+    and .safety.store_trial_called_all == true
+    and .safety.raw_flags_all_false == true
+    and .query_results[0].transition_preflight.gate_post_runtime_evidence_summary_backed == true
+    and .query_results[0].transition_preflight.gate_post_runtime_evidence_summary_ready == true
+    and .query_results[0].transition_preflight.gate_legacy_decision_packet_without_post_runtime_evidence_summary_allowed == false
+    and .query_results[0].transition_preflight.gate_post_runtime_evidence_summary_state == "post_runtime_evidence_ready"
+    and .query_results[0].transition_preflight.gate_post_runtime_batch_evidence_source == "runtime_transition_gated_batch_diagnostics"
+    and .query_results[0].transition_preflight.gate_store_post_runtime_evidence_preflight_ok == true
+    and .query_results[0].transition_preflight.gate_batch_post_runtime_evidence_preflight_ok == true
+    and .query_results[0].store_trial.decision_packet_post_runtime_evidence_summary_backed == true
+    and .query_results[0].store_trial.decision_packet_post_runtime_evidence_summary_ready == true
+    and .query_results[0].calls_memory_search == true
+    and .calls_memory_search == true
+    and .runs_biocortex == false
+    and .changes_memory_search_order == false
+    and .default_search_order_change_allowed == false
+    and .default_calls_unchanged == true
+    and .raw_queries_included == false
+    and .raw_keys_included == false
+    and .content_included == false
+    and .side_signal_raw_included == false
+' "$opt_in_gated_batch_diagnostics_with_evidence_summary_transition" >/dev/null
+if grep -q 'verify evidence-summary transition gated batch secret query\|verify evidence-summary transition gated store trial secret query\|verify evidence-summary store trial ready secret query\|verify evidence-summary gated batch secret query one\|verify evidence-summary gated batch secret query two\|verify evidence-summary gated store trial secret query\|secret evidence summary raw query\|secret_evidence_summary_key\|secret evidence summary content\|verify gated batch allowed secret query one\|verify gated batch allowed secret query two\|verify gated store trial allowed secret query\|verify aggregate-backed store trial ready secret query\|cortexdelta\|axonalpha\|expanded_corpus_baseline_focus\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_gated_batch_diagnostics_with_evidence_summary_transition"; then
+    echo "opt-in gated batch diagnostics evidence-summary transition path leaked raw query/key/content data" >&2
+    exit 1
+fi
+
 opt_in_gated_batch_diagnostics_blocked="$tmpdir/opt-in-gated-batch-diagnostics-blocked.json"
 run env AGENT_BRIDGE_DB="$tmpdir/opt-in-gated-batch-diagnostics-blocked.db" \
     cargo run -p ab-bridge --no-default-features -- \
