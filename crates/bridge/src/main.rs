@@ -434,6 +434,10 @@ enum InstinctOp {
         /// Optional state DB path. Defaults to Agent-Bridge's normal state DB.
         #[arg(long)]
         db_path: Option<PathBuf>,
+        /// Optional receipt JSONL path. Defaults to memory-writes.jsonl under
+        /// the private instinct review sidecar directory.
+        #[arg(long)]
+        receipt_out: Option<PathBuf>,
         /// Actually call memory_save. Without this flag the command is a
         /// dry-run preview.
         #[arg(long)]
@@ -453,6 +457,11 @@ enum InstinctOp {
         /// private instinct review sidecar directory.
         #[arg(long)]
         decisions: Option<PathBuf>,
+        /// Optional memory-write receipt JSONL path. Defaults to
+        /// memory-writes.jsonl under the private instinct review sidecar
+        /// directory.
+        #[arg(long)]
+        receipts: Option<PathBuf>,
         /// Maximum recent rows per section.
         #[arg(long, default_value_t = 10)]
         limit: usize,
@@ -6241,6 +6250,7 @@ async fn real_main() -> Result<()> {
             InstinctOp::MemoryWrite {
                 preflight_json,
                 db_path,
+                receipt_out,
                 write,
                 json,
             } => {
@@ -6268,9 +6278,17 @@ async fn real_main() -> Result<()> {
                         .memory_save(&mem)
                         .await
                         .map_err(|e| anyhow::anyhow!("instinct memory_save: {e}"))?;
+                    let receipt = instinct::observer_memory_write_receipt(
+                        preflight_json,
+                        &mem.key,
+                        &path,
+                        receipt_out.as_deref(),
+                    )
+                    .context("record instinct memory write receipt")?;
                     plan["status"] = json!("saved");
                     plan["saved_memory_key"] = json!(mem.key);
                     plan["db_path"] = json!(path.display().to_string());
+                    plan["receipt"] = receipt;
                 } else {
                     plan["saved_memory_key"] = Value::Null;
                     plan["db_path"] = json!(db_path
@@ -6278,6 +6296,7 @@ async fn real_main() -> Result<()> {
                         .unwrap_or_else(default_db_path)
                         .display()
                         .to_string());
+                    plan["receipt"] = Value::Null;
                 }
                 if *json {
                     println!("{}", serde_json::to_string_pretty(&plan)?);
@@ -6297,8 +6316,11 @@ async fn real_main() -> Result<()> {
                             .unwrap_or(false),
                     );
                     println!(
-                        "db={} next={}",
+                        "db={} receipt={} next={}",
                         plan.get("db_path").and_then(|v| v.as_str()).unwrap_or("-"),
+                        plan.pointer("/receipt/receipts_path")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("-"),
                         plan.get("recommended_next_step")
                             .and_then(|v| v.as_str())
                             .unwrap_or("unknown"),
@@ -6309,12 +6331,14 @@ async fn real_main() -> Result<()> {
             InstinctOp::ReviewStatus {
                 review_dir,
                 decisions,
+                receipts,
                 limit,
                 json,
             } => {
                 let status = instinct::observer_review_status(
                     review_dir.as_deref(),
                     decisions.as_deref(),
+                    receipts.as_deref(),
                     *limit,
                 )
                 .context("read instinct observer review status")?;
@@ -6322,7 +6346,7 @@ async fn real_main() -> Result<()> {
                     println!("{}", serde_json::to_string_pretty(&status)?);
                 } else {
                     println!(
-                        "instinct review status: packets={} decisions={} preflights={} ready={} parse_errors={} memory_write={}",
+                        "instinct review status: packets={} decisions={} preflights={} ready={} receipts={} parse_errors={} memory_write={}",
                         status
                             .get("packet_count")
                             .and_then(|v| v.as_u64())
@@ -6340,6 +6364,10 @@ async fn real_main() -> Result<()> {
                             .and_then(|v| v.as_u64())
                             .unwrap_or(0),
                         status
+                            .get("memory_write_receipt_count")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0),
+                        status
                             .get("parse_error_count")
                             .and_then(|v| v.as_u64())
                             .unwrap_or(0),
@@ -6349,13 +6377,17 @@ async fn real_main() -> Result<()> {
                             .unwrap_or(false),
                     );
                     println!(
-                        "review_dir={} decisions={}",
+                        "review_dir={} decisions={} receipts={}",
                         status
                             .get("review_dir")
                             .and_then(|v| v.as_str())
                             .unwrap_or("-"),
                         status
                             .get("decisions_path")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("-"),
+                        status
+                            .get("receipts_path")
                             .and_then(|v| v.as_str())
                             .unwrap_or("-"),
                     );

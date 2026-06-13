@@ -187,6 +187,13 @@ pub fn default_review_decisions_path() -> PathBuf {
     default_review_dir_path().join("decisions.jsonl")
 }
 
+pub fn default_memory_write_receipts_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("AB_INSTINCT_MEMORY_WRITE_RECEIPTS") {
+        return PathBuf::from(path);
+    }
+    default_review_dir_path().join("memory-writes.jsonl")
+}
+
 pub fn observer_candidate_preview_for_path(log_path: &Path, limit: usize) -> Value {
     let records = load_records(log_path);
     let analyzed = analyze_records(&records);
@@ -666,14 +673,80 @@ pub fn observer_memory_write_plan_for_path(
     }))
 }
 
+pub fn observer_memory_write_receipt(
+    preflight_json: &Path,
+    memory_key: &str,
+    db_path: &Path,
+    receipt_path: Option<&Path>,
+) -> std::io::Result<Value> {
+    let now_unix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    observer_memory_write_receipt_for_paths(
+        preflight_json,
+        receipt_path.unwrap_or(&default_memory_write_receipts_path()),
+        memory_key,
+        db_path,
+        now_unix,
+    )
+}
+
+pub fn observer_memory_write_receipt_for_paths(
+    preflight_json: &Path,
+    receipts_path: &Path,
+    memory_key: &str,
+    db_path: &Path,
+    now_unix: u64,
+) -> std::io::Result<Value> {
+    let body = std::fs::read_to_string(preflight_json)?;
+    let preflight: Value = serde_json::from_str(&body)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    ensure_memory_preflight_schema(&preflight)?;
+    let expected_key = preflight
+        .pointer("/memory_draft/key")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    if expected_key != memory_key {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "memory key does not match preflight draft",
+        ));
+    }
+    let receipt = json!({
+        "schema": "agent_bridge.instinct_observer.phase1_memory_write_receipt.v0",
+        "receipt_id": format!("instinct-memory-write-{now_unix}-{memory_key}"),
+        "generated_at_unix": now_unix,
+        "preflight_json": preflight_json.display().to_string(),
+        "preflight_id": preflight.get("preflight_id").cloned().unwrap_or(Value::Null),
+        "candidate_id": preflight.get("candidate_id").cloned().unwrap_or(Value::Null),
+        "memory_key": memory_key,
+        "memory_kind": preflight.pointer("/memory_draft/kind").cloned().unwrap_or(Value::Null),
+        "db_path": db_path.display().to_string(),
+        "receipts_path": receipts_path.display().to_string(),
+        "writes_memory": true,
+        "raw_prompt_included": false,
+        "raw_tool_input_included": false,
+        "raw_tool_output_included": false,
+    });
+    if let Some(parent) = receipts_path.parent() {
+        std::fs::create_dir_all(parent)?;
+        set_private_dir_permissions(parent)?;
+    }
+    append_private_jsonl(receipts_path, &receipt)?;
+    Ok(receipt)
+}
+
 pub fn observer_review_status(
     review_dir: Option<&Path>,
     decisions_path: Option<&Path>,
+    receipts_path: Option<&Path>,
     limit: usize,
 ) -> std::io::Result<Value> {
     observer_review_status_for_paths(
         review_dir.unwrap_or(&default_review_dir_path()),
         decisions_path.unwrap_or(&default_review_decisions_path()),
+        receipts_path.unwrap_or(&default_memory_write_receipts_path()),
         limit,
     )
 }
@@ -681,6 +754,7 @@ pub fn observer_review_status(
 pub fn observer_review_status_for_paths(
     review_dir: &Path,
     decisions_path: &Path,
+    receipts_path: &Path,
     limit: usize,
 ) -> std::io::Result<Value> {
     let mut packets = Vec::new();
@@ -742,6 +816,7 @@ pub fn observer_review_status_for_paths(
     sort_generated_desc(&mut packets);
     sort_generated_desc(&mut preflights);
     let decisions = load_review_decisions(decisions_path)?;
+    let receipts = load_memory_write_receipts(receipts_path)?;
     let mut decision_counts: BTreeMap<String, u64> = BTreeMap::new();
     for decision in &decisions {
         let key = decision
@@ -757,11 +832,14 @@ pub fn observer_review_status_for_paths(
         "read_only": true,
         "review_dir": review_dir.display().to_string(),
         "decisions_path": decisions_path.display().to_string(),
+        "receipts_path": receipts_path.display().to_string(),
         "review_dir_exists": review_dir.is_dir(),
         "decisions_log_exists": decisions_path.is_file(),
+        "receipts_log_exists": receipts_path.is_file(),
         "packet_count": packets.len(),
         "decision_count": decisions.len(),
         "preflight_count": preflights.len(),
+        "memory_write_receipt_count": receipts.len(),
         "ready_preflight_count": preflights
             .iter()
             .filter(|p| p.get("ready_for_separate_memory_write").and_then(|v| v.as_bool()).unwrap_or(false))
@@ -773,6 +851,7 @@ pub fn observer_review_status_for_paths(
         "auto_apply_allowed": false,
         "latest_packets": packets.into_iter().take(limit).collect::<Vec<_>>(),
         "latest_decisions": decisions.into_iter().rev().take(limit).collect::<Vec<_>>(),
+        "latest_memory_write_receipts": receipts.into_iter().rev().take(limit).collect::<Vec<_>>(),
         "latest_preflights": preflights.into_iter().take(limit).collect::<Vec<_>>(),
     }))
 }
@@ -1070,6 +1149,32 @@ fn load_review_decisions(decisions_path: &Path) -> std::io::Result<Vec<Value>> {
             .unwrap_or(0)
     });
     Ok(decisions)
+}
+
+fn load_memory_write_receipts(receipts_path: &Path) -> std::io::Result<Vec<Value>> {
+    let text = match std::fs::read_to_string(receipts_path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+    let mut receipts = Vec::new();
+    for line in text.lines().filter(|line| !line.trim().is_empty()) {
+        let value: Value = serde_json::from_str(line)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        if value.get("schema").and_then(|v| v.as_str())
+            != Some("agent_bridge.instinct_observer.phase1_memory_write_receipt.v0")
+        {
+            continue;
+        }
+        receipts.push(value);
+    }
+    receipts.sort_by_key(|value| {
+        value
+            .get("generated_at_unix")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0)
+    });
+    Ok(receipts)
 }
 
 fn sort_generated_desc(items: &mut [Value]) {
@@ -2172,6 +2277,7 @@ mod tests {
         let log = tmp.path().join("observations.jsonl");
         let out_dir = tmp.path().join("review");
         let decisions = out_dir.join("decisions.jsonl");
+        let receipts = out_dir.join("memory-writes.jsonl");
         write_jsonl(
             &log,
             &[json!({
@@ -2202,7 +2308,7 @@ mod tests {
             true,
         )
         .unwrap();
-        observer_memory_preflight_for_paths(
+        let preflight = observer_memory_preflight_for_paths(
             &packet_json,
             &decisions,
             &out_dir,
@@ -2214,8 +2320,19 @@ mod tests {
             true,
         )
         .unwrap();
+        let preflight_json = PathBuf::from(preflight["json_path"].as_str().unwrap());
+        let receipt = observer_memory_write_receipt_for_paths(
+            &preflight_json,
+            &receipts,
+            "lesson:instinct-status-test",
+            tmp.path().join("state.db").as_path(),
+            1_780_747_053,
+        )
+        .unwrap();
+        assert_eq!(receipt["memory_key"], json!("lesson:instinct-status-test"));
+        assert_eq!(mode_octal(&receipts).as_deref(), Some("600"));
 
-        let status = observer_review_status_for_paths(&out_dir, &decisions, 10).unwrap();
+        let status = observer_review_status_for_paths(&out_dir, &decisions, &receipts, 10).unwrap();
         assert_eq!(
             status["schema"],
             "agent_bridge.instinct_observer.phase1_review_status.v0"
@@ -2226,9 +2343,14 @@ mod tests {
         assert_eq!(status["decision_count"], json!(1));
         assert_eq!(status["preflight_count"], json!(1));
         assert_eq!(status["ready_preflight_count"], json!(1));
+        assert_eq!(status["memory_write_receipt_count"], json!(1));
         assert_eq!(status["decision_counts"]["approve"], json!(1));
         assert_eq!(
             status["latest_preflights"][0]["memory_key"],
+            json!("lesson:instinct-status-test")
+        );
+        assert_eq!(
+            status["latest_memory_write_receipts"][0]["memory_key"],
             json!("lesson:instinct-status-test")
         );
         let text = serde_json::to_string(&status).unwrap();

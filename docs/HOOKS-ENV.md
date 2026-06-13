@@ -111,12 +111,14 @@ memory write remains a separate explicit command.
 only a ready preflight JSON file, never free-form memory text; without `--write`
 it previews the exact `MemoryRecord` that would be saved. With `--write`, it
 opens the Agent-Bridge state DB and calls the existing `memory_save` path for
-the human-authored draft from the preflight packet.
+the human-authored draft from the preflight packet, then appends a private
+`memory-writes.jsonl` receipt (`AB_INSTINCT_MEMORY_WRITE_RECEIPTS` /
+`--receipt-out` can override the path).
 
 `agent-bridge instinct review-status` is read-only and summarizes the private
 review sidecar directory: review packets, decision counts, preflight packets,
-and how many preflights are ready for a separate memory write. It does not touch
-the memory DB.
+memory-write receipts, and how many preflights are ready for a separate memory
+write. It does not touch the memory DB.
 
 Security posture: the observer sidecar is local-only and private by default.
 The hook honors `AB_INSTINCT_OBSERVER_LOG`; otherwise it prefers
