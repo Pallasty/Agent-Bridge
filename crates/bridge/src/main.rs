@@ -309,6 +309,23 @@ enum ShellKind {
     Fish,
 }
 
+#[derive(Copy, Clone, Debug, ValueEnum)]
+enum InstinctReviewDecision {
+    Approve,
+    Reject,
+    Defer,
+}
+
+impl InstinctReviewDecision {
+    fn as_str(self) -> &'static str {
+        match self {
+            InstinctReviewDecision::Approve => "approve",
+            InstinctReviewDecision::Reject => "reject",
+            InstinctReviewDecision::Defer => "defer",
+        }
+    }
+}
+
 #[derive(Subcommand, Debug)]
 enum InstinctOp {
     /// Build a read-only Phase 1 candidate preview from the observer sidecar
@@ -337,6 +354,37 @@ enum InstinctOp {
         out_dir: Option<PathBuf>,
         /// Write JSON + Markdown packet files. Without this flag the command is
         /// a dry-run preview.
+        #[arg(long)]
+        write: bool,
+        /// Emit raw JSON payload instead of a compact command line summary.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Record a human approve/reject/defer decision for one review-packet
+    /// candidate. Preview only by default; --write appends a private local
+    /// decision JSONL record and still never writes memories.
+    ReviewDecision {
+        /// Review packet JSON produced by `instinct review-packet --write`.
+        #[arg(long)]
+        packet_json: PathBuf,
+        /// Candidate id inside the review packet, e.g. instinct-candidate-0001.
+        #[arg(long)]
+        candidate_id: String,
+        /// Human decision for this candidate.
+        #[arg(long, value_enum)]
+        decision: InstinctReviewDecision,
+        /// Optional reviewer label recorded in the decision.
+        #[arg(long)]
+        reviewer: Option<String>,
+        /// Optional human note recorded in the private local decision log.
+        #[arg(long)]
+        note: Option<String>,
+        /// Optional output JSONL path for --write. Defaults to decisions.jsonl
+        /// under the private instinct review sidecar directory.
+        #[arg(long)]
+        out: Option<PathBuf>,
+        /// Append the decision record. Without this flag the command is a
+        /// dry-run preview.
         #[arg(long)]
         write: bool,
         /// Emit raw JSON payload instead of a compact command line summary.
@@ -5987,6 +6035,66 @@ async fn real_main() -> Result<()> {
                             .get("writes_memory")
                             .and_then(|v| v.as_bool())
                             .unwrap_or(false),
+                    );
+                }
+                Ok(())
+            }
+            InstinctOp::ReviewDecision {
+                packet_json,
+                candidate_id,
+                decision,
+                reviewer,
+                note,
+                out,
+                write,
+                json,
+            } => {
+                let record = instinct::observer_review_decision(
+                    packet_json,
+                    candidate_id,
+                    decision.as_str(),
+                    reviewer.as_deref(),
+                    note.as_deref(),
+                    out.as_deref(),
+                    *write,
+                )
+                .context("record instinct observer review decision")?;
+                if *json {
+                    println!("{}", serde_json::to_string_pretty(&record)?);
+                } else {
+                    println!(
+                        "instinct review decision: status={} candidate={} decision={} written={} memory_write={}",
+                        record
+                            .get("status")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown"),
+                        record
+                            .get("candidate_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("?"),
+                        record
+                            .get("decision")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("?"),
+                        record
+                            .get("written")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false),
+                        record
+                            .get("writes_memory")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false),
+                    );
+                    println!(
+                        "decisions={} next={}",
+                        record
+                            .get("decisions_path")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("-"),
+                        record
+                            .get("recommended_next_step")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown"),
                     );
                 }
                 Ok(())

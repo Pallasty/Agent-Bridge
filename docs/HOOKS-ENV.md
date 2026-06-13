@@ -68,6 +68,8 @@ ECC 的 `ECC_HOOK_PROFILE=minimal|standard|strict` 是上述 toggle 的**便利�
 # Phase 1 候选预览：agent-bridge instinct candidates --limit 20 --json
 # Phase 1 人工审核包预览：agent-bridge instinct review-packet --limit 20 --json
 # 显式写出脱敏 JSON/Markdown 审核材料：agent-bridge instinct review-packet --limit 20 --write
+# 记录单个候选的人工决策，默认预览：agent-bridge instinct review-decision --packet-json <packet.json> --candidate-id instinct-candidate-0001 --decision approve
+# 显式追加本地决策审计日志：agent-bridge instinct review-decision --packet-json <packet.json> --candidate-id instinct-candidate-0001 --decision approve --write
 ```
 
 `agent-bridge doctor` and the MCP `capabilities` tool also expose the observer
@@ -87,6 +89,13 @@ anything, or include raw prompt/tool payload bodies. The default review
 directory is `/Data/agent-bridge/instinct-review` when `/Data` is available, or
 `~/.cache/agent-bridge/instinct-review` otherwise; `AB_INSTINCT_REVIEW_DIR` can
 override it.
+
+`agent-bridge instinct review-decision` records a human `approve`, `reject`, or
+`defer` decision for one candidate from a packet. It is also dry-run by default;
+`--write` appends a private local JSONL audit record (`decisions.jsonl` by
+default, or `AB_INSTINCT_REVIEW_DECISIONS` / `--out`). An `approve` decision only
+marks the candidate as eligible for a later explicit memory-write preflight; it
+does not write memory or authorize automatic application.
 
 Security posture: the observer sidecar is local-only and private by default.
 The hook honors `AB_INSTINCT_OBSERVER_LOG`; otherwise it prefers

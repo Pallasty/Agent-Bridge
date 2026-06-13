@@ -180,6 +180,13 @@ pub fn default_review_dir_path() -> PathBuf {
         .join("instinct-review")
 }
 
+pub fn default_review_decisions_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("AB_INSTINCT_REVIEW_DECISIONS") {
+        return PathBuf::from(path);
+    }
+    default_review_dir_path().join("decisions.jsonl")
+}
+
 pub fn observer_candidate_preview_for_path(log_path: &Path, limit: usize) -> Value {
     let records = load_records(log_path);
     let analyzed = analyze_records(&records);
@@ -337,6 +344,113 @@ pub fn observer_review_packet_for_paths(
     Ok(packet)
 }
 
+pub fn observer_review_decision(
+    packet_json: &Path,
+    candidate_id: &str,
+    decision: &str,
+    reviewer: Option<&str>,
+    note: Option<&str>,
+    out_path: Option<&Path>,
+    write: bool,
+) -> std::io::Result<Value> {
+    let now_unix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    observer_review_decision_for_paths(
+        packet_json,
+        out_path.unwrap_or(&default_review_decisions_path()),
+        candidate_id,
+        decision,
+        reviewer,
+        note,
+        now_unix,
+        write,
+    )
+}
+
+pub fn observer_review_decision_for_paths(
+    packet_json: &Path,
+    decisions_path: &Path,
+    candidate_id: &str,
+    decision: &str,
+    reviewer: Option<&str>,
+    note: Option<&str>,
+    now_unix: u64,
+    write: bool,
+) -> std::io::Result<Value> {
+    let decision = normalize_review_decision(decision)?;
+    let body = std::fs::read_to_string(packet_json)?;
+    let packet: Value = serde_json::from_str(&body)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    let packet_schema = packet.get("schema").and_then(|v| v.as_str()).unwrap_or("");
+    if packet_schema != "agent_bridge.instinct_observer.phase1_review_packet.v0" {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "packet_json is not an instinct phase1 review packet",
+        ));
+    }
+    let candidate = packet
+        .pointer("/candidate_preview/candidates")
+        .and_then(|v| v.as_array())
+        .and_then(|items| {
+            items.iter().find(|candidate| {
+                candidate.get("candidate_id").and_then(|v| v.as_str()) == Some(candidate_id)
+            })
+        })
+        .ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("candidate not found in review packet: {candidate_id}"),
+            )
+        })?;
+
+    let decision_id = format!("instinct-decision-{now_unix}-{candidate_id}");
+    let mut record = json!({
+        "schema": "agent_bridge.instinct_observer.phase1_review_decision.v0",
+        "decision_id": decision_id,
+        "generated_at_unix": now_unix,
+        "dry_run": !write,
+        "status": if write { "recorded" } else { "preview_only" },
+        "review_packet_id": packet.get("packet_id").cloned().unwrap_or(Value::Null),
+        "review_packet_path": packet_json.display().to_string(),
+        "candidate_id": candidate_id,
+        "candidate_kind": candidate.get("kind").cloned().unwrap_or(Value::Null),
+        "candidate_session_id": candidate.get("session_id").cloned().unwrap_or(Value::Null),
+        "decision": decision,
+        "reviewer": reviewer,
+        "note": note,
+        "decisions_path": decisions_path.display().to_string(),
+        "writes_decision_log": write,
+        "writes_memory": false,
+        "persists_review_queue": false,
+        "auto_apply_allowed": false,
+        "raw_prompt_included": false,
+        "raw_tool_input_included": false,
+        "raw_tool_output_included": false,
+        "candidate_can_enter_future_explicit_memory_write_preflight": decision == "approve",
+        "memory_write_requires_separate_command": true,
+        "recommended_next_step": if decision == "approve" {
+            "run_separate_memory_write_preflight_for_approved_candidate"
+        } else {
+            "continue_reviewing_remaining_candidates"
+        },
+    });
+
+    if write {
+        if let Some(parent) = decisions_path.parent() {
+            std::fs::create_dir_all(parent)?;
+            set_private_dir_permissions(parent)?;
+        }
+        append_private_jsonl(decisions_path, &record)?;
+        record["written"] = json!(true);
+    } else {
+        record["written"] = json!(false);
+    }
+
+    Ok(record)
+}
+
 pub fn rotate_observer_log(dry_run: bool) -> std::io::Result<Value> {
     let now_unix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -478,6 +592,18 @@ fn value_str(value: Option<&Value>) -> String {
     }
 }
 
+fn normalize_review_decision(decision: &str) -> std::io::Result<&'static str> {
+    match decision {
+        "approve" => Ok("approve"),
+        "reject" => Ok("reject"),
+        "defer" => Ok("defer"),
+        other => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("unsupported review decision: {other}"),
+        )),
+    }
+}
+
 fn write_private_file(path: &Path, body: &[u8]) -> std::io::Result<()> {
     let mut file = std::fs::OpenOptions::new()
         .create(true)
@@ -485,6 +611,18 @@ fn write_private_file(path: &Path, body: &[u8]) -> std::io::Result<()> {
         .write(true)
         .open(path)?;
     file.write_all(body)?;
+    set_private_file_permissions(path)?;
+    Ok(())
+}
+
+fn append_private_jsonl(path: &Path, value: &Value) -> std::io::Result<()> {
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    let line = serde_json::to_string(value)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    writeln!(file, "{line}")?;
     set_private_file_permissions(path)?;
     Ok(())
 }
@@ -1236,6 +1374,84 @@ mod tests {
         assert!(!body.contains("secret review fixed command"));
         assert!(!body.contains("secret review fixed output"));
         assert!(body.contains("No memory write is authorized"));
+    }
+
+    #[test]
+    fn observer_review_decision_records_private_decision_without_memory_write() {
+        let tmp = tempfile::tempdir().unwrap();
+        let log = tmp.path().join("observations.jsonl");
+        let out_dir = tmp.path().join("review");
+        let decisions = out_dir.join("decisions.jsonl");
+        write_jsonl(
+            &log,
+            &[json!({
+                "ts": 1.0,
+                "sid": "s1",
+                "ev": "UserPromptSubmit",
+                "prompt": "不对，应该改成 secret decision prompt"
+            })],
+        );
+        let packet = observer_review_packet_for_paths(
+            &log,
+            &out_dir,
+            20,
+            Some("tester"),
+            1_780_747_020,
+            true,
+        )
+        .unwrap();
+        let packet_json = PathBuf::from(packet["json_path"].as_str().unwrap());
+
+        let dry_run = observer_review_decision_for_paths(
+            &packet_json,
+            &decisions,
+            "instinct-candidate-0001",
+            "approve",
+            Some("tester"),
+            Some("stable reusable lesson"),
+            1_780_747_021,
+            false,
+        )
+        .unwrap();
+        assert_eq!(dry_run["dry_run"], json!(true));
+        assert_eq!(dry_run["written"], json!(false));
+        assert_eq!(dry_run["writes_memory"], json!(false));
+        assert!(!decisions.exists(), "dry-run must not create decisions log");
+
+        let record = observer_review_decision_for_paths(
+            &packet_json,
+            &decisions,
+            "instinct-candidate-0001",
+            "approve",
+            Some("tester"),
+            Some("stable reusable lesson"),
+            1_780_747_022,
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            record["schema"],
+            "agent_bridge.instinct_observer.phase1_review_decision.v0"
+        );
+        assert_eq!(record["written"], json!(true));
+        assert_eq!(record["writes_decision_log"], json!(true));
+        assert_eq!(record["writes_memory"], json!(false));
+        assert_eq!(record["persists_review_queue"], json!(false));
+        assert_eq!(
+            record["candidate_can_enter_future_explicit_memory_write_preflight"],
+            json!(true)
+        );
+        assert_eq!(mode_octal(&decisions).as_deref(), Some("600"));
+
+        let body = std::fs::read_to_string(&decisions).unwrap();
+        let rows: Vec<Value> = body
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["decision"], json!("approve"));
+        assert_eq!(rows[0]["writes_memory"], json!(false));
+        assert!(!body.contains("secret decision prompt"));
     }
 
     #[test]
