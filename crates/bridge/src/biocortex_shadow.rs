@@ -58,6 +58,8 @@ pub const BIOCORTEX_RETRIEVAL_OPT_IN_BATCH_DIAGNOSTICS_SCHEMA: &str =
     "agent_bridge.biocortex_retrieval.opt_in_batch_diagnostics.v0";
 pub const BIOCORTEX_RETRIEVAL_OPT_IN_RUNTIME_READINESS_PACKET_SCHEMA: &str =
     "agent_bridge.biocortex_retrieval.opt_in_runtime_readiness_packet.v0";
+pub const BIOCORTEX_RETRIEVAL_OPT_IN_RUNTIME_TRANSITION_GATE_SCHEMA: &str =
+    "agent_bridge.biocortex_retrieval.opt_in_runtime_transition_gate.v0";
 pub const BIOCORTEX_SUBSTRATE_REPLAY_PLAN_SCHEMA: &str =
     "agent_bridge.biocortex_substrate_replay_plan.v0";
 pub const BIOCORTEX_CHECKOUT_ENV: &str = "AB_BIOCORTEX_RS";
@@ -289,6 +291,18 @@ pub struct BioCortexRetrievalOptInRuntimeReadinessPacketOptions {
     pub runtime_influence_decision_packet: Value,
     pub store_trial: Value,
     pub batch_diagnostics: Value,
+    pub reviewer: Option<String>,
+    pub commit: Option<String>,
+    pub forum_post_id: Option<String>,
+    pub memory_key: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BioCortexRetrievalOptInRuntimeTransitionGateOptions {
+    pub runtime_readiness_packet: Value,
+    pub mode: String,
+    pub per_call_opt_in: bool,
+    pub operator_disabled: bool,
     pub reviewer: Option<String>,
     pub commit: Option<String>,
     pub forum_post_id: Option<String>,
@@ -6891,6 +6905,308 @@ pub fn biocortex_retrieval_opt_in_runtime_readiness_packet(
     })
 }
 
+pub fn biocortex_retrieval_opt_in_runtime_transition_gate(
+    opts: BioCortexRetrievalOptInRuntimeTransitionGateOptions,
+) -> Value {
+    let readiness = opts.runtime_readiness_packet;
+    let mode = normalize_token(&opts.mode);
+    let requested_mode_authorized = mode == "fts";
+    let requested_hybrid_influence = mode == "hybrid";
+    let requested_semantic_influence = mode == "semantic";
+
+    let readiness_schema_ok = value_str_eq(
+        readiness.get("schema"),
+        BIOCORTEX_RETRIEVAL_OPT_IN_RUNTIME_READINESS_PACKET_SCHEMA,
+    );
+    let readiness_read_only = value_bool_is(readiness.get("read_only"), true);
+    let readiness_marker_ok = value_bool_is(readiness.get("runtime_readiness_packet"), true);
+    let readiness_stage_ok = value_str_eq(
+        readiness.get("implementation_stage"),
+        "controlled_opt_in_runtime_readiness_packet",
+    );
+    let readiness_scope_ok = value_str_eq(
+        readiness.get("authorization_scope"),
+        "explicit_opt_in_fts_runtime_influence",
+    );
+    let readiness_completed = value_str_eq(readiness.get("status"), "completed");
+    let readiness_control_plane_ready =
+        value_bool_is(readiness.pointer("/readiness/control_plane_ready"), true);
+    let readiness_may_accept_calls = value_bool_is(
+        readiness.pointer("/readiness/may_accept_controlled_explicit_opt_in_fts_calls"),
+        true,
+    );
+    let readiness_default_influence_not_ready =
+        value_bool_is(readiness.pointer("/readiness/default_influence_ready"), false)
+            && value_bool_is(
+                readiness.pointer("/readiness/may_change_default_memory_search_order"),
+                false,
+            );
+    let boundary_ready = value_bool_is(
+        readiness.pointer("/boundary_check/runtime_readiness_ready"),
+        true,
+    );
+    let readiness_blockers = json_string_array(readiness.pointer("/boundary_check/blockers"));
+    let readiness_no_blockers = readiness_blockers.is_empty();
+    let boundary_requires_per_call = value_bool_is(
+        readiness.pointer("/boundary_check/requires_per_call_opt_in"),
+        true,
+    );
+    let boundary_requires_operator_enabled = value_bool_is(
+        readiness.pointer("/boundary_check/requires_operator_disable_absent"),
+        true,
+    );
+    let boundary_requires_fail_open = value_bool_is(
+        readiness.pointer("/boundary_check/requires_fail_open_to_baseline"),
+        true,
+    );
+    let boundary_requires_redacted_audit = value_bool_is(
+        readiness.pointer("/boundary_check/requires_redacted_audit_only"),
+        true,
+    );
+    let boundary_requires_baseline_recall = value_bool_is(
+        readiness.pointer("/boundary_check/requires_baseline_candidate_recall"),
+        true,
+    );
+    let boundary_grants_nothing = value_bool_is(
+        readiness.pointer("/boundary_check/this_packet_grants_new_authorization"),
+        false,
+    ) && value_bool_is(
+        readiness.pointer("/boundary_check/this_packet_changes_return_order"),
+        false,
+    ) && value_bool_is(
+        readiness.pointer("/boundary_check/this_packet_allows_default_search_order_change"),
+        false,
+    );
+    let readiness_input_raw_absent =
+        value_bool_is(
+            readiness.pointer("/input_contract/runtime_influence_decision_packet_included"),
+            false,
+        ) && value_bool_is(
+            readiness.pointer("/input_contract/store_trial_included"),
+            false,
+        ) && value_bool_is(
+            readiness.pointer("/input_contract/batch_diagnostics_included"),
+            false,
+        ) && value_bool_is(
+            readiness.pointer("/input_contract/raw_queries_included"),
+            false,
+        ) && value_bool_is(
+            readiness.pointer("/input_contract/raw_keys_included"),
+            false,
+        ) && value_bool_is(readiness.pointer("/input_contract/content_included"), false)
+            && value_bool_is(
+                readiness.pointer("/input_contract/side_signal_raw_included"),
+                false,
+            )
+            && value_bool_is(
+                readiness.pointer("/input_contract/human_decision_text_included"),
+                false,
+            );
+    let readiness_side_effects_absent =
+        value_bool_is(readiness.get("approval_writes_allowed"), false)
+            && value_bool_is(readiness.get("writes_approval"), false)
+            && value_bool_is(readiness.get("calls_memory_search"), false)
+            && value_bool_is(readiness.get("runs_biocortex"), false)
+            && value_bool_is(readiness.get("registers_embedding_backend"), false)
+            && value_bool_is(readiness.get("changes_memory_search_order"), false)
+            && value_bool_is(readiness.get("default_search_order_change_allowed"), false)
+            && value_bool_is(readiness.get("default_calls_unchanged"), true)
+            && value_bool_is(readiness.get("raw_queries_included"), false)
+            && value_bool_is(readiness.get("raw_keys_included"), false)
+            && value_bool_is(readiness.get("content_included"), false)
+            && value_bool_is(readiness.get("side_signal_raw_included"), false)
+            && value_bool_is(readiness.get("human_decision_text_included"), false);
+
+    let mut blockers = Vec::new();
+    push_string_blocker(&mut blockers, readiness_schema_ok, "readiness_packet_schema_invalid");
+    push_string_blocker(&mut blockers, readiness_read_only, "readiness_packet_not_read_only");
+    push_string_blocker(
+        &mut blockers,
+        readiness_marker_ok,
+        "readiness_packet_marker_missing",
+    );
+    push_string_blocker(&mut blockers, readiness_stage_ok, "readiness_packet_stage_invalid");
+    push_string_blocker(&mut blockers, readiness_scope_ok, "readiness_packet_scope_invalid");
+    push_string_blocker(&mut blockers, readiness_completed, "readiness_packet_not_completed");
+    push_string_blocker(
+        &mut blockers,
+        readiness_control_plane_ready,
+        "readiness_control_plane_not_ready",
+    );
+    push_string_blocker(
+        &mut blockers,
+        readiness_may_accept_calls,
+        "readiness_does_not_accept_controlled_calls",
+    );
+    push_string_blocker(
+        &mut blockers,
+        readiness_default_influence_not_ready,
+        "readiness_claims_default_influence",
+    );
+    push_string_blocker(&mut blockers, boundary_ready, "readiness_boundary_not_ready");
+    push_string_blocker(&mut blockers, readiness_no_blockers, "readiness_boundary_has_blockers");
+    push_string_blocker(
+        &mut blockers,
+        boundary_requires_per_call,
+        "readiness_missing_per_call_requirement",
+    );
+    push_string_blocker(
+        &mut blockers,
+        boundary_requires_operator_enabled,
+        "readiness_missing_operator_disable_requirement",
+    );
+    push_string_blocker(
+        &mut blockers,
+        boundary_requires_fail_open,
+        "readiness_missing_fail_open_requirement",
+    );
+    push_string_blocker(
+        &mut blockers,
+        boundary_requires_redacted_audit,
+        "readiness_missing_redacted_audit_requirement",
+    );
+    push_string_blocker(
+        &mut blockers,
+        boundary_requires_baseline_recall,
+        "readiness_missing_baseline_recall_requirement",
+    );
+    push_string_blocker(
+        &mut blockers,
+        boundary_grants_nothing,
+        "readiness_packet_claims_runtime_or_default_change",
+    );
+    push_string_blocker(
+        &mut blockers,
+        readiness_input_raw_absent,
+        "readiness_packet_raw_input_included",
+    );
+    push_string_blocker(
+        &mut blockers,
+        readiness_side_effects_absent,
+        "readiness_packet_side_effect_claim_unexpected",
+    );
+    push_string_blocker(
+        &mut blockers,
+        requested_mode_authorized,
+        "requested_mode_not_authorized",
+    );
+    push_string_blocker(
+        &mut blockers,
+        opts.per_call_opt_in,
+        "per_call_opt_in_missing",
+    );
+    push_string_blocker(
+        &mut blockers,
+        !opts.operator_disabled,
+        "operator_disabled",
+    );
+
+    let transition_allowed = blockers.is_empty();
+
+    json!({
+        "schema": BIOCORTEX_RETRIEVAL_OPT_IN_RUNTIME_TRANSITION_GATE_SCHEMA,
+        "generated_at": now_secs(),
+        "read_only": true,
+        "runtime_transition_gate": true,
+        "implementation_stage": "readiness_gated_runtime_transition_gate",
+        "authorization_scope": "explicit_opt_in_fts_runtime_influence",
+        "purpose": "Consume a runtime-readiness packet and decide whether a requested explicit opt-in FTS runtime transition may proceed. This gate performs no retrieval, runs no BioCortex adapter, writes no approval, and does not alter default memory_search.",
+        "status": if transition_allowed { "transition_allowed" } else { "blocked" },
+        "reviewer": optional_string_json(opts.reviewer),
+        "commit": optional_string_json(opts.commit),
+        "forum_post_id": optional_string_json(opts.forum_post_id),
+        "memory_key": optional_string_json(opts.memory_key),
+        "input_contract": {
+            "runtime_readiness_packet_schema": readiness.get("schema").cloned().unwrap_or(Value::Null),
+            "runtime_readiness_packet_included": false,
+            "requires_runtime_readiness_packet": true,
+            "requires_control_plane_ready": true,
+            "requires_per_call_opt_in": true,
+            "requires_mode_fts": true,
+            "requires_operator_disable_absent": true,
+            "unknown_fields_ignored": true,
+            "raw_queries_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "side_signal_raw_included": false,
+            "human_decision_text_included": false,
+        },
+        "requested_transition": {
+            "mode": mode,
+            "mode_authorized": requested_mode_authorized,
+            "per_call_opt_in": opts.per_call_opt_in,
+            "operator_disabled": opts.operator_disabled,
+            "default_search_order_change_requested": false,
+            "hybrid_retrieval_influence_requested": requested_hybrid_influence,
+            "semantic_retrieval_influence_requested": requested_semantic_influence,
+        },
+        "readiness_summary": {
+            "schema_ok": readiness_schema_ok,
+            "read_only": readiness_read_only,
+            "runtime_readiness_packet": readiness_marker_ok,
+            "status_completed": readiness_completed,
+            "control_plane_ready": readiness_control_plane_ready,
+            "may_accept_controlled_explicit_opt_in_fts_calls": readiness_may_accept_calls,
+            "live_probe_state": readiness.pointer("/readiness/live_probe_state").cloned().unwrap_or(Value::Null),
+            "live_probe_has_candidates": readiness.pointer("/readiness/live_probe_has_candidates").cloned().unwrap_or(Value::Bool(false)),
+            "live_order_influence_ready": readiness.pointer("/readiness/live_order_influence_ready").cloned().unwrap_or(Value::Bool(false)),
+            "default_influence_ready": readiness.pointer("/readiness/default_influence_ready").cloned().unwrap_or(Value::Bool(false)),
+            "boundary_ready": boundary_ready,
+            "readiness_blockers": readiness_blockers,
+            "raw_inputs_absent": readiness_input_raw_absent,
+            "side_effects_absent": readiness_side_effects_absent,
+        },
+        "transition": {
+            "transition_allowed": transition_allowed,
+            "may_call_controlled_store_trial": transition_allowed,
+            "may_run_runtime_adapter_for_explicit_opt_in_fts": transition_allowed,
+            "may_connect_ordering_behavior_for_explicit_opt_in_fts": transition_allowed,
+            "may_affect_only_explicitly_opted_in_fts_calls": transition_allowed,
+            "requires_per_call_opt_in": true,
+            "must_keep_operator_disable": BIOCORTEX_RETRIEVAL_DISABLE_ENV,
+            "must_return_baseline_without_per_call_opt_in": true,
+            "must_fail_open_to_baseline": true,
+            "must_keep_redacted_audit_only": true,
+            "must_keep_baseline_candidate_recall": true,
+            "may_change_default_memory_search_order": false,
+            "default_influence_ready": false,
+            "recommended_next_step": if transition_allowed {
+                "run_controlled_explicit_opt_in_fts_store_trial_with_this_gate"
+            } else {
+                "fix_transition_gate_blockers_before_runtime_use"
+            },
+        },
+        "boundary_check": {
+            "runtime_transition_allowed": transition_allowed,
+            "blockers": blockers,
+            "this_packet_grants_new_authorization": false,
+            "this_packet_calls_memory_search": false,
+            "this_packet_runs_biocortex": false,
+            "this_packet_changes_return_order": false,
+            "this_packet_allows_default_search_order_change": false,
+        },
+        "approval_state": "runtime_transition_gate_only",
+        "authorization_state": if transition_allowed {
+            "readiness_gated_explicit_opt_in_fts_transition_allowed"
+        } else {
+            "blocked"
+        },
+        "approval_writes_allowed": false,
+        "writes_approval": false,
+        "calls_memory_search": false,
+        "runs_biocortex": false,
+        "registers_embedding_backend": false,
+        "changes_memory_search_order": false,
+        "default_search_order_change_allowed": false,
+        "default_calls_unchanged": true,
+        "raw_queries_included": false,
+        "raw_keys_included": false,
+        "content_included": false,
+        "side_signal_raw_included": false,
+        "human_decision_text_included": false,
+    })
+}
+
 #[derive(Default)]
 struct BatchBucketStats {
     query_count: usize,
@@ -12058,6 +12374,157 @@ mod tests {
 
         let serialized = serde_json::to_string(&packet).expect("readiness json");
         assert!(!serialized.contains("secret bad readiness batch query"));
+    }
+
+    fn opt_in_runtime_transition_readiness_fixture() -> Value {
+        let decision_packet = biocortex_retrieval_opt_in_runtime_influence_decision_packet(
+            BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketOptions {
+                runtime_influence_review_request:
+                    opt_in_aggregate_backed_runtime_influence_review_request_fixture(),
+                runtime_influence_decision: opt_in_runtime_influence_decision_fixture(),
+                reviewer: Some("codex".to_string()),
+                commit: Some("runtime-decision-commit".to_string()),
+                forum_post_id: Some("104".to_string()),
+                memory_key: Some("runtime-decision-memory".to_string()),
+            },
+        );
+        biocortex_retrieval_opt_in_runtime_readiness_packet(
+            BioCortexRetrievalOptInRuntimeReadinessPacketOptions {
+                runtime_influence_decision_packet: decision_packet,
+                store_trial: opt_in_runtime_readiness_store_trial_fixture(),
+                batch_diagnostics: opt_in_runtime_readiness_batch_fixture(),
+                reviewer: Some("codex".to_string()),
+                commit: Some("runtime-readiness-commit".to_string()),
+                forum_post_id: Some("104".to_string()),
+                memory_key: Some("runtime-readiness-memory".to_string()),
+            },
+        )
+    }
+
+    #[test]
+    fn opt_in_runtime_transition_gate_allows_only_readiness_gated_fts_opt_in() {
+        let gate = biocortex_retrieval_opt_in_runtime_transition_gate(
+            BioCortexRetrievalOptInRuntimeTransitionGateOptions {
+                runtime_readiness_packet: opt_in_runtime_transition_readiness_fixture(),
+                mode: "fts".to_string(),
+                per_call_opt_in: true,
+                operator_disabled: false,
+                reviewer: Some("codex".to_string()),
+                commit: Some("runtime-transition-commit".to_string()),
+                forum_post_id: Some("104".to_string()),
+                memory_key: Some("runtime-transition-memory".to_string()),
+            },
+        );
+
+        assert_eq!(
+            gate["schema"],
+            json!(BIOCORTEX_RETRIEVAL_OPT_IN_RUNTIME_TRANSITION_GATE_SCHEMA)
+        );
+        assert_eq!(gate["read_only"], json!(true));
+        assert_eq!(gate["runtime_transition_gate"], json!(true));
+        assert_eq!(gate["status"], json!("transition_allowed"));
+        assert_eq!(
+            gate["requested_transition"]["mode_authorized"],
+            json!(true)
+        );
+        assert_eq!(gate["requested_transition"]["per_call_opt_in"], json!(true));
+        assert_eq!(
+            gate["requested_transition"]["hybrid_retrieval_influence_requested"],
+            json!(false)
+        );
+        assert_eq!(
+            gate["requested_transition"]["semantic_retrieval_influence_requested"],
+            json!(false)
+        );
+        assert_eq!(
+            gate["readiness_summary"]["control_plane_ready"],
+            json!(true)
+        );
+        assert_eq!(
+            gate["readiness_summary"]["live_probe_state"],
+            json!("control_plane_ready_no_live_candidates")
+        );
+        assert_eq!(
+            gate["transition"]["transition_allowed"],
+            json!(true)
+        );
+        assert_eq!(
+            gate["transition"]["may_run_runtime_adapter_for_explicit_opt_in_fts"],
+            json!(true)
+        );
+        assert_eq!(
+            gate["transition"]["may_change_default_memory_search_order"],
+            json!(false)
+        );
+        assert_eq!(
+            gate["boundary_check"]["runtime_transition_allowed"],
+            json!(true)
+        );
+        assert_eq!(
+            gate["boundary_check"]["blockers"]
+                .as_array()
+                .expect("blockers")
+                .len(),
+            0
+        );
+        assert_eq!(gate["calls_memory_search"], json!(false));
+        assert_eq!(gate["runs_biocortex"], json!(false));
+        assert_eq!(gate["changes_memory_search_order"], json!(false));
+        assert_eq!(gate["default_search_order_change_allowed"], json!(false));
+    }
+
+    #[test]
+    fn opt_in_runtime_transition_gate_blocks_without_explicit_fts_opt_in() {
+        let mut readiness = opt_in_runtime_transition_readiness_fixture();
+        readiness["raw_query"] = json!("secret transition readiness query");
+        readiness["raw_key"] = json!("secret_transition_readiness_key");
+        readiness["content"] = json!("secret transition readiness content");
+
+        let gate = biocortex_retrieval_opt_in_runtime_transition_gate(
+            BioCortexRetrievalOptInRuntimeTransitionGateOptions {
+                runtime_readiness_packet: readiness,
+                mode: "hybrid".to_string(),
+                per_call_opt_in: false,
+                operator_disabled: true,
+                reviewer: None,
+                commit: None,
+                forum_post_id: None,
+                memory_key: None,
+            },
+        );
+
+        assert_eq!(gate["status"], json!("blocked"));
+        assert_eq!(
+            gate["requested_transition"]["hybrid_retrieval_influence_requested"],
+            json!(true)
+        );
+        assert_eq!(
+            gate["requested_transition"]["semantic_retrieval_influence_requested"],
+            json!(false)
+        );
+        assert_eq!(
+            gate["transition"]["transition_allowed"],
+            json!(false)
+        );
+        assert_eq!(
+            gate["boundary_check"]["runtime_transition_allowed"],
+            json!(false)
+        );
+        let blockers = gate["boundary_check"]["blockers"]
+            .as_array()
+            .expect("blockers");
+        assert!(blockers.contains(&json!("requested_mode_not_authorized")));
+        assert!(blockers.contains(&json!("per_call_opt_in_missing")));
+        assert!(blockers.contains(&json!("operator_disabled")));
+        assert_eq!(gate["calls_memory_search"], json!(false));
+        assert_eq!(gate["runs_biocortex"], json!(false));
+        assert_eq!(gate["changes_memory_search_order"], json!(false));
+        assert_eq!(gate["default_search_order_change_allowed"], json!(false));
+
+        let serialized = serde_json::to_string(&gate).expect("transition gate json");
+        assert!(!serialized.contains("secret transition readiness query"));
+        assert!(!serialized.contains("secret_transition_readiness_key"));
+        assert!(!serialized.contains("secret transition readiness content"));
     }
 
     struct EnvRestore {

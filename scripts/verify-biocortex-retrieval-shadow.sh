@@ -3763,6 +3763,114 @@ if grep -q 'verify aggregate-backed store trial ready secret query\|biocortex op
     echo "opt-in runtime readiness packet leaked raw query/key/content data" >&2
     exit 1
 fi
+
+opt_in_runtime_transition_gate="$tmpdir/opt-in-runtime-transition-gate.json"
+run cargo run -p ab-bridge --no-default-features -- \
+    bio-cortex retrieval-opt-in-runtime-transition-gate \
+    --runtime-readiness-packet-json "$opt_in_runtime_readiness_packet" \
+    --mode fts \
+    --per-call-opt-in \
+    --reviewer verify-bundle \
+    --commit verify-dry-run-commit \
+    --forum-post-id verify-forum-post \
+    --memory-key verify-memory-key \
+    --json > "$opt_in_runtime_transition_gate"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_runtime_transition_gate.v0"
+    and .read_only == true
+    and .runtime_transition_gate == true
+    and .implementation_stage == "readiness_gated_runtime_transition_gate"
+    and .status == "transition_allowed"
+    and .input_contract.runtime_readiness_packet_included == false
+    and .input_contract.requires_runtime_readiness_packet == true
+    and .input_contract.requires_control_plane_ready == true
+    and .input_contract.requires_per_call_opt_in == true
+    and .input_contract.requires_mode_fts == true
+    and .input_contract.requires_operator_disable_absent == true
+    and .input_contract.raw_queries_included == false
+    and .input_contract.raw_keys_included == false
+    and .input_contract.content_included == false
+    and .input_contract.side_signal_raw_included == false
+    and .input_contract.human_decision_text_included == false
+    and .requested_transition.mode == "fts"
+    and .requested_transition.mode_authorized == true
+    and .requested_transition.per_call_opt_in == true
+    and .requested_transition.operator_disabled == false
+    and .requested_transition.default_search_order_change_requested == false
+    and .requested_transition.hybrid_retrieval_influence_requested == false
+    and .requested_transition.semantic_retrieval_influence_requested == false
+    and .readiness_summary.control_plane_ready == true
+    and .readiness_summary.may_accept_controlled_explicit_opt_in_fts_calls == true
+    and .readiness_summary.live_probe_state == "control_plane_ready_no_live_candidates"
+    and .readiness_summary.default_influence_ready == false
+    and .readiness_summary.boundary_ready == true
+    and .readiness_summary.readiness_blockers == []
+    and .readiness_summary.raw_inputs_absent == true
+    and .readiness_summary.side_effects_absent == true
+    and .transition.transition_allowed == true
+    and .transition.may_call_controlled_store_trial == true
+    and .transition.may_run_runtime_adapter_for_explicit_opt_in_fts == true
+    and .transition.may_connect_ordering_behavior_for_explicit_opt_in_fts == true
+    and .transition.may_affect_only_explicitly_opted_in_fts_calls == true
+    and .transition.must_keep_operator_disable == "AB_BIOCORTEX_RETRIEVAL_DISABLE"
+    and .transition.must_return_baseline_without_per_call_opt_in == true
+    and .transition.must_fail_open_to_baseline == true
+    and .transition.must_keep_redacted_audit_only == true
+    and .transition.must_keep_baseline_candidate_recall == true
+    and .transition.may_change_default_memory_search_order == false
+    and .transition.default_influence_ready == false
+    and .boundary_check.runtime_transition_allowed == true
+    and .boundary_check.blockers == []
+    and .boundary_check.this_packet_grants_new_authorization == false
+    and .boundary_check.this_packet_calls_memory_search == false
+    and .boundary_check.this_packet_runs_biocortex == false
+    and .boundary_check.this_packet_changes_return_order == false
+    and .boundary_check.this_packet_allows_default_search_order_change == false
+    and .approval_state == "runtime_transition_gate_only"
+    and .approval_writes_allowed == false
+    and .writes_approval == false
+    and .calls_memory_search == false
+    and .runs_biocortex == false
+    and .registers_embedding_backend == false
+    and .changes_memory_search_order == false
+    and .default_search_order_change_allowed == false
+    and .default_calls_unchanged == true
+    and .raw_queries_included == false
+    and .raw_keys_included == false
+    and .content_included == false
+    and .side_signal_raw_included == false
+' "$opt_in_runtime_transition_gate" >/dev/null
+if grep -q 'verify aggregate-backed store trial ready secret query\|biocortex opt-in runtime adapter\|runtime influence decision packet\|memory search baseline recall\|redacted order artifact movement\|agent bridge mcp tool registry\|agent bridge mcp\|verify runtime influence decision secret wording\|verify runtime influence decision secret query\|verify_runtime_influence_decision_secret_key\|verify runtime influence decision secret content\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_runtime_transition_gate"; then
+    echo "opt-in runtime transition gate leaked raw query/key/content data" >&2
+    exit 1
+fi
+
+opt_in_runtime_transition_gate_blocked="$tmpdir/opt-in-runtime-transition-gate-blocked.json"
+run cargo run -p ab-bridge --no-default-features -- \
+    bio-cortex retrieval-opt-in-runtime-transition-gate \
+    --runtime-readiness-packet-json "$opt_in_runtime_readiness_packet" \
+    --mode hybrid \
+    --operator-disabled \
+    --json > "$opt_in_runtime_transition_gate_blocked"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_runtime_transition_gate.v0"
+    and .status == "blocked"
+    and .requested_transition.mode == "hybrid"
+    and .requested_transition.mode_authorized == false
+    and .requested_transition.per_call_opt_in == false
+    and .requested_transition.operator_disabled == true
+    and .requested_transition.hybrid_retrieval_influence_requested == true
+    and .requested_transition.semantic_retrieval_influence_requested == false
+    and .transition.transition_allowed == false
+    and .boundary_check.runtime_transition_allowed == false
+    and (.boundary_check.blockers | index("requested_mode_not_authorized"))
+    and (.boundary_check.blockers | index("per_call_opt_in_missing"))
+    and (.boundary_check.blockers | index("operator_disabled"))
+    and .calls_memory_search == false
+    and .runs_biocortex == false
+    and .changes_memory_search_order == false
+    and .default_search_order_change_allowed == false
+' "$opt_in_runtime_transition_gate_blocked" >/dev/null
 test -s "$opt_in_auth_request/forum-post-template.md"
 test -s "$opt_in_auth_request/memory-note-template.md"
 
