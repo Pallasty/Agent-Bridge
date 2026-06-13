@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Sway desktop watchdog periodically
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Unit=sway-desktop-watchdog.service
+
+[Install]
+WantedBy=timers.target

@@ -1000,6 +1000,376 @@ fn lossy_truncate(bytes: &[u8]) -> (String, bool) {
 }
 
 // ===========================================================================
+//                              system_control
+// ===========================================================================
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SystemControlPlan {
+    argv: Vec<String>,
+    risk: &'static str,
+    read_only: bool,
+}
+
+fn system_control_plan(
+    domain: &str,
+    action: &str,
+    confirm: bool,
+    tail_lines: u64,
+    topic: Option<&str>,
+) -> std::result::Result<SystemControlPlan, String> {
+    let mut argv = Vec::new();
+    let (risk, read_only) = match domain {
+        "display" if matches!(action, "off" | "on") => {
+            argv.extend([domain.to_string(), action.to_string()]);
+            ("low", false)
+        }
+        "audio" if matches!(action, "up" | "down" | "mute" | "micmute") => {
+            argv.extend([domain.to_string(), action.to_string()]);
+            ("low", false)
+        }
+        "brightness" if matches!(action, "up" | "down") => {
+            argv.extend([domain.to_string(), action.to_string()]);
+            ("low", false)
+        }
+        "screenshot" if matches!(action, "full" | "region") => {
+            argv.extend([domain.to_string(), action.to_string()]);
+            ("low", false)
+        }
+        "wifi"
+            if matches!(
+                action,
+                "networks" | "actions" | "reconnect" | "toggle" | "nmtui"
+            ) =>
+        {
+            argv.extend([domain.to_string(), action.to_string()]);
+            ("medium", false)
+        }
+        "desktop" if action == "doctor" => {
+            argv.extend([domain.to_string(), action.to_string()]);
+            ("low", true)
+        }
+        "desktop" if action == "heal" => {
+            if !confirm {
+                return Err("desktop heal requires confirm=true".to_string());
+            }
+            argv.extend([
+                domain.to_string(),
+                action.to_string(),
+                "--confirm".to_string(),
+            ]);
+            ("medium", false)
+        }
+        "desktop" if action == "watchdog" => {
+            if !confirm {
+                return Err("desktop watchdog requires confirm=true".to_string());
+            }
+            argv.extend([
+                domain.to_string(),
+                action.to_string(),
+                "--confirm".to_string(),
+            ]);
+            ("medium", false)
+        }
+        "desktop" if action == "repair" => {
+            if !confirm {
+                return Err("desktop repair requires confirm=true".to_string());
+            }
+            argv.extend([
+                domain.to_string(),
+                action.to_string(),
+                "--confirm".to_string(),
+            ]);
+            ("medium", false)
+        }
+        "events" if action == "tail" => {
+            argv.push("events".to_string());
+            argv.push("tail".to_string());
+            argv.push(tail_lines.clamp(1, 500).to_string());
+            ("low", true)
+        }
+        "events" if action == "diagnose" => {
+            let topic = topic
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| "events diagnose requires non-empty topic".to_string())?;
+            if !topic
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+            {
+                return Err("events diagnose topic may only contain ASCII letters, digits, '_', '-', or '.'".to_string());
+            }
+            argv.push("events".to_string());
+            argv.push("diagnose".to_string());
+            argv.push(topic.to_string());
+            argv.push(tail_lines.clamp(1, 500).to_string());
+            ("low", true)
+        }
+        "status"
+            if matches!(
+                action,
+                "summary" | "snapshot" | "history" | "diagnose" | "report"
+            ) =>
+        {
+            argv.extend([domain.to_string(), action.to_string()]);
+            if matches!(action, "history" | "diagnose" | "report") {
+                argv.push(tail_lines.clamp(1, 200).to_string());
+            }
+            ("low", true)
+        }
+        "status" if action == "record" => {
+            argv.extend([domain.to_string(), action.to_string()]);
+            ("low", false)
+        }
+        "lid" if matches!(action, "off" | "on") => {
+            argv.extend([domain.to_string(), action.to_string()]);
+            ("low", false)
+        }
+        "power" if action == "press" => {
+            argv.extend([domain.to_string(), action.to_string()]);
+            ("medium", false)
+        }
+        "power" if action == "off" => {
+            if !confirm {
+                return Err("power off requires confirm=true".to_string());
+            }
+            argv.extend([
+                domain.to_string(),
+                action.to_string(),
+                "--confirm".to_string(),
+            ]);
+            ("high", false)
+        }
+        "audit" if action == "tail" => {
+            argv.push("audit-tail".to_string());
+            argv.push(tail_lines.clamp(1, 500).to_string());
+            ("low", true)
+        }
+        _ => {
+            return Err(format!(
+                "unsupported system_control action: domain={domain:?} action={action:?}"
+            ));
+        }
+    };
+    Ok(SystemControlPlan {
+        argv,
+        risk,
+        read_only,
+    })
+}
+
+fn default_system_control_bin() -> PathBuf {
+    std::env::var_os("AB_SYSTEM_CONTROL_BIN")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| {
+                PathBuf::from(home)
+                    .join(".local")
+                    .join("bin")
+                    .join("ab-system-control")
+            })
+        })
+        .unwrap_or_else(|| PathBuf::from("/home/pallasting/.local/bin/ab-system-control"))
+}
+
+pub struct SystemControlTool {
+    hub: Hub,
+}
+
+impl SystemControlTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for SystemControlTool {
+    fn name(&self) -> &'static str {
+        "system_control"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "LLM-safe local Sway/system control wrapper. Calls the \
+                 allowlisted `ab-system-control` actions for display, audio, \
+                 brightness, screenshot, WiFi, desktop doctor/heal/watchdog/repair, status summary/snapshot/record/history/diagnose/report, event timeline/diagnosis, lid, power button, and audit-tail; \
+                 it never accepts arbitrary shell commands. Each action is audited \
+                 by the local script. High-risk power off, desktop heal, desktop watchdog, and desktop repair require confirm=true."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "domain": {
+                        "type": "string",
+                        "enum": ["display", "audio", "brightness", "screenshot", "wifi", "desktop", "events", "status", "lid", "power", "audit"],
+                        "description": "Control surface."
+                    },
+                    "action": {
+                        "type": "string",
+                        "description": "Allowed actions: display off|on; audio up|down|mute|micmute; brightness up|down; screenshot full|region; wifi networks|actions|reconnect|toggle|nmtui; desktop doctor|heal|watchdog|repair; events tail|diagnose; status summary|snapshot|record|history|diagnose|report; lid off|on; power press|off; audit tail."
+                    },
+                    "confirm": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Required for power off, desktop heal, desktop watchdog, and desktop repair."
+                    },
+                    "tail_lines": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 40,
+                        "description": "Line count for domain=audit action=tail."
+                    },
+                    "topic": {
+                        "type": "string",
+                        "description": "Required for domain=events action=diagnose; examples: audio, brightness, wifi, power, statusbar, screenshot."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 60000,
+                        "default": 15000,
+                        "description": "Milliseconds before the control process is killed."
+                    },
+                    "bin": {
+                        "type": "string",
+                        "description": "Optional absolute path to ab-system-control, mainly for tests or alternate installs."
+                    }
+                },
+                "required": ["domain", "action"],
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::ShellExec) {
+            return Ok(ToolResult::error(e));
+        }
+        let domain = match args.get("domain").and_then(|v| v.as_str()) {
+            Some(s) if !s.is_empty() => s,
+            _ => return Ok(ToolResult::error("missing or empty 'domain'")),
+        };
+        let action = match args.get("action").and_then(|v| v.as_str()) {
+            Some(s) if !s.is_empty() => s,
+            _ => return Ok(ToolResult::error("missing or empty 'action'")),
+        };
+        let confirm = args
+            .get("confirm")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let tail_lines = args
+            .get("tail_lines")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(40)
+            .clamp(1, 500);
+        let topic = args.get("topic").and_then(|v| v.as_str());
+        let plan = match system_control_plan(domain, action, confirm, tail_lines, topic) {
+            Ok(plan) => plan,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let bin = args
+            .get("bin")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(default_system_control_bin);
+        if !bin.is_absolute() {
+            return Ok(ToolResult::error(
+                "system_control 'bin' must be an absolute path",
+            ));
+        }
+
+        let timeout_ceiling = self
+            .hub
+            .security
+            .shell_exec_timeout_max_ms
+            .clamp(1_000, 60_000);
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(15_000)
+            .clamp(1_000, timeout_ceiling);
+
+        let mut child = {
+            let mut builder = killable_command(&bin);
+            builder.args(&plan.argv);
+            builder.env("AB_ACTOR", "agent-bridge:mcp:system_control");
+            builder.stdout(std::process::Stdio::piped());
+            builder.stderr(std::process::Stdio::piped());
+            match builder.spawn() {
+                Ok(c) => c,
+                Err(e) => return Ok(ToolResult::error(format!("spawn failed: {e}"))),
+            }
+        };
+
+        let started = Instant::now();
+        let deadline = Duration::from_millis(timeout_ms);
+        use tokio::io::AsyncReadExt as _;
+        let mut stdout_pipe = child.stdout.take().expect("stdout piped");
+        let mut stderr_pipe = child.stderr.take().expect("stderr piped");
+        let stdout_task = tokio::spawn(async move {
+            let mut buf = Vec::new();
+            let _ = stdout_pipe.read_to_end(&mut buf).await;
+            buf
+        });
+        let stderr_task = tokio::spawn(async move {
+            let mut buf = Vec::new();
+            let _ = stderr_pipe.read_to_end(&mut buf).await;
+            buf
+        });
+
+        let timed_out = tokio::time::timeout(deadline, child.wait()).await;
+        let duration_ms = started.elapsed().as_millis() as u64;
+        let exit_code = match timed_out {
+            Err(_) => {
+                child.start_kill().ok();
+                stdout_task.abort();
+                stderr_task.abort();
+                return Ok(ToolResult::json_text(&json!({
+                    "schema": "agent_bridge.system_control.mcp_result.v0",
+                    "domain": domain,
+                    "action": action,
+                    "risk": plan.risk,
+                    "read_only": plan.read_only,
+                    "confirmed": confirm,
+                    "argv": plan.argv,
+                    "exit_code": -1,
+                    "stdout": "",
+                    "stderr": format!("killed after {timeout_ms} ms timeout"),
+                    "duration_ms": duration_ms,
+                    "truncated": false,
+                    "timed_out": true
+                })));
+            }
+            Ok(Err(e)) => return Ok(ToolResult::error(format!("wait failed: {e}"))),
+            Ok(Ok(status)) => status.code().unwrap_or(-1),
+        };
+
+        let stdout_bytes = stdout_task.await.unwrap_or_default();
+        let stderr_bytes = stderr_task.await.unwrap_or_default();
+        let (stdout, stdout_truncated) = lossy_truncate(&stdout_bytes);
+        let (stderr, stderr_truncated) = lossy_truncate(&stderr_bytes);
+
+        Ok(ToolResult::json_text(&json!({
+            "schema": "agent_bridge.system_control.mcp_result.v0",
+            "domain": domain,
+            "action": action,
+            "risk": plan.risk,
+            "read_only": plan.read_only,
+            "confirmed": confirm,
+            "argv": plan.argv,
+            "exit_code": exit_code,
+            "stdout": stdout,
+            "stderr": stderr,
+            "duration_ms": duration_ms,
+            "truncated": stdout_truncated || stderr_truncated,
+            "timed_out": false
+        })))
+    }
+}
+
+// ===========================================================================
 //                              desktop_snapshot
 // ===========================================================================
 
@@ -36264,6 +36634,9 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // External browser-lite discovery: read-only probe only. This is not the
     // mutating browser_* automation surface and does not change browser routing.
     "browser_lite_probe",
+    // Local system control API: allowlisted wrapper over ab-system-control.
+    // It is audited locally and never accepts arbitrary shell commands.
+    "system_control",
     // Remote session steering: a Codex orchestrator (which already carries
     // agent_spawn + agent_session_*) can launch/drive/observe long-lived agents
     // in named tmux sessions and roll up a worker blackboard.
@@ -38460,6 +38833,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Essential,
         Arc::new(ShellExecTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(SystemControlTool::new(hub.clone())),
     );
     // Remote session steering (P2/P3/P4): AB-owned launch + gate-aware drive +
     // blackboard roll-up. Standard tier (multi-agent ops, not minimal-essential).
@@ -44013,6 +44392,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(p.includes(Tier::Standard, "semantic_bus_runtime_conformance"));
         assert!(p.includes(Tier::Standard, "semantic_bus_peer_conformance"));
         assert!(p.includes(Tier::Standard, "browser_lite_probe"));
+        assert!(p.includes(Tier::Standard, "system_control"));
         assert!(p.includes(Tier::Standard, "biocortex_retrieval_shadow"));
         assert!(!p.includes(Tier::Standard, "embed_text"));
         assert!(!p.includes(Tier::Niche, "browser_navigate"));
@@ -44022,9 +44402,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 52 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 53 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-        //      + DIRECT(40: 6 avatar observation/sync/renderer tools
+        //      + DIRECT(41: 6 avatar observation/sync/renderer tools
         //      + xiao_shu_action_request + 14 mobile bridge tools
         //      + memory_graph_topology + biocortex_retrieval_shadow
         //      + memory_related_keys_preflight
@@ -44035,6 +44415,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         //      + semantic_bus_runtime_conformance
         //      + semantic_bus_peer_conformance
         //      + browser_lite_probe
+        //      + system_control
         //      + 6 remote-steering tools: agent_steer_launch/drive/capture/list/kill
         //      + agent_orchestrate_scan, added by d4fd74d).
         // forum_digest joined via the FORUM_READ capability group (2026-05-23).
@@ -44049,7 +44430,8 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         // +semantic_bus_runtime_conformance brought DIRECT 37→38, total 49→50.
         // +semantic_bus_peer_conformance brought DIRECT 38→39, total 50→51.
         // +biocortex_retrieval_shadow brought DIRECT 39→40, total 51→52.
-        assert_eq!(extras.len(), 52);
+        // +system_control brought DIRECT 40→41, total 52→53.
+        assert_eq!(extras.len(), 53);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -44092,6 +44474,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(extras.contains(&"semantic_bus_runtime_conformance"));
         assert!(extras.contains(&"semantic_bus_peer_conformance"));
         assert!(extras.contains(&"browser_lite_probe"));
+        assert!(extras.contains(&"system_control"));
         // Remote session steering (d4fd74d) — direct-exposed for Codex
         // orchestrators that already carry agent_spawn + agent_session_*.
         assert!(extras.contains(&"agent_steer_launch"));
@@ -44489,6 +44872,125 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             .get("probe_mcp_tools")
             .is_some());
         assert!(tool.input_schema["properties"].get("stealth").is_none());
+    }
+
+    #[test]
+    fn system_control_plan_blocks_poweroff_without_confirm() {
+        let blocked = system_control_plan("power", "off", false, 40, None).unwrap_err();
+        assert!(blocked.contains("confirm=true"));
+
+        let confirmed = system_control_plan("power", "off", true, 40, None).unwrap();
+        assert_eq!(confirmed.argv, vec!["power", "off", "--confirm"]);
+        assert_eq!(confirmed.risk, "high");
+
+        let audit = system_control_plan("audit", "tail", false, 999, None).unwrap();
+        assert_eq!(audit.argv, vec!["audit-tail", "500"]);
+        assert!(audit.read_only);
+
+        let status = system_control_plan("status", "summary", false, 40, None).unwrap();
+        assert_eq!(status.argv, vec!["status", "summary"]);
+        assert!(status.read_only);
+
+        let snapshot = system_control_plan("status", "snapshot", false, 40, None).unwrap();
+        assert_eq!(snapshot.argv, vec!["status", "snapshot"]);
+        assert!(snapshot.read_only);
+
+        let history = system_control_plan("status", "history", false, 999, None).unwrap();
+        assert_eq!(history.argv, vec!["status", "history", "200"]);
+        assert!(history.read_only);
+
+        let snapshot_diagnosis =
+            system_control_plan("status", "diagnose", false, 999, None).unwrap();
+        assert_eq!(snapshot_diagnosis.argv, vec!["status", "diagnose", "200"]);
+        assert!(snapshot_diagnosis.read_only);
+
+        let report = system_control_plan("status", "report", false, 999, None).unwrap();
+        assert_eq!(report.argv, vec!["status", "report", "200"]);
+        assert!(report.read_only);
+
+        let record = system_control_plan("status", "record", false, 40, None).unwrap();
+        assert_eq!(record.argv, vec!["status", "record"]);
+        assert_eq!(record.risk, "low");
+        assert!(!record.read_only);
+
+        let desktop = system_control_plan("desktop", "doctor", false, 40, None).unwrap();
+        assert_eq!(desktop.argv, vec!["desktop", "doctor"]);
+        assert!(desktop.read_only);
+
+        let events = system_control_plan("events", "tail", false, 999, None).unwrap();
+        assert_eq!(events.argv, vec!["events", "tail", "500"]);
+        assert!(events.read_only);
+
+        let diagnosis =
+            system_control_plan("events", "diagnose", false, 99, Some("statusbar")).unwrap();
+        assert_eq!(
+            diagnosis.argv,
+            vec!["events", "diagnose", "statusbar", "99"]
+        );
+        assert!(diagnosis.read_only);
+
+        let missing_topic = system_control_plan("events", "diagnose", false, 40, None).unwrap_err();
+        assert!(missing_topic.contains("topic"));
+
+        let bad_topic =
+            system_control_plan("events", "diagnose", false, 40, Some("bad topic")).unwrap_err();
+        assert!(bad_topic.contains("ASCII"));
+
+        let blocked_heal = system_control_plan("desktop", "heal", false, 40, None).unwrap_err();
+        assert!(blocked_heal.contains("confirm=true"));
+
+        let confirmed_heal = system_control_plan("desktop", "heal", true, 40, None).unwrap();
+        assert_eq!(confirmed_heal.argv, vec!["desktop", "heal", "--confirm"]);
+        assert_eq!(confirmed_heal.risk, "medium");
+
+        let blocked_watchdog =
+            system_control_plan("desktop", "watchdog", false, 40, None).unwrap_err();
+        assert!(blocked_watchdog.contains("confirm=true"));
+
+        let confirmed_watchdog =
+            system_control_plan("desktop", "watchdog", true, 40, None).unwrap();
+        assert_eq!(
+            confirmed_watchdog.argv,
+            vec!["desktop", "watchdog", "--confirm"]
+        );
+        assert_eq!(confirmed_watchdog.risk, "medium");
+
+        let blocked_repair = system_control_plan("desktop", "repair", false, 40, None).unwrap_err();
+        assert!(blocked_repair.contains("confirm=true"));
+
+        let confirmed_repair = system_control_plan("desktop", "repair", true, 40, None).unwrap();
+        assert_eq!(
+            confirmed_repair.argv,
+            vec!["desktop", "repair", "--confirm"]
+        );
+        assert_eq!(confirmed_repair.risk, "medium");
+    }
+
+    #[test]
+    fn registry_exposes_system_control_to_codex_essential() {
+        let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+        assert!(p.includes(Tier::Standard, "system_control"));
+
+        let schemas = build_registry_with_policy(Hub::builder().build(), p).list();
+        let tool = schemas
+            .iter()
+            .find(|s| s.name == "system_control")
+            .expect("system_control schema");
+
+        assert!(tool.description.contains("allowlisted"));
+        assert!(tool.description.contains("audited"));
+        assert!(tool.input_schema["properties"].get("domain").is_some());
+        assert!(tool.input_schema["properties"].get("action").is_some());
+        assert!(tool.input_schema["properties"].get("confirm").is_some());
+        assert!(tool.input_schema["properties"].get("tail_lines").is_some());
+        assert!(tool.input_schema["properties"].get("topic").is_some());
+        assert!(tool.input_schema["properties"].get("cmd").is_none());
+        let domains = tool.input_schema["properties"]["domain"]["enum"]
+            .as_array()
+            .expect("domain enum");
+        assert!(domains.iter().any(|v| v == "status"));
+        assert!(domains.iter().any(|v| v == "desktop"));
+        assert!(domains.iter().any(|v| v == "events"));
     }
 
     #[test]
