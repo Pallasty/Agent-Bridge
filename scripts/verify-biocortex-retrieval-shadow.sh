@@ -1115,6 +1115,8 @@ run cargo test -p ab-bridge --lib --no-default-features \
     opt_in_runtime_transition_gate_ -- --nocapture
 run cargo test -p ab-bridge --lib --no-default-features \
     biocortex_retrieval_opt_in_runtime_transition_gate_ -- --nocapture
+run cargo test -p ab-bridge --lib --no-default-features \
+    opt_in_gated_store_trial_ -- --nocapture
 run "$repo_root/scripts/verify-biocortex-runtime-readiness-mcp.sh"
 
 opt_in_status_disabled="$tmpdir/opt-in-status-disabled.json"
@@ -3875,6 +3877,109 @@ jq -e '
     and .changes_memory_search_order == false
     and .default_search_order_change_allowed == false
 ' "$opt_in_runtime_transition_gate_blocked" >/dev/null
+
+opt_in_gated_store_trial_empty_with_aggregate="$tmpdir/opt-in-gated-store-trial-empty-with-aggregate.json"
+run env AGENT_BRIDGE_DB="$tmpdir/opt-in-gated-store-trial-empty-with-aggregate.db" \
+    AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
+    cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
+    bio-cortex retrieval-opt-in-gated-store-trial \
+    --runtime-transition-gate-json "$opt_in_runtime_transition_gate" \
+    --runtime-influence-decision-packet-json "$opt_in_runtime_influence_decision_packet_with_aggregate" \
+    --query "verify gated store trial allowed secret query" \
+    --per-call-opt-in \
+    --checkout "$biocortex_rs" \
+    --limit 3 \
+    --attempt-id verify-gated-store-trial-empty-with-aggregate \
+    --commit verify-dry-run-commit \
+    --json > "$opt_in_gated_store_trial_empty_with_aggregate"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_gated_store_trial.v0"
+    and .gated_store_trial == true
+    and .implementation_stage == "runtime_transition_gated_store_trial"
+    and .status == "transition_gate_consumed"
+    and .input_contract.runtime_transition_gate_included == false
+    and .input_contract.runtime_influence_decision_packet_included == false
+    and .input_contract.store_trial_included == false
+    and .input_contract.requires_transition_gate_allowed == true
+    and .input_contract.raw_query_included == false
+    and .input_contract.raw_keys_included == false
+    and .input_contract.content_included == false
+    and .runtime_transition_preflight.transition_gate_allowed == true
+    and .runtime_transition_preflight.blockers == []
+    and .runtime_transition_preflight.gate_may_call_controlled_store_trial == true
+    and .runtime_transition_preflight.gate_may_run_runtime_adapter_for_explicit_opt_in_fts == true
+    and .runtime_transition_preflight.gate_may_connect_ordering_behavior_for_explicit_opt_in_fts == true
+    and .runtime_transition_preflight.operator_disabled_now == false
+    and .runtime_transition_preflight.query_present == true
+    and .store_trial_called == true
+    and .store_trial_summary.schema == "agent_bridge.biocortex_retrieval.opt_in_store_trial.v0"
+    and .store_trial_summary.status == "baseline_returned"
+    and .store_trial_summary.runtime_adapter_allowed == false
+    and .store_trial_summary.runtime_preflight_blocker_count == 1
+    and .store_trial_summary.compile_feature_enabled == true
+    and .store_trial_summary.runtime_enabled == true
+    and .store_trial_summary.operator_disabled == false
+    and .store_trial_summary.decision_packet_authorized == true
+    and .store_trial_summary.baseline_completed == true
+    and .store_trial_summary.baseline_key_count == 0
+    and .store_trial_summary.side_signal_attempted == false
+    and .store_trial_summary.store_wrapper_called == true
+    and .store_trial_summary.store_trial_included == false
+    and .calls_memory_search == true
+    and .runs_biocortex == false
+    and .changes_memory_search_order == false
+    and .default_search_order_change_allowed == false
+    and .default_calls_unchanged == true
+    and .raw_query_included == false
+    and .raw_keys_included == false
+    and .content_included == false
+    and .side_signal_raw_included == false
+    and .boundary.gate_consumed == true
+    and .boundary.calls_memory_search == true
+' "$opt_in_gated_store_trial_empty_with_aggregate" >/dev/null
+if grep -q 'verify gated store trial allowed secret query\|verify aggregate-backed store trial ready secret query\|cortexdelta\|axonalpha\|expanded_corpus_baseline_focus\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_gated_store_trial_empty_with_aggregate"; then
+    echo "opt-in gated store trial allowed path leaked raw query/key/content data" >&2
+    exit 1
+fi
+
+opt_in_gated_store_trial_blocked="$tmpdir/opt-in-gated-store-trial-blocked.json"
+run env AGENT_BRIDGE_DB="$tmpdir/opt-in-gated-store-trial-blocked.db" \
+    cargo run -p ab-bridge --no-default-features -- \
+    bio-cortex retrieval-opt-in-gated-store-trial \
+    --runtime-transition-gate-json "$opt_in_runtime_transition_gate_blocked" \
+    --runtime-influence-decision-packet-json "$opt_in_runtime_influence_decision_packet_with_aggregate" \
+    --query "verify gated store trial blocked secret query" \
+    --mode hybrid \
+    --json > "$opt_in_gated_store_trial_blocked"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.opt_in_gated_store_trial.v0"
+    and .status == "transition_gate_blocked"
+    and .runtime_transition_preflight.transition_gate_allowed == false
+    and (.runtime_transition_preflight.blockers | index("transition_gate_status_not_allowed"))
+    and (.runtime_transition_preflight.blockers | index("transition_gate_boundary_not_allowed"))
+    and (.runtime_transition_preflight.blockers | index("transition_gate_boundary_has_blockers"))
+    and (.runtime_transition_preflight.blockers | index("transition_gate_transition_not_allowed"))
+    and (.runtime_transition_preflight.blockers | index("transition_gate_may_not_call_store_trial"))
+    and (.runtime_transition_preflight.blockers | index("transition_gate_mode_not_authorized"))
+    and (.runtime_transition_preflight.blockers | index("mode_not_authorized"))
+    and (.runtime_transition_preflight.blockers | index("per_call_opt_in_missing"))
+    and .store_trial_called == false
+    and .calls_memory_search == false
+    and .runs_biocortex == false
+    and .changes_memory_search_order == false
+    and .default_search_order_change_allowed == false
+    and .default_calls_unchanged == true
+    and .raw_query_included == false
+    and .raw_keys_included == false
+    and .content_included == false
+    and .side_signal_raw_included == false
+    and .boundary.gate_consumed == false
+    and .boundary.calls_memory_search == false
+' "$opt_in_gated_store_trial_blocked" >/dev/null
+if grep -q 'verify gated store trial blocked secret query\|verify aggregate-backed store trial ready secret query\|cortexdelta\|axonalpha\|expanded_corpus_baseline_focus\|verify_runtime_trial_secret_key\|verify runtime trial secret content' "$opt_in_gated_store_trial_blocked"; then
+    echo "opt-in gated store trial blocked path leaked raw query/key/content data" >&2
+    exit 1
+fi
 test -s "$opt_in_auth_request/forum-post-template.md"
 test -s "$opt_in_auth_request/memory-note-template.md"
 

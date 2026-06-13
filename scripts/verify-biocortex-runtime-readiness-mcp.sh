@@ -222,6 +222,78 @@ def runtime_readiness_packet_fixture():
     }
 
 
+def blocked_runtime_transition_gate_fixture():
+    return {
+        "schema": "agent_bridge.biocortex_retrieval.opt_in_runtime_transition_gate.v0",
+        "read_only": True,
+        "runtime_transition_gate": True,
+        "implementation_stage": "readiness_gated_runtime_transition_gate",
+        "authorization_scope": "explicit_opt_in_fts_runtime_influence",
+        "status": "blocked",
+        "input_contract": {
+            "runtime_readiness_packet_included": False,
+            "raw_queries_included": False,
+            "raw_keys_included": False,
+            "content_included": False,
+            "side_signal_raw_included": False,
+            "human_decision_text_included": False,
+        },
+        "requested_transition": {
+            "mode": "hybrid",
+            "mode_authorized": False,
+            "per_call_opt_in": False,
+            "operator_disabled": True,
+            "default_search_order_change_requested": False,
+            "hybrid_retrieval_influence_requested": True,
+            "semantic_retrieval_influence_requested": False,
+        },
+        "transition": {
+            "transition_allowed": False,
+            "may_call_controlled_store_trial": False,
+            "may_run_runtime_adapter_for_explicit_opt_in_fts": False,
+            "may_connect_ordering_behavior_for_explicit_opt_in_fts": False,
+            "may_affect_only_explicitly_opted_in_fts_calls": False,
+            "requires_per_call_opt_in": True,
+            "must_keep_operator_disable": "AB_BIOCORTEX_RETRIEVAL_DISABLE",
+            "must_return_baseline_without_per_call_opt_in": True,
+            "must_fail_open_to_baseline": True,
+            "must_keep_redacted_audit_only": True,
+            "must_keep_baseline_candidate_recall": True,
+            "may_change_default_memory_search_order": False,
+            "default_influence_ready": False,
+        },
+        "boundary_check": {
+            "runtime_transition_allowed": False,
+            "blockers": [
+                "requested_mode_not_authorized",
+                "per_call_opt_in_missing",
+                "operator_disabled",
+            ],
+            "this_packet_grants_new_authorization": False,
+            "this_packet_calls_memory_search": False,
+            "this_packet_runs_biocortex": False,
+            "this_packet_changes_return_order": False,
+            "this_packet_allows_default_search_order_change": False,
+        },
+        "approval_writes_allowed": False,
+        "writes_approval": False,
+        "calls_memory_search": False,
+        "runs_biocortex": False,
+        "registers_embedding_backend": False,
+        "changes_memory_search_order": False,
+        "default_search_order_change_allowed": False,
+        "default_calls_unchanged": True,
+        "raw_queries_included": False,
+        "raw_keys_included": False,
+        "content_included": False,
+        "side_signal_raw_included": False,
+        "human_decision_text_included": False,
+        "raw_query": "secret gated transition gate query",
+        "raw_key": "secret_gated_transition_gate_key",
+        "content": "secret gated transition gate content",
+    }
+
+
 messages = [
     {
         "jsonrpc": "2.0",
@@ -285,6 +357,22 @@ messages = [
             },
         },
     },
+    {
+        "jsonrpc": "2.0",
+        "id": 6,
+        "method": "tools/call",
+        "params": {
+            "name": "biocortex_retrieval_opt_in_gated_store_trial",
+            "arguments": {
+                "runtime_transition_gate": blocked_runtime_transition_gate_fixture(),
+                "runtime_influence_decision_packet": decision_fixture(),
+                "query": "secret gated mcp smoke query",
+                "mode": "hybrid",
+                "per_call_opt_in": False,
+                "attempt_id": "mcp-smoke-blocked-gated-store-trial",
+            },
+        },
+    },
 ]
 
 with open(path, "w", encoding="utf-8") as f:
@@ -308,6 +396,7 @@ import sys
 output_path, stderr_path = sys.argv[1:3]
 readiness_tool_name = "biocortex_retrieval_opt_in_runtime_readiness_packet"
 transition_tool_name = "biocortex_retrieval_opt_in_runtime_transition_gate"
+gated_tool_name = "biocortex_retrieval_opt_in_gated_store_trial"
 listed_tools = []
 call_texts = {}
 errors = []
@@ -329,7 +418,7 @@ with open(output_path, encoding="utf-8", errors="replace") as f:
                 for tool in message.get("result", {}).get("tools", [])
                 if isinstance(tool, dict)
             ]
-        if message.get("id") in {3, 4, 5}:
+        if message.get("id") in {3, 4, 5, 6}:
             if message.get("error"):
                 errors.append(f"tools/call error: {message['error']}")
             for item in message.get("result", {}).get("content", []):
@@ -337,10 +426,10 @@ with open(output_path, encoding="utf-8", errors="replace") as f:
                     call_texts[message["id"]] = item["text"]
                     break
 
-for tool_name in [readiness_tool_name, transition_tool_name]:
+for tool_name in [readiness_tool_name, transition_tool_name, gated_tool_name]:
     if tool_name not in listed_tools:
         errors.append(f"{tool_name} missing from tools/list")
-for message_id in [3, 4, 5]:
+for message_id in [3, 4, 5, 6]:
     if message_id not in call_texts:
         errors.append(f"missing tools/call text result for id={message_id}")
 if errors:
@@ -363,6 +452,10 @@ for forbidden in [
     "secret_transition_readiness_key",
     "secret transition readiness content",
     "secret transition human decision",
+    "secret gated transition gate query",
+    "secret_gated_transition_gate_key",
+    "secret gated transition gate content",
+    "secret gated mcp smoke query",
 ]:
     for message_id, call_text in call_texts.items():
         if forbidden in call_text:
@@ -512,8 +605,62 @@ if blocked_actual != blocked_expected:
     )
     sys.exit(1)
 
+gated_payload = json.loads(call_texts[6])
+gated_blockers = gated_payload.get("runtime_transition_preflight", {}).get("blockers") or []
+gated_required = [
+    "transition_gate_status_not_allowed",
+    "transition_gate_boundary_not_allowed",
+    "transition_gate_boundary_has_blockers",
+    "transition_gate_transition_not_allowed",
+    "transition_gate_may_not_call_store_trial",
+    "transition_gate_mode_not_authorized",
+    "mode_not_authorized",
+    "per_call_opt_in_missing",
+]
+gated_expected = {
+    "schema": "agent_bridge.biocortex_retrieval.opt_in_gated_store_trial.v0",
+    "status": "transition_gate_blocked",
+    "transition_gate_allowed": False,
+    "required_blockers_present": all(item in gated_blockers for item in gated_required),
+    "store_trial_called": False,
+    "calls_memory_search": False,
+    "runs_biocortex": False,
+    "changes_memory_search_order": False,
+    "default_search_order_change_allowed": False,
+    "default_calls_unchanged": True,
+    "raw_query_included": False,
+    "raw_keys_included": False,
+    "content_included": False,
+}
+gated_actual = {
+    "schema": gated_payload.get("schema"),
+    "status": gated_payload.get("status"),
+    "transition_gate_allowed": gated_payload.get("runtime_transition_preflight", {}).get(
+        "transition_gate_allowed"
+    ),
+    "required_blockers_present": all(item in gated_blockers for item in gated_required),
+    "store_trial_called": gated_payload.get("store_trial_called"),
+    "calls_memory_search": gated_payload.get("calls_memory_search"),
+    "runs_biocortex": gated_payload.get("runs_biocortex"),
+    "changes_memory_search_order": gated_payload.get("changes_memory_search_order"),
+    "default_search_order_change_allowed": gated_payload.get(
+        "default_search_order_change_allowed"
+    ),
+    "default_calls_unchanged": gated_payload.get("default_calls_unchanged"),
+    "raw_query_included": gated_payload.get("raw_query_included"),
+    "raw_keys_included": gated_payload.get("raw_keys_included"),
+    "content_included": gated_payload.get("content_included"),
+}
+if gated_actual != gated_expected:
+    print("FAIL: unexpected MCP gated store trial blocked payload", file=sys.stderr)
+    print(
+        json.dumps({"actual": gated_actual, "expected": gated_expected}, indent=2),
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
 print(
-    "OK: BioCortex runtime readiness + transition MCP tools/list and tools/call smoke passed "
+    "OK: BioCortex runtime readiness + transition + gated store trial MCP tools/list and tools/call smoke passed "
     f"(tools={len(listed_tools)})"
 )
 PY

@@ -6,14 +6,14 @@ use ab_bridge::biocortex_shadow::{
     biocortex_replay_comparison, biocortex_retrieval_opt_in_audit_report,
     biocortex_retrieval_opt_in_authorization_decision_packet,
     biocortex_retrieval_opt_in_batch_diagnostics, biocortex_retrieval_opt_in_dry_run_plan,
-    biocortex_retrieval_opt_in_execution_packet, biocortex_retrieval_opt_in_order_diff_packet,
+    biocortex_retrieval_opt_in_execution_packet, biocortex_retrieval_opt_in_gated_store_trial,
+    biocortex_retrieval_opt_in_order_diff_packet,
     biocortex_retrieval_opt_in_post_implementation_review_gate,
     biocortex_retrieval_opt_in_redacted_order_artifact, biocortex_retrieval_opt_in_review_packet,
     biocortex_retrieval_opt_in_runtime_influence_decision_packet,
     biocortex_retrieval_opt_in_runtime_influence_review_request,
     biocortex_retrieval_opt_in_runtime_readiness_packet,
-    biocortex_retrieval_opt_in_runtime_transition_gate,
-    biocortex_retrieval_opt_in_runtime_trial,
+    biocortex_retrieval_opt_in_runtime_transition_gate, biocortex_retrieval_opt_in_runtime_trial,
     biocortex_retrieval_opt_in_runtime_trial_review_packet, biocortex_retrieval_opt_in_store_trial,
     biocortex_retrieval_runtime_approval_packet_preview, biocortex_shadow_digest,
     supported_benchmarks, BioCortexReplayComparisonOptions,
@@ -21,7 +21,7 @@ use ab_bridge::biocortex_shadow::{
     BioCortexRetrievalOptInAuditOptions, BioCortexRetrievalOptInAuthorizationDecisionPacketOptions,
     BioCortexRetrievalOptInBatchDiagnosticsOptions, BioCortexRetrievalOptInBatchQueryCase,
     BioCortexRetrievalOptInDryRunOptions, BioCortexRetrievalOptInExecutionPacketOptions,
-    BioCortexRetrievalOptInOrderDiffPacketOptions,
+    BioCortexRetrievalOptInGatedStoreTrialOptions, BioCortexRetrievalOptInOrderDiffPacketOptions,
     BioCortexRetrievalOptInPostImplementationReviewGateOptions,
     BioCortexRetrievalOptInRedactedOrderArtifactOptions,
     BioCortexRetrievalOptInReviewPacketOptions,
@@ -2885,6 +2885,58 @@ enum BioCortexOp {
         #[arg(long)]
         json: bool,
     },
+    /// Run a transition-gated protected live store trial.
+    ///
+    /// This is the runtime entry variant: it consumes a
+    /// retrieval-opt-in-runtime-transition-gate packet and refuses to call
+    /// `memory_search` unless that gate allows the explicit opt-in FTS
+    /// transition. Once the gate passes it delegates to the existing protected
+    /// store trial and returns only redacted summaries.
+    RetrievalOptInGatedStoreTrial {
+        /// JSON file produced by retrieval-opt-in-runtime-transition-gate.
+        #[arg(long = "runtime-transition-gate-json")]
+        runtime_transition_gate_json: PathBuf,
+        /// JSON file produced by retrieval-opt-in-runtime-influence-decision-packet.
+        #[arg(long = "runtime-influence-decision-packet-json")]
+        runtime_influence_decision_packet_json: PathBuf,
+        /// FTS query to evaluate against the AB store. Output includes only a hash.
+        #[arg(long)]
+        query: String,
+        /// Optional tag filter forwarded to baseline memory_search. May be repeated.
+        #[arg(long = "tag")]
+        tags_any: Vec<String>,
+        /// Maximum baseline candidates to retrieve from store memory_search.
+        #[arg(long, default_value_t = 10)]
+        limit: u32,
+        /// Retrieval mode under review. Only fts is authorized for runtime influence.
+        #[arg(long, default_value = "fts")]
+        mode: String,
+        /// Required explicit per-call opt-in bit.
+        #[arg(long)]
+        per_call_opt_in: bool,
+        /// Local biocortex-rs checkout. Defaults to AB_BIOCORTEX_RS, sibling
+        /// checkout paths, then /tmp/biocortex-rs-ab-eval.
+        #[arg(long)]
+        checkout: Option<PathBuf>,
+        /// External side-signal adapter timeout in milliseconds.
+        #[arg(long, default_value_t = 120_000)]
+        timeout_ms: u64,
+        /// Minimum matched side-signal coverage before experimental order is allowed.
+        #[arg(long, default_value_t = 0.8)]
+        coverage_threshold: f64,
+        /// Blend weight passed to the protected store wrapper.
+        #[arg(long, default_value_t = 0.8)]
+        blend_alpha: f32,
+        /// Optional gated store-trial attempt id for audit correlation.
+        #[arg(long)]
+        attempt_id: Option<String>,
+        /// Implementation commit under review.
+        #[arg(long)]
+        commit: Option<String>,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
     /// Run redacted batch diagnostics over protected live store trials.
     ///
     /// Each query reuses the same runtime-influence decision packet and
@@ -5159,6 +5211,44 @@ async fn real_main() -> Result<()> {
                 run_biocortex_retrieval_opt_in_store_trial(
                     runtime_influence_decision_packet_json,
                     BioCortexRetrievalOptInStoreTrialOptions {
+                        runtime_influence_decision_packet: Value::Null,
+                        query: query.clone(),
+                        tags_any: tags_any.clone(),
+                        limit: *limit,
+                        mode: mode.clone(),
+                        per_call_opt_in: *per_call_opt_in,
+                        checkout: checkout.clone(),
+                        timeout_ms: *timeout_ms,
+                        coverage_threshold: *coverage_threshold,
+                        blend_alpha: *blend_alpha,
+                        attempt_id: attempt_id.clone(),
+                        commit: commit.clone(),
+                    },
+                    *json,
+                )
+                .await
+            }
+            BioCortexOp::RetrievalOptInGatedStoreTrial {
+                runtime_transition_gate_json,
+                runtime_influence_decision_packet_json,
+                query,
+                tags_any,
+                limit,
+                mode,
+                per_call_opt_in,
+                checkout,
+                timeout_ms,
+                coverage_threshold,
+                blend_alpha,
+                attempt_id,
+                commit,
+                json,
+            } => {
+                run_biocortex_retrieval_opt_in_gated_store_trial(
+                    runtime_transition_gate_json,
+                    runtime_influence_decision_packet_json,
+                    BioCortexRetrievalOptInGatedStoreTrialOptions {
+                        runtime_transition_gate: Value::Null,
                         runtime_influence_decision_packet: Value::Null,
                         query: query.clone(),
                         tags_any: tags_any.clone(),
@@ -10100,6 +10190,92 @@ async fn run_biocortex_retrieval_opt_in_store_trial(
     Ok(())
 }
 
+async fn run_biocortex_retrieval_opt_in_gated_store_trial(
+    runtime_transition_gate_json: &std::path::Path,
+    runtime_influence_decision_packet_json: &std::path::Path,
+    mut opts: BioCortexRetrievalOptInGatedStoreTrialOptions,
+    as_json: bool,
+) -> Result<()> {
+    let gate_body = std::fs::read_to_string(runtime_transition_gate_json).map_err(|e| {
+        anyhow::anyhow!(
+            "read opt-in runtime transition gate JSON at {runtime_transition_gate_json:?}: {e}"
+        )
+    })?;
+    opts.runtime_transition_gate = serde_json::from_str(&gate_body).map_err(|e| {
+        anyhow::anyhow!(
+            "parse opt-in runtime transition gate JSON at {runtime_transition_gate_json:?}: {e}"
+        )
+    })?;
+    let packet_body = std::fs::read_to_string(runtime_influence_decision_packet_json).map_err(|e| {
+        anyhow::anyhow!(
+            "read opt-in runtime influence decision packet JSON at {runtime_influence_decision_packet_json:?}: {e}"
+        )
+    })?;
+    opts.runtime_influence_decision_packet =
+        serde_json::from_str(&packet_body).map_err(|e| {
+            anyhow::anyhow!(
+                "parse opt-in runtime influence decision packet JSON at {runtime_influence_decision_packet_json:?}: {e}"
+            )
+        })?;
+
+    let db_path = std::env::var("AGENT_BRIDGE_DB")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(default_db_path);
+    let store = SqliteStore::open(&db_path)
+        .await
+        .map_err(|e| anyhow::anyhow!("open state.db at {db_path:?}: {e}"))?;
+    let payload = biocortex_retrieval_opt_in_gated_store_trial(&store, opts).await;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# BioCortex retrieval opt-in gated store trial");
+    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
+    println!(
+        "status={} gate_allowed={} store_trial_called={} approval_state={}",
+        shadow_json_display(payload.get("status"), "-"),
+        shadow_json_display(
+            payload.pointer("/runtime_transition_preflight/transition_gate_allowed"),
+            "false"
+        ),
+        shadow_json_display(payload.get("store_trial_called"), "false"),
+        shadow_json_display(payload.get("approval_state"), "blocked")
+    );
+    let transition = payload
+        .get("runtime_transition_preflight")
+        .unwrap_or(&Value::Null);
+    println!(
+        "transition_blockers={} operator_disabled_now={} query_present={}",
+        transition
+            .get("blockers")
+            .and_then(Value::as_array)
+            .map(|items| items.len().to_string())
+            .unwrap_or_else(|| "0".to_string()),
+        shadow_json_display(transition.get("operator_disabled_now"), "false"),
+        shadow_json_display(transition.get("query_present"), "false")
+    );
+    let summary = payload.get("store_trial_summary").unwrap_or(&Value::Null);
+    println!(
+        "store_trial_status={} adapter_allowed={} baseline_key_count={} side_signal_status={}",
+        shadow_json_display(summary.get("status"), "-"),
+        shadow_json_display(summary.get("runtime_adapter_allowed"), "false"),
+        shadow_json_display(summary.get("baseline_key_count"), "0"),
+        shadow_json_display(summary.get("side_signal_status"), "-")
+    );
+    println!(
+        "calls_memory_search={} runs_biocortex={} changes_memory_search_order={} default_calls_unchanged={}",
+        shadow_json_display(payload.get("calls_memory_search"), "false"),
+        shadow_json_display(payload.get("runs_biocortex"), "false"),
+        shadow_json_display(payload.get("changes_memory_search_order"), "false"),
+        shadow_json_display(payload.get("default_calls_unchanged"), "true")
+    );
+    Ok(())
+}
+
 async fn run_biocortex_retrieval_opt_in_batch_diagnostics(
     runtime_influence_decision_packet_json: &std::path::Path,
     mut opts: BioCortexRetrievalOptInBatchDiagnosticsOptions,
@@ -10203,14 +10379,10 @@ fn run_biocortex_retrieval_opt_in_runtime_readiness_packet(
         anyhow::anyhow!("parse opt-in store trial JSON at {store_trial_json:?}: {e}")
     })?;
     let batch_body = std::fs::read_to_string(batch_diagnostics_json).map_err(|e| {
-        anyhow::anyhow!(
-            "read opt-in batch diagnostics JSON at {batch_diagnostics_json:?}: {e}"
-        )
+        anyhow::anyhow!("read opt-in batch diagnostics JSON at {batch_diagnostics_json:?}: {e}")
     })?;
     opts.batch_diagnostics = serde_json::from_str(&batch_body).map_err(|e| {
-        anyhow::anyhow!(
-            "parse opt-in batch diagnostics JSON at {batch_diagnostics_json:?}: {e}"
-        )
+        anyhow::anyhow!("parse opt-in batch diagnostics JSON at {batch_diagnostics_json:?}: {e}")
     })?;
 
     let payload = biocortex_retrieval_opt_in_runtime_readiness_packet(opts);
@@ -10237,7 +10409,10 @@ fn run_biocortex_retrieval_opt_in_runtime_readiness_packet(
             payload.pointer("/readiness/live_order_influence_ready"),
             "false"
         ),
-        shadow_json_display(payload.pointer("/readiness/default_influence_ready"), "false")
+        shadow_json_display(
+            payload.pointer("/readiness/default_influence_ready"),
+            "false"
+        )
     );
     let boundary = payload.get("boundary_check").unwrap_or(&Value::Null);
     println!(
