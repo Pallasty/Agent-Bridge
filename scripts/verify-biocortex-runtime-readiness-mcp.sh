@@ -377,6 +377,233 @@ def blocked_runtime_transition_gate_fixture():
     }
 
 
+def post_runtime_decision_fixture():
+    decision = decision_fixture()
+    decision["request_summary"].update(
+        {
+            "redacted_evidence_aggregate_summary_included": False,
+            "post_runtime_evidence_summary_backed_review_request": True,
+            "post_runtime_evidence_summary_provided": True,
+            "post_runtime_evidence_summary_ready": True,
+            "post_runtime_evidence_summary_review_state": "post_runtime_evidence_ready",
+            "post_runtime_evidence_summary_state": "post_runtime_evidence_ready",
+            "post_runtime_evidence_summary_default_influence_ready": False,
+            "post_runtime_runtime_readiness_requirement_met": True,
+            "post_runtime_readiness_gated_batch_evidence_ready": True,
+            "post_runtime_batch_transition_gated": True,
+            "post_runtime_batch_evidence_source": "runtime_transition_gated_batch_diagnostics",
+            "post_runtime_evidence_summary_included": False,
+        }
+    )
+    decision["input_contract"].update(
+        {
+            "accepts_post_runtime_evidence_summary_review_request": True,
+            "requires_post_runtime_evidence_summary_ready_when_provided": True,
+            "post_runtime_evidence_summary_included": False,
+        }
+    )
+    decision["boundary_check"].update(
+        {
+            "aggregate_summary_redacted": True,
+            "post_runtime_evidence_summary_backed_review_request": True,
+            "post_runtime_evidence_summary_ready": True,
+            "post_runtime_evidence_summary_safe_for_decision": True,
+            "post_runtime_runtime_readiness_requirement_met": True,
+            "post_runtime_readiness_gated_batch_evidence_ready": True,
+            "post_runtime_batch_transition_gated": True,
+            "post_runtime_evidence_summary_redacted": True,
+        }
+    )
+    decision.update(
+        {
+            "raw_query": "secret post runtime decision query",
+            "raw_key": "secret_post_runtime_decision_key",
+            "content": "secret post runtime decision content",
+            "human_decision_text": "secret post runtime decision human decision",
+        }
+    )
+    return decision
+
+
+def post_runtime_store_trial_fixture():
+    trial = store_trial_fixture()
+    trial["input_contract"].update(
+        {
+            "accepts_post_runtime_evidence_summary_decision_packet": True,
+            "requires_post_runtime_evidence_summary_ready_when_provided": True,
+            "post_runtime_evidence_summary_included": False,
+        }
+    )
+    trial["runtime_preflight"].update(
+        {
+            "decision_packet_post_runtime_evidence_summary_backed": True,
+            "decision_packet_post_runtime_evidence_summary_ready": True,
+            "legacy_decision_packet_without_post_runtime_evidence_summary_allowed": False,
+            "decision_packet_post_runtime_evidence_summary_contract_ok": True,
+            "decision_packet_post_runtime_evidence_summary_redacted": True,
+            "decision_packet_post_runtime_evidence_summary_safe_for_trial": True,
+            "decision_packet_post_runtime_evidence_summary_state": "post_runtime_evidence_ready",
+            "decision_packet_post_runtime_evidence_summary_default_influence_ready": False,
+            "decision_packet_post_runtime_readiness_requirement_met": True,
+            "decision_packet_post_runtime_gated_batch_evidence_ready": True,
+            "decision_packet_post_runtime_batch_transition_gated": True,
+        }
+    )
+    trial.update(
+        {
+            "raw_query": "secret post runtime store query",
+            "raw_key": "secret_post_runtime_store_key",
+            "content": "secret post runtime store content",
+        }
+    )
+    return trial
+
+
+def post_runtime_gated_batch_fixture():
+    batch = gated_batch_fixture()
+    batch["input_contract"].update(
+        {
+            "accepts_post_runtime_evidence_summary_decision_packet": True,
+            "requires_post_runtime_evidence_summary_ready_when_provided": True,
+            "post_runtime_evidence_summary_included": False,
+        }
+    )
+    row = batch["query_results"][0]
+    row["transition_preflight"].update(
+        {
+            "gate_post_runtime_evidence_summary_backed": True,
+            "gate_post_runtime_evidence_summary_ready": True,
+            "gate_legacy_decision_packet_without_post_runtime_evidence_summary_allowed": False,
+            "gate_post_runtime_evidence_summary_state": "post_runtime_evidence_ready",
+            "gate_post_runtime_batch_evidence_source": "runtime_transition_gated_batch_diagnostics",
+            "gate_post_runtime_readiness_gated_batch_evidence_ready": True,
+            "gate_post_runtime_batch_transition_gated": True,
+            "gate_store_post_runtime_evidence_preflight_ok": True,
+            "gate_batch_post_runtime_evidence_preflight_ok": True,
+        }
+    )
+    row["store_trial"].update(
+        {
+            "decision_packet_post_runtime_evidence_summary_backed": True,
+            "decision_packet_post_runtime_evidence_summary_ready": True,
+            "legacy_decision_packet_without_post_runtime_evidence_summary_allowed": False,
+            "decision_packet_post_runtime_evidence_summary_safe_for_trial": True,
+            "decision_packet_post_runtime_evidence_summary_state": "post_runtime_evidence_ready",
+        }
+    )
+    row.update(
+        {
+            "raw_query": "secret post runtime gated batch query",
+            "raw_key": "secret_post_runtime_gated_batch_key",
+            "content": "secret post runtime gated batch content",
+        }
+    )
+    return batch
+
+
+def post_runtime_readiness_packet_fixture():
+    packet = runtime_readiness_packet_fixture()
+    packet["input_contract"].update(
+        {
+            "batch_diagnostics_evidence_source": "runtime_transition_gated_batch_diagnostics",
+            "batch_diagnostics_transition_gated": True,
+            "accepts_post_runtime_evidence_summary_decision_packet": True,
+            "requires_post_runtime_evidence_summary_ready_when_provided": True,
+            "post_runtime_evidence_summary_included": False,
+        }
+    )
+    packet["readiness"].update(
+        {
+            "live_order_influence_ready": False,
+            "may_change_default_memory_search_order": False,
+        }
+    )
+    packet["decision_summary"] = {
+        "post_runtime_evidence_summary_backed_review_request": True,
+        "post_runtime_evidence_summary_ready": True,
+        "legacy_decision_packet_without_post_runtime_evidence_summary_allowed": False,
+        "post_runtime_evidence_summary_safe_for_decision": True,
+        "post_runtime_evidence_summary_default_influence_ready": False,
+        "post_runtime_runtime_readiness_requirement_met": True,
+        "post_runtime_readiness_gated_batch_evidence_ready": True,
+        "post_runtime_batch_transition_gated": True,
+        "post_runtime_batch_evidence_source": "runtime_transition_gated_batch_diagnostics",
+        "post_runtime_evidence_summary_state": "post_runtime_evidence_ready",
+    }
+    packet["store_trial_summary"] = {
+        "post_runtime_evidence_preflight_ok": True,
+    }
+    packet["batch_summary"] = {
+        "evidence_source": "runtime_transition_gated_batch_diagnostics",
+        "transition_gated": True,
+        "transition_gate_ok": True,
+        "post_runtime_evidence_preflight_ok": True,
+        "transition_gate_allowed_count": 1,
+        "transition_gate_blocked_count": 0,
+        "store_trial_called_count": 1,
+        "calls_memory_search_count": 1,
+    }
+    packet.update(
+        {
+            "raw_query": "secret post runtime readiness query",
+            "raw_key": "secret_post_runtime_readiness_key",
+            "content": "secret post runtime readiness content",
+            "human_decision_text": "secret post runtime readiness human decision",
+        }
+    )
+    return packet
+
+
+def post_runtime_transition_gate_fixture():
+    gate = blocked_runtime_transition_gate_fixture()
+    gate["status"] = "transition_allowed"
+    gate["requested_transition"].update(
+        {
+            "mode": "fts",
+            "mode_authorized": True,
+            "per_call_opt_in": True,
+            "operator_disabled": False,
+            "hybrid_retrieval_influence_requested": False,
+            "semantic_retrieval_influence_requested": False,
+        }
+    )
+    gate["readiness_summary"] = {
+        "post_runtime_evidence_summary_backed": True,
+        "post_runtime_evidence_summary_ready": True,
+        "legacy_decision_packet_without_post_runtime_evidence_summary_allowed": False,
+        "post_runtime_evidence_summary_state": "post_runtime_evidence_ready",
+        "post_runtime_batch_evidence_source": "runtime_transition_gated_batch_diagnostics",
+        "post_runtime_readiness_gated_batch_evidence_ready": True,
+        "post_runtime_batch_transition_gated": True,
+        "store_post_runtime_evidence_preflight_ok": True,
+        "batch_post_runtime_evidence_preflight_ok": True,
+    }
+    gate["transition"].update(
+        {
+            "transition_allowed": True,
+            "may_call_controlled_store_trial": True,
+            "may_run_runtime_adapter_for_explicit_opt_in_fts": True,
+            "may_connect_ordering_behavior_for_explicit_opt_in_fts": True,
+            "may_affect_only_explicitly_opted_in_fts_calls": True,
+        }
+    )
+    gate["boundary_check"].update(
+        {
+            "runtime_transition_allowed": True,
+            "blockers": [],
+        }
+    )
+    gate.update(
+        {
+            "registers_embedding_backend": False,
+            "raw_query": "secret post runtime transition gate query",
+            "raw_key": "secret_post_runtime_transition_gate_key",
+            "content": "secret post runtime transition gate content",
+        }
+    )
+    return gate
+
+
 messages = [
     {
         "jsonrpc": "2.0",
@@ -489,6 +716,72 @@ messages = [
             },
         },
     },
+    {
+        "jsonrpc": "2.0",
+        "id": 9,
+        "method": "tools/call",
+        "params": {
+            "name": "biocortex_retrieval_opt_in_runtime_readiness_packet",
+            "arguments": {
+                "runtime_influence_decision_packet": post_runtime_decision_fixture(),
+                "store_trial": post_runtime_store_trial_fixture(),
+                "batch_diagnostics": post_runtime_gated_batch_fixture(),
+                "reviewer": "verify-biocortex-runtime-readiness-mcp",
+                "commit": "mcp-smoke-post-runtime-readiness",
+                "forum_post_id": "mcp-smoke-post-runtime-readiness",
+                "memory_key": "mcp-smoke-post-runtime-readiness",
+            },
+        },
+    },
+    {
+        "jsonrpc": "2.0",
+        "id": 10,
+        "method": "tools/call",
+        "params": {
+            "name": "biocortex_retrieval_opt_in_runtime_transition_gate",
+            "arguments": {
+                "runtime_readiness_packet": post_runtime_readiness_packet_fixture(),
+                "mode": "fts",
+                "per_call_opt_in": True,
+                "reviewer": "verify-biocortex-runtime-readiness-mcp",
+                "commit": "mcp-smoke-post-runtime-transition",
+                "forum_post_id": "mcp-smoke-post-runtime-transition",
+                "memory_key": "mcp-smoke-post-runtime-transition",
+            },
+        },
+    },
+    {
+        "jsonrpc": "2.0",
+        "id": 11,
+        "method": "tools/call",
+        "params": {
+            "name": "biocortex_retrieval_opt_in_gated_store_trial",
+            "arguments": {
+                "runtime_transition_gate": post_runtime_transition_gate_fixture(),
+                "runtime_influence_decision_packet": post_runtime_decision_fixture(),
+                "query": "secret post runtime gated store mcp smoke query",
+                "mode": "fts",
+                "per_call_opt_in": True,
+                "attempt_id": "mcp-smoke-post-runtime-gated-store-trial",
+            },
+        },
+    },
+    {
+        "jsonrpc": "2.0",
+        "id": 12,
+        "method": "tools/call",
+        "params": {
+            "name": "biocortex_retrieval_opt_in_gated_batch_diagnostics",
+            "arguments": {
+                "runtime_transition_gate": post_runtime_transition_gate_fixture(),
+                "runtime_influence_decision_packet": post_runtime_decision_fixture(),
+                "queries": ["secret post runtime gated batch mcp smoke query"],
+                "mode": "fts",
+                "per_call_opt_in": True,
+                "attempt_id": "mcp-smoke-post-runtime-gated-batch-diagnostics",
+            },
+        },
+    },
 ]
 
 with open(path, "w", encoding="utf-8") as f:
@@ -497,7 +790,8 @@ with open(path, "w", encoding="utf-8") as f:
 PY
 
 timeout "${AB_MCP_SMOKE_TIMEOUT_SECS:-180}" \
-    env AGENT_BRIDGE_TOOL_PROFILE="${AGENT_BRIDGE_TOOL_PROFILE:-standard}" \
+    env -u AB_BIOCORTEX_RETRIEVAL_DISABLE \
+    AGENT_BRIDGE_TOOL_PROFILE="${AGENT_BRIDGE_TOOL_PROFILE:-standard}" \
     cargo run -q -p ab-bridge --no-default-features -- mcp \
     <"$input_jsonl" >"$output_jsonl" 2>"$stderr_log" || {
         echo "FAIL: MCP smoke command failed" >&2
@@ -535,7 +829,7 @@ with open(output_path, encoding="utf-8", errors="replace") as f:
                 for tool in message.get("result", {}).get("tools", [])
                 if isinstance(tool, dict)
             ]
-        if message.get("id") in {3, 4, 5, 6, 7, 8}:
+        if message.get("id") in {3, 4, 5, 6, 7, 8, 9, 10, 11, 12}:
             if message.get("error"):
                 errors.append(f"tools/call error: {message['error']}")
             for item in message.get("result", {}).get("content", []):
@@ -551,7 +845,7 @@ for tool_name in [
 ]:
     if tool_name not in listed_tools:
         errors.append(f"{tool_name} missing from tools/list")
-for message_id in [3, 4, 5, 6, 7, 8]:
+for message_id in [3, 4, 5, 6, 7, 8, 9, 10, 11, 12]:
     if message_id not in call_texts:
         errors.append(f"missing tools/call text result for id={message_id}")
 if errors:
@@ -582,6 +876,25 @@ for forbidden in [
     "secret readiness gated batch query",
     "secret_readiness_gated_batch_key",
     "secret readiness gated batch content",
+    "secret post runtime decision query",
+    "secret_post_runtime_decision_key",
+    "secret post runtime decision content",
+    "secret post runtime decision human decision",
+    "secret post runtime store query",
+    "secret_post_runtime_store_key",
+    "secret post runtime store content",
+    "secret post runtime gated batch query",
+    "secret_post_runtime_gated_batch_key",
+    "secret post runtime gated batch content",
+    "secret post runtime readiness query",
+    "secret_post_runtime_readiness_key",
+    "secret post runtime readiness content",
+    "secret post runtime readiness human decision",
+    "secret post runtime transition gate query",
+    "secret_post_runtime_transition_gate_key",
+    "secret post runtime transition gate content",
+    "secret post runtime gated store mcp smoke query",
+    "secret post runtime gated batch mcp smoke query",
 ]:
     for message_id, call_text in call_texts.items():
         if forbidden in call_text:
@@ -696,6 +1009,95 @@ if gated_readiness_actual != gated_readiness_expected:
     )
     sys.exit(1)
 
+post_runtime_readiness_payload = json.loads(call_texts[9])
+post_runtime_readiness_expected = {
+    "schema": "agent_bridge.biocortex_retrieval.opt_in_runtime_readiness_packet.v0",
+    "status": "completed",
+    "control_plane_ready": True,
+    "post_runtime_evidence_backed": True,
+    "post_runtime_evidence_ready": True,
+    "legacy_post_runtime_allowed": False,
+    "post_runtime_safe_for_decision": True,
+    "post_runtime_readiness_requirement_met": True,
+    "post_runtime_gated_batch_ready": True,
+    "post_runtime_batch_transition_gated": True,
+    "post_runtime_state": "post_runtime_evidence_ready",
+    "store_post_runtime_preflight_ok": True,
+    "batch_post_runtime_preflight_ok": True,
+    "batch_evidence_source": "runtime_transition_gated_batch_diagnostics",
+    "runtime_readiness_ready": True,
+    "blockers": [],
+    "calls_memory_search": False,
+    "runs_biocortex": False,
+    "changes_memory_search_order": False,
+    "default_search_order_change_allowed": False,
+}
+post_runtime_readiness_actual = {
+    "schema": post_runtime_readiness_payload.get("schema"),
+    "status": post_runtime_readiness_payload.get("status"),
+    "control_plane_ready": post_runtime_readiness_payload.get("readiness", {}).get(
+        "control_plane_ready"
+    ),
+    "post_runtime_evidence_backed": post_runtime_readiness_payload.get(
+        "decision_summary", {}
+    ).get("post_runtime_evidence_summary_backed_review_request"),
+    "post_runtime_evidence_ready": post_runtime_readiness_payload.get(
+        "decision_summary", {}
+    ).get("post_runtime_evidence_summary_ready"),
+    "legacy_post_runtime_allowed": post_runtime_readiness_payload.get(
+        "decision_summary", {}
+    ).get("legacy_decision_packet_without_post_runtime_evidence_summary_allowed"),
+    "post_runtime_safe_for_decision": post_runtime_readiness_payload.get(
+        "decision_summary", {}
+    ).get("post_runtime_evidence_summary_safe_for_decision"),
+    "post_runtime_readiness_requirement_met": post_runtime_readiness_payload.get(
+        "decision_summary", {}
+    ).get("post_runtime_runtime_readiness_requirement_met"),
+    "post_runtime_gated_batch_ready": post_runtime_readiness_payload.get(
+        "decision_summary", {}
+    ).get("post_runtime_readiness_gated_batch_evidence_ready"),
+    "post_runtime_batch_transition_gated": post_runtime_readiness_payload.get(
+        "decision_summary", {}
+    ).get("post_runtime_batch_transition_gated"),
+    "post_runtime_state": post_runtime_readiness_payload.get("decision_summary", {}).get(
+        "post_runtime_evidence_summary_state"
+    ),
+    "store_post_runtime_preflight_ok": post_runtime_readiness_payload.get(
+        "store_trial_summary", {}
+    ).get("post_runtime_evidence_preflight_ok"),
+    "batch_post_runtime_preflight_ok": post_runtime_readiness_payload.get(
+        "batch_summary", {}
+    ).get("post_runtime_evidence_preflight_ok"),
+    "batch_evidence_source": post_runtime_readiness_payload.get("batch_summary", {}).get(
+        "evidence_source"
+    ),
+    "runtime_readiness_ready": post_runtime_readiness_payload.get(
+        "boundary_check", {}
+    ).get("runtime_readiness_ready"),
+    "blockers": post_runtime_readiness_payload.get("boundary_check", {}).get("blockers"),
+    "calls_memory_search": post_runtime_readiness_payload.get("calls_memory_search"),
+    "runs_biocortex": post_runtime_readiness_payload.get("runs_biocortex"),
+    "changes_memory_search_order": post_runtime_readiness_payload.get(
+        "changes_memory_search_order"
+    ),
+    "default_search_order_change_allowed": post_runtime_readiness_payload.get(
+        "default_search_order_change_allowed"
+    ),
+}
+if post_runtime_readiness_actual != post_runtime_readiness_expected:
+    print("FAIL: unexpected MCP post-runtime readiness payload", file=sys.stderr)
+    print(
+        json.dumps(
+            {
+                "actual": post_runtime_readiness_actual,
+                "expected": post_runtime_readiness_expected,
+            },
+            indent=2,
+        ),
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
 transition_payload = json.loads(call_texts[4])
 transition_expected = {
     "schema": "agent_bridge.biocortex_retrieval.opt_in_runtime_transition_gate.v0",
@@ -744,6 +1146,87 @@ if transition_actual != transition_expected:
     print(
         json.dumps(
             {"actual": transition_actual, "expected": transition_expected},
+            indent=2,
+        ),
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+post_runtime_transition_payload = json.loads(call_texts[10])
+post_runtime_transition_expected = {
+    "schema": "agent_bridge.biocortex_retrieval.opt_in_runtime_transition_gate.v0",
+    "status": "transition_allowed",
+    "transition_allowed": True,
+    "runtime_transition_allowed": True,
+    "post_runtime_evidence_backed": True,
+    "post_runtime_evidence_ready": True,
+    "legacy_post_runtime_allowed": False,
+    "post_runtime_state": "post_runtime_evidence_ready",
+    "post_runtime_batch_evidence_source": "runtime_transition_gated_batch_diagnostics",
+    "post_runtime_gated_batch_ready": True,
+    "post_runtime_batch_transition_gated": True,
+    "store_post_runtime_preflight_ok": True,
+    "batch_post_runtime_preflight_ok": True,
+    "blockers": [],
+    "calls_memory_search": False,
+    "runs_biocortex": False,
+    "changes_memory_search_order": False,
+    "default_search_order_change_allowed": False,
+}
+post_runtime_transition_actual = {
+    "schema": post_runtime_transition_payload.get("schema"),
+    "status": post_runtime_transition_payload.get("status"),
+    "transition_allowed": post_runtime_transition_payload.get("transition", {}).get(
+        "transition_allowed"
+    ),
+    "runtime_transition_allowed": post_runtime_transition_payload.get(
+        "boundary_check", {}
+    ).get("runtime_transition_allowed"),
+    "post_runtime_evidence_backed": post_runtime_transition_payload.get(
+        "readiness_summary", {}
+    ).get("post_runtime_evidence_summary_backed"),
+    "post_runtime_evidence_ready": post_runtime_transition_payload.get(
+        "readiness_summary", {}
+    ).get("post_runtime_evidence_summary_ready"),
+    "legacy_post_runtime_allowed": post_runtime_transition_payload.get(
+        "readiness_summary", {}
+    ).get("legacy_decision_packet_without_post_runtime_evidence_summary_allowed"),
+    "post_runtime_state": post_runtime_transition_payload.get("readiness_summary", {}).get(
+        "post_runtime_evidence_summary_state"
+    ),
+    "post_runtime_batch_evidence_source": post_runtime_transition_payload.get(
+        "readiness_summary", {}
+    ).get("post_runtime_batch_evidence_source"),
+    "post_runtime_gated_batch_ready": post_runtime_transition_payload.get(
+        "readiness_summary", {}
+    ).get("post_runtime_readiness_gated_batch_evidence_ready"),
+    "post_runtime_batch_transition_gated": post_runtime_transition_payload.get(
+        "readiness_summary", {}
+    ).get("post_runtime_batch_transition_gated"),
+    "store_post_runtime_preflight_ok": post_runtime_transition_payload.get(
+        "readiness_summary", {}
+    ).get("store_post_runtime_evidence_preflight_ok"),
+    "batch_post_runtime_preflight_ok": post_runtime_transition_payload.get(
+        "readiness_summary", {}
+    ).get("batch_post_runtime_evidence_preflight_ok"),
+    "blockers": post_runtime_transition_payload.get("boundary_check", {}).get("blockers"),
+    "calls_memory_search": post_runtime_transition_payload.get("calls_memory_search"),
+    "runs_biocortex": post_runtime_transition_payload.get("runs_biocortex"),
+    "changes_memory_search_order": post_runtime_transition_payload.get(
+        "changes_memory_search_order"
+    ),
+    "default_search_order_change_allowed": post_runtime_transition_payload.get(
+        "default_search_order_change_allowed"
+    ),
+}
+if post_runtime_transition_actual != post_runtime_transition_expected:
+    print("FAIL: unexpected MCP post-runtime transition payload", file=sys.stderr)
+    print(
+        json.dumps(
+            {
+                "actual": post_runtime_transition_actual,
+                "expected": post_runtime_transition_expected,
+            },
             indent=2,
         ),
         file=sys.stderr,
@@ -857,6 +1340,103 @@ if gated_actual != gated_expected:
     )
     sys.exit(1)
 
+post_runtime_gated_payload = json.loads(call_texts[11])
+post_runtime_gated_expected = {
+    "schema": "agent_bridge.biocortex_retrieval.opt_in_gated_store_trial.v0",
+    "status": "transition_gate_consumed",
+    "transition_gate_allowed": True,
+    "blockers": [],
+    "gate_post_runtime_evidence_backed": True,
+    "gate_post_runtime_evidence_ready": True,
+    "gate_legacy_post_runtime_allowed": False,
+    "gate_post_runtime_state": "post_runtime_evidence_ready",
+    "gate_post_runtime_batch_evidence_source": "runtime_transition_gated_batch_diagnostics",
+    "gate_post_runtime_gated_batch_ready": True,
+    "gate_post_runtime_batch_transition_gated": True,
+    "gate_store_post_runtime_preflight_ok": True,
+    "gate_batch_post_runtime_preflight_ok": True,
+    "store_trial_called": True,
+    "decision_packet_post_runtime_evidence_backed": True,
+    "decision_packet_post_runtime_evidence_ready": True,
+    "calls_memory_search": True,
+    "runs_biocortex": False,
+    "changes_memory_search_order": False,
+    "default_search_order_change_allowed": False,
+    "default_calls_unchanged": True,
+    "raw_query_included": False,
+    "raw_keys_included": False,
+    "content_included": False,
+}
+post_runtime_gated_actual = {
+    "schema": post_runtime_gated_payload.get("schema"),
+    "status": post_runtime_gated_payload.get("status"),
+    "transition_gate_allowed": post_runtime_gated_payload.get(
+        "runtime_transition_preflight", {}
+    ).get("transition_gate_allowed"),
+    "blockers": post_runtime_gated_payload.get("runtime_transition_preflight", {}).get(
+        "blockers"
+    ),
+    "gate_post_runtime_evidence_backed": post_runtime_gated_payload.get(
+        "runtime_transition_preflight", {}
+    ).get("gate_post_runtime_evidence_summary_backed"),
+    "gate_post_runtime_evidence_ready": post_runtime_gated_payload.get(
+        "runtime_transition_preflight", {}
+    ).get("gate_post_runtime_evidence_summary_ready"),
+    "gate_legacy_post_runtime_allowed": post_runtime_gated_payload.get(
+        "runtime_transition_preflight", {}
+    ).get("gate_legacy_decision_packet_without_post_runtime_evidence_summary_allowed"),
+    "gate_post_runtime_state": post_runtime_gated_payload.get(
+        "runtime_transition_preflight", {}
+    ).get("gate_post_runtime_evidence_summary_state"),
+    "gate_post_runtime_batch_evidence_source": post_runtime_gated_payload.get(
+        "runtime_transition_preflight", {}
+    ).get("gate_post_runtime_batch_evidence_source"),
+    "gate_post_runtime_gated_batch_ready": post_runtime_gated_payload.get(
+        "runtime_transition_preflight", {}
+    ).get("gate_post_runtime_readiness_gated_batch_evidence_ready"),
+    "gate_post_runtime_batch_transition_gated": post_runtime_gated_payload.get(
+        "runtime_transition_preflight", {}
+    ).get("gate_post_runtime_batch_transition_gated"),
+    "gate_store_post_runtime_preflight_ok": post_runtime_gated_payload.get(
+        "runtime_transition_preflight", {}
+    ).get("gate_store_post_runtime_evidence_preflight_ok"),
+    "gate_batch_post_runtime_preflight_ok": post_runtime_gated_payload.get(
+        "runtime_transition_preflight", {}
+    ).get("gate_batch_post_runtime_evidence_preflight_ok"),
+    "store_trial_called": post_runtime_gated_payload.get("store_trial_called"),
+    "decision_packet_post_runtime_evidence_backed": post_runtime_gated_payload.get(
+        "store_trial_summary", {}
+    ).get("decision_packet_post_runtime_evidence_summary_backed"),
+    "decision_packet_post_runtime_evidence_ready": post_runtime_gated_payload.get(
+        "store_trial_summary", {}
+    ).get("decision_packet_post_runtime_evidence_summary_ready"),
+    "calls_memory_search": post_runtime_gated_payload.get("calls_memory_search"),
+    "runs_biocortex": post_runtime_gated_payload.get("runs_biocortex"),
+    "changes_memory_search_order": post_runtime_gated_payload.get(
+        "changes_memory_search_order"
+    ),
+    "default_search_order_change_allowed": post_runtime_gated_payload.get(
+        "default_search_order_change_allowed"
+    ),
+    "default_calls_unchanged": post_runtime_gated_payload.get("default_calls_unchanged"),
+    "raw_query_included": post_runtime_gated_payload.get("raw_query_included"),
+    "raw_keys_included": post_runtime_gated_payload.get("raw_keys_included"),
+    "content_included": post_runtime_gated_payload.get("content_included"),
+}
+if post_runtime_gated_actual != post_runtime_gated_expected:
+    print("FAIL: unexpected MCP post-runtime gated store trial payload", file=sys.stderr)
+    print(
+        json.dumps(
+            {
+                "actual": post_runtime_gated_actual,
+                "expected": post_runtime_gated_expected,
+            },
+            indent=2,
+        ),
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
 gated_batch_payload = json.loads(call_texts[7])
 gated_batch_expected = {
     "schema": "agent_bridge.biocortex_retrieval.opt_in_gated_batch_diagnostics.v0",
@@ -917,8 +1497,129 @@ if gated_batch_actual != gated_batch_expected:
     )
     sys.exit(1)
 
+post_runtime_gated_batch_payload = json.loads(call_texts[12])
+post_runtime_gated_batch_first = (
+    post_runtime_gated_batch_payload.get("query_results") or [{}]
+)[0]
+post_runtime_gated_batch_expected = {
+    "schema": "agent_bridge.biocortex_retrieval.opt_in_gated_batch_diagnostics.v0",
+    "status": "completed",
+    "query_count": 1,
+    "transition_gate_allowed_count": 1,
+    "transition_gate_blocked_count": 0,
+    "store_trial_called_count": 1,
+    "calls_memory_search_count": 1,
+    "transition_gate_allowed_all": True,
+    "store_trial_called_all": True,
+    "calls_memory_search_all": True,
+    "first_transition_gate_allowed": True,
+    "first_gate_post_runtime_evidence_backed": True,
+    "first_gate_post_runtime_evidence_ready": True,
+    "first_gate_post_runtime_state": "post_runtime_evidence_ready",
+    "first_gate_post_runtime_batch_evidence_source": "runtime_transition_gated_batch_diagnostics",
+    "first_gate_store_post_runtime_preflight_ok": True,
+    "first_gate_batch_post_runtime_preflight_ok": True,
+    "first_store_trial_called": True,
+    "first_decision_packet_post_runtime_evidence_backed": True,
+    "first_decision_packet_post_runtime_evidence_ready": True,
+    "calls_memory_search": True,
+    "runs_biocortex": False,
+    "changes_memory_search_order": False,
+    "default_search_order_change_allowed": False,
+    "default_calls_unchanged": True,
+    "raw_queries_included": False,
+    "raw_keys_included": False,
+    "content_included": False,
+}
+post_runtime_gated_batch_actual = {
+    "schema": post_runtime_gated_batch_payload.get("schema"),
+    "status": post_runtime_gated_batch_payload.get("status"),
+    "query_count": post_runtime_gated_batch_payload.get("summary", {}).get("query_count"),
+    "transition_gate_allowed_count": post_runtime_gated_batch_payload.get(
+        "summary", {}
+    ).get("transition_gate_allowed_count"),
+    "transition_gate_blocked_count": post_runtime_gated_batch_payload.get(
+        "summary", {}
+    ).get("transition_gate_blocked_count"),
+    "store_trial_called_count": post_runtime_gated_batch_payload.get("summary", {}).get(
+        "store_trial_called_count"
+    ),
+    "calls_memory_search_count": post_runtime_gated_batch_payload.get(
+        "summary", {}
+    ).get("calls_memory_search_count"),
+    "transition_gate_allowed_all": post_runtime_gated_batch_payload.get("safety", {}).get(
+        "transition_gate_allowed_all"
+    ),
+    "store_trial_called_all": post_runtime_gated_batch_payload.get("safety", {}).get(
+        "store_trial_called_all"
+    ),
+    "calls_memory_search_all": post_runtime_gated_batch_payload.get("safety", {}).get(
+        "calls_memory_search_all"
+    ),
+    "first_transition_gate_allowed": post_runtime_gated_batch_first.get(
+        "transition_preflight", {}
+    ).get("transition_gate_allowed"),
+    "first_gate_post_runtime_evidence_backed": post_runtime_gated_batch_first.get(
+        "transition_preflight", {}
+    ).get("gate_post_runtime_evidence_summary_backed"),
+    "first_gate_post_runtime_evidence_ready": post_runtime_gated_batch_first.get(
+        "transition_preflight", {}
+    ).get("gate_post_runtime_evidence_summary_ready"),
+    "first_gate_post_runtime_state": post_runtime_gated_batch_first.get(
+        "transition_preflight", {}
+    ).get("gate_post_runtime_evidence_summary_state"),
+    "first_gate_post_runtime_batch_evidence_source": post_runtime_gated_batch_first.get(
+        "transition_preflight", {}
+    ).get("gate_post_runtime_batch_evidence_source"),
+    "first_gate_store_post_runtime_preflight_ok": post_runtime_gated_batch_first.get(
+        "transition_preflight", {}
+    ).get("gate_store_post_runtime_evidence_preflight_ok"),
+    "first_gate_batch_post_runtime_preflight_ok": post_runtime_gated_batch_first.get(
+        "transition_preflight", {}
+    ).get("gate_batch_post_runtime_evidence_preflight_ok"),
+    "first_store_trial_called": post_runtime_gated_batch_first.get("store_trial", {}).get(
+        "called"
+    ),
+    "first_decision_packet_post_runtime_evidence_backed": post_runtime_gated_batch_first.get(
+        "store_trial", {}
+    ).get("decision_packet_post_runtime_evidence_summary_backed"),
+    "first_decision_packet_post_runtime_evidence_ready": post_runtime_gated_batch_first.get(
+        "store_trial", {}
+    ).get("decision_packet_post_runtime_evidence_summary_ready"),
+    "calls_memory_search": post_runtime_gated_batch_payload.get("calls_memory_search"),
+    "runs_biocortex": post_runtime_gated_batch_payload.get("runs_biocortex"),
+    "changes_memory_search_order": post_runtime_gated_batch_payload.get(
+        "changes_memory_search_order"
+    ),
+    "default_search_order_change_allowed": post_runtime_gated_batch_payload.get(
+        "default_search_order_change_allowed"
+    ),
+    "default_calls_unchanged": post_runtime_gated_batch_payload.get(
+        "default_calls_unchanged"
+    ),
+    "raw_queries_included": post_runtime_gated_batch_payload.get("raw_queries_included"),
+    "raw_keys_included": post_runtime_gated_batch_payload.get("raw_keys_included"),
+    "content_included": post_runtime_gated_batch_payload.get("content_included"),
+}
+if post_runtime_gated_batch_actual != post_runtime_gated_batch_expected:
+    print(
+        "FAIL: unexpected MCP post-runtime gated batch diagnostics payload",
+        file=sys.stderr,
+    )
+    print(
+        json.dumps(
+            {
+                "actual": post_runtime_gated_batch_actual,
+                "expected": post_runtime_gated_batch_expected,
+            },
+            indent=2,
+        ),
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
 print(
-    "OK: BioCortex runtime readiness + transition + gated store/batch MCP tools/list and tools/call smoke passed "
+    "OK: BioCortex runtime readiness + transition + gated store/batch + post-runtime evidence MCP tools/list and tools/call smoke passed "
     f"(tools={len(listed_tools)})"
 )
 PY
