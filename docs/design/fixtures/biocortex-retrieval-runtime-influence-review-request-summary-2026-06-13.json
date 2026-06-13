@@ -1,0 +1,75 @@
+{
+  "schema": "agent_bridge.biocortex_retrieval.runtime_influence_review_request_summary.v0",
+  "created_at": "2026-06-13T16:25:41Z",
+  "source_commit": "34bf2e3a3ee74135f6774381c094e3ad64bb2289",
+  "source_runner": "scripts/run-biocortex-controlled-trial.sh",
+  "source_output_dir": "target/biocortex-runtime-review-request-20260613",
+  "source_artifacts": {
+    "controlled_trial_summary": "controlled-trial-summary.json",
+    "redacted_evidence_aggregate": "14-redacted-evidence-aggregate.json",
+    "runtime_review_request_with_aggregate": "15-runtime-influence-review-request-with-aggregate.json",
+    "runtime_decision_packet_with_aggregate": "16-runtime-influence-decision-packet-with-aggregate.json"
+  },
+  "request_state": "runtime_influence_review_requested_not_granted",
+  "request_scope": "explicit_opt_in_fts_runtime_influence_review",
+  "approval_state": "not_approved",
+  "implementation_allowed": false,
+  "runtime_adapter_approved": false,
+  "default_search_order_change_allowed": false,
+  "default_calls_unchanged": true,
+  "requested_authorization": {
+    "requested_scope": "explicit_opt_in_fts_runtime_influence_review",
+    "request_runtime_adapter_review": true,
+    "request_ordering_behavior_connection_review": true,
+    "request_default_search_order_change": false,
+    "request_hybrid_retrieval_influence": false,
+    "request_semantic_retrieval_influence": false,
+    "must_keep_per_call_opt_in_required": true,
+    "must_return_baseline_without_per_call_opt_in": true,
+    "must_fail_open_to_baseline": true,
+    "must_keep_operator_disable": "AB_BIOCORTEX_RETRIEVAL_DISABLE",
+    "this_packet_grants_request": false
+  },
+  "controlled_trial": {
+    "status": "controlled_trial_redacted_evidence_ready",
+    "movement_actual_order_changed_count": 1,
+    "coverage_query_count": 5,
+    "coverage_experimental_source_count": 5,
+    "coverage_hash_matches_baseline_count": 5,
+    "aggregate_evidence_ready": true,
+    "controlled_rank_movement_observed": true,
+    "expanded_coverage_without_additional_movement": true,
+    "default_influence_ready": false,
+    "human_review_required": true,
+    "recommended_next_step": "prepare_human_runtime_influence_review_request"
+  },
+  "boundary_check": {
+    "runtime_influence_review_request_ready": true,
+    "redacted_evidence_aggregate_ready": true,
+    "aggregate_safe_for_review": true,
+    "blockers": [],
+    "gate_default_order_still_not_allowed": true,
+    "gate_runtime_adapter_still_not_approved": true
+  },
+  "safety": {
+    "writes_approval": false,
+    "mutates_default_agent_bridge_db": false,
+    "calls_memory_search": false,
+    "runs_biocortex": false,
+    "registers_embedding_backend": false,
+    "changes_memory_search_order": false,
+    "ordering_behavior_connected": false,
+    "raw_queries_included": false,
+    "raw_keys_included": false,
+    "content_included": false,
+    "side_signal_raw_included": false
+  },
+  "required_human_decision": {
+    "decision_required_before_ordering_connection": true,
+    "decision_required_before_runtime_adapter": true,
+    "decision_schema": "agent_bridge.biocortex_retrieval.opt_in_runtime_influence_review_decision.v0",
+    "must_keep_default_search_order_change_allowed_false": true,
+    "must_keep_hybrid_semantic_not_authorized": true,
+    "must_state_scope_explicit_opt_in_fts_only": true
+  }
+}

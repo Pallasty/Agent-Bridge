@@ -35,7 +35,10 @@ pass. A protected MCP store-trial path now calls AB store baseline
 `memory_search`, runs the external BioCortex side-signal adapter only when a
 runtime-influence decision packet and runtime gates authorize it, and feeds the
 sanitized side-signal into the store wrapper. Default `memory_search`, hybrid,
-and semantic paths remain unchanged.
+and semantic paths remain unchanged. A focused controlled-trial runner now
+emits aggregate-backed review-request evidence for commit
+`34bf2e3a3ee74135f6774381c094e3ad64bb2289`; the durable review request remains
+request-only and grants no runtime influence.
 
 ```json
 {
@@ -65,6 +68,9 @@ and semantic paths remain unchanged.
   "runtime_influence_decision_packet_implemented": true,
   "store_opt_in_order_connection_implemented": true,
   "store_opt_in_runtime_adapter_connection_implemented": true,
+  "controlled_trial_runner_implemented": true,
+  "controlled_trial_runner_clean_worktree_verified": true,
+  "runtime_influence_review_request_summary_landed": true,
   "ordering_behavior_connected": false,
   "explicit_opt_in_fts_ordering_behavior_connected": true,
   "explicit_opt_in_fts_runtime_adapter_connected": true
@@ -74,6 +80,11 @@ and semantic paths remain unchanged.
 Machine-readable fixture:
 
 - `docs/design/fixtures/biocortex-retrieval-opt-in-experiment-plan-2026-06-11.json`
+
+Runtime-influence review request summary:
+
+- `docs/design/BIOCORTEX_RETRIEVAL_RUNTIME_INFLUENCE_REVIEW_REQUEST_2026_06_13.md`
+- `docs/design/fixtures/biocortex-retrieval-runtime-influence-review-request-summary-2026-06-13.json`
 
 Authorization request packet:
 
@@ -724,6 +735,22 @@ Slice 31 adds a lightweight controlled-trial runner:
 - it does not write approval state, mutate the default Agent-Bridge DB,
   register an embedding backend, change default retrieval order, or grant
   default influence.
+
+Slice 32 records the aggregate-backed runtime-influence review request:
+
+- the source run is
+  `target/biocortex-runtime-review-request-20260613/controlled-trial-summary.json`
+  for commit `34bf2e3a3ee74135f6774381c094e3ad64bb2289`;
+- the committed review document is
+  `docs/design/BIOCORTEX_RETRIEVAL_RUNTIME_INFLUENCE_REVIEW_REQUEST_2026_06_13.md`;
+- the committed machine-readable summary is
+  `docs/design/fixtures/biocortex-retrieval-runtime-influence-review-request-summary-2026-06-13.json`;
+- the review request is ready and aggregate-backed, but still has
+  `implementation_allowed=false`, `runtime_adapter_approved=false`,
+  `default_search_order_change_allowed=false`, and
+  `this_packet_grants_request=false`;
+- the controlled-trial runner was verified from a clean temporary worktree
+  after helper script calls were changed to explicit `bash` invocation.
 
 ## Fail-Open Rules
 

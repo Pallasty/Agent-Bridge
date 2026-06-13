@@ -235,13 +235,13 @@ json_run "$redacted_order" "${base_cmd[@]}" \
 assert_json '.schema == "agent_bridge.biocortex_retrieval.opt_in_redacted_order_artifact.v0" and .boundary_check.artifact_ready == true and .input_contract.raw_query_included == false and .input_contract.raw_order_keys_included == false' "$redacted_order"
 leak_guard "$redacted_order"
 
-run scripts/prove-biocortex-retrieval-runtime-boundary.sh \
+run bash scripts/prove-biocortex-retrieval-runtime-boundary.sh \
     --out-dir "$runtime_proof_dir" \
     --checkout "$biocortex_rs" \
     --samples "$samples"
 assert_json '.schema == "agent_bridge.biocortex_retrieval.runtime_boundary_proof.v0" and .boundary.changes_memory_search_order == false and .runtime_adapter_approved == false' "$runtime_proof_dir/proof-summary.json"
 
-run scripts/prepare-biocortex-retrieval-opt-in-authorization-request.sh \
+run bash scripts/prepare-biocortex-retrieval-opt-in-authorization-request.sh \
     --out-dir "$auth_request_dir" \
     --reviewer "$reviewer" \
     --runtime-proof-summary "$runtime_proof_dir/proof-summary.json" \
