@@ -48,7 +48,9 @@ packet now tightens that chain so the final readiness/gate/status surfaces all
 report `post_runtime_evidence_summary_ready=true`. A non-production
 live-candidate fixture then proves that the post-runtime-backed final gate can
 run BioCortex and move the protected explicit opt-in FTS order while default
-retrieval remains unchanged.
+retrieval remains unchanged. A reusable post-runtime live-candidate runner now
+replays that proof end-to-end and emits checked redacted artifacts without
+manual command assembly.
 
 ```json
 {
@@ -85,6 +87,8 @@ retrieval remains unchanged.
   "post_decision_runtime_readiness_recorded": true,
   "post_runtime_evidence_backed_decision_recorded": true,
   "post_runtime_live_candidate_fixture_recorded": true,
+  "post_runtime_live_candidate_runner_landed": true,
+  "post_runtime_live_candidate_runner_verified": true,
   "controlled_explicit_opt_in_fts_trial_ready": true,
   "post_runtime_evidence_backed_controlled_trial_ready": true,
   "post_runtime_live_candidate_evidence_ready": true,
@@ -108,6 +112,12 @@ Runtime-influence authorization decision:
 
 - `docs/design/BIOCORTEX_RETRIEVAL_RUNTIME_INFLUENCE_AUTHORIZATION_DECISION_2026_06_13.md`
 - `docs/design/fixtures/biocortex-retrieval-runtime-influence-authorization-decision-2026-06-13.json`
+
+Post-runtime live-candidate runner:
+
+- `scripts/run-biocortex-post-runtime-live-candidate.sh`
+- `docs/design/BIOCORTEX_RETRIEVAL_POST_RUNTIME_LIVE_CANDIDATE_RUNNER_2026_06_13.md`
+- `docs/design/fixtures/biocortex-retrieval-post-runtime-live-candidate-runner-2026-06-13.json`
 
 Authorization request packet:
 
@@ -870,6 +880,31 @@ post-runtime-backed final gate:
 - `retrieval-opt-in-status` intentionally reports this live-candidate artifact
   set as blocked because controlled-readiness status accepts no-order-change
   readiness evidence, while this fixture proves protected opt-in order movement;
+- default `memory_search`, hybrid search, semantic search, approval writes,
+  raw query/key/content redaction, and default search order remain unchanged.
+
+Slice 37 adds a reusable post-runtime live-candidate runner:
+
+- script:
+  `scripts/run-biocortex-post-runtime-live-candidate.sh`;
+- committed document:
+  `docs/design/BIOCORTEX_RETRIEVAL_POST_RUNTIME_LIVE_CANDIDATE_RUNNER_2026_06_13.md`;
+- committed machine-readable summary:
+  `docs/design/fixtures/biocortex-retrieval-post-runtime-live-candidate-runner-2026-06-13.json`;
+- local evidence directory:
+  `target/biocortex-post-runtime-live-candidate-runner-20260613`;
+- the runner consumes the post-runtime decision/readiness/transition packets,
+  seeds the canonical controlled fixture into a caller-selected non-production
+  DB, runs the gated store trial, gated batch diagnostics, status surface, and
+  evidence summary, then verifies every redacted output with `jq`;
+- the runner summary reports
+  `status=post_runtime_live_candidate_evidence_ready`,
+  `runs_biocortex=true`, protected opt-in order movement, and
+  `review_state=post_runtime_evidence_ready`;
+- the status surface remains side-effect free and intentionally reports
+  `blocked` for this movement artifact set;
+- runner summary/report leak guards passed for raw query text, raw memory keys,
+  memory contents, and raw side-signal rows;
 - default `memory_search`, hybrid search, semantic search, approval writes,
   raw query/key/content redaction, and default search order remain unchanged.
 
