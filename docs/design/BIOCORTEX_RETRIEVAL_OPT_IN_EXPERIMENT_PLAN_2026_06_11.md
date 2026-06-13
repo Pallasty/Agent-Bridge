@@ -40,7 +40,10 @@ emits aggregate-backed review-request evidence for commit
 `34bf2e3a3ee74135f6774381c094e3ad64bb2289`; the durable review request remains
 request-only and grants no runtime influence. A separate authorization decision
 now grants only explicit opt-in FTS runtime influence while keeping default,
-hybrid, and semantic influence unauthorized.
+hybrid, and semantic influence unauthorized. Post-decision runtime readiness now
+confirms that the formal decision packet can drive the gated store/readiness
+chain to `ready_for_controlled_explicit_opt_in_fts_trial` without changing
+default retrieval order.
 
 ```json
 {
@@ -74,6 +77,8 @@ hybrid, and semantic influence unauthorized.
   "controlled_trial_runner_clean_worktree_verified": true,
   "runtime_influence_review_request_summary_landed": true,
   "runtime_influence_authorization_decision_landed": true,
+  "post_decision_runtime_readiness_recorded": true,
+  "controlled_explicit_opt_in_fts_trial_ready": true,
   "explicit_opt_in_fts_runtime_influence_authorized": true,
   "ordering_behavior_connected": false,
   "explicit_opt_in_fts_ordering_behavior_connected": true,
@@ -780,6 +785,30 @@ Slice 33 records the separate runtime-influence authorization decision:
 - the decision packet consumer must still produce a read-only control-plane
   packet before downstream store-trial or runtime-readiness evidence is treated
   as authorized.
+
+Slice 34 records post-decision runtime readiness:
+
+- the committed readiness document is
+  `docs/design/BIOCORTEX_RETRIEVAL_POST_DECISION_RUNTIME_READINESS_2026_06_13.md`;
+- the committed machine-readable summary is
+  `docs/design/fixtures/biocortex-retrieval-post-decision-runtime-readiness-2026-06-13.json`;
+- the source decision packet is
+  `target/biocortex-runtime-influence-decision-20260613/runtime-influence-decision-packet.json`;
+- the local evidence directory is
+  `target/biocortex-post-decision-readiness-20260613`;
+- `retrieval-opt-in-runtime-readiness-packet` reports
+  `control_plane_ready=true`, `runtime_readiness_ready=true`, and
+  `live_probe_state=control_plane_ready_no_live_candidates`;
+- `retrieval-opt-in-runtime-transition-gate` reports
+  `status=transition_allowed` for `mode=fts` with explicit per-call opt-in;
+- the gated store trial consumes the transition gate and calls the protected
+  store trial, while the isolated empty store still returns baseline;
+- the gated batch diagnostics reports two gate-allowed protected store-trial
+  calls and no BioCortex run because the isolated baselines are empty;
+- the status surface reports
+  `ready_for_controlled_explicit_opt_in_fts_trial` with no blockers;
+- default `memory_search`, hybrid search, semantic search, approval state,
+  raw query/key/content redaction, and default search order remain unchanged.
 
 ## Fail-Open Rules
 
