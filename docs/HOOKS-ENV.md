@@ -71,6 +71,7 @@ ECC 的 `ECC_HOOK_PROFILE=minimal|standard|strict` 是上述 toggle 的**便利�
 # 记录单个候选的人工决策，默认预览：agent-bridge instinct review-decision --packet-json <packet.json> --candidate-id instinct-candidate-0001 --decision approve
 # 显式追加本地决策审计日志：agent-bridge instinct review-decision --packet-json <packet.json> --candidate-id instinct-candidate-0001 --decision approve --write
 # 已批准候选的 memory 写入预检，仍不写 memory：agent-bridge instinct memory-preflight --packet-json <packet.json> --candidate-id instinct-candidate-0001 --memory-key lesson:foo --memory-kind lesson --memory-body "..."
+# 从 ready preflight 显式写入 memory，默认仍预览：agent-bridge instinct memory-write --preflight-json <preflight.json> --write
 ```
 
 `agent-bridge doctor` and the MCP `capabilities` tool also expose the observer
@@ -104,6 +105,12 @@ the preflight ready when the latest decision is `approve` and the draft has a
 key, kind, and body. It can write a private JSON/Markdown preflight packet with
 `--write`, but it still does not call `memory_save` or write memory; the actual
 memory write remains a separate explicit command.
+
+`agent-bridge instinct memory-write` is that final explicit command. It accepts
+only a ready preflight JSON file, never free-form memory text; without `--write`
+it previews the exact `MemoryRecord` that would be saved. With `--write`, it
+opens the Agent-Bridge state DB and calls the existing `memory_save` path for
+the human-authored draft from the preflight packet.
 
 Security posture: the observer sidecar is local-only and private by default.
 The hook honors `AB_INSTINCT_OBSERVER_LOG`; otherwise it prefers

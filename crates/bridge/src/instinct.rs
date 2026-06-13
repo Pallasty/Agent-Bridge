@@ -579,6 +579,93 @@ pub fn observer_memory_preflight_for_paths(
     Ok(packet_out)
 }
 
+pub fn observer_memory_write_plan(preflight_json: &Path, write: bool) -> std::io::Result<Value> {
+    let now_unix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    observer_memory_write_plan_for_path(preflight_json, now_unix, write)
+}
+
+pub fn observer_memory_write_plan_for_path(
+    preflight_json: &Path,
+    now_unix: u64,
+    write: bool,
+) -> std::io::Result<Value> {
+    let body = std::fs::read_to_string(preflight_json)?;
+    let preflight: Value = serde_json::from_str(&body)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    ensure_memory_preflight_schema(&preflight)?;
+    let ready = preflight
+        .get("ready_for_separate_memory_write")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let draft = preflight.get("memory_draft").unwrap_or(&Value::Null);
+    let key = draft
+        .get("key")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let kind = draft
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let content = draft
+        .get("body")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let draft_complete = key.is_some() && kind.is_some() && content.is_some();
+    let executable = ready && draft_complete;
+    let blocked_reasons =
+        memory_write_blocked_reasons(ready, key.is_some(), kind.is_some(), content.is_some());
+
+    Ok(json!({
+        "schema": "agent_bridge.instinct_observer.phase1_memory_write_plan.v0",
+        "generated_at_unix": now_unix,
+        "dry_run": !write,
+        "status": if executable {
+            if write { "ready_to_write" } else { "preview_ready_to_write" }
+        } else {
+            "blocked"
+        },
+        "preflight_json": preflight_json.display().to_string(),
+        "preflight_id": preflight.get("preflight_id").cloned().unwrap_or(Value::Null),
+        "candidate_id": preflight.get("candidate_id").cloned().unwrap_or(Value::Null),
+        "ready_for_separate_memory_write": ready,
+        "draft_complete": draft_complete,
+        "blocked_reasons": blocked_reasons,
+        "writes_memory": write && executable,
+        "auto_apply_allowed": false,
+        "raw_prompt_included": false,
+        "raw_tool_input_included": false,
+        "raw_tool_output_included": false,
+        "memory_record": if executable {
+            json!({
+                "key": key.unwrap(),
+                "kind": kind.unwrap(),
+                "content": content.unwrap(),
+                "tags": [
+                    "instinct",
+                    "human_reviewed",
+                    "phase1"
+                ],
+                "related_keys": [],
+                "scope": Value::Null,
+                "importance": importance_for_kind(kind.unwrap())
+            })
+        } else {
+            Value::Null
+        },
+        "recommended_next_step": if executable {
+            if write { "memory_save_will_run_now" } else { "rerun_with_write_to_save_memory" }
+        } else {
+            "fix_preflight_or_memory_draft_before_write"
+        },
+    }))
+}
+
 pub fn rotate_observer_log(dry_run: bool) -> std::io::Result<Value> {
     let now_unix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -793,6 +880,18 @@ fn ensure_review_packet_schema(packet: &Value) -> std::io::Result<()> {
     }
 }
 
+fn ensure_memory_preflight_schema(packet: &Value) -> std::io::Result<()> {
+    let schema = packet.get("schema").and_then(|v| v.as_str()).unwrap_or("");
+    if schema == "agent_bridge.instinct_observer.phase1_memory_write_preflight.v0" {
+        Ok(())
+    } else {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "preflight_json is not an instinct phase1 memory write preflight",
+        ))
+    }
+}
+
 fn find_candidate<'a>(packet: &'a Value, candidate_id: &str) -> std::io::Result<&'a Value> {
     packet
         .pointer("/candidate_preview/candidates")
@@ -866,6 +965,39 @@ fn memory_preflight_blocked_reasons(
         reasons.push("missing_memory_body");
     }
     reasons
+}
+
+fn memory_write_blocked_reasons(
+    ready: bool,
+    has_key: bool,
+    has_kind: bool,
+    has_content: bool,
+) -> Vec<&'static str> {
+    let mut reasons = Vec::new();
+    if !ready {
+        reasons.push("preflight_not_ready");
+    }
+    if !has_key {
+        reasons.push("missing_memory_key");
+    }
+    if !has_kind {
+        reasons.push("missing_memory_kind");
+    }
+    if !has_content {
+        reasons.push("missing_memory_content");
+    }
+    reasons
+}
+
+fn importance_for_kind(kind: &str) -> f64 {
+    match kind {
+        "decision" => 0.8,
+        "lesson" => 0.7,
+        "todo" => 0.6,
+        "fact" | "context" => 0.5,
+        "observation" => 0.3,
+        _ => 0.5,
+    }
 }
 
 fn normalize_review_decision(decision: &str) -> std::io::Result<&'static str> {
@@ -1820,6 +1952,80 @@ mod tests {
         assert!(!body.contains("secret preflight prompt"));
         assert!(body.contains("Human-authored reusable lesson."));
         assert!(body.contains("This packet does not write memory"));
+    }
+
+    #[test]
+    fn observer_memory_write_plan_requires_ready_preflight() {
+        let tmp = tempfile::tempdir().unwrap();
+        let log = tmp.path().join("observations.jsonl");
+        let out_dir = tmp.path().join("review");
+        let decisions = out_dir.join("decisions.jsonl");
+        write_jsonl(
+            &log,
+            &[json!({
+                "ts": 1.0,
+                "sid": "s1",
+                "ev": "UserPromptSubmit",
+                "prompt": "不对，应该改成 secret write prompt"
+            })],
+        );
+        let packet = observer_review_packet_for_paths(
+            &log,
+            &out_dir,
+            20,
+            Some("tester"),
+            1_780_747_040,
+            true,
+        )
+        .unwrap();
+        let packet_json = PathBuf::from(packet["json_path"].as_str().unwrap());
+        observer_review_decision_for_paths(
+            &packet_json,
+            &decisions,
+            "instinct-candidate-0001",
+            "approve",
+            Some("tester"),
+            Some("stable enough"),
+            1_780_747_041,
+            true,
+        )
+        .unwrap();
+        let preflight = observer_memory_preflight_for_paths(
+            &packet_json,
+            &decisions,
+            &out_dir,
+            "instinct-candidate-0001",
+            Some("lesson:instinct-write-test"),
+            Some("lesson"),
+            Some("Human-authored memory body."),
+            1_780_747_042,
+            true,
+        )
+        .unwrap();
+        let preflight_json = PathBuf::from(preflight["json_path"].as_str().unwrap());
+
+        let preview =
+            observer_memory_write_plan_for_path(&preflight_json, 1_780_747_043, false).unwrap();
+        assert_eq!(
+            preview["schema"],
+            "agent_bridge.instinct_observer.phase1_memory_write_plan.v0"
+        );
+        assert_eq!(preview["writes_memory"], json!(false));
+        assert_eq!(
+            preview["memory_record"]["key"],
+            json!("lesson:instinct-write-test")
+        );
+
+        let write_plan =
+            observer_memory_write_plan_for_path(&preflight_json, 1_780_747_044, true).unwrap();
+        assert_eq!(write_plan["writes_memory"], json!(true));
+        assert_eq!(write_plan["memory_record"]["kind"], json!("lesson"));
+        assert_eq!(
+            write_plan["memory_record"]["content"],
+            json!("Human-authored memory body.")
+        );
+        let text = serde_json::to_string(&write_plan).unwrap();
+        assert!(!text.contains("secret write prompt"));
     }
 
     #[test]

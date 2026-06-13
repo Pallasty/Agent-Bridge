@@ -425,6 +425,23 @@ enum InstinctOp {
         #[arg(long)]
         json: bool,
     },
+    /// Save memory from a ready instinct memory preflight. Requires --write and
+    /// never accepts free-form memory content directly.
+    MemoryWrite {
+        /// Preflight JSON produced by `instinct memory-preflight --write`.
+        #[arg(long)]
+        preflight_json: PathBuf,
+        /// Optional state DB path. Defaults to Agent-Bridge's normal state DB.
+        #[arg(long)]
+        db_path: Option<PathBuf>,
+        /// Actually call memory_save. Without this flag the command is a
+        /// dry-run preview.
+        #[arg(long)]
+        write: bool,
+        /// Emit raw JSON payload instead of a compact command line summary.
+        #[arg(long)]
+        json: bool,
+    },
     /// Rotate the local instinct observer JSONL log by renaming it to a
     /// timestamped archive path. The hook recreates a fresh log on its next
     /// event.
@@ -6203,6 +6220,74 @@ async fn real_main() -> Result<()> {
                 }
                 Ok(())
             }
+            InstinctOp::MemoryWrite {
+                preflight_json,
+                db_path,
+                write,
+                json,
+            } => {
+                let mut plan = instinct::observer_memory_write_plan(preflight_json, *write)
+                    .context("build instinct observer memory write plan")?;
+                if *write {
+                    if !plan
+                        .get("writes_memory")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false)
+                    {
+                        anyhow::bail!(
+                            "memory write blocked: {}",
+                            plan.get("blocked_reasons").unwrap_or(&Value::Null)
+                        );
+                    }
+                    let record = plan.get("memory_record").cloned().unwrap_or(Value::Null);
+                    let mem = memory_record_from_instinct_plan(&record)
+                        .context("build memory record from instinct preflight")?;
+                    let path = db_path.clone().unwrap_or_else(default_db_path);
+                    let store = SqliteStore::open(&path)
+                        .await
+                        .map_err(|e| anyhow::anyhow!("open state db at {path:?}: {e}"))?;
+                    store
+                        .memory_save(&mem)
+                        .await
+                        .map_err(|e| anyhow::anyhow!("instinct memory_save: {e}"))?;
+                    plan["status"] = json!("saved");
+                    plan["saved_memory_key"] = json!(mem.key);
+                    plan["db_path"] = json!(path.display().to_string());
+                } else {
+                    plan["saved_memory_key"] = Value::Null;
+                    plan["db_path"] = json!(db_path
+                        .clone()
+                        .unwrap_or_else(default_db_path)
+                        .display()
+                        .to_string());
+                }
+                if *json {
+                    println!("{}", serde_json::to_string_pretty(&plan)?);
+                } else {
+                    println!(
+                        "instinct memory write: status={} key={} write={} memory_write={}",
+                        plan.get("status")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown"),
+                        plan.pointer("/memory_record/key")
+                            .and_then(|v| v.as_str())
+                            .or_else(|| plan.get("saved_memory_key").and_then(|v| v.as_str()))
+                            .unwrap_or("-"),
+                        write,
+                        plan.get("writes_memory")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false),
+                    );
+                    println!(
+                        "db={} next={}",
+                        plan.get("db_path").and_then(|v| v.as_str()).unwrap_or("-"),
+                        plan.get("recommended_next_step")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown"),
+                    );
+                }
+                Ok(())
+            }
             InstinctOp::RotateLog { dry_run, json } => {
                 let plan = instinct::rotate_observer_log(*dry_run)
                     .context("rotate instinct observer log")?;
@@ -6603,6 +6688,87 @@ async fn run_avatar_surface(
         println!("{report}");
     }
     Ok(())
+}
+
+fn memory_record_from_instinct_plan(value: &Value) -> Result<ab_store::MemoryRecord> {
+    let key = value
+        .get("key")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("memory_record.key is required"))?
+        .to_string();
+    let kind = value
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("memory_record.kind is required"))?
+        .to_string();
+    let content = value
+        .get("content")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("memory_record.content is required"))?
+        .to_string();
+    let tags = value
+        .get("tags")
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .map(str::trim)
+                .filter(|item| !item.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let related_keys = value
+        .get("related_keys")
+        .and_then(|v| v.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .map(str::trim)
+                .filter(|item| !item.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let scope = value
+        .get("scope")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let importance = value
+        .get("importance")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.5)
+        .clamp(0.0, 1.0);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    Ok(ab_store::MemoryRecord {
+        key,
+        kind,
+        content,
+        tags,
+        related_keys,
+        scope,
+        created_at: now,
+        updated_at: now,
+        last_accessed_at: 0,
+        access_count: 0,
+        importance,
+        status: "active".to_string(),
+        trigger_pattern: None,
+        superseded_by: None,
+    })
 }
 
 /// LCC-F1: report which avatar body backend can satisfy transparency on this
