@@ -51,10 +51,11 @@ use axum::{
 use base64::{engine::general_purpose, Engine as _};
 use serde::{de, Deserialize};
 use serde_json::{json, Value};
-use std::collections::{hash_map::DefaultHasher, HashSet, VecDeque};
+use std::collections::{hash_map::DefaultHasher, BTreeMap, HashSet, VecDeque};
 use std::fs;
 use std::hash::{Hash, Hasher};
-use std::path::PathBuf;
+use std::io::Write;
+use std::path::{Path as FsPath, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -117,6 +118,10 @@ pub async fn run(
         .route("/healthz", get(healthz))
         .route("/api/graph", get(api_graph))
         .route("/api/orphan-candidates", get(api_orphan_candidates))
+        .route(
+            "/api/orphan-candidate-decision",
+            post(api_orphan_candidate_decision),
+        )
         .route("/api/semantic-events", get(api_semantic_events))
         .route("/api/memory/:key", get(api_memory))
         .route("/api/annotate", post(api_annotate))
@@ -202,6 +207,17 @@ struct OrphanCandidatesQuery {
     candidate_limit: Option<u64>,
 }
 
+#[derive(Deserialize)]
+struct OrphanCandidateDecisionRequest {
+    orphan_key: String,
+    candidate_key: String,
+    decision: String,
+    #[serde(default)]
+    reviewer: Option<String>,
+    #[serde(default)]
+    note: Option<String>,
+}
+
 fn deserialize_boolish<'de, D>(deserializer: D) -> std::result::Result<bool, D::Error>
 where
     D: de::Deserializer<'de>,
@@ -249,6 +265,263 @@ struct PalaceOrphanCandidatePreview {
     skipped_blacklisted_orphan: u64,
     skipped_blacklisted_kind: u64,
     rows: Vec<PalaceOrphanCandidatePreviewRow>,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+struct PalaceOrphanCandidatePair {
+    orphan_key: String,
+    candidate_key: String,
+}
+
+fn normalize_palace_orphan_decision(decision: &str) -> std::io::Result<&'static str> {
+    match decision {
+        "approve" => Ok("approve"),
+        "reject" => Ok("reject"),
+        "defer" => Ok("defer"),
+        other => Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("unsupported palace orphan candidate decision: {other}"),
+        )),
+    }
+}
+
+fn palace_orphan_pair_id(pair: &PalaceOrphanCandidatePair) -> String {
+    format!("{} -> {}", pair.orphan_key, pair.candidate_key)
+}
+
+fn default_palace_review_dir_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("AB_PALACE_REVIEW_DIR") {
+        return PathBuf::from(path);
+    }
+    if FsPath::new("/Data").is_dir() {
+        return PathBuf::from("/Data/agent-bridge/palace-review");
+    }
+    palace_home_dir()
+        .join(".cache")
+        .join("agent-bridge")
+        .join("palace-review")
+}
+
+fn default_palace_orphan_candidate_decisions_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("AB_PALACE_ORPHAN_CANDIDATE_DECISIONS") {
+        return PathBuf::from(path);
+    }
+    default_palace_review_dir_path().join("orphan-candidate-decisions.jsonl")
+}
+
+fn palace_home_dir() -> PathBuf {
+    std::env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("/tmp"))
+}
+
+fn palace_orphan_candidate_decision_record_for_time(
+    pair: &PalaceOrphanCandidatePair,
+    decision: &str,
+    reviewer: Option<&str>,
+    note: Option<&str>,
+    generated_at_unix: u64,
+) -> std::io::Result<Value> {
+    let decision = normalize_palace_orphan_decision(decision)?;
+    Ok(json!({
+        "schema": "agent_bridge.palace.orphan_candidate_decision.v0",
+        "generated_at_unix": generated_at_unix,
+        "pair_id": palace_orphan_pair_id(pair),
+        "orphan_key": pair.orphan_key,
+        "candidate_key": pair.candidate_key,
+        "decision": decision,
+        "reviewer": reviewer,
+        "note": note,
+        "writes_memory": false,
+        "writes_edges": false,
+        "auto_apply_allowed": false,
+    }))
+}
+
+fn load_palace_orphan_candidate_decisions(path: &FsPath) -> std::io::Result<Vec<Value>> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+    let mut decisions = Vec::new();
+    for line in text.lines().filter(|line| !line.trim().is_empty()) {
+        let value: Value = serde_json::from_str(line)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        if value.get("schema").and_then(|v| v.as_str())
+            == Some("agent_bridge.palace.orphan_candidate_decision.v0")
+        {
+            decisions.push(value);
+        }
+    }
+    decisions.sort_by_key(|value| {
+        value
+            .get("generated_at_unix")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0)
+    });
+    Ok(decisions)
+}
+
+fn append_palace_orphan_candidate_decision(path: &FsPath, value: &Value) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+        set_palace_private_dir_permissions(parent)?;
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    let line = serde_json::to_string(value)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    writeln!(file, "{line}")?;
+    set_palace_private_file_permissions(path)?;
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_palace_private_dir_permissions(path: &FsPath) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+}
+
+#[cfg(not(unix))]
+fn set_palace_private_dir_permissions(_path: &FsPath) -> std::io::Result<()> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn set_palace_private_file_permissions(path: &FsPath) -> std::io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+}
+
+#[cfg(not(unix))]
+fn set_palace_private_file_permissions(_path: &FsPath) -> std::io::Result<()> {
+    Ok(())
+}
+
+fn palace_orphan_candidate_decision_inbox_for_pairs(
+    pairs: &[PalaceOrphanCandidatePair],
+    decisions: &[Value],
+) -> Value {
+    let mut latest_by_pair: BTreeMap<(String, String), &Value> = BTreeMap::new();
+    for decision in decisions.iter().filter(|value| {
+        value.get("schema").and_then(|v| v.as_str())
+            == Some("agent_bridge.palace.orphan_candidate_decision.v0")
+    }) {
+        let Some(orphan_key) = decision.get("orphan_key").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let Some(candidate_key) = decision.get("candidate_key").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let key = (orphan_key.to_string(), candidate_key.to_string());
+        let current_ts = decision
+            .get("generated_at_unix")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let existing_ts = latest_by_pair
+            .get(&key)
+            .and_then(|v| v.get("generated_at_unix"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        if !latest_by_pair.contains_key(&key) || current_ts >= existing_ts {
+            latest_by_pair.insert(key, decision);
+        }
+    }
+
+    let mut pending_count = 0_u64;
+    let mut approved_count = 0_u64;
+    let mut rejected_count = 0_u64;
+    let mut deferred_count = 0_u64;
+    let candidates: Vec<Value> = pairs
+        .iter()
+        .map(|pair| {
+            let key = (pair.orphan_key.clone(), pair.candidate_key.clone());
+            let latest = latest_by_pair.get(&key).copied();
+            let decision = latest
+                .and_then(|value| value.get("decision"))
+                .and_then(|value| value.as_str())
+                .unwrap_or("pending");
+            match decision {
+                "approve" => approved_count += 1,
+                "reject" => rejected_count += 1,
+                "defer" => deferred_count += 1,
+                _ => pending_count += 1,
+            }
+            json!({
+                "pair_id": palace_orphan_pair_id(pair),
+                "orphan_key": pair.orphan_key,
+                "candidate_key": pair.candidate_key,
+                "decision": decision,
+                "latest_decision_at_unix": latest
+                    .and_then(|value| value.get("generated_at_unix"))
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "reviewer": latest
+                    .and_then(|value| value.get("reviewer"))
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "note": latest
+                    .and_then(|value| value.get("note"))
+                    .cloned()
+                    .unwrap_or(Value::Null),
+            })
+        })
+        .collect();
+
+    json!({
+        "schema": "agent_bridge.palace.orphan_candidate_decision_inbox.v0",
+        "read_only": true,
+        "candidate_count": candidates.len(),
+        "pending_count": pending_count,
+        "approved_count": approved_count,
+        "rejected_count": rejected_count,
+        "deferred_count": deferred_count,
+        "writes_memory": false,
+        "writes_edges": false,
+        "auto_apply_allowed": false,
+        "candidates": candidates,
+    })
+}
+
+fn palace_orphan_candidate_pairs_for_preview(
+    preview: &PalaceOrphanCandidatePreview,
+) -> Vec<PalaceOrphanCandidatePair> {
+    preview
+        .rows
+        .iter()
+        .flat_map(|row| {
+            row.suggestions
+                .iter()
+                .map(|candidate| PalaceOrphanCandidatePair {
+                    orphan_key: row.orphan.key.clone(),
+                    candidate_key: candidate.key.clone(),
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+fn palace_orphan_review_by_pair(inbox: &Value) -> BTreeMap<(String, String), Value> {
+    let mut out = BTreeMap::new();
+    if let Some(candidates) = inbox.get("candidates").and_then(|v| v.as_array()) {
+        for candidate in candidates {
+            let Some(orphan_key) = candidate.get("orphan_key").and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let Some(candidate_key) = candidate.get("candidate_key").and_then(|v| v.as_str())
+            else {
+                continue;
+            };
+            out.insert(
+                (orphan_key.to_string(), candidate_key.to_string()),
+                candidate.clone(),
+            );
+        }
+    }
+    out
 }
 
 fn palace_slug(raw: &str) -> String {
@@ -766,6 +1039,18 @@ async fn api_orphan_candidates(
         max_orphans,
         candidate_limit,
     );
+    let decisions_path = default_palace_orphan_candidate_decisions_path();
+    let decisions = load_palace_orphan_candidate_decisions(&decisions_path).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("load orphan candidate review decisions: {e}"),
+        )
+    })?;
+    let review_inbox = palace_orphan_candidate_decision_inbox_for_pairs(
+        &palace_orphan_candidate_pairs_for_preview(&preview),
+        &decisions,
+    );
+    let review_by_pair = palace_orphan_review_by_pair(&review_inbox);
 
     let rows: Vec<Value> = preview
         .rows
@@ -775,6 +1060,24 @@ async fn api_orphan_candidates(
                 .suggestions
                 .iter()
                 .map(|candidate| {
+                    let pair = PalaceOrphanCandidatePair {
+                        orphan_key: row.orphan.key.clone(),
+                        candidate_key: candidate.key.clone(),
+                    };
+                    let review = review_by_pair
+                        .get(&(pair.orphan_key.clone(), pair.candidate_key.clone()))
+                        .cloned()
+                        .unwrap_or_else(|| {
+                            json!({
+                                "pair_id": palace_orphan_pair_id(&pair),
+                                "orphan_key": &pair.orphan_key,
+                                "candidate_key": &pair.candidate_key,
+                                "decision": "pending",
+                                "latest_decision_at_unix": Value::Null,
+                                "reviewer": Value::Null,
+                                "note": Value::Null,
+                            })
+                        });
                     json!({
                         "key": &candidate.key,
                         "kind": &candidate.kind,
@@ -783,6 +1086,7 @@ async fn api_orphan_candidates(
                         "scope": candidate.scope.as_deref(),
                         "scope_relation": candidate.scope_relation,
                         "preview": &candidate.preview,
+                        "review": review,
                     })
                 })
                 .collect();
@@ -816,8 +1120,63 @@ async fn api_orphan_candidates(
         "skipped_no_candidates": preview.skipped_no_candidates,
         "skipped_blacklisted_orphan": preview.skipped_blacklisted_orphan,
         "skipped_blacklisted_kind": preview.skipped_blacklisted_kind,
+        "review": {
+            "read_only": true,
+            "decisions_path": decisions_path.display().to_string(),
+            "candidate_count": review_inbox.get("candidate_count").cloned().unwrap_or(Value::Null),
+            "pending_count": review_inbox.get("pending_count").cloned().unwrap_or(Value::Null),
+            "approved_count": review_inbox.get("approved_count").cloned().unwrap_or(Value::Null),
+            "rejected_count": review_inbox.get("rejected_count").cloned().unwrap_or(Value::Null),
+            "deferred_count": review_inbox.get("deferred_count").cloned().unwrap_or(Value::Null),
+            "writes_memory": false,
+            "writes_edges": false,
+            "auto_apply_allowed": false,
+        },
         "rows": rows,
         "next_step": "Inspect candidate quality before any write-capable hygiene run.",
+    })))
+}
+
+async fn api_orphan_candidate_decision(
+    Json(req): Json<OrphanCandidateDecisionRequest>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let pair = PalaceOrphanCandidatePair {
+        orphan_key: req.orphan_key.trim().to_string(),
+        candidate_key: req.candidate_key.trim().to_string(),
+    };
+    if pair.orphan_key.is_empty() || pair.candidate_key.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "orphan_key and candidate_key are required".to_string(),
+        ));
+    }
+    let generated_at_unix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let record = palace_orphan_candidate_decision_record_for_time(
+        &pair,
+        req.decision.trim(),
+        req.reviewer.as_deref(),
+        req.note.as_deref(),
+        generated_at_unix,
+    )
+    .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+    let decisions_path = default_palace_orphan_candidate_decisions_path();
+    append_palace_orphan_candidate_decision(&decisions_path, &record).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("append orphan candidate review decision: {e}"),
+        )
+    })?;
+    Ok(Json(json!({
+        "schema": "agent_bridge.palace.orphan_candidate_decision_response.v0",
+        "written": true,
+        "decisions_path": decisions_path.display().to_string(),
+        "writes_memory": false,
+        "writes_edges": false,
+        "auto_apply_allowed": false,
+        "record": record,
     })))
 }
 
@@ -2783,6 +3142,99 @@ mod tests {
             .suggestions
             .iter()
             .any(|s| s.key == "memory_auto_target"));
+    }
+
+    #[test]
+    fn palace_orphan_decision_inbox_merges_latest_pair_decision_without_memory_write() {
+        let pair = PalaceOrphanCandidatePair {
+            orphan_key: "memory_orphan".to_string(),
+            candidate_key: "memory_anchor".to_string(),
+        };
+        let decisions = vec![
+            palace_orphan_candidate_decision_record_for_time(
+                &pair,
+                "approve",
+                Some("alice"),
+                Some("looks related"),
+                10,
+            )
+            .expect("approve record"),
+            palace_orphan_candidate_decision_record_for_time(
+                &pair,
+                "defer",
+                Some("bob"),
+                Some("needs another look"),
+                20,
+            )
+            .expect("defer record"),
+        ];
+
+        let inbox = palace_orphan_candidate_decision_inbox_for_pairs(&[pair], &decisions);
+
+        assert_eq!(
+            inbox["schema"],
+            "agent_bridge.palace.orphan_candidate_decision_inbox.v0"
+        );
+        assert_eq!(inbox["writes_memory"], json!(false));
+        assert_eq!(inbox["auto_apply_allowed"], json!(false));
+        assert_eq!(inbox["candidate_count"], json!(1));
+        assert_eq!(inbox["deferred_count"], json!(1));
+        assert_eq!(inbox["approved_count"], json!(0));
+        assert_eq!(inbox["candidates"][0]["decision"], json!("defer"));
+        assert_eq!(inbox["candidates"][0]["reviewer"], json!("bob"));
+    }
+
+    #[test]
+    fn palace_orphan_decision_jsonl_is_private_append_only_and_schema_filtered() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("review").join("decisions.jsonl");
+        let pair = PalaceOrphanCandidatePair {
+            orphan_key: "memory_orphan".to_string(),
+            candidate_key: "memory_anchor".to_string(),
+        };
+        let approve = palace_orphan_candidate_decision_record_for_time(
+            &pair,
+            "approve",
+            Some("alice"),
+            None,
+            10,
+        )
+        .expect("approve");
+        let reject = palace_orphan_candidate_decision_record_for_time(
+            &pair,
+            "reject",
+            Some("bob"),
+            Some("not the same thing"),
+            20,
+        )
+        .expect("reject");
+
+        append_palace_orphan_candidate_decision(&path, &approve).expect("append approve");
+        append_palace_orphan_candidate_decision(&path, &json!({
+            "schema": "other.schema",
+            "decision": "approve"
+        }))
+        .expect("append ignored schema");
+        append_palace_orphan_candidate_decision(&path, &reject).expect("append reject");
+
+        let loaded = load_palace_orphan_candidate_decisions(&path).expect("load decisions");
+
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0]["decision"], json!("approve"));
+        assert_eq!(loaded[1]["decision"], json!("reject"));
+        assert_eq!(loaded[1]["writes_edges"], json!(false));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let file_mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            let dir_mode = std::fs::metadata(path.parent().unwrap())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(file_mode, 0o600);
+            assert_eq!(dir_mode, 0o700);
+        }
     }
 
     #[test]

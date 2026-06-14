@@ -1324,6 +1324,29 @@
       font-variant-numeric: tabular-nums;
       white-space: nowrap;
     }
+    #panel .orphan-candidate-review {
+      display: inline-flex;
+      align-items: center;
+      min-width: 0;
+      padding: 1px 5px;
+      border: 1px solid #2a2a36;
+      border-radius: 3px;
+      color: #8a8a98;
+      font-size: 9px;
+      line-height: 1.25;
+    }
+    #panel .orphan-candidate-review.approve {
+      color: #5cc89a;
+      border-color: rgba(92,200,154,0.42);
+    }
+    #panel .orphan-candidate-review.reject {
+      color: #d88080;
+      border-color: rgba(216,128,128,0.42);
+    }
+    #panel .orphan-candidate-review.defer {
+      color: #c8a96a;
+      border-color: rgba(200,169,106,0.42);
+    }
     #panel .orphan-candidate-evidence {
       display: grid;
       grid-template-columns: minmax(0, 1fr);
@@ -1360,6 +1383,38 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+    #panel .orphan-candidate-actions {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 5px;
+    }
+    #panel .orphan-candidate-action {
+      min-width: 0;
+      padding: 4px 5px;
+      border: 1px solid #252532;
+      border-radius: 4px;
+      background: #111118;
+      color: #858594;
+      font-size: 10px;
+      line-height: 1.2;
+      cursor: pointer;
+    }
+    #panel .orphan-candidate-action:hover {
+      border-color: #3a3a48;
+      color: #d8d8e2;
+    }
+    #panel .orphan-candidate-action.active[data-orphan-review-decision="approve"] {
+      border-color: rgba(92,200,154,0.58);
+      color: #5cc89a;
+    }
+    #panel .orphan-candidate-action.active[data-orphan-review-decision="defer"] {
+      border-color: rgba(200,169,106,0.58);
+      color: #c8a96a;
+    }
+    #panel .orphan-candidate-action.active[data-orphan-review-decision="reject"] {
+      border-color: rgba(216,128,128,0.58);
+      color: #d88080;
     }
     #panel .neighbor-list,
     #panel .region-node-list,
@@ -5356,6 +5411,30 @@ function renderOrphanCandidateSnippet(label, text) {
   </div>`;
 }
 
+function orphanCandidateDecision(candidate) {
+  const decision = candidate && candidate.review && typeof candidate.review.decision === "string"
+    ? candidate.review.decision
+    : "pending";
+  return ["approve", "reject", "defer", "pending"].includes(decision) ? decision : "pending";
+}
+
+function renderOrphanCandidateReview(candidate) {
+  const decision = orphanCandidateDecision(candidate);
+  return `<span class="orphan-candidate-review ${escapeHTML(decision)}">${escapeHTML(decision)}</span>`;
+}
+
+function renderOrphanCandidateActions(row, candidate) {
+  if (!candidate) return "";
+  const current = orphanCandidateDecision(candidate);
+  return `<div class="orphan-candidate-actions">` + ["approve", "defer", "reject"].map(decision =>
+    `<button type="button"
+      class="orphan-candidate-action${current === decision ? " active" : ""}"
+      data-orphan-review-decision="${escapeHTML(decision)}"
+      data-orphan-review-orphan="${escapeHTML(row.orphan)}"
+      data-orphan-review-candidate="${escapeHTML(candidate.key)}">${escapeHTML(decision)}</button>`
+  ).join("") + `</div>`;
+}
+
 function renderOrphanCandidateRows(result) {
   const rows = Array.isArray(result.rows) ? result.rows : [];
   if (rows.length === 0) {
@@ -5372,7 +5451,7 @@ function renderOrphanCandidateRows(result) {
     const target = candidate
       ? `<button type="button" class="orphan-candidate-target" data-orphan-candidate-key="${escapeHTML(candidate.key)}">
           <span class="orphan-candidate-label" title="${escapeHTML(candidate.key)}">${escapeHTML(candidate.key)}</span>
-          <span class="orphan-candidate-meta">${escapeHTML(candidate.kind || "unknown")} · <span class="orphan-candidate-score">${confidence}</span></span>
+          <span class="orphan-candidate-meta">${escapeHTML(candidate.kind || "unknown")} · <span class="orphan-candidate-score">${confidence}</span> · ${renderOrphanCandidateReview(candidate)}</span>
         </button>`
       : `<div class="orphan-candidate-target">
           <span class="orphan-candidate-label">no candidate</span>
@@ -5391,6 +5470,7 @@ function renderOrphanCandidateRows(result) {
         ${renderOrphanCandidateSnippet("candidate", candidate && candidate.preview)}
       </div>
       <div class="orphan-candidate-reasons" title="${escapeHTML(`${scopeRelation} · ${reason}`)}">${escapeHTML(scopeRelation)} · ${escapeHTML(reason)}</div>
+      ${renderOrphanCandidateActions(row, candidate)}
     </div>`;
   }).join("") + `</div>`;
 }
@@ -5429,6 +5509,36 @@ async function loadRegionOrphanCandidates(regionId) {
     </div>
     <div class="maintenance-empty">${escapeHTML(String(error))}</div>`;
   }
+}
+
+async function recordOrphanCandidateDecision(regionId, orphanKey, candidateKey, decision) {
+  const slot = document.getElementById("region-orphan-candidates");
+  const r = await fetch("/api/orphan-candidate-decision", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      orphan_key: orphanKey,
+      candidate_key: candidateKey,
+      decision,
+      reviewer: "palace",
+    }),
+  });
+  if (!r.ok) {
+    const text = await r.text();
+    throw new Error(`${r.status} ${text || r.statusText}`);
+  }
+  const result = await r.json();
+  if (result.writes_memory || result.writes_edges) {
+    throw new Error("unexpected write-capable review response");
+  }
+  if (slot) {
+    slot.innerHTML = `<div class="orphan-candidate-head">
+      <span>candidate links</span>
+      <span class="orphan-candidate-status">refreshing</span>
+    </div>
+    <div class="maintenance-empty">recorded ${escapeHTML(decision)} · refreshing candidates...</div>`;
+  }
+  await loadRegionOrphanCandidates(regionId);
 }
 
 function renderRegionNodeList(regionId) {
@@ -5642,6 +5752,25 @@ function jumpToRegionNode(key) {
 
 function bindRegionWorkbenchActions(panel, regionId) {
   panel.addEventListener("click", (e) => {
+    const reviewBtn = e.target.closest("[data-orphan-review-decision]");
+    if (reviewBtn) {
+      e.preventDefault();
+      const decision = reviewBtn.dataset.orphanReviewDecision;
+      const orphanKey = reviewBtn.dataset.orphanReviewOrphan;
+      const candidateKey = reviewBtn.dataset.orphanReviewCandidate;
+      reviewBtn.disabled = true;
+      recordOrphanCandidateDecision(regionId, orphanKey, candidateKey, decision).catch(error => {
+        const slot = document.getElementById("region-orphan-candidates");
+        if (slot) {
+          slot.innerHTML = `<div class="orphan-candidate-head">
+            <span>candidate links</span>
+            <span class="orphan-candidate-status">review error</span>
+          </div>
+          <div class="maintenance-empty">${escapeHTML(String(error))}</div>`;
+        }
+      });
+      return;
+    }
     const target = e.target.closest("[data-orphan-node-key], [data-orphan-candidate-key]");
     if (!target) return;
     const key = target.dataset.orphanNodeKey || target.dataset.orphanCandidateKey;
