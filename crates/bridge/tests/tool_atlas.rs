@@ -195,3 +195,66 @@ fn tool_atlas_treats_session_reconcile_confirmation_gate_as_expected() {
         .contains(&"expected_confirmation".to_string()));
     assert!(!reconcile.risk_flags.contains(&"has_errors".to_string()));
 }
+
+#[test]
+fn tool_atlas_treats_desktop_host_mutation_refusal_as_expected_safety_gate() {
+    let snapshot = build_tool_atlas_snapshot(ToolAtlasInput {
+        generated_at: 1_779_910_000,
+        window_secs: 600,
+        current_tools: vec!["desktop_action".to_string()],
+        stats: vec![stat("desktop_action", 2, 1, 256, 846.0)],
+        recent_errors: vec![McpToolErrorRecord {
+            ts: 1_779_909_990,
+            tool_name: "desktop_action".to_string(),
+            message: "host_mutation_not_exposed: this MCP injects only dry_run or isolated actions"
+                .to_string(),
+        }],
+    });
+
+    assert_eq!(snapshot.summary.failing_tool_count, 0);
+
+    let desktop = snapshot
+        .tools
+        .iter()
+        .find(|tool| tool.tool_name == "desktop_action")
+        .expect("desktop_action");
+
+    assert_eq!(desktop.error_count, 1);
+    assert_eq!(desktop.health, "healthy");
+    assert_eq!(desktop.recommendation, "keep");
+    assert!(desktop
+        .risk_flags
+        .contains(&"expected_safety_gate".to_string()));
+    assert!(!desktop.risk_flags.contains(&"has_errors".to_string()));
+}
+
+#[test]
+fn tool_atlas_treats_memory_save_missing_required_key_as_expected_input_validation() {
+    let snapshot = build_tool_atlas_snapshot(ToolAtlasInput {
+        generated_at: 1_779_910_000,
+        window_secs: 600,
+        current_tools: vec!["memory_save".to_string()],
+        stats: vec![stat("memory_save", 15, 1, 2_586, 872.0)],
+        recent_errors: vec![McpToolErrorRecord {
+            ts: 1_779_909_990,
+            tool_name: "memory_save".to_string(),
+            message: "missing or empty 'key'".to_string(),
+        }],
+    });
+
+    assert_eq!(snapshot.summary.failing_tool_count, 0);
+
+    let memory_save = snapshot
+        .tools
+        .iter()
+        .find(|tool| tool.tool_name == "memory_save")
+        .expect("memory_save");
+
+    assert_eq!(memory_save.error_count, 1);
+    assert_eq!(memory_save.health, "degraded");
+    assert_eq!(memory_save.recommendation, "optimize_latency");
+    assert!(memory_save
+        .risk_flags
+        .contains(&"expected_input_validation".to_string()));
+    assert!(!memory_save.risk_flags.contains(&"has_errors".to_string()));
+}

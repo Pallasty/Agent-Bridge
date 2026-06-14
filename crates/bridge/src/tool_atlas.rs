@@ -206,24 +206,20 @@ fn atlas_entry(
     let max_duration_ms = stat.map(|s| s.max_duration_ms).unwrap_or(0);
     let avg_result_size = stat.map(|s| s.avg_result_size).unwrap_or(0.0);
     let usage_class = usage_class(call_count).to_string();
-    let has_expected_confirmation_errors =
-        has_expected_confirmation_errors(tool_name, &failure_samples);
-    let actionable_error_count = if has_expected_confirmation_errors {
-        0
-    } else {
-        error_count
-    };
+    let expected_gate = expected_gate_flag(tool_name, &failure_samples);
+    let has_expected_gate = expected_gate.is_some();
+    let actionable_error_count = if has_expected_gate { 0 } else { error_count };
     let risk_flags = risk_flags(
         tool_name,
         actionable_error_count,
         p95_duration_ms,
         avg_result_size,
-        has_expected_confirmation_errors,
+        expected_gate,
     );
     let health = health(
         observed,
         actionable_error_count,
-        !failure_samples.is_empty() && !has_expected_confirmation_errors,
+        !failure_samples.is_empty() && !has_expected_gate,
         &risk_flags,
     )
     .to_string();
@@ -263,14 +259,14 @@ fn risk_flags(
     error_count: u64,
     p95_duration_ms: u32,
     avg_result_size: f64,
-    has_expected_confirmation_errors: bool,
+    expected_gate: Option<&'static str>,
 ) -> Vec<String> {
     let mut flags = Vec::new();
     if error_count > 0 {
         flags.push("has_errors".to_string());
     }
-    if has_expected_confirmation_errors {
-        flags.push("expected_confirmation".to_string());
+    if let Some(flag) = expected_gate {
+        flags.push(flag.to_string());
     }
     if p95_duration_ms >= SLOW_P95_MS {
         if is_expected_wait_tool(tool_name) {
@@ -289,11 +285,29 @@ fn is_expected_wait_tool(tool_name: &str) -> bool {
     matches!(tool_name, "agent_session_wait")
 }
 
-fn has_expected_confirmation_errors(tool_name: &str, samples: &[ToolAtlasFailureSample]) -> bool {
-    !samples.is_empty()
-        && samples
-            .iter()
-            .all(|sample| is_expected_confirmation_error(tool_name, &sample.message))
+fn expected_gate_flag(tool_name: &str, samples: &[ToolAtlasFailureSample]) -> Option<&'static str> {
+    if samples.is_empty() {
+        return None;
+    }
+    if samples
+        .iter()
+        .all(|sample| is_expected_confirmation_error(tool_name, &sample.message))
+    {
+        return Some("expected_confirmation");
+    }
+    if samples
+        .iter()
+        .all(|sample| is_expected_safety_gate(tool_name, &sample.message))
+    {
+        return Some("expected_safety_gate");
+    }
+    if samples
+        .iter()
+        .all(|sample| is_expected_input_validation(tool_name, &sample.message))
+    {
+        return Some("expected_input_validation");
+    }
+    None
 }
 
 fn is_expected_confirmation_error(tool_name: &str, message: &str) -> bool {
@@ -301,10 +315,28 @@ fn is_expected_confirmation_error(tool_name: &str, message: &str) -> bool {
         && message.contains("requires apply_confirmation=\"finalise_stale_sessions\"")
 }
 
+fn is_expected_safety_gate(tool_name: &str, message: &str) -> bool {
+    tool_name == "desktop_action" && message.contains("host_mutation_not_exposed")
+}
+
+fn is_expected_input_validation(tool_name: &str, message: &str) -> bool {
+    tool_name == "memory_save"
+        && matches!(
+            message,
+            "missing or empty 'key'" | "missing or empty 'kind'"
+        )
+}
+
 fn has_actionable_risk_flags(risk_flags: &[String]) -> bool {
-    risk_flags
-        .iter()
-        .any(|flag| !matches!(flag.as_str(), "expected_wait" | "expected_confirmation"))
+    risk_flags.iter().any(|flag| {
+        !matches!(
+            flag.as_str(),
+            "expected_wait"
+                | "expected_confirmation"
+                | "expected_safety_gate"
+                | "expected_input_validation"
+        )
+    })
 }
 
 fn health(

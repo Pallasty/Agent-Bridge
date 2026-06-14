@@ -137,3 +137,38 @@ fn gos_lite_projection_includes_forum_backed_human_gate_packet() {
         .iter()
         .any(|q| q.as_str().unwrap_or("").contains("support")));
 }
+
+#[test]
+fn gos_lite_projects_large_average_result_as_size_degradation_evidence() {
+    let atlas = build_tool_atlas_snapshot(ToolAtlasInput {
+        generated_at: 1_781_450_000,
+        window_secs: 86_400,
+        current_tools: vec!["tool_atlas_snapshot".to_string()],
+        stats: vec![stat("tool_atlas_snapshot", 4, 0, 38, 28_826.0)],
+        recent_errors: Vec::new(),
+    });
+
+    let snapshot = build_gos_lite_snapshot_from_tool_atlas(&atlas);
+
+    assert_eq!(snapshot.status, "needs_optimization");
+    assert_eq!(snapshot.summary.degraded_tools, 1);
+
+    let size_evidence = snapshot
+        .nodes
+        .iter()
+        .find(|node| {
+            node.node_type == "Evidence"
+                && node.attrs["risk_flag"].as_str() == Some("large_average_result")
+        })
+        .expect("large_average_result evidence");
+    assert_eq!(
+        size_evidence.attrs["provenance_source"],
+        "tool_atlas.risk_flags"
+    );
+
+    assert!(snapshot.edges.iter().any(|edge| {
+        edge.src == size_evidence.id
+            && edge.dst == "hypothesis:tool:tool_atlas_snapshot:latency_or_size_degradation"
+            && edge.edge_type == "support"
+    }));
+}

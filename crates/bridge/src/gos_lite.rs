@@ -300,7 +300,11 @@ fn add_degraded_tool_projection(
         edges.push(support_edge(&evidence_id, &hypothesis_id, 0.8));
     }
 
-    if tool.risk_flags.iter().any(|flag| flag == "large_result") {
+    if tool
+        .risk_flags
+        .iter()
+        .any(|flag| flag == "large_average_result" || flag == "large_result")
+    {
         let evidence_id = format!("evidence:tool:{}:large_result", tool.tool_name);
         nodes.push(GosLiteNode {
             id: evidence_id.clone(),
@@ -309,7 +313,7 @@ fn add_degraded_tool_projection(
             score: 1.0,
             attrs: json!({
                 "provenance_source": "tool_atlas.risk_flags",
-                "risk_flag": "large_result",
+                "risk_flag": "large_average_result",
                 "tool_name": tool.tool_name,
                 "avg_result_size": tool.avg_result_size,
             }),
