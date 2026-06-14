@@ -1226,6 +1226,29 @@
       color: #5cc8c8;
       white-space: nowrap;
     }
+    #panel .orphan-candidate-head-actions {
+      display: inline-flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 5px;
+      min-width: 0;
+    }
+    #panel .orphan-candidate-mini-button {
+      min-width: 0;
+      padding: 2px 6px;
+      border: 1px solid #252532;
+      border-radius: 4px;
+      background: #101018;
+      color: #858594;
+      font-family: inherit;
+      font-size: 9px;
+      line-height: 1.2;
+      cursor: pointer;
+    }
+    #panel .orphan-candidate-mini-button:hover {
+      border-color: #3a3a48;
+      color: #d8d8e2;
+    }
     #panel .orphan-candidate-summary {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1415,6 +1438,25 @@
     #panel .orphan-candidate-action.active[data-orphan-review-decision="reject"] {
       border-color: rgba(216,128,128,0.58);
       color: #d88080;
+    }
+    #panel .orphan-approved-plan-links {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    #panel .orphan-approved-plan-link {
+      min-width: 0;
+      padding: 8px;
+      background: #0f0f16;
+      border: 1px solid #252532;
+      border-left: 2px solid #5cc89a;
+      border-radius: 4px;
+    }
+    #panel .orphan-approved-plan-pair {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 5px;
+      margin-bottom: 6px;
     }
     #panel .neighbor-list,
     #panel .region-node-list,
@@ -5367,12 +5409,27 @@ function renderRegionOrphanCandidateShell(region) {
     ? `<div class="maintenance-empty">loading candidate links...</div>`
     : `<div class="maintenance-empty">no graph orphans in this region</div>`;
   return `<div id="region-orphan-candidates" class="orphan-candidate-panel" data-region="${escapeHTML(region.id)}">
-    <div class="orphan-candidate-head">
-      <span>candidate links</span>
-      <span class="orphan-candidate-status">read-only</span>
-    </div>
+    ${renderOrphanCandidateHead("candidate links", "read-only", renderOrphanCandidatePlanButton(region.id))}
     ${body}
   </div>`;
+}
+
+function renderOrphanCandidateHead(title, status, actions = "") {
+  return `<div class="orphan-candidate-head">
+    <span>${escapeHTML(title)}</span>
+    <span class="orphan-candidate-head-actions">
+      ${actions}
+      <span class="orphan-candidate-status">${escapeHTML(status)}</span>
+    </span>
+  </div>`;
+}
+
+function renderOrphanCandidatePlanButton(regionId) {
+  return `<button type="button" class="orphan-candidate-mini-button" data-orphan-approved-plan="${escapeHTML(regionId || "")}">plan</button>`;
+}
+
+function renderOrphanCandidateBackButton(regionId) {
+  return `<button type="button" class="orphan-candidate-mini-button" data-orphan-plan-back="${escapeHTML(regionId || "")}">back</button>`;
 }
 
 function orphanCandidateStatusClass(status) {
@@ -5477,12 +5534,54 @@ function renderOrphanCandidateRows(result) {
 
 function renderRegionOrphanCandidateResult(result) {
   const readOnly = result && result.read_only ? "read-only" : "preview";
-  return `<div class="orphan-candidate-head">
-    <span>candidate links</span>
-    <span class="orphan-candidate-status">${escapeHTML(readOnly)}</span>
-  </div>
+  const regionId = result && result.region ? result.region : "";
+  return `${renderOrphanCandidateHead("candidate links", readOnly, renderOrphanCandidatePlanButton(regionId))}
   ${renderOrphanCandidateStats(result || {})}
   ${renderOrphanCandidateRows(result || {})}`;
+}
+
+function renderOrphanApprovedPlanStats(plan) {
+  const stats = [
+    ["approved", plan.approved_pair_count || 0],
+    ["reviewed", plan.reviewed_candidate_count || 0],
+    ["writes", plan.writes_edges || plan.writes_memory ? "yes" : "no"],
+  ];
+  return `<div class="orphan-candidate-summary">` + stats.map(([label, value]) =>
+    `<div class="orphan-candidate-stat">
+      <span class="label">${escapeHTML(label)}</span>
+      <span class="value">${escapeHTML(String(value))}</span>
+    </div>`
+  ).join("") + `</div>`;
+}
+
+function renderOrphanApprovedPlanLinks(plan) {
+  const links = Array.isArray(plan.links) ? plan.links : [];
+  if (links.length === 0) {
+    return `<div class="maintenance-empty">no approved links under current guardrails</div>`;
+  }
+  return `<div class="orphan-approved-plan-links">` + links.slice(0, 10).map(link => {
+    const reviewer = link.reviewer ? ` · ${link.reviewer}` : "";
+    const note = link.note ? renderOrphanCandidateSnippet("note", link.note) : "";
+    return `<div class="orphan-approved-plan-link">
+      <div class="orphan-approved-plan-pair">
+        <button type="button" class="orphan-candidate-node" data-orphan-node-key="${escapeHTML(link.orphan_key || "")}">
+          <span class="orphan-candidate-label" title="${escapeHTML(link.orphan_key || "")}">${escapeHTML(link.orphan_key || "")}</span>
+          <span class="orphan-candidate-meta">orphan · approved${escapeHTML(reviewer)}</span>
+        </button>
+        <button type="button" class="orphan-candidate-target" data-orphan-candidate-key="${escapeHTML(link.candidate_key || "")}">
+          <span class="orphan-candidate-label" title="${escapeHTML(link.candidate_key || "")}">${escapeHTML(link.candidate_key || "")}</span>
+          <span class="orphan-candidate-meta">${escapeHTML(link.edge_type || "relates")} · read-only plan</span>
+        </button>
+      </div>
+      ${note}
+    </div>`;
+  }).join("") + `</div>`;
+}
+
+function renderRegionOrphanApprovedPlan(plan, regionId) {
+  return `${renderOrphanCandidateHead("approved plan", "read-only", renderOrphanCandidateBackButton(regionId))}
+  ${renderOrphanApprovedPlanStats(plan || {})}
+  ${renderOrphanApprovedPlanLinks(plan || {})}`;
 }
 
 async function loadRegionOrphanCandidates(regionId) {
@@ -5503,10 +5602,35 @@ async function loadRegionOrphanCandidates(regionId) {
     slot.innerHTML = renderRegionOrphanCandidateResult(result);
   } catch (error) {
     if (!document.body.contains(slot) || slot.dataset.region !== regionId) return;
-    slot.innerHTML = `<div class="orphan-candidate-head">
-      <span>candidate links</span>
-      <span class="orphan-candidate-status">unavailable</span>
-    </div>
+    slot.innerHTML = `${renderOrphanCandidateHead("candidate links", "unavailable", renderOrphanCandidatePlanButton(regionId))}
+    <div class="maintenance-empty">${escapeHTML(String(error))}</div>`;
+  }
+}
+
+async function loadRegionOrphanApprovedPlan(regionId) {
+  const slot = document.getElementById("region-orphan-candidates");
+  if (!slot || !regionId) return;
+  slot.dataset.region = regionId;
+  slot.innerHTML = `${renderOrphanCandidateHead("approved plan", "loading", renderOrphanCandidateBackButton(regionId))}
+    <div class="maintenance-empty">loading approved link plan...</div>`;
+  const params = new URLSearchParams({
+    region: regionId,
+    threshold: "0.85",
+    max_orphans: "10",
+    candidate_limit: "2",
+  });
+  try {
+    const r = await fetch(`/api/orphan-approved-link-plan?${params.toString()}`);
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    const plan = await r.json();
+    if (plan.writes_memory || plan.writes_edges || plan.auto_apply_allowed) {
+      throw new Error("unexpected write-capable approved plan response");
+    }
+    if (!document.body.contains(slot) || slot.dataset.region !== regionId) return;
+    slot.innerHTML = renderRegionOrphanApprovedPlan(plan, regionId);
+  } catch (error) {
+    if (!document.body.contains(slot) || slot.dataset.region !== regionId) return;
+    slot.innerHTML = `${renderOrphanCandidateHead("approved plan", "unavailable", renderOrphanCandidateBackButton(regionId))}
     <div class="maintenance-empty">${escapeHTML(String(error))}</div>`;
   }
 }
@@ -5532,10 +5656,7 @@ async function recordOrphanCandidateDecision(regionId, orphanKey, candidateKey, 
     throw new Error("unexpected write-capable review response");
   }
   if (slot) {
-    slot.innerHTML = `<div class="orphan-candidate-head">
-      <span>candidate links</span>
-      <span class="orphan-candidate-status">refreshing</span>
-    </div>
+    slot.innerHTML = `${renderOrphanCandidateHead("candidate links", "refreshing", renderOrphanCandidatePlanButton(regionId))}
     <div class="maintenance-empty">recorded ${escapeHTML(decision)} · refreshing candidates...</div>`;
   }
   await loadRegionOrphanCandidates(regionId);
@@ -5752,6 +5873,18 @@ function jumpToRegionNode(key) {
 
 function bindRegionWorkbenchActions(panel, regionId) {
   panel.addEventListener("click", (e) => {
+    const planBtn = e.target.closest("[data-orphan-approved-plan]");
+    if (planBtn) {
+      e.preventDefault();
+      loadRegionOrphanApprovedPlan(planBtn.dataset.orphanApprovedPlan || regionId);
+      return;
+    }
+    const planBackBtn = e.target.closest("[data-orphan-plan-back]");
+    if (planBackBtn) {
+      e.preventDefault();
+      loadRegionOrphanCandidates(planBackBtn.dataset.orphanPlanBack || regionId);
+      return;
+    }
     const reviewBtn = e.target.closest("[data-orphan-review-decision]");
     if (reviewBtn) {
       e.preventDefault();
@@ -5762,10 +5895,7 @@ function bindRegionWorkbenchActions(panel, regionId) {
       recordOrphanCandidateDecision(regionId, orphanKey, candidateKey, decision).catch(error => {
         const slot = document.getElementById("region-orphan-candidates");
         if (slot) {
-          slot.innerHTML = `<div class="orphan-candidate-head">
-            <span>candidate links</span>
-            <span class="orphan-candidate-status">review error</span>
-          </div>
+          slot.innerHTML = `${renderOrphanCandidateHead("candidate links", "review error", renderOrphanCandidatePlanButton(regionId))}
           <div class="maintenance-empty">${escapeHTML(String(error))}</div>`;
         }
       });

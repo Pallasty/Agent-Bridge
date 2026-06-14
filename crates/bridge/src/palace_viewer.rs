@@ -119,6 +119,10 @@ pub async fn run(
         .route("/api/graph", get(api_graph))
         .route("/api/orphan-candidates", get(api_orphan_candidates))
         .route(
+            "/api/orphan-approved-link-plan",
+            get(api_orphan_approved_link_plan),
+        )
+        .route(
             "/api/orphan-candidate-decision",
             post(api_orphan_candidate_decision),
         )
@@ -522,6 +526,57 @@ fn palace_orphan_review_by_pair(inbox: &Value) -> BTreeMap<(String, String), Val
         }
     }
     out
+}
+
+fn palace_orphan_approved_link_plan_for_inbox(inbox: &Value) -> Value {
+    let links: Vec<Value> = inbox
+        .get("candidates")
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+        .filter(|candidate| candidate.get("decision").and_then(|v| v.as_str()) == Some("approve"))
+        .filter_map(|candidate| {
+            let orphan_key = candidate.get("orphan_key").and_then(|v| v.as_str())?;
+            let candidate_key = candidate.get("candidate_key").and_then(|v| v.as_str())?;
+            Some(json!({
+                "pair_id": candidate
+                    .get("pair_id")
+                    .cloned()
+                    .unwrap_or_else(|| json!(format!("{orphan_key} -> {candidate_key}"))),
+                "orphan_key": orphan_key,
+                "candidate_key": candidate_key,
+                "edge_type": "relates",
+                "decision": "approve",
+                "latest_decision_at_unix": candidate
+                    .get("latest_decision_at_unix")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "reviewer": candidate.get("reviewer").cloned().unwrap_or(Value::Null),
+                "note": candidate.get("note").cloned().unwrap_or(Value::Null),
+            }))
+        })
+        .collect();
+
+    json!({
+        "schema": "agent_bridge.palace.orphan_approved_link_plan.v0",
+        "read_only": true,
+        "approved_pair_count": links.len(),
+        "edge_type": "relates",
+        "writes_memory": false,
+        "writes_edges": false,
+        "auto_apply_allowed": false,
+        "links": links,
+        "next_step": "Review this approved plan before invoking any write-capable memory edge tool.",
+    })
+}
+
+fn palace_orphan_approved_link_plan_for_preview(
+    preview: &PalaceOrphanCandidatePreview,
+    decisions: &[Value],
+) -> Value {
+    let pairs = palace_orphan_candidate_pairs_for_preview(preview);
+    let inbox = palace_orphan_candidate_decision_inbox_for_pairs(&pairs, decisions);
+    palace_orphan_approved_link_plan_for_inbox(&inbox)
 }
 
 fn palace_slug(raw: &str) -> String {
@@ -1178,6 +1233,79 @@ async fn api_orphan_candidate_decision(
         "auto_apply_allowed": false,
         "record": record,
     })))
+}
+
+async fn api_orphan_approved_link_plan(
+    State(s): State<AppState>,
+    Query(q): Query<OrphanCandidatesQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let threshold = q.threshold.unwrap_or(0.85).clamp(0.0, 2.0);
+    let min_content_len = q.min_content_len.unwrap_or(50).min(1000) as usize;
+    let max_orphans = q.max_orphans.unwrap_or(12).clamp(1, 100) as usize;
+    let candidate_limit = q.candidate_limit.unwrap_or(3).clamp(1, 10) as usize;
+    let region = q
+        .region
+        .as_deref()
+        .map(str::trim)
+        .filter(|region| !region.is_empty());
+
+    let all = s
+        .store
+        .list_memories(None, MemoryListSort::Recent, STORE_FETCH_LIMIT)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("list_memories: {e}"),
+            )
+        })?;
+
+    let mut keys_with_edges: HashSet<String> = HashSet::new();
+    for mem in &all {
+        if !palace_memory_active(mem) || palace_memory_excluded_kind(mem) {
+            continue;
+        }
+        if let Ok(edges) = s.store.memory_neighbors(&mem.key).await {
+            if !edges.is_empty() {
+                keys_with_edges.insert(mem.key.clone());
+            }
+        }
+    }
+
+    let preview = preview_palace_orphan_candidates(
+        &all,
+        &keys_with_edges,
+        region,
+        threshold,
+        min_content_len,
+        max_orphans,
+        candidate_limit,
+    );
+    let decisions_path = default_palace_orphan_candidate_decisions_path();
+    let decisions = load_palace_orphan_candidate_decisions(&decisions_path).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("load orphan candidate review decisions: {e}"),
+        )
+    })?;
+    let mut plan = palace_orphan_approved_link_plan_for_preview(&preview, &decisions);
+    if let Some(obj) = plan.as_object_mut() {
+        obj.insert("region".to_string(), json!(region));
+        obj.insert("threshold".to_string(), json!(threshold));
+        obj.insert("min_content_len".to_string(), json!(min_content_len));
+        obj.insert("max_orphans".to_string(), json!(max_orphans));
+        obj.insert("candidate_limit".to_string(), json!(candidate_limit));
+        obj.insert("loaded_records".to_string(), json!(all.len()));
+        obj.insert(
+            "reviewed_candidate_count".to_string(),
+            json!(palace_orphan_candidate_pairs_for_preview(&preview).len()),
+        );
+        obj.insert(
+            "decisions_path".to_string(),
+            json!(decisions_path.display().to_string()),
+        );
+    }
+    Ok(Json(plan))
 }
 
 async fn build_graph_snapshot(
@@ -3210,10 +3338,13 @@ mod tests {
         .expect("reject");
 
         append_palace_orphan_candidate_decision(&path, &approve).expect("append approve");
-        append_palace_orphan_candidate_decision(&path, &json!({
-            "schema": "other.schema",
-            "decision": "approve"
-        }))
+        append_palace_orphan_candidate_decision(
+            &path,
+            &json!({
+                "schema": "other.schema",
+                "decision": "approve"
+            }),
+        )
         .expect("append ignored schema");
         append_palace_orphan_candidate_decision(&path, &reject).expect("append reject");
 
@@ -3235,6 +3366,114 @@ mod tests {
             assert_eq!(file_mode, 0o600);
             assert_eq!(dir_mode, 0o700);
         }
+    }
+
+    #[test]
+    fn palace_orphan_approved_plan_only_includes_latest_approved_pairs() {
+        let approved = PalaceOrphanCandidatePair {
+            orphan_key: "memory_orphan".to_string(),
+            candidate_key: "memory_anchor".to_string(),
+        };
+        let rejected = PalaceOrphanCandidatePair {
+            orphan_key: "memory_rejected".to_string(),
+            candidate_key: "memory_other_anchor".to_string(),
+        };
+        let pairs = vec![approved.clone(), rejected.clone()];
+        let decisions = vec![
+            palace_orphan_candidate_decision_record_for_time(
+                &approved,
+                "defer",
+                Some("alice"),
+                None,
+                10,
+            )
+            .expect("initial defer"),
+            palace_orphan_candidate_decision_record_for_time(
+                &approved,
+                "approve",
+                Some("bob"),
+                Some("human checked"),
+                20,
+            )
+            .expect("latest approve"),
+            palace_orphan_candidate_decision_record_for_time(
+                &rejected,
+                "reject",
+                Some("carol"),
+                None,
+                30,
+            )
+            .expect("reject"),
+        ];
+        let inbox = palace_orphan_candidate_decision_inbox_for_pairs(&pairs, &decisions);
+
+        let plan = palace_orphan_approved_link_plan_for_inbox(&inbox);
+
+        assert_eq!(
+            plan["schema"],
+            "agent_bridge.palace.orphan_approved_link_plan.v0"
+        );
+        assert_eq!(plan["read_only"], json!(true));
+        assert_eq!(plan["writes_memory"], json!(false));
+        assert_eq!(plan["writes_edges"], json!(false));
+        assert_eq!(plan["auto_apply_allowed"], json!(false));
+        assert_eq!(plan["approved_pair_count"], json!(1));
+        assert_eq!(plan["links"][0]["orphan_key"], json!("memory_orphan"));
+        assert_eq!(plan["links"][0]["candidate_key"], json!("memory_anchor"));
+        assert_eq!(plan["links"][0]["reviewer"], json!("bob"));
+        assert_eq!(plan["links"][0]["note"], json!("human checked"));
+    }
+
+    #[test]
+    fn palace_orphan_approved_plan_is_scoped_to_current_preview_pairs() {
+        let preview = PalaceOrphanCandidatePreview {
+            rows: vec![PalaceOrphanCandidatePreviewRow {
+                orphan: test_mem("memory_orphan", "lesson", "body", &[]),
+                suggestions: vec![PalaceLinkSuggestion {
+                    key: "memory_anchor".to_string(),
+                    kind: "lesson".to_string(),
+                    confidence: 1.0,
+                    reason: "tag_overlap".to_string(),
+                    scope: None,
+                    scope_relation: "same_scope",
+                    preview: "anchor".to_string(),
+                }],
+            }],
+            ..PalaceOrphanCandidatePreview::default()
+        };
+        let visible_pair = PalaceOrphanCandidatePair {
+            orphan_key: "memory_orphan".to_string(),
+            candidate_key: "memory_anchor".to_string(),
+        };
+        let stale_pair = PalaceOrphanCandidatePair {
+            orphan_key: "old_orphan".to_string(),
+            candidate_key: "old_anchor".to_string(),
+        };
+        let decisions = vec![
+            palace_orphan_candidate_decision_record_for_time(
+                &visible_pair,
+                "approve",
+                Some("alice"),
+                None,
+                10,
+            )
+            .expect("visible approve"),
+            palace_orphan_candidate_decision_record_for_time(
+                &stale_pair,
+                "approve",
+                Some("bob"),
+                None,
+                20,
+            )
+            .expect("stale approve"),
+        ];
+
+        let plan = palace_orphan_approved_link_plan_for_preview(&preview, &decisions);
+
+        assert_eq!(plan["approved_pair_count"], json!(1));
+        assert_eq!(plan["links"][0]["orphan_key"], json!("memory_orphan"));
+        assert_eq!(plan["links"][0]["candidate_key"], json!("memory_anchor"));
+        assert_eq!(plan["links"][0]["reviewer"], json!("alice"));
     }
 
     #[test]
