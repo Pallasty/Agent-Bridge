@@ -469,6 +469,27 @@ enum InstinctOp {
         #[arg(long)]
         json: bool,
     },
+    /// Read-only candidate inbox for a review packet, merged with latest
+    /// approve/reject/defer decisions. Does not write memories.
+    ReviewInbox {
+        /// Optional review packet JSON. Defaults to the newest packet in the
+        /// private instinct review sidecar directory.
+        #[arg(long)]
+        packet_json: Option<PathBuf>,
+        /// Optional review directory used when --packet-json is omitted.
+        #[arg(long)]
+        review_dir: Option<PathBuf>,
+        /// Optional decisions JSONL path. Defaults to decisions.jsonl under the
+        /// private instinct review sidecar directory.
+        #[arg(long)]
+        decisions: Option<PathBuf>,
+        /// Maximum candidate rows to print.
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        /// Emit raw JSON payload instead of a compact command line summary.
+        #[arg(long)]
+        json: bool,
+    },
     /// Rotate the local instinct observer JSONL log by renaming it to a
     /// timestamped archive path. The hook recreates a fresh log on its next
     /// event.
@@ -6391,6 +6412,102 @@ async fn real_main() -> Result<()> {
                             .and_then(|v| v.as_str())
                             .unwrap_or("-"),
                     );
+                }
+                Ok(())
+            }
+            InstinctOp::ReviewInbox {
+                packet_json,
+                review_dir,
+                decisions,
+                limit,
+                json,
+            } => {
+                let inbox = instinct::observer_review_inbox(
+                    packet_json.as_deref(),
+                    review_dir.as_deref(),
+                    decisions.as_deref(),
+                    *limit,
+                )
+                .context("read instinct observer review inbox")?;
+                if *json {
+                    println!("{}", serde_json::to_string_pretty(&inbox)?);
+                } else {
+                    println!(
+                        "instinct review inbox: packet={} candidates={} pending={} approved={} rejected={} deferred={} memory_write={}",
+                        inbox
+                            .get("packet_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("-"),
+                        inbox
+                            .get("candidate_count")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0),
+                        inbox
+                            .get("pending_count")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0),
+                        inbox
+                            .get("approved_count")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0),
+                        inbox
+                            .get("rejected_count")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0),
+                        inbox
+                            .get("deferred_count")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0),
+                        inbox
+                            .get("writes_memory")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false),
+                    );
+                    println!(
+                        "packet_json={} decisions={}",
+                        inbox
+                            .get("packet_json")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("-"),
+                        inbox
+                            .get("decisions_path")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("-"),
+                    );
+                    if let Some(candidates) = inbox.get("candidates").and_then(|v| v.as_array()) {
+                        for candidate in candidates.iter().take(*limit) {
+                            println!(
+                                "{} kind={} decision={} session={} cues={}",
+                                candidate
+                                    .get("candidate_id")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("-"),
+                                candidate
+                                    .get("kind")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("-"),
+                                candidate
+                                    .get("decision")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("-"),
+                                candidate
+                                    .get("session_id")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("-"),
+                                candidate
+                                    .get("matched_cues")
+                                    .and_then(|v| v.as_array())
+                                    .map(|items| {
+                                        items
+                                            .iter()
+                                            .filter_map(|v| v.as_str())
+                                            .collect::<Vec<_>>()
+                                            .join(",")
+                                    })
+                                    .unwrap_or_else(|| "-".to_string()),
+                            );
+                        }
+                    }
                 }
                 Ok(())
             }

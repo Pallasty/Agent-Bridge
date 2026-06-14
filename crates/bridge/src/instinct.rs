@@ -856,6 +856,126 @@ pub fn observer_review_status_for_paths(
     }))
 }
 
+pub fn observer_review_inbox(
+    packet_json: Option<&Path>,
+    review_dir: Option<&Path>,
+    decisions_path: Option<&Path>,
+    limit: usize,
+) -> std::io::Result<Value> {
+    let default_review_dir = default_review_dir_path();
+    let review_dir = review_dir.unwrap_or(&default_review_dir);
+    let packet_path = match packet_json {
+        Some(path) => path.to_path_buf(),
+        None => latest_review_packet_path(review_dir)?.ok_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "no instinct review packet found",
+            )
+        })?,
+    };
+    observer_review_inbox_for_paths(
+        &packet_path,
+        decisions_path.unwrap_or(&default_review_decisions_path()),
+        limit,
+    )
+}
+
+pub fn observer_review_inbox_for_paths(
+    packet_json: &Path,
+    decisions_path: &Path,
+    limit: usize,
+) -> std::io::Result<Value> {
+    let body = std::fs::read_to_string(packet_json)?;
+    let packet: Value = serde_json::from_str(&body)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    ensure_review_packet_schema(&packet)?;
+    let decisions = load_review_decisions(decisions_path)?;
+    let mut latest_by_candidate: BTreeMap<String, Value> = BTreeMap::new();
+    for decision in decisions {
+        let Some(candidate_id) = decision.get("candidate_id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let current_ts = decision
+            .get("generated_at_unix")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        let existing_ts = latest_by_candidate
+            .get(candidate_id)
+            .and_then(|v| v.get("generated_at_unix"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        if !latest_by_candidate.contains_key(candidate_id) || current_ts >= existing_ts {
+            latest_by_candidate.insert(candidate_id.to_string(), decision);
+        }
+    }
+
+    let candidates = packet
+        .pointer("/candidate_preview/candidates")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let mut rows = Vec::new();
+    let mut pending_count = 0_u64;
+    let mut approved_count = 0_u64;
+    let mut rejected_count = 0_u64;
+    let mut deferred_count = 0_u64;
+    for candidate in candidates {
+        let candidate_id = candidate
+            .get("candidate_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let latest = latest_by_candidate.get(&candidate_id);
+        let decision = latest
+            .and_then(|v| v.get("decision"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("pending");
+        match decision {
+            "approve" => approved_count += 1,
+            "reject" => rejected_count += 1,
+            "defer" => deferred_count += 1,
+            _ => pending_count += 1,
+        }
+        rows.push(json!({
+            "candidate_id": candidate_id,
+            "kind": candidate.get("kind").cloned().unwrap_or(Value::Null),
+            "session_id": candidate.get("session_id").cloned().unwrap_or(Value::Null),
+            "tool": candidate.get("tool").cloned().unwrap_or(Value::Null),
+            "matched_cues": candidate.get("matched_cues").cloned().unwrap_or(Value::Null),
+            "decision": decision,
+            "latest_decision_at_unix": latest
+                .and_then(|v| v.get("generated_at_unix"))
+                .cloned()
+                .unwrap_or(Value::Null),
+            "reviewer": latest
+                .and_then(|v| v.get("reviewer"))
+                .cloned()
+                .unwrap_or(Value::Null),
+            "requires_local_log_lookup": candidate
+                .get("requires_local_log_lookup")
+                .cloned()
+                .unwrap_or(Value::Null),
+        }));
+    }
+
+    let candidate_count = rows.len();
+    Ok(json!({
+        "schema": "agent_bridge.instinct_observer.phase1_review_inbox.v0",
+        "read_only": true,
+        "packet_json": packet_json.display().to_string(),
+        "decisions_path": decisions_path.display().to_string(),
+        "packet_id": packet.get("packet_id").cloned().unwrap_or(Value::Null),
+        "candidate_count": candidate_count,
+        "pending_count": pending_count,
+        "approved_count": approved_count,
+        "rejected_count": rejected_count,
+        "deferred_count": deferred_count,
+        "writes_memory": false,
+        "auto_apply_allowed": false,
+        "candidates": rows.into_iter().take(limit).collect::<Vec<_>>(),
+    }))
+}
+
 pub fn rotate_observer_log(dry_run: bool) -> std::io::Result<Value> {
     let now_unix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1123,6 +1243,42 @@ fn latest_decision_for_candidate(
         }
     }
     Ok(latest)
+}
+
+fn latest_review_packet_path(review_dir: &Path) -> std::io::Result<Option<PathBuf>> {
+    if !review_dir.is_dir() {
+        return Ok(None);
+    }
+    let mut latest: Option<(u64, PathBuf)> = None;
+    for entry in std::fs::read_dir(review_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(body) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<Value>(&body) else {
+            continue;
+        };
+        if value.get("schema").and_then(|v| v.as_str())
+            != Some("agent_bridge.instinct_observer.phase1_review_packet.v0")
+        {
+            continue;
+        }
+        let generated_at = value
+            .get("generated_at_unix")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
+        if latest
+            .as_ref()
+            .is_none_or(|(latest_ts, _)| generated_at >= *latest_ts)
+        {
+            latest = Some((generated_at, path));
+        }
+    }
+    Ok(latest.map(|(_, path)| path))
 }
 
 fn load_review_decisions(decisions_path: &Path) -> std::io::Result<Vec<Value>> {
@@ -2123,6 +2279,69 @@ mod tests {
         assert_eq!(rows[0]["decision"], json!("approve"));
         assert_eq!(rows[0]["writes_memory"], json!(false));
         assert!(!body.contains("secret decision prompt"));
+    }
+
+    #[test]
+    fn observer_review_inbox_merges_latest_decisions_without_memory_write() {
+        let tmp = tempfile::tempdir().unwrap();
+        let log = tmp.path().join("observations.jsonl");
+        let out_dir = tmp.path().join("review");
+        let decisions = out_dir.join("decisions.jsonl");
+        write_jsonl(
+            &log,
+            &[
+                json!({
+                    "ts": 1.0,
+                    "sid": TEST_SID,
+                    "ev": "UserPromptSubmit",
+                    "prompt": "不对，应该改成 secret inbox prompt"
+                }),
+                json!({
+                    "ts": 2.0,
+                    "sid": "019e0000-0000-7000-8000-000000000002",
+                    "ev": "UserPromptSubmit",
+                    "prompt": "不要使用 secret inbox second prompt"
+                }),
+            ],
+        );
+        let packet = observer_review_packet_for_paths(
+            &log,
+            &out_dir,
+            20,
+            Some("tester"),
+            1_780_747_025,
+            true,
+        )
+        .unwrap();
+        let packet_json = PathBuf::from(packet["json_path"].as_str().unwrap());
+        observer_review_decision_for_paths(
+            &packet_json,
+            &decisions,
+            "instinct-candidate-0001",
+            "approve",
+            Some("tester"),
+            Some("stable inbox lesson"),
+            1_780_747_026,
+            true,
+        )
+        .unwrap();
+
+        let inbox = observer_review_inbox(Some(&packet_json), Some(&out_dir), Some(&decisions), 20)
+            .unwrap();
+        assert_eq!(
+            inbox["schema"],
+            "agent_bridge.instinct_observer.phase1_review_inbox.v0"
+        );
+        assert_eq!(inbox["read_only"], json!(true));
+        assert_eq!(inbox["writes_memory"], json!(false));
+        assert_eq!(inbox["candidate_count"], json!(2));
+        assert_eq!(inbox["pending_count"], json!(1));
+        assert_eq!(inbox["approved_count"], json!(1));
+        assert_eq!(inbox["candidates"][0]["decision"], json!("approve"));
+        assert_eq!(inbox["candidates"][1]["decision"], json!("pending"));
+        let text = serde_json::to_string(&inbox).unwrap();
+        assert!(!text.contains("secret inbox prompt"));
+        assert!(!text.contains("secret inbox second prompt"));
     }
 
     #[test]
