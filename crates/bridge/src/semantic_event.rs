@@ -126,7 +126,7 @@ impl SemanticEvent {
             }
             serde_json::to_string(&Value::Object(d)).ok()
         };
-        SemanticEventRecord {
+        let record = SemanticEventRecord {
             ts: self.ts,
             actor: self.actor.clone(),
             source: self.source.clone(),
@@ -137,8 +137,97 @@ impl SemanticEvent {
             evidence,
             facts: self.facts.to_string(),
             descriptor,
+        };
+        // SSB conformance gate (roadmap Gate E): every produced event MUST satisfy
+        // the unified contract. Enforced as a debug assertion so any producer that
+        // drifts (or launders a verdict) trips CI/tests; compiled out of release,
+        // so deployed behavior is unchanged.
+        debug_assert!(
+            contract_violations(&record).is_empty(),
+            "SemanticEvent violates the unified SSB contract: {:?}",
+            contract_violations(&record)
+        );
+        record
+    }
+}
+
+/// SSB unified-contract conformance check (roadmap Gate E). Returns the list of
+/// contract violations for a persisted [`SemanticEventRecord`] (empty = conformant).
+///
+/// This codifies the unified Object/Affordance contract as an executable spec so
+/// a future producer cannot silently emit a non-conformant — or laundered —
+/// event. Every producer (browser / desktop / mobile / …) must pass it.
+pub fn contract_violations(rec: &SemanticEventRecord) -> Vec<String> {
+    let mut v = Vec::new();
+    // Verdict must be one of the three honest states (no green laundering).
+    if !matches!(
+        rec.verdict_status.as_str(),
+        "verified" | "not_verified" | "unknown"
+    ) {
+        v.push(format!(
+            "verdict_status not in {{verified,not_verified,unknown}}: {:?}",
+            rec.verdict_status
+        ));
+    }
+    if rec.verdict_method.trim().is_empty() {
+        v.push("verdict_method is empty".to_string());
+    }
+    // The unified contract requires the typed descriptor.
+    let Some(desc_str) = rec.descriptor.as_deref() else {
+        v.push("descriptor missing (the unified contract requires it)".to_string());
+        return v;
+    };
+    let desc: Value = match serde_json::from_str(desc_str) {
+        Ok(d) => d,
+        Err(e) => {
+            v.push(format!("descriptor is not valid JSON: {e}"));
+            return v;
+        }
+    };
+    // Object: object_type + source_adapter required; adapter must match the event.
+    let obj = &desc["object"];
+    for field in ["object_type", "source_adapter"] {
+        if !obj
+            .get(field)
+            .and_then(|x| x.as_str())
+            .map(|s| !s.is_empty())
+            .unwrap_or(false)
+        {
+            v.push(format!("descriptor.object.{field} missing/empty"));
         }
     }
+    if let Some(adapter) = obj.get("source_adapter").and_then(|x| x.as_str()) {
+        if adapter != rec.source {
+            v.push(format!(
+                "source '{}' != descriptor.object.source_adapter '{}'",
+                rec.source, adapter
+            ));
+        }
+    }
+    // Affordance: action_type + a valid risk_level + a boolean requires_gate.
+    let aff = &desc["affordance"];
+    if !aff
+        .get("action_type")
+        .and_then(|x| x.as_str())
+        .map(|s| !s.is_empty())
+        .unwrap_or(false)
+    {
+        v.push("descriptor.affordance.action_type missing/empty".to_string());
+    }
+    if !matches!(
+        aff.get("risk_level").and_then(|x| x.as_str()),
+        Some("low" | "medium" | "high")
+    ) {
+        v.push("descriptor.affordance.risk_level not in {low,medium,high}".to_string());
+    }
+    if !aff
+        .get("requires_gate")
+        .map(|x| x.is_boolean())
+        .unwrap_or(false)
+    {
+        v.push("descriptor.affordance.requires_gate missing/not boolean".to_string());
+    }
+    v
 }
 
 /// Classify a browser-click outcome into a verify-first verdict. Pure + total so
@@ -493,5 +582,125 @@ mod tests {
         let v = classify_mobile(false, "selector matched 0 node(s)");
         assert_eq!(v.status, VerdictStatus::NotVerified);
         assert_eq!(v.method, "adb_tap_failed");
+    }
+
+    // ---- SSB conformance gate (roadmap Gate E) ----
+
+    fn event_for(
+        source: &str,
+        action: &str,
+        object_type: &str,
+        action_type: &str,
+        risk: &str,
+        gated: bool,
+        verdict: VerdictStatus,
+    ) -> SemanticEvent {
+        SemanticEvent {
+            ts: 1,
+            actor: "mcp".to_string(),
+            source: source.to_string(),
+            action: action.to_string(),
+            target: None,
+            object: SemanticObject {
+                object_type: object_type.to_string(),
+                source_adapter: source.to_string(),
+                label: None,
+                object_id: None,
+            },
+            affordance: Affordance {
+                action_type: action_type.to_string(),
+                risk_level: risk.to_string(),
+                requires_gate: gated,
+                expected_effect: None,
+            },
+            verdict: Verdict {
+                status: verdict,
+                method: "m".to_string(),
+                evidence: Value::Null,
+            },
+            facts: json!({}),
+        }
+    }
+
+    #[test]
+    fn all_three_adapter_shapes_conform_to_contract() {
+        // The exact shapes the three live producers emit must all pass.
+        let browser = event_for(
+            "browser",
+            "click",
+            "dom_element",
+            "click",
+            "low",
+            false,
+            VerdictStatus::Verified,
+        );
+        let desktop = event_for(
+            "desktop",
+            "click",
+            "desktop_input_surface",
+            "click",
+            "high",
+            true,
+            VerdictStatus::NotVerified,
+        );
+        let mobile = event_for(
+            "mobile",
+            "tap",
+            "mobile_ui_node",
+            "tap",
+            "medium",
+            false,
+            VerdictStatus::Unknown,
+        );
+        for ev in [browser, desktop, mobile] {
+            let rec = ev.to_record();
+            assert!(
+                contract_violations(&rec).is_empty(),
+                "{}: {:?}",
+                rec.source,
+                contract_violations(&rec)
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_record_without_descriptor_is_flagged() {
+        let rec = SemanticEventRecord {
+            ts: 1,
+            actor: "mcp".to_string(),
+            source: "browser".to_string(),
+            action: "click".to_string(),
+            target: None,
+            verdict_status: "verified".to_string(),
+            verdict_method: "m".to_string(),
+            evidence: None,
+            facts: "{}".to_string(),
+            descriptor: None,
+        };
+        let viol = contract_violations(&rec);
+        assert!(viol.iter().any(|s| s.contains("descriptor missing")));
+    }
+
+    #[test]
+    fn laundered_verdict_is_flagged() {
+        // A status outside {verified,not_verified,unknown} (e.g. a faked "green")
+        // must be caught — the gate refuses laundering.
+        let mut rec = sample_event().to_record();
+        rec.verdict_status = "green".to_string();
+        assert!(contract_violations(&rec)
+            .iter()
+            .any(|s| s.contains("verdict_status not in")));
+    }
+
+    #[test]
+    fn adapter_mismatch_is_flagged() {
+        // descriptor.object.source_adapter must agree with the event source.
+        // Build a conformant record (passes to_record's debug assert), then break
+        // the source after the fact so the validator sees the mismatch.
+        let mut rec = sample_event().to_record(); // browser / object.source_adapter=browser
+        rec.source = "desktop".to_string();
+        assert!(contract_violations(&rec)
+            .iter()
+            .any(|s| s.contains("!= descriptor.object.source_adapter")));
     }
 }
