@@ -346,6 +346,13 @@ fn default_palace_orphan_candidate_decisions_path() -> PathBuf {
     default_palace_review_dir_path().join("orphan-candidate-decisions.jsonl")
 }
 
+fn default_palace_orphan_approved_link_apply_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("AB_PALACE_ORPHAN_APPROVED_LINK_APPLY_AUDIT") {
+        return PathBuf::from(path);
+    }
+    default_palace_review_dir_path().join("orphan-approved-link-apply.jsonl")
+}
+
 fn palace_home_dir() -> PathBuf {
     std::env::var("HOME")
         .map(PathBuf::from)
@@ -401,6 +408,79 @@ fn load_palace_orphan_candidate_decisions(path: &FsPath) -> std::io::Result<Vec<
 }
 
 fn append_palace_orphan_candidate_decision(path: &FsPath, value: &Value) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+        set_palace_private_dir_permissions(parent)?;
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    let line = serde_json::to_string(value)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    writeln!(file, "{line}")?;
+    set_palace_private_file_permissions(path)?;
+    Ok(())
+}
+
+fn palace_orphan_approved_link_apply_record_for_time(
+    response: &Value,
+    actor: Option<&str>,
+    generated_at_unix: u64,
+) -> Value {
+    json!({
+        "schema": "agent_bridge.palace.orphan_approved_link_apply_audit.v0",
+        "generated_at_unix": generated_at_unix,
+        "actor": actor.map(str::trim).filter(|value| !value.is_empty()),
+        "response_schema": response.get("schema").cloned().unwrap_or(Value::Null),
+        "status": response.get("status").cloned().unwrap_or(Value::Null),
+        "blocked": response.get("blocked").cloned().unwrap_or(json!(true)),
+        "dry_run": response.get("dry_run").cloned().unwrap_or(json!(true)),
+        "approved_pair_count": response.get("approved_pair_count").cloned().unwrap_or(json!(0)),
+        "would_write_edges": response.get("would_write_edges").cloned().unwrap_or(json!(0)),
+        "applied_count": response.get("applied_count").cloned().unwrap_or(json!(0)),
+        "failed_count": response.get("failed_count").cloned().unwrap_or(json!(0)),
+        "skipped_count": response.get("skipped_count").cloned().unwrap_or(json!(0)),
+        "writes_memory": response.get("writes_memory").cloned().unwrap_or(json!(false)),
+        "writes_edges": response.get("writes_edges").cloned().unwrap_or(json!(false)),
+        "blocking_reasons": response.get("blocking_reasons").cloned().unwrap_or_else(|| json!([])),
+        "region": response.get("region").cloned().unwrap_or(Value::Null),
+        "threshold": response.get("threshold").cloned().unwrap_or(Value::Null),
+        "max_orphans": response.get("max_orphans").cloned().unwrap_or(Value::Null),
+        "candidate_limit": response.get("candidate_limit").cloned().unwrap_or(Value::Null),
+    })
+}
+
+#[cfg(test)]
+fn load_palace_orphan_approved_link_apply_records(path: &FsPath) -> std::io::Result<Vec<Value>> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+    let mut records = Vec::new();
+    for line in text.lines().filter(|line| !line.trim().is_empty()) {
+        let value: Value = serde_json::from_str(line)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        if value.get("schema").and_then(|v| v.as_str())
+            == Some("agent_bridge.palace.orphan_approved_link_apply_audit.v0")
+        {
+            records.push(value);
+        }
+    }
+    records.sort_by_key(|value| {
+        value
+            .get("generated_at_unix")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0)
+    });
+    Ok(records)
+}
+
+fn append_palace_orphan_approved_link_apply_record(
+    path: &FsPath,
+    value: &Value,
+) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
         set_palace_private_dir_permissions(parent)?;
@@ -1481,6 +1561,7 @@ async fn api_orphan_approved_link_apply(
     let links = palace_orphan_approved_links_from_plan(&plan);
     let mut response =
         palace_orphan_approved_link_apply_gate_for_plan(&plan, dry_run, req.confirm.as_deref());
+    let apply_audit_path = default_palace_orphan_approved_link_apply_path();
     if let Some(obj) = response.as_object_mut() {
         obj.insert("region".to_string(), json!(region));
         obj.insert("threshold".to_string(), json!(threshold));
@@ -1490,6 +1571,10 @@ async fn api_orphan_approved_link_apply(
         obj.insert(
             "decisions_path".to_string(),
             json!(decisions_path.display().to_string()),
+        );
+        obj.insert(
+            "apply_audit_path".to_string(),
+            json!(apply_audit_path.display().to_string()),
         );
         obj.insert(
             "actor".to_string(),
@@ -1507,6 +1592,23 @@ async fn api_orphan_approved_link_apply(
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
     if blocked {
+        let generated_at_unix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let record = palace_orphan_approved_link_apply_record_for_time(
+            &response,
+            req.actor.as_deref(),
+            generated_at_unix,
+        );
+        append_palace_orphan_approved_link_apply_record(&apply_audit_path, &record).map_err(
+            |e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("append orphan approved link apply audit: {e}"),
+                )
+            },
+        )?;
         return Ok(Json(response));
     }
 
@@ -1599,6 +1701,22 @@ async fn api_orphan_approved_link_apply(
         );
         obj.insert("plan".to_string(), plan);
     }
+
+    let generated_at_unix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let record = palace_orphan_approved_link_apply_record_for_time(
+        &response,
+        req.actor.as_deref(),
+        generated_at_unix,
+    );
+    append_palace_orphan_approved_link_apply_record(&apply_audit_path, &record).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("append orphan approved link apply audit: {e}"),
+        )
+    })?;
 
     Ok(Json(response))
 }
@@ -3797,6 +3915,77 @@ mod tests {
         assert_eq!(gate["blocked"], json!(true));
         assert_eq!(gate["writes_edges"], json!(false));
         assert_eq!(gate["blocking_reasons"][0], json!("confirmation_required"));
+    }
+
+    #[test]
+    fn palace_orphan_approved_link_apply_audit_is_private_append_only_and_schema_filtered() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("review").join("apply.jsonl");
+        let blocked = palace_orphan_approved_link_apply_record_for_time(
+            &json!({
+                "schema": "agent_bridge.palace.orphan_approved_link_apply.v0",
+                "status": "blocked",
+                "blocked": true,
+                "dry_run": false,
+                "approved_pair_count": 1,
+                "would_write_edges": 1,
+                "writes_edges": false,
+                "writes_memory": false,
+                "blocking_reasons": ["confirmation_required"],
+            }),
+            Some("palace"),
+            10,
+        );
+        let dry_run = palace_orphan_approved_link_apply_record_for_time(
+            &json!({
+                "schema": "agent_bridge.palace.orphan_approved_link_apply.v0",
+                "status": "dry_run",
+                "blocked": false,
+                "dry_run": true,
+                "approved_pair_count": 2,
+                "would_write_edges": 2,
+                "writes_edges": false,
+                "writes_memory": false,
+                "blocking_reasons": [],
+            }),
+            Some("palace"),
+            20,
+        );
+
+        append_palace_orphan_approved_link_apply_record(&path, &blocked).expect("append blocked");
+        append_palace_orphan_approved_link_apply_record(
+            &path,
+            &json!({
+                "schema": "other.schema",
+                "status": "ignored"
+            }),
+        )
+        .expect("append ignored schema");
+        append_palace_orphan_approved_link_apply_record(&path, &dry_run).expect("append dry_run");
+
+        let loaded = load_palace_orphan_approved_link_apply_records(&path).expect("load apply");
+
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0]["status"], json!("blocked"));
+        assert_eq!(loaded[0]["writes_edges"], json!(false));
+        assert_eq!(
+            loaded[0]["blocking_reasons"][0],
+            json!("confirmation_required")
+        );
+        assert_eq!(loaded[1]["status"], json!("dry_run"));
+        assert_eq!(loaded[1]["would_write_edges"], json!(2));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let file_mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            let dir_mode = std::fs::metadata(path.parent().unwrap())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(file_mode, 0o600);
+            assert_eq!(dir_mode, 0o700);
+        }
     }
 
     #[test]
