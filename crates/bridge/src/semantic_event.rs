@@ -268,6 +268,33 @@ pub fn classify_action(mode: &str, ok: bool, err_msg: &str) -> Verdict {
     }
 }
 
+/// Classify a `mobile_click` (adb `input tap`) outcome into a verify-first
+/// verdict. Like the CSS-click and desktop-injection paths, an adb tap
+/// dispatches input with NO readback, so a successful tap is honestly Unknown —
+/// never Verified. A failed tap (no device, adb error, unmatched selector) is
+/// NotVerified — the anti-laundering signal (a tap that never landed on a device
+/// must never read as a green success).
+pub fn classify_mobile(ok: bool, err_msg: &str) -> Verdict {
+    if ok {
+        return Verdict {
+            status: VerdictStatus::Unknown,
+            method: "adb_tap_no_readback".to_string(),
+            evidence: json!({ "note": "adb input tap dispatched; effect not read back" }),
+        };
+    }
+    let lc = err_msg.to_ascii_lowercase();
+    let method = if lc.contains("device") || lc.contains("no android") {
+        "no_device"
+    } else {
+        "adb_tap_failed"
+    };
+    Verdict {
+        status: VerdictStatus::NotVerified,
+        method: method.to_string(),
+        evidence: json!({ "error": err_msg }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -441,5 +468,30 @@ mod tests {
     fn action_dry_run_failure_is_not_verified() {
         let v = classify_action("dry-run", false, "script crashed");
         assert_eq!(v.status, VerdictStatus::NotVerified);
+    }
+
+    #[test]
+    fn mobile_ok_is_unknown_never_faked_verified() {
+        // adb tap has no readback, so a dispatched tap is honestly Unknown.
+        let v = classify_mobile(true, "");
+        assert_eq!(v.status, VerdictStatus::Unknown);
+        assert_eq!(v.status.as_ok(), None);
+    }
+
+    #[test]
+    fn mobile_no_device_is_not_verified_not_green() {
+        // The falsifier: a tap with no device attached never landed — it MUST be
+        // not_verified, never a green success.
+        let v = classify_mobile(false, "no devices/emulators found");
+        assert_eq!(v.status, VerdictStatus::NotVerified);
+        assert_eq!(v.status.as_ok(), Some(false));
+        assert_eq!(v.method, "no_device");
+    }
+
+    #[test]
+    fn mobile_adb_failure_is_not_verified() {
+        let v = classify_mobile(false, "selector matched 0 node(s)");
+        assert_eq!(v.status, VerdictStatus::NotVerified);
+        assert_eq!(v.method, "adb_tap_failed");
     }
 }
