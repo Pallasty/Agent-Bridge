@@ -350,21 +350,13 @@ fn default_palace_orphan_approved_link_apply_path() -> PathBuf {
     if let Some(path) = std::env::var_os("AB_PALACE_ORPHAN_APPROVED_LINK_APPLY_AUDIT") {
         return PathBuf::from(path);
     }
-    palace_private_data_dir_path()
+    palace_private_home_dir_path()
         .join("palace-review")
         .join("orphan-approved-link-apply.jsonl")
 }
 
-fn palace_private_data_dir_path() -> PathBuf {
-    if let Ok(path) = std::env::var("XDG_DATA_HOME") {
-        if !path.trim().is_empty() {
-            return PathBuf::from(path).join("agent-bridge");
-        }
-    }
-    palace_home_dir()
-        .join(".local")
-        .join("share")
-        .join("agent-bridge")
+fn palace_private_home_dir_path() -> PathBuf {
+    palace_home_dir().join(".agent-bridge-private")
 }
 
 fn palace_home_dir() -> PathBuf {
@@ -4005,24 +3997,31 @@ mod tests {
     }
 
     #[test]
-    fn palace_orphan_approved_link_apply_audit_defaults_to_private_data_home() {
+    fn palace_orphan_approved_link_apply_audit_defaults_to_private_home_dir() {
         let _guard = ENV_LOCK.lock().expect("env lock");
-        let dir = tempfile::tempdir().expect("tempdir");
+        let home_dir = tempfile::tempdir().expect("home tempdir");
+        let xdg_dir = tempfile::tempdir().expect("xdg tempdir");
+        let old_home = std::env::var_os("HOME");
         let old_data_home = std::env::var_os("XDG_DATA_HOME");
         let old_review_dir = std::env::var_os("AB_PALACE_REVIEW_DIR");
         let old_apply_audit = std::env::var_os("AB_PALACE_ORPHAN_APPROVED_LINK_APPLY_AUDIT");
 
-        std::env::set_var("XDG_DATA_HOME", dir.path());
+        std::env::set_var("HOME", home_dir.path());
+        std::env::set_var("XDG_DATA_HOME", xdg_dir.path());
         std::env::remove_var("AB_PALACE_REVIEW_DIR");
         std::env::remove_var("AB_PALACE_ORPHAN_APPROVED_LINK_APPLY_AUDIT");
 
         let path = default_palace_orphan_approved_link_apply_path();
-        let expected = dir
+        let expected = home_dir
             .path()
-            .join("agent-bridge")
+            .join(".agent-bridge-private")
             .join("palace-review")
             .join("orphan-approved-link-apply.jsonl");
 
+        match old_home {
+            Some(value) => std::env::set_var("HOME", value),
+            None => std::env::remove_var("HOME"),
+        }
         match old_data_home {
             Some(value) => std::env::set_var("XDG_DATA_HOME", value),
             None => std::env::remove_var("XDG_DATA_HOME"),
