@@ -22581,12 +22581,12 @@ impl McpTool for EventSpineSnapshotTool {
                         "type": "integer",
                         "minimum": 1,
                         "maximum": 500,
-                        "default": 100,
-                        "description": "Maximum derived events to include after timestamp ordering."
+                        "default": 40,
+                        "description": "Maximum derived events to consider after timestamp ordering."
                     },
                     "include_events": {
                         "type": "boolean",
-                        "default": true,
+                        "default": false,
                         "description": "When false, omit event rows but keep counts and chain head."
                     }
                 }
@@ -22607,12 +22607,12 @@ impl McpTool for EventSpineSnapshotTool {
         let limit = args
             .get("limit")
             .and_then(|v| v.as_u64())
-            .unwrap_or(100)
+            .unwrap_or(40)
             .clamp(1, 500) as usize;
         let include_events = args
             .get("include_events")
             .and_then(|v| v.as_bool())
-            .unwrap_or(true);
+            .unwrap_or(false);
         let fetch_limit = limit.min(500) as u32;
 
         let calls = match store.recent_mcp_tool_calls(window_secs, fetch_limit).await {
@@ -22643,14 +22643,7 @@ impl McpTool for EventSpineSnapshotTool {
             limit,
             dispatch_now_secs(),
         );
-        let event_count = snapshot.event_count;
-        let mut payload = serde_json::to_value(&snapshot).unwrap_or_else(|_| json!({}));
-        if !include_events {
-            if let Some(obj) = payload.as_object_mut() {
-                obj.insert("events_omitted".to_string(), json!(event_count));
-                obj.insert("events".to_string(), json!([]));
-            }
-        }
+        let payload = crate::event_spine::project_event_spine_snapshot(&snapshot, include_events);
         Ok(ToolResult::json_text(&payload))
     }
 }
@@ -22719,8 +22712,8 @@ impl McpTool for ToolAtlasSnapshotTool {
                         "type": "integer",
                         "minimum": 1,
                         "maximum": 500,
-                        "default": 20,
-                        "description": "Maximum number of per-tool rows to include. Defaults to 20 to keep MCP output compact; summary counts still cover all tools."
+                        "default": 8,
+                        "description": "Maximum number of per-tool rows to include. Defaults to 8 to keep MCP output compact; summary counts still cover all tools."
                     },
                     "include_tools": {
                         "type": "boolean",
@@ -22745,7 +22738,7 @@ impl McpTool for ToolAtlasSnapshotTool {
         let limit = args
             .get("limit")
             .and_then(|v| v.as_u64())
-            .unwrap_or(20)
+            .unwrap_or(8)
             .clamp(1, 500) as usize;
         let include_tools = args
             .get("include_tools")
@@ -47704,12 +47697,30 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             .expect("mcp_dispatch_audit schema");
 
         assert!(atlas.input_schema["properties"].get("limit").is_some());
+        assert_eq!(
+            atlas.input_schema["properties"]["limit"]["default"],
+            json!(8)
+        );
         assert!(atlas.input_schema["properties"]
             .get("include_tools")
             .is_some());
         assert!(audit.input_schema["properties"]
             .get("include_tools")
             .is_none());
+    }
+
+    #[test]
+    fn event_spine_schema_defaults_to_summary_projection() {
+        let schema = EventSpineSnapshotTool::new(Hub::builder().build()).schema();
+
+        assert_eq!(
+            schema.input_schema["properties"]["limit"]["default"],
+            json!(40)
+        );
+        assert_eq!(
+            schema.input_schema["properties"]["include_events"]["default"],
+            json!(false)
+        );
     }
 
     #[test]

@@ -282,6 +282,18 @@ pub fn mcp_event_spine_snapshot(
     }
 }
 
+pub fn project_event_spine_snapshot(snapshot: &EventSpineSnapshot, include_events: bool) -> Value {
+    let event_count = snapshot.event_count;
+    let mut payload = serde_json::to_value(snapshot).unwrap_or_else(|_| json!({}));
+    if !include_events {
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert("events_omitted".to_string(), json!(event_count));
+            obj.insert("events".to_string(), json!([]));
+        }
+    }
+    payload
+}
+
 pub fn verify_event_chain(events: &[EventSpineEvent], expected_chain_head: &str) -> bool {
     let mut prev_hash = EVENT_SPINE_ZERO_HASH.to_string();
     for event in events {
@@ -460,6 +472,37 @@ mod tests {
             &snapshot.events,
             &snapshot.integrity.chain_head
         ));
+    }
+
+    #[test]
+    fn event_spine_projection_can_omit_events_but_keep_chain_summary() {
+        let snapshot = mcp_event_spine_snapshot(
+            &[
+                call(100, "memory_search", true),
+                call(102, "skills_route", true),
+            ],
+            &[error(
+                101,
+                "agent_spawn",
+                "spawn kilo: No such file or directory",
+            )],
+            &[],
+            &[],
+            60,
+            10,
+            120,
+        );
+
+        let payload = project_event_spine_snapshot(&snapshot, false);
+
+        assert_eq!(payload["event_count"], 3);
+        assert_eq!(payload["events_omitted"], 3);
+        assert_eq!(payload["events"].as_array().expect("events").len(), 0);
+        assert_eq!(
+            payload["integrity"]["chain_head"],
+            snapshot.integrity.chain_head
+        );
+        assert_eq!(payload["integrity"]["verified"], true);
     }
 
     #[test]

@@ -36,7 +36,7 @@ impl Default for ToolAtlasViewOptions {
     fn default() -> Self {
         Self {
             include_tools: true,
-            limit: 20,
+            limit: 8,
         }
     }
 }
