@@ -330,13 +330,7 @@ fn default_palace_review_dir_path() -> PathBuf {
     if let Some(path) = std::env::var_os("AB_PALACE_REVIEW_DIR") {
         return PathBuf::from(path);
     }
-    if FsPath::new("/Data").is_dir() {
-        return PathBuf::from("/Data/agent-bridge/palace-review");
-    }
-    palace_home_dir()
-        .join(".cache")
-        .join("agent-bridge")
-        .join("palace-review")
+    palace_private_home_dir_path().join("palace-review")
 }
 
 fn default_palace_orphan_candidate_decisions_path() -> PathBuf {
@@ -350,9 +344,7 @@ fn default_palace_orphan_approved_link_apply_path() -> PathBuf {
     if let Some(path) = std::env::var_os("AB_PALACE_ORPHAN_APPROVED_LINK_APPLY_AUDIT") {
         return PathBuf::from(path);
     }
-    palace_private_home_dir_path()
-        .join("palace-review")
-        .join("orphan-approved-link-apply.jsonl")
+    default_palace_review_dir_path().join("orphan-approved-link-apply.jsonl")
 }
 
 fn palace_private_home_dir_path() -> PathBuf {
@@ -416,6 +408,7 @@ fn load_palace_orphan_candidate_decisions(path: &FsPath) -> std::io::Result<Vec<
 fn append_palace_orphan_candidate_decision(path: &FsPath, value: &Value) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
+        set_palace_private_home_root_permissions_if_needed(parent)?;
         set_palace_private_dir_permissions(parent)?;
     }
     let mut file = std::fs::OpenOptions::new()
@@ -3795,6 +3788,96 @@ mod tests {
                 & 0o777;
             assert_eq!(file_mode, 0o600);
             assert_eq!(dir_mode, 0o700);
+        }
+    }
+
+    #[test]
+    fn palace_orphan_candidate_decisions_default_to_private_home_dir() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let home_dir = tempfile::tempdir().expect("home tempdir");
+        let old_home = std::env::var_os("HOME");
+        let old_review_dir = std::env::var_os("AB_PALACE_REVIEW_DIR");
+        let old_decisions = std::env::var_os("AB_PALACE_ORPHAN_CANDIDATE_DECISIONS");
+
+        std::env::set_var("HOME", home_dir.path());
+        std::env::remove_var("AB_PALACE_REVIEW_DIR");
+        std::env::remove_var("AB_PALACE_ORPHAN_CANDIDATE_DECISIONS");
+
+        let path = default_palace_orphan_candidate_decisions_path();
+        let expected = home_dir
+            .path()
+            .join(".agent-bridge-private")
+            .join("palace-review")
+            .join("orphan-candidate-decisions.jsonl");
+
+        match old_home {
+            Some(value) => std::env::set_var("HOME", value),
+            None => std::env::remove_var("HOME"),
+        }
+        match old_review_dir {
+            Some(value) => std::env::set_var("AB_PALACE_REVIEW_DIR", value),
+            None => std::env::remove_var("AB_PALACE_REVIEW_DIR"),
+        }
+        match old_decisions {
+            Some(value) => std::env::set_var("AB_PALACE_ORPHAN_CANDIDATE_DECISIONS", value),
+            None => std::env::remove_var("AB_PALACE_ORPHAN_CANDIDATE_DECISIONS"),
+        }
+
+        assert_eq!(path, expected);
+    }
+
+    #[test]
+    fn palace_orphan_candidate_decisions_set_private_home_root_permissions() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let home_dir = tempfile::tempdir().expect("home tempdir");
+        let old_home = std::env::var_os("HOME");
+        let old_decisions = std::env::var_os("AB_PALACE_ORPHAN_CANDIDATE_DECISIONS");
+
+        std::env::set_var("HOME", home_dir.path());
+        std::env::remove_var("AB_PALACE_ORPHAN_CANDIDATE_DECISIONS");
+
+        let path = default_palace_orphan_candidate_decisions_path();
+        let pair = PalaceOrphanCandidatePair {
+            orphan_key: "memory_orphan".to_string(),
+            candidate_key: "memory_anchor".to_string(),
+        };
+        let approve = palace_orphan_candidate_decision_record_for_time(
+            &pair,
+            "approve",
+            Some("alice"),
+            None,
+            30,
+        )
+        .expect("approve");
+        append_palace_orphan_candidate_decision(&path, &approve).expect("append decision");
+
+        match old_home {
+            Some(value) => std::env::set_var("HOME", value),
+            None => std::env::remove_var("HOME"),
+        }
+        match old_decisions {
+            Some(value) => std::env::set_var("AB_PALACE_ORPHAN_CANDIDATE_DECISIONS", value),
+            None => std::env::remove_var("AB_PALACE_ORPHAN_CANDIDATE_DECISIONS"),
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let private_root = home_dir.path().join(".agent-bridge-private");
+            let root_mode = std::fs::metadata(private_root)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            let review_mode = std::fs::metadata(path.parent().unwrap())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            let file_mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(root_mode, 0o700);
+            assert_eq!(review_mode, 0o700);
+            assert_eq!(file_mode, 0o600);
         }
     }
 
