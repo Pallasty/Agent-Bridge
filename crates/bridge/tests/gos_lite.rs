@@ -28,7 +28,7 @@ fn atlas_with_failure_and_latency() -> ToolAtlasSnapshot {
     build_tool_atlas_snapshot(ToolAtlasInput {
         generated_at: 1_781_450_000,
         window_secs: 86_400,
-        current_tools: vec!["memory_save".to_string()],
+        current_tools: vec!["browser_click".to_string(), "memory_save".to_string()],
         stats: vec![
             stat("browser_click", 4, 3, 32, 191.0),
             stat("memory_save", 4, 0, 2_586, 561.0),

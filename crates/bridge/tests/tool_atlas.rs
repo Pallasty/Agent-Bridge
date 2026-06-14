@@ -258,3 +258,67 @@ fn tool_atlas_treats_memory_save_missing_required_key_as_expected_input_validati
         .contains(&"expected_input_validation".to_string()));
     assert!(!memory_save.risk_flags.contains(&"has_errors".to_string()));
 }
+
+#[test]
+fn tool_atlas_treats_unexposed_browser_input_errors_as_historical() {
+    let snapshot = build_tool_atlas_snapshot(ToolAtlasInput {
+        generated_at: 1_779_910_000,
+        window_secs: 600,
+        current_tools: vec!["tool_atlas_snapshot".to_string()],
+        stats: vec![
+            stat("browser_click", 5, 3, 32, 187.0),
+            stat("browser_snapshot", 3, 1, 25, 850.0),
+        ],
+        recent_errors: vec![
+            McpToolErrorRecord {
+                ts: 1_779_909_990,
+                tool_name: "browser_click".to_string(),
+                message: "missing 'page'".to_string(),
+            },
+            McpToolErrorRecord {
+                ts: 1_779_909_991,
+                tool_name: "browser_click".to_string(),
+                message:
+                    "browser: invalid argument: ref @e2 element is disabled — click refused (it would no-op)"
+                        .to_string(),
+            },
+            McpToolErrorRecord {
+                ts: 1_779_909_992,
+                tool_name: "browser_snapshot".to_string(),
+                message: "missing 'page'".to_string(),
+            },
+        ],
+    });
+
+    assert_eq!(snapshot.summary.failing_tool_count, 0);
+
+    let browser_click = snapshot
+        .tools
+        .iter()
+        .find(|tool| tool.tool_name == "browser_click")
+        .expect("browser_click");
+    assert!(!browser_click.exposed);
+    assert_eq!(browser_click.error_count, 3);
+    assert_eq!(browser_click.health, "healthy");
+    assert_eq!(browser_click.recommendation, "keep");
+    assert!(browser_click
+        .risk_flags
+        .contains(&"historical_unexposed_failure".to_string()));
+    assert!(!browser_click.risk_flags.contains(&"has_errors".to_string()));
+
+    let browser_snapshot = snapshot
+        .tools
+        .iter()
+        .find(|tool| tool.tool_name == "browser_snapshot")
+        .expect("browser_snapshot");
+    assert!(!browser_snapshot.exposed);
+    assert_eq!(browser_snapshot.error_count, 1);
+    assert_eq!(browser_snapshot.health, "healthy");
+    assert_eq!(browser_snapshot.recommendation, "keep");
+    assert!(browser_snapshot
+        .risk_flags
+        .contains(&"historical_unexposed_failure".to_string()));
+    assert!(!browser_snapshot
+        .risk_flags
+        .contains(&"has_errors".to_string()));
+}

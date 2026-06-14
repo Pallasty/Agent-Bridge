@@ -206,7 +206,7 @@ fn atlas_entry(
     let max_duration_ms = stat.map(|s| s.max_duration_ms).unwrap_or(0);
     let avg_result_size = stat.map(|s| s.avg_result_size).unwrap_or(0.0);
     let usage_class = usage_class(call_count).to_string();
-    let expected_gate = expected_gate_flag(tool_name, &failure_samples);
+    let expected_gate = expected_gate_flag(tool_name, exposed, &failure_samples);
     let has_expected_gate = expected_gate.is_some();
     let actionable_error_count = if has_expected_gate { 0 } else { error_count };
     let risk_flags = risk_flags(
@@ -285,9 +285,20 @@ fn is_expected_wait_tool(tool_name: &str) -> bool {
     matches!(tool_name, "agent_session_wait")
 }
 
-fn expected_gate_flag(tool_name: &str, samples: &[ToolAtlasFailureSample]) -> Option<&'static str> {
+fn expected_gate_flag(
+    tool_name: &str,
+    exposed: bool,
+    samples: &[ToolAtlasFailureSample],
+) -> Option<&'static str> {
     if samples.is_empty() {
         return None;
+    }
+    if !exposed
+        && samples
+            .iter()
+            .all(|sample| is_historical_unexposed_browser_failure(tool_name, &sample.message))
+    {
+        return Some("historical_unexposed_failure");
     }
     if samples
         .iter()
@@ -327,6 +338,13 @@ fn is_expected_input_validation(tool_name: &str, message: &str) -> bool {
         )
 }
 
+fn is_historical_unexposed_browser_failure(tool_name: &str, message: &str) -> bool {
+    matches!(tool_name, "browser_click" | "browser_snapshot")
+        && (message == "missing 'page'"
+            || message.contains("click refused (it would no-op)")
+            || message.contains("element is disabled"))
+}
+
 fn has_actionable_risk_flags(risk_flags: &[String]) -> bool {
     risk_flags.iter().any(|flag| {
         !matches!(
@@ -335,6 +353,7 @@ fn has_actionable_risk_flags(risk_flags: &[String]) -> bool {
                 | "expected_confirmation"
                 | "expected_safety_gate"
                 | "expected_input_validation"
+                | "historical_unexposed_failure"
         )
     })
 }
