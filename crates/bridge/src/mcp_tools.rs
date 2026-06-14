@@ -8190,6 +8190,44 @@ impl McpTool for MobileLaunchAppTool {
     }
 }
 
+/// SSB Phase-1 typed event spine: emit a verify-first semantic event for a
+/// `mobile_click` (adb `input tap`) outcome AT ACTION TIME. Best-effort — a
+/// telemetry write must never fail the tap. adb tap has no readback, so a
+/// successful tap is Unknown; a failed / no-device tap is NotVerified (the
+/// anti-laundering signal). Same unified Object/Affordance descriptor vocabulary
+/// as the browser_click and desktop_action producers.
+async fn record_mobile_click_event(hub: &Hub, ok: bool, err_msg: &str, facts: Value) {
+    if let Some(store) = &hub.store {
+        let verdict = crate::semantic_event::classify_mobile(ok, err_msg);
+        let object = crate::semantic_event::SemanticObject {
+            object_type: "mobile_ui_node".to_string(),
+            source_adapter: "mobile".to_string(),
+            label: None,
+            object_id: None,
+        };
+        let affordance = crate::semantic_event::Affordance {
+            action_type: "tap".to_string(),
+            risk_level: "medium".to_string(),
+            requires_gate: false,
+            expected_effect: Some("tap the targeted node/coordinate on the device".to_string()),
+        };
+        let ev = crate::semantic_event::SemanticEvent {
+            ts: dispatch_now_secs(),
+            actor: "mcp".to_string(),
+            source: "mobile".to_string(),
+            action: "tap".to_string(),
+            target: None,
+            object,
+            affordance,
+            verdict,
+            facts,
+        };
+        if let Err(e) = store.record_semantic_event(ev.to_record()).await {
+            tracing::debug!(error = %e, "record_semantic_event (mobile_click) failed");
+        }
+    }
+}
+
 mobile_tool_struct!(MobileClickTool);
 #[async_trait]
 impl McpTool for MobileClickTool {
@@ -8223,7 +8261,13 @@ impl McpTool for MobileClickTool {
         let timeout_ms = mobile_timeout_ms(&args);
         let serial = match resolve_mobile_serial(&args, timeout_ms).await {
             Ok(s) => s,
-            Err(e) => return Ok(ToolResult::error(e)),
+            Err(e) => {
+                // Anti-laundering headline: a tap with no resolvable device never
+                // landed — record not_verified, never a green success.
+                record_mobile_click_event(&self.hub, false, &e, json!({ "stage": "resolve_serial" }))
+                    .await;
+                return Ok(ToolResult::error(e));
+            }
         };
         let explicit_x = args.get("x").and_then(|v| v.as_i64());
         let explicit_y = args.get("y").and_then(|v| v.as_i64());
@@ -8279,10 +8323,30 @@ impl McpTool for MobileClickTool {
         ];
         let out = match run_adb_command(Some(&serial), &cmd, timeout_ms).await {
             Ok(out) => out,
-            Err(e) => return Ok(ToolResult::error(e)),
+            Err(e) => {
+                record_mobile_click_event(
+                    &self.hub,
+                    false,
+                    &e,
+                    json!({ "stage": "adb_run", "tap": { "x": x, "y": y } }),
+                )
+                .await;
+                return Ok(ToolResult::error(e));
+            }
         };
+        // SSB Phase-1 typed event spine: stamp the verify-first verdict for the
+        // tap AT ACTION TIME — Unknown on a dispatched tap (no readback),
+        // NotVerified when adb reports the tap failed.
+        let tap_ok = out.ok();
+        record_mobile_click_event(
+            &self.hub,
+            tap_ok,
+            if tap_ok { "" } else { "adb input tap returned nonzero" },
+            json!({ "stage": "tap", "tap": { "x": x, "y": y } }),
+        )
+        .await;
         Ok(ToolResult::json_text(&json!({
-            "status": if out.ok() { "ok" } else { "error" },
+            "status": if tap_ok { "ok" } else { "error" },
             "serial": serial,
             "tap": { "x": x, "y": y },
             "selected_node": selected_node,
