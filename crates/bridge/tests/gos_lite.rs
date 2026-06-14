@@ -253,3 +253,38 @@ fn gos_lite_replay_report_flags_missing_support_as_falsifier_candidate() {
         .iter()
         .any(|note| note.contains("no event-level failure support")));
 }
+
+#[test]
+fn gos_lite_replay_report_supports_large_average_result_risk_flag() {
+    let atlas = build_tool_atlas_snapshot(ToolAtlasInput {
+        generated_at: 1_781_450_000,
+        window_secs: 86_400,
+        current_tools: vec!["tool_atlas_snapshot".to_string()],
+        stats: vec![stat("tool_atlas_snapshot", 4, 0, 38, 28_826.0)],
+        recent_errors: Vec::new(),
+    });
+    let snapshot = build_gos_lite_snapshot_from_tool_atlas(&atlas);
+    let spine = ab_bridge::event_spine::mcp_event_spine_snapshot(
+        &[call(1_781_448_518, "tool_atlas_snapshot", true, 38, 28_826)],
+        &[],
+        &[],
+        &[],
+        86_400,
+        50,
+        1_781_450_000,
+    );
+
+    let report = build_gos_lite_replay_report(&snapshot, &spine);
+
+    let payload_check = report
+        .checks
+        .iter()
+        .find(|check| {
+            check.hypothesis_id == "hypothesis:tool:tool_atlas_snapshot:latency_or_size_degradation"
+        })
+        .expect("tool_atlas_snapshot degradation check");
+    assert_eq!(payload_check.verdict, "supported");
+    assert_eq!(payload_check.review_action, "review_support");
+    assert_eq!(payload_check.supporting_event_ids.len(), 1);
+    assert!(payload_check.refuting_event_ids.is_empty());
+}

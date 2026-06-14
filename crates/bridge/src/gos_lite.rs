@@ -396,7 +396,7 @@ fn event_supports_hypothesis(
             event.kind == "tool_call"
                 && ((has_risk_flag(hypothesis, "slow_p95")
                     && event.facts["duration_ms"].as_u64().unwrap_or(0) >= SLOW_P95_MS)
-                    || (has_risk_flag(hypothesis, "large_result")
+                    || (has_large_result_risk_flag(hypothesis)
                         && event.facts["result_size"].as_u64().unwrap_or(0) >= LARGE_RESULT_SIZE))
         }
         _ => false,
@@ -414,7 +414,7 @@ fn event_refutes_hypothesis(
             event.kind == "tool_call"
                 && (!has_risk_flag(hypothesis, "slow_p95")
                     || event.facts["duration_ms"].as_u64().unwrap_or(0) < SLOW_P95_MS)
-                && (!has_risk_flag(hypothesis, "large_result")
+                && (!has_large_result_risk_flag(hypothesis)
                     || event.facts["result_size"].as_u64().unwrap_or(0) < LARGE_RESULT_SIZE)
         }
         _ => false,
@@ -426,6 +426,10 @@ fn has_risk_flag(hypothesis: &GosLiteNode, flag: &str) -> bool {
         .as_array()
         .map(|flags| flags.iter().any(|value| value.as_str() == Some(flag)))
         .unwrap_or(false)
+}
+
+fn has_large_result_risk_flag(hypothesis: &GosLiteNode) -> bool {
+    has_risk_flag(hypothesis, "large_average_result") || has_risk_flag(hypothesis, "large_result")
 }
 
 fn gos_lite_human_gate_packet(snapshot: &GosLiteSnapshot) -> Value {
