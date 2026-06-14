@@ -102,6 +102,15 @@ pub fn mcp_event_spine_snapshot(
             .unwrap_or(Value::Null);
         let facts: Value =
             serde_json::from_str(&ev.facts).unwrap_or_else(|_| json!({ "raw": ev.facts }));
+        // SSB unified contract: surface the normalized Object/Affordance descriptor
+        // so consumers of event_spine_snapshot read the same typed shape every
+        // producer emits — not just the adapter-specific `facts`. Null for legacy
+        // rows / producers that have not adopted the contract.
+        let descriptor: Value = ev
+            .descriptor
+            .as_deref()
+            .and_then(|s| serde_json::from_str(s).ok())
+            .unwrap_or(Value::Null);
         raw.push(RawEvent {
             ts: ev.ts,
             source: "semantic_events",
@@ -120,6 +129,7 @@ pub fn mcp_event_spine_snapshot(
                 "verdict_status": ev.verdict_status,
                 "verdict_method": ev.verdict_method,
                 "evidence": evidence,
+                "descriptor": descriptor,
                 "facts": facts,
             }),
         });
@@ -556,7 +566,12 @@ mod tests {
             verdict_method: "test".to_string(),
             evidence: None,
             facts: "{\"selector\":\"@e5\"}".to_string(),
-            descriptor: None,
+            descriptor: Some(
+                "{\"object\":{\"object_type\":\"dom_element\",\"source_adapter\":\"browser\",\
+                 \"label\":null,\"object_id\":\"@e5\"},\"affordance\":{\"action_type\":\"click\",\
+                 \"risk_level\":\"low\",\"requires_gate\":false,\"expected_effect\":null}}"
+                    .to_string(),
+            ),
         }
     }
 
@@ -591,6 +606,15 @@ mod tests {
         assert_eq!(sem_events[2].ok, None);
         assert_eq!(sem_events[0].kind, "semantic_event");
         assert_eq!(sem_events[1].facts["verdict_status"], "not_verified");
+        // SSB unified contract surfaces through the read projection (not just stored).
+        assert_eq!(
+            sem_events[0].facts["descriptor"]["object"]["object_type"],
+            "dom_element"
+        );
+        assert_eq!(
+            sem_events[0].facts["descriptor"]["affordance"]["action_type"],
+            "click"
+        );
         // The produced events are part of the verified hash chain.
         assert!(snapshot.integrity.verified);
         assert!(verify_event_chain(
