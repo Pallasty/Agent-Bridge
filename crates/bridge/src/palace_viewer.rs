@@ -489,6 +489,7 @@ fn append_palace_orphan_approved_link_apply_record(
 ) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
+        set_palace_private_home_root_permissions_if_needed(parent)?;
         set_palace_private_dir_permissions(parent)?;
     }
     let mut file = std::fs::OpenOptions::new()
@@ -499,6 +500,14 @@ fn append_palace_orphan_approved_link_apply_record(
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
     writeln!(file, "{line}")?;
     set_palace_private_file_permissions(path)?;
+    Ok(())
+}
+
+fn set_palace_private_home_root_permissions_if_needed(path: &FsPath) -> std::io::Result<()> {
+    let private_root = palace_private_home_dir_path();
+    if path.starts_with(&private_root) && private_root.is_dir() {
+        set_palace_private_dir_permissions(&private_root)?;
+    }
     Ok(())
 }
 
@@ -4036,6 +4045,59 @@ mod tests {
         }
 
         assert_eq!(path, expected);
+    }
+
+    #[test]
+    fn palace_orphan_approved_link_apply_audit_sets_private_home_root_permissions() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let home_dir = tempfile::tempdir().expect("home tempdir");
+        let old_home = std::env::var_os("HOME");
+        let old_apply_audit = std::env::var_os("AB_PALACE_ORPHAN_APPROVED_LINK_APPLY_AUDIT");
+
+        std::env::set_var("HOME", home_dir.path());
+        std::env::remove_var("AB_PALACE_ORPHAN_APPROVED_LINK_APPLY_AUDIT");
+
+        let path = default_palace_orphan_approved_link_apply_path();
+        let record = palace_orphan_approved_link_apply_record_for_time(
+            &json!({
+                "schema": "agent_bridge.palace.orphan_approved_link_apply.v0",
+                "status": "dry_run",
+                "blocked": false,
+                "dry_run": true,
+            }),
+            Some("palace"),
+            30,
+        );
+        append_palace_orphan_approved_link_apply_record(&path, &record).expect("append audit");
+
+        match old_home {
+            Some(value) => std::env::set_var("HOME", value),
+            None => std::env::remove_var("HOME"),
+        }
+        match old_apply_audit {
+            Some(value) => std::env::set_var("AB_PALACE_ORPHAN_APPROVED_LINK_APPLY_AUDIT", value),
+            None => std::env::remove_var("AB_PALACE_ORPHAN_APPROVED_LINK_APPLY_AUDIT"),
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let private_root = home_dir.path().join(".agent-bridge-private");
+            let root_mode = std::fs::metadata(private_root)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            let review_mode = std::fs::metadata(path.parent().unwrap())
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            let file_mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(root_mode, 0o700);
+            assert_eq!(review_mode, 0o700);
+            assert_eq!(file_mode, 0o600);
+        }
     }
 
     #[test]
