@@ -8,6 +8,7 @@
 use crate::tool_atlas::{ToolAtlasEntry, ToolAtlasSnapshot};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::HashSet;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct GosLiteSnapshot {
@@ -49,6 +50,21 @@ pub struct GosLiteEdge {
     pub edge_type: String,
     pub confidence: f64,
     pub attrs: Value,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GosLiteViewOptions {
+    pub include_graph: bool,
+    pub limit: usize,
+}
+
+impl Default for GosLiteViewOptions {
+    fn default() -> Self {
+        Self {
+            include_graph: true,
+            limit: 100,
+        }
+    }
 }
 
 pub fn build_gos_lite_snapshot_from_tool_atlas(atlas: &ToolAtlasSnapshot) -> GosLiteSnapshot {
@@ -130,6 +146,83 @@ pub fn build_gos_lite_snapshot_from_tool_atlas(atlas: &ToolAtlasSnapshot) -> Gos
         nodes,
         edges,
     }
+}
+
+pub fn project_gos_lite_snapshot(snapshot: &GosLiteSnapshot, options: GosLiteViewOptions) -> Value {
+    let limit = options.limit.clamp(1, 500);
+    let nodes_total = snapshot.nodes.len();
+    let edges_total = snapshot.edges.len();
+    let nodes_included = if options.include_graph {
+        nodes_total.min(limit)
+    } else {
+        0
+    };
+    let included_node_ids = snapshot.nodes[..nodes_included]
+        .iter()
+        .map(|node| node.id.as_str())
+        .collect::<HashSet<_>>();
+    let included_edges = if options.include_graph {
+        snapshot
+            .edges
+            .iter()
+            .filter(|edge| {
+                included_node_ids.contains(edge.src.as_str())
+                    && included_node_ids.contains(edge.dst.as_str())
+            })
+            .cloned()
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    let edges_included = included_edges.len();
+
+    let mut payload = serde_json::to_value(snapshot).unwrap_or_else(|_| json!({}));
+    if let Some(obj) = payload.as_object_mut() {
+        obj.insert(
+            "nodes".to_string(),
+            serde_json::to_value(&snapshot.nodes[..nodes_included]).unwrap_or_else(|_| json!([])),
+        );
+        obj.insert(
+            "edges".to_string(),
+            serde_json::to_value(&included_edges).unwrap_or_else(|_| json!([])),
+        );
+        obj.insert("nodes_total".to_string(), json!(nodes_total));
+        obj.insert("nodes_included".to_string(), json!(nodes_included));
+        obj.insert(
+            "nodes_omitted".to_string(),
+            json!(nodes_total.saturating_sub(nodes_included)),
+        );
+        obj.insert("edges_total".to_string(), json!(edges_total));
+        obj.insert("edges_included".to_string(), json!(edges_included));
+        obj.insert(
+            "edges_omitted".to_string(),
+            json!(edges_total.saturating_sub(edges_included)),
+        );
+        obj.insert(
+            "graph_limit".to_string(),
+            json!(if options.include_graph { limit } else { 0 }),
+        );
+        obj.insert("graph_included".to_string(), json!(options.include_graph));
+        obj.insert(
+            "human_gate".to_string(),
+            json!({
+                "required": true,
+                "promotion_allowed": false,
+                "promotion_policy": "Human reviewer must inspect supporting and refuting evidence before promoting GoS-lite hypotheses into decisions or write-capable actions.",
+                "forum": {
+                    "board": "design",
+                    "kind": "finding",
+                    "title": "Review GoS-lite diagnostic hypotheses before action",
+                },
+                "review_questions": [
+                    "Does every hypothesis have grounded support evidence?",
+                    "Is there missing refuting evidence or an alternate explanation?",
+                    "Should this remain a finding rather than a decision?",
+                ],
+            }),
+        );
+    }
+    payload
 }
 
 fn add_failing_tool_projection(

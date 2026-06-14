@@ -22825,6 +22825,18 @@ impl McpTool for GosLiteSnapshotTool {
                         "type": "string",
                         "enum": ["desktop", "cli", "ide", "legacy"],
                         "description": "Optional AGENT_BRIDGE_CODEX_HOST filter for Codex desktop/CLI/IDE slices."
+                    },
+                    "include_graph": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "When false, omit nodes and edges while keeping counts, summary, and the human review gate."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 100,
+                        "description": "Maximum graph nodes to include when include_graph=true. Edges are kept only when both endpoints are included."
                     }
                 }
             }),
@@ -22841,6 +22853,15 @@ impl McpTool for GosLiteSnapshotTool {
             .and_then(|v| v.as_i64())
             .unwrap_or(86_400)
             .clamp(60, 31_536_000);
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(100)
+            .clamp(1, 500) as usize;
+        let include_graph = args
+            .get("include_graph")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
         let filter = dispatch_filter_from_args(&args);
         let current_tools: Vec<String> = build_registry(self.hub.clone())
             .list()
@@ -22875,7 +22896,13 @@ impl McpTool for GosLiteSnapshotTool {
                 recent_errors,
             });
         let snapshot = crate::gos_lite::build_gos_lite_snapshot_from_tool_atlas(&atlas);
-        let mut payload = serde_json::to_value(&snapshot).unwrap_or_else(|_| json!({}));
+        let mut payload = crate::gos_lite::project_gos_lite_snapshot(
+            &snapshot,
+            crate::gos_lite::GosLiteViewOptions {
+                include_graph,
+                limit,
+            },
+        );
         if let Some(obj) = payload.as_object_mut() {
             obj.insert("filter".to_string(), dispatch_filter_json(&filter));
             obj.insert(
@@ -44950,6 +44977,52 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             .map(|s| s.name)
             .collect();
         assert!(!lean_names.iter().any(|n| n == "gos_lite_snapshot"));
+    }
+
+    #[test]
+    fn gos_lite_snapshot_schema_exposes_compact_human_gated_projection() {
+        let schema = GosLiteSnapshotTool::new(Hub::builder().build()).schema();
+
+        assert!(schema.description.contains("Read-only"));
+        assert!(schema.description.contains("does not call"));
+        assert_eq!(
+            schema.input_schema["properties"]["include_graph"]["type"],
+            "boolean"
+        );
+        assert_eq!(
+            schema.input_schema["properties"]["limit"]["maximum"],
+            json!(500)
+        );
+        assert!(schema.input_schema["properties"].get("mutate").is_none());
+    }
+
+    #[tokio::test]
+    async fn gos_lite_snapshot_tool_returns_human_gate_packet_and_can_omit_graph() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let tool = GosLiteSnapshotTool::new(hub);
+
+        let out = tool
+            .execute(
+                json!({"include_graph": false, "limit": 2}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(payload["graph_included"], false);
+        assert_eq!(payload["graph_limit"], 0);
+        assert_eq!(payload["nodes"], json!([]));
+        assert_eq!(payload["edges"], json!([]));
+        assert_eq!(payload["human_gate"]["required"], true);
+        assert_eq!(payload["human_gate"]["forum"]["board"], "design");
+        assert_eq!(payload["human_gate"]["promotion_allowed"], false);
+        assert!(payload["note"]
+            .as_str()
+            .expect("note")
+            .contains("Read-only GoS-lite"));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
     #[test]

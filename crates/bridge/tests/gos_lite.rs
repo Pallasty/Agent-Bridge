@@ -1,4 +1,6 @@
-use ab_bridge::gos_lite::build_gos_lite_snapshot_from_tool_atlas;
+use ab_bridge::gos_lite::{
+    build_gos_lite_snapshot_from_tool_atlas, project_gos_lite_snapshot, GosLiteViewOptions,
+};
 use ab_bridge::tool_atlas::{
     build_tool_atlas_snapshot, ToolAtlasFailureSample, ToolAtlasInput, ToolAtlasSnapshot,
 };
@@ -112,4 +114,26 @@ fn gos_lite_uses_risk_flags_as_degradation_evidence_without_fabricating_failures
         .iter()
         .collect();
     assert!(fabricated_memory_failures.is_empty());
+}
+
+#[test]
+fn gos_lite_projection_includes_forum_backed_human_gate_packet() {
+    let atlas = atlas_with_failure_and_latency();
+    let snapshot = build_gos_lite_snapshot_from_tool_atlas(&atlas);
+
+    let payload = project_gos_lite_snapshot(&snapshot, GosLiteViewOptions::default());
+
+    assert_eq!(payload["human_gate"]["required"], true);
+    assert_eq!(payload["human_gate"]["forum"]["board"], "design");
+    assert_eq!(payload["human_gate"]["forum"]["kind"], "finding");
+    assert_eq!(payload["human_gate"]["promotion_allowed"], false);
+    assert!(payload["human_gate"]["promotion_policy"]
+        .as_str()
+        .expect("promotion policy")
+        .contains("Human reviewer"));
+    assert!(payload["human_gate"]["review_questions"]
+        .as_array()
+        .expect("review questions")
+        .iter()
+        .any(|q| q.as_str().unwrap_or("").contains("support")));
 }
