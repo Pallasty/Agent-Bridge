@@ -6067,12 +6067,33 @@ async fn record_desktop_action_event(
 ) {
     if let Some(store) = &hub.store {
         let verdict = crate::semantic_event::classify_action(mode, ok, err_msg);
+        // SSB unified contract: same Object/Affordance vocabulary as browser_click.
+        // Risk tracks how close the mode gets to real host mutation.
+        let risk_level = match mode {
+            "dry-run" => "low",
+            "isolated" => "medium",
+            _ => "high", // host-grant / pending-host-confirm / refused
+        };
+        let object = crate::semantic_event::SemanticObject {
+            object_type: "desktop_input_surface".to_string(),
+            source_adapter: "desktop".to_string(),
+            label: None,
+            object_id: None,
+        };
+        let affordance = crate::semantic_event::Affordance {
+            action_type: action.to_string(),
+            risk_level: risk_level.to_string(),
+            requires_gate: true,
+            expected_effect: Some(format!("inject {action} into the {mode} target")),
+        };
         let ev = crate::semantic_event::SemanticEvent {
             ts: dispatch_now_secs(),
             actor: "mcp".to_string(),
             source: "desktop".to_string(),
             action: action.to_string(),
             target: None,
+            object,
+            affordance,
             verdict,
             facts,
         };
@@ -11388,12 +11409,27 @@ impl McpTool for BrowserClickTool {
         };
         if let Some(store) = &self.hub.store {
             let verdict = crate::semantic_event::classify_click(is_ref, ok, &err_msg);
+            // SSB unified contract: same Object/Affordance vocabulary as desktop_action.
+            let object = crate::semantic_event::SemanticObject {
+                object_type: "dom_element".to_string(),
+                source_adapter: "browser".to_string(),
+                label: None,
+                object_id: Some(sel.to_string()),
+            };
+            let affordance = crate::semantic_event::Affordance {
+                action_type: "click".to_string(),
+                risk_level: "low".to_string(),
+                requires_gate: false,
+                expected_effect: Some("the targeted DOM element receives a click".to_string()),
+            };
             let ev = crate::semantic_event::SemanticEvent {
                 ts: dispatch_now_secs(),
                 actor: "mcp".to_string(),
                 source: "browser".to_string(),
                 action: "click".to_string(),
                 target: Some(sel.to_string()),
+                object,
+                affordance,
                 verdict,
                 facts: json!({ "selector": sel, "is_ref": is_ref, "page": page.as_str() }),
             };

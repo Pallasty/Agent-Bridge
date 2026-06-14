@@ -60,7 +60,38 @@ pub struct Verdict {
     pub evidence: Value,
 }
 
-/// A produced semantic event ready to persist.
+/// SSB unified contract — the semantic OBJECT an action targets (roadmap §3.1,
+/// minimal producer-known subset). Every producer fills this with the same
+/// vocabulary so browser / desktop / … events share one shape.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SemanticObject {
+    /// Normalized kind, e.g. "dom_element", "desktop_input_surface".
+    pub object_type: String,
+    /// Which adapter observed/owns it, e.g. "browser", "desktop".
+    pub source_adapter: String,
+    /// Human-readable label when known.
+    pub label: Option<String>,
+    /// Stable reference when the adapter has one (e.g. "@e5"); None for
+    /// coordinate/key surfaces with no resolved element.
+    pub object_id: Option<String>,
+}
+
+/// SSB unified contract — the AFFORDANCE (available action) exercised
+/// (roadmap §3.2, minimal producer-known subset).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Affordance {
+    /// Action verb, e.g. "click", "type", "key".
+    pub action_type: String,
+    /// "low" | "medium" | "high".
+    pub risk_level: String,
+    /// Whether the surface gates this action (host injection, etc.).
+    pub requires_gate: bool,
+    /// What the action is expected to do, when known.
+    pub expected_effect: Option<String>,
+}
+
+/// A produced semantic event ready to persist. Field order follows the canonical
+/// loop `Object → Affordance → Action → Event → Verification`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SemanticEvent {
     pub ts: i64,
@@ -68,6 +99,8 @@ pub struct SemanticEvent {
     pub source: String,
     pub action: String,
     pub target: Option<String>,
+    pub object: SemanticObject,
+    pub affordance: Affordance,
     pub verdict: Verdict,
     pub facts: Value,
 }
@@ -80,6 +113,19 @@ impl SemanticEvent {
         } else {
             Some(self.verdict.evidence.to_string())
         };
+        // SSB unified contract: serialize the normalized Object + Affordance into
+        // the dedicated `descriptor` column (kept distinct from adapter-specific
+        // `facts`). Built explicitly so a serialization slip can never panic.
+        let descriptor = {
+            let mut d = serde_json::Map::new();
+            if let Ok(o) = serde_json::to_value(&self.object) {
+                d.insert("object".to_string(), o);
+            }
+            if let Ok(a) = serde_json::to_value(&self.affordance) {
+                d.insert("affordance".to_string(), a);
+            }
+            serde_json::to_string(&Value::Object(d)).ok()
+        };
         SemanticEventRecord {
             ts: self.ts,
             actor: self.actor.clone(),
@@ -90,6 +136,7 @@ impl SemanticEvent {
             verdict_method: self.verdict.method.clone(),
             evidence,
             facts: self.facts.to_string(),
+            descriptor,
         }
     }
 }
@@ -288,26 +335,57 @@ mod tests {
         assert_eq!(v.status, VerdictStatus::NotVerified);
     }
 
-    #[test]
-    fn to_record_serializes_verdict_and_drops_null_evidence() {
-        let ev = SemanticEvent {
+    fn sample_event() -> SemanticEvent {
+        SemanticEvent {
             ts: 100,
             actor: "mcp".to_string(),
             source: "browser".to_string(),
             action: "click".to_string(),
             target: Some("@e5".to_string()),
+            object: SemanticObject {
+                object_type: "dom_element".to_string(),
+                source_adapter: "browser".to_string(),
+                label: None,
+                object_id: Some("@e5".to_string()),
+            },
+            affordance: Affordance {
+                action_type: "click".to_string(),
+                risk_level: "low".to_string(),
+                requires_gate: false,
+                expected_effect: Some("the targeted DOM element receives a click".to_string()),
+            },
             verdict: Verdict {
                 status: VerdictStatus::Verified,
                 method: "m".to_string(),
                 evidence: Value::Null,
             },
             facts: json!({"selector": "@e5"}),
-        };
-        let rec = ev.to_record();
+        }
+    }
+
+    #[test]
+    fn to_record_serializes_verdict_and_drops_null_evidence() {
+        let rec = sample_event().to_record();
         assert_eq!(rec.verdict_status, "verified");
         assert_eq!(rec.target.as_deref(), Some("@e5"));
         assert!(rec.evidence.is_none());
         assert!(rec.facts.contains("@e5"));
+    }
+
+    #[test]
+    fn to_record_emits_unified_object_affordance_descriptor() {
+        let rec = sample_event().to_record();
+        let d = rec.descriptor.expect("descriptor present");
+        let v: Value = serde_json::from_str(&d).expect("descriptor is valid JSON");
+        // The unified contract shape both producers must share.
+        assert_eq!(v["object"]["object_type"], "dom_element");
+        assert_eq!(v["object"]["source_adapter"], "browser");
+        assert_eq!(v["object"]["object_id"], "@e5");
+        assert_eq!(v["affordance"]["action_type"], "click");
+        assert_eq!(v["affordance"]["risk_level"], "low");
+        assert_eq!(v["affordance"]["requires_gate"], false);
+        // descriptor is the contract; facts stays adapter-specific.
+        assert!(rec.facts.contains("selector"));
     }
 
     #[test]

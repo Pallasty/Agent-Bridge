@@ -556,6 +556,7 @@ mod tests {
             verdict_method: "test".to_string(),
             evidence: None,
             facts: "{\"selector\":\"@e5\"}".to_string(),
+            descriptor: None,
         }
     }
 

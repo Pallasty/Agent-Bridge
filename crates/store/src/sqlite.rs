@@ -1379,6 +1379,31 @@ impl SqliteStore {
                 c.execute_batch(SCHEMA_V34)?;
                 let _ = c.execute("UPDATE schema_meta SET value='34' WHERE key='version'", []);
             }
+
+            // ── v35: SSB unified Object/Affordance contract — add the normalized
+            // `descriptor` column to semantic_events (roadmap §3.1/§3.2). Additive +
+            // idempotent (guarded by a pragma_table_info existence check).
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "34".to_string());
+            if cur.as_str() == "34" {
+                let col_exists: i64 = c
+                    .query_row(
+                        "SELECT COUNT(*) FROM pragma_table_info('semantic_events') \
+                         WHERE name='descriptor'",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .unwrap_or(0);
+                if col_exists == 0 {
+                    c.execute("ALTER TABLE semantic_events ADD COLUMN descriptor TEXT", [])?;
+                }
+                let _ = c.execute("UPDATE schema_meta SET value='35' WHERE key='version'", []);
+            }
             Ok(())
         })
         .await
@@ -2389,8 +2414,8 @@ impl StateStore for SqliteStore {
                 c.execute(
                     "INSERT INTO semantic_events
                        (ts, actor, source, action, target, verdict_status,
-                        verdict_method, evidence, facts)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                        verdict_method, evidence, facts, descriptor)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
                     params![
                         event.ts,
                         event.actor,
@@ -2401,6 +2426,7 @@ impl StateStore for SqliteStore {
                         event.verdict_method,
                         event.evidence,
                         event.facts,
+                        event.descriptor,
                     ],
                 )?;
                 // FIFO ring cap so the producer log stays bounded.
@@ -2429,7 +2455,7 @@ impl StateStore for SqliteStore {
                 move |c| -> RusqliteResult<Vec<crate::SemanticEventRecord>> {
                     let mut stmt = c.prepare(
                         "SELECT ts, actor, source, action, target, verdict_status,
-                            verdict_method, evidence, facts
+                            verdict_method, evidence, facts, descriptor
                        FROM semantic_events
                       WHERE ts >= ?1
                       ORDER BY ts DESC, id DESC LIMIT ?2",
@@ -2446,6 +2472,7 @@ impl StateStore for SqliteStore {
                                 verdict_method: row.get(6)?,
                                 evidence: row.get(7)?,
                                 facts: row.get(8)?,
+                                descriptor: row.get(9)?,
                             })
                         })?
                         .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -14792,7 +14819,7 @@ mod tests {
             .await
             .expect("inspect migrated rows");
 
-        assert_eq!(version, "34"); // v34 = semantic_events (SSB Phase 1); latest after all migrations
+        assert_eq!(version, "35"); // v35 = semantic_events.descriptor (SSB unified Object/Affordance contract); latest after all migrations
         assert_eq!(bad_count, 0);
         assert_eq!(mem_created, 1_779_641_229_i64);
         assert_eq!(post_created, 1_779_641_229_i64);
@@ -18931,7 +18958,7 @@ mod tests {
         let v = store.schema_meta_version().await.expect("query");
         assert_eq!(
             v.as_deref(),
-            Some("34"),
+            Some("35"),
             "if schema bumped, update both this assertion and S5 docs"
         );
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;

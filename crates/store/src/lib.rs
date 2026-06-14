@@ -158,6 +158,11 @@ pub struct SemanticEventRecord {
     pub evidence: Option<String>,
     /// JSON facts string.
     pub facts: String,
+    /// SSB unified contract: normalized `{"object":…,"affordance":…}` descriptor
+    /// (roadmap §3.1/§3.2), emitted with the same vocabulary by every producer.
+    /// Distinct from `facts` (adapter-specific extras). None for legacy rows /
+    /// producers that have not adopted the contract yet.
+    pub descriptor: Option<String>,
 }
 
 /// Max rows retained in `mcp_tool_errors` after each insert (oldest pruned).
