@@ -1,7 +1,7 @@
 {
   "schema": "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0",
   "created_at": "2026-06-11T00:00:00Z",
-  "status": "post_runtime_multi_case_live_candidate_evidence_ready",
+  "status": "post_runtime_semantic_diverse_live_candidate_evidence_ready",
   "approval_state": "opt_in_implementation_authorized",
   "runtime_adapter_approved": false,
   "default_search_order_change_allowed": false,
@@ -245,7 +245,9 @@
     "hybrid_retrieval_unchanged": true,
     "semantic_retrieval_unchanged": true,
     "raw_probe_query_or_key_leak_check": "passed",
-    "next_step": "expand_semantically_diverse_non_production_live_candidate_corpus"
+    "next_step": "completed_by_semantic_diverse_live_candidate_corpus",
+    "completed_by": "post_runtime_semantic_diverse_live_candidate_corpus",
+    "next_step_completed": true
   },
   "requested_human_authorization_scope": "opt_in_experiment",
   "requested_default_influence_scope": "none",
@@ -1106,5 +1108,35 @@
     ],
     "requires_separate_human_decision_before_implementation": false,
     "requires_post_implementation_review_before_ordering_use": true
-  }
+  },
+  "post_runtime_semantic_diverse_live_candidate_corpus_recorded": true,
+  "post_runtime_semantic_diverse_live_candidate_evidence_ready": true,
+  "post_runtime_semantic_diverse_live_candidate_corpus": {
+    "doc": "docs/design/BIOCORTEX_RETRIEVAL_POST_RUNTIME_SEMANTIC_DIVERSE_LIVE_CANDIDATE_2026_06_14.md",
+    "corpus_fixture": "docs/design/fixtures/biocortex-retrieval-post-runtime-semantic-diverse-live-candidate-corpus-2026-06-14.json",
+    "summary_fixture": "docs/design/fixtures/biocortex-retrieval-post-runtime-semantic-diverse-live-candidate-2026-06-14.json",
+    "source_runner": "scripts/run-biocortex-post-runtime-semantic-diverse-live-candidate-corpus.sh",
+    "single_fixture_runner": "scripts/run-biocortex-post-runtime-live-candidate.sh",
+    "artifact_dir": "target/biocortex-post-runtime-semantic-diverse-live-candidate-20260614",
+    "authorization_scope": "explicit_opt_in_fts_runtime_influence",
+    "runner_status": "post_runtime_semantic_diverse_live_candidate_evidence_ready",
+    "expected_met": true,
+    "fixture_count": 4,
+    "total_query_count": 8,
+    "total_baseline_empty_count": 0,
+    "total_runs_biocortex_count": 8,
+    "total_side_signal_ok_count": 8,
+    "total_experimental_source_count": 8,
+    "total_actual_order_changed_count": 8,
+    "all_cases_evidence_ready": true,
+    "all_status_surfaces_blocked": true,
+    "all_status_surfaces_side_effect_free": true,
+    "default_search_order_change_allowed": false,
+    "default_memory_search_unchanged": true,
+    "hybrid_retrieval_unchanged": true,
+    "semantic_retrieval_unchanged": true,
+    "raw_probe_query_or_key_leak_check": "passed",
+    "next_step": "handoff_to_aio2_for_post_semantic_diverse_review"
+  },
+  "next_step": "handoff_to_aio2_for_post_semantic_diverse_review"
 }

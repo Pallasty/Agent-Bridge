@@ -1,0 +1,58 @@
+{
+  "schema": "agent_bridge.biocortex_retrieval.opt_in_controlled_order_fixture.v0",
+  "read_only": false,
+  "purpose": "Semantic-temporal non-production fixture for proving that an independent candidate pair can move protected explicit opt-in FTS order through the post-runtime BioCortex live-candidate runner.",
+  "safety_boundary": {
+    "requires_agent_bridge_db_override": true,
+    "requires_non_production_store_write_ack": true,
+    "writes_only_fixture_memories": true,
+    "writes_approval": false,
+    "registers_embedding_backend": false,
+    "raw_queries_are_fixture_inputs": true,
+    "raw_queries_must_not_be_returned_by_runner": true,
+    "raw_keys_must_not_be_returned_by_runner": true,
+    "content_must_not_be_returned_by_runner": true,
+    "side_signal_raw_must_not_be_returned_by_runner": true,
+    "default_search_order_change_allowed": false,
+    "default_calls_unchanged": true
+  },
+  "memory_records": [
+    {
+      "key": "semantic_temporal_baseline_high",
+      "kind": "fact",
+      "importance": 1.0,
+      "tags": [
+        "biocortex_semantic_diverse_live_fixture",
+        "semantic_temporal"
+      ],
+      "content": "temporalalpha temporalalpha temporalalpha temporalalpha temporalalpha baseline anchor"
+    },
+    {
+      "key": "semantic_temporal_biocortex_target",
+      "kind": "fact",
+      "importance": 0.0,
+      "tags": [
+        "biocortex_semantic_diverse_live_fixture",
+        "semantic_temporal"
+      ],
+      "content": "temporalalpha temporalbeta temporalgamma temporaldelta temporalepsilon temporalzeta target anchor"
+    }
+  ],
+  "query_cases": [
+    {
+      "query": "temporalalpha OR temporalbeta OR temporalgamma OR temporaldelta OR temporalepsilon OR temporalzeta",
+      "class_label": "semantic_temporal_movement_base",
+      "diagnostic_focus": "temporal_candidate_pair_baseline_importance_vs_biocortex_coverage"
+    },
+    {
+      "query": "temporalepsilon OR temporalzeta OR temporaldelta OR temporalgamma OR temporalbeta OR temporalalpha",
+      "class_label": "semantic_temporal_movement_rotated",
+      "diagnostic_focus": "temporal_candidate_pair_rotated_or_order"
+    }
+  ],
+  "expected": {
+    "min_actual_order_changed_count": 2,
+    "min_experimental_source_count": 2,
+    "min_side_signal_ok_count": 2
+  }
+}

@@ -52,7 +52,9 @@ retrieval remains unchanged. A reusable post-runtime live-candidate runner now
 replays that proof end-to-end and emits checked redacted artifacts without
 manual command assembly. The same runner now has a multi-case fixture that
 observes three protected explicit opt-in order movements across three batch
-query cases.
+query cases. A semantic-diverse corpus runner now replays four independent
+non-production fixture cases across isolated stores, producing eight protected
+BioCortex movements with default retrieval still unchanged.
 
 ```json
 {
@@ -93,6 +95,8 @@ query cases.
   "post_runtime_live_candidate_runner_verified": true,
   "post_runtime_multi_case_live_candidate_fixture_recorded": true,
   "post_runtime_multi_case_live_candidate_evidence_ready": true,
+  "post_runtime_semantic_diverse_live_candidate_corpus_recorded": true,
+  "post_runtime_semantic_diverse_live_candidate_evidence_ready": true,
   "controlled_explicit_opt_in_fts_trial_ready": true,
   "post_runtime_evidence_backed_controlled_trial_ready": true,
   "post_runtime_live_candidate_evidence_ready": true,
@@ -128,6 +132,13 @@ Post-runtime multi-case live-candidate fixture:
 - `docs/design/BIOCORTEX_RETRIEVAL_POST_RUNTIME_MULTI_CASE_LIVE_CANDIDATE_2026_06_13.md`
 - `docs/design/fixtures/biocortex-retrieval-post-runtime-multi-case-live-candidate-fixture-2026-06-13.json`
 - `docs/design/fixtures/biocortex-retrieval-post-runtime-multi-case-live-candidate-2026-06-13.json`
+
+Post-runtime semantic-diverse live-candidate corpus:
+
+- `scripts/run-biocortex-post-runtime-semantic-diverse-live-candidate-corpus.sh`
+- `docs/design/BIOCORTEX_RETRIEVAL_POST_RUNTIME_SEMANTIC_DIVERSE_LIVE_CANDIDATE_2026_06_14.md`
+- `docs/design/fixtures/biocortex-retrieval-post-runtime-semantic-diverse-live-candidate-corpus-2026-06-14.json`
+- `docs/design/fixtures/biocortex-retrieval-post-runtime-semantic-diverse-live-candidate-2026-06-14.json`
 
 Authorization request packet:
 
