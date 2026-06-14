@@ -205,24 +205,38 @@ pub fn project_gos_lite_snapshot(snapshot: &GosLiteSnapshot, options: GosLiteVie
         obj.insert("graph_included".to_string(), json!(options.include_graph));
         obj.insert(
             "human_gate".to_string(),
-            json!({
-                "required": true,
-                "promotion_allowed": false,
-                "promotion_policy": "Human reviewer must inspect supporting and refuting evidence before promoting GoS-lite hypotheses into decisions or write-capable actions.",
-                "forum": {
-                    "board": "design",
-                    "kind": "finding",
-                    "title": "Review GoS-lite diagnostic hypotheses before action",
-                },
-                "review_questions": [
-                    "Does every hypothesis have grounded support evidence?",
-                    "Is there missing refuting evidence or an alternate explanation?",
-                    "Should this remain a finding rather than a decision?",
-                ],
-            }),
+            gos_lite_human_gate_packet(snapshot),
         );
     }
     payload
+}
+
+fn gos_lite_human_gate_packet(snapshot: &GosLiteSnapshot) -> Value {
+    let required = snapshot.summary.hypotheses > 0;
+    json!({
+        "required": required,
+        "reason": if required {
+            "GoS-lite hypotheses are diagnostic candidates, not durable decisions."
+        } else {
+            "No hypotheses were generated for the selected telemetry window."
+        },
+        "forum": {
+            "board": "design",
+            "kind": "finding",
+            "title": format!(
+                "Review GoS-lite hypotheses: {} failing, {} degraded tools",
+                snapshot.summary.failing_tools,
+                snapshot.summary.degraded_tools
+            ),
+        },
+        "promotion_allowed": false,
+        "promotion_policy": "Human reviewer must confirm, refute, or defer GoS-lite hypotheses before saving them as durable decisions, changing tool profiles, or treating them as research conclusions.",
+        "review_questions": [
+            "Which evidence nodes directly support each hypothesis?",
+            "Is any support edge weak, stale, duplicated, or missing contradictory evidence?",
+            "Should the hypothesis be confirmed, refuted, deferred, or converted into a replay/falsifier test?",
+        ],
+    })
 }
 
 fn add_failing_tool_projection(
