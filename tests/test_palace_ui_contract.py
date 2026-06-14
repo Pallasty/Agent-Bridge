@@ -222,9 +222,9 @@ class PalaceUiContractTests(unittest.TestCase):
     def test_node_glyphs_use_half_scale_screen_size(self):
         html = palace_html()
 
-        self.assertIn("const NODE_GLYPH_SCREEN_SCALE = 0.14;", html)
-        self.assertIn("const NODE_GLYPH_SCREEN_MIN = 3;", html)
-        self.assertIn("const NODE_GLYPH_SCREEN_MAX = 7;", html)
+        self.assertIn("const NODE_GLYPH_SCREEN_SCALE = 0.07;", html)
+        self.assertIn("const NODE_GLYPH_SCREEN_MIN = 2;", html)
+        self.assertIn("const NODE_GLYPH_SCREEN_MAX = 4;", html)
         self.assertIn("nodeGlyphScreenSizeFromSize(size)", html)
         self.assertIn('"width": "data(displaySize)", "height": "data(displaySize)"', html)
 
@@ -299,6 +299,16 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("data-preview-node-key", html)
         self.assertIn("state.maintenancePreviewFilter = filter;", html)
         self.assertIn("read-only", html)
+
+    def test_approved_plan_surfaces_human_confirmed_write_gate(self):
+        html = palace_html()
+
+        self.assertIn("function renderOrphanApprovedPlanApplyGate(plan, regionId)", html)
+        self.assertIn("function runOrphanApprovedPlanApply(regionId, dryRun)", html)
+        self.assertIn("/api/orphan-approved-link-apply", html)
+        self.assertIn("data-orphan-approved-apply", html)
+        self.assertIn("data-orphan-approved-confirm", html)
+        self.assertIn("APPLY APPROVED LINKS", html)
 
     def test_search_surfaces_result_navigation(self):
         html = palace_html()

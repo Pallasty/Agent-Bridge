@@ -123,6 +123,10 @@ pub async fn run(
             get(api_orphan_approved_link_plan),
         )
         .route(
+            "/api/orphan-approved-link-apply",
+            post(api_orphan_approved_link_apply),
+        )
+        .route(
             "/api/orphan-candidate-decision",
             post(api_orphan_candidate_decision),
         )
@@ -222,6 +226,26 @@ struct OrphanCandidateDecisionRequest {
     note: Option<String>,
 }
 
+#[derive(Deserialize, Default)]
+struct OrphanApprovedLinkApplyRequest {
+    #[serde(default)]
+    region: Option<String>,
+    #[serde(default)]
+    threshold: Option<f64>,
+    #[serde(default)]
+    min_content_len: Option<u64>,
+    #[serde(default)]
+    max_orphans: Option<u64>,
+    #[serde(default)]
+    candidate_limit: Option<u64>,
+    #[serde(default)]
+    dry_run: Option<bool>,
+    #[serde(default)]
+    confirm: Option<String>,
+    #[serde(default)]
+    actor: Option<String>,
+}
+
 fn deserialize_boolish<'de, D>(deserializer: D) -> std::result::Result<bool, D::Error>
 where
     D: de::Deserializer<'de>,
@@ -241,6 +265,7 @@ where
 
 const PALACE_ORPHAN_SKIP_TAGS: &[&str] = &["auto_curated", "alert", "ttl:7d"];
 const PALACE_ORPHAN_SKIP_KINDS: &[&str] = &["alert", "work_memory", "session_handoff", "snapshot"];
+const PALACE_ORPHAN_APPROVED_LINK_APPLY_CONFIRM: &str = "APPLY APPROVED LINKS";
 
 #[derive(Debug, Clone)]
 struct PalaceLinkSuggestion {
@@ -275,6 +300,14 @@ struct PalaceOrphanCandidatePreview {
 struct PalaceOrphanCandidatePair {
     orphan_key: String,
     candidate_key: String,
+}
+
+#[derive(Debug, Clone)]
+struct PalaceOrphanApprovedLink {
+    pair_id: String,
+    orphan_key: String,
+    candidate_key: String,
+    edge_type: String,
 }
 
 fn normalize_palace_orphan_decision(decision: &str) -> std::io::Result<&'static str> {
@@ -567,6 +600,71 @@ fn palace_orphan_approved_link_plan_for_inbox(inbox: &Value) -> Value {
         "auto_apply_allowed": false,
         "links": links,
         "next_step": "Review this approved plan before invoking any write-capable memory edge tool.",
+    })
+}
+
+fn palace_orphan_approved_links_from_plan(plan: &Value) -> Vec<PalaceOrphanApprovedLink> {
+    plan.get("links")
+        .and_then(|v| v.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|link| {
+            let orphan_key = link.get("orphan_key").and_then(|v| v.as_str())?.trim();
+            let candidate_key = link.get("candidate_key").and_then(|v| v.as_str())?.trim();
+            if orphan_key.is_empty() || candidate_key.is_empty() {
+                return None;
+            }
+            let edge_type = link
+                .get("edge_type")
+                .and_then(|v| v.as_str())
+                .unwrap_or("relates")
+                .trim();
+            Some(PalaceOrphanApprovedLink {
+                pair_id: link
+                    .get("pair_id")
+                    .and_then(|v| v.as_str())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| format!("{orphan_key} -> {candidate_key}")),
+                orphan_key: orphan_key.to_string(),
+                candidate_key: candidate_key.to_string(),
+                edge_type: if edge_type.is_empty() {
+                    "relates".to_string()
+                } else {
+                    edge_type.to_string()
+                },
+            })
+        })
+        .collect()
+}
+
+fn palace_orphan_approved_link_apply_gate_for_plan(
+    plan: &Value,
+    dry_run: bool,
+    confirm: Option<&str>,
+) -> Value {
+    let links = palace_orphan_approved_links_from_plan(plan);
+    let confirmation_required = !dry_run && !links.is_empty();
+    let confirmation_matches = confirm
+        .map(str::trim)
+        .is_some_and(|value| value == PALACE_ORPHAN_APPROVED_LINK_APPLY_CONFIRM);
+    let mut blocking_reasons = Vec::new();
+    if confirmation_required && !confirmation_matches {
+        blocking_reasons.push("confirmation_required");
+    }
+    json!({
+        "schema": "agent_bridge.palace.orphan_approved_link_apply.v0",
+        "dry_run": dry_run,
+        "blocked": !blocking_reasons.is_empty(),
+        "status": if blocking_reasons.is_empty() { "ready" } else { "blocked" },
+        "confirm_phrase": PALACE_ORPHAN_APPROVED_LINK_APPLY_CONFIRM,
+        "confirmation_required": confirmation_required,
+        "confirmation_matches": confirmation_matches,
+        "approved_pair_count": links.len(),
+        "would_write_edges": links.len(),
+        "writes_memory": false,
+        "writes_edges": false,
+        "auto_apply_allowed": false,
+        "blocking_reasons": blocking_reasons,
     })
 }
 
@@ -1306,6 +1404,203 @@ async fn api_orphan_approved_link_plan(
         );
     }
     Ok(Json(plan))
+}
+
+async fn api_orphan_approved_link_apply(
+    State(s): State<AppState>,
+    Json(req): Json<OrphanApprovedLinkApplyRequest>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let threshold = req.threshold.unwrap_or(0.85).clamp(0.0, 2.0);
+    let min_content_len = req.min_content_len.unwrap_or(50).min(1000) as usize;
+    let max_orphans = req.max_orphans.unwrap_or(12).clamp(1, 100) as usize;
+    let candidate_limit = req.candidate_limit.unwrap_or(3).clamp(1, 10) as usize;
+    let region = req
+        .region
+        .as_deref()
+        .map(str::trim)
+        .filter(|region| !region.is_empty());
+    let dry_run = req.dry_run.unwrap_or(true);
+
+    let all = s
+        .store
+        .list_memories(None, MemoryListSort::Recent, STORE_FETCH_LIMIT)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("list_memories: {e}"),
+            )
+        })?;
+
+    let mut keys_with_edges: HashSet<String> = HashSet::new();
+    for mem in &all {
+        if !palace_memory_active(mem) || palace_memory_excluded_kind(mem) {
+            continue;
+        }
+        if let Ok(edges) = s.store.memory_neighbors(&mem.key).await {
+            if !edges.is_empty() {
+                keys_with_edges.insert(mem.key.clone());
+            }
+        }
+    }
+
+    let preview = preview_palace_orphan_candidates(
+        &all,
+        &keys_with_edges,
+        region,
+        threshold,
+        min_content_len,
+        max_orphans,
+        candidate_limit,
+    );
+    let decisions_path = default_palace_orphan_candidate_decisions_path();
+    let decisions = load_palace_orphan_candidate_decisions(&decisions_path).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("load orphan candidate review decisions: {e}"),
+        )
+    })?;
+    let mut plan = palace_orphan_approved_link_plan_for_preview(&preview, &decisions);
+    if let Some(obj) = plan.as_object_mut() {
+        obj.insert("region".to_string(), json!(region));
+        obj.insert("threshold".to_string(), json!(threshold));
+        obj.insert("min_content_len".to_string(), json!(min_content_len));
+        obj.insert("max_orphans".to_string(), json!(max_orphans));
+        obj.insert("candidate_limit".to_string(), json!(candidate_limit));
+        obj.insert("loaded_records".to_string(), json!(all.len()));
+        obj.insert(
+            "reviewed_candidate_count".to_string(),
+            json!(palace_orphan_candidate_pairs_for_preview(&preview).len()),
+        );
+        obj.insert(
+            "decisions_path".to_string(),
+            json!(decisions_path.display().to_string()),
+        );
+    }
+
+    let links = palace_orphan_approved_links_from_plan(&plan);
+    let mut response =
+        palace_orphan_approved_link_apply_gate_for_plan(&plan, dry_run, req.confirm.as_deref());
+    if let Some(obj) = response.as_object_mut() {
+        obj.insert("region".to_string(), json!(region));
+        obj.insert("threshold".to_string(), json!(threshold));
+        obj.insert("min_content_len".to_string(), json!(min_content_len));
+        obj.insert("max_orphans".to_string(), json!(max_orphans));
+        obj.insert("candidate_limit".to_string(), json!(candidate_limit));
+        obj.insert(
+            "decisions_path".to_string(),
+            json!(decisions_path.display().to_string()),
+        );
+        obj.insert(
+            "actor".to_string(),
+            req.actor
+                .as_deref()
+                .map(str::trim)
+                .filter(|actor| !actor.is_empty())
+                .map(|actor| json!(actor))
+                .unwrap_or(Value::Null),
+        );
+    }
+
+    let blocked = response
+        .get("blocked")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    if blocked {
+        return Ok(Json(response));
+    }
+
+    let mut results = Vec::new();
+    let mut applied_count = 0_u64;
+    let mut failed_count = 0_u64;
+    let mut skipped_count = 0_u64;
+    for link in links {
+        if link.edge_type != "relates" {
+            skipped_count += 1;
+            results.push(json!({
+                "pair_id": link.pair_id,
+                "orphan_key": link.orphan_key,
+                "candidate_key": link.candidate_key,
+                "edge_type": link.edge_type,
+                "status": "skipped_unsupported_edge_type",
+            }));
+            continue;
+        }
+        if link.orphan_key == link.candidate_key {
+            skipped_count += 1;
+            results.push(json!({
+                "pair_id": link.pair_id,
+                "orphan_key": link.orphan_key,
+                "candidate_key": link.candidate_key,
+                "edge_type": link.edge_type,
+                "status": "skipped_self_edge",
+            }));
+            continue;
+        }
+        if dry_run {
+            results.push(json!({
+                "pair_id": link.pair_id,
+                "orphan_key": link.orphan_key,
+                "candidate_key": link.candidate_key,
+                "edge_type": link.edge_type,
+                "status": "would_write",
+            }));
+            continue;
+        }
+        match s
+            .store
+            .memory_link(&link.orphan_key, &link.candidate_key, &link.edge_type, 1.0)
+            .await
+        {
+            Ok(()) => {
+                applied_count += 1;
+                results.push(json!({
+                    "pair_id": link.pair_id,
+                    "orphan_key": link.orphan_key,
+                    "candidate_key": link.candidate_key,
+                    "edge_type": link.edge_type,
+                    "status": "applied",
+                }));
+            }
+            Err(e) => {
+                failed_count += 1;
+                results.push(json!({
+                    "pair_id": link.pair_id,
+                    "orphan_key": link.orphan_key,
+                    "candidate_key": link.candidate_key,
+                    "edge_type": link.edge_type,
+                    "status": "failed",
+                    "error": e.to_string(),
+                }));
+            }
+        }
+    }
+
+    if let Some(obj) = response.as_object_mut() {
+        obj.insert(
+            "status".to_string(),
+            json!(if dry_run {
+                "dry_run"
+            } else if failed_count > 0 {
+                "partial"
+            } else if applied_count > 0 {
+                "applied"
+            } else {
+                "noop"
+            }),
+        );
+        obj.insert("applied_count".to_string(), json!(applied_count));
+        obj.insert("failed_count".to_string(), json!(failed_count));
+        obj.insert("skipped_count".to_string(), json!(skipped_count));
+        obj.insert("results".to_string(), json!(results));
+        obj.insert(
+            "writes_edges".to_string(),
+            json!(!dry_run && applied_count > 0),
+        );
+        obj.insert("plan".to_string(), plan);
+    }
+
+    Ok(Json(response))
 }
 
 async fn build_graph_snapshot(
@@ -3474,6 +3769,34 @@ mod tests {
         assert_eq!(plan["links"][0]["orphan_key"], json!("memory_orphan"));
         assert_eq!(plan["links"][0]["candidate_key"], json!("memory_anchor"));
         assert_eq!(plan["links"][0]["reviewer"], json!("alice"));
+    }
+
+    #[test]
+    fn palace_orphan_approved_link_apply_gate_requires_confirmation_before_writes() {
+        let plan = json!({
+            "schema": "agent_bridge.palace.orphan_approved_link_plan.v0",
+            "links": [{
+                "orphan_key": "memory_orphan",
+                "candidate_key": "memory_anchor",
+                "edge_type": "relates",
+            }],
+        });
+
+        let gate =
+            palace_orphan_approved_link_apply_gate_for_plan(&plan, false, Some("wrong phrase"));
+
+        assert_eq!(
+            gate["schema"],
+            "agent_bridge.palace.orphan_approved_link_apply.v0"
+        );
+        assert_eq!(
+            gate["confirm_phrase"],
+            json!(PALACE_ORPHAN_APPROVED_LINK_APPLY_CONFIRM)
+        );
+        assert_eq!(gate["dry_run"], json!(false));
+        assert_eq!(gate["blocked"], json!(true));
+        assert_eq!(gate["writes_edges"], json!(false));
+        assert_eq!(gate["blocking_reasons"][0], json!("confirmation_required"));
     }
 
     #[test]
