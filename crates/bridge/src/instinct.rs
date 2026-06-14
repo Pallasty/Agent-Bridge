@@ -976,6 +976,83 @@ pub fn observer_review_inbox_for_paths(
     }))
 }
 
+pub fn observer_review_context(
+    packet_json: &Path,
+    candidate_id: &str,
+    log_path: Option<&Path>,
+    include_local_excerpt: bool,
+) -> std::io::Result<Value> {
+    observer_review_context_for_paths(
+        packet_json,
+        candidate_id,
+        log_path.unwrap_or(&default_observer_log_path()),
+        include_local_excerpt,
+    )
+}
+
+pub fn observer_review_context_for_paths(
+    packet_json: &Path,
+    candidate_id: &str,
+    log_path: &Path,
+    include_local_excerpt: bool,
+) -> std::io::Result<Value> {
+    let body = std::fs::read_to_string(packet_json)?;
+    let packet: Value = serde_json::from_str(&body)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    ensure_review_packet_schema(&packet)?;
+    let candidate = find_candidate(&packet, candidate_id)?;
+    let session_id = candidate
+        .get("session_id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let event_at = candidate.get("event_at_unix").and_then(|v| v.as_f64());
+    let mut local_log_match = Value::Null;
+    if let Some(event_at) = event_at {
+        if let Some(record) = find_observation_by_session_and_time(log_path, session_id, event_at) {
+            local_log_match = json!({
+                "found": true,
+                "event_at_unix": record.ts,
+                "event": record.ev,
+                "prompt_chars": record.prompt.as_ref().map(|s| s.chars().count()),
+                "prompt_excerpt": if include_local_excerpt {
+                    record.prompt.clone().map(Value::String).unwrap_or(Value::Null)
+                } else {
+                    Value::Null
+                },
+                "raw_prompt_included": include_local_excerpt,
+            });
+        }
+    }
+    if local_log_match.is_null() {
+        local_log_match = json!({
+            "found": false,
+            "raw_prompt_included": false,
+        });
+    }
+
+    Ok(json!({
+        "schema": "agent_bridge.instinct_observer.phase1_review_context.v0",
+        "read_only": true,
+        "packet_json": packet_json.display().to_string(),
+        "log_path": log_path.display().to_string(),
+        "packet_id": packet.get("packet_id").cloned().unwrap_or(Value::Null),
+        "candidate_id": candidate_id,
+        "candidate": {
+            "kind": candidate.get("kind").cloned().unwrap_or(Value::Null),
+            "session_id": candidate.get("session_id").cloned().unwrap_or(Value::Null),
+            "event_at_unix": candidate.get("event_at_unix").cloned().unwrap_or(Value::Null),
+            "matched_cues": candidate.get("matched_cues").cloned().unwrap_or(Value::Null),
+            "prompt_chars": candidate.get("prompt_chars").cloned().unwrap_or(Value::Null),
+            "requires_local_log_lookup": candidate.get("requires_local_log_lookup").cloned().unwrap_or(Value::Null),
+        },
+        "local_log_match": local_log_match,
+        "writes_memory": false,
+        "writes_decision": false,
+        "auto_apply_allowed": false,
+        "recommended_next_step": "decide_approve_reject_or_defer",
+    }))
+}
+
 pub fn rotate_observer_log(dry_run: bool) -> std::io::Result<Value> {
     let now_unix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1279,6 +1356,17 @@ fn latest_review_packet_path(review_dir: &Path) -> std::io::Result<Option<PathBu
         }
     }
     Ok(latest.map(|(_, path)| path))
+}
+
+fn find_observation_by_session_and_time(
+    log_path: &Path,
+    session_id: &str,
+    event_at: f64,
+) -> Option<ObservationRecord> {
+    load_records(log_path).into_iter().find(|record| {
+        record.sid.as_deref() == Some(session_id)
+            && record.ts.is_some_and(|ts| (ts - event_at).abs() < 0.001)
+    })
 }
 
 fn load_review_decisions(decisions_path: &Path) -> std::io::Result<Vec<Value>> {
@@ -2342,6 +2430,62 @@ mod tests {
         let text = serde_json::to_string(&inbox).unwrap();
         assert!(!text.contains("secret inbox prompt"));
         assert!(!text.contains("secret inbox second prompt"));
+    }
+
+    #[test]
+    fn observer_review_context_requires_explicit_local_excerpt() {
+        let tmp = tempfile::tempdir().unwrap();
+        let log = tmp.path().join("observations.jsonl");
+        let out_dir = tmp.path().join("review");
+        write_jsonl(
+            &log,
+            &[json!({
+                "ts": 1.0,
+                "sid": TEST_SID,
+                "ev": "UserPromptSubmit",
+                "prompt": "不对，应该改成 secret context prompt"
+            })],
+        );
+        let packet = observer_review_packet_for_paths(
+            &log,
+            &out_dir,
+            20,
+            Some("tester"),
+            1_780_747_027,
+            true,
+        )
+        .unwrap();
+        let packet_json = PathBuf::from(packet["json_path"].as_str().unwrap());
+
+        let redacted =
+            observer_review_context_for_paths(&packet_json, "instinct-candidate-0001", &log, false)
+                .unwrap();
+        assert_eq!(
+            redacted["schema"],
+            "agent_bridge.instinct_observer.phase1_review_context.v0"
+        );
+        assert_eq!(redacted["read_only"], json!(true));
+        assert_eq!(redacted["writes_memory"], json!(false));
+        assert_eq!(redacted["writes_decision"], json!(false));
+        assert_eq!(
+            redacted["local_log_match"]["raw_prompt_included"],
+            json!(false)
+        );
+        assert_eq!(redacted["local_log_match"]["prompt_excerpt"], Value::Null);
+        assert!(!serde_json::to_string(&redacted)
+            .unwrap()
+            .contains("secret context prompt"));
+
+        let included =
+            observer_review_context_for_paths(&packet_json, "instinct-candidate-0001", &log, true)
+                .unwrap();
+        assert_eq!(
+            included["local_log_match"]["raw_prompt_included"],
+            json!(true)
+        );
+        assert!(serde_json::to_string(&included)
+            .unwrap()
+            .contains("secret context prompt"));
     }
 
     #[test]

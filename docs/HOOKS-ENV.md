@@ -74,6 +74,7 @@ ECC 的 `ECC_HOOK_PROFILE=minimal|standard|strict` 是上述 toggle 的**便利�
 # 从 ready preflight 显式写入 memory，默认仍预览：agent-bridge instinct memory-write --preflight-json <preflight.json> --write
 # 只读汇总审核状态：agent-bridge instinct review-status
 # 只读查看最新审核包的逐候选 inbox：agent-bridge instinct review-inbox
+# 只读查看单个候选上下文，默认不显示 prompt 摘要：agent-bridge instinct review-context --packet-json <packet.json> --candidate-id instinct-candidate-0001
 ```
 
 `agent-bridge doctor` and the MCP `capabilities` tool also expose the observer
@@ -127,6 +128,11 @@ write. It does not touch the memory DB.
 review packet by default (or `--packet-json`) and merges each candidate with its
 latest local decision so pending/approved/rejected/deferred rows can be reviewed
 without opening the full Markdown packet.
+
+`agent-bridge instinct review-context` is read-only for one candidate. By
+default it reports only redacted packet metadata; `--include-local-excerpt`
+explicitly reads the private observer log and prints the bounded local prompt
+excerpt for human review. It still does not write decisions or memories.
 
 Security posture: the observer sidecar is local-only and private by default.
 The hook honors `AB_INSTINCT_OBSERVER_LOG`; otherwise it prefers

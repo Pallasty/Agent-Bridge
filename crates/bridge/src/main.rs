@@ -490,6 +490,26 @@ enum InstinctOp {
         #[arg(long)]
         json: bool,
     },
+    /// Read-only context for one review candidate. Local prompt excerpt is
+    /// omitted unless --include-local-excerpt is passed.
+    ReviewContext {
+        /// Review packet JSON produced by `instinct review-packet --write`.
+        #[arg(long)]
+        packet_json: PathBuf,
+        /// Candidate id inside the review packet, e.g. instinct-candidate-0001.
+        #[arg(long)]
+        candidate_id: String,
+        /// Optional observer JSONL path. Defaults to the private observer log.
+        #[arg(long)]
+        log: Option<PathBuf>,
+        /// Include the local observer prompt excerpt in output. This remains
+        /// read-only but may expose local prompt text.
+        #[arg(long)]
+        include_local_excerpt: bool,
+        /// Emit raw JSON payload instead of a compact command line summary.
+        #[arg(long)]
+        json: bool,
+    },
     /// Rotate the local instinct observer JSONL log by renaming it to a
     /// timestamped archive path. The hook recreates a fresh log on its next
     /// event.
@@ -6506,6 +6526,88 @@ async fn real_main() -> Result<()> {
                                     })
                                     .unwrap_or_else(|| "-".to_string()),
                             );
+                        }
+                    }
+                }
+                Ok(())
+            }
+            InstinctOp::ReviewContext {
+                packet_json,
+                candidate_id,
+                log,
+                include_local_excerpt,
+                json,
+            } => {
+                let context = instinct::observer_review_context(
+                    packet_json,
+                    candidate_id,
+                    log.as_deref(),
+                    *include_local_excerpt,
+                )
+                .context("read instinct observer review context")?;
+                if *json {
+                    println!("{}", serde_json::to_string_pretty(&context)?);
+                } else {
+                    println!(
+                        "instinct review context: packet={} candidate={} kind={} session={} excerpt_included={} memory_write={}",
+                        context
+                            .get("packet_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("-"),
+                        context
+                            .get("candidate_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("-"),
+                        context
+                            .pointer("/candidate/kind")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("-"),
+                        context
+                            .pointer("/candidate/session_id")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("-"),
+                        context
+                            .pointer("/local_log_match/raw_prompt_included")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false),
+                        context
+                            .get("writes_memory")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false),
+                    );
+                    println!(
+                        "matched_cues={} prompt_chars={} local_log_found={} next={}",
+                        context
+                            .pointer("/candidate/matched_cues")
+                            .and_then(|v| v.as_array())
+                            .map(|items| {
+                                items
+                                    .iter()
+                                    .filter_map(|v| v.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(",")
+                            })
+                            .unwrap_or_else(|| "-".to_string()),
+                        context
+                            .pointer("/candidate/prompt_chars")
+                            .and_then(|v| v.as_u64())
+                            .map(|n| n.to_string())
+                            .unwrap_or_else(|| "-".to_string()),
+                        context
+                            .pointer("/local_log_match/found")
+                            .and_then(|v| v.as_bool())
+                            .unwrap_or(false),
+                        context
+                            .get("recommended_next_step")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown"),
+                    );
+                    if *include_local_excerpt {
+                        if let Some(excerpt) = context
+                            .pointer("/local_log_match/prompt_excerpt")
+                            .and_then(|v| v.as_str())
+                        {
+                            println!("local_prompt_excerpt={excerpt}");
                         }
                     }
                 }
