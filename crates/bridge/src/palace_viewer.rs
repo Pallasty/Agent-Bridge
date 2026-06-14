@@ -350,7 +350,21 @@ fn default_palace_orphan_approved_link_apply_path() -> PathBuf {
     if let Some(path) = std::env::var_os("AB_PALACE_ORPHAN_APPROVED_LINK_APPLY_AUDIT") {
         return PathBuf::from(path);
     }
-    default_palace_review_dir_path().join("orphan-approved-link-apply.jsonl")
+    palace_private_data_dir_path()
+        .join("palace-review")
+        .join("orphan-approved-link-apply.jsonl")
+}
+
+fn palace_private_data_dir_path() -> PathBuf {
+    if let Ok(path) = std::env::var("XDG_DATA_HOME") {
+        if !path.trim().is_empty() {
+            return PathBuf::from(path).join("agent-bridge");
+        }
+    }
+    palace_home_dir()
+        .join(".local")
+        .join("share")
+        .join("agent-bridge")
 }
 
 fn palace_home_dir() -> PathBuf {
@@ -3612,6 +3626,8 @@ fn format_history(history: &[ChatMessage]) -> String {
 mod tests {
     use super::*;
 
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn test_mem(key: &str, kind: &str, content: &str, tags: &[&str]) -> MemoryRecord {
         MemoryRecord {
             key: key.to_string(),
@@ -3986,6 +4002,41 @@ mod tests {
             assert_eq!(file_mode, 0o600);
             assert_eq!(dir_mode, 0o700);
         }
+    }
+
+    #[test]
+    fn palace_orphan_approved_link_apply_audit_defaults_to_private_data_home() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let old_data_home = std::env::var_os("XDG_DATA_HOME");
+        let old_review_dir = std::env::var_os("AB_PALACE_REVIEW_DIR");
+        let old_apply_audit = std::env::var_os("AB_PALACE_ORPHAN_APPROVED_LINK_APPLY_AUDIT");
+
+        std::env::set_var("XDG_DATA_HOME", dir.path());
+        std::env::remove_var("AB_PALACE_REVIEW_DIR");
+        std::env::remove_var("AB_PALACE_ORPHAN_APPROVED_LINK_APPLY_AUDIT");
+
+        let path = default_palace_orphan_approved_link_apply_path();
+        let expected = dir
+            .path()
+            .join("agent-bridge")
+            .join("palace-review")
+            .join("orphan-approved-link-apply.jsonl");
+
+        match old_data_home {
+            Some(value) => std::env::set_var("XDG_DATA_HOME", value),
+            None => std::env::remove_var("XDG_DATA_HOME"),
+        }
+        match old_review_dir {
+            Some(value) => std::env::set_var("AB_PALACE_REVIEW_DIR", value),
+            None => std::env::remove_var("AB_PALACE_REVIEW_DIR"),
+        }
+        match old_apply_audit {
+            Some(value) => std::env::set_var("AB_PALACE_ORPHAN_APPROVED_LINK_APPLY_AUDIT", value),
+            None => std::env::remove_var("AB_PALACE_ORPHAN_APPROVED_LINK_APPLY_AUDIT"),
+        }
+
+        assert_eq!(path, expected);
     }
 
     #[test]
