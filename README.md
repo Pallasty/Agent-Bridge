@@ -138,6 +138,13 @@ repos into the local memory store, so you can search across them and
 pick a skill on demand. It walks `**/SKILL.md`, `.claude/skills/*.md`,
 and `skills/*.md`, parses YAML frontmatter, and runs a heuristic safety
 lint (`pipe-to-shell`, `dangerous-rm`, `creds-path`, `eval-substitution`).
+
+### Sway workstation runbook
+
+For the local Sway workstation integration covering keyboard hotkeys, Wi-Fi
+status-bar actions, display power policy, desktop doctor/heal/watchdog, and
+status snapshot diagnostics, see
+[`docs/SWAY-WORKSTATION-RUNBOOK.md`](docs/SWAY-WORKSTATION-RUNBOOK.md).
 Lint findings are surfaced — they do **not** mean a skill is unsafe,
 just that it warrants manual review before installing.
 

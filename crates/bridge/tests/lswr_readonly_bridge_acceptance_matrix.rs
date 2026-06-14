@@ -1,7 +1,7 @@
 use ab_bridge::lswr_snapshot_report::render_readonly_bridge_report;
 use ab_bridge::lswr_snapshot_report_acceptance::{
-    LSWR_READONLY_BRIDGE_ACCEPTANCE_MATRIX_SCHEMA, ReadOnlyBridgeAcceptanceMatrix,
-    build_readonly_bridge_acceptance_matrix,
+    build_readonly_bridge_acceptance_matrix, ReadOnlyBridgeAcceptanceMatrix,
+    LSWR_READONLY_BRIDGE_ACCEPTANCE_MATRIX_SCHEMA,
 };
 use ab_bridge::lswr_snapshot_report_packet::ReadOnlyBridgeReportPacket;
 

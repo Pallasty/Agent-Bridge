@@ -221,7 +221,9 @@ fn select_default() -> Arc<dyn EmbeddingBackend> {
         }
         "hash" => Arc::new(HashBackend),
         other => {
-            tracing::warn!("Unknown AGENT_BRIDGE_EMBED_BACKEND={other:?}; using compile-time default");
+            tracing::warn!(
+                "Unknown AGENT_BRIDGE_EMBED_BACKEND={other:?}; using compile-time default"
+            );
             #[cfg(feature = "onnx-embed")]
             {
                 Arc::new(OnnxBackend)

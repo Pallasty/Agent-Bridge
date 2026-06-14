@@ -1,11 +1,11 @@
 [package]
 name = "ab-seed-bridge"
-version.workspace = true
-edition.workspace = true
-rust-version.workspace = true
-license.workspace = true
-authors.workspace = true
-repository.workspace = true
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+authors = ["agent-bridge contributors"]
+repository = "https://github.com/pallasting/agent-bridge"
 
 description = """
 v22 — agent-bridge memory substrate Layer 2 wiring.
@@ -20,13 +20,17 @@ substrate stats CLI. Phase 2 adds learned projection + snapshot/replay +
 neighbors_of query API.
 """
 
+[features]
+default = ["legacy-seed"]
+legacy-seed = ["dep:seed_neuron"]
+
 [dependencies]
 ab-store = { path = "../store" }
-seed_neuron = { path = "../../../AiOT/rust/seed_neuron", default-features = false }
-serde = { workspace = true }
-serde_json = { workspace = true }
-tracing = { workspace = true }
-thiserror = { workspace = true }
+seed_neuron = { git = "ssh://git@github.com/pallasting/AiOT.git", package = "seed_neuron", optional = true, default-features = false }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+thiserror = "1"
 
 # Phase 2.2 — substrate snapshot Parquet (multi-cadence per v22 §3.4)
 arrow = "53.0"
@@ -34,7 +38,7 @@ parquet = "53.0"
 sha2 = "0.10"
 
 # Phase 2.4 — α-α SVD warm-start projection loader (mean_vector_b64 in artifact JSON)
-base64 = { workspace = true }
+base64 = "0.22"
 
 [dev-dependencies]
 tempfile = "3"

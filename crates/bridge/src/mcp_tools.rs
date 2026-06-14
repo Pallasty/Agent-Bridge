@@ -44,6 +44,41 @@ use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::process::Command as TokioCommand;
 
+use crate::biocortex_shadow::{
+    biocortex_replay_comparison, biocortex_retrieval_opt_in_audit_report,
+    biocortex_retrieval_opt_in_authorization_decision_packet,
+    biocortex_retrieval_opt_in_batch_diagnostics, biocortex_retrieval_opt_in_dry_run_plan,
+    biocortex_retrieval_opt_in_execution_packet,
+    biocortex_retrieval_opt_in_gated_batch_diagnostics,
+    biocortex_retrieval_opt_in_gated_store_trial, biocortex_retrieval_opt_in_order_diff_packet,
+    biocortex_retrieval_opt_in_post_implementation_review_gate,
+    biocortex_retrieval_opt_in_redacted_order_artifact, biocortex_retrieval_opt_in_review_packet,
+    biocortex_retrieval_opt_in_runtime_influence_decision_packet,
+    biocortex_retrieval_opt_in_runtime_influence_review_request,
+    biocortex_retrieval_opt_in_runtime_readiness_packet,
+    biocortex_retrieval_opt_in_runtime_transition_gate, biocortex_retrieval_opt_in_runtime_trial,
+    biocortex_retrieval_opt_in_runtime_trial_review_packet, biocortex_retrieval_opt_in_store_trial,
+    biocortex_shadow_digest, supported_benchmarks, BioCortexReplayComparisonOptions,
+    BioCortexRetrievalCandidate, BioCortexRetrievalOptInAuditOptions,
+    BioCortexRetrievalOptInAuthorizationDecisionPacketOptions,
+    BioCortexRetrievalOptInBatchDiagnosticsOptions, BioCortexRetrievalOptInBatchQueryCase,
+    BioCortexRetrievalOptInDryRunOptions, BioCortexRetrievalOptInExecutionPacketOptions,
+    BioCortexRetrievalOptInGatedBatchDiagnosticsOptions,
+    BioCortexRetrievalOptInGatedStoreTrialOptions, BioCortexRetrievalOptInOrderDiffPacketOptions,
+    BioCortexRetrievalOptInPostImplementationReviewGateOptions,
+    BioCortexRetrievalOptInRedactedOrderArtifactOptions,
+    BioCortexRetrievalOptInReviewPacketOptions,
+    BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketOptions,
+    BioCortexRetrievalOptInRuntimeInfluenceReviewRequestOptions,
+    BioCortexRetrievalOptInRuntimeReadinessPacketOptions,
+    BioCortexRetrievalOptInRuntimeTransitionGateOptions,
+    BioCortexRetrievalOptInRuntimeTrialOptions,
+    BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions,
+    BioCortexRetrievalOptInStoreTrialOptions, BioCortexShadowOptions, BIOCORTEX_CHECKOUT_ENV,
+    BIOCORTEX_RETRIEVAL_DISABLE_ENV,
+};
+#[cfg(feature = "biocortex-retrieval-shadow")]
+use crate::biocortex_shadow::{biocortex_retrieval_shadow_report, BioCortexRetrievalShadowOptions};
 use crate::context_budget::{
     budget_recommendation, env_context_window, estimate_tokens_from_text, estimated_usage_tokens,
     resolve_context_window,
@@ -52,6 +87,7 @@ use crate::hub::Hub;
 use crate::ide::{queue_ide_command, read_ide_snapshot, IdeCommandOptions, IdeSnapshotOptions};
 use crate::project::{changes_digest, detect_project, git_topology_preflight, resolve_cwd};
 use crate::security::Cap;
+use crate::seed_substrate as ab_seed_bridge;
 use crate::session_handoff::build_handoff_brief;
 use crate::warp_actions::warp_status_snapshot;
 
@@ -963,6 +999,376 @@ fn lossy_truncate(bytes: &[u8]) -> (String, bool) {
 }
 
 // ===========================================================================
+//                              system_control
+// ===========================================================================
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SystemControlPlan {
+    argv: Vec<String>,
+    risk: &'static str,
+    read_only: bool,
+}
+
+fn system_control_plan(
+    domain: &str,
+    action: &str,
+    confirm: bool,
+    tail_lines: u64,
+    topic: Option<&str>,
+) -> std::result::Result<SystemControlPlan, String> {
+    let mut argv = Vec::new();
+    let (risk, read_only) = match domain {
+        "display" if matches!(action, "off" | "on") => {
+            argv.extend([domain.to_string(), action.to_string()]);
+            ("low", false)
+        }
+        "audio" if matches!(action, "up" | "down" | "mute" | "micmute") => {
+            argv.extend([domain.to_string(), action.to_string()]);
+            ("low", false)
+        }
+        "brightness" if matches!(action, "up" | "down") => {
+            argv.extend([domain.to_string(), action.to_string()]);
+            ("low", false)
+        }
+        "screenshot" if matches!(action, "full" | "region") => {
+            argv.extend([domain.to_string(), action.to_string()]);
+            ("low", false)
+        }
+        "wifi"
+            if matches!(
+                action,
+                "networks" | "actions" | "reconnect" | "toggle" | "nmtui"
+            ) =>
+        {
+            argv.extend([domain.to_string(), action.to_string()]);
+            ("medium", false)
+        }
+        "desktop" if action == "doctor" => {
+            argv.extend([domain.to_string(), action.to_string()]);
+            ("low", true)
+        }
+        "desktop" if action == "heal" => {
+            if !confirm {
+                return Err("desktop heal requires confirm=true".to_string());
+            }
+            argv.extend([
+                domain.to_string(),
+                action.to_string(),
+                "--confirm".to_string(),
+            ]);
+            ("medium", false)
+        }
+        "desktop" if action == "watchdog" => {
+            if !confirm {
+                return Err("desktop watchdog requires confirm=true".to_string());
+            }
+            argv.extend([
+                domain.to_string(),
+                action.to_string(),
+                "--confirm".to_string(),
+            ]);
+            ("medium", false)
+        }
+        "desktop" if action == "repair" => {
+            if !confirm {
+                return Err("desktop repair requires confirm=true".to_string());
+            }
+            argv.extend([
+                domain.to_string(),
+                action.to_string(),
+                "--confirm".to_string(),
+            ]);
+            ("medium", false)
+        }
+        "events" if action == "tail" => {
+            argv.push("events".to_string());
+            argv.push("tail".to_string());
+            argv.push(tail_lines.clamp(1, 500).to_string());
+            ("low", true)
+        }
+        "events" if action == "diagnose" => {
+            let topic = topic
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| "events diagnose requires non-empty topic".to_string())?;
+            if !topic
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+            {
+                return Err("events diagnose topic may only contain ASCII letters, digits, '_', '-', or '.'".to_string());
+            }
+            argv.push("events".to_string());
+            argv.push("diagnose".to_string());
+            argv.push(topic.to_string());
+            argv.push(tail_lines.clamp(1, 500).to_string());
+            ("low", true)
+        }
+        "status"
+            if matches!(
+                action,
+                "summary" | "snapshot" | "history" | "diagnose" | "report"
+            ) =>
+        {
+            argv.extend([domain.to_string(), action.to_string()]);
+            if matches!(action, "history" | "diagnose" | "report") {
+                argv.push(tail_lines.clamp(1, 200).to_string());
+            }
+            ("low", true)
+        }
+        "status" if action == "record" => {
+            argv.extend([domain.to_string(), action.to_string()]);
+            ("low", false)
+        }
+        "lid" if matches!(action, "off" | "on") => {
+            argv.extend([domain.to_string(), action.to_string()]);
+            ("low", false)
+        }
+        "power" if action == "press" => {
+            argv.extend([domain.to_string(), action.to_string()]);
+            ("medium", false)
+        }
+        "power" if action == "off" => {
+            if !confirm {
+                return Err("power off requires confirm=true".to_string());
+            }
+            argv.extend([
+                domain.to_string(),
+                action.to_string(),
+                "--confirm".to_string(),
+            ]);
+            ("high", false)
+        }
+        "audit" if action == "tail" => {
+            argv.push("audit-tail".to_string());
+            argv.push(tail_lines.clamp(1, 500).to_string());
+            ("low", true)
+        }
+        _ => {
+            return Err(format!(
+                "unsupported system_control action: domain={domain:?} action={action:?}"
+            ));
+        }
+    };
+    Ok(SystemControlPlan {
+        argv,
+        risk,
+        read_only,
+    })
+}
+
+fn default_system_control_bin() -> PathBuf {
+    std::env::var_os("AB_SYSTEM_CONTROL_BIN")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("HOME").map(|home| {
+                PathBuf::from(home)
+                    .join(".local")
+                    .join("bin")
+                    .join("ab-system-control")
+            })
+        })
+        .unwrap_or_else(|| PathBuf::from("/home/pallasting/.local/bin/ab-system-control"))
+}
+
+pub struct SystemControlTool {
+    hub: Hub,
+}
+
+impl SystemControlTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for SystemControlTool {
+    fn name(&self) -> &'static str {
+        "system_control"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "LLM-safe local Sway/system control wrapper. Calls the \
+                 allowlisted `ab-system-control` actions for display, audio, \
+                 brightness, screenshot, WiFi, desktop doctor/heal/watchdog/repair, status summary/snapshot/record/history/diagnose/report, event timeline/diagnosis, lid, power button, and audit-tail; \
+                 it never accepts arbitrary shell commands. Each action is audited \
+                 by the local script. High-risk power off, desktop heal, desktop watchdog, and desktop repair require confirm=true."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "domain": {
+                        "type": "string",
+                        "enum": ["display", "audio", "brightness", "screenshot", "wifi", "desktop", "events", "status", "lid", "power", "audit"],
+                        "description": "Control surface."
+                    },
+                    "action": {
+                        "type": "string",
+                        "description": "Allowed actions: display off|on; audio up|down|mute|micmute; brightness up|down; screenshot full|region; wifi networks|actions|reconnect|toggle|nmtui; desktop doctor|heal|watchdog|repair; events tail|diagnose; status summary|snapshot|record|history|diagnose|report; lid off|on; power press|off; audit tail."
+                    },
+                    "confirm": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Required for power off, desktop heal, desktop watchdog, and desktop repair."
+                    },
+                    "tail_lines": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 40,
+                        "description": "Line count for domain=audit action=tail."
+                    },
+                    "topic": {
+                        "type": "string",
+                        "description": "Required for domain=events action=diagnose; examples: audio, brightness, wifi, power, statusbar, screenshot."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 60000,
+                        "default": 15000,
+                        "description": "Milliseconds before the control process is killed."
+                    },
+                    "bin": {
+                        "type": "string",
+                        "description": "Optional absolute path to ab-system-control, mainly for tests or alternate installs."
+                    }
+                },
+                "required": ["domain", "action"],
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::ShellExec) {
+            return Ok(ToolResult::error(e));
+        }
+        let domain = match args.get("domain").and_then(|v| v.as_str()) {
+            Some(s) if !s.is_empty() => s,
+            _ => return Ok(ToolResult::error("missing or empty 'domain'")),
+        };
+        let action = match args.get("action").and_then(|v| v.as_str()) {
+            Some(s) if !s.is_empty() => s,
+            _ => return Ok(ToolResult::error("missing or empty 'action'")),
+        };
+        let confirm = args
+            .get("confirm")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let tail_lines = args
+            .get("tail_lines")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(40)
+            .clamp(1, 500);
+        let topic = args.get("topic").and_then(|v| v.as_str());
+        let plan = match system_control_plan(domain, action, confirm, tail_lines, topic) {
+            Ok(plan) => plan,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let bin = args
+            .get("bin")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(default_system_control_bin);
+        if !bin.is_absolute() {
+            return Ok(ToolResult::error(
+                "system_control 'bin' must be an absolute path",
+            ));
+        }
+
+        let timeout_ceiling = self
+            .hub
+            .security
+            .shell_exec_timeout_max_ms
+            .clamp(1_000, 60_000);
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(15_000)
+            .clamp(1_000, timeout_ceiling);
+
+        let mut child = {
+            let mut builder = killable_command(&bin);
+            builder.args(&plan.argv);
+            builder.env("AB_ACTOR", "agent-bridge:mcp:system_control");
+            builder.stdout(std::process::Stdio::piped());
+            builder.stderr(std::process::Stdio::piped());
+            match builder.spawn() {
+                Ok(c) => c,
+                Err(e) => return Ok(ToolResult::error(format!("spawn failed: {e}"))),
+            }
+        };
+
+        let started = Instant::now();
+        let deadline = Duration::from_millis(timeout_ms);
+        use tokio::io::AsyncReadExt as _;
+        let mut stdout_pipe = child.stdout.take().expect("stdout piped");
+        let mut stderr_pipe = child.stderr.take().expect("stderr piped");
+        let stdout_task = tokio::spawn(async move {
+            let mut buf = Vec::new();
+            let _ = stdout_pipe.read_to_end(&mut buf).await;
+            buf
+        });
+        let stderr_task = tokio::spawn(async move {
+            let mut buf = Vec::new();
+            let _ = stderr_pipe.read_to_end(&mut buf).await;
+            buf
+        });
+
+        let timed_out = tokio::time::timeout(deadline, child.wait()).await;
+        let duration_ms = started.elapsed().as_millis() as u64;
+        let exit_code = match timed_out {
+            Err(_) => {
+                child.start_kill().ok();
+                stdout_task.abort();
+                stderr_task.abort();
+                return Ok(ToolResult::json_text(&json!({
+                    "schema": "agent_bridge.system_control.mcp_result.v0",
+                    "domain": domain,
+                    "action": action,
+                    "risk": plan.risk,
+                    "read_only": plan.read_only,
+                    "confirmed": confirm,
+                    "argv": plan.argv,
+                    "exit_code": -1,
+                    "stdout": "",
+                    "stderr": format!("killed after {timeout_ms} ms timeout"),
+                    "duration_ms": duration_ms,
+                    "truncated": false,
+                    "timed_out": true
+                })));
+            }
+            Ok(Err(e)) => return Ok(ToolResult::error(format!("wait failed: {e}"))),
+            Ok(Ok(status)) => status.code().unwrap_or(-1),
+        };
+
+        let stdout_bytes = stdout_task.await.unwrap_or_default();
+        let stderr_bytes = stderr_task.await.unwrap_or_default();
+        let (stdout, stdout_truncated) = lossy_truncate(&stdout_bytes);
+        let (stderr, stderr_truncated) = lossy_truncate(&stderr_bytes);
+
+        Ok(ToolResult::json_text(&json!({
+            "schema": "agent_bridge.system_control.mcp_result.v0",
+            "domain": domain,
+            "action": action,
+            "risk": plan.risk,
+            "read_only": plan.read_only,
+            "confirmed": confirm,
+            "argv": plan.argv,
+            "exit_code": exit_code,
+            "stdout": stdout,
+            "stderr": stderr,
+            "duration_ms": duration_ms,
+            "truncated": stdout_truncated || stderr_truncated,
+            "timed_out": false
+        })))
+    }
+}
+
+// ===========================================================================
 //                              desktop_snapshot
 // ===========================================================================
 
@@ -1306,10 +1712,7 @@ fn desktop_snapshot_semantic_bus_payload(snapshot: &Value, include_raw: bool) ->
                     let role = desktop_snapshot_str(element, "role").unwrap_or("element");
                     let name = desktop_snapshot_str(element, "name").unwrap_or("");
                     let element_slug = desktop_snapshot_slug(&format!("{role}-{name}-{idx}"));
-                    let object_id = format!(
-                        "desktop:linux:atspi:{pid_label}:{}",
-                        element_slug
-                    );
+                    let object_id = format!("desktop:linux:atspi:{pid_label}:{}", element_slug);
                     let mut relations = vec![json!({
                         "type": "member_of",
                         "target": session_object_id
@@ -1459,7 +1862,11 @@ fn desktop_snapshot_semantic_bus_payload(snapshot: &Value, include_raw: bool) ->
 }
 
 fn desktop_snapshot_str<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
-    value.get(key).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty())
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
 }
 
 fn desktop_snapshot_value_label(value: &Value, fallback: &str) -> String {
@@ -1707,7 +2114,8 @@ impl McpTool for DesktopVerifyTool {
         push_optional_str_arg(&mut cmd, &args, "before_present", "--before-present");
         push_optional_str_arg(&mut cmd, &args, "before_focus", "--before-focus");
         if let Some(pi) = args.get("poll_interval_secs").and_then(|v| v.as_f64()) {
-            cmd.arg("--poll-interval").arg(pi.clamp(0.05, 5.0).to_string());
+            cmd.arg("--poll-interval")
+                .arg(pi.clamp(0.05, 5.0).to_string());
         }
         if let Some(s) = args.get("settle_secs").and_then(|v| v.as_f64()) {
             if s > 0.0 {
@@ -2724,7 +3132,8 @@ impl McpTool for MacosAxVerifyTool {
         push_optional_value_arg(&mut cmd, &args, "index", "--index");
         push_optional_str_arg(&mut cmd, &args, "state", "--state");
         if let Some(pi) = args.get("poll_interval_secs").and_then(Value::as_f64) {
-            cmd.arg("--poll-interval").arg(pi.clamp(0.05, 5.0).to_string());
+            cmd.arg("--poll-interval")
+                .arg(pi.clamp(0.05, 5.0).to_string());
         }
         if let Some(s) = args.get("settle_secs").and_then(Value::as_f64) {
             if s > 0.0 {
@@ -2981,15 +3390,7 @@ fn macos_ax_verify_target_family(expect: &str) -> &'static str {
 
 fn macos_ax_verify_selector_summary(selector: &Value) -> String {
     let mut parts = Vec::new();
-    for key in [
-        "app",
-        "bundle_id",
-        "pid",
-        "title",
-        "role",
-        "index",
-        "state",
-    ] {
+    for key in ["app", "bundle_id", "pid", "title", "role", "index", "state"] {
         if let Some(value) = selector.get(key) {
             match value {
                 Value::String(s) if !s.trim().is_empty() => {
@@ -3046,14 +3447,11 @@ fn macos_ax_verify_error(error: Value) -> ToolResult {
 //                       semantic_bus_adapter_report
 // ===========================================================================
 
-const SEMANTIC_BUS_ADAPTER_REPORT_SCHEMA: &str =
-    "agent_bridge.semantic_bus.adapter_report.v0";
-const SEMANTIC_BUS_RUNTIME_HEALTH_SCHEMA: &str =
-    "agent_bridge.semantic_bus.runtime_health.v0";
+const SEMANTIC_BUS_ADAPTER_REPORT_SCHEMA: &str = "agent_bridge.semantic_bus.adapter_report.v0";
+const SEMANTIC_BUS_RUNTIME_HEALTH_SCHEMA: &str = "agent_bridge.semantic_bus.runtime_health.v0";
 const SEMANTIC_BUS_RUNTIME_CONFORMANCE_SCHEMA: &str =
     "agent_bridge.semantic_bus.runtime_conformance.v0";
-const SEMANTIC_BUS_PEER_CONFORMANCE_SCHEMA: &str =
-    "agent_bridge.semantic_bus.peer_conformance.v0";
+const SEMANTIC_BUS_PEER_CONFORMANCE_SCHEMA: &str = "agent_bridge.semantic_bus.peer_conformance.v0";
 
 pub struct SemanticBusAdapterReportTool {
     _hub: Hub,
@@ -3102,7 +3500,9 @@ impl McpTool for SemanticBusAdapterReportTool {
     }
 
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        Ok(ToolResult::json_text(&semantic_bus_adapter_report_payload(&args)))
+        Ok(ToolResult::json_text(&semantic_bus_adapter_report_payload(
+            &args,
+        )))
     }
 }
 
@@ -3369,21 +3769,14 @@ fn semantic_bus_adapter_row(
     let all_runtime_present = runtime_assets.iter().all(semantic_bus_asset_present);
     let any_fixture_present = fixture_assets.iter().any(semantic_bus_asset_present);
     let any_doc_present = doc_assets.iter().any(semantic_bus_asset_present);
-    let ready_for_runtime = spec.evidence_level == "runtime_backed"
-        && all_runtime_present
-        && any_doc_present;
-    let fixture_adapter_contract_present = fixture_assets.iter().any(|asset| {
-        asset
-            .get("has_adapter_contract")
-            .and_then(Value::as_bool)
-            == Some(true)
-    });
+    let ready_for_runtime =
+        spec.evidence_level == "runtime_backed" && all_runtime_present && any_doc_present;
+    let fixture_adapter_contract_present = fixture_assets
+        .iter()
+        .any(|asset| asset.get("has_adapter_contract").and_then(Value::as_bool) == Some(true));
     let fixture_without_adapter_contract = fixture_assets.iter().any(|asset| {
         semantic_bus_asset_present(asset)
-            && asset
-                .get("has_adapter_contract")
-                .and_then(Value::as_bool)
-                == Some(false)
+            && asset.get("has_adapter_contract").and_then(Value::as_bool) == Some(false)
     });
 
     let mut row = json!({
@@ -3428,7 +3821,9 @@ fn semantic_bus_adapter_row(
 }
 
 fn semantic_bus_asset_list(repo_root: &Path, rels: &[&str]) -> Vec<Value> {
-    rels.iter().map(|rel| semantic_bus_asset(repo_root, rel)).collect()
+    rels.iter()
+        .map(|rel| semantic_bus_asset(repo_root, rel))
+        .collect()
 }
 
 fn semantic_bus_fixture_asset_list(repo_root: &Path, rels: &[&str]) -> Vec<Value> {
@@ -3463,7 +3858,10 @@ fn semantic_bus_fixture_asset(repo_root: &Path, rel: &str) -> Value {
 }
 
 fn semantic_bus_asset_present(asset: &Value) -> bool {
-    asset.get("exists").and_then(Value::as_bool).unwrap_or(false)
+    asset
+        .get("exists")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 fn semantic_bus_adapter_report_summary(adapters: &[Value]) -> Value {
@@ -3626,11 +4024,8 @@ impl McpTool for SemanticBusRuntimeHealthTool {
 }
 
 async fn semantic_bus_runtime_health_payload(args: &Value) -> Value {
-    let daemon_http_url = semantic_bus_runtime_arg(
-        args,
-        "daemon_http_url",
-        "http://127.0.0.1:7878",
-    );
+    let daemon_http_url =
+        semantic_bus_runtime_arg(args, "daemon_http_url", "http://127.0.0.1:7878");
     let palace_url = semantic_bus_runtime_arg(args, "palace_url", "http://127.0.0.1:7979");
     let include_all = args
         .get("include_all")
@@ -3878,7 +4273,12 @@ async fn semantic_bus_runtime_get_text(
 ) -> (Value, Option<String>) {
     let url = match semantic_bus_runtime_join_url(base_url, endpoint) {
         Ok(url) => url,
-        Err(e) => return (semantic_bus_runtime_error_check(endpoint, "invalid_url", &e), None),
+        Err(e) => {
+            return (
+                semantic_bus_runtime_error_check(endpoint, "invalid_url", &e),
+                None,
+            )
+        }
     };
     let started = Instant::now();
     let response = client
@@ -3948,10 +4348,7 @@ fn semantic_bus_runtime_parse_json(check: &mut Value, body: Option<&str>) -> Opt
             if let Some(obj) = check.as_object_mut() {
                 obj.insert("ok".to_string(), json!(false));
                 obj.insert("status".to_string(), json!("invalid_json"));
-                obj.insert(
-                    "error".to_string(),
-                    json!("response was not valid JSON"),
-                );
+                obj.insert("error".to_string(), json!("response was not valid JSON"));
             }
             None
         }
@@ -3968,7 +4365,10 @@ fn semantic_bus_runtime_arg(args: &Value, key: &str, default: &str) -> String {
         .to_string()
 }
 
-fn semantic_bus_runtime_join_url(base_url: &str, endpoint: &str) -> std::result::Result<String, String> {
+fn semantic_bus_runtime_join_url(
+    base_url: &str,
+    endpoint: &str,
+) -> std::result::Result<String, String> {
     let base_url = base_url.trim();
     if base_url.is_empty() {
         return Err("base URL is empty".to_string());
@@ -4013,8 +4413,8 @@ fn semantic_bus_runtime_health_ok(check: &Value, body: Option<&str>) -> bool {
 }
 
 fn semantic_bus_runtime_service_id(name: &str, base_url: &str) -> String {
-    let authority = semantic_bus_runtime_url_authority(base_url)
-        .unwrap_or_else(|| "unknown".to_string());
+    let authority =
+        semantic_bus_runtime_url_authority(base_url).unwrap_or_else(|| "unknown".to_string());
     format!("service:agent-bridge:{name}:{authority}")
 }
 
@@ -4106,10 +4506,9 @@ fn semantic_bus_runtime_graph_stats(graph: &Value) -> Value {
             "markdown" => markdown_nodes += 1,
             _ => {}
         }
-        let last_accessed = semantic_bus_runtime_i64(
-            node.get("last_accessed").unwrap_or(&Value::Null),
-        )
-        .unwrap_or(0);
+        let last_accessed =
+            semantic_bus_runtime_i64(node.get("last_accessed").unwrap_or(&Value::Null))
+                .unwrap_or(0);
         if last_accessed > 0 {
             let age = now_secs.saturating_sub(last_accessed);
             if age < 3600 {
@@ -4149,7 +4548,12 @@ fn semantic_bus_runtime_graph_stats(graph: &Value) -> Value {
     let mut degrees: Vec<i64> = degree.values().copied().filter(|d| *d > 0).collect();
     degrees.sort_unstable();
     let hub_threshold = degrees
-        .get(degrees.len().saturating_sub(1).min(degrees.len() * 95 / 100))
+        .get(
+            degrees
+                .len()
+                .saturating_sub(1)
+                .min(degrees.len() * 95 / 100),
+        )
         .copied()
         .unwrap_or(0)
         .max(5);
@@ -4357,12 +4761,16 @@ fn semantic_bus_runtime_conformance_report(
         .unwrap_or_else(|| json!([]));
     let windows_slot = rows
         .iter()
-        .find(|row| row.get("adapter_id").and_then(Value::as_str) == Some("windows_uia_runtime_adapter"))
+        .find(|row| {
+            row.get("adapter_id").and_then(Value::as_str) == Some("windows_uia_runtime_adapter")
+        })
         .cloned()
-        .unwrap_or_else(|| json!({
-            "adapter_id": "windows_uia_runtime_adapter",
-            "live_status": "missing_from_adapter_report"
-        }));
+        .unwrap_or_else(|| {
+            json!({
+                "adapter_id": "windows_uia_runtime_adapter",
+                "live_status": "missing_from_adapter_report"
+            })
+        });
     let verdict = if runtime_health_verified {
         "verified"
     } else if runtime_health.is_some() {
@@ -4591,20 +4999,11 @@ async fn semantic_bus_peer_conformance_fetch(
     timeout_ms: u64,
     include_raw: bool,
 ) -> Value {
-    let url = match semantic_bus_peer_conformance_url(
-        endpoint,
-        include_runtime_health,
-        timeout_ms,
-    ) {
+    let url = match semantic_bus_peer_conformance_url(endpoint, include_runtime_health, timeout_ms)
+    {
         Ok(url) => url,
         Err(e) => {
-            return semantic_bus_peer_conformance_error_row(
-                idx,
-                endpoint,
-                None,
-                "invalid_url",
-                &e,
-            )
+            return semantic_bus_peer_conformance_error_row(idx, endpoint, None, "invalid_url", &e)
         }
     };
     let started = Instant::now();
@@ -4692,8 +5091,8 @@ fn semantic_bus_peer_conformance_url(
     } else {
         semantic_bus_runtime_join_url(trimmed, "/semantic-bus/runtime-conformance")?
     };
-    let mut parsed = reqwest::Url::parse(&url)
-        .map_err(|e| format!("parse conformance URL {url}: {e}"))?;
+    let mut parsed =
+        reqwest::Url::parse(&url).map_err(|e| format!("parse conformance URL {url}: {e}"))?;
     if !matches!(parsed.scheme(), "http" | "https") {
         return Err(format!("unsupported URL scheme: {}", parsed.scheme()));
     }
@@ -4701,7 +5100,11 @@ fn semantic_bus_peer_conformance_url(
         let mut qp = parsed.query_pairs_mut();
         qp.append_pair(
             "include_runtime_health",
-            if include_runtime_health { "true" } else { "false" },
+            if include_runtime_health {
+                "true"
+            } else {
+                "false"
+            },
         );
         qp.append_pair("timeout_ms", &timeout_ms.to_string());
     }
@@ -4718,7 +5121,10 @@ fn semantic_bus_peer_conformance_payload_row(
     payload: Value,
     include_raw: bool,
 ) -> Value {
-    let schema = payload.get("schema").and_then(Value::as_str).unwrap_or("unknown");
+    let schema = payload
+        .get("schema")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
     let schema_ok = schema == SEMANTIC_BUS_RUNTIME_CONFORMANCE_SCHEMA;
     let verification = payload.get("verification").cloned().unwrap_or(Value::Null);
     let verdict = verification
@@ -9144,11 +9550,16 @@ impl McpTool for PresentTool {
         // a listing failure leaves it empty rather than failing the render.
         let chain_head = {
             let artifacts = crate::present::list_artifacts(&dir, 500, None);
-            crate::present::present_replay_snapshot(&artifacts, 0usize, 0u64, crate::present::now_unix())
-                .get("chain_head")
-                .and_then(|v| v.as_str())
-                .map(|s| s.to_string())
-                .unwrap_or_default()
+            crate::present::present_replay_snapshot(
+                &artifacts,
+                0usize,
+                0u64,
+                crate::present::now_unix(),
+            )
+            .get("chain_head")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_default()
         };
         let outcome_record = json!({
             "artifact_id": id,
@@ -9476,18 +9887,56 @@ impl McpTool for PresentVoiceTool {
     }
 
     async fn execute(&self, args: Value, ctx: &ToolContext) -> Result<ToolResult> {
-        let backend = args.get("backend").and_then(|v| v.as_str()).unwrap_or("tone").to_string();
+        let backend = args
+            .get("backend")
+            .and_then(|v| v.as_str())
+            .unwrap_or("tone")
+            .to_string();
         let is_speech = backend != "tone";
-        let freq = args.get("freq").and_then(|v| v.as_f64()).unwrap_or(440.0).clamp(50.0, 18000.0);
-        let duration_ms = args.get("duration_ms").and_then(|v| v.as_u64()).unwrap_or(1500).clamp(100, 8000);
-        let amplitude = args.get("amplitude").and_then(|v| v.as_f64()).unwrap_or(0.25).clamp(0.0, 1.0);
-        let text = args.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let voice = args.get("voice").and_then(|v| v.as_str()).unwrap_or("af_sarah").to_string();
-        let speed = args.get("speed").and_then(|v| v.as_f64()).unwrap_or(1.0).clamp(0.5, 2.0);
-        let verify_intelligibility = args.get("verify_intelligibility").and_then(|v| v.as_bool()).unwrap_or(false);
+        let freq = args
+            .get("freq")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(440.0)
+            .clamp(50.0, 18000.0);
+        let duration_ms = args
+            .get("duration_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1500)
+            .clamp(100, 8000);
+        let amplitude = args
+            .get("amplitude")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.25)
+            .clamp(0.0, 1.0);
+        let text = args
+            .get("text")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let voice = args
+            .get("voice")
+            .and_then(|v| v.as_str())
+            .unwrap_or("af_sarah")
+            .to_string();
+        let speed = args
+            .get("speed")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(1.0)
+            .clamp(0.5, 2.0);
+        let verify_intelligibility = args
+            .get("verify_intelligibility")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let capture_channel = args
-            .get("capture_channel").and_then(|v| v.as_str()).unwrap_or("sink_monitor").to_string();
-        let intent = args.get("intent").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            .get("capture_channel")
+            .and_then(|v| v.as_str())
+            .unwrap_or("sink_monitor")
+            .to_string();
+        let intent = args
+            .get("intent")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let cwd = args.get("cwd").and_then(|v| v.as_str()).map(PathBuf::from);
 
         if is_speech && text.trim().is_empty() {
@@ -9505,18 +9954,27 @@ impl McpTool for PresentVoiceTool {
         }
 
         let mut cmd = killable_command(
-            std::env::var("PYTHON").ok().filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "python3".to_string()),
+            std::env::var("PYTHON")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| "python3".to_string()),
         );
         cmd.arg(&script).arg("--json");
         if is_speech {
             // backend=kokoro|piper: synthesize `text` with that engine and verify via
             // envelope correlation. `backend` is exactly the audio_embody synth engine.
-            cmd.arg("--mode").arg("speech")
-                .arg("--text").arg(&text)
-                .arg("--voice").arg(&voice)
-                .arg("--speed").arg(format!("{speed}"))
-                .arg("--synth-backend").arg(&backend)
-                .arg("--capture-channel").arg(&capture_channel);
+            cmd.arg("--mode")
+                .arg("speech")
+                .arg("--text")
+                .arg(&text)
+                .arg("--voice")
+                .arg(&voice)
+                .arg("--speed")
+                .arg(format!("{speed}"))
+                .arg("--synth-backend")
+                .arg(&backend)
+                .arg("--capture-channel")
+                .arg(&capture_channel);
             push_optional_str_arg(&mut cmd, &args, "synth_bin", "--synth-bin");
             if verify_intelligibility {
                 cmd.arg("--check-intelligibility");
@@ -9524,10 +9982,14 @@ impl McpTool for PresentVoiceTool {
                 push_optional_str_arg(&mut cmd, &args, "stt_model", "--stt-model");
             }
         } else {
-            cmd.arg("--freq").arg(format!("{freq}"))
-                .arg("--duration-ms").arg(duration_ms.to_string())
-                .arg("--amplitude").arg(format!("{amplitude}"))
-                .arg("--capture-channel").arg(&capture_channel);
+            cmd.arg("--freq")
+                .arg(format!("{freq}"))
+                .arg("--duration-ms")
+                .arg(duration_ms.to_string())
+                .arg("--amplitude")
+                .arg(format!("{amplitude}"))
+                .arg("--capture-channel")
+                .arg(&capture_channel);
         }
         push_optional_str_arg(&mut cmd, &args, "sink", "--sink");
         cmd.stdout(std::process::Stdio::piped());
@@ -9538,12 +10000,25 @@ impl McpTool for PresentVoiceTool {
 
         // process kill ceiling. tone: emit duration + capture/ffmpeg margin. speech:
         // generous — first call loads the ~300 MB model (~3-4s) + synth + realtime play.
-        let timeout_ms = if is_speech { 120_000 } else { duration_ms + 8_000 };
-        let output = match tokio::time::timeout(Duration::from_millis(timeout_ms), cmd.output()).await {
-            Err(_) => return Ok(ToolResult::error(format!("present_voice: audio_embody exceeded {timeout_ms} ms"))),
-            Ok(Err(e)) => return Ok(ToolResult::error(format!("present_voice: spawn failed: {e}"))),
-            Ok(Ok(o)) => o,
+        let timeout_ms = if is_speech {
+            120_000
+        } else {
+            duration_ms + 8_000
         };
+        let output =
+            match tokio::time::timeout(Duration::from_millis(timeout_ms), cmd.output()).await {
+                Err(_) => {
+                    return Ok(ToolResult::error(format!(
+                        "present_voice: audio_embody exceeded {timeout_ms} ms"
+                    )))
+                }
+                Ok(Err(e)) => {
+                    return Ok(ToolResult::error(format!(
+                        "present_voice: spawn failed: {e}"
+                    )))
+                }
+                Ok(Ok(o)) => o,
+            };
         let (stdout, _) = lossy_truncate(&output.stdout);
         let (stderr, _) = lossy_truncate(&output.stderr);
         let res: Value = match serde_json::from_str(&stdout) {
@@ -9555,8 +10030,14 @@ impl McpTool for PresentVoiceTool {
             }
         };
 
-        let status = res.get("status").and_then(|v| v.as_str()).unwrap_or("error");
-        let verify_status = res.get("verify_status").and_then(|v| v.as_str()).unwrap_or("error");
+        let status = res
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("error");
+        let verify_status = res
+            .get("verify_status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("error");
 
         // Provenance: the present_replay chain_head over the lane's artifacts NOW
         // (same idiom present()/present_dashboard use). build_outcome_memory now
@@ -9565,8 +10046,16 @@ impl McpTool for PresentVoiceTool {
         let dir = crate::present::presentations_dir();
         let chain_head = {
             let artifacts = crate::present::list_artifacts(&dir, 500, None);
-            crate::present::present_replay_snapshot(&artifacts, 0usize, 0u64, crate::present::now_unix())
-                .get("chain_head").and_then(|v| v.as_str()).map(|s| s.to_string()).unwrap_or_default()
+            crate::present::present_replay_snapshot(
+                &artifacts,
+                0usize,
+                0u64,
+                crate::present::now_unix(),
+            )
+            .get("chain_head")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_default()
         };
         let ts = crate::present::now_unix();
         let id = if is_speech {
@@ -9620,12 +10109,18 @@ impl McpTool for PresentVoiceTool {
             obj.insert("action_tool".to_string(), json!("present_voice"));
             obj.insert("verify_method".to_string(), json!("audio_bus_readback"));
             obj.insert("chain_head".to_string(), json!(chain_head));
-            obj.insert("outcome_sidecar".to_string(), json!(format!("{id}.outcome.json")));
-            obj.insert("mcp_wrapper".to_string(), json!({
-                "tool": "present_voice",
-                "exit_code": output.status.code().unwrap_or(-1),
-                "stderr_present": !stderr.is_empty()
-            }));
+            obj.insert(
+                "outcome_sidecar".to_string(),
+                json!(format!("{id}.outcome.json")),
+            );
+            obj.insert(
+                "mcp_wrapper".to_string(),
+                json!({
+                    "tool": "present_voice",
+                    "exit_code": output.status.code().unwrap_or(-1),
+                    "stderr_present": !stderr.is_empty()
+                }),
+            );
         }
         Ok(ToolResult::json_text(&result))
     }
@@ -9798,9 +10293,8 @@ impl McpTool for PresentDashboardTool {
                                             .and_then(|v| v.as_str())
                                             .unwrap_or("")
                                             .to_string();
-                                        embody_status = crate::present::classify_embody(
-                                            &readback, &expected,
-                                        );
+                                        embody_status =
+                                            crate::present::classify_embody(&readback, &expected);
                                         embody_detail = Some(format!(
                                             "dom_head={} expected_head={} rendered={} rows={}",
                                             short_head(&readback.chain_head),
@@ -10565,7 +11059,10 @@ impl McpTool for PresentOutcomesIngestTool {
             .and_then(|v| v.as_u64())
             .unwrap_or(25)
             .clamp(1, 200) as usize;
-        let dry_run = args.get("dry_run").and_then(|v| v.as_bool()).unwrap_or(true);
+        let dry_run = args
+            .get("dry_run")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
 
         let now = dispatch_now_secs();
         let cutoff = now.saturating_sub(window_secs).max(0) as u64;
@@ -22201,6 +22698,302 @@ impl McpTool for ToolAtlasSnapshotTool {
     }
 }
 
+// ===========================================================================
+//                 mcp_lifecycle_digest - borrowed-patterns status
+// ===========================================================================
+
+pub struct McpLifecycleDigestTool {
+    hub: Hub,
+}
+impl McpLifecycleDigestTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for McpLifecycleDigestTool {
+    fn name(&self) -> &'static str {
+        "mcp_lifecycle_digest"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only lifecycle/status digest for Agent-Bridge MCP. \
+                 Separates stdio MCP/tool-profile readiness, hook/setup readiness, \
+                 recent tool telemetry, and optional daemon-http/Palace runtime health. \
+                 It does not start/stop MCP servers, restart services, or mutate profiles."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "repo_root": {
+                        "type": "string",
+                        "description": "Optional Agent-Bridge checkout root for readiness source checks."
+                    },
+                    "window_secs": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 31536000,
+                        "default": 86400,
+                        "description": "Tool telemetry look-back window."
+                    },
+                    "include_local_install": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Ask readiness_audit to inspect installed hook scripts and setup-state."
+                    },
+                    "include_runtime_health": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Run bounded read-only daemon-http/Palace health GETs. Defaults false so a digest can stay stdio-only."
+                    },
+                    "daemon_http_url": {
+                        "type": "string",
+                        "description": "Base URL for daemon-http when include_runtime_health=true."
+                    },
+                    "palace_url": {
+                        "type": "string",
+                        "description": "Base URL for Palace when include_runtime_health=true."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 100,
+                        "maximum": 30000,
+                        "default": 1000,
+                        "description": "Per-request timeout for optional runtime health checks."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let payload = mcp_lifecycle_digest_payload(&args, &self.hub).await;
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+async fn mcp_lifecycle_digest_payload(args: &Value, hub: &Hub) -> Value {
+    let policy = ToolPolicy::from_env();
+    let window_secs = args
+        .get("window_secs")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(86_400)
+        .clamp(60, 31_536_000);
+    let include_local_install = args
+        .get("include_local_install")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let include_runtime_health = args
+        .get("include_runtime_health")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let current_tool_count = build_registry(hub.clone()).list().len();
+    let scoped_tool_count = build_registry_with_policy(hub.clone(), policy).list().len();
+    let readiness_args = json!({
+        "repo_root": args.get("repo_root").cloned().unwrap_or(Value::Null),
+        "include_local_install": include_local_install,
+    });
+    let readiness = readiness_audit_payload(&readiness_args, hub);
+    let telemetry = mcp_lifecycle_tool_telemetry(hub, window_secs).await;
+    let runtime_health = if include_runtime_health {
+        let mut runtime_args = json!({
+            "timeout_ms": args.get("timeout_ms").cloned().unwrap_or(json!(1000)),
+        });
+        if let Some(v) = args.get("daemon_http_url").cloned() {
+            runtime_args["daemon_http_url"] = v;
+        }
+        if let Some(v) = args.get("palace_url").cloned() {
+            runtime_args["palace_url"] = v;
+        }
+        json!({
+            "checked": true,
+            "payload": semantic_bus_runtime_health_payload(&runtime_args).await,
+        })
+    } else {
+        json!({
+            "checked": false,
+            "reason": "include_runtime_health=false",
+            "note": "MCP stdio/readiness can be healthy even when daemon-http or Palace are not running."
+        })
+    };
+
+    let readiness_status = readiness
+        .get("status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+    let readiness_warnings = readiness
+        .pointer("/summary/warnings")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let runtime_status = runtime_health
+        .pointer("/payload/status")
+        .and_then(|v| v.as_str())
+        .unwrap_or(if include_runtime_health {
+            "unknown"
+        } else {
+            "not_checked"
+        })
+        .to_string();
+    let failing_tool_count = telemetry
+        .pointer("/summary/failing_tool_count")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let lifecycle_state = if readiness_warnings == 0 && failing_tool_count == 0 {
+        if include_runtime_health && runtime_status != "ok" {
+            "stdio_ready_runtime_degraded"
+        } else {
+            "ready"
+        }
+    } else {
+        "attention"
+    };
+
+    json!({
+        "schema": "agent_bridge.mcp_lifecycle_digest.v0",
+        "generated_at": dispatch_now_secs(),
+        "read_only": true,
+        "lifecycle_state": lifecycle_state,
+        "summary": {
+            "mcp_stdio_available": true,
+            "toolset": policy.label(),
+            "tool_profile": policy.profile().label(),
+            "current_tool_count": current_tool_count,
+            "scoped_tool_count": scoped_tool_count,
+            "readiness_status": readiness_status,
+            "readiness_warnings": readiness_warnings,
+            "telemetry_window_secs": window_secs,
+            "failing_tool_count": failing_tool_count,
+            "runtime_health_checked": include_runtime_health,
+            "runtime_health_status": runtime_status,
+        },
+        "sections": {
+            "mcp_profile": {
+                "toolset": policy.label(),
+                "tool_profile": policy.profile().label(),
+                "tool_profile_extras": policy.extras(),
+                "toolset_env": std::env::var("AGENT_BRIDGE_TOOLSET").ok(),
+                "tool_profile_env": std::env::var("AGENT_BRIDGE_TOOL_PROFILE").ok(),
+                "client": std::env::var("AGENT_BRIDGE_CLIENT").ok(),
+                "codex_host": std::env::var("AGENT_BRIDGE_CODEX_HOST").ok(),
+                "model": std::env::var("AGENT_BRIDGE_MODEL").ok(),
+                "model_reasoning_effort": std::env::var("AGENT_BRIDGE_MODEL_REASONING_EFFORT").ok(),
+            },
+            "readiness": {
+                "status": readiness_status,
+                "summary": readiness.get("summary").cloned().unwrap_or(Value::Null),
+                "recommendations": readiness.get("recommendations").cloned().unwrap_or(json!([])),
+            },
+            "tool_telemetry": telemetry,
+            "runtime_health": runtime_health,
+        },
+        "recommendations": mcp_lifecycle_recommendations(
+            readiness_warnings,
+            failing_tool_count,
+            include_runtime_health,
+            &runtime_status,
+        ),
+        "note": "Borrowed from Theia-style lifecycle separation: profile/readiness/telemetry/runtime health are reported as separate axes. This tool is observational only."
+    })
+}
+
+async fn mcp_lifecycle_tool_telemetry(hub: &Hub, window_secs: i64) -> Value {
+    let Some(store) = hub.store.as_ref() else {
+        return json!({
+            "status": "unavailable",
+            "reason": "no store configured",
+            "summary": {
+                "current_tool_count": build_registry(hub.clone()).list().len(),
+                "observed_tool_count": 0,
+                "hot_tool_count": 0,
+                "failing_tool_count": 0,
+                "cold_tool_count": 0
+            }
+        });
+    };
+    let current_tools: Vec<String> = build_registry(hub.clone())
+        .list()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
+    let stats_limit = current_tools.len().max(1).min(200) as u32;
+    let stats = match store
+        .mcp_tool_call_stats_filtered(window_secs, stats_limit, McpToolCallFilter::default())
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            return json!({
+                "status": "error",
+                "reason": format!("mcp_tool_call_stats_filtered: {e}"),
+            })
+        }
+    };
+    let recent_errors = match store
+        .recent_mcp_tool_errors(ab_store::MCP_TOOL_ERROR_RING_CAP)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            return json!({
+                "status": "error",
+                "reason": format!("recent_mcp_tool_errors: {e}"),
+            })
+        }
+    };
+    let snapshot =
+        crate::tool_atlas::build_tool_atlas_snapshot(crate::tool_atlas::ToolAtlasInput {
+            generated_at: dispatch_now_secs(),
+            window_secs,
+            current_tools,
+            stats,
+            recent_errors,
+        });
+    let mut payload = crate::tool_atlas::project_tool_atlas_snapshot(
+        &snapshot,
+        crate::tool_atlas::ToolAtlasViewOptions {
+            include_tools: false,
+            limit: 1,
+        },
+    );
+    if let Some(obj) = payload.as_object_mut() {
+        obj.insert("status".to_string(), json!("ok"));
+    }
+    payload
+}
+
+fn mcp_lifecycle_recommendations(
+    readiness_warnings: u64,
+    failing_tool_count: u64,
+    include_runtime_health: bool,
+    runtime_status: &str,
+) -> Vec<String> {
+    let mut out = Vec::new();
+    if readiness_warnings > 0 {
+        out.push(
+            "Inspect readiness_audit recommendations before changing MCP tool profiles.".into(),
+        );
+    }
+    if failing_tool_count > 0 {
+        out.push("Inspect tool_atlas_snapshot or mcp_dispatch_audit for failing MCP tools.".into());
+    }
+    if !include_runtime_health {
+        out.push(
+            "Set include_runtime_health=true when diagnosing daemon-http or Palace availability."
+                .into(),
+        );
+    } else if runtime_status != "ok" {
+        out.push("Treat daemon-http/Palace degradation as runtime health, separate from MCP stdio readiness.".into());
+    }
+    if out.is_empty() {
+        out.push("MCP lifecycle axes look ready in this digest.".into());
+    }
+    out
+}
+
 fn dispatch_window_from_args(args: &Value) -> (i64, i64, &'static str) {
     let window_days = args
         .get("window_days")
@@ -23102,6 +23895,7 @@ fn readiness_tool_surface_rows(hub: &Hub) -> Vec<Value> {
             "tool_atlas_snapshot",
             "tool registry and failure-mode atlas",
         ),
+        ("mcp_lifecycle_digest", "MCP lifecycle/status digest"),
         ("hook_status", "installed hook health"),
         ("skills_recommend", "skill index retrieval"),
         ("skills_route", "skill routing metadata"),
@@ -24541,6 +25335,2889 @@ impl McpTool for SubstrateNeighborsTool {
                 },
             }),
         };
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
+//       biocortex_shadow_digest — shadow-only external BioCortex adapter
+// ===========================================================================
+
+/// Read-only BioCortex integration probe. This runs a sanctioned adapter
+/// example from a local `biocortex-rs` checkout and projects its deterministic
+/// `key=value` report into AB JSON. It intentionally does not link BioCortex
+/// into the AB runtime or mutate AB memory/retrieval state.
+pub struct BioCortexShadowDigestTool;
+
+impl BioCortexShadowDigestTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for BioCortexShadowDigestTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for BioCortexShadowDigestTool {
+    fn name(&self) -> &'static str {
+        "biocortex_shadow_digest"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only BioCortex shadow digest. Runs a sanctioned \
+                 local biocortex-rs adapter example via `cargo run --offline` and \
+                 returns AB JSON. Does not link BioCortex into the AB runtime, \
+                 mutate AB memory, or alter retrieval vectors."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "checkout_path": {
+                        "type": "string",
+                        "description": "Optional local biocortex-rs checkout. Defaults to AB_BIOCORTEX_RS, sibling checkout paths, then /tmp/biocortex-rs-ab-eval."
+                    },
+                    "benchmark": {
+                        "type": "string",
+                        "enum": supported_benchmarks(),
+                        "default": "scaled_morphology",
+                        "description": "Adapter benchmark to run."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 600000,
+                        "default": 120000,
+                        "description": "External adapter timeout in milliseconds."
+                    },
+                    "include_raw": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Include raw stdout/stderr from the external adapter."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let checkout = args
+            .get("checkout_path")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from);
+        let benchmark = args
+            .get("benchmark")
+            .and_then(|v| v.as_str())
+            .unwrap_or("scaled_morphology")
+            .to_string();
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(120_000);
+        let include_raw = args
+            .get("include_raw")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let payload = biocortex_shadow_digest(BioCortexShadowOptions {
+            checkout,
+            benchmark,
+            timeout_ms,
+            include_raw,
+            fixture_projection: None,
+        })
+        .await;
+        Ok(ToolResult::json_text(&json!({
+            "checkout_env": BIOCORTEX_CHECKOUT_ENV,
+            "digest": payload,
+        })))
+    }
+}
+
+// ===========================================================================
+//  biocortex_replay_compare — AB fixture projection + BioCortex shadow digest
+// ===========================================================================
+
+/// Read-only comparison between an AB shadow-cortex replay fixture and a
+/// BioCortex sanctioned shadow report. This is not a training bridge: current
+/// BioCortex examples do not consume AB events, and this tool does not change
+/// memory retrieval.
+pub struct BioCortexReplayCompareTool {
+    hub: Hub,
+}
+
+impl BioCortexReplayCompareTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for BioCortexReplayCompareTool {
+    fn name(&self) -> &'static str {
+        "biocortex_replay_compare"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only BioCortex replay comparison. Collects an AB \
+                 shadow-cortex fixture from state.db, projects it into a stable \
+                 replay summary, then runs a sanctioned local biocortex-rs shadow \
+                 adapter side-by-side. BioCortex does not yet consume AB events; \
+                 retrieval vectors and AB memory remain unchanged."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "window_days": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 365,
+                        "default": 7,
+                        "description": "Look-back window for AB shadow-cortex fixture collection."
+                    },
+                    "source": {
+                        "type": "string",
+                        "default": "all",
+                        "description": "Source selector: all | mcp_dispatch | memory | forum | codex."
+                    },
+                    "checkout_path": {
+                        "type": "string",
+                        "description": "Optional local biocortex-rs checkout. Defaults to AB_BIOCORTEX_RS, sibling checkout paths, then /tmp/biocortex-rs-ab-eval."
+                    },
+                    "benchmark": {
+                        "type": "string",
+                        "enum": supported_benchmarks(),
+                        "default": "ab_fixture_projection",
+                        "description": "BioCortex shadow benchmark to run side-by-side."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 600000,
+                        "default": 120000,
+                        "description": "External adapter timeout in milliseconds."
+                    },
+                    "include_raw": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Include raw stdout/stderr from the external BioCortex adapter."
+                    },
+                    "include_events": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Include every projected AB event instead of only a compact preview."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let Some(store) = &self.hub.store else {
+            return Ok(ToolResult::error("no store configured"));
+        };
+        let window_days = args
+            .get("window_days")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as u32)
+            .unwrap_or(7);
+        let source = args
+            .get("source")
+            .and_then(|v| v.as_str())
+            .unwrap_or("all")
+            .to_string();
+        let checkout = args
+            .get("checkout_path")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from);
+        let benchmark = args
+            .get("benchmark")
+            .and_then(|v| v.as_str())
+            .unwrap_or("ab_fixture_projection")
+            .to_string();
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(120_000);
+        let include_raw = args
+            .get("include_raw")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let include_events = args
+            .get("include_events")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let fixture = crate::shadow_cortex::collect_shadow_cortex_fixture(
+            store.as_ref(),
+            crate::shadow_cortex::ShadowCortexOptions {
+                window_days,
+                source,
+            },
+        )
+        .await
+        .map_err(|e| ab_core::Error::Backend(format!("collect shadow-cortex fixture: {e}")))?;
+        let payload = biocortex_replay_comparison(
+            &fixture,
+            BioCortexReplayComparisonOptions {
+                checkout,
+                benchmark,
+                timeout_ms,
+                include_raw,
+                include_events,
+            },
+        )
+        .await;
+        Ok(ToolResult::json_text(&json!({
+            "checkout_env": BIOCORTEX_CHECKOUT_ENV,
+            "comparison": payload,
+        })))
+    }
+}
+
+// ===========================================================================
+//  biocortex_retrieval_opt_in_status — read-only opt-in gate/audit report
+// ===========================================================================
+
+/// Read-only BioCortex retrieval opt-in status surface. This tool reports the
+/// gate and audit shape for a hypothetical per-call opt-in request. It does not
+/// call `memory_search`, run BioCortex, include raw memory content, or change
+/// retrieval order.
+pub struct BioCortexRetrievalOptInStatusTool;
+
+impl BioCortexRetrievalOptInStatusTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for BioCortexRetrievalOptInStatusTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for BioCortexRetrievalOptInStatusTool {
+    fn name(&self) -> &'static str {
+        "biocortex_retrieval_opt_in_status"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only BioCortex retrieval opt-in status/audit \
+                 report. Reports feature/runtime/per-call gate state and an \
+                 audit-shape preview with hashed query/order data only. Does \
+                 not call memory_search, run BioCortex, mutate memory, include \
+                 raw memory keys/content, register an EmbeddingBackend, or \
+                 alter retrieval order."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "enum": ["fts", "hybrid", "semantic"],
+                        "default": "fts",
+                        "description": "Retrieval mode under review. Only fts is authorized for opt-in work."
+                    },
+                    "per_call_opt_in": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Explicit per-call opt-in bit to evaluate."
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Optional query text. Output includes only a hash."
+                    },
+                    "baseline_keys": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Optional baseline candidate keys. Output includes only count/hash, never raw keys."
+                    },
+                    "side_signal_status": {
+                        "type": "string",
+                        "description": "Optional side-signal status label for audit-shape previews."
+                    },
+                    "fallback_reason": {
+                        "type": "string",
+                        "description": "Optional fallback reason override for audit-shape previews."
+                    },
+                    "latency_ms": {
+                        "type": "number",
+                        "description": "Optional latency in milliseconds for audit-shape previews."
+                    },
+                    "runtime_readiness_packet": {
+                        "type": "object",
+                        "description": "Optional JSON object produced by biocortex_retrieval_opt_in_runtime_readiness_packet. The status tool consumes only safe summary fields and never echoes the packet."
+                    },
+                    "runtime_transition_gate": {
+                        "type": "object",
+                        "description": "Optional JSON object produced by biocortex_retrieval_opt_in_runtime_transition_gate. The status tool consumes only safe summary fields and never echoes the gate."
+                    },
+                    "gated_store_trial": {
+                        "type": "object",
+                        "description": "Optional JSON object produced by biocortex_retrieval_opt_in_gated_store_trial. The status tool consumes only safe summary fields and never echoes query data."
+                    },
+                    "gated_batch_diagnostics": {
+                        "type": "object",
+                        "description": "Optional JSON object produced by biocortex_retrieval_opt_in_gated_batch_diagnostics. The status tool consumes only safe summary fields and never echoes query rows."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let mode = args
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("fts")
+            .to_string();
+        let per_call_opt_in = args
+            .get("per_call_opt_in")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let query = args
+            .get("query")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let baseline_keys = args
+            .get("baseline_keys")
+            .cloned()
+            .map(serde_json::from_value::<Vec<String>>)
+            .transpose()
+            .map_err(|e| ab_core::Error::Backend(format!("parse baseline_keys: {e}")))?
+            .unwrap_or_default();
+        let side_signal_status = args
+            .get("side_signal_status")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let fallback_reason = args
+            .get("fallback_reason")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let latency_ms = args.get("latency_ms").and_then(Value::as_f64);
+        let runtime_readiness_packet = args.get("runtime_readiness_packet").cloned();
+        let runtime_transition_gate = args.get("runtime_transition_gate").cloned();
+        let gated_store_trial = args.get("gated_store_trial").cloned();
+        let gated_batch_diagnostics = args.get("gated_batch_diagnostics").cloned();
+
+        let payload =
+            biocortex_retrieval_opt_in_audit_report(BioCortexRetrievalOptInAuditOptions {
+                mode,
+                per_call_opt_in,
+                query,
+                baseline_keys,
+                side_signal_status,
+                fallback_reason,
+                latency_ms,
+                runtime_readiness_packet,
+                runtime_transition_gate,
+                gated_store_trial,
+                gated_batch_diagnostics,
+            });
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
+//  biocortex_retrieval_opt_in_dry_run — read-only future-path planner
+// ===========================================================================
+
+/// Read-only BioCortex retrieval opt-in dry-run planner. This tool reports the
+/// future FTS opt-in ordering path and store-contract fallback decision. It
+/// does not call `memory_search`, run BioCortex, include raw memory content, or
+/// change retrieval order.
+pub struct BioCortexRetrievalOptInDryRunTool;
+
+impl BioCortexRetrievalOptInDryRunTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for BioCortexRetrievalOptInDryRunTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for BioCortexRetrievalOptInDryRunTool {
+    fn name(&self) -> &'static str {
+        "biocortex_retrieval_opt_in_dry_run"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only BioCortex retrieval opt-in dry-run planner. \
+                 Reports the future FTS opt-in ordering path, planned side-signal \
+                 steps, and store-contract fallback decision with hashed query/order \
+                 data only. Does not call memory_search, run BioCortex, mutate \
+                 memory, include raw memory keys/content, register an EmbeddingBackend, \
+                 or alter retrieval order."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "mode": {
+                        "type": "string",
+                        "enum": ["fts", "hybrid", "semantic"],
+                        "default": "fts",
+                        "description": "Retrieval mode under review. Only fts is authorized for opt-in work."
+                    },
+                    "per_call_opt_in": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Explicit per-call opt-in bit to evaluate."
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Optional query text. Output includes only a hash."
+                    },
+                    "baseline_keys": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Optional baseline candidate keys. Output includes only count/hash, never raw keys."
+                    },
+                    "baseline_completed": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Whether the baseline memory_search result already exists for this dry run."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 120000,
+                        "description": "Future side-signal adapter timeout in milliseconds."
+                    },
+                    "coverage_threshold": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "default": 0.8,
+                        "description": "Future minimum side-signal coverage threshold."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let mode = args
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("fts")
+            .to_string();
+        let per_call_opt_in = args
+            .get("per_call_opt_in")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let query = args
+            .get("query")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let baseline_keys = args
+            .get("baseline_keys")
+            .cloned()
+            .map(serde_json::from_value::<Vec<String>>)
+            .transpose()
+            .map_err(|e| ab_core::Error::Backend(format!("parse baseline_keys: {e}")))?
+            .unwrap_or_default();
+        let baseline_completed = args
+            .get("baseline_completed")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(120_000);
+        let coverage_threshold = args
+            .get("coverage_threshold")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.8);
+
+        let payload =
+            biocortex_retrieval_opt_in_dry_run_plan(BioCortexRetrievalOptInDryRunOptions {
+                mode,
+                per_call_opt_in,
+                query,
+                baseline_keys,
+                baseline_completed,
+                timeout_ms,
+                coverage_threshold,
+            });
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
+//  biocortex_retrieval_opt_in_review_packet — read-only dry-run review packet
+// ===========================================================================
+
+/// Read-only BioCortex retrieval opt-in review-packet consumer. This tool
+/// accepts an opt-in dry-run plan and emits a safe review packet for human/agent
+/// inspection. It does not include the raw dry-run payload, approve anything,
+/// call `memory_search`, run BioCortex, or change retrieval order.
+pub struct BioCortexRetrievalOptInReviewPacketTool;
+
+impl BioCortexRetrievalOptInReviewPacketTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for BioCortexRetrievalOptInReviewPacketTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for BioCortexRetrievalOptInReviewPacketTool {
+    fn name(&self) -> &'static str {
+        "biocortex_retrieval_opt_in_review_packet"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only BioCortex retrieval opt-in review packet \
+                 consumer. Accepts a dry-run plan and emits safe summary evidence \
+                 for review without including the raw dry-run payload. Does not \
+                 call memory_search, run BioCortex, mutate memory, include raw \
+                 memory keys/content, register an EmbeddingBackend, approve \
+                 runtime influence, or alter retrieval order."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["dry_run_plan"],
+                "properties": {
+                    "dry_run_plan": {
+                        "type": "object",
+                        "description": "JSON object produced by biocortex_retrieval_opt_in_dry_run. Unknown/raw fields are ignored."
+                    },
+                    "reviewer": {
+                        "type": "string",
+                        "description": "Optional reviewer identity or handle."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Optional implementation commit under review."
+                    },
+                    "forum_post_id": {
+                        "type": "string",
+                        "description": "Optional forum post id linking this review packet."
+                    },
+                    "memory_key": {
+                        "type": "string",
+                        "description": "Optional memory key linking this review packet."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let dry_run_plan = args.get("dry_run_plan").cloned().unwrap_or(Value::Null);
+        let reviewer = args
+            .get("reviewer")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let commit = args
+            .get("commit")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let forum_post_id = args
+            .get("forum_post_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let memory_key = args
+            .get("memory_key")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let payload =
+            biocortex_retrieval_opt_in_review_packet(BioCortexRetrievalOptInReviewPacketOptions {
+                dry_run_plan,
+                reviewer,
+                commit,
+                forum_post_id,
+                memory_key,
+            });
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
+//  biocortex_retrieval_opt_in_execution_packet — protected preflight contract
+// ===========================================================================
+
+/// Read-only BioCortex retrieval opt-in execution packet. This tool accepts an
+/// opt-in review packet and emits a protected preflight contract for a future
+/// adapter. It does not include the raw review packet, approve anything, call
+/// `memory_search`, run BioCortex, or change retrieval order.
+pub struct BioCortexRetrievalOptInExecutionPacketTool;
+
+impl BioCortexRetrievalOptInExecutionPacketTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for BioCortexRetrievalOptInExecutionPacketTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for BioCortexRetrievalOptInExecutionPacketTool {
+    fn name(&self) -> &'static str {
+        "biocortex_retrieval_opt_in_execution_packet"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only BioCortex retrieval opt-in execution preflight \
+                 packet. Accepts a review packet and emits a protected adapter \
+                 contract while still returning baseline. Does not call \
+                 memory_search, run BioCortex, mutate memory, include raw memory \
+                 keys/content, register an EmbeddingBackend, approve runtime \
+                 influence, or alter retrieval order."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["review_packet"],
+                "properties": {
+                    "review_packet": {
+                        "type": "object",
+                        "description": "JSON object produced by biocortex_retrieval_opt_in_review_packet. Unknown/raw fields are ignored."
+                    },
+                    "per_call_opt_in": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Explicit per-call opt-in bit to evaluate in the store contract."
+                    },
+                    "attempt_id": {
+                        "type": "string",
+                        "description": "Optional execution attempt id for audit correlation."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Optional implementation commit under review."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let review_packet = args.get("review_packet").cloned().unwrap_or(Value::Null);
+        let per_call_opt_in = args
+            .get("per_call_opt_in")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let attempt_id = args
+            .get("attempt_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let commit = args
+            .get("commit")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let payload = biocortex_retrieval_opt_in_execution_packet(
+            BioCortexRetrievalOptInExecutionPacketOptions {
+                review_packet,
+                per_call_opt_in,
+                attempt_id,
+                commit,
+            },
+        );
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
+//  biocortex_retrieval_opt_in_runtime_trial — baseline-preserving side signal
+// ===========================================================================
+
+/// Baseline-preserving BioCortex retrieval opt-in runtime trial. This tool
+/// accepts an execution packet plus explicit candidate rows and may run the
+/// external side-signal adapter when opt-in gates pass. It never calls
+/// `memory_search`, includes raw query/key/content data in output, registers an
+/// EmbeddingBackend, approves runtime influence, or changes returned order.
+pub struct BioCortexRetrievalOptInRuntimeTrialTool;
+
+impl BioCortexRetrievalOptInRuntimeTrialTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for BioCortexRetrievalOptInRuntimeTrialTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for BioCortexRetrievalOptInRuntimeTrialTool {
+    fn name(&self) -> &'static str {
+        "biocortex_retrieval_opt_in_runtime_trial"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Baseline-preserving BioCortex retrieval opt-in runtime \
+                 trial. Accepts an execution packet and explicit candidate rows, \
+                 runs the external side-signal adapter only when opt-in gates pass, \
+                 and returns a sanitized evidence packet. Does not call \
+                 memory_search, mutate memory, include raw query/keys/content, \
+                 register an EmbeddingBackend, approve runtime influence, or alter \
+                 retrieval order."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["execution_packet", "query", "candidates"],
+                "properties": {
+                    "execution_packet": {
+                        "type": "object",
+                        "description": "JSON object produced by biocortex_retrieval_opt_in_execution_packet. Unknown/raw fields are ignored."
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "Query text for the side-signal trial. Output includes only a hash."
+                    },
+                    "candidates": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "key": { "type": "string" },
+                                "content": { "type": "string" }
+                            },
+                            "required": ["key", "content"]
+                        },
+                        "description": "Explicit baseline candidate rows. The tool never fetches memory_search results and does not echo keys/content."
+                    },
+                    "expected_key": {
+                        "type": "string",
+                        "description": "Optional expected key. Output includes only a hash and ranks."
+                    },
+                    "checkout_path": {
+                        "type": "string",
+                        "description": "Optional local biocortex-rs checkout. Defaults to AB_BIOCORTEX_RS, sibling checkout paths, then /tmp/biocortex-rs-ab-eval."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 600000,
+                        "default": 120000,
+                        "description": "External side-signal adapter timeout in milliseconds."
+                    },
+                    "coverage_threshold": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "default": 0.8,
+                        "description": "Minimum matched side-signal coverage for advisory availability."
+                    },
+                    "attempt_id": {
+                        "type": "string",
+                        "description": "Optional runtime trial attempt id for audit correlation."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Optional implementation commit under review."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let execution_packet = args.get("execution_packet").cloned().unwrap_or(Value::Null);
+        let query = args
+            .get("query")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let candidates_value = args.get("candidates").cloned().unwrap_or_else(|| json!([]));
+        let candidates =
+            serde_json::from_value::<Vec<BioCortexRetrievalCandidate>>(candidates_value)
+                .map_err(|e| ab_core::Error::Backend(format!("parse candidates: {e}")))?;
+        let expected_key = args
+            .get("expected_key")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let checkout = args
+            .get("checkout_path")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from);
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(120_000);
+        let coverage_threshold = args
+            .get("coverage_threshold")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.8);
+        let attempt_id = args
+            .get("attempt_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let commit = args
+            .get("commit")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+
+        let payload =
+            biocortex_retrieval_opt_in_runtime_trial(BioCortexRetrievalOptInRuntimeTrialOptions {
+                execution_packet,
+                query,
+                candidates,
+                expected_key,
+                checkout,
+                timeout_ms,
+                coverage_threshold,
+                attempt_id,
+                commit,
+            })
+            .await;
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
+//  biocortex_retrieval_opt_in_runtime_trial_review_packet — review evidence
+// ===========================================================================
+
+/// Read-only BioCortex retrieval opt-in runtime-trial review packet. This tool
+/// accepts a runtime trial packet and emits safe post-implementation review
+/// evidence. It does not include the raw runtime trial payload, approve
+/// anything, call `memory_search`, run BioCortex, or change retrieval order.
+pub struct BioCortexRetrievalOptInRuntimeTrialReviewPacketTool;
+
+impl BioCortexRetrievalOptInRuntimeTrialReviewPacketTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for BioCortexRetrievalOptInRuntimeTrialReviewPacketTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for BioCortexRetrievalOptInRuntimeTrialReviewPacketTool {
+    fn name(&self) -> &'static str {
+        "biocortex_retrieval_opt_in_runtime_trial_review_packet"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only BioCortex retrieval opt-in runtime-trial \
+                 review packet. Accepts a runtime trial packet and emits safe \
+                 post-implementation review evidence without including the raw \
+                 trial payload. Does not call memory_search, run BioCortex, \
+                 mutate memory, include raw query/keys/content, register an \
+                 EmbeddingBackend, approve runtime influence, or alter retrieval \
+                 order."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["runtime_trial"],
+                "properties": {
+                    "runtime_trial": {
+                        "type": "object",
+                        "description": "JSON object produced by biocortex_retrieval_opt_in_runtime_trial. Unknown/raw fields are ignored."
+                    },
+                    "reviewer": {
+                        "type": "string",
+                        "description": "Optional reviewer identity or handle."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Optional implementation commit under review."
+                    },
+                    "forum_post_id": {
+                        "type": "string",
+                        "description": "Optional forum post id linking this review packet."
+                    },
+                    "memory_key": {
+                        "type": "string",
+                        "description": "Optional memory key linking this review packet."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let runtime_trial = args.get("runtime_trial").cloned().unwrap_or(Value::Null);
+        let reviewer = args
+            .get("reviewer")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let commit = args
+            .get("commit")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let forum_post_id = args
+            .get("forum_post_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let memory_key = args
+            .get("memory_key")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let payload = biocortex_retrieval_opt_in_runtime_trial_review_packet(
+            BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions {
+                runtime_trial,
+                reviewer,
+                commit,
+                forum_post_id,
+                memory_key,
+            },
+        );
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
+//  biocortex_retrieval_opt_in_order_diff_packet — hash-only order diff
+// ===========================================================================
+
+/// Read-only BioCortex retrieval opt-in order-diff packet. This tool accepts a
+/// runtime-trial or runtime-trial-review packet and compares baseline order
+/// against the advisory order using safe hash/rank summaries only. It does not
+/// include raw order keys, approve anything, call `memory_search`, run
+/// BioCortex, or change retrieval order.
+pub struct BioCortexRetrievalOptInOrderDiffPacketTool;
+
+impl BioCortexRetrievalOptInOrderDiffPacketTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for BioCortexRetrievalOptInOrderDiffPacketTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for BioCortexRetrievalOptInOrderDiffPacketTool {
+    fn name(&self) -> &'static str {
+        "biocortex_retrieval_opt_in_order_diff_packet"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only BioCortex retrieval opt-in order-diff \
+                 packet. Accepts a runtime trial or runtime-trial-review packet \
+                 and compares baseline order against advisory order using \
+                 hash/rank summaries only. Does not call memory_search, run \
+                 BioCortex, mutate memory, include raw query/keys/content, \
+                 register an EmbeddingBackend, approve runtime influence, or \
+                 alter retrieval order."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["source_packet"],
+                "properties": {
+                    "source_packet": {
+                        "type": "object",
+                        "description": "JSON object produced by biocortex_retrieval_opt_in_runtime_trial or biocortex_retrieval_opt_in_runtime_trial_review_packet. Unknown/raw fields are ignored."
+                    },
+                    "reviewer": {
+                        "type": "string",
+                        "description": "Optional reviewer identity or handle."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Optional implementation commit under review."
+                    },
+                    "forum_post_id": {
+                        "type": "string",
+                        "description": "Optional forum post id linking this packet."
+                    },
+                    "memory_key": {
+                        "type": "string",
+                        "description": "Optional memory key linking this packet."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let source_packet = args.get("source_packet").cloned().unwrap_or(Value::Null);
+        let reviewer = args
+            .get("reviewer")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let commit = args
+            .get("commit")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let forum_post_id = args
+            .get("forum_post_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let memory_key = args
+            .get("memory_key")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let payload = biocortex_retrieval_opt_in_order_diff_packet(
+            BioCortexRetrievalOptInOrderDiffPacketOptions {
+                source_packet,
+                reviewer,
+                commit,
+                forum_post_id,
+                memory_key,
+            },
+        );
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
+//  biocortex_retrieval_opt_in_redacted_order_artifact — rank movement metrics
+// ===========================================================================
+
+/// Read-only BioCortex retrieval opt-in redacted-order artifact. This tool
+/// accepts a runtime-trial or runtime-trial-review packet and computes top-k
+/// overlap plus per-key rank movements from sanitized key_hash rows only. It
+/// does not include raw order keys, approve anything, call `memory_search`, run
+/// BioCortex, or change retrieval order.
+pub struct BioCortexRetrievalOptInRedactedOrderArtifactTool;
+
+impl BioCortexRetrievalOptInRedactedOrderArtifactTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for BioCortexRetrievalOptInRedactedOrderArtifactTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for BioCortexRetrievalOptInRedactedOrderArtifactTool {
+    fn name(&self) -> &'static str {
+        "biocortex_retrieval_opt_in_redacted_order_artifact"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only BioCortex retrieval opt-in redacted-order \
+                 artifact. Accepts a runtime trial or runtime-trial-review \
+                 packet and computes top-k overlap plus per-key rank movement \
+                 from sanitized key_hash rows only. Does not call \
+                 memory_search, run BioCortex, mutate memory, include raw \
+                 query/keys/content, register an EmbeddingBackend, approve \
+                 runtime influence, or alter retrieval order."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["source_packet"],
+                "properties": {
+                    "source_packet": {
+                        "type": "object",
+                        "description": "JSON object produced by biocortex_retrieval_opt_in_runtime_trial or biocortex_retrieval_opt_in_runtime_trial_review_packet. Unknown/raw fields are ignored."
+                    },
+                    "reviewer": {
+                        "type": "string",
+                        "description": "Optional reviewer identity or handle."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Optional implementation commit under review."
+                    },
+                    "forum_post_id": {
+                        "type": "string",
+                        "description": "Optional forum post id linking this artifact."
+                    },
+                    "memory_key": {
+                        "type": "string",
+                        "description": "Optional memory key linking this artifact."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let source_packet = args.get("source_packet").cloned().unwrap_or(Value::Null);
+        let reviewer = args
+            .get("reviewer")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let commit = args
+            .get("commit")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let forum_post_id = args
+            .get("forum_post_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let memory_key = args
+            .get("memory_key")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let payload = biocortex_retrieval_opt_in_redacted_order_artifact(
+            BioCortexRetrievalOptInRedactedOrderArtifactOptions {
+                source_packet,
+                reviewer,
+                commit,
+                forum_post_id,
+                memory_key,
+            },
+        );
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
+//  biocortex_retrieval_opt_in_authorization_decision_packet — impl-only gate
+// ===========================================================================
+
+/// Read-only BioCortex retrieval opt-in authorization decision consumer. This
+/// tool accepts an authorization request plus the human decision record and
+/// emits an implementation-only gate packet. It never approves runtime adapter
+/// influence, calls `memory_search`, runs BioCortex, or changes retrieval order.
+pub struct BioCortexRetrievalOptInAuthorizationDecisionPacketTool;
+
+impl BioCortexRetrievalOptInAuthorizationDecisionPacketTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for BioCortexRetrievalOptInAuthorizationDecisionPacketTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for BioCortexRetrievalOptInAuthorizationDecisionPacketTool {
+    fn name(&self) -> &'static str {
+        "biocortex_retrieval_opt_in_authorization_decision_packet"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only BioCortex retrieval opt-in authorization \
+                 decision consumer. Accepts an authorization request and a human \
+                 decision record, then emits an implementation-only gate packet. \
+                 Does not call memory_search, run BioCortex, mutate memory, \
+                 include raw query/keys/content, register an EmbeddingBackend, \
+                 approve runtime influence, or alter retrieval order."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["authorization_request", "authorization_decision"],
+                "properties": {
+                    "authorization_request": {
+                        "type": "object",
+                        "description": "JSON object produced by prepare-biocortex-retrieval-opt-in-authorization-request.sh. Unknown/raw fields are ignored."
+                    },
+                    "authorization_decision": {
+                        "type": "object",
+                        "description": "Human opt-in implementation authorization decision record. Unknown/raw fields are ignored."
+                    },
+                    "reviewer": {
+                        "type": "string",
+                        "description": "Optional reviewer identity or handle."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Optional implementation commit under review."
+                    },
+                    "forum_post_id": {
+                        "type": "string",
+                        "description": "Optional forum post id linking this decision packet."
+                    },
+                    "memory_key": {
+                        "type": "string",
+                        "description": "Optional memory key linking this decision packet."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let authorization_request = args
+            .get("authorization_request")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let authorization_decision = args
+            .get("authorization_decision")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let reviewer = args
+            .get("reviewer")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let commit = args
+            .get("commit")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let forum_post_id = args
+            .get("forum_post_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let memory_key = args
+            .get("memory_key")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let payload = biocortex_retrieval_opt_in_authorization_decision_packet(
+            BioCortexRetrievalOptInAuthorizationDecisionPacketOptions {
+                authorization_decision,
+                authorization_request,
+                reviewer,
+                commit,
+                forum_post_id,
+                memory_key,
+            },
+        );
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
+//  biocortex_retrieval_opt_in_post_implementation_review_gate — review gate
+// ===========================================================================
+
+/// Read-only BioCortex retrieval opt-in post-implementation review gate. This
+/// tool accepts the authorization decision packet plus the opt-in plan fixture
+/// and emits a readiness packet for a separate human runtime-influence review.
+/// It never approves runtime adapter influence, calls `memory_search`, runs
+/// BioCortex, or changes retrieval order.
+pub struct BioCortexRetrievalOptInPostImplementationReviewGateTool;
+
+impl BioCortexRetrievalOptInPostImplementationReviewGateTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for BioCortexRetrievalOptInPostImplementationReviewGateTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for BioCortexRetrievalOptInPostImplementationReviewGateTool {
+    fn name(&self) -> &'static str {
+        "biocortex_retrieval_opt_in_post_implementation_review_gate"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only BioCortex retrieval opt-in \
+                 post-implementation review gate. Accepts an authorization \
+                 decision packet and opt-in plan fixture, then emits readiness \
+                 for a separate human runtime-influence review. Does not call \
+                 memory_search, run BioCortex, mutate memory, include raw \
+                 query/keys/content, register an EmbeddingBackend, approve \
+                 runtime influence, or alter retrieval order."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["authorization_decision_packet", "opt_in_plan"],
+                "properties": {
+                    "authorization_decision_packet": {
+                        "type": "object",
+                        "description": "JSON object produced by biocortex_retrieval_opt_in_authorization_decision_packet. Unknown/raw fields are ignored."
+                    },
+                    "opt_in_plan": {
+                        "type": "object",
+                        "description": "Machine-readable opt-in experiment plan fixture. Unknown/raw fields are ignored."
+                    },
+                    "reviewer": {
+                        "type": "string",
+                        "description": "Optional reviewer identity or handle."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Optional implementation commit under review."
+                    },
+                    "forum_post_id": {
+                        "type": "string",
+                        "description": "Optional forum post id linking this review gate."
+                    },
+                    "memory_key": {
+                        "type": "string",
+                        "description": "Optional memory key linking this review gate."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let authorization_decision_packet = args
+            .get("authorization_decision_packet")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let opt_in_plan = args.get("opt_in_plan").cloned().unwrap_or(Value::Null);
+        let reviewer = args
+            .get("reviewer")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let commit = args
+            .get("commit")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let forum_post_id = args
+            .get("forum_post_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let memory_key = args
+            .get("memory_key")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let payload = biocortex_retrieval_opt_in_post_implementation_review_gate(
+            BioCortexRetrievalOptInPostImplementationReviewGateOptions {
+                authorization_decision_packet,
+                opt_in_plan,
+                reviewer,
+                commit,
+                forum_post_id,
+                memory_key,
+            },
+        );
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
+//  biocortex_retrieval_opt_in_runtime_influence_review_request — request
+// ===========================================================================
+
+/// Read-only BioCortex retrieval opt-in runtime-influence review request. This
+/// tool accepts the post-implementation review gate plus redacted order artifact
+/// and may accept a redacted evidence aggregate summary. It emits a human
+/// review request for explicit opt-in FTS influence. It never approves runtime
+/// adapter influence, calls `memory_search`, runs BioCortex, or changes
+/// retrieval order.
+pub struct BioCortexRetrievalOptInRuntimeInfluenceReviewRequestTool;
+
+impl BioCortexRetrievalOptInRuntimeInfluenceReviewRequestTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for BioCortexRetrievalOptInRuntimeInfluenceReviewRequestTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for BioCortexRetrievalOptInRuntimeInfluenceReviewRequestTool {
+    fn name(&self) -> &'static str {
+        "biocortex_retrieval_opt_in_runtime_influence_review_request"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only BioCortex retrieval opt-in \
+                 runtime-influence review request. Accepts a post-implementation \
+                 review gate, redacted order artifact, optional redacted \
+                 evidence aggregate, and optional post-runtime evidence \
+                 summary, then emits a request for separate human review of \
+                 explicit opt-in FTS influence. Does not call \
+                 memory_search, run BioCortex, mutate memory, include raw \
+                 query/keys/content, register an EmbeddingBackend, approve \
+                 runtime influence, or alter retrieval order."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["post_implementation_review_gate", "redacted_order_artifact"],
+                "properties": {
+                    "post_implementation_review_gate": {
+                        "type": "object",
+                        "description": "JSON object produced by biocortex_retrieval_opt_in_post_implementation_review_gate. Unknown/raw fields are ignored."
+                    },
+                    "redacted_order_artifact": {
+                        "type": "object",
+                        "description": "JSON object produced by biocortex_retrieval_opt_in_redacted_order_artifact. Unknown/raw fields are ignored."
+                    },
+                    "redacted_evidence_aggregate": {
+                        "type": "object",
+                        "description": "Optional JSON object produced by biocortex_retrieval_opt_in_redacted_evidence_aggregate. Unknown/raw fields are ignored; the input body is not copied to output."
+                    },
+                    "evidence_summary": {
+                        "type": "object",
+                        "description": "Optional JSON object produced by biocortex_retrieval_opt_in_evidence_summary. Unknown/raw fields are ignored; the input body is not copied to output."
+                    },
+                    "reviewer": {
+                        "type": "string",
+                        "description": "Optional reviewer identity or handle."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Optional implementation commit under review."
+                    },
+                    "forum_post_id": {
+                        "type": "string",
+                        "description": "Optional forum post id linking this request."
+                    },
+                    "memory_key": {
+                        "type": "string",
+                        "description": "Optional memory key linking this request."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let post_implementation_review_gate = args
+            .get("post_implementation_review_gate")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let redacted_order_artifact = args
+            .get("redacted_order_artifact")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let redacted_evidence_aggregate = args.get("redacted_evidence_aggregate").cloned();
+        let evidence_summary = args.get("evidence_summary").cloned();
+        let reviewer = args
+            .get("reviewer")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let commit = args
+            .get("commit")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let forum_post_id = args
+            .get("forum_post_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let memory_key = args
+            .get("memory_key")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let payload = biocortex_retrieval_opt_in_runtime_influence_review_request(
+            BioCortexRetrievalOptInRuntimeInfluenceReviewRequestOptions {
+                post_implementation_review_gate,
+                redacted_order_artifact,
+                redacted_evidence_aggregate,
+                evidence_summary,
+                reviewer,
+                commit,
+                forum_post_id,
+                memory_key,
+            },
+        );
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
+//  biocortex_retrieval_opt_in_runtime_influence_decision_packet — decision
+// ===========================================================================
+
+/// Read-only BioCortex retrieval opt-in runtime-influence decision consumer.
+/// This tool accepts a runtime-influence review request plus a separate human
+/// decision record. It can authorize implementation of explicit opt-in FTS
+/// runtime influence only; it never calls `memory_search`, runs BioCortex,
+/// mutates memory, connects ordering behavior, or changes retrieval order.
+pub struct BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketTool;
+
+impl BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketTool {
+    fn name(&self) -> &'static str {
+        "biocortex_retrieval_opt_in_runtime_influence_decision_packet"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only BioCortex retrieval opt-in \
+                 runtime-influence decision consumer. Accepts a \
+                 runtime-influence review request and a separate human \
+                 decision record, then emits a machine-checkable decision \
+                 packet for explicit opt-in FTS runtime influence only. \
+                 Does not call memory_search, run BioCortex, mutate memory, \
+                 include raw query/keys/content or human decision text, \
+                 register an EmbeddingBackend, connect ordering behavior, \
+                 allow default search order changes, or alter retrieval order."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["runtime_influence_review_request", "runtime_influence_decision"],
+                "properties": {
+                    "runtime_influence_review_request": {
+                        "type": "object",
+                        "description": "JSON object produced by biocortex_retrieval_opt_in_runtime_influence_review_request. Unknown/raw fields are ignored."
+                    },
+                    "runtime_influence_decision": {
+                        "type": "object",
+                        "description": "Human runtime-influence review decision record. Unknown/raw fields are ignored."
+                    },
+                    "reviewer": {
+                        "type": "string",
+                        "description": "Optional reviewer identity or handle."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Optional implementation commit under review."
+                    },
+                    "forum_post_id": {
+                        "type": "string",
+                        "description": "Optional forum post id linking this decision packet."
+                    },
+                    "memory_key": {
+                        "type": "string",
+                        "description": "Optional memory key linking this decision packet."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let runtime_influence_review_request = args
+            .get("runtime_influence_review_request")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let runtime_influence_decision = args
+            .get("runtime_influence_decision")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let reviewer = args
+            .get("reviewer")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let commit = args
+            .get("commit")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let forum_post_id = args
+            .get("forum_post_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let memory_key = args
+            .get("memory_key")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let payload = biocortex_retrieval_opt_in_runtime_influence_decision_packet(
+            BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketOptions {
+                runtime_influence_review_request,
+                runtime_influence_decision,
+                reviewer,
+                commit,
+                forum_post_id,
+                memory_key,
+            },
+        );
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
+//  biocortex_retrieval_opt_in_store_trial — protected store wrapper connection
+// ===========================================================================
+
+/// Explicit opt-in BioCortex store trial. This tool calls AB store baseline
+/// `memory_search`, runs the external BioCortex side-signal adapter only after a
+/// runtime-influence decision packet authorizes it, then feeds the side-signal
+/// into the protected opt-in store wrapper. Output is redacted to hashes/counts.
+pub struct BioCortexRetrievalOptInStoreTrialTool {
+    hub: Hub,
+}
+
+impl BioCortexRetrievalOptInStoreTrialTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for BioCortexRetrievalOptInStoreTrialTool {
+    fn name(&self) -> &'static str {
+        "biocortex_retrieval_opt_in_store_trial"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Explicit opt-in BioCortex store trial. Calls AB store \
+                 baseline memory_search, runs the external BioCortex side-signal \
+                 adapter only when a runtime-influence decision packet and runtime \
+                 gates authorize it, and feeds sanitized side-signal rows into the \
+                 protected opt-in store wrapper. Returns only redacted hashes/counts; \
+                 does not mutate memory, register an EmbeddingBackend, expose raw \
+                 query/keys/content, or affect default memory_search."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["runtime_influence_decision_packet", "query", "per_call_opt_in"],
+                "properties": {
+                    "runtime_influence_decision_packet": {
+                        "type": "object",
+                        "description": "JSON object produced by biocortex_retrieval_opt_in_runtime_influence_decision_packet. The tool consumes only safe summary fields and does not echo the packet."
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "FTS query for baseline memory_search. Output includes only a query hash."
+                    },
+                    "tags_any": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Optional tag filter forwarded to baseline memory_search. Output includes only the filter count."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100,
+                        "default": 10,
+                        "description": "Maximum baseline candidates to retrieve from store memory_search."
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["fts", "hybrid", "semantic"],
+                        "default": "fts",
+                        "description": "Retrieval mode. Only fts is authorized for runtime influence."
+                    },
+                    "per_call_opt_in": {
+                        "type": "boolean",
+                        "description": "Required explicit per-call opt-in bit."
+                    },
+                    "checkout_path": {
+                        "type": "string",
+                        "description": "Optional local biocortex-rs checkout. Defaults to AB_BIOCORTEX_RS, sibling checkout paths, then /tmp/biocortex-rs-ab-eval."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 600000,
+                        "default": 120000,
+                        "description": "External side-signal adapter timeout in milliseconds."
+                    },
+                    "coverage_threshold": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "default": 0.8,
+                        "description": "Minimum matched side-signal coverage required before the store wrapper may return experimental order."
+                    },
+                    "blend_alpha": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "default": 0.8,
+                        "description": "Blend weight passed to the protected store wrapper."
+                    },
+                    "attempt_id": {
+                        "type": "string",
+                        "description": "Optional attempt id for audit correlation."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Optional implementation commit under review."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = self
+            .hub
+            .store
+            .as_ref()
+            .ok_or_else(|| ab_core::Error::Backend("store unavailable".into()))?;
+        let runtime_influence_decision_packet = args
+            .get("runtime_influence_decision_packet")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let query = args
+            .get("query")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let tags_any = args
+            .get("tags_any")
+            .cloned()
+            .map(serde_json::from_value::<Vec<String>>)
+            .transpose()
+            .map_err(|e| ab_core::Error::Backend(format!("parse tags_any: {e}")))?
+            .unwrap_or_default();
+        let limit = args
+            .get("limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(10)
+            .clamp(1, 100) as u32;
+        let mode = args
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("fts")
+            .to_string();
+        let per_call_opt_in = args
+            .get("per_call_opt_in")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let checkout = args
+            .get("checkout_path")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from);
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(120_000);
+        let coverage_threshold = args
+            .get("coverage_threshold")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.8);
+        let blend_alpha = args
+            .get("blend_alpha")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.8) as f32;
+        let attempt_id = args
+            .get("attempt_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let commit = args
+            .get("commit")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+
+        let payload = biocortex_retrieval_opt_in_store_trial(
+            store.as_ref(),
+            BioCortexRetrievalOptInStoreTrialOptions {
+                runtime_influence_decision_packet,
+                query,
+                tags_any,
+                limit,
+                mode,
+                per_call_opt_in,
+                checkout,
+                timeout_ms,
+                coverage_threshold,
+                blend_alpha,
+                attempt_id,
+                commit,
+            },
+        )
+        .await;
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
+//  biocortex_retrieval_opt_in_gated_store_trial — transition-gated runtime entry
+// ===========================================================================
+
+/// Transition-gated explicit opt-in BioCortex store trial. This tool refuses to
+/// call AB store baseline `memory_search` unless a runtime-transition gate
+/// explicitly allows the FTS per-call opt-in transition.
+pub struct BioCortexRetrievalOptInGatedStoreTrialTool {
+    hub: Hub,
+}
+
+impl BioCortexRetrievalOptInGatedStoreTrialTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for BioCortexRetrievalOptInGatedStoreTrialTool {
+    fn name(&self) -> &'static str {
+        "biocortex_retrieval_opt_in_gated_store_trial"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Transition-gated explicit opt-in BioCortex store trial. \
+                 Consumes a runtime-transition gate and refuses to call AB store \
+                 baseline memory_search unless that gate allows the explicit FTS \
+                 per-call opt-in transition. After the gate passes it delegates to \
+                 the protected opt-in store trial. Returns only redacted summaries; \
+                 does not mutate memory, register an EmbeddingBackend, expose raw \
+                 query/keys/content, or affect default memory_search."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": [
+                    "runtime_transition_gate",
+                    "runtime_influence_decision_packet",
+                    "query",
+                    "per_call_opt_in"
+                ],
+                "properties": {
+                    "runtime_transition_gate": {
+                        "type": "object",
+                        "description": "JSON object produced by biocortex_retrieval_opt_in_runtime_transition_gate. The tool consumes only safe summary fields and does not echo the gate."
+                    },
+                    "runtime_influence_decision_packet": {
+                        "type": "object",
+                        "description": "JSON object produced by biocortex_retrieval_opt_in_runtime_influence_decision_packet. The tool consumes only safe summary fields and does not echo the packet."
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "FTS query for baseline memory_search after the transition gate passes. Output includes only a query hash."
+                    },
+                    "tags_any": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Optional tag filter forwarded to baseline memory_search. Output includes only the filter count."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100,
+                        "default": 10,
+                        "description": "Maximum baseline candidates to retrieve from store memory_search."
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["fts", "hybrid", "semantic"],
+                        "default": "fts",
+                        "description": "Retrieval mode. Only fts is authorized for runtime influence."
+                    },
+                    "per_call_opt_in": {
+                        "type": "boolean",
+                        "description": "Required explicit per-call opt-in bit."
+                    },
+                    "checkout_path": {
+                        "type": "string",
+                        "description": "Optional local biocortex-rs checkout. Defaults to AB_BIOCORTEX_RS, sibling checkout paths, then /tmp/biocortex-rs-ab-eval."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 600000,
+                        "default": 120000,
+                        "description": "External side-signal adapter timeout in milliseconds."
+                    },
+                    "coverage_threshold": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "default": 0.8,
+                        "description": "Minimum matched side-signal coverage required before the store wrapper may return experimental order."
+                    },
+                    "blend_alpha": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "default": 0.8,
+                        "description": "Blend weight passed to the protected store wrapper."
+                    },
+                    "attempt_id": {
+                        "type": "string",
+                        "description": "Optional attempt id for audit correlation."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Optional implementation commit under review."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = self
+            .hub
+            .store
+            .as_ref()
+            .ok_or_else(|| ab_core::Error::Backend("store unavailable".into()))?;
+        let runtime_transition_gate = args
+            .get("runtime_transition_gate")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let runtime_influence_decision_packet = args
+            .get("runtime_influence_decision_packet")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let query = args
+            .get("query")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let tags_any = args
+            .get("tags_any")
+            .cloned()
+            .map(serde_json::from_value::<Vec<String>>)
+            .transpose()
+            .map_err(|e| ab_core::Error::Backend(format!("parse tags_any: {e}")))?
+            .unwrap_or_default();
+        let limit = args
+            .get("limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(10)
+            .clamp(1, 100) as u32;
+        let mode = args
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("fts")
+            .to_string();
+        let per_call_opt_in = args
+            .get("per_call_opt_in")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let checkout = args
+            .get("checkout_path")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from);
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(120_000);
+        let coverage_threshold = args
+            .get("coverage_threshold")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.8);
+        let blend_alpha = args
+            .get("blend_alpha")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.8) as f32;
+        let attempt_id = args
+            .get("attempt_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let commit = args
+            .get("commit")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+
+        let payload = biocortex_retrieval_opt_in_gated_store_trial(
+            store.as_ref(),
+            BioCortexRetrievalOptInGatedStoreTrialOptions {
+                runtime_transition_gate,
+                runtime_influence_decision_packet,
+                query,
+                tags_any,
+                limit,
+                mode,
+                per_call_opt_in,
+                checkout,
+                timeout_ms,
+                coverage_threshold,
+                blend_alpha,
+                attempt_id,
+                commit,
+            },
+        )
+        .await;
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
+//  biocortex_retrieval_opt_in_batch_diagnostics — redacted ranking diagnostics
+// ===========================================================================
+
+/// Batch redacted diagnostics for explicit opt-in BioCortex store trials. This
+/// tool runs multiple protected store trials and aggregates only hashes/counts.
+pub struct BioCortexRetrievalOptInBatchDiagnosticsTool {
+    hub: Hub,
+}
+
+impl BioCortexRetrievalOptInBatchDiagnosticsTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for BioCortexRetrievalOptInBatchDiagnosticsTool {
+    fn name(&self) -> &'static str {
+        "biocortex_retrieval_opt_in_batch_diagnostics"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Batch redacted diagnostics for explicit opt-in \
+                 BioCortex store trials. Reuses the protected store-trial gate \
+                 for every query, then aggregates baseline vs experimental \
+                 order hashes, side-signal coverage, latency, and movement \
+                 classes. Does not expose raw queries/keys/content, mutate \
+                 memory, register an EmbeddingBackend, or affect default \
+                 memory_search."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["runtime_influence_decision_packet", "per_call_opt_in"],
+                "properties": {
+                    "runtime_influence_decision_packet": {
+                        "type": "object",
+                        "description": "JSON object produced by biocortex_retrieval_opt_in_runtime_influence_decision_packet. The tool consumes only safe summary fields and does not echo the packet."
+                    },
+                    "queries": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "FTS queries to diagnose. Output includes only query hashes."
+                    },
+                    "query_cases": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["query"],
+                            "properties": {
+                                "query": {
+                                    "type": "string",
+                                    "description": "FTS query. Output includes only a query hash."
+                                },
+                                "class_label": {
+                                    "type": "string",
+                                    "description": "Optional operator-defined bucket label. It is normalized before output."
+                                }
+                            }
+                        },
+                        "description": "Optional query cases with sanitized bucket labels."
+                    },
+                    "tags_any": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Optional tag filter forwarded to each baseline memory_search. Output includes only the filter count."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100,
+                        "default": 10,
+                        "description": "Maximum baseline candidates per query."
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["fts", "hybrid", "semantic"],
+                        "default": "fts",
+                        "description": "Retrieval mode. Only fts is authorized for runtime influence."
+                    },
+                    "per_call_opt_in": {
+                        "type": "boolean",
+                        "description": "Required explicit per-call opt-in bit for every query."
+                    },
+                    "checkout_path": {
+                        "type": "string",
+                        "description": "Optional local biocortex-rs checkout. Defaults to AB_BIOCORTEX_RS, sibling checkout paths, then /tmp/biocortex-rs-ab-eval."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 600000,
+                        "default": 120000,
+                        "description": "External side-signal adapter timeout per query in milliseconds."
+                    },
+                    "coverage_threshold": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "default": 0.8,
+                        "description": "Minimum matched side-signal coverage required before the store wrapper may return experimental order."
+                    },
+                    "blend_alpha": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "default": 0.8,
+                        "description": "Blend weight passed to the protected store wrapper."
+                    },
+                    "attempt_id": {
+                        "type": "string",
+                        "description": "Optional batch attempt id for audit correlation."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Optional implementation commit under review."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = self
+            .hub
+            .store
+            .as_ref()
+            .ok_or_else(|| ab_core::Error::Backend("store unavailable".into()))?;
+        let runtime_influence_decision_packet = args
+            .get("runtime_influence_decision_packet")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let queries = biocortex_batch_query_cases_from_args(&args);
+        let tags_any = args
+            .get("tags_any")
+            .cloned()
+            .map(serde_json::from_value::<Vec<String>>)
+            .transpose()
+            .map_err(|e| ab_core::Error::Backend(format!("parse tags_any: {e}")))?
+            .unwrap_or_default();
+        let limit = args
+            .get("limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(10)
+            .clamp(1, 100) as u32;
+        let mode = args
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("fts")
+            .to_string();
+        let per_call_opt_in = args
+            .get("per_call_opt_in")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let checkout = args
+            .get("checkout_path")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from);
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(120_000);
+        let coverage_threshold = args
+            .get("coverage_threshold")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.8);
+        let blend_alpha = args
+            .get("blend_alpha")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.8) as f32;
+        let attempt_id = args
+            .get("attempt_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let commit = args
+            .get("commit")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+
+        let payload = biocortex_retrieval_opt_in_batch_diagnostics(
+            store.as_ref(),
+            BioCortexRetrievalOptInBatchDiagnosticsOptions {
+                runtime_influence_decision_packet,
+                queries,
+                tags_any,
+                limit,
+                mode,
+                per_call_opt_in,
+                checkout,
+                timeout_ms,
+                coverage_threshold,
+                blend_alpha,
+                attempt_id,
+                commit,
+            },
+        )
+        .await;
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
+//  biocortex_retrieval_opt_in_gated_batch_diagnostics — transition-gated batch
+// ===========================================================================
+
+/// Transition-gated batch diagnostics for explicit opt-in BioCortex store
+/// trials. Every query consumes the same runtime-transition gate before it may
+/// call the protected store-trial path.
+pub struct BioCortexRetrievalOptInGatedBatchDiagnosticsTool {
+    hub: Hub,
+}
+
+impl BioCortexRetrievalOptInGatedBatchDiagnosticsTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for BioCortexRetrievalOptInGatedBatchDiagnosticsTool {
+    fn name(&self) -> &'static str {
+        "biocortex_retrieval_opt_in_gated_batch_diagnostics"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Transition-gated batch diagnostics for explicit \
+                 opt-in BioCortex store trials. Consumes a runtime-transition \
+                 gate before each query may call the protected store-trial \
+                 path. Blocked gates return only redacted transition evidence \
+                 and do not call memory_search or BioCortex. Does not mutate \
+                 memory, register an EmbeddingBackend, expose raw queries/keys/\
+                 content, or affect default memory_search."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": [
+                    "runtime_transition_gate",
+                    "runtime_influence_decision_packet",
+                    "per_call_opt_in"
+                ],
+                "properties": {
+                    "runtime_transition_gate": {
+                        "type": "object",
+                        "description": "JSON object produced by biocortex_retrieval_opt_in_runtime_transition_gate. The tool consumes only safe summary fields and does not echo the gate."
+                    },
+                    "runtime_influence_decision_packet": {
+                        "type": "object",
+                        "description": "JSON object produced by biocortex_retrieval_opt_in_runtime_influence_decision_packet. The tool consumes only safe summary fields and does not echo the packet."
+                    },
+                    "queries": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "FTS queries to diagnose. Output includes only query hashes."
+                    },
+                    "query_cases": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["query"],
+                            "properties": {
+                                "query": {
+                                    "type": "string",
+                                    "description": "FTS query. Output includes only a query hash."
+                                },
+                                "class_label": {
+                                    "type": "string",
+                                    "description": "Optional operator-defined bucket label. It is normalized before output."
+                                }
+                            }
+                        },
+                        "description": "Optional query cases with sanitized bucket labels."
+                    },
+                    "tags_any": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Optional tag filter forwarded to each baseline memory_search after the transition gate passes. Output includes only the filter count."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100,
+                        "default": 10,
+                        "description": "Maximum baseline candidates per query."
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["fts", "hybrid", "semantic"],
+                        "default": "fts",
+                        "description": "Retrieval mode. Only fts is authorized for runtime influence."
+                    },
+                    "per_call_opt_in": {
+                        "type": "boolean",
+                        "description": "Required explicit per-call opt-in bit for every query."
+                    },
+                    "checkout_path": {
+                        "type": "string",
+                        "description": "Optional local biocortex-rs checkout. Defaults to AB_BIOCORTEX_RS, sibling checkout paths, then /tmp/biocortex-rs-ab-eval."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 600000,
+                        "default": 120000,
+                        "description": "External side-signal adapter timeout per query in milliseconds."
+                    },
+                    "coverage_threshold": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "default": 0.8,
+                        "description": "Minimum matched side-signal coverage required before the store wrapper may return experimental order."
+                    },
+                    "blend_alpha": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "default": 0.8,
+                        "description": "Blend weight passed to the protected store wrapper."
+                    },
+                    "attempt_id": {
+                        "type": "string",
+                        "description": "Optional batch attempt id for audit correlation."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Optional implementation commit under review."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = self
+            .hub
+            .store
+            .as_ref()
+            .ok_or_else(|| ab_core::Error::Backend("store unavailable".into()))?;
+        let runtime_transition_gate = args
+            .get("runtime_transition_gate")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let runtime_influence_decision_packet = args
+            .get("runtime_influence_decision_packet")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let queries = biocortex_batch_query_cases_from_args(&args);
+        let tags_any = args
+            .get("tags_any")
+            .cloned()
+            .map(serde_json::from_value::<Vec<String>>)
+            .transpose()
+            .map_err(|e| ab_core::Error::Backend(format!("parse tags_any: {e}")))?
+            .unwrap_or_default();
+        let limit = args
+            .get("limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(10)
+            .clamp(1, 100) as u32;
+        let mode = args
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("fts")
+            .to_string();
+        let per_call_opt_in = args
+            .get("per_call_opt_in")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let checkout = args
+            .get("checkout_path")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from);
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(120_000);
+        let coverage_threshold = args
+            .get("coverage_threshold")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.8);
+        let blend_alpha = args
+            .get("blend_alpha")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.8) as f32;
+        let attempt_id = args
+            .get("attempt_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let commit = args
+            .get("commit")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+
+        let payload = biocortex_retrieval_opt_in_gated_batch_diagnostics(
+            store.as_ref(),
+            BioCortexRetrievalOptInGatedBatchDiagnosticsOptions {
+                runtime_transition_gate,
+                runtime_influence_decision_packet,
+                queries,
+                tags_any,
+                limit,
+                mode,
+                per_call_opt_in,
+                checkout,
+                timeout_ms,
+                coverage_threshold,
+                blend_alpha,
+                attempt_id,
+                commit,
+            },
+        )
+        .await;
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
+//  biocortex_retrieval_opt_in_runtime_readiness_packet - readiness summary
+// ===========================================================================
+
+/// Read-only BioCortex retrieval opt-in runtime-readiness packet. This tool
+/// consumes aggregate-backed runtime-influence decision, store-trial, and
+/// legacy or transition-gated batch-diagnostics summaries to report whether
+/// the explicit opt-in FTS control plane is ready. It never calls
+/// `memory_search`, runs BioCortex, writes approval, exposes raw
+/// query/key/content data, or changes ordering.
+pub struct BioCortexRetrievalOptInRuntimeReadinessPacketTool;
+
+impl BioCortexRetrievalOptInRuntimeReadinessPacketTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for BioCortexRetrievalOptInRuntimeReadinessPacketTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for BioCortexRetrievalOptInRuntimeReadinessPacketTool {
+    fn name(&self) -> &'static str {
+        "biocortex_retrieval_opt_in_runtime_readiness_packet"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only BioCortex retrieval opt-in runtime-readiness \
+                 packet. Consumes aggregate-backed runtime-influence decision, \
+                 store-trial, and legacy or transition-gated batch-diagnostics \
+                 summaries to report whether the explicit opt-in FTS control \
+                 plane is ready. Distinguishes empty live probes from blocked \
+                 control-plane state. Does not \
+                 call memory_search, run BioCortex, mutate memory, write approval, \
+                 include raw query/keys/content or human decision text, register \
+                 an EmbeddingBackend, allow default search order changes, or \
+                 alter retrieval order."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": [
+                    "runtime_influence_decision_packet",
+                    "store_trial",
+                    "batch_diagnostics"
+                ],
+                "properties": {
+                    "runtime_influence_decision_packet": {
+                        "type": "object",
+                        "description": "JSON object produced by biocortex_retrieval_opt_in_runtime_influence_decision_packet. The tool consumes only safe summary fields and does not echo the packet."
+                    },
+                    "store_trial": {
+                        "type": "object",
+                        "description": "JSON object produced by biocortex_retrieval_opt_in_store_trial. The tool consumes only safe summary fields and does not echo the trial body."
+                    },
+                    "batch_diagnostics": {
+                        "type": "object",
+                        "description": "JSON object produced by biocortex_retrieval_opt_in_batch_diagnostics or biocortex_retrieval_opt_in_gated_batch_diagnostics. The tool consumes only safe aggregate fields and does not echo query rows."
+                    },
+                    "reviewer": {
+                        "type": "string",
+                        "description": "Optional reviewer identity or handle."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Optional implementation commit under review."
+                    },
+                    "forum_post_id": {
+                        "type": "string",
+                        "description": "Optional forum post id linking this readiness packet."
+                    },
+                    "memory_key": {
+                        "type": "string",
+                        "description": "Optional memory key linking this readiness packet."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let runtime_influence_decision_packet = args
+            .get("runtime_influence_decision_packet")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let store_trial = args.get("store_trial").cloned().unwrap_or(Value::Null);
+        let batch_diagnostics = args
+            .get("batch_diagnostics")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let reviewer = args
+            .get("reviewer")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let commit = args
+            .get("commit")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let forum_post_id = args
+            .get("forum_post_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let memory_key = args
+            .get("memory_key")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+
+        let payload = biocortex_retrieval_opt_in_runtime_readiness_packet(
+            BioCortexRetrievalOptInRuntimeReadinessPacketOptions {
+                runtime_influence_decision_packet,
+                store_trial,
+                batch_diagnostics,
+                reviewer,
+                commit,
+                forum_post_id,
+                memory_key,
+            },
+        );
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
+//  biocortex_retrieval_opt_in_runtime_transition_gate - readiness-gated switch
+// ===========================================================================
+
+/// Read-only BioCortex retrieval opt-in runtime-transition gate. This tool
+/// consumes a runtime-readiness packet and reports whether a requested
+/// explicit opt-in FTS transition may proceed. It never calls `memory_search`,
+/// runs BioCortex, writes approval, exposes raw data, or changes default order.
+pub struct BioCortexRetrievalOptInRuntimeTransitionGateTool;
+
+impl BioCortexRetrievalOptInRuntimeTransitionGateTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for BioCortexRetrievalOptInRuntimeTransitionGateTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn mcp_env_truthy(key: &str) -> bool {
+    std::env::var(key)
+        .ok()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
+#[async_trait]
+impl McpTool for BioCortexRetrievalOptInRuntimeTransitionGateTool {
+    fn name(&self) -> &'static str {
+        "biocortex_retrieval_opt_in_runtime_transition_gate"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only BioCortex retrieval opt-in runtime-transition \
+                 gate. Consumes a runtime-readiness packet and checks that the \
+                 requested transition is explicit per-call FTS, readiness-gated, \
+                 and not operator-disabled. Does not call memory_search, run \
+                 BioCortex, mutate memory, write approval, include raw query/keys/\
+                 content or human decision text, register an EmbeddingBackend, \
+                 allow default search order changes, or alter retrieval order."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["runtime_readiness_packet"],
+                "properties": {
+                    "runtime_readiness_packet": {
+                        "type": "object",
+                        "description": "JSON object produced by biocortex_retrieval_opt_in_runtime_readiness_packet. The tool consumes only safe summary fields and does not echo the packet."
+                    },
+                    "mode": {
+                        "type": "string",
+                        "default": "fts",
+                        "description": "Requested retrieval mode. Only fts can pass this transition gate."
+                    },
+                    "per_call_opt_in": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Required explicit per-call opt-in bit."
+                    },
+                    "operator_disabled": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Treat the operator disable switch as active for this gate. The environment variable AB_BIOCORTEX_RETRIEVAL_DISABLE is also honored."
+                    },
+                    "reviewer": {
+                        "type": "string",
+                        "description": "Optional reviewer identity or handle."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Optional implementation commit under review."
+                    },
+                    "forum_post_id": {
+                        "type": "string",
+                        "description": "Optional forum post id linking this transition gate."
+                    },
+                    "memory_key": {
+                        "type": "string",
+                        "description": "Optional memory key linking this transition gate."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let runtime_readiness_packet = args
+            .get("runtime_readiness_packet")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let mode = args
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("fts")
+            .to_string();
+        let per_call_opt_in = args
+            .get("per_call_opt_in")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let operator_disabled = args
+            .get("operator_disabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            || mcp_env_truthy(BIOCORTEX_RETRIEVAL_DISABLE_ENV);
+        let reviewer = args
+            .get("reviewer")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let commit = args
+            .get("commit")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let forum_post_id = args
+            .get("forum_post_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let memory_key = args
+            .get("memory_key")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+
+        let payload = biocortex_retrieval_opt_in_runtime_transition_gate(
+            BioCortexRetrievalOptInRuntimeTransitionGateOptions {
+                runtime_readiness_packet,
+                mode,
+                per_call_opt_in,
+                operator_disabled,
+                reviewer,
+                commit,
+                forum_post_id,
+                memory_key,
+            },
+        );
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+fn biocortex_batch_query_cases_from_args(
+    args: &Value,
+) -> Vec<BioCortexRetrievalOptInBatchQueryCase> {
+    let mut cases = Vec::new();
+    if let Some(values) = args.get("queries").and_then(Value::as_array) {
+        for value in values {
+            if let Some(query) = value.as_str() {
+                cases.push(BioCortexRetrievalOptInBatchQueryCase {
+                    query: query.to_string(),
+                    class_label: None,
+                });
+            }
+        }
+    }
+    if let Some(values) = args.get("query_cases").and_then(Value::as_array) {
+        for value in values {
+            if let Some(query) = value.get("query").and_then(Value::as_str) {
+                let class_label = value
+                    .get("class_label")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                cases.push(BioCortexRetrievalOptInBatchQueryCase {
+                    query: query.to_string(),
+                    class_label,
+                });
+            }
+        }
+    }
+    cases
+}
+
+// ===========================================================================
+//   biocortex_retrieval_shadow — review-only retrieval side-signal report
+// ===========================================================================
+
+/// Review-only BioCortex retrieval side-signal surface. This tool accepts
+/// explicit query/candidate rows and reports advisory BioCortex side-signal
+/// evidence. It does not call `memory_search`, does not mutate AB memory, and
+/// does not change returned retrieval order.
+#[cfg(feature = "biocortex-retrieval-shadow")]
+pub struct BioCortexRetrievalShadowTool;
+
+#[cfg(feature = "biocortex-retrieval-shadow")]
+impl BioCortexRetrievalShadowTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[cfg(feature = "biocortex-retrieval-shadow")]
+impl Default for BioCortexRetrievalShadowTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(feature = "biocortex-retrieval-shadow")]
+#[async_trait]
+impl McpTool for BioCortexRetrievalShadowTool {
+    fn name(&self) -> &'static str {
+        "biocortex_retrieval_shadow"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Review-only BioCortex retrieval side-signal report. \
+                 Accepts explicit query/candidate rows, runs the optional \
+                 BioCortex side-signal adapter only when runtime-enabled, and \
+                 returns an advisory report with runtime_adapter_approved=false. \
+                 Does not call memory_search, mutate memory, register an \
+                 EmbeddingBackend, or alter retrieval order."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Query text to evaluate against explicit candidates."
+                    },
+                    "candidates": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "key": { "type": "string" },
+                                "content": { "type": "string" }
+                            },
+                            "required": ["key", "content"]
+                        },
+                        "description": "Explicit candidate rows. The tool never fetches or mutates memory_search results."
+                    },
+                    "expected_key": {
+                        "type": "string",
+                        "description": "Optional expected key for labeled regression reporting."
+                    },
+                    "checkout_path": {
+                        "type": "string",
+                        "description": "Optional local biocortex-rs checkout. Defaults to AB_BIOCORTEX_RS, sibling checkout paths, then /tmp/biocortex-rs-ab-eval."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 600000,
+                        "default": 120000,
+                        "description": "External side-signal adapter timeout in milliseconds."
+                    },
+                    "include_raw": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Include raw stdout/stderr from the external adapter."
+                    }
+                },
+                "required": ["query", "candidates"]
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let query = args
+            .get("query")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let candidates_value = args.get("candidates").cloned().unwrap_or_else(|| json!([]));
+        let candidates =
+            serde_json::from_value::<Vec<BioCortexRetrievalCandidate>>(candidates_value)
+                .map_err(|e| ab_core::Error::Backend(format!("parse candidates: {e}")))?;
+        let expected_key = args
+            .get("expected_key")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let checkout = args
+            .get("checkout_path")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from);
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(120_000);
+        let include_raw = args
+            .get("include_raw")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+
+        let payload = biocortex_retrieval_shadow_report(BioCortexRetrievalShadowOptions {
+            query,
+            candidates,
+            expected_key,
+            checkout,
+            timeout_ms,
+            include_raw,
+        })
+        .await;
         Ok(ToolResult::json_text(&payload))
     }
 }
@@ -32938,6 +36615,9 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // Search-ranking diagnostics: read-only graph topology preflight for
     // PageRank-like centrality experiments.
     "memory_graph_topology",
+    // BioCortex retrieval side-signal: review-only, explicit candidates only,
+    // and runtime-disabled unless AB_BIOCORTEX_RETRIEVAL_SHADOW=1.
+    "biocortex_retrieval_shadow",
     // Explicit-link diagnostics: read-only projection of related_keys into
     // candidate graph edges before any write-capable backfill is considered.
     "memory_related_keys_preflight",
@@ -32977,6 +36657,9 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // External browser-lite discovery: read-only probe only. This is not the
     // mutating browser_* automation surface and does not change browser routing.
     "browser_lite_probe",
+    // Local system control API: allowlisted wrapper over ab-system-control.
+    // It is audited locally and never accepts arbitrary shell commands.
+    "system_control",
     // Remote session steering: a Codex orchestrator (which already carries
     // agent_spawn + agent_session_*) can launch/drive/observe long-lived agents
     // in named tmux sessions and roll up a worker blackboard.
@@ -33008,6 +36691,7 @@ fn codex_lean_tool(tool_name: &str) -> bool {
         tool_name,
         "capabilities"
             | "mcp_dispatch_audit"
+            | "mcp_lifecycle_digest"
             | "readiness_audit"
             | "event_spine_snapshot"
             | "tool_atlas_snapshot"
@@ -33058,6 +36742,7 @@ fn gemini_lean_tool(tool_name: &str) -> bool {
             | "changes_digest"
             | "git_topology_preflight"
             | "mcp_dispatch_audit"
+            | "mcp_lifecycle_digest"
             | "readiness_audit"
             | "event_spine_snapshot"
             | "tool_atlas_snapshot"
@@ -33071,6 +36756,7 @@ fn hook_lifecycle_tool(tool_name: &str) -> bool {
         tool_name,
         "capabilities"
             | "mcp_dispatch_audit"
+            | "mcp_lifecycle_digest"
             | "readiness_audit"
             | "event_spine_snapshot"
             | "tool_atlas_snapshot"
@@ -33291,7 +36977,9 @@ fn lswr_readonly_bridge_display_payload(
             })
         })?;
 
-    if packet.schema != crate::lswr_snapshot_report_packet::LSWR_READONLY_BRIDGE_REPORT_PACKET_SCHEMA {
+    if packet.schema
+        != crate::lswr_snapshot_report_packet::LSWR_READONLY_BRIDGE_REPORT_PACKET_SCHEMA
+    {
         return Err(json!({
             "code": "schema_mismatch",
             "message": "report_packet schema does not match the LSWR read-only bridge packet contract",
@@ -33388,9 +37076,21 @@ fn lswr_readonly_bridge_display_surface_profile_rows() -> Vec<Value> {
     [
         ("profile-standard", None, None, Some("standard"), false),
         ("profile-all", None, None, Some("all"), true),
-        ("codex-essential", Some("codex-essential"), None, None, false),
+        (
+            "codex-essential",
+            Some("codex-essential"),
+            None,
+            None,
+            false,
+        ),
         ("codex-lean", Some("codex-lean"), None, None, false),
-        ("claude-standard", Some("claude-standard"), None, None, false),
+        (
+            "claude-standard",
+            Some("claude-standard"),
+            None,
+            None,
+            false,
+        ),
         ("gemini-lean", Some("gemini-lean"), None, None, false),
         ("hook-lifecycle", Some("hook-lifecycle"), None, None, false),
         ("all-dev", Some("all-dev"), None, None, true),
@@ -33398,8 +37098,7 @@ fn lswr_readonly_bridge_display_surface_profile_rows() -> Vec<Value> {
     .into_iter()
     .map(|(label, toolset, client, profile, expected_registered)| {
         let policy = ToolPolicy::from_values(toolset, client, None, profile);
-        let registered =
-            lswr_readonly_bridge_display_schema_for_policy(policy).is_some();
+        let registered = lswr_readonly_bridge_display_schema_for_policy(policy).is_some();
         json!({
             "label": label,
             "toolset": policy.label(),
@@ -33496,8 +37195,7 @@ fn lswr_readonly_bridge_display_surface_checks(
         .as_array()
         .map(|keys| keys.len() == 1 && keys.iter().any(|key| key == "report_packet"))
         .unwrap_or(false);
-    let no_additional_properties =
-        schema_facts["additional_properties"] == Value::Bool(false);
+    let no_additional_properties = schema_facts["additional_properties"] == Value::Bool(false);
     let forbidden_absent = schema_facts["forbidden_input_keys_absent"]
         .as_bool()
         .unwrap_or(false);
@@ -34507,7 +38205,10 @@ impl McpTool for AgentSteerDriveTool {
             } else if matched {
                 "expect matched".to_string()
             } else if expect.is_some() {
-                format!("drove {} ms, expect not matched", start.elapsed().as_millis())
+                format!(
+                    "drove {} ms, expect not matched",
+                    start.elapsed().as_millis()
+                )
             } else {
                 format!("drove {} ms", start.elapsed().as_millis())
             };
@@ -35156,6 +38857,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Essential,
         Arc::new(ShellExecTool::new(hub.clone())),
     );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(SystemControlTool::new(hub.clone())),
+    );
     // Remote session steering (P2/P3/P4): AB-owned launch + gate-aware drive +
     // blackboard roll-up. Standard tier (multi-agent ops, not minimal-essential).
     reg_if(
@@ -35241,6 +38948,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Essential,
         Arc::new(ReadinessAuditTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(McpLifecycleDigestTool::new(hub.clone())),
     );
     // IDE bridge stays Niche by default, but Codex Essential allowlists it so
     // IDE-aware Codex sessions can opt into editor context without widening to
@@ -35638,6 +39351,137 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Standard,
         Arc::new(SubstrateNeighborsTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexShadowDigestTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexReplayCompareTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexRetrievalOptInStatusTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexRetrievalOptInDryRunTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexRetrievalOptInReviewPacketTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexRetrievalOptInExecutionPacketTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexRetrievalOptInRuntimeTrialTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexRetrievalOptInRuntimeTrialReviewPacketTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexRetrievalOptInOrderDiffPacketTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexRetrievalOptInRedactedOrderArtifactTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexRetrievalOptInAuthorizationDecisionPacketTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexRetrievalOptInPostImplementationReviewGateTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexRetrievalOptInRuntimeInfluenceReviewRequestTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexRetrievalOptInStoreTrialTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexRetrievalOptInBatchDiagnosticsTool::new(
+            hub.clone(),
+        )),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexRetrievalOptInRuntimeReadinessPacketTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexRetrievalOptInRuntimeTransitionGateTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexRetrievalOptInGatedStoreTrialTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexRetrievalOptInGatedBatchDiagnosticsTool::new(
+            hub.clone(),
+        )),
+    );
+    #[cfg(feature = "biocortex-retrieval-shadow")]
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexRetrievalShadowTool::new()),
     );
     reg_if(
         &mut reg,
@@ -39193,7 +43037,10 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         // The single upstream gate excludes BOTH cohorts, keeps ordinary kinds.
         assert!(vis(&lesson));
         assert!(vis(&decision));
-        assert!(!vis(&outcome), "present_outcome must be excluded from coverage");
+        assert!(
+            !vis(&outcome),
+            "present_outcome must be excluded from coverage"
+        );
         assert!(!vis(&skill), "skill stays excluded");
 
         // End-to-end: gate -> from_records denominator counts only the 2
@@ -40420,6 +44267,12 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(tool_rows.iter().any(|row| {
             row["tool"] == "mcp_config_audit" && row["present_all"].as_bool().unwrap_or(false)
         }));
+        assert!(tool_rows.iter().any(|row| {
+            row["tool"] == "mcp_lifecycle_digest"
+                && row["present_all"].as_bool().unwrap_or(false)
+                && row["present_codex_lean"].as_bool().unwrap_or(false)
+                && row["present_gemini_lean"].as_bool().unwrap_or(false)
+        }));
 
         let closed = payload["closed_ecc_paths"]
             .as_array()
@@ -40562,6 +44415,8 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(p.includes(Tier::Standard, "semantic_bus_runtime_conformance"));
         assert!(p.includes(Tier::Standard, "semantic_bus_peer_conformance"));
         assert!(p.includes(Tier::Standard, "browser_lite_probe"));
+        assert!(p.includes(Tier::Standard, "system_control"));
+        assert!(p.includes(Tier::Standard, "biocortex_retrieval_shadow"));
         assert!(!p.includes(Tier::Standard, "embed_text"));
         assert!(!p.includes(Tier::Niche, "browser_navigate"));
     }
@@ -40570,11 +44425,12 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 51 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 53 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-        //      + DIRECT(39: 6 avatar observation/sync/renderer tools
+        //      + DIRECT(41: 6 avatar observation/sync/renderer tools
         //      + xiao_shu_action_request + 14 mobile bridge tools
-        //      + memory_graph_topology + memory_related_keys_preflight
+        //      + memory_graph_topology + biocortex_retrieval_shadow
+        //      + memory_related_keys_preflight
         //      + memory_orphan_candidates + memory_orphan_inventory
         //      + desktop_snapshot + vision_grounding_ocr + desktop_verify
         //      + macos_ax_probe + macos_ax_verify + semantic_bus_adapter_report
@@ -40582,6 +44438,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         //      + semantic_bus_runtime_conformance
         //      + semantic_bus_peer_conformance
         //      + browser_lite_probe
+        //      + system_control
         //      + 6 remote-steering tools: agent_steer_launch/drive/capture/list/kill
         //      + agent_orchestrate_scan, added by d4fd74d).
         // forum_digest joined via the FORUM_READ capability group (2026-05-23).
@@ -40595,7 +44452,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         // +semantic_bus_runtime_health brought DIRECT 36→37, total 48→49.
         // +semantic_bus_runtime_conformance brought DIRECT 37→38, total 49→50.
         // +semantic_bus_peer_conformance brought DIRECT 38→39, total 50→51.
-        assert_eq!(extras.len(), 51);
+        // +biocortex_retrieval_shadow brought DIRECT 39→40, total 51→52.
+        // +system_control brought DIRECT 40→41, total 52→53.
+        assert_eq!(extras.len(), 53);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -40623,6 +44482,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(extras.contains(&"mobile_ios_apps"));
         assert!(extras.contains(&"mobile_ios_syslog_tail"));
         assert!(extras.contains(&"memory_graph_topology"));
+        assert!(extras.contains(&"biocortex_retrieval_shadow"));
         assert!(extras.contains(&"memory_related_keys_preflight"));
         assert!(!extras.contains(&"memory_related_keys_materialize"));
         assert!(extras.contains(&"memory_orphan_candidates"));
@@ -40637,6 +44497,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(extras.contains(&"semantic_bus_runtime_conformance"));
         assert!(extras.contains(&"semantic_bus_peer_conformance"));
         assert!(extras.contains(&"browser_lite_probe"));
+        assert!(extras.contains(&"system_control"));
         // Remote session steering (d4fd74d) — direct-exposed for Codex
         // orchestrators that already carry agent_spawn + agent_session_*.
         assert!(extras.contains(&"agent_steer_launch"));
@@ -40808,6 +44669,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(p.includes(Tier::Essential, "event_spine_snapshot"));
         assert!(p.includes(Tier::Essential, "readiness_audit"));
         assert!(p.includes(Tier::Essential, "tool_atlas_snapshot"));
+        assert!(p.includes(Tier::Essential, "mcp_lifecycle_digest"));
         assert!(p.includes(Tier::Standard, "memory_compact"));
         assert!(p.includes(Tier::Essential, "pet_state_ritual"));
         assert!(p.includes(Tier::Essential, "work_memory"));
@@ -40825,6 +44687,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(p.includes(Tier::Essential, "event_spine_snapshot"));
         assert!(p.includes(Tier::Essential, "readiness_audit"));
         assert!(p.includes(Tier::Essential, "tool_atlas_snapshot"));
+        assert!(p.includes(Tier::Essential, "mcp_lifecycle_digest"));
         assert!(p.includes(Tier::Essential, "skills_recommend"));
         assert!(p.includes(Tier::Essential, "skills_route"));
         assert!(p.includes(Tier::Essential, "skills_feedback"));
@@ -40893,6 +44756,64 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     }
 
     #[test]
+    fn registry_exposes_mcp_lifecycle_digest_tool() {
+        for label in [
+            "codex-essential",
+            "codex-lean",
+            "gemini-lean",
+            "hook-lifecycle",
+        ] {
+            let p = ToolPolicy::from_values(Some(label), None, None, None);
+            let schemas = build_registry_with_policy(Hub::builder().build(), p).list();
+            let tool = schemas
+                .iter()
+                .find(|s| s.name == "mcp_lifecycle_digest")
+                .unwrap_or_else(|| panic!("mcp_lifecycle_digest missing from {label}"));
+
+            assert!(tool.description.contains("Read-only"));
+            assert!(tool.description.contains("does not start/stop"));
+            assert!(tool.input_schema["properties"]
+                .get("include_runtime_health")
+                .is_some());
+            assert!(tool.input_schema["properties"].get("restart").is_none());
+            assert!(tool.input_schema["properties"].get("mutate").is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn mcp_lifecycle_digest_defaults_to_stdio_only_runtime_boundary() {
+        let payload = mcp_lifecycle_digest_payload(
+            &json!({
+                "repo_root": env!("CARGO_MANIFEST_DIR"),
+                "window_secs": 60,
+                "include_runtime_health": false
+            }),
+            &Hub::builder().build(),
+        )
+        .await;
+
+        assert_eq!(payload["schema"], "agent_bridge.mcp_lifecycle_digest.v0");
+        assert_eq!(payload["read_only"], json!(true));
+        assert_eq!(payload["summary"]["mcp_stdio_available"], json!(true));
+        assert_eq!(payload["summary"]["runtime_health_checked"], json!(false));
+        assert_eq!(
+            payload["sections"]["runtime_health"]["reason"],
+            "include_runtime_health=false"
+        );
+        assert!(payload["sections"]["mcp_profile"]["tool_profile"].is_string());
+        assert!(payload["sections"]["readiness"]["summary"].is_object());
+        assert!(payload["sections"]["tool_telemetry"]["summary"].is_object());
+        assert!(payload["recommendations"]
+            .as_array()
+            .expect("recommendations")
+            .iter()
+            .any(|v| v
+                .as_str()
+                .unwrap_or("")
+                .contains("include_runtime_health=true")));
+    }
+
+    #[test]
     fn registry_exposes_git_topology_preflight_tool() {
         for label in ["codex-essential", "codex-lean", "gemini-lean"] {
             let p = ToolPolicy::from_values(Some(label), None, None, None);
@@ -40924,7 +44845,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(tool.input_schema["properties"]
             .get("include_screenshot")
             .is_some());
-        assert!(tool.input_schema["properties"].get("semantic_bus").is_some());
+        assert!(tool.input_schema["properties"]
+            .get("semantic_bus")
+            .is_some());
         assert!(tool.input_schema["properties"]
             .get("semantic_include_raw")
             .is_some());
@@ -40946,7 +44869,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
 
         assert!(tool.description.contains("Read-only"));
         assert!(tool.input_schema["properties"].get("expect").is_some());
-        assert!(tool.input_schema["properties"].get("semantic_bus").is_some());
+        assert!(tool.input_schema["properties"]
+            .get("semantic_bus")
+            .is_some());
         assert!(tool.input_schema["properties"]
             .get("semantic_include_raw")
             .is_some());
@@ -40973,6 +44898,125 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     }
 
     #[test]
+    fn system_control_plan_blocks_poweroff_without_confirm() {
+        let blocked = system_control_plan("power", "off", false, 40, None).unwrap_err();
+        assert!(blocked.contains("confirm=true"));
+
+        let confirmed = system_control_plan("power", "off", true, 40, None).unwrap();
+        assert_eq!(confirmed.argv, vec!["power", "off", "--confirm"]);
+        assert_eq!(confirmed.risk, "high");
+
+        let audit = system_control_plan("audit", "tail", false, 999, None).unwrap();
+        assert_eq!(audit.argv, vec!["audit-tail", "500"]);
+        assert!(audit.read_only);
+
+        let status = system_control_plan("status", "summary", false, 40, None).unwrap();
+        assert_eq!(status.argv, vec!["status", "summary"]);
+        assert!(status.read_only);
+
+        let snapshot = system_control_plan("status", "snapshot", false, 40, None).unwrap();
+        assert_eq!(snapshot.argv, vec!["status", "snapshot"]);
+        assert!(snapshot.read_only);
+
+        let history = system_control_plan("status", "history", false, 999, None).unwrap();
+        assert_eq!(history.argv, vec!["status", "history", "200"]);
+        assert!(history.read_only);
+
+        let snapshot_diagnosis =
+            system_control_plan("status", "diagnose", false, 999, None).unwrap();
+        assert_eq!(snapshot_diagnosis.argv, vec!["status", "diagnose", "200"]);
+        assert!(snapshot_diagnosis.read_only);
+
+        let report = system_control_plan("status", "report", false, 999, None).unwrap();
+        assert_eq!(report.argv, vec!["status", "report", "200"]);
+        assert!(report.read_only);
+
+        let record = system_control_plan("status", "record", false, 40, None).unwrap();
+        assert_eq!(record.argv, vec!["status", "record"]);
+        assert_eq!(record.risk, "low");
+        assert!(!record.read_only);
+
+        let desktop = system_control_plan("desktop", "doctor", false, 40, None).unwrap();
+        assert_eq!(desktop.argv, vec!["desktop", "doctor"]);
+        assert!(desktop.read_only);
+
+        let events = system_control_plan("events", "tail", false, 999, None).unwrap();
+        assert_eq!(events.argv, vec!["events", "tail", "500"]);
+        assert!(events.read_only);
+
+        let diagnosis =
+            system_control_plan("events", "diagnose", false, 99, Some("statusbar")).unwrap();
+        assert_eq!(
+            diagnosis.argv,
+            vec!["events", "diagnose", "statusbar", "99"]
+        );
+        assert!(diagnosis.read_only);
+
+        let missing_topic = system_control_plan("events", "diagnose", false, 40, None).unwrap_err();
+        assert!(missing_topic.contains("topic"));
+
+        let bad_topic =
+            system_control_plan("events", "diagnose", false, 40, Some("bad topic")).unwrap_err();
+        assert!(bad_topic.contains("ASCII"));
+
+        let blocked_heal = system_control_plan("desktop", "heal", false, 40, None).unwrap_err();
+        assert!(blocked_heal.contains("confirm=true"));
+
+        let confirmed_heal = system_control_plan("desktop", "heal", true, 40, None).unwrap();
+        assert_eq!(confirmed_heal.argv, vec!["desktop", "heal", "--confirm"]);
+        assert_eq!(confirmed_heal.risk, "medium");
+
+        let blocked_watchdog =
+            system_control_plan("desktop", "watchdog", false, 40, None).unwrap_err();
+        assert!(blocked_watchdog.contains("confirm=true"));
+
+        let confirmed_watchdog =
+            system_control_plan("desktop", "watchdog", true, 40, None).unwrap();
+        assert_eq!(
+            confirmed_watchdog.argv,
+            vec!["desktop", "watchdog", "--confirm"]
+        );
+        assert_eq!(confirmed_watchdog.risk, "medium");
+
+        let blocked_repair = system_control_plan("desktop", "repair", false, 40, None).unwrap_err();
+        assert!(blocked_repair.contains("confirm=true"));
+
+        let confirmed_repair = system_control_plan("desktop", "repair", true, 40, None).unwrap();
+        assert_eq!(
+            confirmed_repair.argv,
+            vec!["desktop", "repair", "--confirm"]
+        );
+        assert_eq!(confirmed_repair.risk, "medium");
+    }
+
+    #[test]
+    fn registry_exposes_system_control_to_codex_essential() {
+        let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+        assert!(p.includes(Tier::Standard, "system_control"));
+
+        let schemas = build_registry_with_policy(Hub::builder().build(), p).list();
+        let tool = schemas
+            .iter()
+            .find(|s| s.name == "system_control")
+            .expect("system_control schema");
+
+        assert!(tool.description.contains("allowlisted"));
+        assert!(tool.description.contains("audited"));
+        assert!(tool.input_schema["properties"].get("domain").is_some());
+        assert!(tool.input_schema["properties"].get("action").is_some());
+        assert!(tool.input_schema["properties"].get("confirm").is_some());
+        assert!(tool.input_schema["properties"].get("tail_lines").is_some());
+        assert!(tool.input_schema["properties"].get("topic").is_some());
+        assert!(tool.input_schema["properties"].get("cmd").is_none());
+        let domains = tool.input_schema["properties"]["domain"]["enum"]
+            .as_array()
+            .expect("domain enum");
+        assert!(domains.iter().any(|v| v == "status"));
+        assert!(domains.iter().any(|v| v == "desktop"));
+        assert!(domains.iter().any(|v| v == "events"));
+    }
+
+    #[test]
     fn registry_exposes_macos_ax_probe_to_codex_essential() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         assert!(p.includes(Tier::Standard, "macos_ax_probe"));
@@ -40989,7 +45033,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             .get("include_windows")
             .is_some());
         assert!(tool.input_schema["properties"].get("max_windows").is_some());
-        assert!(tool.input_schema["properties"].get("semantic_bus").is_some());
+        assert!(tool.input_schema["properties"]
+            .get("semantic_bus")
+            .is_some());
         assert!(tool.input_schema["properties"]
             .get("semantic_include_raw")
             .is_some());
@@ -41014,7 +45060,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(tool.input_schema["properties"]
             .get("poll_timeout_secs")
             .is_some());
-        assert!(tool.input_schema["properties"].get("semantic_bus").is_some());
+        assert!(tool.input_schema["properties"]
+            .get("semantic_bus")
+            .is_some());
         assert!(tool.input_schema["properties"]
             .get("semantic_include_raw")
             .is_some());
@@ -41035,8 +45083,12 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(tool.description.contains("Read-only"));
         assert!(tool.description.contains("never runs probes"));
         assert!(tool.input_schema["properties"].get("cwd").is_some());
-        assert!(tool.input_schema["properties"].get("include_details").is_some());
-        assert!(tool.input_schema["properties"].get("include_design_only").is_some());
+        assert!(tool.input_schema["properties"]
+            .get("include_details")
+            .is_some());
+        assert!(tool.input_schema["properties"]
+            .get("include_design_only")
+            .is_some());
         assert!(tool.input_schema["properties"].get("run_live").is_none());
     }
 
@@ -41053,7 +45105,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
 
         assert!(tool.description.contains("Read-only"));
         assert!(tool.description.contains("never"));
-        assert!(tool.input_schema["properties"].get("daemon_http_url").is_some());
+        assert!(tool.input_schema["properties"]
+            .get("daemon_http_url")
+            .is_some());
         assert!(tool.input_schema["properties"].get("palace_url").is_some());
         assert!(tool.input_schema["properties"].get("include_raw").is_some());
         assert!(tool.input_schema["properties"].get("restart").is_none());
@@ -41073,8 +45127,12 @@ com.example.multiline, , \"Line one\nLine two\"\n";
 
         assert!(tool.description.contains("Read-only"));
         assert!(tool.description.contains("never mutates"));
-        assert!(tool.input_schema["properties"].get("include_runtime_health").is_some());
-        assert!(tool.input_schema["properties"].get("daemon_http_url").is_some());
+        assert!(tool.input_schema["properties"]
+            .get("include_runtime_health")
+            .is_some());
+        assert!(tool.input_schema["properties"]
+            .get("daemon_http_url")
+            .is_some());
         assert!(tool.input_schema["properties"].get("restart").is_none());
         assert!(tool.input_schema["properties"].get("write_edges").is_none());
     }
@@ -41093,7 +45151,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(tool.description.contains("Read-only"));
         assert!(tool.description.contains("never restarts"));
         assert!(tool.input_schema["properties"].get("endpoints").is_some());
-        assert!(tool.input_schema["properties"].get("include_runtime_health").is_some());
+        assert!(tool.input_schema["properties"]
+            .get("include_runtime_health")
+            .is_some());
         assert!(tool.input_schema["properties"].get("restart").is_none());
         assert!(tool.input_schema["properties"].get("write_edges").is_none());
     }
@@ -41159,18 +45219,24 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         );
 
         let summary = &payload["summary"];
-        assert!(summary["by_evidence_level"]["runtime_backed"]
-            .as_u64()
-            .unwrap_or(0)
-            >= 6);
-        assert!(summary["by_evidence_level"]["fixture_backed"]
-            .as_u64()
-            .unwrap_or(0)
-            >= 4);
-        assert!(summary["by_evidence_level"]["design_only"]
-            .as_u64()
-            .unwrap_or(0)
-            >= 1);
+        assert!(
+            summary["by_evidence_level"]["runtime_backed"]
+                .as_u64()
+                .unwrap_or(0)
+                >= 6
+        );
+        assert!(
+            summary["by_evidence_level"]["fixture_backed"]
+                .as_u64()
+                .unwrap_or(0)
+                >= 4
+        );
+        assert!(
+            summary["by_evidence_level"]["design_only"]
+                .as_u64()
+                .unwrap_or(0)
+                >= 1
+        );
 
         let gaps = payload["gaps"].as_array().expect("gaps array");
         assert!(gaps.iter().any(|gap| {
@@ -41241,7 +45307,10 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert_eq!(payload["read_only"].as_bool(), Some(true));
         assert_eq!(payload["live_checks_executed"].as_bool(), Some(true));
         assert_eq!(payload["status"].as_str(), Some("ready"));
-        assert_eq!(payload["verification"]["verdict"].as_str(), Some("verified"));
+        assert_eq!(
+            payload["verification"]["verdict"].as_str(),
+            Some("verified")
+        );
         assert_eq!(
             payload["summary"]["palace_semantic_events_status"].as_str(),
             Some("http_error")
@@ -41256,8 +45325,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             .as_array()
             .unwrap()
             .iter()
-            .any(|obj| obj["object_id"].as_str()
-                == Some("palace:memory-region:agent-bridge")));
+            .any(|obj| obj["object_id"].as_str() == Some("palace:memory-region:agent-bridge")));
     }
 
     #[tokio::test]
@@ -41302,15 +45370,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
 
     #[test]
     fn semantic_bus_peer_conformance_url_accepts_base_and_full_endpoint() {
-        let from_base = semantic_bus_peer_conformance_url(
-            "http://127.0.0.1:7878",
-            false,
-            1_500,
-        )
-        .expect("base URL");
-        assert!(from_base.starts_with(
-            "http://127.0.0.1:7878/semantic-bus/runtime-conformance?"
-        ));
+        let from_base = semantic_bus_peer_conformance_url("http://127.0.0.1:7878", false, 1_500)
+            .expect("base URL");
+        assert!(from_base.starts_with("http://127.0.0.1:7878/semantic-bus/runtime-conformance?"));
         assert!(from_base.contains("include_runtime_health=false"));
         assert!(from_base.contains("timeout_ms=1500"));
 
@@ -41320,9 +45382,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             2_500,
         )
         .expect("full URL");
-        assert!(from_full.starts_with(
-            "http://example.test/semantic-bus/runtime-conformance?node=win&"
-        ));
+        assert!(
+            from_full.starts_with("http://example.test/semantic-bus/runtime-conformance?node=win&")
+        );
         assert!(from_full.contains("include_runtime_health=true"));
         assert!(from_full.contains("timeout_ms=2500"));
 
@@ -41588,17 +45650,17 @@ print(json.dumps(payload))
             o["object_id"] == "desktop:linux:sway:window:42"
                 && o["source_adapter"] == "linux.sway.tree"
         }));
-        assert!(objects.iter().any(|o| {
-            o["source_adapter"] == "linux.atspi" && o["label"] == "INVOKEOK"
-        }));
+        assert!(objects
+            .iter()
+            .any(|o| { o["source_adapter"] == "linux.atspi" && o["label"] == "INVOKEOK" }));
 
         let affordances = payload["affordances"].as_array().expect("affordances");
-        assert!(affordances.iter().any(|a| {
-            a["action_type"] == "desktop.verify" && a["requires_gate"] == false
-        }));
-        assert!(affordances.iter().any(|a| {
-            a["action_type"] == "desktop.invoke" && a["requires_gate"] == true
-        }));
+        assert!(affordances
+            .iter()
+            .any(|a| { a["action_type"] == "desktop.verify" && a["requires_gate"] == false }));
+        assert!(affordances
+            .iter()
+            .any(|a| { a["action_type"] == "desktop.invoke" && a["requires_gate"] == true }));
         assert_eq!(
             payload["presentation"]["machine_payload"]["atspi_object_count"],
             1
@@ -41623,7 +45685,10 @@ print(json.dumps(payload))
             .expect("raw execute");
         let raw_payload = result_text_as_json(&raw_out);
         assert_eq!(raw_payload["raw_included"], true);
-        assert_eq!(raw_payload["raw_snapshot"]["schema"], DESKTOP_SNAPSHOT_SOURCE_SCHEMA);
+        assert_eq!(
+            raw_payload["raw_snapshot"]["schema"],
+            DESKTOP_SNAPSHOT_SOURCE_SCHEMA
+        );
         assert!(raw_payload["raw_snapshot"].get("mcp_wrapper").is_some());
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
@@ -41762,7 +45827,10 @@ print(json.dumps(payload))
             .expect("raw execute");
         let raw_payload = result_text_as_json(&raw_out);
         assert_eq!(raw_payload["raw_included"], true);
-        assert_eq!(raw_payload["raw_verify"]["schema"], DESKTOP_VERIFY_SOURCE_SCHEMA);
+        assert_eq!(
+            raw_payload["raw_verify"]["schema"],
+            DESKTOP_VERIFY_SOURCE_SCHEMA
+        );
         assert!(raw_payload["raw_verify"].get("mcp_wrapper").is_some());
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
@@ -41950,7 +46018,10 @@ print(json.dumps(payload))
             .expect("raw execute");
         let raw_payload = result_text_as_json(&raw_out);
         assert_eq!(raw_payload["raw_included"], true);
-        assert_eq!(raw_payload["raw_probe"]["schema"], MACOS_AX_PROBE_SOURCE_SCHEMA);
+        assert_eq!(
+            raw_payload["raw_probe"]["schema"],
+            MACOS_AX_PROBE_SOURCE_SCHEMA
+        );
         assert!(raw_payload["raw_probe"].get("mcp_wrapper").is_some());
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
@@ -42163,7 +46234,10 @@ print(json.dumps(payload))
             .expect("raw execute");
         let raw_payload = result_text_as_json(&raw_out);
         assert_eq!(raw_payload["raw_included"], true);
-        assert_eq!(raw_payload["raw_verify"]["schema"], MACOS_AX_VERIFY_SOURCE_SCHEMA);
+        assert_eq!(
+            raw_payload["raw_verify"]["schema"],
+            MACOS_AX_VERIFY_SOURCE_SCHEMA
+        );
         assert!(raw_payload["raw_verify"].get("mcp_wrapper").is_some());
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
@@ -42344,8 +46418,14 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
             "world_visibility_query",
             "world_present",
         ] {
-            assert!(all.includes(Tier::Niche, t), "{t} must be available under all");
-            assert!(!std_p.includes(Tier::Niche, t), "{t} must stay out of standard");
+            assert!(
+                all.includes(Tier::Niche, t),
+                "{t} must be available under all"
+            );
+            assert!(
+                !std_p.includes(Tier::Niche, t),
+                "{t} must stay out of standard"
+            );
         }
         // P34 read-only bridge display wrapper follows the same all-profile opt-in
         // shape as the LSWR world tools, but stays read-only and packet-backed.
@@ -42372,9 +46452,7 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
             "present_outcomes must register under the all profile"
         );
         assert!(
-            schemas
-                .iter()
-                .any(|s| s.name == "lswr_outcome_admissions"),
+            schemas.iter().any(|s| s.name == "lswr_outcome_admissions"),
             "lswr_outcome_admissions must register under the all profile"
         );
         assert!(
@@ -42398,8 +46476,7 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
                 .any(|s| s.name == "lswr_readonly_bridge_display"),
             "lswr_readonly_bridge_display must register under the all profile"
         );
-        let standard_schemas =
-            build_registry_with_policy(Hub::builder().build(), std_p).list();
+        let standard_schemas = build_registry_with_policy(Hub::builder().build(), std_p).list();
         assert!(
             !standard_schemas
                 .iter()
@@ -42412,7 +46489,8 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
                 .any(|s| s.name == "lswr_outcome_admissions"),
             "lswr_outcome_admissions must stay out of standard"
         );
-        let codex_schemas = build_registry_with_policy(Hub::builder().build(), codex_essential).list();
+        let codex_schemas =
+            build_registry_with_policy(Hub::builder().build(), codex_essential).list();
         assert!(
             !codex_schemas
                 .iter()
@@ -42432,7 +46510,9 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
 
         assert!(tool.description.contains("Read-only"));
         assert!(tool.description.contains("explicit"));
-        assert!(tool.input_schema["properties"].get("report_packet").is_some());
+        assert!(tool.input_schema["properties"]
+            .get("report_packet")
+            .is_some());
         assert_eq!(
             tool.input_schema["additionalProperties"],
             serde_json::Value::Bool(false)
@@ -42482,9 +46562,15 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
             .map(|schema| schema.name)
             .collect::<Vec<_>>();
 
-        assert!(all_names.iter().any(|name| name == "lswr_readonly_bridge_display"));
-        assert!(!standard_names.iter().any(|name| name == "lswr_readonly_bridge_display"));
-        assert!(!codex_names.iter().any(|name| name == "lswr_readonly_bridge_display"));
+        assert!(all_names
+            .iter()
+            .any(|name| name == "lswr_readonly_bridge_display"));
+        assert!(!standard_names
+            .iter()
+            .any(|name| name == "lswr_readonly_bridge_display"));
+        assert!(!codex_names
+            .iter()
+            .any(|name| name == "lswr_readonly_bridge_display"));
     }
 
     fn lswr_readonly_bridge_report_packet_fixture() -> Value {
@@ -44284,6 +48370,3278 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert_eq!(t1.name(), t2.name());
         assert_eq!(t2.name(), t3.name());
         assert_eq!(t1.name(), "substrate_neighbors_of");
+    }
+
+    // ── biocortex_shadow_digest MCP tool tests ───────────────────────────
+
+    #[tokio::test]
+    async fn biocortex_shadow_digest_rejects_invalid_benchmark_without_checkout() {
+        let tool = BioCortexShadowDigestTool::new();
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(json!({"benchmark": "not-real"}), &ctx)
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ab_mcp::ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(v["checkout_env"], json!(BIOCORTEX_CHECKOUT_ENV));
+        assert_eq!(v["digest"]["status"], json!("invalid_benchmark"));
+        assert_eq!(v["digest"]["read_only"], json!(true));
+    }
+
+    #[test]
+    fn biocortex_shadow_digest_schema_lists_benchmarks() {
+        let tool = BioCortexShadowDigestTool::new();
+        let schema = tool.schema();
+        assert_eq!(schema.name, "biocortex_shadow_digest");
+        let values = schema
+            .input_schema
+            .pointer("/properties/benchmark/enum")
+            .and_then(|v| v.as_array())
+            .expect("benchmark enum");
+        assert!(values.contains(&json!("scaled_morphology")));
+        assert!(values.contains(&json!("temporal_credit")));
+        assert!(values.contains(&json!("minimal_morphology")));
+    }
+
+    #[test]
+    fn biocortex_replay_compare_schema_keeps_readonly_inputs() {
+        let tool = BioCortexReplayCompareTool::new(Hub::builder().build());
+        let schema = tool.schema();
+        assert_eq!(schema.name, "biocortex_replay_compare");
+        assert!(schema.description.contains("Read-only"));
+        assert!(schema.input_schema["properties"]
+            .get("window_days")
+            .is_some());
+        assert!(schema.input_schema["properties"].get("source").is_some());
+        assert!(schema.input_schema["properties"]
+            .get("include_events")
+            .is_some());
+        assert!(schema.input_schema["properties"]
+            .get("fixture_path")
+            .is_none());
+        assert!(schema.input_schema["properties"].get("mutate").is_none());
+    }
+
+    #[test]
+    fn biocortex_retrieval_opt_in_status_schema_is_readonly() {
+        let tool = BioCortexRetrievalOptInStatusTool::new();
+        let schema = tool.schema();
+        assert_eq!(schema.name, "biocortex_retrieval_opt_in_status");
+        assert!(schema.description.contains("Read-only"));
+        assert!(schema.description.contains("hashed query/order data"));
+        assert!(schema.description.contains("Does not call memory_search"));
+
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("mode").is_some());
+        assert!(props.get("per_call_opt_in").is_some());
+        assert!(props.get("query").is_some());
+        assert!(props.get("baseline_keys").is_some());
+        assert!(props.get("latency_ms").is_some());
+        assert!(props.get("mutate").is_none());
+        assert!(props.get("memory_search").is_none());
+        assert!(props.get("raw_content").is_none());
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_status_does_not_echo_query_or_keys() {
+        let tool = BioCortexRetrievalOptInStatusTool::new();
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(
+                json!({
+                    "mode": "hybrid",
+                    "per_call_opt_in": true,
+                    "query": "secret query text",
+                    "baseline_keys": ["secret_key_a", "secret_key_b"],
+                    "latency_ms": 1.23456
+                }),
+                &ctx,
+            )
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains("secret query text"));
+        assert!(!text.contains("secret_key_a"));
+        assert!(!text.contains("secret_key_b"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_call_audit.v0")
+        );
+        assert_eq!(v["mode"], json!("hybrid"));
+        assert_eq!(v["mode_authorized"], json!(false));
+        assert_eq!(v["baseline_order"]["key_count"], json!(2));
+        assert_eq!(v["baseline_order"]["raw_keys_included"], json!(false));
+        assert_eq!(v["baseline_order"]["content_included"], json!(false));
+        assert_eq!(v["fallback"]["baseline_returned"], json!(true));
+        assert_eq!(v["fallback"]["reason"], json!("mode_not_authorized"));
+        assert_eq!(v["changes_memory_search_order"], json!(false));
+        assert_eq!(v["ordering_behavior_connected"], json!(false));
+    }
+
+    #[test]
+    fn biocortex_retrieval_opt_in_dry_run_schema_is_readonly() {
+        let tool = BioCortexRetrievalOptInDryRunTool::new();
+        let schema = tool.schema();
+        assert_eq!(schema.name, "biocortex_retrieval_opt_in_dry_run");
+        assert!(schema.description.contains("Read-only"));
+        assert!(schema.description.contains("dry-run planner"));
+        assert!(schema.description.contains("Does not call memory_search"));
+
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("mode").is_some());
+        assert!(props.get("per_call_opt_in").is_some());
+        assert!(props.get("query").is_some());
+        assert!(props.get("baseline_keys").is_some());
+        assert!(props.get("baseline_completed").is_some());
+        assert!(props.get("timeout_ms").is_some());
+        assert!(props.get("coverage_threshold").is_some());
+        assert!(props.get("mutate").is_none());
+        assert!(props.get("memory_search").is_none());
+        assert!(props.get("raw_content").is_none());
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_dry_run_does_not_echo_query_or_keys() {
+        let tool = BioCortexRetrievalOptInDryRunTool::new();
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(
+                json!({
+                    "mode": "semantic",
+                    "per_call_opt_in": true,
+                    "query": "secret dry-run query text",
+                    "baseline_keys": ["secret_dry_key_a", "secret_dry_key_b"],
+                    "timeout_ms": 123,
+                    "coverage_threshold": 0.75
+                }),
+                &ctx,
+            )
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains("secret dry-run query text"));
+        assert!(!text.contains("secret_dry_key_a"));
+        assert!(!text.contains("secret_dry_key_b"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_dry_run_plan.v0")
+        );
+        assert_eq!(v["read_only"], json!(true));
+        assert_eq!(v["dry_run"], json!(true));
+        assert_eq!(v["mode"], json!("semantic"));
+        assert_eq!(v["mode_authorized"], json!(false));
+        assert_eq!(v["baseline_order"]["key_count"], json!(2));
+        assert_eq!(v["baseline_order"]["raw_keys_included"], json!(false));
+        assert_eq!(v["baseline_order"]["content_included"], json!(false));
+        assert_eq!(
+            v["planner_result"]["fallback_reason"],
+            json!("mode_not_authorized")
+        );
+        assert_eq!(v["calls_memory_search"], json!(false));
+        assert_eq!(v["runs_biocortex"], json!(false));
+        assert_eq!(v["changes_memory_search_order"], json!(false));
+        assert_eq!(v["ordering_behavior_connected"], json!(false));
+    }
+
+    #[test]
+    fn biocortex_retrieval_opt_in_review_packet_schema_is_readonly() {
+        let tool = BioCortexRetrievalOptInReviewPacketTool::new();
+        let schema = tool.schema();
+        assert_eq!(schema.name, "biocortex_retrieval_opt_in_review_packet");
+        assert!(schema.description.contains("Read-only"));
+        assert!(schema.description.contains("review packet"));
+        assert!(schema.description.contains("Does not call memory_search"));
+
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required");
+        assert!(required.contains(&json!("dry_run_plan")));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("dry_run_plan").is_some());
+        assert!(props.get("reviewer").is_some());
+        assert!(props.get("commit").is_some());
+        assert!(props.get("forum_post_id").is_some());
+        assert!(props.get("memory_key").is_some());
+        assert!(props.get("mutate").is_none());
+        assert!(props.get("memory_search").is_none());
+        assert!(props.get("raw_content").is_none());
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_review_packet_ignores_raw_plan_fields() {
+        let tool = BioCortexRetrievalOptInReviewPacketTool::new();
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(
+                json!({
+                    "dry_run_plan": {
+                        "schema": "agent_bridge.biocortex_retrieval.opt_in_dry_run_plan.v0",
+                        "read_only": true,
+                        "dry_run": true,
+                        "mode": "fts",
+                        "mode_authorized": true,
+                        "query": "secret review packet query",
+                        "baseline_keys": ["secret_review_packet_key"],
+                        "query_hash": "sha256:query",
+                        "baseline_order": {
+                            "completed": true,
+                            "key_count": 1,
+                            "hash": "sha256:baseline",
+                            "raw_keys_included": false,
+                            "content_included": false
+                        },
+                        "planned_side_signal": {
+                            "status": "not_run_dry_run",
+                            "raw_included": false
+                        },
+                        "planner_result": {
+                            "returned_order_source": "baseline",
+                            "baseline_returned": true,
+                            "fallback_reason": "ordering_behavior_not_connected",
+                            "blocking_reasons": [],
+                            "execution_ready": false
+                        },
+                        "store_contract": {
+                            "schema": "agent_bridge.store.memory_search.biocortex_opt_in_contract.v0",
+                            "baseline_returned": true,
+                            "returned_order_source": "baseline",
+                            "fallback_reason": "ordering_behavior_not_connected",
+                            "changes_memory_search_order": false
+                        },
+                        "calls_memory_search": false,
+                        "runs_biocortex": false,
+                        "registers_embedding_backend": false,
+                        "changes_memory_search_order": false,
+                        "default_search_order_change_allowed": false,
+                        "ordering_behavior_connected": false,
+                        "may_change_search_order_now": false
+                    },
+                    "reviewer": "codex",
+                    "commit": "test-commit"
+                }),
+                &ctx,
+            )
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains("secret review packet query"));
+        assert!(!text.contains("secret_review_packet_key"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_review_packet.v0")
+        );
+        assert_eq!(v["read_only"], json!(true));
+        assert_eq!(v["dry_run_consumer"], json!(true));
+        assert_eq!(v["approval_state"], json!("not_approved"));
+        assert_eq!(v["boundary_check"]["review_ready"], json!(true));
+        assert_eq!(v["input_contract"]["dry_run_plan_included"], json!(false));
+        assert_eq!(v["calls_memory_search"], json!(false));
+        assert_eq!(v["runs_biocortex"], json!(false));
+        assert_eq!(v["changes_memory_search_order"], json!(false));
+        assert_eq!(v["may_implement_ordering_now"], json!(false));
+    }
+
+    #[test]
+    fn biocortex_retrieval_opt_in_execution_packet_schema_is_readonly() {
+        let tool = BioCortexRetrievalOptInExecutionPacketTool::new();
+        let schema = tool.schema();
+        assert_eq!(schema.name, "biocortex_retrieval_opt_in_execution_packet");
+        assert!(schema.description.contains("Read-only"));
+        assert!(schema.description.contains("execution preflight"));
+        assert!(schema.description.contains("Does not call memory_search"));
+
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required");
+        assert!(required.contains(&json!("review_packet")));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("review_packet").is_some());
+        assert!(props.get("per_call_opt_in").is_some());
+        assert!(props.get("attempt_id").is_some());
+        assert!(props.get("commit").is_some());
+        assert!(props.get("mutate").is_none());
+        assert!(props.get("memory_search").is_none());
+        assert!(props.get("raw_content").is_none());
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_execution_packet_ignores_raw_review_fields() {
+        let tool = BioCortexRetrievalOptInExecutionPacketTool::new();
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(
+                json!({
+                    "review_packet": {
+                        "schema": "agent_bridge.biocortex_retrieval.opt_in_review_packet.v0",
+                        "read_only": true,
+                        "dry_run_consumer": true,
+                        "approval_state": "not_approved",
+                        "query": "secret execution packet query",
+                        "baseline_keys": ["secret_execution_packet_key"],
+                        "review_target": {
+                            "mode": "fts",
+                            "mode_authorized": true
+                        },
+                        "input_contract": {
+                            "dry_run_plan_included": false,
+                            "raw_query_included": false,
+                            "raw_keys_included": false,
+                            "content_included": false
+                        },
+                        "boundary_check": {
+                            "review_ready": true,
+                            "violations": []
+                        },
+                        "dry_run_summary": {
+                            "query_hash": "sha256:query",
+                            "baseline_order": {
+                                "completed": true,
+                                "key_count": 1,
+                                "hash": "sha256:baseline"
+                            },
+                            "planner_result": {
+                                "fallback_reason": "ordering_behavior_not_connected"
+                            }
+                        },
+                        "calls_memory_search": false,
+                        "runs_biocortex": false,
+                        "changes_memory_search_order": false,
+                        "ordering_behavior_connected": false
+                    },
+                    "per_call_opt_in": true,
+                    "attempt_id": "attempt-test",
+                    "commit": "test-commit"
+                }),
+                &ctx,
+            )
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains("secret execution packet query"));
+        assert!(!text.contains("secret_execution_packet_key"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_execution_packet.v0")
+        );
+        assert_eq!(v["read_only"], json!(true));
+        assert_eq!(v["execution_packet"], json!(true));
+        assert_eq!(v["approval_state"], json!("not_approved"));
+        assert_eq!(v["preflight"]["execution_allowed"], json!(false));
+        assert_eq!(v["execution_decision"]["baseline_returned"], json!(true));
+        assert_eq!(v["calls_memory_search"], json!(false));
+        assert_eq!(v["runs_biocortex"], json!(false));
+        assert_eq!(v["changes_memory_search_order"], json!(false));
+        assert_eq!(v["may_implement_ordering_now"], json!(false));
+    }
+
+    #[test]
+    fn biocortex_retrieval_opt_in_runtime_trial_schema_is_baseline_preserving() {
+        let tool = BioCortexRetrievalOptInRuntimeTrialTool::new();
+        let schema = tool.schema();
+        assert_eq!(schema.name, "biocortex_retrieval_opt_in_runtime_trial");
+        assert!(schema.description.contains("Baseline-preserving"));
+        assert!(schema.description.contains("Does not call memory_search"));
+        assert!(schema.description.contains("alter retrieval order"));
+
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required");
+        assert!(required.contains(&json!("execution_packet")));
+        assert!(required.contains(&json!("query")));
+        assert!(required.contains(&json!("candidates")));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("execution_packet").is_some());
+        assert!(props.get("query").is_some());
+        assert!(props.get("candidates").is_some());
+        assert!(props.get("checkout_path").is_some());
+        assert!(props.get("include_raw").is_none());
+        assert!(props.get("mutate").is_none());
+        assert!(props.get("memory_search").is_none());
+        assert!(props.get("raw_content").is_none());
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_runtime_trial_sanitizes_inputs() {
+        let tool = BioCortexRetrievalOptInRuntimeTrialTool::new();
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(
+                json!({
+                    "execution_packet": {
+                        "schema": "agent_bridge.biocortex_retrieval.opt_in_execution_packet.v0",
+                        "read_only": true,
+                        "execution_packet": true,
+                        "approval_state": "not_approved",
+                        "runtime_adapter_approved": false,
+                        "attempt": {
+                            "mode": "fts",
+                            "per_call_opt_in": true
+                        },
+                        "input_contract": {
+                            "review_packet_included": false,
+                            "raw_query_included": false,
+                            "raw_keys_included": false,
+                            "content_included": false
+                        },
+                        "review_summary": {
+                            "baseline_order": {
+                                "completed": true,
+                                "key_count": 1
+                            }
+                        },
+                        "preflight": {
+                            "preflight_passed_for_baseline_only_contract": true,
+                            "execution_allowed": false
+                        },
+                        "calls_memory_search": false,
+                        "changes_memory_search_order": false,
+                        "ordering_behavior_connected": false
+                    },
+                    "query": "secret runtime trial query",
+                    "candidates": [
+                        {
+                            "key": "secret_runtime_trial_key",
+                            "content": "secret runtime trial content"
+                        }
+                    ],
+                    "expected_key": "secret_runtime_trial_key",
+                    "attempt_id": "trial-attempt",
+                    "commit": "test-commit"
+                }),
+                &ctx,
+            )
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains("secret runtime trial query"));
+        assert!(!text.contains("secret_runtime_trial_key"));
+        assert!(!text.contains("secret runtime trial content"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_runtime_trial.v0")
+        );
+        assert_eq!(v["read_only"], json!(true));
+        assert_eq!(v["runtime_trial"], json!(true));
+        assert_eq!(v["approval_state"], json!("not_approved"));
+        assert_eq!(v["calls_memory_search"], json!(false));
+        assert_eq!(v["changes_memory_search_order"], json!(false));
+        assert_eq!(v["returned_order"]["source"], json!("baseline"));
+        assert_eq!(v["returned_order"]["baseline_returned"], json!(true));
+        assert_eq!(
+            v["input_contract"]["execution_packet_included"],
+            json!(false)
+        );
+        assert_eq!(v["baseline_order"]["raw_keys_included"], json!(false));
+        assert_eq!(v["baseline_order"]["content_included"], json!(false));
+        assert_eq!(v["side_signal"]["raw_included"], json!(false));
+        assert_eq!(v["side_signal"]["candidate_keys_included"], json!(false));
+        assert_eq!(v["side_signal"]["content_included"], json!(false));
+        assert_eq!(v["advisory_result"]["raw_keys_included"], json!(false));
+        assert_eq!(v["advisory_result"]["content_included"], json!(false));
+        assert_eq!(v["runtime_adapter_approved"], json!(false));
+        assert_eq!(v["may_implement_ordering_now"], json!(false));
+    }
+
+    #[test]
+    fn biocortex_retrieval_opt_in_runtime_trial_review_packet_schema_is_readonly() {
+        let tool = BioCortexRetrievalOptInRuntimeTrialReviewPacketTool::new();
+        let schema = tool.schema();
+        assert_eq!(
+            schema.name,
+            "biocortex_retrieval_opt_in_runtime_trial_review_packet"
+        );
+        assert!(schema.description.contains("Read-only"));
+        assert!(schema.description.contains("Does not call memory_search"));
+        assert!(schema.description.contains("run BioCortex"));
+        assert!(schema.description.contains("alter retrieval order"));
+
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required");
+        assert!(required.contains(&json!("runtime_trial")));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("runtime_trial").is_some());
+        assert!(props.get("reviewer").is_some());
+        assert!(props.get("commit").is_some());
+        assert!(props.get("forum_post_id").is_some());
+        assert!(props.get("memory_key").is_some());
+        assert!(props.get("include_raw").is_none());
+        assert!(props.get("mutate").is_none());
+        assert!(props.get("memory_search").is_none());
+        assert!(props.get("raw_content").is_none());
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_runtime_trial_review_packet_sanitizes_inputs() {
+        let tool = BioCortexRetrievalOptInRuntimeTrialReviewPacketTool::new();
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(
+                json!({
+                    "runtime_trial": {
+                        "schema": "agent_bridge.biocortex_retrieval.opt_in_runtime_trial.v0",
+                        "read_only": true,
+                        "runtime_trial": true,
+                        "implementation_stage": "baseline_preserving_runtime_trial",
+                        "approval_state": "not_approved",
+                        "runtime_adapter_approved": false,
+                        "approval_writes_allowed": false,
+                        "writes_approval": false,
+                        "query": "secret runtime trial review packet query",
+                        "candidate_keys": ["secret_runtime_trial_review_packet_key"],
+                        "candidate_content": "secret runtime trial review packet content",
+                        "attempt": {
+                            "mode": "fts",
+                            "per_call_opt_in": true,
+                            "attempt_id": "trial-attempt",
+                            "commit": "trial-commit"
+                        },
+                        "input_contract": {
+                            "execution_packet_included": false,
+                            "raw_query_included": false,
+                            "raw_keys_included": false,
+                            "content_included": false
+                        },
+                        "query_hash": "sha256:query",
+                        "baseline_order": {
+                            "completed": true,
+                            "key_count": 1,
+                            "hash": "sha256:baseline",
+                            "top_key_hash": "sha256:top",
+                            "raw_keys_included": false,
+                            "content_included": false
+                        },
+                        "runtime_preflight": {
+                            "side_signal_trial_allowed": true,
+                            "blockers": [],
+                            "execution_packet_preflight_passed": true,
+                            "gate_ready": true,
+                            "candidate_count_matches_packet": true,
+                            "ordering_execution_allowed": false
+                        },
+                        "side_signal": {
+                            "attempted": true,
+                            "status": "ok",
+                            "timeout_ms": 30000,
+                            "coverage_threshold": 0.5,
+                            "row_count": 1,
+                            "matched_candidate_count": 1,
+                            "coverage": 1.0,
+                            "latency_ms": 12.345,
+                            "raw_included": false,
+                            "candidate_keys_included": false,
+                            "content_included": false
+                        },
+                        "advisory_result": {
+                            "available": true,
+                            "used_for_return_order": false,
+                            "order_hash": "sha256:advisory",
+                            "top_key_hash": "sha256:advisory-top",
+                            "matched_side_signal_count": 1,
+                            "evidence_count": 1,
+                            "expected": {
+                                "key_hash": "sha256:expected",
+                                "baseline_rank": 1,
+                                "advisory_rank": 1,
+                                "regressed": false
+                            },
+                            "raw_keys_included": false,
+                            "content_included": false,
+                            "side_signal_raw_included": false
+                        },
+                        "returned_order": {
+                            "source": "baseline",
+                            "baseline_returned": true,
+                            "hash_matches_baseline": true
+                        },
+                        "calls_memory_search": false,
+                        "runs_biocortex": true,
+                        "registers_embedding_backend": false,
+                        "changes_memory_search_order": false,
+                        "default_search_order_change_allowed": false,
+                        "ordering_behavior_connected": false,
+                        "may_change_search_order_now": false,
+                        "may_implement_ordering_now": false,
+                        "boundary": {
+                            "calls_memory_search": false,
+                            "changes_memory_search_order": false,
+                            "mutates_ab_memory": false
+                        }
+                    },
+                    "reviewer": "codex",
+                    "commit": "review-commit",
+                    "forum_post_id": "103",
+                    "memory_key": "memory-key"
+                }),
+                &ctx,
+            )
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains("secret runtime trial review packet query"));
+        assert!(!text.contains("secret_runtime_trial_review_packet_key"));
+        assert!(!text.contains("secret runtime trial review packet content"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_runtime_trial_review_packet.v0")
+        );
+        assert_eq!(v["read_only"], json!(true));
+        assert_eq!(v["runtime_trial_consumer"], json!(true));
+        assert_eq!(v["approval_state"], json!("not_approved"));
+        assert_eq!(v["runtime_adapter_approved"], json!(false));
+        assert_eq!(v["calls_memory_search"], json!(false));
+        assert_eq!(v["runs_biocortex"], json!(false));
+        assert_eq!(v["changes_memory_search_order"], json!(false));
+        assert_eq!(
+            v["input_contract"]["runtime_trial_packet_included"],
+            json!(false)
+        );
+        assert_eq!(
+            v["boundary_check"]["review_ready_for_baseline_runtime_trial"],
+            json!(true)
+        );
+        assert_eq!(
+            v["runtime_trial_summary"]["side_signal"]["raw_included"],
+            json!(false)
+        );
+        assert_eq!(
+            v["runtime_trial_summary"]["side_signal"]["candidate_keys_included"],
+            json!(false)
+        );
+        assert_eq!(
+            v["runtime_trial_summary"]["side_signal"]["content_included"],
+            json!(false)
+        );
+        assert_eq!(
+            v["runtime_trial_summary"]["returned_order"]["source"],
+            json!("baseline")
+        );
+        assert_eq!(v["may_implement_ordering_now"], json!(false));
+    }
+
+    #[test]
+    fn biocortex_retrieval_opt_in_order_diff_packet_schema_is_readonly() {
+        let tool = BioCortexRetrievalOptInOrderDiffPacketTool::new();
+        let schema = tool.schema();
+        assert_eq!(schema.name, "biocortex_retrieval_opt_in_order_diff_packet");
+        assert!(schema.description.contains("Read-only"));
+        assert!(schema.description.contains("Does not call memory_search"));
+        assert!(schema.description.contains("run BioCortex"));
+        assert!(schema.description.contains("alter retrieval order"));
+
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required");
+        assert!(required.contains(&json!("source_packet")));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("source_packet").is_some());
+        assert!(props.get("reviewer").is_some());
+        assert!(props.get("commit").is_some());
+        assert!(props.get("forum_post_id").is_some());
+        assert!(props.get("memory_key").is_some());
+        assert!(props.get("include_raw").is_none());
+        assert!(props.get("mutate").is_none());
+        assert!(props.get("memory_search").is_none());
+        assert!(props.get("raw_content").is_none());
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_order_diff_packet_sanitizes_inputs() {
+        let tool = BioCortexRetrievalOptInOrderDiffPacketTool::new();
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(
+                json!({
+                    "source_packet": {
+                        "schema": "agent_bridge.biocortex_retrieval.opt_in_runtime_trial_review_packet.v0",
+                        "read_only": true,
+                        "runtime_trial_consumer": true,
+                        "implementation_stage": "runtime_trial_review_packet_only",
+                        "approval_state": "not_approved",
+                        "runtime_adapter_approved": false,
+                        "approval_writes_allowed": false,
+                        "writes_approval": false,
+                        "query": "secret order diff query",
+                        "candidate_keys": ["secret_order_diff_key"],
+                        "candidate_content": "secret order diff content",
+                        "input_contract": {
+                            "runtime_trial_packet_included": false,
+                            "raw_query_included": false,
+                            "raw_keys_included": false,
+                            "content_included": false,
+                            "side_signal_raw_included": false
+                        },
+                        "runtime_trial_summary": {
+                            "baseline_order": {
+                                "key_count": 2,
+                                "hash": "sha256:baseline",
+                                "top_key_hash": "sha256:baseline-top",
+                                "raw_keys_included": false,
+                                "content_included": false
+                            },
+                            "side_signal": {
+                                "status": "ok",
+                                "matched_candidate_count": 2,
+                                "raw_included": false,
+                                "candidate_keys_included": false,
+                                "content_included": false
+                            },
+                            "advisory_result": {
+                                "available": true,
+                                "used_for_return_order": false,
+                                "order_hash": "sha256:advisory",
+                                "top_key_hash": "sha256:advisory-top",
+                                "matched_side_signal_count": 2,
+                                "evidence_count": 1,
+                                "expected": {
+                                    "key_hash": "sha256:expected",
+                                    "baseline_rank": 1,
+                                    "advisory_rank": 2,
+                                    "regressed": true
+                                },
+                                "raw_keys_included": false,
+                                "content_included": false,
+                                "side_signal_raw_included": false
+                            },
+                            "returned_order": {
+                                "source": "baseline",
+                                "baseline_returned": true,
+                                "hash_matches_baseline": true
+                            }
+                        },
+                        "boundary_check": {
+                            "review_ready_for_baseline_runtime_trial": true,
+                            "violations": []
+                        },
+                        "calls_memory_search": false,
+                        "runs_biocortex": false,
+                        "registers_embedding_backend": false,
+                        "changes_memory_search_order": false,
+                        "default_search_order_change_allowed": false,
+                        "ordering_behavior_connected": false,
+                        "may_change_search_order_now": false,
+                        "may_implement_ordering_now": false
+                    },
+                    "reviewer": "codex",
+                    "commit": "order-diff-commit",
+                    "forum_post_id": "103",
+                    "memory_key": "order-diff-memory"
+                }),
+                &ctx,
+            )
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains("secret order diff query"));
+        assert!(!text.contains("secret_order_diff_key"));
+        assert!(!text.contains("secret order diff content"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_order_diff_packet.v0")
+        );
+        assert_eq!(v["read_only"], json!(true));
+        assert_eq!(v["order_diff_packet"], json!(true));
+        assert_eq!(v["source_packet_consumer"], json!(true));
+        assert_eq!(
+            v["review_target"]["source_kind"],
+            json!("runtime_trial_review_packet")
+        );
+        assert_eq!(v["boundary_check"]["diff_ready"], json!(true));
+        assert_eq!(
+            v["order_comparison"]["hash_diff"]["order_hash_changed"],
+            json!(true)
+        );
+        assert_eq!(
+            v["order_comparison"]["hash_diff"]["top_key_changed"],
+            json!(true)
+        );
+        assert_eq!(
+            v["order_comparison"]["expected_key_rank"]["rank_delta_advisory_minus_baseline"],
+            json!(1)
+        );
+        assert_eq!(
+            v["order_comparison"]["expected_key_rank"]["direction"],
+            json!("regressed")
+        );
+        assert_eq!(
+            v["order_comparison"]["returned_order"]["actual_return_order_changed"],
+            json!(false)
+        );
+        assert_eq!(v["calls_memory_search"], json!(false));
+        assert_eq!(v["runs_biocortex"], json!(false));
+        assert_eq!(v["changes_memory_search_order"], json!(false));
+        assert_eq!(v["may_implement_ordering_now"], json!(false));
+    }
+
+    #[test]
+    fn biocortex_retrieval_opt_in_redacted_order_artifact_schema_is_readonly() {
+        let tool = BioCortexRetrievalOptInRedactedOrderArtifactTool::new();
+        let schema = tool.schema();
+        assert_eq!(
+            schema.name,
+            "biocortex_retrieval_opt_in_redacted_order_artifact"
+        );
+        assert!(schema.description.contains("Read-only"));
+        assert!(schema.description.contains("key_hash rows"));
+        assert!(schema.description.contains("Does not call memory_search"));
+        assert!(schema.description.contains("run BioCortex"));
+        assert!(schema.description.contains("alter retrieval order"));
+
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required");
+        assert!(required.contains(&json!("source_packet")));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("source_packet").is_some());
+        assert!(props.get("reviewer").is_some());
+        assert!(props.get("commit").is_some());
+        assert!(props.get("forum_post_id").is_some());
+        assert!(props.get("memory_key").is_some());
+        assert!(props.get("include_raw").is_none());
+        assert!(props.get("mutate").is_none());
+        assert!(props.get("memory_search").is_none());
+        assert!(props.get("raw_content").is_none());
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_redacted_order_artifact_sanitizes_inputs() {
+        let key_a = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let key_b = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let tool = BioCortexRetrievalOptInRedactedOrderArtifactTool::new();
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(
+                json!({
+                    "source_packet": {
+                        "schema": "agent_bridge.biocortex_retrieval.opt_in_runtime_trial_review_packet.v0",
+                        "read_only": true,
+                        "runtime_trial_consumer": true,
+                        "implementation_stage": "runtime_trial_review_packet_only",
+                        "approval_state": "not_approved",
+                        "runtime_adapter_approved": false,
+                        "approval_writes_allowed": false,
+                        "writes_approval": false,
+                        "query": "secret redacted artifact query",
+                        "candidate_keys": ["secret_redacted_artifact_key"],
+                        "candidate_content": "secret redacted artifact content",
+                        "input_contract": {
+                            "runtime_trial_packet_included": false,
+                            "raw_query_included": false,
+                            "raw_keys_included": false,
+                            "content_included": false,
+                            "side_signal_raw_included": false
+                        },
+                        "runtime_trial_summary": {
+                            "baseline_order": {
+                                "key_count": 2,
+                                "hash": "sha256:baseline",
+                                "top_key_hash": key_a,
+                                "redacted_rank_rows": [
+                                    {"key_hash": key_a, "baseline_rank": 1},
+                                    {"key_hash": key_b, "baseline_rank": 2, "key": "secret_redacted_artifact_key"}
+                                ],
+                                "redacted_rank_rows_included": true,
+                                "raw_keys_included": false,
+                                "raw_order_keys_included": false,
+                                "content_included": false
+                            },
+                            "side_signal": {
+                                "status": "ok",
+                                "matched_candidate_count": 2,
+                                "raw_included": false,
+                                "candidate_keys_included": false,
+                                "content_included": false
+                            },
+                            "advisory_result": {
+                                "available": true,
+                                "used_for_return_order": false,
+                                "order_hash": "sha256:advisory",
+                                "top_key_hash": key_b,
+                                "matched_side_signal_count": 2,
+                                "evidence_count": 1,
+                                "redacted_rank_rows": [
+                                    {"key_hash": key_b, "advisory_rank": 1},
+                                    {"key_hash": key_a, "advisory_rank": 2, "key": "secret_redacted_artifact_key"}
+                                ],
+                                "redacted_rank_rows_included": true,
+                                "raw_keys_included": false,
+                                "raw_order_keys_included": false,
+                                "content_included": false,
+                                "side_signal_raw_included": false
+                            },
+                            "returned_order": {
+                                "source": "baseline",
+                                "baseline_returned": true,
+                                "hash_matches_baseline": true
+                            }
+                        },
+                        "boundary_check": {
+                            "review_ready_for_baseline_runtime_trial": true,
+                            "violations": []
+                        },
+                        "calls_memory_search": false,
+                        "runs_biocortex": false,
+                        "registers_embedding_backend": false,
+                        "changes_memory_search_order": false,
+                        "default_search_order_change_allowed": false,
+                        "ordering_behavior_connected": false,
+                        "may_change_search_order_now": false,
+                        "may_implement_ordering_now": false
+                    },
+                    "reviewer": "codex",
+                    "commit": "redacted-order-commit",
+                    "forum_post_id": "103",
+                    "memory_key": "redacted-order-memory"
+                }),
+                &ctx,
+            )
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains("secret redacted artifact query"));
+        assert!(!text.contains("secret_redacted_artifact_key"));
+        assert!(!text.contains("secret redacted artifact content"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_redacted_order_artifact.v0")
+        );
+        assert_eq!(v["read_only"], json!(true));
+        assert_eq!(v["redacted_order_artifact"], json!(true));
+        assert_eq!(v["source_packet_consumer"], json!(true));
+        assert_eq!(
+            v["review_target"]["source_kind"],
+            json!("runtime_trial_review_packet")
+        );
+        assert_eq!(v["boundary_check"]["artifact_ready"], json!(true));
+        assert_eq!(v["boundary_check"]["redacted_rows_comparable"], json!(true));
+        assert_eq!(
+            v["redacted_order_comparison"]["top_k_overlap"][0]["overlap_count"],
+            json!(0)
+        );
+        assert_eq!(
+            v["redacted_order_comparison"]["rank_delta_distribution"]["improved_count"],
+            json!(1)
+        );
+        assert_eq!(
+            v["redacted_order_comparison"]["rank_delta_distribution"]["regressed_count"],
+            json!(1)
+        );
+        assert_eq!(
+            v["redacted_order_comparison"]["returned_order"]["actual_return_order_changed"],
+            json!(false)
+        );
+        assert_eq!(v["calls_memory_search"], json!(false));
+        assert_eq!(v["runs_biocortex"], json!(false));
+        assert_eq!(v["changes_memory_search_order"], json!(false));
+        assert_eq!(v["may_implement_ordering_now"], json!(false));
+    }
+
+    #[test]
+    fn biocortex_retrieval_opt_in_authorization_decision_packet_schema_is_readonly() {
+        let tool = BioCortexRetrievalOptInAuthorizationDecisionPacketTool::new();
+        let schema = tool.schema();
+        assert_eq!(
+            schema.name,
+            "biocortex_retrieval_opt_in_authorization_decision_packet"
+        );
+        assert!(schema.description.contains("Read-only"));
+        assert!(schema.description.contains("implementation-only gate"));
+        assert!(schema.description.contains("Does not call memory_search"));
+        assert!(schema.description.contains("run BioCortex"));
+        assert!(schema.description.contains("approve runtime influence"));
+        assert!(schema.description.contains("alter retrieval order"));
+
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required");
+        assert!(required.contains(&json!("authorization_request")));
+        assert!(required.contains(&json!("authorization_decision")));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("authorization_request").is_some());
+        assert!(props.get("authorization_decision").is_some());
+        assert!(props.get("reviewer").is_some());
+        assert!(props.get("commit").is_some());
+        assert!(props.get("forum_post_id").is_some());
+        assert!(props.get("memory_key").is_some());
+        assert!(props.get("include_raw").is_none());
+        assert!(props.get("mutate").is_none());
+        assert!(props.get("memory_search").is_none());
+        assert!(props.get("raw_content").is_none());
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_authorization_decision_packet_sanitizes_inputs() {
+        let tool = BioCortexRetrievalOptInAuthorizationDecisionPacketTool::new();
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(
+                json!({
+                    "authorization_decision": {
+                        "schema": "agent_bridge.biocortex_retrieval.opt_in_authorization_decision.v0",
+                        "decision": "authorized",
+                        "authorization_state": "authorized",
+                        "authorized_scope": "opt_in_experiment",
+                        "human_decision_text": "secret human auth wording",
+                        "implementation_allowed": true,
+                        "runtime_adapter_approved": false,
+                        "default_search_order_change_allowed": false,
+                        "default_retrieval_influence_authorized": false,
+                        "hybrid_retrieval_influence_authorized": false,
+                        "semantic_retrieval_influence_authorized": false,
+                        "authorized_implementation": {
+                            "may_add_runtime_enable_env": "AB_BIOCORTEX_RETRIEVAL_OPT_IN",
+                            "may_add_per_call_opt_in_surface": true,
+                            "may_affect_only_explicitly_opted_in_fts_calls": true,
+                            "must_keep_operator_disable": "AB_BIOCORTEX_RETRIEVAL_DISABLE",
+                            "must_return_baseline_without_per_call_opt_in": true,
+                            "must_return_baseline_on_absent_error_timeout_low_coverage_malformed_rows": true
+                        },
+                        "not_authorized": [
+                            "runtime_adapter_approved",
+                            "default_search_order_change_allowed",
+                            "production_use_without_post_implementation_review"
+                        ],
+                        "requires_post_implementation_review_before_use": true,
+                        "raw_query": "secret decision query",
+                        "raw_key": "secret_decision_key"
+                    },
+                    "authorization_request": {
+                        "schema": "agent_bridge.biocortex_retrieval.opt_in_authorization_request.v0",
+                        "approval_state": "opt_in_implementation_authorized",
+                        "authorization_state": "authorized_for_opt_in_implementation",
+                        "request_scope": "opt_in_experiment",
+                        "implementation_allowed": true,
+                        "runtime_adapter_approved": false,
+                        "default_search_order_change_allowed": false,
+                        "writes_approval": false,
+                        "current_permissions": {
+                            "may_implement_opt_in_experiment": true,
+                            "may_change_default_retrieval_order": false
+                        },
+                        "opt_in_plan": {
+                            "status": "store_opt_in_search_wrapper_implemented"
+                        },
+                        "not_requested": [
+                            "runtime_adapter_approved",
+                            "default_search_order_change_allowed"
+                        ],
+                        "raw_query": "secret request query",
+                        "raw_key": "secret_request_key",
+                        "content": "secret request content"
+                    },
+                    "reviewer": "codex",
+                    "commit": "decision-commit",
+                    "forum_post_id": "103",
+                    "memory_key": "decision-memory"
+                }),
+                &ctx,
+            )
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains("secret human auth wording"));
+        assert!(!text.contains("secret decision query"));
+        assert!(!text.contains("secret_decision_key"));
+        assert!(!text.contains("secret request query"));
+        assert!(!text.contains("secret_request_key"));
+        assert!(!text.contains("secret request content"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_authorization_decision_packet.v0")
+        );
+        assert_eq!(v["read_only"], json!(true));
+        assert_eq!(v["authorization_decision_consumer"], json!(true));
+        assert_eq!(
+            v["approval_state"],
+            json!("opt_in_implementation_authorized")
+        );
+        assert_eq!(
+            v["authorization_state"],
+            json!("authorized_for_opt_in_implementation")
+        );
+        assert_eq!(v["runtime_adapter_approved"], json!(false));
+        assert_eq!(v["default_search_order_change_allowed"], json!(false));
+        assert_eq!(v["writes_approval"], json!(false));
+        assert_eq!(v["calls_memory_search"], json!(false));
+        assert_eq!(v["runs_biocortex"], json!(false));
+        assert_eq!(v["changes_memory_search_order"], json!(false));
+        assert_eq!(v["may_implement_ordering_now"], json!(false));
+        assert_eq!(
+            v["boundary_check"]["implementation_authorized"],
+            json!(true)
+        );
+        assert_eq!(
+            v["required_next_gate"]["this_packet_approves_runtime_adapter"],
+            json!(false)
+        );
+    }
+
+    #[test]
+    fn biocortex_retrieval_opt_in_post_implementation_review_gate_schema_is_readonly() {
+        let tool = BioCortexRetrievalOptInPostImplementationReviewGateTool::new();
+        let schema = tool.schema();
+        assert_eq!(
+            schema.name,
+            "biocortex_retrieval_opt_in_post_implementation_review_gate"
+        );
+        assert!(schema.description.contains("Read-only"));
+        assert!(schema
+            .description
+            .contains("post-implementation review gate"));
+        assert!(schema.description.contains("Does not call memory_search"));
+        assert!(schema.description.contains("run BioCortex"));
+        assert!(schema.description.contains("approve runtime influence"));
+        assert!(schema.description.contains("alter retrieval order"));
+
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required");
+        assert!(required.contains(&json!("authorization_decision_packet")));
+        assert!(required.contains(&json!("opt_in_plan")));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("authorization_decision_packet").is_some());
+        assert!(props.get("opt_in_plan").is_some());
+        assert!(props.get("reviewer").is_some());
+        assert!(props.get("commit").is_some());
+        assert!(props.get("forum_post_id").is_some());
+        assert!(props.get("memory_key").is_some());
+        assert!(props.get("include_raw").is_none());
+        assert!(props.get("mutate").is_none());
+        assert!(props.get("memory_search").is_none());
+        assert!(props.get("raw_content").is_none());
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_post_implementation_review_gate_sanitizes_inputs() {
+        let tool = BioCortexRetrievalOptInPostImplementationReviewGateTool::new();
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(
+                json!({
+                    "authorization_decision_packet": {
+                        "schema": "agent_bridge.biocortex_retrieval.opt_in_authorization_decision_packet.v0",
+                        "read_only": true,
+                        "authorization_decision_consumer": true,
+                        "approval_state": "opt_in_implementation_authorized",
+                        "authorization_state": "authorized_for_opt_in_implementation",
+                        "boundary_check": {
+                            "implementation_authorized": true
+                        },
+                        "required_next_gate": {
+                            "post_implementation_review_before_use": true,
+                            "runtime_adapter_approval_required": true,
+                            "ordering_behavior_connection_required": true,
+                            "this_packet_approves_runtime_adapter": false,
+                            "this_packet_connects_ordering_behavior": false
+                        },
+                        "runtime_adapter_approved": false,
+                        "default_search_order_change_allowed": false,
+                        "approval_writes_allowed": false,
+                        "writes_approval": false,
+                        "calls_memory_search": false,
+                        "runs_biocortex": false,
+                        "registers_embedding_backend": false,
+                        "changes_memory_search_order": false,
+                        "ordering_behavior_connected": false,
+                        "may_change_search_order_now": false,
+                        "may_implement_ordering_now": false,
+                        "raw_query": "secret decision packet query",
+                        "raw_key": "secret_decision_packet_key",
+                        "content": "secret decision packet content"
+                    },
+                    "opt_in_plan": {
+                        "schema": "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0",
+                        "status": "post_implementation_review_gate_implemented",
+                        "implementation_allowed": true,
+                        "store_opt_in_search_wrapper_implemented": true,
+                        "authorization_decision_consumer_implemented": true,
+                        "post_implementation_review_gate_implemented": true,
+                        "runtime_adapter_approved": false,
+                        "default_search_order_change_allowed": false,
+                        "ordering_behavior_connected": false,
+                        "requested_default_influence_scope": "none",
+                        "default_memory_search_unchanged": true,
+                        "implemented_store_opt_in_search_wrapper": {
+                            "returns_baseline_order": true,
+                            "redacted_audit_only": true,
+                            "runs_biocortex": false,
+                            "changes_memory_search_order": false,
+                            "ordering_behavior_connected": false
+                        },
+                        "implemented_post_implementation_review_gate": {
+                            "cli": "agent-bridge bio-cortex retrieval-opt-in-post-implementation-review-gate",
+                            "mcp_tool": "biocortex_retrieval_opt_in_post_implementation_review_gate",
+                            "schema": "agent_bridge.biocortex_retrieval.opt_in_post_implementation_review_gate.v0",
+                            "read_only": true,
+                            "runtime_adapter_approved": false,
+                            "default_search_order_change_allowed": false,
+                            "calls_memory_search": false,
+                            "runs_biocortex": false,
+                            "registers_embedding_backend": false,
+                            "changes_memory_search_order": false,
+                            "ordering_behavior_connected": false,
+                            "may_change_search_order_now": false,
+                            "may_implement_ordering_now": false
+                        },
+                        "raw_query": "secret plan query",
+                        "raw_key": "secret_plan_key",
+                        "content": "secret plan content"
+                    },
+                    "reviewer": "codex",
+                    "commit": "review-gate-commit",
+                    "forum_post_id": "103",
+                    "memory_key": "review-gate-memory"
+                }),
+                &ctx,
+            )
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains("secret decision packet query"));
+        assert!(!text.contains("secret_decision_packet_key"));
+        assert!(!text.contains("secret decision packet content"));
+        assert!(!text.contains("secret plan query"));
+        assert!(!text.contains("secret_plan_key"));
+        assert!(!text.contains("secret plan content"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_post_implementation_review_gate.v0")
+        );
+        assert_eq!(v["read_only"], json!(true));
+        assert_eq!(v["post_implementation_review_gate"], json!(true));
+        assert_eq!(
+            v["review_readiness"]["ready_for_human_runtime_influence_review"],
+            json!(true)
+        );
+        assert_eq!(v["approval_state"], json!("not_approved"));
+        assert_eq!(v["implementation_allowed"], json!(false));
+        assert_eq!(v["runtime_adapter_approved"], json!(false));
+        assert_eq!(v["default_search_order_change_allowed"], json!(false));
+        assert_eq!(v["writes_approval"], json!(false));
+        assert_eq!(v["calls_memory_search"], json!(false));
+        assert_eq!(v["runs_biocortex"], json!(false));
+        assert_eq!(v["changes_memory_search_order"], json!(false));
+        assert_eq!(v["ordering_behavior_connected"], json!(false));
+        assert_eq!(v["may_implement_ordering_now"], json!(false));
+        assert_eq!(
+            v["boundary_check"]["ready_for_human_runtime_influence_review"],
+            json!(true)
+        );
+        assert_eq!(
+            v["required_next_gate"]["this_packet_approves_runtime_adapter"],
+            json!(false)
+        );
+        assert_eq!(
+            v["required_next_gate"]["this_packet_connects_ordering_behavior"],
+            json!(false)
+        );
+    }
+
+    #[test]
+    fn biocortex_retrieval_opt_in_runtime_influence_review_request_schema_is_readonly() {
+        let tool = BioCortexRetrievalOptInRuntimeInfluenceReviewRequestTool::new();
+        let schema = tool.schema();
+        assert_eq!(
+            schema.name,
+            "biocortex_retrieval_opt_in_runtime_influence_review_request"
+        );
+        assert!(schema.description.contains("Read-only"));
+        assert!(schema
+            .description
+            .contains("runtime-influence review request"));
+        assert!(schema
+            .description
+            .contains("optional redacted evidence aggregate"));
+        assert!(schema.description.contains("post-runtime evidence summary"));
+        assert!(schema.description.contains("Does not call memory_search"));
+        assert!(schema.description.contains("run BioCortex"));
+        assert!(schema
+            .description
+            .contains("include raw query/keys/content"));
+        assert!(schema.description.contains("approve runtime influence"));
+        assert!(schema.description.contains("alter retrieval order"));
+
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required");
+        assert!(required.contains(&json!("post_implementation_review_gate")));
+        assert!(required.contains(&json!("redacted_order_artifact")));
+        assert!(!required.contains(&json!("redacted_evidence_aggregate")));
+        assert!(!required.contains(&json!("evidence_summary")));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("post_implementation_review_gate").is_some());
+        assert!(props.get("redacted_order_artifact").is_some());
+        assert!(props.get("redacted_evidence_aggregate").is_some());
+        assert!(props.get("evidence_summary").is_some());
+        assert!(props.get("reviewer").is_some());
+        assert!(props.get("commit").is_some());
+        assert!(props.get("forum_post_id").is_some());
+        assert!(props.get("memory_key").is_some());
+        assert!(props.get("include_raw").is_none());
+        assert!(props.get("mutate").is_none());
+        assert!(props.get("memory_search").is_none());
+        assert!(props.get("raw_content").is_none());
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_runtime_influence_review_request_sanitizes_inputs() {
+        let tool = BioCortexRetrievalOptInRuntimeInfluenceReviewRequestTool::new();
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(
+                json!({
+                    "post_implementation_review_gate": {
+                        "schema": "agent_bridge.biocortex_retrieval.opt_in_post_implementation_review_gate.v0",
+                        "read_only": true,
+                        "post_implementation_review_gate": true,
+                        "review_readiness": {
+                            "ready_for_human_runtime_influence_review": true
+                        },
+                        "boundary_check": {
+                            "ready_for_human_runtime_influence_review": true
+                        },
+                        "review_state": "ready_for_human_runtime_influence_review",
+                        "approval_state": "not_approved",
+                        "authorization_state": "requires_separate_human_runtime_influence_review",
+                        "required_next_gate": {
+                            "runtime_adapter_approval_required": true,
+                            "ordering_behavior_connection_required": true,
+                            "this_packet_approves_runtime_adapter": false,
+                            "this_packet_connects_ordering_behavior": false
+                        },
+                        "runtime_adapter_approved": false,
+                        "default_search_order_change_allowed": false,
+                        "writes_approval": false,
+                        "calls_memory_search": false,
+                        "runs_biocortex": false,
+                        "changes_memory_search_order": false,
+                        "ordering_behavior_connected": false,
+                        "may_change_search_order_now": false,
+                        "may_implement_ordering_now": false,
+                        "raw_query": "secret gate query",
+                        "raw_key": "secret_gate_key",
+                        "content": "secret gate content"
+                    },
+                    "redacted_order_artifact": {
+                        "schema": "agent_bridge.biocortex_retrieval.opt_in_redacted_order_artifact.v0",
+                        "read_only": true,
+                        "input_contract": {
+                            "raw_query_included": false,
+                            "raw_keys_included": false,
+                            "content_included": false
+                        },
+                        "redacted_order_comparison": {
+                            "top_k_overlap": [
+                                {"k": 1, "overlap_count": 1, "jaccard": 1.0}
+                            ],
+                            "rank_delta_distribution": {
+                                "improved_count": 0,
+                                "regressed_count": 0,
+                                "unchanged_count": 1,
+                                "max_abs_delta": 0
+                            },
+                            "returned_order": {
+                                "baseline_returned": true,
+                                "actual_return_order_changed": false
+                            }
+                        },
+                        "boundary_check": {
+                            "artifact_ready": true,
+                            "redacted_rows_comparable": true
+                        },
+                        "approval_state": "not_approved",
+                        "runtime_adapter_approved": false,
+                        "approval_writes_allowed": false,
+                        "writes_approval": false,
+                        "calls_memory_search": false,
+                        "runs_biocortex": false,
+                        "registers_embedding_backend": false,
+                        "changes_memory_search_order": false,
+                        "actual_return_order_changed": false,
+                        "default_search_order_change_allowed": false,
+                        "ordering_behavior_connected": false,
+                        "may_change_search_order_now": false,
+                        "may_implement_ordering_now": false,
+                        "raw_query": "secret artifact query",
+                        "raw_key": "secret_artifact_key",
+                        "content": "secret artifact content"
+                    },
+                    "redacted_evidence_aggregate": {
+                        "schema": "agent_bridge.biocortex_retrieval.opt_in_redacted_evidence_aggregate.v0",
+                        "read_only": true,
+                        "redacted_evidence_aggregate": true,
+                        "input_contract": {
+                            "raw_queries_included": false,
+                            "raw_keys_included": false,
+                            "content_included": false,
+                            "side_signal_raw_included": false
+                        },
+                        "movement_evidence": {
+                            "raw_flags_all_false": true,
+                            "movement_observed": true
+                        },
+                        "coverage_evidence": {
+                            "raw_flags_all_false": true,
+                            "expanded_coverage_observed": true
+                        },
+                        "interpretation": {
+                            "aggregate_evidence_ready": true,
+                            "controlled_rank_movement_observed": true,
+                            "expanded_coverage_without_additional_movement": true,
+                            "default_influence_ready": false,
+                            "human_review_required": true,
+                            "review_state": "redacted_aggregate_ready"
+                        },
+                        "approval_state": "evidence_aggregate_only",
+                        "authorization_state": "does_not_grant_runtime_influence",
+                        "approval_writes_allowed": false,
+                        "writes_approval": false,
+                        "calls_memory_search": false,
+                        "runs_biocortex": false,
+                        "registers_embedding_backend": false,
+                        "changes_memory_search_order": false,
+                        "default_search_order_change_allowed": false,
+                        "default_calls_unchanged": true,
+                        "raw_queries_included": false,
+                        "raw_keys_included": false,
+                        "content_included": false,
+                        "side_signal_raw_included": false,
+                        "raw_query": "secret aggregate query",
+                        "raw_key": "secret_aggregate_key",
+                        "content": "secret aggregate content"
+                    },
+                    "evidence_summary": {
+                        "schema": "agent_bridge.biocortex_retrieval.opt_in_evidence_summary.v0",
+                        "read_only": true,
+                        "evidence_summary": true,
+                        "input_contract": {
+                            "batch_diagnostics_schema": "agent_bridge.biocortex_retrieval.opt_in_gated_batch_diagnostics.v0",
+                            "batch_diagnostics_evidence_source": "runtime_transition_gated_batch_diagnostics",
+                            "batch_diagnostics_transition_gated": true,
+                            "runtime_readiness_packet_schema": "agent_bridge.biocortex_retrieval.opt_in_runtime_readiness_packet.v0",
+                            "batch_diagnostics_included": false,
+                            "controlled_order_fixture_run_included": false,
+                            "runtime_readiness_packet_included": false,
+                            "runtime_readiness_packet_provided": true,
+                            "raw_queries_included": false,
+                            "raw_keys_included": false,
+                            "content_included": false,
+                            "side_signal_raw_included": false
+                        },
+                        "runtime_readiness": {
+                            "raw_flags_all_false": true
+                        },
+                        "interpretation": {
+                            "batch_diagnostics_raw_safe": true,
+                            "batch_diagnostics_transition_gated": true,
+                            "batch_diagnostics_evidence_source": "runtime_transition_gated_batch_diagnostics",
+                            "controlled_order_raw_safe": true,
+                            "runtime_readiness_packet_provided": true,
+                            "runtime_readiness_requirement_met": true,
+                            "readiness_matches_batch_diagnostics": true,
+                            "readiness_gated_batch_evidence_ready": true,
+                            "controlled_rank_movement_observed": true,
+                            "evidence_ready": true,
+                            "default_influence_ready": false,
+                            "review_state": "post_runtime_evidence_ready"
+                        },
+                        "approval_state": "evidence_summary_only",
+                        "authorization_state": "does_not_grant_runtime_influence",
+                        "approval_writes_allowed": false,
+                        "writes_approval": false,
+                        "calls_memory_search": false,
+                        "runs_biocortex": false,
+                        "registers_embedding_backend": false,
+                        "changes_memory_search_order": false,
+                        "default_search_order_change_allowed": false,
+                        "default_calls_unchanged": true,
+                        "raw_queries_included": false,
+                        "raw_keys_included": false,
+                        "content_included": false,
+                        "side_signal_raw_included": false,
+                        "raw_query": "secret evidence summary query",
+                        "raw_key": "secret_evidence_summary_key",
+                        "content": "secret evidence summary content"
+                    },
+                    "reviewer": "codex",
+                    "commit": "runtime-review-request-commit",
+                    "forum_post_id": "104",
+                    "memory_key": "runtime-review-request-memory"
+                }),
+                &ctx,
+            )
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains("secret gate query"));
+        assert!(!text.contains("secret_gate_key"));
+        assert!(!text.contains("secret gate content"));
+        assert!(!text.contains("secret artifact query"));
+        assert!(!text.contains("secret_artifact_key"));
+        assert!(!text.contains("secret artifact content"));
+        assert!(!text.contains("secret aggregate query"));
+        assert!(!text.contains("secret_aggregate_key"));
+        assert!(!text.contains("secret aggregate content"));
+        assert!(!text.contains("secret evidence summary query"));
+        assert!(!text.contains("secret_evidence_summary_key"));
+        assert!(!text.contains("secret evidence summary content"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_runtime_influence_review_request.v0")
+        );
+        assert_eq!(v["read_only"], json!(true));
+        assert_eq!(v["runtime_influence_review_request"], json!(true));
+        assert_eq!(
+            v["implementation_stage"],
+            json!("runtime_influence_review_request_only")
+        );
+        assert_eq!(
+            v["input_contract"]["post_implementation_review_gate_included"],
+            json!(false)
+        );
+        assert_eq!(
+            v["input_contract"]["redacted_order_artifact_included"],
+            json!(false)
+        );
+        assert_eq!(v["input_contract"]["raw_query_included"], json!(false));
+        assert_eq!(v["input_contract"]["raw_keys_included"], json!(false));
+        assert_eq!(v["input_contract"]["content_included"], json!(false));
+        assert_eq!(
+            v["input_contract"]["redacted_evidence_aggregate_schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_redacted_evidence_aggregate.v0")
+        );
+        assert_eq!(
+            v["input_contract"]["redacted_evidence_aggregate_included"],
+            json!(false)
+        );
+        assert_eq!(
+            v["input_contract"]["post_runtime_evidence_summary_schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_evidence_summary.v0")
+        );
+        assert_eq!(
+            v["input_contract"]["post_runtime_evidence_summary_included"],
+            json!(false)
+        );
+        assert_eq!(
+            v["requested_authorization"]["request_runtime_adapter_review"],
+            json!(true)
+        );
+        assert_eq!(
+            v["requested_authorization"]["request_ordering_behavior_connection_review"],
+            json!(true)
+        );
+        assert_eq!(
+            v["requested_authorization"]["request_default_search_order_change"],
+            json!(false)
+        );
+        assert_eq!(
+            v["requested_authorization"]["request_hybrid_retrieval_influence"],
+            json!(false)
+        );
+        assert_eq!(
+            v["requested_authorization"]["request_semantic_retrieval_influence"],
+            json!(false)
+        );
+        assert_eq!(
+            v["requested_authorization"]["accepts_redacted_evidence_aggregate"],
+            json!(true)
+        );
+        assert_eq!(
+            v["requested_authorization"]["requires_redacted_evidence_aggregate"],
+            json!(false)
+        );
+        assert_eq!(
+            v["requested_authorization"]["accepts_post_runtime_evidence_summary"],
+            json!(true)
+        );
+        assert_eq!(
+            v["requested_authorization"]["requires_post_runtime_evidence_summary"],
+            json!(false)
+        );
+        assert_eq!(
+            v["requested_authorization"]["this_packet_grants_request"],
+            json!(false)
+        );
+        assert_eq!(
+            v["evidence_summary"]["redacted_evidence_aggregate_provided"],
+            json!(true)
+        );
+        assert_eq!(
+            v["evidence_summary"]["redacted_evidence_aggregate_ready"],
+            json!(true)
+        );
+        assert_eq!(
+            v["evidence_summary"]["aggregate_review_state"],
+            json!("redacted_aggregate_ready")
+        );
+        assert_eq!(
+            v["evidence_summary"]["post_runtime_evidence_summary_provided"],
+            json!(true)
+        );
+        assert_eq!(
+            v["evidence_summary"]["post_runtime_evidence_summary_ready"],
+            json!(true)
+        );
+        assert_eq!(
+            v["evidence_summary"]["post_runtime_readiness_gated_batch_evidence_ready"],
+            json!(true)
+        );
+        assert_eq!(
+            v["evidence_summary"]["post_runtime_batch_transition_gated"],
+            json!(true)
+        );
+        assert_eq!(
+            v["evidence_summary"]["post_runtime_batch_evidence_source"],
+            json!("runtime_transition_gated_batch_diagnostics")
+        );
+        assert_eq!(
+            v["boundary_check"]["runtime_influence_review_request_ready"],
+            json!(true)
+        );
+        assert_eq!(
+            v["boundary_check"]["redacted_evidence_aggregate_provided"],
+            json!(true)
+        );
+        assert_eq!(
+            v["boundary_check"]["redacted_evidence_aggregate_ready"],
+            json!(true)
+        );
+        assert_eq!(
+            v["boundary_check"]["post_runtime_evidence_summary_provided"],
+            json!(true)
+        );
+        assert_eq!(
+            v["boundary_check"]["post_runtime_evidence_summary_safe_for_review"],
+            json!(true)
+        );
+        assert_eq!(v["boundary_check"]["blockers"], json!([]));
+        assert_eq!(
+            v["review_request_state"],
+            json!("ready_for_human_runtime_influence_review")
+        );
+        assert_eq!(v["approval_state"], json!("not_approved"));
+        assert_eq!(
+            v["authorization_state"],
+            json!("runtime_influence_review_requested_not_granted")
+        );
+        assert_eq!(v["implementation_allowed"], json!(false));
+        assert_eq!(v["runtime_adapter_approved"], json!(false));
+        assert_eq!(v["default_search_order_change_allowed"], json!(false));
+        assert_eq!(v["writes_approval"], json!(false));
+        assert_eq!(v["calls_memory_search"], json!(false));
+        assert_eq!(v["runs_biocortex"], json!(false));
+        assert_eq!(v["registers_embedding_backend"], json!(false));
+        assert_eq!(v["changes_memory_search_order"], json!(false));
+        assert_eq!(v["ordering_behavior_connected"], json!(false));
+        assert_eq!(v["may_change_search_order_now"], json!(false));
+        assert_eq!(v["may_implement_ordering_now"], json!(false));
+    }
+
+    #[test]
+    fn biocortex_retrieval_opt_in_runtime_influence_decision_packet_schema_is_readonly() {
+        let tool = BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketTool::new();
+        let schema = tool.schema();
+        assert_eq!(
+            schema.name,
+            "biocortex_retrieval_opt_in_runtime_influence_decision_packet"
+        );
+        assert!(schema.description.contains("Read-only"));
+        assert!(schema
+            .description
+            .contains("runtime-influence decision consumer"));
+        assert!(schema.description.contains("explicit opt-in FTS"));
+        assert!(schema.description.contains("Does not call memory_search"));
+        assert!(schema.description.contains("run BioCortex"));
+        assert!(schema.description.contains("human decision text"));
+        assert!(schema.description.contains("connect ordering behavior"));
+        assert!(schema.description.contains("alter retrieval order"));
+
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required");
+        assert!(required.contains(&json!("runtime_influence_review_request")));
+        assert!(required.contains(&json!("runtime_influence_decision")));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("runtime_influence_review_request").is_some());
+        assert!(props.get("runtime_influence_decision").is_some());
+        assert!(props.get("reviewer").is_some());
+        assert!(props.get("commit").is_some());
+        assert!(props.get("forum_post_id").is_some());
+        assert!(props.get("memory_key").is_some());
+        assert!(props.get("include_raw").is_none());
+        assert!(props.get("mutate").is_none());
+        assert!(props.get("memory_search").is_none());
+        assert!(props.get("raw_content").is_none());
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_runtime_influence_decision_packet_sanitizes_inputs() {
+        let tool = BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketTool::new();
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(
+                json!({
+                    "runtime_influence_review_request": {
+                        "schema": "agent_bridge.biocortex_retrieval.opt_in_runtime_influence_review_request.v0",
+                        "read_only": true,
+                        "runtime_influence_review_request": true,
+                        "request_scope": "explicit_opt_in_fts_runtime_influence_review",
+                        "review_request_state": "ready_for_human_runtime_influence_review",
+                        "approval_state": "not_approved",
+                        "authorization_state": "runtime_influence_review_requested_not_granted",
+                        "requested_authorization": {
+                            "request_runtime_adapter_review": true,
+                            "request_ordering_behavior_connection_review": true,
+                            "request_default_search_order_change": false,
+                            "request_hybrid_retrieval_influence": false,
+                            "request_semantic_retrieval_influence": false,
+                            "must_keep_per_call_opt_in_required": true,
+                            "must_keep_operator_disable": "AB_BIOCORTEX_RETRIEVAL_DISABLE",
+                            "must_return_baseline_without_per_call_opt_in": true,
+                            "must_fail_open_to_baseline": true,
+                            "this_packet_grants_request": false
+                        },
+                        "evidence_summary": {
+                            "baseline_returned": true,
+                            "actual_return_order_changed": false
+                        },
+                        "boundary_check": {
+                            "runtime_influence_review_request_ready": true
+                        },
+                        "runtime_adapter_approved": false,
+                        "default_search_order_change_allowed": false,
+                        "writes_approval": false,
+                        "calls_memory_search": false,
+                        "runs_biocortex": false,
+                        "changes_memory_search_order": false,
+                        "ordering_behavior_connected": false,
+                        "may_change_search_order_now": false,
+                        "may_implement_ordering_now": false,
+                        "raw_query": "secret request query",
+                        "raw_key": "secret_request_key",
+                        "content": "secret request content"
+                    },
+                    "runtime_influence_decision": {
+                        "schema": "agent_bridge.biocortex_retrieval.opt_in_runtime_influence_review_decision.v0",
+                        "decision": "authorized",
+                        "authorization_state": "authorized",
+                        "authorized_scope": "explicit_opt_in_fts_runtime_influence",
+                        "human_decision_text": "secret human runtime decision",
+                        "runtime_adapter_approved": true,
+                        "ordering_behavior_connection_authorized": true,
+                        "default_search_order_change_allowed": false,
+                        "default_retrieval_influence_authorized": false,
+                        "hybrid_retrieval_influence_authorized": false,
+                        "semantic_retrieval_influence_authorized": false,
+                        "authorized_runtime_influence": {
+                            "may_run_runtime_adapter_for_explicit_opt_in_fts": true,
+                            "may_connect_ordering_behavior_for_explicit_opt_in_fts": true,
+                            "may_affect_only_explicitly_opted_in_fts_calls": true,
+                            "requires_per_call_opt_in": true,
+                            "must_keep_baseline_candidate_recall": true,
+                            "must_keep_default_calls_unchanged": true,
+                            "must_keep_redacted_audit_only": true,
+                            "must_keep_operator_disable": "AB_BIOCORTEX_RETRIEVAL_DISABLE",
+                            "must_return_baseline_without_per_call_opt_in": true,
+                            "must_fail_open_to_baseline": true
+                        },
+                        "not_authorized": [
+                            "default_search_order_change_allowed",
+                            "default_retrieval_influence_fts",
+                            "default_retrieval_influence_hybrid",
+                            "default_retrieval_influence_semantic",
+                            "hybrid_retrieval_influence",
+                            "semantic_retrieval_influence",
+                            "affecting_calls_without_explicit_opt_in"
+                        ],
+                        "raw_query": "secret decision query",
+                        "raw_key": "secret_decision_key",
+                        "content": "secret decision content"
+                    },
+                    "reviewer": "codex",
+                    "commit": "runtime-decision-commit",
+                    "forum_post_id": "104",
+                    "memory_key": "runtime-decision-memory"
+                }),
+                &ctx,
+            )
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains("secret human runtime decision"));
+        assert!(!text.contains("secret request query"));
+        assert!(!text.contains("secret_request_key"));
+        assert!(!text.contains("secret request content"));
+        assert!(!text.contains("secret decision query"));
+        assert!(!text.contains("secret_decision_key"));
+        assert!(!text.contains("secret decision content"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_runtime_influence_decision_packet.v0")
+        );
+        assert_eq!(v["read_only"], json!(true));
+        assert_eq!(v["runtime_influence_decision_consumer"], json!(true));
+        assert_eq!(
+            v["authorization_scope"],
+            json!("explicit_opt_in_fts_runtime_influence")
+        );
+        assert_eq!(
+            v["boundary_check"]["runtime_influence_authorized"],
+            json!(true)
+        );
+        assert_eq!(v["boundary_check"]["blockers"], json!([]));
+        assert_eq!(
+            v["approval_state"],
+            json!("runtime_influence_review_authorized")
+        );
+        assert_eq!(
+            v["authorization_state"],
+            json!("authorized_for_explicit_opt_in_fts_runtime_influence")
+        );
+        assert_eq!(v["implementation_allowed"], json!(true));
+        assert_eq!(v["runtime_adapter_approved"], json!(true));
+        assert_eq!(v["ordering_behavior_connection_authorized"], json!(true));
+        assert_eq!(v["default_search_order_change_allowed"], json!(false));
+        assert_eq!(v["writes_approval"], json!(false));
+        assert_eq!(v["calls_memory_search"], json!(false));
+        assert_eq!(v["runs_biocortex"], json!(false));
+        assert_eq!(v["changes_memory_search_order"], json!(false));
+        assert_eq!(v["ordering_behavior_connected"], json!(false));
+        assert_eq!(v["may_change_search_order_now"], json!(false));
+        assert_eq!(v["may_implement_ordering_now"], json!(true));
+        assert_eq!(
+            v["required_next_gate"]["this_packet_connects_ordering_behavior"],
+            json!(false)
+        );
+        assert_eq!(
+            v["required_next_gate"]["this_packet_changes_return_order"],
+            json!(false)
+        );
+    }
+
+    fn biocortex_store_trial_authorized_decision_packet_fixture() -> Value {
+        json!({
+            "schema": "agent_bridge.biocortex_retrieval.opt_in_runtime_influence_decision_packet.v0",
+            "read_only": true,
+            "runtime_influence_decision_consumer": true,
+            "implementation_stage": "runtime_influence_decision_consumer_only",
+            "authorization_scope": "explicit_opt_in_fts_runtime_influence",
+            "input_contract": {
+                "runtime_influence_review_request_included": false,
+                "runtime_influence_decision_included": false,
+                "raw_query_included": false,
+                "raw_keys_included": false,
+                "content_included": false,
+                "human_decision_text_included": false
+            },
+            "decision_summary": {
+                "decision": "authorized",
+                "authorization_state": "authorized",
+                "authorized_scope": "explicit_opt_in_fts_runtime_influence",
+                "runtime_adapter_approved": true,
+                "ordering_behavior_connection_authorized": true,
+                "default_search_order_change_allowed": false,
+                "default_retrieval_influence_authorized": false,
+                "hybrid_retrieval_influence_authorized": false,
+                "semantic_retrieval_influence_authorized": false
+            },
+            "authorized_runtime_influence": {
+                "may_run_runtime_adapter_for_explicit_opt_in_fts": true,
+                "may_connect_ordering_behavior_for_explicit_opt_in_fts": true,
+                "may_affect_only_explicitly_opted_in_fts_calls": true,
+                "requires_per_call_opt_in": true,
+                "must_keep_baseline_candidate_recall": true,
+                "must_keep_default_calls_unchanged": true,
+                "must_keep_redacted_audit_only": true,
+                "must_keep_operator_disable": "AB_BIOCORTEX_RETRIEVAL_DISABLE",
+                "must_return_baseline_without_per_call_opt_in": true,
+                "must_fail_open_to_baseline": true
+            },
+            "boundary_check": {
+                "runtime_influence_authorized": true,
+                "blockers": []
+            },
+            "required_next_gate": {
+                "implementation_may_add_runtime_adapter_for_explicit_opt_in_fts": true,
+                "implementation_may_connect_ordering_behavior_for_explicit_opt_in_fts": true,
+                "post_connection_verification_required": true,
+                "this_packet_connects_ordering_behavior": false,
+                "this_packet_changes_return_order": false,
+                "this_packet_allows_default_search_order_change": false
+            },
+            "approval_state": "runtime_influence_review_authorized",
+            "authorization_state": "authorized_for_explicit_opt_in_fts_runtime_influence",
+            "implementation_allowed": true,
+            "runtime_adapter_approved": true,
+            "ordering_behavior_connection_authorized": true,
+            "approval_writes_allowed": false,
+            "writes_approval": false,
+            "calls_memory_search": false,
+            "runs_biocortex": false,
+            "registers_embedding_backend": false,
+            "changes_memory_search_order": false,
+            "default_search_order_change_allowed": false,
+            "ordering_behavior_connected": false,
+            "may_change_search_order_now": false,
+            "may_implement_ordering_now": true,
+            "default_calls_unchanged": true,
+            "raw_query": "secret store trial packet query",
+            "raw_key": "secret_store_trial_packet_key",
+            "content": "secret store trial packet content"
+        })
+    }
+
+    async fn save_store_trial_memory(hub: &Hub, key: &str, importance: f64, content: &str) {
+        let store = hub.store.as_ref().expect("store");
+        store
+            .memory_save(&ab_store::MemoryRecord {
+                key: key.to_string(),
+                kind: "fact".to_string(),
+                content: content.to_string(),
+                tags: vec![],
+                related_keys: vec![],
+                scope: None,
+                created_at: 0,
+                updated_at: 0,
+                last_accessed_at: 0,
+                access_count: 0,
+                importance,
+                status: String::new(),
+                trigger_pattern: None,
+                superseded_by: None,
+            })
+            .await
+            .expect("save memory");
+    }
+
+    #[test]
+    fn biocortex_retrieval_opt_in_store_trial_schema_requires_runtime_decision() {
+        let tool = BioCortexRetrievalOptInStoreTrialTool::new(Hub::builder().build());
+        let schema = tool.schema();
+        assert_eq!(schema.name, "biocortex_retrieval_opt_in_store_trial");
+        assert!(schema.description.contains("Calls AB store"));
+        assert!(schema
+            .description
+            .contains("runtime-influence decision packet"));
+        assert!(schema.description.contains("default memory_search"));
+
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required");
+        assert!(required.contains(&json!("runtime_influence_decision_packet")));
+        assert!(required.contains(&json!("query")));
+        assert!(required.contains(&json!("per_call_opt_in")));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("runtime_influence_decision_packet").is_some());
+        assert!(props.get("query").is_some());
+        assert!(props.get("tags_any").is_some());
+        assert!(props.get("limit").is_some());
+        assert!(props.get("checkout_path").is_some());
+        assert!(props.get("mutate").is_none());
+        assert!(props.get("raw_content").is_none());
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_store_trial_blocks_without_decision_and_redacts_store_data()
+    {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let secret_query = "secret store trial query";
+        let secret_key = "secret_store_trial_key";
+        let secret_content = "secret store trial query content should not leak";
+        save_store_trial_memory(&hub, secret_key, 0.9, secret_content).await;
+
+        let tool = BioCortexRetrievalOptInStoreTrialTool::new(hub);
+        let out = tool
+            .execute(
+                json!({
+                    "runtime_influence_decision_packet": {
+                        "raw_query": "secret packet query should not leak",
+                        "raw_key": "secret_packet_key",
+                        "content": "secret packet content"
+                    },
+                    "query": secret_query,
+                    "per_call_opt_in": true,
+                    "limit": 5,
+                    "attempt_id": "blocked-store-trial"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let text = match out.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains(secret_query));
+        assert!(!text.contains(secret_key));
+        assert!(!text.contains(secret_content));
+        assert!(!text.contains("secret packet query should not leak"));
+        assert!(!text.contains("secret_packet_key"));
+        assert!(!text.contains("secret packet content"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_store_trial.v0")
+        );
+        assert_eq!(v["store_trial"], json!(true));
+        assert_eq!(v["runtime_preflight"]["adapter_allowed"], json!(false));
+        assert!(v["runtime_preflight"]["blockers"]
+            .as_array()
+            .expect("blockers")
+            .contains(&json!("decision_packet_schema_invalid")));
+        assert_eq!(v["baseline_order"]["key_count"], json!(1));
+        assert_eq!(v["baseline_order"]["raw_keys_included"], json!(false));
+        assert_eq!(v["baseline_order"]["content_included"], json!(false));
+        assert_eq!(v["side_signal"]["attempted"], json!(false));
+        assert_eq!(v["store_wrapper"]["called"], json!(true));
+        assert_eq!(v["returned_order"]["baseline_returned"], json!(true));
+        assert_eq!(v["calls_memory_search"], json!(true));
+        assert_eq!(v["runs_biocortex"], json!(false));
+        assert_eq!(v["raw_query_included"], json!(false));
+        assert_eq!(v["raw_keys_included"], json!(false));
+        assert_eq!(v["content_included"], json!(false));
+
+        let _ = tokio::fs::remove_dir_all(temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_store_trial_runs_adapter_when_feature_env_and_packet_allow()
+    {
+        if !cfg!(feature = "biocortex-retrieval-opt-in") {
+            return;
+        }
+        let checkout = match std::env::var("AB_BIOCORTEX_RS") {
+            Ok(path) if std::path::Path::new(&path).join("Cargo.toml").exists() => path,
+            _ => return,
+        };
+        let prior_enable = std::env::var("AB_BIOCORTEX_RETRIEVAL_OPT_IN").ok();
+        let prior_disable = std::env::var("AB_BIOCORTEX_RETRIEVAL_DISABLE").ok();
+        std::env::set_var("AB_BIOCORTEX_RETRIEVAL_OPT_IN", "1");
+        std::env::remove_var("AB_BIOCORTEX_RETRIEVAL_DISABLE");
+
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let secret_query = "synaptic plasticity";
+        let low_key = "secret_store_runtime_low";
+        let high_key = "secret_store_runtime_high";
+        save_store_trial_memory(
+            &hub,
+            low_key,
+            0.10,
+            "synaptic plasticity iota kappa lambda mu nu xi omicron pi",
+        )
+        .await;
+        save_store_trial_memory(
+            &hub,
+            high_key,
+            0.95,
+            "synaptic plasticity alpha beta gamma delta epsilon zeta eta theta",
+        )
+        .await;
+
+        let tool = BioCortexRetrievalOptInStoreTrialTool::new(hub);
+        let out = tool
+            .execute(
+                json!({
+                    "runtime_influence_decision_packet": biocortex_store_trial_authorized_decision_packet_fixture(),
+                    "query": secret_query,
+                    "per_call_opt_in": true,
+                    "limit": 10,
+                    "checkout_path": checkout,
+                    "timeout_ms": 30000,
+                    "coverage_threshold": 0.5,
+                    "blend_alpha": 0.8,
+                    "attempt_id": "authorized-store-trial"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let text = match out.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains(secret_query));
+        assert!(!text.contains(low_key));
+        assert!(!text.contains(high_key));
+        assert!(!text.contains("iota kappa"));
+        assert!(!text.contains("alpha beta"));
+        assert!(!text.contains("secret store trial packet query"));
+        assert!(!text.contains("secret_store_trial_packet_key"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_store_trial.v0")
+        );
+        assert_eq!(v["runtime_preflight"]["adapter_allowed"], json!(true));
+        assert_eq!(v["side_signal"]["attempted"], json!(true));
+        assert_eq!(v["side_signal"]["status"], json!("ok"));
+        assert_eq!(v["side_signal"]["raw_included"], json!(false));
+        assert_eq!(v["store_wrapper"]["called"], json!(true));
+        assert_eq!(
+            v["store_wrapper"]["redacted_audit"]["side_signal_summary"]["available"],
+            json!(true)
+        );
+        assert_eq!(v["runtime_adapter_approved"], json!(true));
+        assert_eq!(v["ordering_behavior_connected"], json!(true));
+        assert_eq!(v["calls_memory_search"], json!(true));
+        assert_eq!(v["runs_biocortex"], json!(true));
+        assert_eq!(v["default_search_order_change_allowed"], json!(false));
+        assert_eq!(v["raw_query_included"], json!(false));
+        assert_eq!(v["raw_keys_included"], json!(false));
+        assert_eq!(v["content_included"], json!(false));
+
+        if let Some(value) = prior_enable {
+            std::env::set_var("AB_BIOCORTEX_RETRIEVAL_OPT_IN", value);
+        } else {
+            std::env::remove_var("AB_BIOCORTEX_RETRIEVAL_OPT_IN");
+        }
+        if let Some(value) = prior_disable {
+            std::env::set_var("AB_BIOCORTEX_RETRIEVAL_DISABLE", value);
+        }
+        let _ = tokio::fs::remove_dir_all(temp_dir).await;
+    }
+
+    #[test]
+    fn biocortex_retrieval_opt_in_batch_diagnostics_schema_is_redacted_batch_surface() {
+        let tool = BioCortexRetrievalOptInBatchDiagnosticsTool::new(Hub::builder().build());
+        let schema = tool.schema();
+        assert_eq!(schema.name, "biocortex_retrieval_opt_in_batch_diagnostics");
+        assert!(schema.description.contains("Batch redacted diagnostics"));
+        assert!(schema.description.contains("default memory_search"));
+        assert!(schema.description.contains("raw queries/keys/content"));
+
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required");
+        assert!(required.contains(&json!("runtime_influence_decision_packet")));
+        assert!(required.contains(&json!("per_call_opt_in")));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("runtime_influence_decision_packet").is_some());
+        assert!(props.get("queries").is_some());
+        assert!(props.get("query_cases").is_some());
+        assert!(props.get("tags_any").is_some());
+        assert!(props.get("limit").is_some());
+        assert!(props.get("checkout_path").is_some());
+        assert!(props.get("mutate").is_none());
+        assert!(props.get("raw_content").is_none());
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_batch_diagnostics_blocks_and_redacts_store_data() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let secret_query = "secret batch diagnostics query";
+        let secret_key = "secret_batch_diagnostics_key";
+        let secret_content = "secret batch diagnostics query content should not leak";
+        save_store_trial_memory(&hub, secret_key, 0.9, secret_content).await;
+
+        let tool = BioCortexRetrievalOptInBatchDiagnosticsTool::new(hub);
+        let out = tool
+            .execute(
+                json!({
+                    "runtime_influence_decision_packet": {
+                        "raw_query": "secret batch packet query should not leak",
+                        "raw_key": "secret_batch_packet_key",
+                        "content": "secret batch packet content"
+                    },
+                    "query_cases": [
+                        {
+                            "query": secret_query,
+                            "class_label": "Runtime Adapter"
+                        }
+                    ],
+                    "per_call_opt_in": true,
+                    "limit": 5,
+                    "attempt_id": "blocked-batch-diagnostics"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let text = match out.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains(secret_query));
+        assert!(!text.contains(secret_key));
+        assert!(!text.contains(secret_content));
+        assert!(!text.contains("secret batch packet query should not leak"));
+        assert!(!text.contains("secret_batch_packet_key"));
+        assert!(!text.contains("secret batch packet content"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_batch_diagnostics.v0")
+        );
+        assert_eq!(v["batch_diagnostics"], json!(true));
+        assert_eq!(v["status"], json!("completed"));
+        assert_eq!(v["summary"]["query_count"], json!(1));
+        assert_eq!(v["summary"]["baseline_completed_count"], json!(1));
+        assert_eq!(v["summary"]["adapter_allowed_count"], json!(0));
+        assert_eq!(v["summary"]["side_signal_attempted_count"], json!(0));
+        assert_eq!(v["summary"]["raw_flagged_count"], json!(0));
+        assert_eq!(v["safety"]["calls_memory_search_all"], json!(true));
+        assert_eq!(v["safety"]["runs_biocortex_any"], json!(false));
+        assert_eq!(v["safety"]["raw_flags_all_false"], json!(true));
+        assert_eq!(v["input_contract"]["raw_queries_included"], json!(false));
+        assert_eq!(v["input_contract"]["raw_keys_included"], json!(false));
+        assert_eq!(v["input_contract"]["content_included"], json!(false));
+        assert_eq!(
+            v["query_results"][0]["class_label"],
+            json!("runtime_adapter")
+        );
+        assert_eq!(
+            v["query_results"][0]["movement_class"],
+            json!("preflight_blocked")
+        );
+        assert_eq!(
+            v["query_results"][0]["preflight"]["adapter_allowed"],
+            json!(false)
+        );
+        assert_eq!(v["query_results"][0]["baseline"]["key_count"], json!(1));
+        assert_eq!(v["query_results"][0]["raw_query_included"], json!(false));
+        assert_eq!(v["query_results"][0]["raw_keys_included"], json!(false));
+        assert_eq!(v["query_results"][0]["content_included"], json!(false));
+
+        let _ = tokio::fs::remove_dir_all(temp_dir).await;
+    }
+
+    fn biocortex_runtime_readiness_decision_fixture() -> Value {
+        json!({
+            "schema": "agent_bridge.biocortex_retrieval.opt_in_runtime_influence_decision_packet.v0",
+            "read_only": true,
+            "runtime_influence_decision_consumer": true,
+            "authorization_scope": "explicit_opt_in_fts_runtime_influence",
+            "request_summary": {
+                "aggregate_backed_review_request": true,
+                "redacted_evidence_aggregate_ready": true,
+                "aggregate_review_evidence_state": "redacted_aggregate_ready",
+                "aggregate_default_influence_ready": false,
+                "default_influence_ready": false,
+                "aggregate_human_review_required": true
+            },
+            "input_contract": {
+                "runtime_influence_decision_included": false,
+                "runtime_influence_review_request_included": false,
+                "redacted_evidence_aggregate_included": false,
+                "raw_query_included": false,
+                "raw_keys_included": false,
+                "content_included": false,
+                "human_decision_text_included": false
+            },
+            "boundary_check": {
+                "runtime_influence_authorized": true,
+                "aggregate_backed_review_request": true,
+                "aggregate_review_evidence_ready": true,
+                "aggregate_safe_for_decision": true,
+                "blockers": []
+            },
+            "approval_state": "runtime_influence_review_authorized",
+            "authorization_state": "authorized_for_explicit_opt_in_fts_runtime_influence",
+            "runtime_adapter_approved": true,
+            "ordering_behavior_connection_authorized": true,
+            "default_search_order_change_allowed": false,
+            "default_calls_unchanged": true,
+            "calls_memory_search": false,
+            "runs_biocortex": false,
+            "changes_memory_search_order": false,
+            "ordering_behavior_connected": false,
+            "raw_query": "secret readiness decision query",
+            "raw_key": "secret_readiness_decision_key",
+            "content": "secret readiness decision content",
+            "human_decision_text": "secret readiness human decision"
+        })
+    }
+
+    fn biocortex_runtime_readiness_store_trial_fixture() -> Value {
+        json!({
+            "schema": "agent_bridge.biocortex_retrieval.opt_in_store_trial.v0",
+            "read_only": true,
+            "store_trial": true,
+            "status": "completed",
+            "input_contract": {
+                "accepts_aggregate_backed_decision_packet": true,
+                "requires_aggregate_ready_when_provided": true,
+                "redacted_evidence_aggregate_included": false,
+                "aggregate_evidence_summary_included": false,
+                "raw_query_included": false,
+                "raw_keys_included": false,
+                "content_included": false,
+                "side_signal_raw_included": false
+            },
+            "runtime_preflight": {
+                "decision_packet_authorized": true,
+                "decision_packet_aggregate_backed": true,
+                "decision_packet_aggregate_review_evidence_ready": true,
+                "legacy_decision_packet_without_aggregate_allowed": false,
+                "decision_packet_aggregate_safe_for_trial": true,
+                "adapter_allowed": false,
+                "blockers": ["baseline_empty"]
+            },
+            "baseline_order": {
+                "completed": true,
+                "key_count": 0
+            },
+            "side_signal": {
+                "attempted": false,
+                "status": "not_attempted"
+            },
+            "returned_order": {
+                "source": "baseline",
+                "actual_return_order_changed": false
+            },
+            "default_search_order_change_allowed": false,
+            "default_calls_unchanged": true,
+            "changes_memory_search_order": false,
+            "raw_query_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "side_signal_raw_included": false,
+            "raw_query": "secret readiness store query",
+            "raw_key": "secret_readiness_store_key",
+            "content": "secret readiness store content"
+        })
+    }
+
+    fn biocortex_runtime_readiness_batch_fixture() -> Value {
+        json!({
+            "schema": "agent_bridge.biocortex_retrieval.opt_in_batch_diagnostics.v0",
+            "read_only": true,
+            "batch_diagnostics": true,
+            "input_contract": {
+                "accepts_aggregate_backed_decision_packet": true,
+                "requires_aggregate_ready_when_provided": true,
+                "redacted_evidence_aggregate_included": false,
+                "aggregate_evidence_summary_included": false,
+                "raw_queries_included": false,
+                "raw_keys_included": false,
+                "content_included": false,
+                "side_signal_raw_included": false
+            },
+            "summary": {
+                "query_count": 1,
+                "baseline_completed_count": 1,
+                "baseline_empty_count": 1,
+                "adapter_allowed_count": 0,
+                "side_signal_ok_count": 0,
+                "experimental_source_count": 0,
+                "actual_order_changed_count": 0
+            },
+            "query_results": [
+                {
+                    "preflight": {
+                        "decision_packet_authorized": true,
+                        "decision_packet_aggregate_backed": true,
+                        "decision_packet_aggregate_review_evidence_ready": true,
+                        "legacy_decision_packet_without_aggregate_allowed": false,
+                        "decision_packet_aggregate_safe_for_trial": true,
+                        "adapter_allowed": false,
+                        "blocker_count": 1
+                    },
+                    "baseline": {
+                        "key_count": 0
+                    },
+                    "raw_query": "secret readiness batch query",
+                    "raw_key": "secret_readiness_batch_key",
+                    "content": "secret readiness batch content"
+                }
+            ],
+            "safety": {
+                "raw_flags_all_false": true,
+                "default_calls_unchanged_all": true
+            },
+            "default_search_order_change_allowed": false,
+            "default_calls_unchanged": true,
+            "raw_queries_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "side_signal_raw_included": false
+        })
+    }
+
+    #[test]
+    fn biocortex_retrieval_opt_in_runtime_readiness_packet_schema_is_readonly() {
+        let tool = BioCortexRetrievalOptInRuntimeReadinessPacketTool::new();
+        let schema = tool.schema();
+        assert_eq!(
+            schema.name,
+            "biocortex_retrieval_opt_in_runtime_readiness_packet"
+        );
+        assert!(schema.description.contains("Read-only"));
+        assert!(schema.description.contains("runtime-readiness"));
+        assert!(schema.description.contains("Does not call memory_search"));
+        assert!(schema.description.contains("run BioCortex"));
+        assert!(schema.description.contains("human decision text"));
+        assert!(schema.description.contains("alter retrieval order"));
+
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required");
+        assert!(required.contains(&json!("runtime_influence_decision_packet")));
+        assert!(required.contains(&json!("store_trial")));
+        assert!(required.contains(&json!("batch_diagnostics")));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("runtime_influence_decision_packet").is_some());
+        assert!(props.get("store_trial").is_some());
+        assert!(props.get("batch_diagnostics").is_some());
+        assert!(props.get("reviewer").is_some());
+        assert!(props.get("commit").is_some());
+        assert!(props.get("forum_post_id").is_some());
+        assert!(props.get("memory_key").is_some());
+        assert!(props.get("include_raw").is_none());
+        assert!(props.get("mutate").is_none());
+        assert!(props.get("memory_search").is_none());
+        assert!(props.get("raw_content").is_none());
+
+        let names: Vec<String> = build_registry_with_policy(
+            Hub::builder().build(),
+            ToolPolicy {
+                set: ToolSet::Profile,
+                profile: ToolProfile::Standard,
+            },
+        )
+        .list()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
+        assert!(names.contains(&schema.name));
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_runtime_readiness_packet_sanitizes_inputs() {
+        let tool = BioCortexRetrievalOptInRuntimeReadinessPacketTool::new();
+        let out = tool
+            .execute(
+                json!({
+                    "runtime_influence_decision_packet": biocortex_runtime_readiness_decision_fixture(),
+                    "store_trial": biocortex_runtime_readiness_store_trial_fixture(),
+                    "batch_diagnostics": biocortex_runtime_readiness_batch_fixture(),
+                    "reviewer": "codex",
+                    "commit": "runtime-readiness-commit",
+                    "forum_post_id": "104",
+                    "memory_key": "runtime-readiness-memory"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let text = match out.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains("secret readiness decision query"));
+        assert!(!text.contains("secret_readiness_decision_key"));
+        assert!(!text.contains("secret readiness decision content"));
+        assert!(!text.contains("secret readiness human decision"));
+        assert!(!text.contains("secret readiness store query"));
+        assert!(!text.contains("secret_readiness_store_key"));
+        assert!(!text.contains("secret readiness store content"));
+        assert!(!text.contains("secret readiness batch query"));
+        assert!(!text.contains("secret_readiness_batch_key"));
+        assert!(!text.contains("secret readiness batch content"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_runtime_readiness_packet.v0")
+        );
+        assert_eq!(v["read_only"], json!(true));
+        assert_eq!(v["runtime_readiness_packet"], json!(true));
+        assert_eq!(
+            v["implementation_stage"],
+            json!("controlled_opt_in_runtime_readiness_packet")
+        );
+        assert_eq!(
+            v["input_contract"]["runtime_influence_decision_packet_included"],
+            json!(false)
+        );
+        assert_eq!(v["input_contract"]["store_trial_included"], json!(false));
+        assert_eq!(
+            v["input_contract"]["batch_diagnostics_included"],
+            json!(false)
+        );
+        assert_eq!(v["input_contract"]["raw_queries_included"], json!(false));
+        assert_eq!(v["input_contract"]["raw_keys_included"], json!(false));
+        assert_eq!(v["input_contract"]["content_included"], json!(false));
+        assert_eq!(
+            v["input_contract"]["human_decision_text_included"],
+            json!(false)
+        );
+        assert_eq!(
+            v["decision_summary"]["runtime_influence_authorized"],
+            json!(true)
+        );
+        assert_eq!(v["store_trial_summary"]["baseline_key_count"], json!(0));
+        assert_eq!(v["batch_summary"]["query_count"], json!(1));
+        assert_eq!(v["readiness"]["control_plane_ready"], json!(true));
+        assert_eq!(
+            v["readiness"]["live_probe_state"],
+            json!("control_plane_ready_no_live_candidates")
+        );
+        assert_eq!(v["readiness"]["live_order_influence_ready"], json!(false));
+        assert_eq!(
+            v["readiness"]["may_accept_controlled_explicit_opt_in_fts_calls"],
+            json!(true)
+        );
+        assert_eq!(v["boundary_check"]["runtime_readiness_ready"], json!(true));
+        assert_eq!(v["boundary_check"]["blockers"], json!([]));
+        assert_eq!(v["approval_state"], json!("runtime_readiness_only"));
+        assert_eq!(v["writes_approval"], json!(false));
+        assert_eq!(v["calls_memory_search"], json!(false));
+        assert_eq!(v["runs_biocortex"], json!(false));
+        assert_eq!(v["registers_embedding_backend"], json!(false));
+        assert_eq!(v["changes_memory_search_order"], json!(false));
+        assert_eq!(v["default_search_order_change_allowed"], json!(false));
+    }
+
+    fn biocortex_runtime_transition_readiness_fixture() -> Value {
+        biocortex_retrieval_opt_in_runtime_readiness_packet(
+            BioCortexRetrievalOptInRuntimeReadinessPacketOptions {
+                runtime_influence_decision_packet: biocortex_runtime_readiness_decision_fixture(),
+                store_trial: biocortex_runtime_readiness_store_trial_fixture(),
+                batch_diagnostics: biocortex_runtime_readiness_batch_fixture(),
+                reviewer: Some("codex".to_string()),
+                commit: Some("runtime-readiness-commit".to_string()),
+                forum_post_id: Some("104".to_string()),
+                memory_key: Some("runtime-readiness-memory".to_string()),
+            },
+        )
+    }
+
+    fn biocortex_runtime_transition_gate_fixture() -> Value {
+        biocortex_retrieval_opt_in_runtime_transition_gate(
+            BioCortexRetrievalOptInRuntimeTransitionGateOptions {
+                runtime_readiness_packet: biocortex_runtime_transition_readiness_fixture(),
+                mode: "fts".to_string(),
+                per_call_opt_in: true,
+                operator_disabled: false,
+                reviewer: Some("codex".to_string()),
+                commit: Some("runtime-transition-commit".to_string()),
+                forum_post_id: Some("104".to_string()),
+                memory_key: Some("runtime-transition-memory".to_string()),
+            },
+        )
+    }
+
+    #[test]
+    fn biocortex_retrieval_opt_in_runtime_transition_gate_schema_is_readonly() {
+        let tool = BioCortexRetrievalOptInRuntimeTransitionGateTool::new();
+        let schema = tool.schema();
+        assert_eq!(
+            schema.name,
+            "biocortex_retrieval_opt_in_runtime_transition_gate"
+        );
+        assert!(schema.description.contains("Read-only"));
+        assert!(schema.description.contains("runtime-transition"));
+        assert!(schema.description.contains("Does not call memory_search"));
+        assert!(schema.description.contains("run BioCortex"));
+        assert!(schema.description.contains("human decision text"));
+        assert!(schema.description.contains("alter retrieval order"));
+
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required");
+        assert!(required.contains(&json!("runtime_readiness_packet")));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("runtime_readiness_packet").is_some());
+        assert!(props.get("mode").is_some());
+        assert!(props.get("per_call_opt_in").is_some());
+        assert!(props.get("operator_disabled").is_some());
+        assert!(props.get("reviewer").is_some());
+        assert!(props.get("commit").is_some());
+        assert!(props.get("forum_post_id").is_some());
+        assert!(props.get("memory_key").is_some());
+        assert!(props.get("include_raw").is_none());
+        assert!(props.get("mutate").is_none());
+        assert!(props.get("memory_search").is_none());
+        assert!(props.get("raw_content").is_none());
+
+        let names: Vec<String> = build_registry_with_policy(
+            Hub::builder().build(),
+            ToolPolicy {
+                set: ToolSet::Profile,
+                profile: ToolProfile::Standard,
+            },
+        )
+        .list()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
+        assert!(names.contains(&schema.name));
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_runtime_transition_gate_sanitizes_inputs() {
+        let tool = BioCortexRetrievalOptInRuntimeTransitionGateTool::new();
+        let mut readiness = biocortex_runtime_transition_readiness_fixture();
+        readiness["raw_query"] = json!("secret transition mcp readiness query");
+        readiness["raw_key"] = json!("secret_transition_mcp_readiness_key");
+        readiness["content"] = json!("secret transition mcp readiness content");
+        readiness["human_decision_text"] = json!("secret transition mcp human decision");
+
+        let out = tool
+            .execute(
+                json!({
+                    "runtime_readiness_packet": readiness,
+                    "mode": "fts",
+                    "per_call_opt_in": true,
+                    "reviewer": "codex",
+                    "commit": "runtime-transition-commit",
+                    "forum_post_id": "104",
+                    "memory_key": "runtime-transition-memory"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let text = match out.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains("secret transition mcp readiness query"));
+        assert!(!text.contains("secret_transition_mcp_readiness_key"));
+        assert!(!text.contains("secret transition mcp readiness content"));
+        assert!(!text.contains("secret transition mcp human decision"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_runtime_transition_gate.v0")
+        );
+        assert_eq!(v["read_only"], json!(true));
+        assert_eq!(v["runtime_transition_gate"], json!(true));
+        assert_eq!(
+            v["implementation_stage"],
+            json!("readiness_gated_runtime_transition_gate")
+        );
+        assert_eq!(v["status"], json!("transition_allowed"));
+        assert_eq!(
+            v["input_contract"]["runtime_readiness_packet_included"],
+            json!(false)
+        );
+        assert_eq!(v["requested_transition"]["mode"], json!("fts"));
+        assert_eq!(v["requested_transition"]["mode_authorized"], json!(true));
+        assert_eq!(v["requested_transition"]["per_call_opt_in"], json!(true));
+        assert_eq!(v["requested_transition"]["operator_disabled"], json!(false));
+        assert_eq!(v["transition"]["transition_allowed"], json!(true));
+        assert_eq!(
+            v["transition"]["may_run_runtime_adapter_for_explicit_opt_in_fts"],
+            json!(true)
+        );
+        assert_eq!(
+            v["boundary_check"]["runtime_transition_allowed"],
+            json!(true)
+        );
+        assert_eq!(v["boundary_check"]["blockers"], json!([]));
+        assert_eq!(v["approval_writes_allowed"], json!(false));
+        assert_eq!(v["writes_approval"], json!(false));
+        assert_eq!(v["calls_memory_search"], json!(false));
+        assert_eq!(v["runs_biocortex"], json!(false));
+        assert_eq!(v["registers_embedding_backend"], json!(false));
+        assert_eq!(v["changes_memory_search_order"], json!(false));
+        assert_eq!(v["default_search_order_change_allowed"], json!(false));
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_runtime_transition_gate_blocks_non_fts() {
+        let tool = BioCortexRetrievalOptInRuntimeTransitionGateTool::new();
+        let out = tool
+            .execute(
+                json!({
+                    "runtime_readiness_packet": biocortex_runtime_transition_readiness_fixture(),
+                    "mode": "hybrid",
+                    "operator_disabled": true
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let text = match out.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(v["status"], json!("blocked"));
+        assert_eq!(v["requested_transition"]["mode"], json!("hybrid"));
+        assert_eq!(v["requested_transition"]["mode_authorized"], json!(false));
+        assert_eq!(v["requested_transition"]["per_call_opt_in"], json!(false));
+        assert_eq!(v["requested_transition"]["operator_disabled"], json!(true));
+        assert_eq!(
+            v["requested_transition"]["hybrid_retrieval_influence_requested"],
+            json!(true)
+        );
+        assert_eq!(v["transition"]["transition_allowed"], json!(false));
+        assert_eq!(
+            v["boundary_check"]["runtime_transition_allowed"],
+            json!(false)
+        );
+        let blockers = v["boundary_check"]["blockers"]
+            .as_array()
+            .expect("blockers");
+        assert!(blockers.contains(&json!("requested_mode_not_authorized")));
+        assert!(blockers.contains(&json!("per_call_opt_in_missing")));
+        assert!(blockers.contains(&json!("operator_disabled")));
+        assert_eq!(v["calls_memory_search"], json!(false));
+        assert_eq!(v["runs_biocortex"], json!(false));
+        assert_eq!(v["changes_memory_search_order"], json!(false));
+        assert_eq!(v["default_search_order_change_allowed"], json!(false));
+    }
+
+    #[test]
+    fn biocortex_retrieval_opt_in_gated_store_trial_schema_requires_transition_gate() {
+        let tool = BioCortexRetrievalOptInGatedStoreTrialTool::new(Hub::builder().build());
+        let schema = tool.schema();
+        assert_eq!(schema.name, "biocortex_retrieval_opt_in_gated_store_trial");
+        assert!(schema.description.contains("Transition-gated"));
+        assert!(schema.description.contains("refuses to call"));
+        assert!(schema.description.contains("runtime-transition gate"));
+        assert!(schema.description.contains("default memory_search"));
+
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required");
+        assert!(required.contains(&json!("runtime_transition_gate")));
+        assert!(required.contains(&json!("runtime_influence_decision_packet")));
+        assert!(required.contains(&json!("query")));
+        assert!(required.contains(&json!("per_call_opt_in")));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("runtime_transition_gate").is_some());
+        assert!(props.get("runtime_influence_decision_packet").is_some());
+        assert!(props.get("query").is_some());
+        assert!(props.get("tags_any").is_some());
+        assert!(props.get("limit").is_some());
+        assert!(props.get("checkout_path").is_some());
+        assert!(props.get("mutate").is_none());
+        assert!(props.get("raw_content").is_none());
+
+        let names: Vec<String> = build_registry_with_policy(
+            Hub::builder().build(),
+            ToolPolicy {
+                set: ToolSet::Profile,
+                profile: ToolProfile::Standard,
+            },
+        )
+        .list()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
+        assert!(names.contains(&schema.name));
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_gated_store_trial_blocks_before_memory_search() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let secret_query = "secret gated mcp blocked query";
+        let secret_key = "secret_gated_mcp_blocked_key";
+        let secret_content = "secret gated mcp blocked content should not leak";
+        save_store_trial_memory(&hub, secret_key, 0.9, secret_content).await;
+
+        let mut gate = biocortex_runtime_transition_gate_fixture();
+        gate["status"] = json!("blocked");
+        gate["transition"]["transition_allowed"] = json!(false);
+        gate["transition"]["may_call_controlled_store_trial"] = json!(false);
+        gate["boundary_check"]["runtime_transition_allowed"] = json!(false);
+        gate["boundary_check"]["blockers"] = json!(["forced_transition_block"]);
+
+        let tool = BioCortexRetrievalOptInGatedStoreTrialTool::new(hub);
+        let out = tool
+            .execute(
+                json!({
+                    "runtime_transition_gate": gate,
+                    "runtime_influence_decision_packet": biocortex_store_trial_authorized_decision_packet_fixture(),
+                    "query": secret_query,
+                    "per_call_opt_in": true,
+                    "limit": 5,
+                    "attempt_id": "blocked-gated-store-trial"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let text = match out.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains(secret_query));
+        assert!(!text.contains(secret_key));
+        assert!(!text.contains(secret_content));
+        assert!(!text.contains("secret store trial packet query"));
+        assert!(!text.contains("secret_store_trial_packet_key"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_gated_store_trial.v0")
+        );
+        assert_eq!(v["status"], json!("transition_gate_blocked"));
+        assert_eq!(
+            v["runtime_transition_preflight"]["transition_gate_allowed"],
+            json!(false)
+        );
+        let blockers = v["runtime_transition_preflight"]["blockers"]
+            .as_array()
+            .expect("blockers");
+        assert!(blockers.contains(&json!("transition_gate_status_not_allowed")));
+        assert!(blockers.contains(&json!("transition_gate_boundary_not_allowed")));
+        assert!(blockers.contains(&json!("transition_gate_boundary_has_blockers")));
+        assert!(blockers.contains(&json!("transition_gate_transition_not_allowed")));
+        assert!(blockers.contains(&json!("transition_gate_may_not_call_store_trial")));
+        assert_eq!(v["store_trial_called"], json!(false));
+        assert_eq!(v["calls_memory_search"], json!(false));
+        assert_eq!(v["runs_biocortex"], json!(false));
+        assert_eq!(v["changes_memory_search_order"], json!(false));
+        assert_eq!(v["raw_query_included"], json!(false));
+        assert_eq!(v["raw_keys_included"], json!(false));
+        assert_eq!(v["content_included"], json!(false));
+
+        let _ = tokio::fs::remove_dir_all(temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_gated_store_trial_consumes_gate_then_store_trial() {
+        let prior_enable = std::env::var("AB_BIOCORTEX_RETRIEVAL_OPT_IN").ok();
+        let prior_disable = std::env::var("AB_BIOCORTEX_RETRIEVAL_DISABLE").ok();
+        std::env::remove_var("AB_BIOCORTEX_RETRIEVAL_OPT_IN");
+        std::env::remove_var("AB_BIOCORTEX_RETRIEVAL_DISABLE");
+
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let secret_query = "secret gated mcp allowed query";
+        let secret_key = "secret_gated_mcp_allowed_key";
+        let secret_content = "secret gated mcp allowed query content should not leak";
+        save_store_trial_memory(&hub, secret_key, 0.9, secret_content).await;
+
+        let tool = BioCortexRetrievalOptInGatedStoreTrialTool::new(hub);
+        let out = tool
+            .execute(
+                json!({
+                    "runtime_transition_gate": biocortex_runtime_transition_gate_fixture(),
+                    "runtime_influence_decision_packet": biocortex_store_trial_authorized_decision_packet_fixture(),
+                    "query": secret_query,
+                    "per_call_opt_in": true,
+                    "limit": 5,
+                    "attempt_id": "allowed-gated-store-trial"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        restore_env_var("AB_BIOCORTEX_RETRIEVAL_OPT_IN", prior_enable);
+        restore_env_var("AB_BIOCORTEX_RETRIEVAL_DISABLE", prior_disable);
+
+        let text = match out.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains(secret_query));
+        assert!(!text.contains(secret_key));
+        assert!(!text.contains(secret_content));
+        assert!(!text.contains("secret store trial packet query"));
+        assert!(!text.contains("secret_store_trial_packet_key"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(v["status"], json!("transition_gate_consumed"));
+        assert_eq!(
+            v["runtime_transition_preflight"]["transition_gate_allowed"],
+            json!(true)
+        );
+        assert_eq!(v["runtime_transition_preflight"]["blockers"], json!([]));
+        assert_eq!(v["store_trial_called"], json!(true));
+        assert_eq!(v["calls_memory_search"], json!(true));
+        assert_eq!(v["runs_biocortex"], json!(false));
+        assert_eq!(v["changes_memory_search_order"], json!(false));
+        assert_eq!(v["store_trial_summary"]["baseline_key_count"], json!(1));
+        assert_eq!(
+            v["store_trial_summary"]["side_signal_attempted"],
+            json!(false)
+        );
+        assert_eq!(
+            v["store_trial_summary"]["store_wrapper_called"],
+            json!(true)
+        );
+        assert_eq!(
+            v["store_trial_summary"]["store_trial_included"],
+            json!(false)
+        );
+        assert_eq!(v["raw_query_included"], json!(false));
+        assert_eq!(v["raw_keys_included"], json!(false));
+        assert_eq!(v["content_included"], json!(false));
+
+        let _ = tokio::fs::remove_dir_all(temp_dir).await;
+    }
+
+    #[test]
+    fn biocortex_retrieval_opt_in_gated_batch_diagnostics_schema_is_registered() {
+        let tool = BioCortexRetrievalOptInGatedBatchDiagnosticsTool::new(Hub::builder().build());
+        let schema = tool.schema();
+        assert_eq!(
+            schema.name,
+            "biocortex_retrieval_opt_in_gated_batch_diagnostics"
+        );
+        assert!(schema.description.contains("Transition-gated"));
+        assert!(schema.description.contains("Blocked gates"));
+        assert!(schema.description.contains("default memory_search"));
+
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required");
+        assert!(required.contains(&json!("runtime_transition_gate")));
+        assert!(required.contains(&json!("runtime_influence_decision_packet")));
+        assert!(required.contains(&json!("per_call_opt_in")));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("runtime_transition_gate").is_some());
+        assert!(props.get("runtime_influence_decision_packet").is_some());
+        assert!(props.get("queries").is_some());
+        assert!(props.get("query_cases").is_some());
+        assert!(props.get("tags_any").is_some());
+        assert!(props.get("limit").is_some());
+        assert!(props.get("checkout_path").is_some());
+        assert!(props.get("mutate").is_none());
+        assert!(props.get("raw_content").is_none());
+
+        let names: Vec<String> = build_registry_with_policy(
+            Hub::builder().build(),
+            ToolPolicy {
+                set: ToolSet::Profile,
+                profile: ToolProfile::Standard,
+            },
+        )
+        .list()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
+        assert!(names.contains(&schema.name));
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_gated_batch_diagnostics_blocks_before_memory_search() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let secret_query = "secret gated batch mcp blocked query";
+        let secret_key = "secret_gated_batch_mcp_blocked_key";
+        let secret_content = "secret gated batch mcp blocked content should not leak";
+        save_store_trial_memory(&hub, secret_key, 0.9, secret_content).await;
+
+        let mut gate = biocortex_runtime_transition_gate_fixture();
+        gate["status"] = json!("blocked");
+        gate["transition"]["transition_allowed"] = json!(false);
+        gate["transition"]["may_call_controlled_store_trial"] = json!(false);
+        gate["boundary_check"]["runtime_transition_allowed"] = json!(false);
+        gate["boundary_check"]["blockers"] = json!(["forced_transition_block"]);
+
+        let tool = BioCortexRetrievalOptInGatedBatchDiagnosticsTool::new(hub);
+        let out = tool
+            .execute(
+                json!({
+                    "runtime_transition_gate": gate,
+                    "runtime_influence_decision_packet": biocortex_store_trial_authorized_decision_packet_fixture(),
+                    "queries": [secret_query],
+                    "per_call_opt_in": true,
+                    "limit": 5,
+                    "attempt_id": "blocked-gated-batch-diagnostics"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let text = match out.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains(secret_query));
+        assert!(!text.contains(secret_key));
+        assert!(!text.contains(secret_content));
+        assert!(!text.contains("secret store trial packet query"));
+        assert!(!text.contains("secret_store_trial_packet_key"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_gated_batch_diagnostics.v0")
+        );
+        assert_eq!(v["status"], json!("transition_gate_blocked"));
+        assert_eq!(v["summary"]["transition_gate_blocked_count"], json!(1));
+        assert_eq!(v["summary"]["store_trial_called_count"], json!(0));
+        assert_eq!(v["summary"]["calls_memory_search_count"], json!(0));
+        assert_eq!(v["safety"]["transition_gate_blocked_all"], json!(true));
+        assert_eq!(v["safety"]["store_trial_called_any"], json!(false));
+        assert_eq!(v["calls_memory_search"], json!(false));
+        assert_eq!(v["runs_biocortex"], json!(false));
+        assert_eq!(v["changes_memory_search_order"], json!(false));
+        assert_eq!(v["raw_queries_included"], json!(false));
+        assert_eq!(v["raw_keys_included"], json!(false));
+        assert_eq!(v["content_included"], json!(false));
+
+        let _ = tokio::fs::remove_dir_all(temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn biocortex_retrieval_opt_in_gated_batch_diagnostics_consumes_gate() {
+        let prior_enable = std::env::var("AB_BIOCORTEX_RETRIEVAL_OPT_IN").ok();
+        let prior_disable = std::env::var("AB_BIOCORTEX_RETRIEVAL_DISABLE").ok();
+        std::env::remove_var("AB_BIOCORTEX_RETRIEVAL_OPT_IN");
+        std::env::remove_var("AB_BIOCORTEX_RETRIEVAL_DISABLE");
+
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let secret_query = "secret gated batch mcp allowed query";
+        let secret_key = "secret_gated_batch_mcp_allowed_key";
+        let secret_content = "secret gated batch mcp allowed content should not leak";
+        save_store_trial_memory(&hub, secret_key, 0.9, secret_content).await;
+
+        let tool = BioCortexRetrievalOptInGatedBatchDiagnosticsTool::new(hub);
+        let out = tool
+            .execute(
+                json!({
+                    "runtime_transition_gate": biocortex_runtime_transition_gate_fixture(),
+                    "runtime_influence_decision_packet": biocortex_store_trial_authorized_decision_packet_fixture(),
+                    "queries": [secret_query],
+                    "per_call_opt_in": true,
+                    "limit": 5,
+                    "attempt_id": "allowed-gated-batch-diagnostics"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        restore_env_var("AB_BIOCORTEX_RETRIEVAL_OPT_IN", prior_enable);
+        restore_env_var("AB_BIOCORTEX_RETRIEVAL_DISABLE", prior_disable);
+
+        let text = match out.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains(secret_query));
+        assert!(!text.contains(secret_key));
+        assert!(!text.contains(secret_content));
+        assert!(!text.contains("secret store trial packet query"));
+        assert!(!text.contains("secret_store_trial_packet_key"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(v["status"], json!("completed"));
+        assert_eq!(v["summary"]["transition_gate_allowed_count"], json!(1));
+        assert_eq!(v["summary"]["store_trial_called_count"], json!(1));
+        assert_eq!(v["summary"]["calls_memory_search_count"], json!(1));
+        assert_eq!(v["summary"]["baseline_completed_count"], json!(1));
+        assert_eq!(v["safety"]["transition_gate_allowed_all"], json!(true));
+        assert_eq!(v["safety"]["store_trial_called_all"], json!(true));
+        assert_eq!(v["safety"]["calls_memory_search_all"], json!(true));
+        assert_eq!(v["calls_memory_search"], json!(true));
+        assert_eq!(v["runs_biocortex"], json!(false));
+        assert_eq!(v["changes_memory_search_order"], json!(false));
+        assert!(v["query_results"][0]["store_trial"]["baseline_key_count"].is_number());
+        assert_eq!(v["raw_queries_included"], json!(false));
+        assert_eq!(v["raw_keys_included"], json!(false));
+        assert_eq!(v["content_included"], json!(false));
+
+        let _ = tokio::fs::remove_dir_all(temp_dir).await;
+    }
+
+    #[cfg(feature = "biocortex-retrieval-shadow")]
+    #[test]
+    fn biocortex_retrieval_shadow_schema_is_explicit_and_readonly() {
+        let tool = BioCortexRetrievalShadowTool::new();
+        let schema = tool.schema();
+        assert_eq!(schema.name, "biocortex_retrieval_shadow");
+        assert!(schema.description.contains("Review-only"));
+        assert!(schema
+            .description
+            .contains("runtime_adapter_approved=false"));
+        assert!(schema.description.contains("Does not call memory_search"));
+
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required fields");
+        let required = required
+            .iter()
+            .filter_map(Value::as_str)
+            .collect::<Vec<_>>();
+        assert!(required.contains(&"query"));
+        assert!(required.contains(&"candidates"));
+
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("query").is_some());
+        assert!(props.get("candidates").is_some());
+        assert!(props.get("expected_key").is_some());
+        assert!(props.get("checkout_path").is_some());
+        assert!(props.get("timeout_ms").is_some());
+        assert!(props.get("include_raw").is_some());
+        assert!(props.get("mutate").is_none());
+        assert!(props.get("memory_search").is_none());
+        assert!(props.get("fixture_path").is_none());
     }
 
     // ── C3 S6 — verify_forum_post_write ───────────────────────────────────

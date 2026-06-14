@@ -174,11 +174,9 @@ fn semantic_bus_fixtures_follow_minimum_contract() {
             assert_eq!(str_field(affordance, "object_id"), object_id);
             assert!(!str_field(affordance, "action_type").is_empty());
             assert!(affordance.get("args_schema").is_some_and(Value::is_object));
-            assert!(
-                affordance
-                    .get("requires_gate")
-                    .is_some_and(Value::is_boolean)
-            );
+            assert!(affordance
+                .get("requires_gate")
+                .is_some_and(Value::is_boolean));
         }
 
         let events = array_field(&fixture, "events");
@@ -202,11 +200,9 @@ fn semantic_bus_fixtures_follow_minimum_contract() {
         assert!(!str_field(verification, "method").is_empty());
         assert!(verification.get("evidence").is_some_and(Value::is_object));
         assert!(!str_field(verification, "recover").is_empty());
-        assert!(
-            verification
-                .get("raw_available")
-                .is_some_and(Value::is_boolean)
-        );
+        assert!(verification
+            .get("raw_available")
+            .is_some_and(Value::is_boolean));
         if verdict == "verified" {
             assert!(
                 verification
@@ -232,11 +228,9 @@ fn semantic_bus_fixtures_follow_minimum_contract() {
                 "{name} presentation links unknown event {event_id}"
             );
         }
-        assert!(
-            presentation
-                .get("machine_payload")
-                .is_some_and(Value::is_object)
-        );
+        assert!(presentation
+            .get("machine_payload")
+            .is_some_and(Value::is_object));
         assert!(presentation.get("ingestion").is_some_and(Value::is_object));
     }
 

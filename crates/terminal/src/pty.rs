@@ -39,8 +39,8 @@ use tokio::sync::broadcast;
 
 use crate::{
     osc::{FeedItem, PromptMarker},
-    OscEvent, OscParser, Pane, SpawnOptions, SplitDir, TermEvent, TerminalBackend,
-    TerminalBlock, TerminalCapabilities,
+    OscEvent, OscParser, Pane, SpawnOptions, SplitDir, TermEvent, TerminalBackend, TerminalBlock,
+    TerminalCapabilities,
 };
 
 /// Default rows/cols for spawned PTYs. Matches what most modern terminals
@@ -336,7 +336,9 @@ impl PtyBackend {
         // so the parser only needs to cover the visible screen. Fewer
         // rows allocated = less memory per pane.
         let parser = Arc::new(Mutex::new(vt100::Parser::new(
-            DEFAULT_ROWS, DEFAULT_COLS, 0,
+            DEFAULT_ROWS,
+            DEFAULT_COLS,
+            0,
         )));
         let tracker = Arc::new(Mutex::new(BlockTracker::new(DEFAULT_BLOCK_CAP)));
         let handle = Arc::new(PtyHandle {
@@ -447,7 +449,13 @@ impl TerminalBackend for PtyBackend {
         // current working directory. Keeps "first call returns something"
         // consistent with how WezTermBackend behaves when there's a window
         // open.
-        if self.inner.panes.read().expect("panes lock poisoned").is_empty() {
+        if self
+            .inner
+            .panes
+            .read()
+            .expect("panes lock poisoned")
+            .is_empty()
+        {
             let cwd = std::env::current_dir()
                 .ok()
                 .map(|p| p.display().to_string());
@@ -706,7 +714,11 @@ fn reader_loop(
                 for item in osc.feed_segments(chunk) {
                     match item {
                         FeedItem::Event(OscEvent::Notify(NotifyEvent {
-                            title, body, severity, source, ..
+                            title,
+                            body,
+                            severity,
+                            source,
+                            ..
                         })) => {
                             let labelled = match source {
                                 NotifySource::Mcp | NotifySource::Manual => body,
@@ -856,8 +868,8 @@ mod tests {
             // tokio::block_in_place would be ideal, but we're already in
             // a multi-threaded runtime; this synchronous read is fine
             // because read_output's blocking work is tiny.
-            let lines = futures::executor::block_on(backend.read_output(&pane, 20))
-                .unwrap_or_default();
+            let lines =
+                futures::executor::block_on(backend.read_output(&pane, 20)).unwrap_or_default();
             lines.iter().any(|l| l.contains("hello-pty"))
         })
         .await;
@@ -882,8 +894,8 @@ mod tests {
             .await
             .expect("send_keys");
         let ok = wait_for(3000, 50, || {
-            let lines = futures::executor::block_on(backend.read_output(&pane, 20))
-                .unwrap_or_default();
+            let lines =
+                futures::executor::block_on(backend.read_output(&pane, 20)).unwrap_or_default();
             // Must contain the final token AND must not contain the
             // earlier ones as standalone lines.
             let has_done = lines.iter().any(|l| l.contains("BAR_DONE"));
@@ -1034,8 +1046,8 @@ mod tests {
             .await
             .expect("send_keys");
         let ok = wait_for(2000, 50, || {
-            let lines = futures::executor::block_on(backend.read_output(&new_id, 20))
-                .unwrap_or_default();
+            let lines =
+                futures::executor::block_on(backend.read_output(&new_id, 20)).unwrap_or_default();
             lines.iter().any(|l| l.contains("MARKER_FROM_OPTIONS"))
         })
         .await;

@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::os::unix::fs::MetadataExt;
 
 use anyhow::Result;
-use serde_json::json;
+use serde_json::{json, Value};
 
 use ab_bridge::instinct;
 use ab_bridge::mcp_tools::exposed_tool_count_for;
@@ -708,6 +708,339 @@ fn check_mcp_tool_surface() -> Check {
     )
 }
 
+fn system_control_bin_path(dir: &Path) -> PathBuf {
+    std::env::var_os("AB_SYSTEM_CONTROL_BIN")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| dir.join("ab-system-control"))
+}
+
+fn system_control_audit_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("AB_SYSTEM_CONTROL_AUDIT_DIR") {
+        return PathBuf::from(dir);
+    }
+    if Path::new("/Data").is_dir() {
+        return PathBuf::from("/Data/agent-bridge/system-control");
+    }
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/".into());
+    PathBuf::from(home).join(".local/share/agent-bridge/system-control")
+}
+
+#[cfg(unix)]
+fn mode_octal(path: &Path) -> Option<u32> {
+    std::fs::metadata(path).ok().map(|m| m.mode() & 0o777)
+}
+
+#[cfg(not(unix))]
+fn mode_octal(_path: &Path) -> Option<u32> {
+    None
+}
+
+#[cfg(unix)]
+fn is_executable(path: &Path) -> bool {
+    std::fs::metadata(path)
+        .ok()
+        .is_some_and(|m| m.is_file() && (m.mode() & 0o111) != 0)
+}
+
+#[cfg(not(unix))]
+fn is_executable(path: &Path) -> bool {
+    path.is_file()
+}
+
+fn system_control_script_has_confirm_gate(text: &str) -> bool {
+    text.contains("power off --confirm")
+        && text.contains("Refusing poweroff without --confirm")
+        && text.contains("agent_bridge.system_control.audit.v0")
+}
+
+fn check_system_control_api(dir: &Path) -> Check {
+    let bin = system_control_bin_path(dir);
+    if !bin.is_file() {
+        return Check::warn(
+            "system_control_api",
+            format!("{} missing", bin.display()),
+            "run scripts/setup-sway-workstation.sh to install ab-system-control",
+        );
+    }
+    if !is_executable(&bin) {
+        return Check::warn(
+            "system_control_api",
+            format!("{} is not executable", bin.display()),
+            format!("chmod +x {}", bin.display()),
+        );
+    }
+
+    let text = std::fs::read_to_string(&bin).unwrap_or_default();
+    if !system_control_script_has_confirm_gate(&text) {
+        return Check::fail(
+            "system_control_api",
+            format!(
+                "{} does not advertise the audited power-off confirmation gate",
+                bin.display()
+            ),
+            "reinstall the current ab-system-control script from scripts/setup-sway-workstation.sh",
+        );
+    }
+
+    let audit_dir = system_control_audit_dir();
+    let audit_log = audit_dir.join("system-actions.jsonl");
+    let dir_mode = mode_octal(&audit_dir);
+    let log_mode = mode_octal(&audit_log);
+    let dir_private = dir_mode.is_some_and(|m| m & 0o077 == 0);
+    let log_private = log_mode.is_some_and(|m| m & 0o077 == 0);
+    let detail = format!(
+        "bin={}, audit_dir={} mode={:?}, audit_log={} mode={:?}, power_confirm_gate=true",
+        bin.display(),
+        audit_dir.display(),
+        dir_mode.map(|m| format!("{m:o}")),
+        audit_log.display(),
+        log_mode.map(|m| format!("{m:o}"))
+    );
+
+    if !audit_dir.exists() || !audit_log.exists() {
+        return Check::warn(
+            "system_control_api",
+            detail,
+            "run ab-system-control audit-tail 1 once, or use any system_control action, to initialize the audit log",
+        );
+    }
+    if !dir_private || !log_private {
+        return Check::warn(
+            "system_control_api",
+            detail,
+            format!(
+                "chmod 700 {} && chmod 600 {}",
+                audit_dir.display(),
+                audit_log.display()
+            ),
+        );
+    }
+
+    let snapshot_out = match std::process::Command::new(&bin)
+        .args(["status", "snapshot"])
+        .env("AB_SYSTEM_CONTROL_SNAPSHOT_SKIP_AGENT_DOCTOR", "1")
+        .output()
+    {
+        Ok(out) => out,
+        Err(e) => {
+            return Check::warn(
+                "system_control_api",
+                format!("{detail}, status_snapshot=error({e})"),
+                "verify ab-system-control is executable and can run status snapshot",
+            );
+        }
+    };
+    if !snapshot_out.status.success() {
+        return Check::fail(
+            "system_control_api",
+            format!(
+                "{detail}, status_snapshot=exit({}); stderr={}",
+                snapshot_out.status.code().unwrap_or(-1),
+                String::from_utf8_lossy(&snapshot_out.stderr).trim()
+            ),
+            "reinstall the current ab-system-control script from scripts/setup-sway-workstation.sh",
+        );
+    }
+    let snapshot: Value = match serde_json::from_slice(&snapshot_out.stdout) {
+        Ok(v) => v,
+        Err(e) => {
+            return Check::fail(
+                "system_control_api",
+                format!("{detail}, status_snapshot=non_json({e})"),
+                "check ab-system-control status snapshot output",
+            );
+        }
+    };
+    let snapshot_schema_ok =
+        value_str(&snapshot, "/schema") == "agent_bridge.system_control.snapshot.v0";
+    let snapshot_read_only = value_bool(&snapshot, "/read_only").unwrap_or(false);
+    if !snapshot_schema_ok || !snapshot_read_only {
+        return Check::fail(
+            "system_control_api",
+            format!(
+                "{detail}, status_snapshot_schema={}, status_snapshot_read_only={snapshot_read_only}",
+                value_str(&snapshot, "/schema")
+            ),
+            "reinstall the current ab-system-control script from scripts/setup-sway-workstation.sh",
+        );
+    }
+
+    let snapshot_status = value_str(&snapshot, "/summary/desktop_status");
+    let snapshot_watchdog = value_str(&snapshot, "/summary/watchdog_status");
+
+    let diagnosis_out = match std::process::Command::new(&bin)
+        .args(["status", "diagnose", "20"])
+        .output()
+    {
+        Ok(out) => out,
+        Err(e) => {
+            return Check::warn(
+                "system_control_api",
+                format!("{detail}, status_diagnosis=error({e})"),
+                "verify ab-system-control can run status diagnose",
+            );
+        }
+    };
+    if !diagnosis_out.status.success() {
+        return Check::fail(
+            "system_control_api",
+            format!(
+                "{detail}, status_diagnosis=exit({}); stderr={}",
+                diagnosis_out.status.code().unwrap_or(-1),
+                String::from_utf8_lossy(&diagnosis_out.stderr).trim()
+            ),
+            "reinstall the current ab-system-control script from scripts/setup-sway-workstation.sh",
+        );
+    }
+    let diagnosis: Value = match serde_json::from_slice(&diagnosis_out.stdout) {
+        Ok(v) => v,
+        Err(e) => {
+            return Check::fail(
+                "system_control_api",
+                format!("{detail}, status_diagnosis=non_json({e})"),
+                "check ab-system-control status diagnose output",
+            );
+        }
+    };
+    let diagnosis_schema_ok =
+        value_str(&diagnosis, "/schema") == "agent_bridge.system_control.snapshot_diagnosis.v0";
+    let diagnosis_read_only = value_bool(&diagnosis, "/read_only").unwrap_or(false);
+    if !diagnosis_schema_ok || !diagnosis_read_only {
+        return Check::fail(
+            "system_control_api",
+            format!(
+                "{detail}, status_diagnosis_schema={}, status_diagnosis_read_only={diagnosis_read_only}",
+                value_str(&diagnosis, "/schema")
+            ),
+            "reinstall the current ab-system-control script from scripts/setup-sway-workstation.sh",
+        );
+    }
+    let diagnosis_status = value_str(&diagnosis, "/status");
+
+    Check::ok(
+        "system_control_api",
+        format!(
+            "{detail}, status_snapshot=true, status_diagnosis=true, desktop_status={snapshot_status}, watchdog_status={snapshot_watchdog}, diagnosis_status={diagnosis_status}"
+        ),
+    )
+}
+
+fn value_str<'a>(v: &'a Value, pointer: &str) -> &'a str {
+    v.pointer(pointer).and_then(Value::as_str).unwrap_or("")
+}
+
+fn value_bool(v: &Value, pointer: &str) -> Option<bool> {
+    v.pointer(pointer).and_then(Value::as_bool)
+}
+
+fn value_u64(v: &Value, pointer: &str) -> Option<u64> {
+    v.pointer(pointer).and_then(Value::as_u64)
+}
+
+fn desktop_runtime_detail(status: &Value) -> (String, Vec<String>) {
+    let audio_volume = value_str(status, "/audio/volume");
+    let audio_muted = value_str(status, "/audio/muted");
+    let mic_muted = value_str(status, "/audio/mic_muted");
+    let brightness = value_str(status, "/brightness/percent");
+    let wifi_radio = value_str(status, "/wifi/radio");
+    let wifi_ssid = value_str(status, "/wifi/ssid");
+    let wifi_signal = value_str(status, "/wifi/signal");
+    let wifi_connected = value_bool(status, "/wifi/connected").unwrap_or(false);
+    let outputs_active = value_u64(status, "/display/outputs_active").unwrap_or(0);
+    let outputs_powered = value_u64(status, "/display/outputs_powered").unwrap_or(0);
+    let outputs_total = value_u64(status, "/display/outputs_total").unwrap_or(0);
+    let focused_output = value_str(status, "/display/focused_output");
+    let battery_state = value_str(status, "/battery/state");
+    let battery_percent = value_str(status, "/battery/percentage");
+    let swayidle = value_bool(status, "/services/swayidle").unwrap_or(false);
+    let mako = value_bool(status, "/services/mako").unwrap_or(false);
+    let networkmanager = value_bool(status, "/services/networkmanager").unwrap_or(false);
+
+    let mut warnings = Vec::new();
+    if outputs_powered == 0 {
+        warnings.push("no powered display output".to_string());
+    }
+    if !swayidle {
+        warnings.push("swayidle not running".to_string());
+    }
+    if !mako {
+        warnings.push("mako not running".to_string());
+    }
+    if !networkmanager {
+        warnings.push("NetworkManager not active".to_string());
+    }
+    if wifi_radio != "enabled" {
+        warnings.push("WiFi radio disabled".to_string());
+    } else if !wifi_connected {
+        warnings.push("WiFi not connected".to_string());
+    }
+
+    let wifi_label = if wifi_connected {
+        format!("{wifi_ssid} {wifi_signal}%")
+    } else {
+        format!("radio={wifi_radio} disconnected")
+    };
+    let detail = format!(
+        "audio={audio_volume} muted={audio_muted} mic={mic_muted}; brightness={brightness}; wifi={wifi_label}; display={outputs_powered}/{outputs_active}/{outputs_total} powered/active/total focused={focused_output}; battery={battery_state} {battery_percent}; services=swayidle:{swayidle},mako:{mako},NetworkManager:{networkmanager}"
+    );
+    (detail, warnings)
+}
+
+fn check_desktop_runtime(dir: &Path) -> Check {
+    let bin = system_control_bin_path(dir);
+    if !bin.is_file() {
+        return Check::warn(
+            "desktop_runtime",
+            format!("{} missing; cannot read desktop status", bin.display()),
+            "install ab-system-control via scripts/setup-sway-workstation.sh",
+        );
+    }
+    let out = match std::process::Command::new(&bin)
+        .args(["status", "summary"])
+        .output()
+    {
+        Ok(out) => out,
+        Err(e) => {
+            return Check::warn(
+                "desktop_runtime",
+                format!("failed to run {} status summary: {e}", bin.display()),
+                "verify ab-system-control is executable and on the current Sway session",
+            );
+        }
+    };
+    if !out.status.success() {
+        return Check::warn(
+            "desktop_runtime",
+            format!(
+                "status summary exited {}; stderr={}",
+                out.status.code().unwrap_or(-1),
+                String::from_utf8_lossy(&out.stderr).trim()
+            ),
+            "run ab-system-control status summary manually to inspect the read-only status failure",
+        );
+    }
+    let status: Value = match serde_json::from_slice(&out.stdout) {
+        Ok(v) => v,
+        Err(e) => {
+            return Check::warn(
+                "desktop_runtime",
+                format!("status summary returned non-JSON: {e}"),
+                "check ab-system-control status summary output",
+            );
+        }
+    };
+    let (detail, warnings) = desktop_runtime_detail(&status);
+    if warnings.is_empty() {
+        Check::ok("desktop_runtime", detail)
+    } else {
+        Check::warn(
+            "desktop_runtime",
+            format!("{detail}; warnings={}", warnings.join(",")),
+            "check Sway services or use system_control/status to inspect the failing component",
+        )
+    }
+}
+
 fn check_instinct_observer() -> Check {
     let status = instinct::observer_status();
     let detail = format!(
@@ -764,6 +1097,8 @@ pub async fn run_doctor(json: bool, markdown: bool) -> Result<()> {
         check_daemon_runtime(),
         check_mcp_servers(&dir),
         check_mcp_tool_surface(),
+        check_system_control_api(&dir),
+        check_desktop_runtime(&dir),
         check_instinct_observer(),
     ];
 
@@ -934,6 +1269,49 @@ mod tests {
             Some("maxiaodeMac-Pro".into())
         );
         assert_eq!(parse_env_assignment(ps_out, "MISSING"), None);
+    }
+
+    #[test]
+    fn system_control_confirm_gate_detection_requires_audit_and_confirm() {
+        let good = r#"
+audit "power.off" "high" "blocked" "missing --confirm"
+echo "Refusing poweroff without --confirm" >&2
+power off --confirm
+agent_bridge.system_control.audit.v0
+"#;
+        assert!(system_control_script_has_confirm_gate(good));
+        assert!(!system_control_script_has_confirm_gate(
+            "power off\nagent_bridge.system_control.audit.v0"
+        ));
+        assert!(!system_control_script_has_confirm_gate(
+            "power off --confirm\nRefusing poweroff without --confirm"
+        ));
+    }
+
+    #[test]
+    fn desktop_runtime_detail_warns_on_missing_core_services() {
+        let status = json!({
+            "audio": {"volume": "75%", "muted": "no", "mic_muted": "no"},
+            "brightness": {"percent": "80%"},
+            "wifi": {"radio": "enabled", "connected": true, "ssid": "Lab", "signal": "71"},
+            "display": {"outputs_total": 1, "outputs_active": 1, "outputs_powered": 1, "focused_output": "eDP-1"},
+            "battery": {"state": "charging", "percentage": "90%"},
+            "services": {"swayidle": true, "mako": true, "networkmanager": true}
+        });
+        let (detail, warnings) = desktop_runtime_detail(&status);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert!(detail.contains("audio=75%"));
+        assert!(detail.contains("wifi=Lab 71%"));
+
+        let broken = json!({
+            "wifi": {"radio": "disabled", "connected": false},
+            "display": {"outputs_total": 1, "outputs_active": 1, "outputs_powered": 0},
+            "services": {"swayidle": false, "mako": false, "networkmanager": false}
+        });
+        let (_, warnings) = desktop_runtime_detail(&broken);
+        assert!(warnings.iter().any(|w| w.contains("no powered")));
+        assert!(warnings.iter().any(|w| w.contains("swayidle")));
+        assert!(warnings.iter().any(|w| w.contains("WiFi radio disabled")));
     }
 
     #[test]

@@ -275,6 +275,499 @@ pub struct MemorySearchHit {
     pub cosine: Option<f32>,
 }
 
+pub const BIOCORTEX_RETRIEVAL_OPT_IN_STORE_CONTRACT_SCHEMA: &str =
+    "agent_bridge.store.memory_search.biocortex_opt_in_contract.v0";
+pub const BIOCORTEX_RETRIEVAL_OPT_IN_SEARCH_AUDIT_SCHEMA: &str =
+    "agent_bridge.store.memory_search.biocortex_opt_in_search_audit.v0";
+pub const BIOCORTEX_RETRIEVAL_OPT_IN_AUTHORIZATION_SCOPE: &str = "opt_in_experiment";
+
+/// Store-level contract for a future BioCortex-assisted `memory_search` call.
+///
+/// This is deliberately just a contract shape: it does not run BioCortex and
+/// does not alter `memory_search`. Callers must already have the baseline FTS
+/// result before an opt-in experiment can be evaluated, so every failure path
+/// can return the baseline list.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BioCortexRetrievalOptInRequest {
+    /// Retrieval mode under review. Only `fts` is authorized by the current
+    /// opt-in experiment scope.
+    #[serde(default = "default_biocortex_retrieval_mode")]
+    pub mode: String,
+    /// Explicit per-call opt-in. Feature/runtime flags alone are insufficient.
+    #[serde(default)]
+    pub per_call_opt_in: bool,
+    /// Whether the optional Cargo feature was compiled in.
+    #[serde(default)]
+    pub compile_feature_enabled: bool,
+    /// Whether the runtime enable env was set for this process.
+    #[serde(default)]
+    pub runtime_enabled: bool,
+    /// Operator kill-switch; wins over runtime enable and per-call opt-in.
+    #[serde(default)]
+    pub operator_disabled: bool,
+    /// True when the baseline search has already completed. A baseline may have
+    /// zero hits; that is still a completed baseline and is safe to return.
+    #[serde(default = "default_true")]
+    pub baseline_completed: bool,
+    /// Count only. The store-level contract must not require raw memory keys.
+    #[serde(default)]
+    pub baseline_key_count: usize,
+    /// Review gate for future runtime influence. False in the current plan.
+    #[serde(default)]
+    pub runtime_adapter_approved: bool,
+    /// True only after code is intentionally connected to an ordering path.
+    #[serde(default)]
+    pub ordering_behavior_connected: bool,
+}
+
+impl Default for BioCortexRetrievalOptInRequest {
+    fn default() -> Self {
+        Self {
+            mode: default_biocortex_retrieval_mode(),
+            per_call_opt_in: false,
+            compile_feature_enabled: false,
+            runtime_enabled: false,
+            operator_disabled: false,
+            baseline_completed: true,
+            baseline_key_count: 0,
+            runtime_adapter_approved: false,
+            ordering_behavior_connected: false,
+        }
+    }
+}
+
+impl BioCortexRetrievalOptInRequest {
+    pub fn normalized_mode(&self) -> String {
+        normalize_retrieval_mode(&self.mode)
+    }
+
+    pub fn evaluate(&self) -> BioCortexRetrievalOptInDecision {
+        let mode = self.normalized_mode();
+        let mode_authorized = mode == "fts";
+        let mut blocking_reasons = Vec::new();
+
+        if !mode_authorized {
+            blocking_reasons.push(BioCortexRetrievalOptInBlocker::ModeNotAuthorized);
+        }
+        if !self.baseline_completed {
+            blocking_reasons.push(BioCortexRetrievalOptInBlocker::BaselineNotEstablished);
+        }
+        if !self.compile_feature_enabled {
+            blocking_reasons.push(BioCortexRetrievalOptInBlocker::CompileFeatureDisabled);
+        } else if self.operator_disabled {
+            blocking_reasons.push(BioCortexRetrievalOptInBlocker::OperatorDisabled);
+        } else if !self.runtime_enabled {
+            blocking_reasons.push(BioCortexRetrievalOptInBlocker::RuntimeDisabled);
+        } else if !self.per_call_opt_in {
+            blocking_reasons.push(BioCortexRetrievalOptInBlocker::PerCallOptInMissing);
+        }
+
+        let gate_ready = mode_authorized
+            && self.baseline_completed
+            && self.compile_feature_enabled
+            && self.runtime_enabled
+            && self.per_call_opt_in
+            && !self.operator_disabled;
+        if gate_ready {
+            if !self.ordering_behavior_connected {
+                blocking_reasons.push(BioCortexRetrievalOptInBlocker::OrderingBehaviorNotConnected);
+            }
+            if !self.runtime_adapter_approved {
+                blocking_reasons.push(BioCortexRetrievalOptInBlocker::RuntimeAdapterNotApproved);
+            }
+        }
+
+        let may_change_search_order = blocking_reasons.is_empty();
+        BioCortexRetrievalOptInDecision {
+            schema: BIOCORTEX_RETRIEVAL_OPT_IN_STORE_CONTRACT_SCHEMA.to_string(),
+            authorization_scope: BIOCORTEX_RETRIEVAL_OPT_IN_AUTHORIZATION_SCOPE.to_string(),
+            mode,
+            mode_authorized,
+            eligible_for_side_signal: may_change_search_order,
+            may_change_search_order,
+            default_search_order_change_allowed: false,
+            default_calls_unchanged: true,
+            must_return_baseline: !may_change_search_order,
+            baseline_completed: self.baseline_completed,
+            baseline_key_count: self.baseline_key_count,
+            fallback_reason: blocking_reasons.first().copied(),
+            blocking_reasons,
+            audit_requirements: BioCortexRetrievalAuditRequirements::default(),
+        }
+    }
+}
+
+fn default_biocortex_retrieval_mode() -> String {
+    "fts".to_string()
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn normalize_retrieval_mode(value: &str) -> String {
+    let mut out = String::new();
+    for ch in value.trim().chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+            out.push(ch.to_ascii_lowercase());
+        }
+    }
+    if out.is_empty() {
+        "fts".to_string()
+    } else {
+        out
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BioCortexRetrievalOptInBlocker {
+    ModeNotAuthorized,
+    BaselineNotEstablished,
+    CompileFeatureDisabled,
+    OperatorDisabled,
+    RuntimeDisabled,
+    PerCallOptInMissing,
+    OrderingBehaviorNotConnected,
+    RuntimeAdapterNotApproved,
+    SideSignalUnavailable,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BioCortexRetrievalAuditRequirements {
+    pub query_hash_required: bool,
+    pub baseline_order_hash_required: bool,
+    pub raw_query_included: bool,
+    pub raw_keys_included: bool,
+    pub content_included: bool,
+    pub side_signal_raw_included: bool,
+}
+
+impl Default for BioCortexRetrievalAuditRequirements {
+    fn default() -> Self {
+        Self {
+            query_hash_required: true,
+            baseline_order_hash_required: true,
+            raw_query_included: false,
+            raw_keys_included: false,
+            content_included: false,
+            side_signal_raw_included: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BioCortexRetrievalOptInDecision {
+    pub schema: String,
+    pub authorization_scope: String,
+    pub mode: String,
+    pub mode_authorized: bool,
+    pub eligible_for_side_signal: bool,
+    pub may_change_search_order: bool,
+    pub default_search_order_change_allowed: bool,
+    pub default_calls_unchanged: bool,
+    pub must_return_baseline: bool,
+    pub baseline_completed: bool,
+    pub baseline_key_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_reason: Option<BioCortexRetrievalOptInBlocker>,
+    pub blocking_reasons: Vec<BioCortexRetrievalOptInBlocker>,
+    pub audit_requirements: BioCortexRetrievalAuditRequirements,
+}
+
+impl BioCortexRetrievalOptInDecision {
+    pub fn response_contract(
+        &self,
+        experimental_order_available: bool,
+    ) -> BioCortexRetrievalOptInResponseContract {
+        let use_experimental = self.may_change_search_order && experimental_order_available;
+        let fallback_reason = if use_experimental {
+            None
+        } else {
+            self.fallback_reason
+                .or(Some(BioCortexRetrievalOptInBlocker::SideSignalUnavailable))
+        };
+        BioCortexRetrievalOptInResponseContract {
+            schema: BIOCORTEX_RETRIEVAL_OPT_IN_STORE_CONTRACT_SCHEMA.to_string(),
+            returned_order_source: if use_experimental {
+                BioCortexReturnedOrderSource::Experimental
+            } else {
+                BioCortexReturnedOrderSource::Baseline
+            },
+            baseline_returned: !use_experimental,
+            changes_memory_search_order: use_experimental,
+            fallback_reason,
+            decision: self.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BioCortexReturnedOrderSource {
+    Baseline,
+    Experimental,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BioCortexRetrievalOptInResponseContract {
+    pub schema: String,
+    pub returned_order_source: BioCortexReturnedOrderSource,
+    pub baseline_returned: bool,
+    pub changes_memory_search_order: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_reason: Option<BioCortexRetrievalOptInBlocker>,
+    pub decision: BioCortexRetrievalOptInDecision,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BioCortexRetrievalOptInSideSignal {
+    pub candidate_key: String,
+    pub score: f32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BioCortexRetrievalOptInSideSignalSummary {
+    pub row_count: usize,
+    pub matched_candidate_count: usize,
+    pub candidate_count: usize,
+    pub coverage: f64,
+    pub coverage_threshold: f64,
+    pub blend_alpha: f32,
+    pub invalid_score_count: usize,
+    pub duplicate_candidate_count: usize,
+    pub available: bool,
+    pub raw_scores_included: bool,
+    pub raw_keys_included: bool,
+    pub content_included: bool,
+}
+
+impl BioCortexRetrievalOptInSideSignalSummary {
+    fn unavailable(candidate_count: usize, coverage_threshold: f64, blend_alpha: f32) -> Self {
+        Self {
+            row_count: 0,
+            matched_candidate_count: 0,
+            candidate_count,
+            coverage: if candidate_count == 0 { 1.0 } else { 0.0 },
+            coverage_threshold,
+            blend_alpha,
+            invalid_score_count: 0,
+            duplicate_candidate_count: 0,
+            available: false,
+            raw_scores_included: false,
+            raw_keys_included: false,
+            content_included: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BioCortexRetrievalOptInSearchOptions {
+    #[serde(default = "default_biocortex_retrieval_mode")]
+    pub mode: String,
+    #[serde(default)]
+    pub per_call_opt_in: bool,
+    #[serde(default)]
+    pub compile_feature_enabled: bool,
+    #[serde(default)]
+    pub runtime_enabled: bool,
+    #[serde(default)]
+    pub operator_disabled: bool,
+    #[serde(default)]
+    pub runtime_adapter_approved: bool,
+    #[serde(default)]
+    pub ordering_behavior_connected: bool,
+    #[serde(default)]
+    pub side_signal_scores: Vec<BioCortexRetrievalOptInSideSignal>,
+    #[serde(default = "default_biocortex_side_signal_alpha")]
+    pub side_signal_alpha: f32,
+    #[serde(default = "default_biocortex_side_signal_coverage_threshold")]
+    pub side_signal_coverage_threshold: f64,
+}
+
+impl Default for BioCortexRetrievalOptInSearchOptions {
+    fn default() -> Self {
+        Self {
+            mode: default_biocortex_retrieval_mode(),
+            per_call_opt_in: false,
+            compile_feature_enabled: false,
+            runtime_enabled: false,
+            operator_disabled: false,
+            runtime_adapter_approved: false,
+            ordering_behavior_connected: false,
+            side_signal_scores: Vec::new(),
+            side_signal_alpha: default_biocortex_side_signal_alpha(),
+            side_signal_coverage_threshold: default_biocortex_side_signal_coverage_threshold(),
+        }
+    }
+}
+
+fn default_biocortex_side_signal_alpha() -> f32 {
+    0.8
+}
+
+fn default_biocortex_side_signal_coverage_threshold() -> f64 {
+    0.8
+}
+
+fn biocortex_opt_in_apply_side_signal(
+    baseline_hits: &[MemorySearchHit],
+    side_signal_scores: &[BioCortexRetrievalOptInSideSignal],
+    side_signal_alpha: f32,
+    side_signal_coverage_threshold: f64,
+    gate_allows_ordering: bool,
+) -> (
+    Vec<MemorySearchHit>,
+    BioCortexRetrievalOptInSideSignalSummary,
+    bool,
+) {
+    let candidate_count = baseline_hits.len();
+    let alpha = if side_signal_alpha.is_finite() && side_signal_alpha >= 0.0 {
+        side_signal_alpha
+    } else {
+        default_biocortex_side_signal_alpha()
+    };
+    let coverage_threshold = if side_signal_coverage_threshold.is_finite()
+        && (0.0..=1.0).contains(&side_signal_coverage_threshold)
+    {
+        side_signal_coverage_threshold
+    } else {
+        default_biocortex_side_signal_coverage_threshold()
+    };
+
+    if side_signal_scores.is_empty() || candidate_count == 0 {
+        return (
+            baseline_hits.to_vec(),
+            BioCortexRetrievalOptInSideSignalSummary::unavailable(
+                candidate_count,
+                coverage_threshold,
+                alpha,
+            ),
+            false,
+        );
+    }
+
+    let mut matched_scores: Vec<(String, f32)> = Vec::new();
+    let mut invalid_score_count = 0usize;
+    let mut duplicate_candidate_count = 0usize;
+
+    for row in side_signal_scores {
+        if !row.score.is_finite() || !(-1.0..=1.0).contains(&row.score) {
+            invalid_score_count += 1;
+            continue;
+        }
+        if !baseline_hits
+            .iter()
+            .any(|hit| hit.record.key == row.candidate_key)
+        {
+            continue;
+        }
+        if matched_scores
+            .iter()
+            .any(|(key, _)| key == &row.candidate_key)
+        {
+            duplicate_candidate_count += 1;
+            continue;
+        }
+        matched_scores.push((row.candidate_key.clone(), row.score));
+    }
+
+    let coverage = matched_scores.len() as f64 / candidate_count.max(1) as f64;
+    let available =
+        invalid_score_count == 0 && coverage >= coverage_threshold && !matched_scores.is_empty();
+    let summary = BioCortexRetrievalOptInSideSignalSummary {
+        row_count: side_signal_scores.len(),
+        matched_candidate_count: matched_scores.len(),
+        candidate_count,
+        coverage,
+        coverage_threshold,
+        blend_alpha: alpha,
+        invalid_score_count,
+        duplicate_candidate_count,
+        available,
+        raw_scores_included: false,
+        raw_keys_included: false,
+        content_included: false,
+    };
+
+    if !(gate_allows_ordering && available) {
+        return (baseline_hits.to_vec(), summary, false);
+    }
+
+    let mut scored_hits = baseline_hits
+        .iter()
+        .cloned()
+        .enumerate()
+        .map(|(idx, hit)| {
+            let side_score = matched_scores
+                .iter()
+                .find(|(key, _)| key == &hit.record.key)
+                .map(|(_, score)| *score)
+                .unwrap_or(0.0);
+            let blended = hit.score + f64::from(alpha * side_score);
+            (idx, blended, hit)
+        })
+        .collect::<Vec<_>>();
+
+    scored_hits.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.0.cmp(&b.0))
+    });
+
+    (
+        scored_hits
+            .into_iter()
+            .map(|(_, _, hit)| hit)
+            .collect::<Vec<_>>(),
+        summary,
+        true,
+    )
+}
+
+#[derive(Debug, Clone)]
+pub struct BioCortexRetrievalOptInSearchOutcome {
+    pub baseline_hits: Vec<MemorySearchHit>,
+    pub returned_hits: Vec<MemorySearchHit>,
+    pub response_contract: BioCortexRetrievalOptInResponseContract,
+    pub side_signal_summary: BioCortexRetrievalOptInSideSignalSummary,
+}
+
+impl BioCortexRetrievalOptInSearchOutcome {
+    pub fn redacted_audit(&self) -> BioCortexRetrievalOptInSearchAudit {
+        BioCortexRetrievalOptInSearchAudit {
+            schema: BIOCORTEX_RETRIEVAL_OPT_IN_SEARCH_AUDIT_SCHEMA.to_string(),
+            authorization_scope: BIOCORTEX_RETRIEVAL_OPT_IN_AUTHORIZATION_SCOPE.to_string(),
+            baseline_key_count: self.baseline_hits.len(),
+            returned_hit_count: self.returned_hits.len(),
+            returned_order_source: self.response_contract.returned_order_source,
+            baseline_returned: self.response_contract.baseline_returned,
+            changes_memory_search_order: self.response_contract.changes_memory_search_order,
+            raw_query_included: false,
+            raw_keys_included: false,
+            content_included: false,
+            side_signal_summary: self.side_signal_summary.clone(),
+            response_contract: self.response_contract.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BioCortexRetrievalOptInSearchAudit {
+    pub schema: String,
+    pub authorization_scope: String,
+    pub baseline_key_count: usize,
+    pub returned_hit_count: usize,
+    pub returned_order_source: BioCortexReturnedOrderSource,
+    pub baseline_returned: bool,
+    pub changes_memory_search_order: bool,
+    pub raw_query_included: bool,
+    pub raw_keys_included: bool,
+    pub content_included: bool,
+    pub side_signal_summary: BioCortexRetrievalOptInSideSignalSummary,
+    pub response_contract: BioCortexRetrievalOptInResponseContract,
+}
+
 /// One memory ranked purely by cosine similarity to a query, **without**
 /// the importance / recency / access-count blending that `MemorySearchHit`
 /// applies. Used by L6 introspection probes (e.g. `introspect_recall`'s
@@ -1712,12 +2205,8 @@ pub trait StateStore: Send + Sync {
         window_secs: i64,
         top_n: u32,
     ) -> Result<Vec<McpToolSourceStats>> {
-        self.mcp_tool_source_stats_filtered(
-            window_secs,
-            top_n,
-            McpToolCallFilter::default(),
-        )
-        .await
+        self.mcp_tool_source_stats_filtered(window_secs, top_n, McpToolCallFilter::default())
+            .await
     }
 
     /// Group recent MCP traffic by source/client/profile/model attribution,
@@ -1755,6 +2244,54 @@ pub trait StateStore: Send + Sync {
         tags_any: &[String],
         limit: u32,
     ) -> Result<Vec<MemorySearchHit>>;
+
+    /// Protected BioCortex opt-in search surface.
+    ///
+    /// Default calls still use baseline `memory_search`. This protected wrapper
+    /// can return an experimental order only when the caller supplies explicit
+    /// opt-in, runtime approval, an ordering connection flag, and sufficient
+    /// side-signal coverage. Every blocked or malformed side-signal path returns
+    /// the baseline list.
+    async fn memory_search_biocortex_opt_in(
+        &self,
+        query: &str,
+        tags_any: &[String],
+        limit: u32,
+        options: BioCortexRetrievalOptInSearchOptions,
+    ) -> Result<BioCortexRetrievalOptInSearchOutcome> {
+        let baseline_hits = self.memory_search(query, tags_any, limit).await?;
+        let side_signal_scores = options.side_signal_scores;
+        let side_signal_alpha = options.side_signal_alpha;
+        let side_signal_coverage_threshold = options.side_signal_coverage_threshold;
+        let decision = BioCortexRetrievalOptInRequest {
+            mode: options.mode,
+            per_call_opt_in: options.per_call_opt_in,
+            compile_feature_enabled: options.compile_feature_enabled,
+            runtime_enabled: options.runtime_enabled,
+            operator_disabled: options.operator_disabled,
+            baseline_completed: true,
+            baseline_key_count: baseline_hits.len(),
+            runtime_adapter_approved: options.runtime_adapter_approved,
+            ordering_behavior_connected: options.ordering_behavior_connected,
+        }
+        .evaluate();
+        let (returned_hits, side_signal_summary, experimental_order_available) =
+            biocortex_opt_in_apply_side_signal(
+                &baseline_hits,
+                &side_signal_scores,
+                side_signal_alpha,
+                side_signal_coverage_threshold,
+                decision.may_change_search_order,
+            );
+        let response_contract = decision.response_contract(experimental_order_available);
+
+        Ok(BioCortexRetrievalOptInSearchOutcome {
+            returned_hits,
+            baseline_hits,
+            response_contract,
+            side_signal_summary,
+        })
+    }
 
     /// List memories. `scope` filters to records visible in the given context:
     /// returns records whose scope is None/global OR matches the provided scope.
@@ -2181,11 +2718,7 @@ pub trait StateStore: Send + Sync {
     /// `introspect_recall` novelty = `1 - max(cosine)`) where the raw
     /// geometric signal is the point. Default impl returns empty (back-
     /// compat — non-SQLite stores quietly produce no novelty signal).
-    async fn memory_top_k_cosine(
-        &self,
-        query: &str,
-        k: u32,
-    ) -> Result<Vec<MemoryCosineHit>> {
+    async fn memory_top_k_cosine(&self, query: &str, k: u32) -> Result<Vec<MemoryCosineHit>> {
         let _ = (query, k);
         Ok(Vec::new())
     }
@@ -2211,11 +2744,7 @@ pub trait StateStore: Send + Sync {
     /// v21 α — Synaptic Trace: return the top-N co-activation edges for
     /// a given memory key, ordered by count DESC. Default returns empty
     /// so older stores keep compiling.
-    async fn top_coactivation(
-        &self,
-        _key: &str,
-        _limit: u32,
-    ) -> Result<Vec<CoactivationEdge>> {
+    async fn top_coactivation(&self, _key: &str, _limit: u32) -> Result<Vec<CoactivationEdge>> {
         Ok(Vec::new())
     }
 
@@ -2291,11 +2820,7 @@ pub trait StateStore: Send + Sync {
     /// window. Powers `agent-bridge dream identity` (vision principle 5:
     /// "literal answer to non-continuous medium continuity"). Default
     /// returns an empty window so older stores keep compiling.
-    async fn identity_window(
-        &self,
-        window_start: i64,
-        window_end: i64,
-    ) -> Result<IdentityWindow> {
+    async fn identity_window(&self, window_start: i64, window_end: i64) -> Result<IdentityWindow> {
         Ok(IdentityWindow {
             window_start,
             window_end,
@@ -2398,9 +2923,7 @@ pub trait StateStore: Send + Sync {
         refs: Option<&serde_json::Value>,
         tags: Option<&[String]>,
     ) -> Result<ForumPostOutcome> {
-        let _ = (
-            thread_id, board, title, author, kind, body, refs, tags,
-        );
+        let _ = (thread_id, board, title, author, kind, body, refs, tags);
         Err(ab_core::Error::Backend("forum_post not implemented".into()))
     }
 
@@ -2503,11 +3026,7 @@ pub trait StateStore: Send + Sync {
     /// `forum_digest`'s per-thread extraction so high-volume threads reflect
     /// current state, not their opening posts. Returned newest-first; callers
     /// that need chronological order should sort by id. Default impl errors.
-    async fn forum_recent_posts(
-        &self,
-        thread_id: i64,
-        limit: u32,
-    ) -> Result<Vec<ForumPostRecord>> {
+    async fn forum_recent_posts(&self, thread_id: i64, limit: u32) -> Result<Vec<ForumPostRecord>> {
         let _ = (thread_id, limit);
         Err(ab_core::Error::Backend(
             "forum_recent_posts not implemented".into(),
@@ -2519,10 +3038,7 @@ pub trait StateStore: Send + Sync {
     /// per line; posts are nested inside their thread. Subscriptions are not
     /// included (each device has its own read cursors). Used by
     /// `agent-bridge sync` for cross-device collaboration.
-    async fn forum_export(
-        &self,
-        out_path: &std::path::Path,
-    ) -> Result<ForumExportResult> {
+    async fn forum_export(&self, out_path: &std::path::Path) -> Result<ForumExportResult> {
         let _ = out_path;
         Err(ab_core::Error::Backend(
             "forum_export not implemented".into(),
@@ -2534,10 +3050,7 @@ pub trait StateStore: Send + Sync {
     /// title)`; posts are matched by `(thread, author, created_at, body)`.
     /// On match, existing local row is reused; on no match, new row is
     /// inserted. `last_post_at` is updated to `max(local, remote)`.
-    async fn forum_import(
-        &self,
-        in_path: &std::path::Path,
-    ) -> Result<ForumImportReport> {
+    async fn forum_import(&self, in_path: &std::path::Path) -> Result<ForumImportReport> {
         let _ = in_path;
         Err(ab_core::Error::Backend(
             "forum_import not implemented".into(),
@@ -2588,10 +3101,7 @@ pub trait StateStore: Send + Sync {
     /// `session_identity` to auto-tag when a fresh sibling already holds
     /// the proposed canonical id. Default impl returns `Ok(None)` so
     /// non-SQLite backends fall back to the pure-helper behavior.
-    async fn agent_presence_get(
-        &self,
-        session_id: &str,
-    ) -> Result<Option<AgentPresenceRecord>> {
+    async fn agent_presence_get(&self, session_id: &str) -> Result<Option<AgentPresenceRecord>> {
         let _ = session_id;
         Ok(None)
     }
@@ -2699,13 +3209,7 @@ pub trait StateStore: Send + Sync {
         root_path: Option<&str>,
         limit: u32,
     ) -> Result<Vec<CodebaseCall>> {
-        let _ = (
-            callee_substr,
-            caller_substr,
-            file_filter,
-            root_path,
-            limit,
-        );
+        let _ = (callee_substr, caller_substr, file_filter, root_path, limit);
         Err(ab_core::Error::Backend(
             "codebase_calls_for not implemented".into(),
         ))
@@ -2776,8 +3280,7 @@ pub trait StateStore: Send + Sync {
         let per_hop_limit = per_hop_limit.clamp(1, 500);
 
         let mut closure: Vec<ImpactNode> = Vec::new();
-        let mut visited: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
+        let mut visited: std::collections::HashSet<String> = std::collections::HashSet::new();
         // Frontier of (callee_to_lookup, hop_to_record) — hop=1 for
         // direct callers of `target`, hop=N+1 after one BFS expansion.
         let mut frontier: Vec<(String, u32)> = vec![(target.to_string(), 1)];
@@ -2835,11 +3338,7 @@ pub trait StateStore: Send + Sync {
     /// `top_n` caps the size of `hot_callees`, `hot_callers`,
     /// `orphan_functions`, and `fan_out_files`. The per-language and
     /// total counts are always full.
-    async fn codebase_call_stats(
-        &self,
-        root_path: &str,
-        top_n: u32,
-    ) -> Result<CodebaseCallStats> {
+    async fn codebase_call_stats(&self, root_path: &str, top_n: u32) -> Result<CodebaseCallStats> {
         let _ = (root_path, top_n);
         Err(ab_core::Error::Backend(
             "codebase_call_stats not implemented".into(),
@@ -2854,10 +3353,7 @@ pub trait StateStore: Send + Sync {
     /// Default-safe to pass `7 * 86400` (7 days).
     ///
     /// Default impl errors so non-sqlite backends opt in explicitly.
-    async fn memory_substrate_audit(
-        &self,
-        window_secs: u64,
-    ) -> Result<SubstrateAuditReport> {
+    async fn memory_substrate_audit(&self, window_secs: u64) -> Result<SubstrateAuditReport> {
         let _ = window_secs;
         Err(ab_core::Error::Backend(
             "memory_substrate_audit not implemented".into(),
@@ -2900,6 +3396,167 @@ pub trait StateStore: Send + Sync {
     /// backends silently no-op the daemon's S2-S4 forum-channel alerts.
     async fn s234_counts(&self) -> Result<S234Counts> {
         Ok(S234Counts::default())
+    }
+}
+
+#[cfg(test)]
+mod biocortex_opt_in_contract_tests {
+    use super::*;
+
+    #[test]
+    fn biocortex_contract_defaults_to_baseline_fallback() {
+        let decision = BioCortexRetrievalOptInRequest::default().evaluate();
+
+        assert_eq!(
+            decision.schema,
+            BIOCORTEX_RETRIEVAL_OPT_IN_STORE_CONTRACT_SCHEMA
+        );
+        assert_eq!(
+            decision.authorization_scope,
+            BIOCORTEX_RETRIEVAL_OPT_IN_AUTHORIZATION_SCOPE
+        );
+        assert_eq!(decision.mode, "fts");
+        assert!(decision.mode_authorized);
+        assert!(!decision.eligible_for_side_signal);
+        assert!(!decision.may_change_search_order);
+        assert!(!decision.default_search_order_change_allowed);
+        assert!(decision.default_calls_unchanged);
+        assert!(decision.must_return_baseline);
+        assert_eq!(
+            decision.fallback_reason,
+            Some(BioCortexRetrievalOptInBlocker::CompileFeatureDisabled)
+        );
+        assert_eq!(decision.audit_requirements.raw_query_included, false);
+        assert_eq!(decision.audit_requirements.raw_keys_included, false);
+        assert_eq!(decision.audit_requirements.content_included, false);
+
+        let response = decision.response_contract(false);
+        assert_eq!(
+            response.returned_order_source,
+            BioCortexReturnedOrderSource::Baseline
+        );
+        assert!(response.baseline_returned);
+        assert!(!response.changes_memory_search_order);
+    }
+
+    #[test]
+    fn biocortex_contract_rejects_non_fts_before_runtime_gate() {
+        let decision = BioCortexRetrievalOptInRequest {
+            mode: "hybrid".to_string(),
+            per_call_opt_in: true,
+            compile_feature_enabled: true,
+            runtime_enabled: true,
+            baseline_key_count: 2,
+            ..Default::default()
+        }
+        .evaluate();
+
+        assert_eq!(decision.mode, "hybrid");
+        assert!(!decision.mode_authorized);
+        assert_eq!(
+            decision.fallback_reason,
+            Some(BioCortexRetrievalOptInBlocker::ModeNotAuthorized)
+        );
+        assert!(decision
+            .blocking_reasons
+            .contains(&BioCortexRetrievalOptInBlocker::ModeNotAuthorized));
+        assert!(!decision.may_change_search_order);
+        assert!(decision.must_return_baseline);
+    }
+
+    #[test]
+    fn biocortex_contract_ready_gate_still_blocks_without_ordering_path() {
+        let decision = BioCortexRetrievalOptInRequest {
+            mode: "fts".to_string(),
+            per_call_opt_in: true,
+            compile_feature_enabled: true,
+            runtime_enabled: true,
+            baseline_key_count: 2,
+            runtime_adapter_approved: false,
+            ordering_behavior_connected: false,
+            ..Default::default()
+        }
+        .evaluate();
+
+        assert_eq!(
+            decision.fallback_reason,
+            Some(BioCortexRetrievalOptInBlocker::OrderingBehaviorNotConnected)
+        );
+        assert!(decision
+            .blocking_reasons
+            .contains(&BioCortexRetrievalOptInBlocker::RuntimeAdapterNotApproved));
+        assert!(!decision.eligible_for_side_signal);
+        assert!(!decision.may_change_search_order);
+        assert!(decision.must_return_baseline);
+
+        let response = decision.response_contract(false);
+        assert_eq!(
+            response.returned_order_source,
+            BioCortexReturnedOrderSource::Baseline
+        );
+        assert!(response.baseline_returned);
+        assert!(!response.changes_memory_search_order);
+    }
+
+    #[test]
+    fn biocortex_contract_allows_experimental_order_only_after_all_gates() {
+        let decision = BioCortexRetrievalOptInRequest {
+            mode: "fts".to_string(),
+            per_call_opt_in: true,
+            compile_feature_enabled: true,
+            runtime_enabled: true,
+            baseline_completed: true,
+            baseline_key_count: 3,
+            runtime_adapter_approved: true,
+            ordering_behavior_connected: true,
+            operator_disabled: false,
+        }
+        .evaluate();
+
+        assert!(decision.eligible_for_side_signal);
+        assert!(decision.may_change_search_order);
+        assert!(!decision.must_return_baseline);
+        assert_eq!(decision.fallback_reason, None);
+
+        let missing_signal = decision.response_contract(false);
+        assert_eq!(
+            missing_signal.returned_order_source,
+            BioCortexReturnedOrderSource::Baseline
+        );
+        assert_eq!(
+            missing_signal.fallback_reason,
+            Some(BioCortexRetrievalOptInBlocker::SideSignalUnavailable)
+        );
+
+        let experimental = decision.response_contract(true);
+        assert_eq!(
+            experimental.returned_order_source,
+            BioCortexReturnedOrderSource::Experimental
+        );
+        assert!(!experimental.baseline_returned);
+        assert!(experimental.changes_memory_search_order);
+        assert_eq!(experimental.fallback_reason, None);
+    }
+
+    #[test]
+    fn biocortex_contract_serializes_audit_requirements_without_raw_data() {
+        let decision = BioCortexRetrievalOptInRequest {
+            mode: "fts".to_string(),
+            per_call_opt_in: true,
+            compile_feature_enabled: true,
+            runtime_enabled: true,
+            baseline_key_count: 2,
+            ..Default::default()
+        }
+        .evaluate();
+
+        let serialized = serde_json::to_string(&decision).expect("serialize decision");
+        assert!(serialized.contains(BIOCORTEX_RETRIEVAL_OPT_IN_STORE_CONTRACT_SCHEMA));
+        assert!(serialized.contains("\"baseline_key_count\":2"));
+        assert!(serialized.contains("\"raw_keys_included\":false"));
+        assert!(serialized.contains("\"content_included\":false"));
+        assert!(!serialized.contains("secret_key"));
+        assert!(!serialized.contains("secret query"));
     }
 }
 

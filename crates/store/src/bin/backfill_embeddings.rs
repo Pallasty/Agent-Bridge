@@ -1,6 +1,6 @@
-use std::path::PathBuf;
-use tokio_rusqlite::rusqlite::{Connection, params};
 use ab_store::vector::{embed_text, encode_embedding};
+use std::path::PathBuf;
+use tokio_rusqlite::rusqlite::{params, Connection};
 
 fn db_path() -> PathBuf {
     let base = std::env::var("XDG_DATA_HOME")

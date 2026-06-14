@@ -163,8 +163,7 @@ fn build_remote_run_cmd(
     // are not safe shell identifiers rather than risk an injection.
     for (k, v) in env {
         if !k.is_empty()
-            && k.chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_')
+            && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
             && !k.chars().next().unwrap().is_ascii_digit()
         {
             cmd.push_str(&format!("{}={} ", k, sh_single_quote(v)));
@@ -770,7 +769,9 @@ mod tests {
 
     #[test]
     fn is_provider_miss_detects_free_pool_errors() {
-        assert!(is_provider_miss("ProviderModelNotFoundError: ProviderModelNotFoundError"));
+        assert!(is_provider_miss(
+            "ProviderModelNotFoundError: ProviderModelNotFoundError"
+        ));
         assert!(is_provider_miss(
             "\u{1b}[91mError: Model not found: kilo/kilo-auto/free.\n"
         ));

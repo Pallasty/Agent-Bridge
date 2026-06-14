@@ -60,7 +60,11 @@ pub async fn compute_section(store: &dyn StateStore, is_compact: bool) -> Result
         return Ok(Vec::new());
     }
     ranked.sort_by(|a, b| b.1.cmp(&a.1));
-    let top_k = if is_compact { COMPACT_TOP_K } else { DEFAULT_TOP_K };
+    let top_k = if is_compact {
+        COMPACT_TOP_K
+    } else {
+        DEFAULT_TOP_K
+    };
     ranked.truncate(top_k);
 
     let mut out = Vec::new();

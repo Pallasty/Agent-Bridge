@@ -97,7 +97,9 @@ fn main() {
             }
         }
         "piper" => synth_piper(&text),
-        other => fail(format!("unknown --backend {other:?} (expected kokoro|piper)")),
+        other => fail(format!(
+            "unknown --backend {other:?} (expected kokoro|piper)"
+        )),
     };
     if let Err(e) = audio.write_wav(&out) {
         fail(format!("write wav {out}: {e}"));
@@ -136,5 +138,8 @@ fn synth_piper(text: &str) -> (AudioBuf, String) {
 
 #[cfg(not(feature = "piper"))]
 fn synth_piper(_text: &str) -> (AudioBuf, String) {
-    fail("--backend piper requested but this ab-tts-synth was not built with the `piper` feature".into())
+    fail(
+        "--backend piper requested but this ab-tts-synth was not built with the `piper` feature"
+            .into(),
+    )
 }

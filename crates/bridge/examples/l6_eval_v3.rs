@@ -134,7 +134,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .filter(|l| !l.trim().is_empty())
         .map(|l| serde_json::from_str::<CorpusItem>(l).expect("bad corpus row"))
         .collect();
-    eprintln!("- {} items ({} grounded / {} fictional)",
+    eprintln!(
+        "- {} items ({} grounded / {} fictional)",
         items.len(),
         items.iter().filter(|i| i.label == "grounded").count(),
         items.iter().filter(|i| i.label == "fictional").count(),
@@ -152,14 +153,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let res: OptionEResult = match option_e_run(&item.query, &hits, &llm).await {
             Ok(r) => r,
             Err(e) => {
-                eprintln!("  [{i}] {} — Option E error: {e}; falling back probability=0.5", item.id);
+                eprintln!(
+                    "  [{i}] {} — Option E error: {e}; falling back probability=0.5",
+                    item.id
+                );
                 continue;
             }
         };
         let verified = res.per_doc.iter().filter(|d| d.quote_verified).count();
         let score_sum_raw: u32 = res.per_doc.iter().map(|d| d.score_raw as u32).sum();
-        let score_sum_verified: u32 =
-            res.per_doc.iter().map(|d| d.score_after_verify as u32).sum();
+        let score_sum_verified: u32 = res
+            .per_doc
+            .iter()
+            .map(|d| d.score_after_verify as u32)
+            .sum();
         rows.push(Row {
             item: item.clone(),
             probability_grounded: res.probability_grounded,
@@ -242,7 +249,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             grounded.iter().filter(|p| **p < thr).count() as f32 / grounded.len() as f32
         };
         let j = detect - fp;
-        println!("| {thr:.2} | {:.1}% | {:.1}% | {j:+.3} |", detect * 100.0, fp * 100.0);
+        println!(
+            "| {thr:.2} | {:.1}% | {:.1}% | {j:+.3} |",
+            detect * 100.0,
+            fp * 100.0
+        );
         if j > best_j {
             best_j = j;
             best_t = thr;
@@ -292,10 +303,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     if gt > 0 {
-        println!("- grounded class: {gv}/{gt} quotes verified ({:.1}%)", gv as f32 / gt as f32 * 100.0);
+        println!(
+            "- grounded class: {gv}/{gt} quotes verified ({:.1}%)",
+            gv as f32 / gt as f32 * 100.0
+        );
     }
     if ft > 0 {
-        println!("- fictional class: {fv}/{ft} quotes verified ({:.1}%)", fv as f32 / ft as f32 * 100.0);
+        println!(
+            "- fictional class: {fv}/{ft} quotes verified ({:.1}%)",
+            fv as f32 / ft as f32 * 100.0
+        );
     }
     println!();
 

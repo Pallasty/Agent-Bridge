@@ -12,9 +12,8 @@
 //! Run (gate-safe: point PROBE_DB at a COPY of state.db; read-only):
 //!   PROBE_DB=/tmp/probe.db PROBE_ARM=onnx \
 //!     cargo run --release -p ab-bridge --example substrate_recall_eval
-//!   PROBE_DB=/tmp/probe.db PROBE_ARM=substrate \
-//!     AB_SUBSTRATE_PROJECTION=svd AB_SUBSTRATE_SVD_PATH=/Data/CascadeProjects/AiOT/build/svd_projection_v1.bin \
-//!     cargo run --release -p ab-bridge --example substrate_recall_eval
+//!   # Legacy Seed arm moved out of the AB runtime; build crates/seed-bridge
+//!   # directly if this historical probe needs to be revived.
 
 use ab_store::{MemoryListSort, SqliteStore, StateStore};
 use std::sync::Arc;
@@ -40,7 +39,10 @@ fn cosine(a: &[f32], b: &[f32]) -> f32 {
 fn title_of(content: &str) -> String {
     content
         .lines()
-        .map(|l| l.trim_start_matches(|c| c == '#' || c == '*' || c == '-' || c == ' ').trim())
+        .map(|l| {
+            l.trim_start_matches(|c| c == '#' || c == '*' || c == '-' || c == ' ')
+                .trim()
+        })
         .find(|l| l.chars().count() >= 8)
         .unwrap_or("")
         .chars()
@@ -72,13 +74,14 @@ fn body_minus_title(content: &str) -> String {
 async fn main() -> anyhow::Result<()> {
     let arm = std::env::var("PROBE_ARM").unwrap_or_else(|_| "onnx".into());
     let db = std::env::var("PROBE_DB").expect("set PROBE_DB to a state.db COPY path");
-    let n: usize = std::env::var("PROBE_N").ok().and_then(|s| s.parse().ok()).unwrap_or(50);
+    let n: usize = std::env::var("PROBE_N")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(50);
 
     if arm == "substrate" {
-        ab_seed_bridge::install_default().map_err(|e| anyhow::anyhow!("install_default: {e}"))?;
-        eprintln!(
-            "[arm=substrate] SeedBackend installed (svd_env={:?})",
-            std::env::var("AB_SUBSTRATE_PROJECTION").ok()
+        anyhow::bail!(
+            "PROBE_ARM=substrate moved out of ab-bridge; build the legacy crates/seed-bridge crate directly"
         );
     } else {
         eprintln!("[arm=onnx] default backend (no substrate install)");
@@ -86,8 +89,7 @@ async fn main() -> anyhow::Result<()> {
     let backend = ab_store::embedding::default_backend();
     let _ = backend.embed("warm-up probe — substrate recall eval"); // force lazy model load
 
-    let store: Arc<dyn StateStore> =
-        Arc::new(SqliteStore::open(std::path::Path::new(&db)).await?);
+    let store: Arc<dyn StateStore> = Arc::new(SqliteStore::open(std::path::Path::new(&db)).await?);
     let pool = store
         .list_memories(None, MemoryListSort::Newest, (n as u32) * 3 + 80)
         .await?;
@@ -110,8 +112,14 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Embed all docs + queries once, under this arm's backend (same space).
-    let doc_vecs: Vec<Vec<f32>> = corpus.iter().map(|(_, _, body)| backend.embed(body)).collect();
-    let query_vecs: Vec<Vec<f32>> = corpus.iter().map(|(_, title, _)| backend.embed(title)).collect();
+    let doc_vecs: Vec<Vec<f32>> = corpus
+        .iter()
+        .map(|(_, _, body)| backend.embed(body))
+        .collect();
+    let query_vecs: Vec<Vec<f32>> = corpus
+        .iter()
+        .map(|(_, title, _)| backend.embed(title))
+        .collect();
 
     let mut recall5 = 0usize;
     let mut recall1 = 0usize;
@@ -121,7 +129,10 @@ async fn main() -> anyhow::Result<()> {
             .map(|j| (j, cosine(&query_vecs[i], &doc_vecs[j])))
             .collect();
         scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        let rank = scored.iter().position(|(j, _)| *j == i).unwrap_or(usize::MAX);
+        let rank = scored
+            .iter()
+            .position(|(j, _)| *j == i)
+            .unwrap_or(usize::MAX);
         if rank == 0 {
             recall1 += 1;
         }

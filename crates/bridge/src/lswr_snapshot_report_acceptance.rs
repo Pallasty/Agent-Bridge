@@ -1,9 +1,9 @@
 use crate::lswr_snapshot_consumer::LSWR_READONLY_BRIDGE_CONSUMER_SUMMARY_SCHEMA;
 use crate::lswr_snapshot_report::{
-    LSWR_READONLY_BRIDGE_REPORT_SCHEMA, render_readonly_bridge_report,
+    render_readonly_bridge_report, LSWR_READONLY_BRIDGE_REPORT_SCHEMA,
 };
 use crate::lswr_snapshot_report_packet::{
-    LSWR_READONLY_BRIDGE_REPORT_PACKET_SCHEMA, ReadOnlyBridgeReportPacket,
+    ReadOnlyBridgeReportPacket, LSWR_READONLY_BRIDGE_REPORT_PACKET_SCHEMA,
 };
 use serde::{Deserialize, Serialize};
 
@@ -268,7 +268,11 @@ fn gate(
 }
 
 fn verdict(ok: bool) -> &'static str {
-    if ok { PASSED } else { FAILED }
+    if ok {
+        PASSED
+    } else {
+        FAILED
+    }
 }
 
 fn overall_verdict(gates: &[ReadOnlyBridgeAcceptanceGate]) -> String {
@@ -311,7 +315,11 @@ fn guidance_for(overall_verdict: &str) -> Vec<String> {
 }
 
 fn bool_text(value: bool) -> &'static str {
-    if value { "true" } else { "false" }
+    if value {
+        "true"
+    } else {
+        "false"
+    }
 }
 
 fn optional_count(value: Option<usize>) -> String {

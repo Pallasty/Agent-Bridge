@@ -13,7 +13,7 @@ Contract:
   - Registered on PostToolUse (tool outcomes / errors) + UserPromptSubmit
     (prompt text, for correction detection).
 
-Wipe anytime:  rm -f ~/.cache/agent-bridge/instinct-probe/observations.jsonl
+Wipe anytime:  rm -f /Data/agent-bridge/instinct-probe/observations.jsonl
 Disable:       set AB_INSTINCT_OBSERVER=0  (hook becomes a no-op)
 """
 import os
@@ -21,8 +21,17 @@ import sys
 import json
 import time
 
-LOG_DIR = os.path.expanduser("~/.cache/agent-bridge/instinct-probe")
-LOG = os.path.join(LOG_DIR, "observations.jsonl")
+def _default_log_path():
+    explicit = os.environ.get("AB_INSTINCT_OBSERVER_LOG", "").strip()
+    if explicit:
+        return os.path.expanduser(explicit)
+    if os.path.isdir("/Data") and os.access("/Data", os.W_OK):
+        return "/Data/agent-bridge/instinct-probe/observations.jsonl"
+    return os.path.expanduser("~/.cache/agent-bridge/instinct-probe/observations.jsonl")
+
+
+LOG = _default_log_path()
+LOG_DIR = os.path.dirname(LOG)
 MAX_BYTES = 8 * 1024 * 1024  # self-cap; stop appending past 8 MiB (probe, not prod)
 DIR_MODE = 0o700
 FILE_MODE = 0o600

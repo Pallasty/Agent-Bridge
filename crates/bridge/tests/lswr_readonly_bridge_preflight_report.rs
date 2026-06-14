@@ -4,9 +4,9 @@ use ab_bridge::lswr_snapshot_wrapper_exposure_dry_run::{
     evaluate_readonly_bridge_wrapper_exposure_dry_run,
 };
 use ab_bridge::lswr_snapshot_wrapper_preflight_report::{
-    LSWR_READONLY_BRIDGE_WRAPPER_PREFLIGHT_REPORT_SCHEMA, ReadOnlyBridgeWrapperPreflightReport,
     build_readonly_bridge_wrapper_preflight_report,
     build_readonly_bridge_wrapper_preflight_report_from_parts,
+    ReadOnlyBridgeWrapperPreflightReport, LSWR_READONLY_BRIDGE_WRAPPER_PREFLIGHT_REPORT_SCHEMA,
 };
 
 const PREFLIGHT_REPORT_JSON: &str =
@@ -52,13 +52,11 @@ fn preflight_report_preserves_readonly_safety_boundary() {
     assert!(report.safety_boundary.no_host_path);
     assert!(report.safety_boundary.no_live_runtime);
     assert!(report.safety_boundary.no_gui_capture);
-    assert!(
-        report
-            .safety_boundary
-            .disallowed_capabilities
-            .iter()
-            .any(|capability| capability == "runtime_launch")
-    );
+    assert!(report
+        .safety_boundary
+        .disallowed_capabilities
+        .iter()
+        .any(|capability| capability == "runtime_launch"));
 }
 
 #[test]
@@ -92,26 +90,18 @@ fn preflight_report_blocks_rejected_dry_run() {
 fn preflight_report_markdown_keeps_registry_boundary_visible() {
     let report = build_readonly_bridge_wrapper_preflight_report();
 
-    assert!(
-        report
-            .report_markdown
-            .contains("# LSWR Read-Only Bridge Wrapper Preflight")
-    );
-    assert!(
-        report
-            .report_markdown
-            .contains("- Applies registry change: `false`")
-    );
-    assert!(
-        report
-            .report_markdown
-            .contains("- Separate registry change required: `true`")
-    );
-    assert!(
-        report
-            .report_markdown
-            .contains("`preflight_consistency`: `passed`")
-    );
+    assert!(report
+        .report_markdown
+        .contains("# LSWR Read-Only Bridge Wrapper Preflight"));
+    assert!(report
+        .report_markdown
+        .contains("- Applies registry change: `false`"));
+    assert!(report
+        .report_markdown
+        .contains("- Separate registry change required: `true`"));
+    assert!(report
+        .report_markdown
+        .contains("`preflight_consistency`: `passed`"));
 }
 
 #[test]

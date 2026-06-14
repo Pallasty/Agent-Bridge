@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """delta① observer audit snapshot — analyze the observer sidecar log.
 
-Reads ~/.cache/agent-bridge/instinct-probe/observations.jsonl (written by
-ab-instinct-observer-hook) and estimates the per-session density of clean
+Reads the observer sidecar log written by ab-instinct-observer-hook and
+estimates the per-session density of clean
 behavioral signals, to decide whether an auto-miner is worth building.
 Spec/falsifier: docs/design/ECC_INSTINCT_MINING_PROBE_2026_05_24.md (Phase 0b).
 
@@ -28,7 +28,16 @@ import sys
 from collections import defaultdict
 from datetime import datetime, timezone
 
-DEFAULT_LOG = os.path.expanduser("~/.cache/agent-bridge/instinct-probe/observations.jsonl")
+def default_log_path():
+    explicit = os.environ.get("AB_INSTINCT_OBSERVER_LOG", "").strip()
+    if explicit:
+        return os.path.expanduser(explicit)
+    if os.path.isdir("/Data") and os.access("/Data", os.W_OK):
+        return "/Data/agent-bridge/instinct-probe/observations.jsonl"
+    return os.path.expanduser("~/.cache/agent-bridge/instinct-probe/observations.jsonl")
+
+
+DEFAULT_LOG = default_log_path()
 
 # Bilingual negation / redirection cues. Deliberately broad (density is an
 # upper-bound estimate; FPs are acceptable, FNs would hide real signal).

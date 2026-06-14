@@ -135,13 +135,16 @@ mod tests {
 
     #[test]
     fn parse_typical_web_hit() {
-        let v: serde_json::Value = serde_json::from_str(r#"{
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{
             "title":"Rust Programming Language",
             "url":"https://www.rust-lang.org/",
             "description":"A language empowering everyone…",
             "age":"2023-01-15",
             "language":"en"
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
         let h = parse_web_hit(&v);
         assert_eq!(h.title, "Rust Programming Language");
         assert_eq!(h.url, "https://www.rust-lang.org/");
@@ -151,9 +154,12 @@ mod tests {
 
     #[test]
     fn parse_minimal_web_hit() {
-        let v: serde_json::Value = serde_json::from_str(r#"{
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{
             "title":"x","url":"https://x","description":""
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
         let h = parse_web_hit(&v);
         assert_eq!(h.title, "x");
         assert!(h.age.is_none());

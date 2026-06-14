@@ -41,8 +41,11 @@ async fn click_by_ref_real_chrome_e2e() {
     let tree = b.snapshot_a11y(&page).await.expect("snapshot_a11y");
 
     // (1) positive control: a visible button gets a ref AND a real-mouse click fires it.
-    let vis = find_ref(&tree, "button", "Click Visible").expect("visible button should have an @eN ref");
-    b.click_by_ref(&page, &vis).await.expect("click_by_ref on visible button");
+    let vis =
+        find_ref(&tree, "button", "Click Visible").expect("visible button should have an @eN ref");
+    b.click_by_ref(&page, &vis)
+        .await
+        .expect("click_by_ref on visible button");
     let title = b.eval(&page, "document.title").await.expect("eval title");
     assert!(
         title.to_string().contains("VIS"),

@@ -7,7 +7,7 @@
 use ab_core::Result;
 use ab_mcp::{McpTool, ToolContext, ToolResult, ToolSchema};
 use async_trait::async_trait;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -168,12 +168,11 @@ fn build_query_request(args: &Value, default_entities: Option<Vec<String>>) -> O
     let mut request = serde_json::Map::new();
     request.insert(
         "request_id".to_string(),
-        json!(
-            args.get("request_id")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-                .unwrap_or_else(|| request_id("ab-world-query"))
-        ),
+        json!(args
+            .get("request_id")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| request_id("ab-world-query"))),
     );
     request.insert(
         "world.visibility.query".to_string(),
@@ -212,12 +211,11 @@ fn build_patch_request(args: &Value) -> std::result::Result<Value, String> {
     let mut request = serde_json::Map::new();
     request.insert(
         "request_id".to_string(),
-        json!(
-            args.get("request_id")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-                .unwrap_or_else(|| request_id("ab-world-patch"))
-        ),
+        json!(args
+            .get("request_id")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| request_id("ab-world-patch"))),
     );
     let mut patch = serde_json::Map::new();
     patch.insert("op".to_string(), json!(op));

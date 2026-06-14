@@ -22,11 +22,7 @@ use std::collections::{HashMap, HashSet};
 /// - Recently accessed (sorted by `last_accessed_at DESC` via `Recent`).
 /// - Non-skill (skills are 88% of store and rarely the right seed).
 /// - Importance ≥ 0.4 (filters out auto-curated implicit observations).
-async fn pick_seeds(
-    store: &dyn StateStore,
-    cwd: &str,
-    seed_count: usize,
-) -> Result<Vec<String>> {
+async fn pick_seeds(store: &dyn StateStore, cwd: &str, seed_count: usize) -> Result<Vec<String>> {
     let rows = store
         .list_memories_in_scope(cwd, None, MemoryListSort::Recent, 60)
         .await?;
@@ -85,9 +81,8 @@ pub async fn compute_section(
 
     let mut ranked: Vec<(String, (f64, String))> = best.into_iter().collect();
     ranked.sort_by(|a, b| {
-        b.1
-             .0
-            .partial_cmp(&a.1.0)
+        b.1 .0
+            .partial_cmp(&a.1 .0)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     let cap = if is_compact { 8 } else { 12 };
@@ -97,7 +92,8 @@ pub async fn compute_section(
     out.push(if is_compact {
         "=== Activated by recent context ===".to_string()
     } else {
-        "=== Activated by recent context (γ' wiring — α/β/P4 edges from recent seeds) ===".to_string()
+        "=== Activated by recent context (γ' wiring — α/β/P4 edges from recent seeds) ==="
+            .to_string()
     });
     out.push(String::new());
     out.push(format!(

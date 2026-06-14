@@ -10,7 +10,7 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 use crate::lswr_present::LSWR_PRESENT_PACKET_SCHEMA;
 use crate::present::{ArtifactInfo, OUTCOME_SIDECAR_SUFFIX};
@@ -443,7 +443,7 @@ fn get_path<'a>(value: &'a Value, path: &[&str]) -> Option<&'a Value> {
 mod tests {
     use super::*;
     use crate::lswr_present::{
-        PresentPacketOptions, WORLD_TOOL_SCHEMA, world_envelope_to_present_packet,
+        world_envelope_to_present_packet, PresentPacketOptions, WORLD_TOOL_SCHEMA,
     };
     use std::fs;
 
@@ -797,7 +797,10 @@ mod tests {
         ];
         let projection = outcome_admissions_projection(&artifacts, false, 1_780_000_010, 86_400);
 
-        assert_eq!(projection["schema"], LSWR_OUTCOME_ADMISSIONS_PROJECTION_SCHEMA);
+        assert_eq!(
+            projection["schema"],
+            LSWR_OUTCOME_ADMISSIONS_PROJECTION_SCHEMA
+        );
         assert_eq!(projection["scanned_artifacts"], json!(5));
         assert_eq!(projection["skipped_non_lswr_count"], json!(1));
         assert_eq!(projection["lswr_artifact_count"], json!(4));
@@ -849,7 +852,10 @@ mod tests {
 
         assert_eq!(projection["lswr_artifact_count"], json!(1));
         assert_eq!(projection["rejected_count"], json!(1));
-        assert_eq!(projection["reason_counts"]["dual_payload_missing"], json!(1));
+        assert_eq!(
+            projection["reason_counts"]["dual_payload_missing"],
+            json!(1)
+        );
         assert_eq!(
             projection["admissions"][0]["admission"]["reason"],
             "dual_payload_missing"

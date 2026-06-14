@@ -192,8 +192,16 @@ impl VersionVector {
         while ai < a.len() || bi < b.len() {
             let a_missing = ai >= a.len();
             let b_missing = bi >= b.len();
-            let av = if a_missing { Counter { id: 0, value: 0 } } else { a[ai] };
-            let bv = if b_missing { Counter { id: 0, value: 0 } } else { b[bi] };
+            let av = if a_missing {
+                Counter { id: 0, value: 0 }
+            } else {
+                a[ai]
+            };
+            let bv = if b_missing {
+                Counter { id: 0, value: 0 }
+            } else {
+                b[bi]
+            };
 
             if !a_missing && !b_missing && av.id == bv.id {
                 // Both sides have this counter.
@@ -341,7 +349,10 @@ mod tests {
     const MAC: NodeId = 0x22;
 
     fn vv(pairs: &[(NodeId, u64)]) -> VersionVector {
-        let mut counters: Vec<Counter> = pairs.iter().map(|&(id, value)| Counter { id, value }).collect();
+        let mut counters: Vec<Counter> = pairs
+            .iter()
+            .map(|&(id, value)| Counter { id, value })
+            .collect();
         counters.sort_by_key(|c| c.id);
         VersionVector { counters }
     }

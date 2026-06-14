@@ -60,9 +60,21 @@ ECC 的 `ECC_HOOK_PROFILE=minimal|standard|strict` 是上述 toggle 的**便利�
 
 ```sh
 # 关闭：AB_INSTINCT_OBSERVER=0（或从 settings.json 摘掉两处 hook 条目）
-# 清数据：rm -f ~/.cache/agent-bridge/instinct-probe/observations.jsonl
+# 默认路径：有 /Data 时用 /Data/agent-bridge/instinct-probe/observations.jsonl
+# 覆盖路径：AB_INSTINCT_OBSERVER_LOG=/path/to/observations.jsonl
+# 清数据：rm -f "${AB_INSTINCT_OBSERVER_LOG:-/Data/agent-bridge/instinct-probe/observations.jsonl}"
 # 跑只读审计快照：python3 scripts/instinct_density_audit.py
 # JSON 输出：python3 scripts/instinct_density_audit.py --json
+# Phase 1 候选预览：agent-bridge instinct candidates --limit 20 --json
+# Phase 1 人工审核包预览：agent-bridge instinct review-packet --limit 20 --json
+# 显式写出脱敏 JSON/Markdown 审核材料：agent-bridge instinct review-packet --limit 20 --write
+# 记录单个候选的人工决策，默认预览：agent-bridge instinct review-decision --packet-json <packet.json> --candidate-id instinct-candidate-0001 --decision approve
+# 显式追加本地决策审计日志：agent-bridge instinct review-decision --packet-json <packet.json> --candidate-id instinct-candidate-0001 --decision approve --write
+# 已批准候选的 memory 写入预检，仍不写 memory：agent-bridge instinct memory-preflight --packet-json <packet.json> --candidate-id instinct-candidate-0001 --memory-key lesson:foo --memory-kind lesson --memory-body "..."
+# 从 ready preflight 显式写入 memory，默认仍预览：agent-bridge instinct memory-write --preflight-json <preflight.json> --write
+# 只读汇总审核状态：agent-bridge instinct review-status
+# 只读查看最新审核包的逐候选 inbox：agent-bridge instinct review-inbox
+# 只读查看单个候选上下文，默认不显示 prompt 摘要：agent-bridge instinct review-context --packet-json <packet.json> --candidate-id instinct-candidate-0001
 ```
 
 `agent-bridge doctor` and the MCP `capabilities` tool also expose the observer
@@ -70,8 +82,62 @@ as read-only operational state. Missing or empty logs are not warnings: the
 probe is optional, and `NO_SIGNAL` / `INSUFFICIENT_SESSIONS` should block miner
 work rather than block normal Agent-Bridge startup.
 
+Phase 1 candidate preview is also read-only: it reports redacted correction and
+clean error-resolution candidates for human review, but does not write memories,
+persist a review queue, or include raw prompt/tool input/output bodies.
+Synthetic or malformed session ids are ignored so local test fixtures do not
+enter the human-review packet.
+
+`agent-bridge instinct review-packet` turns the same redacted candidates into a
+human-review packet. It is a dry-run preview unless `--write` is passed; even
+when writing packet files, it only creates private local JSON/Markdown review
+materials and still does not write memory, persist an approval queue, auto-apply
+anything, or include raw prompt/tool payload bodies. The default review
+directory is `/Data/agent-bridge/instinct-review` when `/Data` is available, or
+`~/.cache/agent-bridge/instinct-review` otherwise; `AB_INSTINCT_REVIEW_DIR` can
+override it.
+
+`agent-bridge instinct review-decision` records a human `approve`, `reject`, or
+`defer` decision for one candidate from a packet. It is also dry-run by default;
+`--write` appends a private local JSONL audit record (`decisions.jsonl` by
+default, or `AB_INSTINCT_REVIEW_DECISIONS` / `--out`). An `approve` decision only
+marks the candidate as eligible for a later explicit memory-write preflight; it
+does not write memory or authorize automatic application.
+
+`agent-bridge instinct memory-preflight` consumes a review packet, the latest
+decision for one candidate, and human-authored draft memory fields. It only marks
+the preflight ready when the latest decision is `approve` and the draft has a
+key, kind, and body. It can write a private JSON/Markdown preflight packet with
+`--write`, but it still does not call `memory_save` or write memory; the actual
+memory write remains a separate explicit command.
+
+`agent-bridge instinct memory-write` is that final explicit command. It accepts
+only a ready preflight JSON file, never free-form memory text; without `--write`
+it previews the exact `MemoryRecord` that would be saved. With `--write`, it
+opens the Agent-Bridge state DB and calls the existing `memory_save` path for
+the human-authored draft from the preflight packet, then appends a private
+`memory-writes.jsonl` receipt (`AB_INSTINCT_MEMORY_WRITE_RECEIPTS` /
+`--receipt-out` can override the path).
+
+`agent-bridge instinct review-status` is read-only and summarizes the private
+review sidecar directory: review packets, decision counts, preflight packets,
+memory-write receipts, and how many preflights are ready for a separate memory
+write. It does not touch the memory DB.
+
+`agent-bridge instinct review-inbox` is also read-only. It opens the newest
+review packet by default (or `--packet-json`) and merges each candidate with its
+latest local decision so pending/approved/rejected/deferred rows can be reviewed
+without opening the full Markdown packet.
+
+`agent-bridge instinct review-context` is read-only for one candidate. By
+default it reports only redacted packet metadata; `--include-local-excerpt`
+explicitly reads the private observer log and prints the bounded local prompt
+excerpt for human review. It still does not write decisions or memories.
+
 Security posture: the observer sidecar is local-only and private by default.
-The hook creates `~/.cache/agent-bridge/instinct-probe` as `0700` and
-`observations.jsonl` as `0600`, and `doctor` warns if an older file keeps wider
-permissions. The sidecar may contain prompt/tool summaries, so do not make it
-group/world-readable.
+The hook honors `AB_INSTINCT_OBSERVER_LOG`; otherwise it prefers
+`/Data/agent-bridge/instinct-probe/observations.jsonl` when `/Data` is writable,
+falling back to `~/.cache/agent-bridge/instinct-probe/observations.jsonl`. The
+hook creates the sidecar directory as `0700` and `observations.jsonl` as `0600`,
+and `doctor` warns if an older file keeps wider permissions. The sidecar may
+contain prompt/tool summaries, so do not make it group/world-readable.

@@ -695,7 +695,7 @@ mod tests {
         // them (they may belong to a CSI / SS3 / etc.).
         let mut p = OscParser::new();
         let items = p.feed_segments(b"a\x1b[31mb"); // CSI red, not OSC
-        // The "a" comes out, then ESC and '[' resurface as text, then "31mb".
+                                                    // The "a" comes out, then ESC and '[' resurface as text, then "31mb".
         let mut all_text = Vec::new();
         for item in &items {
             if let FeedItem::Text(b) = item {

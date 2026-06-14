@@ -16,6 +16,7 @@ AUDIT = ROOT / "scripts/instinct_density_audit.py"
 def run_hook(home, payload):
     env = os.environ.copy()
     env["HOME"] = str(home)
+    env["AB_INSTINCT_OBSERVER_LOG"] = str(observer_log(home))
     subprocess.run(
         [sys.executable, str(HOOK)],
         input=json.dumps(payload),
@@ -25,8 +26,12 @@ def run_hook(home, payload):
     )
 
 
+def observer_log(home):
+    return home / ".cache/agent-bridge/instinct-probe/observations.jsonl"
+
+
 def read_observations(home):
-    path = home / ".cache/agent-bridge/instinct-probe/observations.jsonl"
+    path = observer_log(home)
     with path.open(encoding="utf-8") as f:
         return [json.loads(line) for line in f if line.strip()]
 

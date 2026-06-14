@@ -36,7 +36,10 @@ pub struct AudioBuf {
 
 impl AudioBuf {
     pub fn new(samples: Vec<f32>, sample_rate: u32) -> Self {
-        Self { samples, sample_rate }
+        Self {
+            samples,
+            sample_rate,
+        }
     }
 
     /// Wall-clock duration of the buffer — the value the speech-mode falsifier
@@ -172,7 +175,10 @@ mod tests {
     #[test]
     fn audiobuf_rms_and_i16_clamp() {
         let buf = AudioBuf::new(vec![1.0, -1.0, 1.0, -1.0], 48_000);
-        assert!((buf.rms() - 1.0).abs() < 1e-6, "full-scale square has rms 1.0");
+        assert!(
+            (buf.rms() - 1.0).abs() < 1e-6,
+            "full-scale square has rms 1.0"
+        );
         // out-of-range samples clamp, not wrap
         let clipped = AudioBuf::new(vec![2.0, -2.0], 48_000).to_i16();
         assert_eq!(clipped, vec![32767i16, -32767i16]);
@@ -195,7 +201,11 @@ mod tests {
             24_000,
             "sample rate"
         );
-        assert_eq!(u16::from_le_bytes([bytes[34], bytes[35]]), 16, "bits/sample");
+        assert_eq!(
+            u16::from_le_bytes([bytes[34], bytes[35]]),
+            16,
+            "bits/sample"
+        );
         assert_eq!(&bytes[36..40], b"data");
         assert_eq!(
             u32::from_le_bytes([bytes[40], bytes[41], bytes[42], bytes[43]]),

@@ -1,6 +1,6 @@
 use crate::lswr_snapshot_consumer::{ConsumerSafety, ReadOnlyBridgeConsumerSummary};
 use crate::lswr_snapshot_report::{
-    LSWR_READONLY_BRIDGE_REPORT_SCHEMA, render_readonly_bridge_report,
+    render_readonly_bridge_report, LSWR_READONLY_BRIDGE_REPORT_SCHEMA,
 };
 use serde::{Deserialize, Serialize};
 

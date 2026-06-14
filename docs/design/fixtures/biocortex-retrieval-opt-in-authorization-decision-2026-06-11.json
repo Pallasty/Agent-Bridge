@@ -1,0 +1,52 @@
+{
+  "schema": "agent_bridge.biocortex_retrieval.opt_in_authorization_decision.v0",
+  "created_at": "2026-06-11T00:00:00Z",
+  "decision": "authorized",
+  "authorization_state": "authorized",
+  "authorized_scope": "opt_in_experiment",
+  "human_authorizer": "user",
+  "human_decision_text": "很好！我授权，你按照你自己的思路继续推进即可",
+  "source": {
+    "channel": "chat",
+    "date": "2026-06-11",
+    "context": "response to request for opt_in_experiment authorization"
+  },
+  "commit_under_review": "18341a26de9f93859f0467052ad32e97b1d5db73",
+  "implementation_allowed": true,
+  "runtime_adapter_approved": false,
+  "default_search_order_change_allowed": false,
+  "default_retrieval_influence_authorized": false,
+  "hybrid_retrieval_influence_authorized": false,
+  "semantic_retrieval_influence_authorized": false,
+  "authorized_implementation": {
+    "may_add_cargo_feature": "biocortex-retrieval-opt-in",
+    "may_add_runtime_enable_env": "AB_BIOCORTEX_RETRIEVAL_OPT_IN",
+    "may_add_per_call_opt_in_surface": true,
+    "may_affect_only_explicitly_opted_in_fts_calls": true,
+    "affected_call_site": {
+      "file": "crates/store/src/sqlite.rs",
+      "line": 3067,
+      "function": "SqliteStore::memory_search"
+    },
+    "must_keep_operator_disable": "AB_BIOCORTEX_RETRIEVAL_DISABLE",
+    "must_return_baseline_without_per_call_opt_in": true,
+    "must_return_baseline_on_absent_error_timeout_low_coverage_malformed_rows": true
+  },
+  "not_authorized": [
+    "default_retrieval_influence_fts",
+    "default_retrieval_influence_hybrid",
+    "default_retrieval_influence_semantic",
+    "runtime_adapter_approved",
+    "default_search_order_change_allowed",
+    "affecting_calls_without_explicit_opt_in",
+    "production_use_without_post_implementation_review"
+  ],
+  "required_next_step": "feature_gated_skeleton_and_guardrail_tests",
+  "requires_post_implementation_review_before_use": true,
+  "related_artifacts": [
+    "docs/design/BIOCORTEX_RETRIEVAL_OPT_IN_EXPERIMENT_PLAN_2026_06_11.md",
+    "docs/design/BIOCORTEX_RETRIEVAL_OPT_IN_AUTHORIZATION_REQUEST_2026_06_11.md",
+    "docs/design/BIOCORTEX_RETRIEVAL_DEFAULT_INFLUENCE_CONTRACT_2026_06_11.md",
+    "docs/design/BIOCORTEX_RETRIEVAL_RUNTIME_PROOF_2026_06_11.md"
+  ]
+}

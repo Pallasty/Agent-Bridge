@@ -1021,10 +1021,7 @@ mod tests {
             "reindexed all 1978 rows",                      // 4-digit number, no #
             "a plain sentence with no identifiers at all",
         ] {
-            assert!(
-                !contains_unverified_identifier(s),
-                "should NOT flag: {s}"
-            );
+            assert!(!contains_unverified_identifier(s), "should NOT flag: {s}");
         }
     }
 

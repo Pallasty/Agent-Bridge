@@ -43,7 +43,12 @@ async fn main() -> anyhow::Result<()> {
         .and_then(|s| s.parse().ok())
         .unwrap_or(5);
 
-    eprintln!("L6 eval — db={} corpus={} k={}", db_path.display(), corpus_path.display(), k);
+    eprintln!(
+        "L6 eval — db={} corpus={} k={}",
+        db_path.display(),
+        corpus_path.display(),
+        k
+    );
 
     let corpus_raw = std::fs::read_to_string(&corpus_path)?;
     let items: Vec<CorpusItem> = corpus_raw
@@ -53,7 +58,10 @@ async fn main() -> anyhow::Result<()> {
         .collect::<Result<_, _>>()?;
     let total_grounded = items.iter().filter(|i| i.label == "grounded").count();
     let total_fictional = items.iter().filter(|i| i.label == "fictional").count();
-    eprintln!("corpus: {} grounded + {} fictional", total_grounded, total_fictional);
+    eprintln!(
+        "corpus: {} grounded + {} fictional",
+        total_grounded, total_fictional
+    );
 
     // ── Open store + warm embedding backend ──────────────────────────────
     let store_concrete = SqliteStore::open(&db_path).await?;
@@ -69,7 +77,10 @@ async fn main() -> anyhow::Result<()> {
     let mut rows: Vec<(CorpusItem, f32, usize)> = Vec::with_capacity(items.len());
     for item in &items {
         let hits = store.memory_top_k_cosine(&item.query, k).await?;
-        let max_cos = hits.iter().map(|h| h.cosine).fold(f32::NEG_INFINITY, f32::max);
+        let max_cos = hits
+            .iter()
+            .map(|h| h.cosine)
+            .fold(f32::NEG_INFINITY, f32::max);
         let novelty = if hits.is_empty() {
             1.0_f32
         } else {
@@ -81,7 +92,12 @@ async fn main() -> anyhow::Result<()> {
     // ── Per-item table ───────────────────────────────────────────────────
     println!("# L6-P1 / L6-P2 evaluation");
     println!();
-    println!("Backend: {} | k={} | corpus={} items", embedding_name(), k, items.len());
+    println!(
+        "Backend: {} | k={} | corpus={} items",
+        embedding_name(),
+        k,
+        items.len()
+    );
     println!();
     println!("## Per-item novelty");
     println!();
@@ -100,7 +116,9 @@ async fn main() -> anyhow::Result<()> {
     // ── Threshold sweep ──────────────────────────────────────────────────
     println!("## Threshold sweep");
     println!();
-    println!("| threshold | detect (fictional≥thr) | FP (grounded≥thr) | P1 PASS≥60% | P2 PASS≤25% |");
+    println!(
+        "| threshold | detect (fictional≥thr) | FP (grounded≥thr) | P1 PASS≥60% | P2 PASS≤25% |"
+    );
     println!("|---|---|---|---|---|");
     let mut best_threshold: Option<(f32, f32, f32)> = None;
     for thr_pct in (40..=90).step_by(5) {
@@ -122,8 +140,12 @@ async fn main() -> anyhow::Result<()> {
         println!(
             "| {:.2} | {}/{} = {:.1}% | {}/{} = {:.1}% | {} | {} |",
             thr,
-            tp, total_fictional, detect * 100.0,
-            fp, total_grounded, fpr * 100.0,
+            tp,
+            total_fictional,
+            detect * 100.0,
+            fp,
+            total_grounded,
+            fpr * 100.0,
             if p1_ok { "✓" } else { "✗" },
             if p2_ok { "✓" } else { "✗" }
         );
@@ -157,7 +179,9 @@ async fn main() -> anyhow::Result<()> {
             println!();
             println!("Possible causes to investigate:");
             println!("- Embedding backend lacks discrimination (hash fallback active?)");
-            println!("- Corpus design: fictional queries share too many tokens with stored content");
+            println!(
+                "- Corpus design: fictional queries share too many tokens with stored content"
+            );
             println!("- k too small or too large for the novelty signal");
         }
     }

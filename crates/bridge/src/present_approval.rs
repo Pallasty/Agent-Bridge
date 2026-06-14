@@ -251,7 +251,8 @@ mod tests {
         let r1 = parse_approval_readback(&as_obj);
         assert!(r1.decided && r1.decision == "approve" && r1.token == "abc" && r1.wired);
         // stringified JSON (some backends return eval results as strings)
-        let as_str = json!("{\"decided\":true,\"decision\":\"reject\",\"token\":\"def\",\"wired\":true}");
+        let as_str =
+            json!("{\"decided\":true,\"decision\":\"reject\",\"token\":\"def\",\"wired\":true}");
         let r2 = parse_approval_readback(&as_str);
         assert!(r2.decided && r2.decision == "reject" && r2.token == "def" && r2.wired);
         // a readback reporting no affordance parses wired=false.

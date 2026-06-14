@@ -1,0 +1,133 @@
+{
+  "schema": "agent_bridge.biocortex_retrieval.post_decision_runtime_readiness_summary.v0",
+  "created_at": "2026-06-13T00:00:00Z",
+  "source_decision_packet": "target/biocortex-runtime-influence-decision-20260613/runtime-influence-decision-packet.json",
+  "artifact_dir": "target/biocortex-post-decision-readiness-20260613",
+  "commit_under_check": "005c6fa",
+  "authorization_scope": "explicit_opt_in_fts_runtime_influence",
+  "decision_packet_summary": {
+    "implementation_allowed": true,
+    "runtime_adapter_approved": true,
+    "ordering_behavior_connection_authorized": true,
+    "default_search_order_change_allowed": false,
+    "default_retrieval_influence_authorized": false,
+    "hybrid_retrieval_influence_authorized": false,
+    "semantic_retrieval_influence_authorized": false,
+    "writes_approval": false,
+    "changes_memory_search_order": false,
+    "this_packet_changes_return_order": false,
+    "this_packet_connects_ordering_behavior": false
+  },
+  "artifacts": {
+    "store_trial": "target/biocortex-post-decision-readiness-20260613/01-store-trial.json",
+    "batch_diagnostics": "target/biocortex-post-decision-readiness-20260613/02-batch-diagnostics.json",
+    "runtime_readiness_packet": "target/biocortex-post-decision-readiness-20260613/03-runtime-readiness-packet.json",
+    "runtime_transition_gate": "target/biocortex-post-decision-readiness-20260613/04-runtime-transition-gate.json",
+    "gated_store_trial": "target/biocortex-post-decision-readiness-20260613/05-gated-store-trial.json",
+    "gated_batch_diagnostics": "target/biocortex-post-decision-readiness-20260613/06-gated-batch-diagnostics.json",
+    "runtime_readiness_packet_with_gated_batch": "target/biocortex-post-decision-readiness-20260613/07-runtime-readiness-packet-gated-batch.json",
+    "status": "target/biocortex-post-decision-readiness-20260613/08-status.json"
+  },
+  "store_trial": {
+    "schema": "agent_bridge.biocortex_retrieval.opt_in_store_trial.v0",
+    "status": "baseline_returned",
+    "calls_memory_search": true,
+    "runs_biocortex": false,
+    "runtime_preflight_blockers": [
+      "baseline_empty"
+    ],
+    "changes_memory_search_order": false,
+    "default_calls_unchanged": true
+  },
+  "batch_diagnostics": {
+    "schema": "agent_bridge.biocortex_retrieval.opt_in_batch_diagnostics.v0",
+    "status": "completed",
+    "query_count": 2,
+    "baseline_empty_count": 2,
+    "runs_biocortex_count": 0,
+    "changes_memory_search_order": false,
+    "default_calls_unchanged": true
+  },
+  "runtime_readiness_with_gated_batch": {
+    "schema": "agent_bridge.biocortex_retrieval.opt_in_runtime_readiness_packet.v0",
+    "status": "completed",
+    "control_plane_ready": true,
+    "runtime_readiness_ready": true,
+    "live_probe_state": "control_plane_ready_no_live_candidates",
+    "may_accept_controlled_explicit_opt_in_fts_calls": true,
+    "live_order_influence_ready": false,
+    "default_influence_ready": false,
+    "batch_diagnostics_evidence_source": "runtime_transition_gated_batch_diagnostics",
+    "batch_diagnostics_transition_gated": true,
+    "blockers": []
+  },
+  "runtime_transition_gate": {
+    "schema": "agent_bridge.biocortex_retrieval.opt_in_runtime_transition_gate.v0",
+    "status": "transition_allowed",
+    "requested_mode": "fts",
+    "per_call_opt_in": true,
+    "operator_disabled": false,
+    "transition_allowed": true,
+    "may_call_controlled_store_trial": true,
+    "may_run_runtime_adapter_for_explicit_opt_in_fts": true,
+    "may_connect_ordering_behavior_for_explicit_opt_in_fts": true,
+    "may_change_default_memory_search_order": false,
+    "blockers": []
+  },
+  "gated_store_trial": {
+    "schema": "agent_bridge.biocortex_retrieval.opt_in_gated_store_trial.v0",
+    "status": "transition_gate_consumed",
+    "store_trial_called": true,
+    "calls_memory_search": true,
+    "runs_biocortex": false,
+    "changes_memory_search_order": false,
+    "default_calls_unchanged": true
+  },
+  "gated_batch_diagnostics": {
+    "schema": "agent_bridge.biocortex_retrieval.opt_in_gated_batch_diagnostics.v0",
+    "status": "completed",
+    "query_count": 2,
+    "transition_gate_allowed_count": 2,
+    "store_trial_called_count": 2,
+    "calls_memory_search_count": 2,
+    "runs_biocortex_count": 0,
+    "actual_order_changed_count": 0,
+    "changes_memory_search_order": false,
+    "default_calls_unchanged": true
+  },
+  "controlled_trial_readiness": {
+    "schema": "agent_bridge.biocortex_retrieval.controlled_trial_readiness_summary.v0",
+    "status": "ready_for_controlled_explicit_opt_in_fts_trial",
+    "ready_for_controlled_trial": true,
+    "blockers": [],
+    "status_surface_calls_memory_search": false,
+    "status_surface_runs_biocortex": false,
+    "status_surface_changes_memory_search_order": false,
+    "raw_packets_included": false,
+    "raw_queries_included": false,
+    "raw_keys_included": false,
+    "content_included": false
+  },
+  "post_runtime_evidence_summary": {
+    "backed": false,
+    "ready": false,
+    "state": "not_provided_legacy_compatible",
+    "acceptable_for_controlled_explicit_opt_in_fts_trial": true,
+    "recommended_future_tightening": "produce_post_runtime_evidence_summary_backed_decision_before_wider_rollout"
+  },
+  "boundary": {
+    "requires_compile_feature": "biocortex-retrieval-opt-in",
+    "requires_runtime_enable_env": "AB_BIOCORTEX_RETRIEVAL_OPT_IN",
+    "requires_operator_disable_absent": "AB_BIOCORTEX_RETRIEVAL_DISABLE",
+    "requires_per_call_opt_in": true,
+    "requires_fail_open_to_baseline": true,
+    "requires_redacted_audit_only": true,
+    "default_memory_search_unchanged": true,
+    "hybrid_retrieval_unchanged": true,
+    "semantic_retrieval_unchanged": true,
+    "default_search_order_change_allowed": false,
+    "approval_writes_allowed": false,
+    "writes_approval": false,
+    "raw_probe_query_or_key_leak_check": "passed"
+  }
+}

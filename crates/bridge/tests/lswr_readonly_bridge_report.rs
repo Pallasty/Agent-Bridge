@@ -1,9 +1,9 @@
 use ab_bridge::lswr_snapshot_bridge::ReadOnlyBridgeSnapshot;
 use ab_bridge::lswr_snapshot_consumer::{
-    ReadOnlyBridgeConsumerSummary, build_readonly_bridge_consumer_summary,
+    build_readonly_bridge_consumer_summary, ReadOnlyBridgeConsumerSummary,
 };
 use ab_bridge::lswr_snapshot_report::{
-    LSWR_READONLY_BRIDGE_REPORT_SCHEMA, render_readonly_bridge_report,
+    render_readonly_bridge_report, LSWR_READONLY_BRIDGE_REPORT_SCHEMA,
 };
 
 const PROJECTION_JSON: &str = include_str!("fixtures/lswr_readonly_bridge_projection_v0.json");

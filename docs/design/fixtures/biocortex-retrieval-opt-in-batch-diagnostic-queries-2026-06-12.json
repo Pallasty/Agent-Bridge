@@ -1,0 +1,64 @@
+{
+  "schema": "agent_bridge.biocortex_retrieval.opt_in_batch_diagnostic_query_cases.v0",
+  "read_only": true,
+  "purpose": "Reusable non-secret query cases for BioCortex explicit opt-in batch diagnostics. These are fixture inputs; batch diagnostics output must return only hashes, counts, coverage, latency, bucket summaries, and movement classes.",
+  "input_boundary": {
+    "raw_queries_are_fixture_inputs": true,
+    "raw_queries_may_be_read_by_cli": true,
+    "raw_queries_must_not_be_returned_by_batch_diagnostics": true,
+    "raw_keys_included": false,
+    "content_included": false,
+    "side_signal_raw_included": false,
+    "decision_packet_included": false
+  },
+  "query_cases": [
+    {
+      "query": "biocortex opt-in runtime adapter",
+      "class_label": "runtime_adapter",
+      "diagnostic_focus": "adapter_connection"
+    },
+    {
+      "query": "runtime influence decision packet",
+      "class_label": "approval_gate",
+      "diagnostic_focus": "authorization_boundary"
+    },
+    {
+      "query": "memory search baseline recall",
+      "class_label": "baseline_retrieval",
+      "diagnostic_focus": "candidate_recall"
+    },
+    {
+      "query": "redacted order artifact movement",
+      "class_label": "rank_movement",
+      "diagnostic_focus": "order_delta"
+    },
+    {
+      "query": "agent bridge mcp tool registry",
+      "class_label": "fail_open",
+      "diagnostic_focus": "baseline_empty_fallback"
+    },
+    {
+      "query": "agent bridge mcp",
+      "class_label": "mcp_surface",
+      "diagnostic_focus": "tool_surface"
+    }
+  ],
+  "expected_batch_contract": {
+    "schema": "agent_bridge.biocortex_retrieval.opt_in_batch_diagnostics.v0",
+    "query_count": 6,
+    "classes": [
+      "approval_gate",
+      "baseline_retrieval",
+      "fail_open",
+      "mcp_surface",
+      "rank_movement",
+      "runtime_adapter"
+    ],
+    "raw_queries_included": false,
+    "raw_keys_included": false,
+    "content_included": false,
+    "side_signal_raw_included": false,
+    "default_search_order_change_allowed": false,
+    "default_calls_unchanged": true
+  }
+}

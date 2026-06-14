@@ -12,16 +12,13 @@
 //! See `project_phase1_complete_p5_design_draft.md` for design rationale,
 //! risk inventory, and the prompt template.
 
-use ab_store::{
-    default_db_path, MemoryRecord, SqliteStore, StateStore,
-};
+use ab_store::{default_db_path, MemoryRecord, SqliteStore, StateStore};
 use anyhow::Result;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::llm_client::{LlmClient, Message};
-
 
 /// Cap on edges fetched from `top_coactivation_edges` per round. With ~5
 /// avg cluster size this covers ~600 keys — plenty of room before the
@@ -65,9 +62,7 @@ pub async fn run(top_n: usize, min_cluster_size: usize, dry_run: bool) -> Result
     }
 
     let db_path = default_db_path();
-    println!(
-        "# P5 dream replay  (top_n={top_n}, min_size={min_cluster_size}, dry_run={dry_run})"
-    );
+    println!("# P5 dream replay  (top_n={top_n}, min_size={min_cluster_size}, dry_run={dry_run})");
     println!("DB: {}", db_path.display());
 
     let store = SqliteStore::open(&db_path)
@@ -88,7 +83,10 @@ pub async fn run(top_n: usize, min_cluster_size: usize, dry_run: bool) -> Result
     println!("scanned {} candidate edges", edges.len());
 
     let clusters = build_clusters(&edges, min_cluster_size);
-    println!("formed {} raw clusters (size ≥ {min_cluster_size})", clusters.len());
+    println!(
+        "formed {} raw clusters (size ≥ {min_cluster_size})",
+        clusters.len()
+    );
 
     let today_tag = today_tag();
     let mut accepted: Vec<(Cluster, Vec<MemoryRecord>)> = Vec::new();
@@ -108,7 +106,10 @@ pub async fn run(top_n: usize, min_cluster_size: usize, dry_run: bool) -> Result
             break;
         }
     }
-    println!("after dedupe + size guard: {} clusters to summarize", accepted.len());
+    println!(
+        "after dedupe + size guard: {} clusters to summarize",
+        accepted.len()
+    );
 
     if accepted.is_empty() {
         println!("(nothing to do — all candidate clusters are already-summarized or out of range)");
@@ -140,8 +141,8 @@ pub async fn run(top_n: usize, min_cluster_size: usize, dry_run: bool) -> Result
     }
 
     // Wet run: needs an LLM client (Anthropic or OpenAI-compat).
-    let client = LlmClient::from_env()
-        .map_err(|e| anyhow::anyhow!("LLM client (P5 needs LLM): {e}"))?;
+    let client =
+        LlmClient::from_env().map_err(|e| anyhow::anyhow!("LLM client (P5 needs LLM): {e}"))?;
     println!("(LLM provider: {})", client.provider());
 
     let mut written = 0usize;
@@ -190,10 +191,7 @@ pub async fn run(top_n: usize, min_cluster_size: usize, dry_run: bool) -> Result
 /// Cheap when the graph is sparse (≤ a few cluster-member memory_get
 /// calls). Bumps `access_count` as a side-effect of memory_get just like
 /// dream_replay::run does.
-pub async fn count_p5_ready_clusters(
-    store: &dyn StateStore,
-    min_size: usize,
-) -> Result<usize> {
+pub async fn count_p5_ready_clusters(store: &dyn StateStore, min_size: usize) -> Result<usize> {
     if min_size < 2 {
         return Ok(0);
     }
@@ -225,10 +223,7 @@ pub async fn count_p5_ready_clusters(
 /// Build clusters via union-find over edges. Keeps total edge weight
 /// per cluster (sum of `count`) so we can rank clusters by importance
 /// before the `top_n` cutoff.
-pub fn build_clusters(
-    edges: &[ab_store::CoactivationEdge],
-    min_size: usize,
-) -> Vec<Cluster> {
+pub fn build_clusters(edges: &[ab_store::CoactivationEdge], min_size: usize) -> Vec<Cluster> {
     let mut uf = UnionFind::new();
     let mut weight_in_cluster: HashMap<String, u64> = HashMap::new();
 
@@ -349,10 +344,7 @@ fn ymd_from_unix(secs: i64) -> (i32, u32, u32) {
 }
 
 /// Build the LLM prompt and call the chosen provider. Returns the parsed summary.
-async fn summarize_cluster(
-    client: &LlmClient,
-    members: &[MemoryRecord],
-) -> Result<ClusterSummary> {
+async fn summarize_cluster(client: &LlmClient, members: &[MemoryRecord]) -> Result<ClusterSummary> {
     let prompt = build_consolidation_prompt(members);
     let messages = vec![Message {
         role: "user".to_string(),
@@ -365,9 +357,12 @@ async fn summarize_cluster(
     let resp = client
         .messages_create(&model, None, &messages, 4096)
         .await
-        .map_err(|e| anyhow::anyhow!("llm messages_create ({} / {model}): {e}", client.provider()))?;
-    parse_summary_response(&resp.text)
-        .map_err(|reason| anyhow::anyhow!("parse summary: {reason} (raw: {})", short(&resp.text, 200)))
+        .map_err(|e| {
+            anyhow::anyhow!("llm messages_create ({} / {model}): {e}", client.provider())
+        })?;
+    parse_summary_response(&resp.text).map_err(|reason| {
+        anyhow::anyhow!("parse summary: {reason} (raw: {})", short(&resp.text, 200))
+    })
 }
 
 pub fn build_consolidation_prompt(members: &[MemoryRecord]) -> String {
@@ -429,8 +424,7 @@ pub fn parse_summary_response(text: &str) -> std::result::Result<ClusterSummary,
     }
     let json_slice = &inner[start..=end];
 
-    let v: serde_json::Value =
-        serde_json::from_str(json_slice).map_err(|_| "JSON parse failed")?;
+    let v: serde_json::Value = serde_json::from_str(json_slice).map_err(|_| "JSON parse failed")?;
 
     let key = v
         .get("key")
@@ -486,10 +480,7 @@ async fn apply_summary(
     if !summary_tags.iter().any(|t| t == today_tag) {
         summary_tags.push(today_tag.to_string());
     }
-    let importance = members
-        .iter()
-        .map(|m| m.importance)
-        .fold(0.5_f64, f64::max);
+    let importance = members.iter().map(|m| m.importance).fold(0.5_f64, f64::max);
     let related_keys: Vec<String> = members.iter().map(|m| m.key.clone()).collect();
 
     // Phase 2 #2 dedupe: derive the summary key deterministically from the

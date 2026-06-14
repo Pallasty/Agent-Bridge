@@ -288,7 +288,10 @@ async fn semantic_bus_runtime_conformance_endpoint(
         args.insert("cwd".into(), json!(cwd));
     }
     if let Some(include_runtime_health) = q.include_runtime_health {
-        args.insert("include_runtime_health".into(), json!(include_runtime_health));
+        args.insert(
+            "include_runtime_health".into(),
+            json!(include_runtime_health),
+        );
     }
     if let Some(daemon_http_url) = q.daemon_http_url.filter(|s| !s.trim().is_empty()) {
         args.insert("daemon_http_url".into(), json!(daemon_http_url));
@@ -299,10 +302,7 @@ async fn semantic_bus_runtime_conformance_endpoint(
     if let Some(timeout_ms) = q.timeout_ms {
         args.insert("timeout_ms".into(), json!(timeout_ms));
     }
-    Json(crate::mcp_tools::semantic_bus_runtime_conformance_payload(
-        &Value::Object(args),
-    )
-    .await)
+    Json(crate::mcp_tools::semantic_bus_runtime_conformance_payload(&Value::Object(args)).await)
 }
 
 /// Serve the A2A AgentCard for a single session_id.
@@ -7396,13 +7396,12 @@ mod tests {
 
     #[tokio::test]
     async fn semantic_bus_runtime_conformance_endpoint_is_read_only_json() {
-        let Json(payload) = semantic_bus_runtime_conformance_endpoint(Query(
-            SemanticBusRuntimeConformanceQuery {
+        let Json(payload) =
+            semantic_bus_runtime_conformance_endpoint(Query(SemanticBusRuntimeConformanceQuery {
                 include_runtime_health: Some(false),
                 ..Default::default()
-            },
-        ))
-        .await;
+            }))
+            .await;
 
         assert_eq!(
             payload["schema"].as_str(),

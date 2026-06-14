@@ -166,8 +166,14 @@ pub fn build_outcome_memory(record: &Value, now: i64) -> Option<MemoryRecord> {
     // bus, NOT the physical transducer. Carrying it into the durable training label
     // keeps a `verified` row honest: it records verified-TO-WHERE + what it did NOT
     // verify, never an unscoped claim. Null for a producer that records no boundary.
-    let verified_to = record.get("verified_to").and_then(Value::as_str).filter(|s| !s.is_empty());
-    let not_verified = record.get("not_verified").and_then(Value::as_str).filter(|s| !s.is_empty());
+    let verified_to = record
+        .get("verified_to")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty());
+    let not_verified = record
+        .get("not_verified")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty());
 
     // Content: a human line + an embedded machine-readable JSON body
     // (dual-encoding; carries artifact_id+ts so the row is self-describing).
@@ -297,7 +303,10 @@ mod tests {
         let b = build_outcome_memory(&rec("bbbbbbbb2222"), 1).unwrap();
         assert_eq!(a.scope, Some("outcome:aaaaaaaa1111".to_string()));
         assert_eq!(b.scope, Some("outcome:bbbbbbbb2222".to_string()));
-        assert_ne!(a.scope, b.scope, "distinct scope = distinct supersede candidate set");
+        assert_ne!(
+            a.scope, b.scope,
+            "distinct scope = distinct supersede candidate set"
+        );
         // same kind (cohort) but never same scope → singleton candidate set each.
         assert_eq!(a.kind, b.kind);
         assert_eq!(a.kind, "present_outcome");
@@ -403,8 +412,15 @@ mod tests {
             "not_verified": "physical transducer (headphone/speaker driver output)",
         });
         let m = build_outcome_memory(&voice, 0).unwrap();
-        assert!(m.content.contains("\"verified_to\": \"output bus"), "verified_to in body");
-        assert!(m.content.contains("\"not_verified\": \"physical transducer"), "not_verified in body");
+        assert!(
+            m.content.contains("\"verified_to\": \"output bus"),
+            "verified_to in body"
+        );
+        assert!(
+            m.content
+                .contains("\"not_verified\": \"physical transducer"),
+            "not_verified in body"
+        );
         // a producer with no boundary -> null, never fabricated
         let plain = json!({
             "artifact_id": "noboundary0001",
@@ -414,7 +430,10 @@ mod tests {
             "verify_method": "browser_eval",
         });
         let mp = build_outcome_memory(&plain, 0).unwrap();
-        assert!(mp.content.contains("\"verified_to\": null"), "null when the producer records no boundary");
+        assert!(
+            mp.content.contains("\"verified_to\": null"),
+            "null when the producer records no boundary"
+        );
         assert!(mp.content.contains("\"not_verified\": null"));
     }
 
@@ -468,7 +487,11 @@ mod tests {
         });
         let m = build_outcome_memory(&v, 0).unwrap();
         // content far below the 256 KiB cap despite a 100k-char intent.
-        assert!(m.content.len() < 16_384, "content len = {}", m.content.len());
+        assert!(
+            m.content.len() < 16_384,
+            "content len = {}",
+            m.content.len()
+        );
         // JSON body precedes the human tail.
         assert!(m.content.starts_with("```json ab-outcome"));
         // the embedded body's intent is the capped form (truncation marker).
@@ -490,10 +513,7 @@ mod tests {
         // land silently; the "no memory_edges write" half is enforced structurally
         // (PresentOutcomesIngestTool::execute calls only memory_save, never
         // memory_link — there is no edge-writing call site in the Slice B path).
-        for (aid, decision) in [
-            ("orphan00aaaa", None),
-            ("orphan00bbbb", Some("approved")),
-        ] {
+        for (aid, decision) in [("orphan00aaaa", None), ("orphan00bbbb", Some("approved"))] {
             let mut v = rec(aid);
             if let Some(d) = decision {
                 v["action_tool"] = json!("present_await_decision");

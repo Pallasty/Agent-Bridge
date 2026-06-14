@@ -1,0 +1,65 @@
+{
+  "schema": "agent_bridge.biocortex_retrieval.post_runtime_semantic_diverse_live_candidate_corpus.v0",
+  "created_at": "2026-06-14T00:00:00Z",
+  "purpose": "Manifest for replaying multiple independent semantic live-candidate fixtures through isolated post-runtime BioCortex non-production stores.",
+  "source_runner": "scripts/run-biocortex-post-runtime-semantic-diverse-live-candidate-corpus.sh",
+  "single_fixture_runner": "scripts/run-biocortex-post-runtime-live-candidate.sh",
+  "authorization_scope": "explicit_opt_in_fts_runtime_influence",
+  "isolation_model": {
+    "one_non_production_db_per_fixture": true,
+    "prevents_cross_fixture_fts_idf_coupling": true,
+    "writes_default_agent_bridge_db": false,
+    "writes_approval": false
+  },
+  "fixtures": [
+    {
+      "id": "semantic-route",
+      "semantic_axis": "route",
+      "fixture": "docs/design/fixtures/biocortex-retrieval-post-runtime-semantic-route-live-candidate-fixture-2026-06-14.json",
+      "expected_query_count": 2,
+      "expected_actual_order_changed_count": 2
+    },
+    {
+      "id": "semantic-repair",
+      "semantic_axis": "repair",
+      "fixture": "docs/design/fixtures/biocortex-retrieval-post-runtime-semantic-repair-live-candidate-fixture-2026-06-14.json",
+      "expected_query_count": 2,
+      "expected_actual_order_changed_count": 2
+    },
+    {
+      "id": "semantic-temporal",
+      "semantic_axis": "temporal",
+      "fixture": "docs/design/fixtures/biocortex-retrieval-post-runtime-semantic-temporal-live-candidate-fixture-2026-06-14.json",
+      "expected_query_count": 2,
+      "expected_actual_order_changed_count": 2
+    },
+    {
+      "id": "semantic-graph",
+      "semantic_axis": "graph",
+      "fixture": "docs/design/fixtures/biocortex-retrieval-post-runtime-semantic-graph-live-candidate-fixture-2026-06-14.json",
+      "expected_query_count": 2,
+      "expected_actual_order_changed_count": 2
+    }
+  ],
+  "expected": {
+    "fixture_count": 4,
+    "total_query_count": 8,
+    "min_total_actual_order_changed_count": 8,
+    "min_total_runs_biocortex_count": 8,
+    "min_total_side_signal_ok_count": 8,
+    "all_status_surfaces_blocked": true,
+    "all_default_calls_unchanged": true
+  },
+  "boundary": {
+    "requires_compile_feature": "biocortex-retrieval-opt-in",
+    "requires_runtime_enable_env": "AB_BIOCORTEX_RETRIEVAL_OPT_IN",
+    "requires_per_call_opt_in": true,
+    "requires_post_runtime_transition_gate": true,
+    "raw_queries_included": false,
+    "raw_keys_included": false,
+    "content_included": false,
+    "side_signal_raw_included": false,
+    "default_search_order_change_allowed": false,
+    "default_calls_unchanged": true
+  }
+}

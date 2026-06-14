@@ -132,10 +132,7 @@ impl CloudflareClient {
     }
 
     pub async fn zone_list(&self, per_page: u32) -> Result<Vec<ZoneSummary>> {
-        let url = format!(
-            "{API_BASE}/zones?per_page={}",
-            per_page.clamp(1, 50)
-        );
+        let url = format!("{API_BASE}/zones?per_page={}", per_page.clamp(1, 50));
         let v = self.get_json(&url, "zone_list").await?;
         Ok(v.get("result")
             .and_then(|x| x.as_array())
@@ -173,7 +170,11 @@ impl CloudflareClient {
 
 fn parse_zone(v: &serde_json::Value) -> ZoneSummary {
     ZoneSummary {
-        id: v.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+        id: v
+            .get("id")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string(),
         name: v
             .get("name")
             .and_then(|x| x.as_str())
@@ -223,7 +224,11 @@ fn parse_worker(v: &serde_json::Value) -> WorkerScript {
         })
         .unwrap_or_default();
     WorkerScript {
-        id: v.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+        id: v
+            .get("id")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string(),
         created_on: v
             .get("created_on")
             .and_then(|x| x.as_str())
@@ -264,10 +269,7 @@ fn parse_r2_bucket(v: &serde_json::Value) -> R2Bucket {
             .and_then(|x| x.as_str())
             .unwrap_or("")
             .to_string(),
-        location: v
-            .get("location")
-            .and_then(|x| x.as_str())
-            .map(String::from),
+        location: v.get("location").and_then(|x| x.as_str()).map(String::from),
         storage_class: v
             .get("storage_class")
             .and_then(|x| x.as_str())
@@ -281,11 +283,14 @@ mod tests {
 
     #[test]
     fn parse_zone_typical() {
-        let v: serde_json::Value = serde_json::from_str(r#"{
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{
             "id":"abc","name":"example.com","status":"active","paused":false,"type":"full",
             "name_servers":["ns1.cloudflare.com","ns2.cloudflare.com"],
             "created_on":"2024-01-01T00:00:00Z","modified_on":"2024-06-01T00:00:00Z"
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
         let z = parse_zone(&v);
         assert_eq!(z.id, "abc");
         assert_eq!(z.name, "example.com");
@@ -295,23 +300,32 @@ mod tests {
 
     #[test]
     fn parse_worker_with_routes() {
-        let v: serde_json::Value = serde_json::from_str(r#"{
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{
             "id":"my-worker","created_on":"x","modified_on":"y",
             "etag":"abc","handlers":["fetch"],"usage_model":"standard",
             "routes":[{"pattern":"*.example.com/*","script":"my-worker"},
                       {"pattern":"api.foo/*","script":"my-worker"}]
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
         let w = parse_worker(&v);
         assert_eq!(w.id, "my-worker");
-        assert_eq!(w.routes, vec!["*.example.com/*".to_string(), "api.foo/*".to_string()]);
+        assert_eq!(
+            w.routes,
+            vec!["*.example.com/*".to_string(), "api.foo/*".to_string()]
+        );
         assert_eq!(w.handlers, vec!["fetch".to_string()]);
     }
 
     #[test]
     fn parse_r2_bucket_minimal() {
-        let v: serde_json::Value = serde_json::from_str(r#"{
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{
             "name":"mybucket","creation_date":"2024-12-01T00:00:00Z"
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
         let b = parse_r2_bucket(&v);
         assert_eq!(b.name, "mybucket");
         assert!(b.location.is_none());
