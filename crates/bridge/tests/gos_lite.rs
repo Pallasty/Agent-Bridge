@@ -1,10 +1,11 @@
 use ab_bridge::gos_lite::{
-    build_gos_lite_snapshot_from_tool_atlas, project_gos_lite_snapshot, GosLiteViewOptions,
+    build_gos_lite_replay_report, build_gos_lite_snapshot_from_tool_atlas,
+    project_gos_lite_snapshot, GosLiteViewOptions,
 };
 use ab_bridge::tool_atlas::{
     build_tool_atlas_snapshot, ToolAtlasFailureSample, ToolAtlasInput, ToolAtlasSnapshot,
 };
-use ab_store::{McpToolCallStats, McpToolErrorRecord};
+use ab_store::{McpToolCallRow, McpToolCallStats, McpToolErrorRecord};
 
 fn stat(name: &str, calls: u64, errors: u64, p95: u32, avg_result_size: f64) -> McpToolCallStats {
     McpToolCallStats {
@@ -21,6 +22,17 @@ fn stat(name: &str, calls: u64, errors: u64, p95: u32, avg_result_size: f64) -> 
         model: None,
         model_reasoning_effort: None,
         codex_host: None,
+    }
+}
+
+fn call(ts: i64, tool_name: &str, ok: bool, duration_ms: u32, result_size: u32) -> McpToolCallRow {
+    McpToolCallRow {
+        ts,
+        tool_name: tool_name.to_string(),
+        duration_ms,
+        ok,
+        args_size: Some(4),
+        result_size: Some(result_size),
     }
 }
 
@@ -171,4 +183,73 @@ fn gos_lite_projects_large_average_result_as_size_degradation_evidence() {
             && edge.dst == "hypothesis:tool:tool_atlas_snapshot:latency_or_size_degradation"
             && edge.edge_type == "support"
     }));
+}
+
+#[test]
+fn gos_lite_replay_report_links_hypotheses_to_event_spine_support() {
+    let atlas = atlas_with_failure_and_latency();
+    let snapshot = build_gos_lite_snapshot_from_tool_atlas(&atlas);
+    let spine = ab_bridge::event_spine::mcp_event_spine_snapshot(
+        &[
+            call(1_781_448_518, "browser_click", false, 32, 191),
+            call(1_781_448_519, "memory_save", true, 2_586, 561),
+        ],
+        &[McpToolErrorRecord {
+            ts: 1_781_448_517,
+            tool_name: "browser_click".to_string(),
+            message: "browser: invalid argument: ref @e2 element is disabled".to_string(),
+        }],
+        &[],
+        &[],
+        86_400,
+        50,
+        1_781_450_000,
+    );
+
+    let report = build_gos_lite_replay_report(&snapshot, &spine);
+
+    assert_eq!(report.schema_version, 1);
+    assert!(report.event_chain_verified);
+    let failure_check = report
+        .checks
+        .iter()
+        .find(|check| check.hypothesis_id == "hypothesis:tool:browser_click:failure_mode")
+        .expect("browser_click check");
+    assert_eq!(failure_check.verdict, "supported");
+    assert_eq!(failure_check.tool_name, "browser_click");
+    assert!(failure_check.supporting_event_ids.len() >= 2);
+    assert!(failure_check
+        .supporting_sources
+        .iter()
+        .any(|source| source == "mcp_tool_errors"));
+}
+
+#[test]
+fn gos_lite_replay_report_flags_missing_support_as_falsifier_candidate() {
+    let atlas = atlas_with_failure_and_latency();
+    let snapshot = build_gos_lite_snapshot_from_tool_atlas(&atlas);
+    let spine = ab_bridge::event_spine::mcp_event_spine_snapshot(
+        &[call(1_781_448_518, "browser_click", true, 32, 191)],
+        &[],
+        &[],
+        &[],
+        86_400,
+        50,
+        1_781_450_000,
+    );
+
+    let report = build_gos_lite_replay_report(&snapshot, &spine);
+
+    let failure_check = report
+        .checks
+        .iter()
+        .find(|check| check.hypothesis_id == "hypothesis:tool:browser_click:failure_mode")
+        .expect("browser_click check");
+    assert_eq!(failure_check.verdict, "falsifier_candidate");
+    assert_eq!(failure_check.review_action, "replay_or_refute");
+    assert_eq!(failure_check.refuting_event_ids.len(), 1);
+    assert!(failure_check
+        .notes
+        .iter()
+        .any(|note| note.contains("no event-level failure support")));
 }

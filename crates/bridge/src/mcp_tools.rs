@@ -23649,6 +23649,18 @@ impl McpTool for GosLiteSnapshotTool {
                         "default": true,
                         "description": "When false, omit nodes and edges while keeping counts, summary, and the human review gate."
                     },
+                    "include_replay_check": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "When true, attach a read-only Event Spine replay/falsifier report for generated hypotheses."
+                    },
+                    "replay_event_limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 200,
+                        "description": "Maximum recent Event Spine events to inspect for replay/falsifier checks."
+                    },
                     "limit": {
                         "type": "integer",
                         "minimum": 1,
@@ -23680,6 +23692,15 @@ impl McpTool for GosLiteSnapshotTool {
             .get("include_graph")
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
+        let include_replay_check = args
+            .get("include_replay_check")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
+        let replay_event_limit = args
+            .get("replay_event_limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(200)
+            .clamp(1, 500) as usize;
         let filter = dispatch_filter_from_args(&args);
         let current_tools: Vec<String> = build_registry(self.hub.clone())
             .list()
@@ -23687,6 +23708,7 @@ impl McpTool for GosLiteSnapshotTool {
             .map(|schema| schema.name)
             .collect();
         let stats_limit = current_tools.len().max(1).min(200) as u32;
+        let generated_at = dispatch_now_secs();
         let stats = match store
             .mcp_tool_call_stats_filtered(window_secs, stats_limit, filter.clone())
             .await
@@ -23707,11 +23729,11 @@ impl McpTool for GosLiteSnapshotTool {
         };
         let atlas =
             crate::tool_atlas::build_tool_atlas_snapshot(crate::tool_atlas::ToolAtlasInput {
-                generated_at: dispatch_now_secs(),
+                generated_at,
                 window_secs,
                 current_tools,
                 stats,
-                recent_errors,
+                recent_errors: recent_errors.clone(),
             });
         let snapshot = crate::gos_lite::build_gos_lite_snapshot_from_tool_atlas(&atlas);
         let mut payload = crate::gos_lite::project_gos_lite_snapshot(
@@ -23723,6 +23745,41 @@ impl McpTool for GosLiteSnapshotTool {
         );
         if let Some(obj) = payload.as_object_mut() {
             obj.insert("filter".to_string(), dispatch_filter_json(&filter));
+            obj.insert("read_only".to_string(), json!(true));
+            obj.insert("llm_calls".to_string(), json!(false));
+            obj.insert("writes_state".to_string(), json!(false));
+            if include_replay_check {
+                let calls = match store
+                    .recent_mcp_tool_calls(window_secs, replay_event_limit as u32)
+                    .await
+                {
+                    Ok(rows) => rows,
+                    Err(e) => return Ok(ToolResult::error(format!("recent_mcp_tool_calls: {e}"))),
+                };
+                let event_spine = crate::event_spine::mcp_event_spine_snapshot(
+                    &calls,
+                    &recent_errors,
+                    &[],
+                    &[],
+                    window_secs,
+                    replay_event_limit,
+                    generated_at,
+                );
+                let replay_report =
+                    crate::gos_lite::build_gos_lite_replay_report(&snapshot, &event_spine);
+                obj.insert(
+                    "replay_check".to_string(),
+                    serde_json::to_value(replay_report).unwrap_or_else(|_| json!({})),
+                );
+            } else {
+                obj.insert(
+                    "replay_check".to_string(),
+                    json!({
+                        "included": false,
+                        "reason": "include_replay_check=false"
+                    }),
+                );
+            }
             obj.insert(
                 "note".to_string(),
                 json!("Read-only GoS-lite projection derived from the same Tool Atlas telemetry. It does not call tools, write memories, change profiles, or replace the event spine."),
@@ -50041,6 +50098,67 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             schema.input_schema["properties"]["include_events"]["default"],
             json!(false)
         );
+    }
+
+    #[tokio::test]
+    async fn gos_lite_snapshot_tool_projects_current_tool_atlas() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.as_ref().expect("store").clone();
+        store
+            .record_mcp_tool_call(
+                "browser_click",
+                32,
+                false,
+                Some(2),
+                Some(191),
+                None,
+                None,
+                Some("codex".into()),
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("record call");
+        store
+            .record_mcp_tool_error("browser_click", "missing 'page'")
+            .await
+            .expect("record error");
+
+        let out = GosLiteSnapshotTool::new(hub)
+            .execute(
+                json!({
+                    "window_secs": 60,
+                    "source": "codex",
+                    "include_graph": true,
+                    "limit": 50
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(payload["schema_version"], 1);
+        assert_eq!(payload["status"], "needs_investigation");
+        assert_eq!(payload["summary"]["failing_tools"], 1);
+        assert_eq!(payload["filter"]["source"], "codex");
+        assert_eq!(payload["graph_included"], true);
+        assert_eq!(
+            payload["replay_check"]["summary"]["supported"],
+            serde_json::json!(1)
+        );
+        assert_eq!(payload["replay_check"]["replay_ready"], true);
+        assert!(payload["nodes"]
+            .as_array()
+            .expect("nodes")
+            .iter()
+            .any(|node| { node["id"] == "hypothesis:tool:browser_click:failure_mode" }));
+        assert_eq!(payload["read_only"], true);
+        assert_eq!(payload["llm_calls"], false);
+        assert_eq!(payload["writes_state"], false);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
     #[test]

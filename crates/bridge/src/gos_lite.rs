@@ -5,10 +5,16 @@
 //! Signal/Evidence/Hypothesis nodes plus support/refines edges. It does not
 //! call tools, write state, or ask an LLM to fill missing evidence.
 
-use crate::tool_atlas::{ToolAtlasEntry, ToolAtlasSnapshot};
+use crate::{
+    event_spine::{EventSpineEvent, EventSpineSnapshot},
+    tool_atlas::{ToolAtlasEntry, ToolAtlasSnapshot},
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
+
+const SLOW_P95_MS: u64 = 1_000;
+const LARGE_RESULT_SIZE: u64 = 24_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct GosLiteSnapshot {
@@ -50,6 +56,39 @@ pub struct GosLiteEdge {
     pub edge_type: String,
     pub confidence: f64,
     pub attrs: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GosLiteReplayReport {
+    pub schema_version: u32,
+    pub event_chain_verified: bool,
+    pub event_count: usize,
+    pub truncated_count: usize,
+    pub replay_ready: bool,
+    pub summary: GosLiteReplaySummary,
+    pub checks: Vec<GosLiteReplayCheck>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GosLiteReplaySummary {
+    pub hypotheses_checked: usize,
+    pub supported: usize,
+    pub falsifier_candidates: usize,
+    pub inconclusive: usize,
+    pub chain_unverified: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct GosLiteReplayCheck {
+    pub hypothesis_id: String,
+    pub hypothesis_kind: String,
+    pub tool_name: String,
+    pub verdict: String,
+    pub review_action: String,
+    pub supporting_event_ids: Vec<String>,
+    pub supporting_sources: Vec<String>,
+    pub refuting_event_ids: Vec<String>,
+    pub notes: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -209,6 +248,184 @@ pub fn project_gos_lite_snapshot(snapshot: &GosLiteSnapshot, options: GosLiteVie
         );
     }
     payload
+}
+
+pub fn build_gos_lite_replay_report(
+    snapshot: &GosLiteSnapshot,
+    event_spine: &EventSpineSnapshot,
+) -> GosLiteReplayReport {
+    let checks = snapshot
+        .nodes
+        .iter()
+        .filter(|node| node.node_type == "Hypothesis")
+        .map(|node| gos_lite_replay_check(node, event_spine))
+        .collect::<Vec<_>>();
+    let summary = GosLiteReplaySummary {
+        hypotheses_checked: checks.len(),
+        supported: checks
+            .iter()
+            .filter(|check| check.verdict == "supported")
+            .count(),
+        falsifier_candidates: checks
+            .iter()
+            .filter(|check| check.verdict == "falsifier_candidate")
+            .count(),
+        inconclusive: checks
+            .iter()
+            .filter(|check| check.verdict == "inconclusive")
+            .count(),
+        chain_unverified: checks
+            .iter()
+            .filter(|check| check.verdict == "chain_unverified")
+            .count(),
+    };
+
+    GosLiteReplayReport {
+        schema_version: 1,
+        event_chain_verified: event_spine.integrity.verified,
+        event_count: event_spine.event_count,
+        truncated_count: event_spine.truncated_count,
+        replay_ready: event_spine.integrity.verified && event_spine.truncated_count == 0,
+        summary,
+        checks,
+    }
+}
+
+fn gos_lite_replay_check(
+    hypothesis: &GosLiteNode,
+    event_spine: &EventSpineSnapshot,
+) -> GosLiteReplayCheck {
+    let tool_name = hypothesis.attrs["tool_name"]
+        .as_str()
+        .unwrap_or("unknown")
+        .to_string();
+    let hypothesis_kind = if hypothesis.id.ends_with(":failure_mode") {
+        "failure_mode"
+    } else if hypothesis.id.ends_with(":latency_or_size_degradation") {
+        "latency_or_size_degradation"
+    } else {
+        "unknown"
+    }
+    .to_string();
+    let mut supporting_event_ids = Vec::new();
+    let mut supporting_sources = BTreeSet::new();
+    let mut refuting_event_ids = Vec::new();
+    let mut same_tool_events = 0usize;
+
+    for event in &event_spine.events {
+        if event_tool_name(event) != Some(tool_name.as_str()) {
+            continue;
+        }
+        same_tool_events += 1;
+        if event_supports_hypothesis(&hypothesis_kind, hypothesis, event) {
+            supporting_event_ids.push(event.event_id.clone());
+            supporting_sources.insert(event.source.clone());
+        } else if event_refutes_hypothesis(&hypothesis_kind, hypothesis, event) {
+            refuting_event_ids.push(event.event_id.clone());
+        }
+    }
+
+    let replay_ready = event_spine.integrity.verified && event_spine.truncated_count == 0;
+    let verdict = if !event_spine.integrity.verified {
+        "chain_unverified"
+    } else if !supporting_event_ids.is_empty() {
+        "supported"
+    } else if replay_ready && !refuting_event_ids.is_empty() {
+        "falsifier_candidate"
+    } else {
+        "inconclusive"
+    }
+    .to_string();
+    let review_action = match verdict.as_str() {
+        "chain_unverified" => "verify_event_spine",
+        "supported" => "review_support",
+        "falsifier_candidate" => "replay_or_refute",
+        _ if event_spine.truncated_count > 0 => "increase_event_limit_or_window",
+        _ => "collect_more_events",
+    }
+    .to_string();
+
+    let mut notes = Vec::new();
+    if same_tool_events == 0 {
+        notes.push("no same-tool events were present in the Event Spine window".to_string());
+    }
+    if supporting_event_ids.is_empty() {
+        let support_kind = match hypothesis_kind.as_str() {
+            "failure_mode" => "failure",
+            "latency_or_size_degradation" => "degradation",
+            _ => "matching",
+        };
+        notes.push(format!("no event-level {support_kind} support was found"));
+    }
+    if event_spine.truncated_count > 0 {
+        notes.push(
+            "Event Spine was truncated; missing older events may change the verdict".to_string(),
+        );
+    }
+    if !event_spine.integrity.verified {
+        notes.push("Event Spine hash chain did not verify".to_string());
+    }
+
+    GosLiteReplayCheck {
+        hypothesis_id: hypothesis.id.clone(),
+        hypothesis_kind,
+        tool_name,
+        verdict,
+        review_action,
+        supporting_event_ids,
+        supporting_sources: supporting_sources.into_iter().collect(),
+        refuting_event_ids,
+        notes,
+    }
+}
+
+fn event_tool_name(event: &EventSpineEvent) -> Option<&str> {
+    event.facts["tool_name"].as_str()
+}
+
+fn event_supports_hypothesis(
+    hypothesis_kind: &str,
+    hypothesis: &GosLiteNode,
+    event: &EventSpineEvent,
+) -> bool {
+    match hypothesis_kind {
+        "failure_mode" => {
+            event.kind == "tool_error" || (event.kind == "tool_call" && event.ok == Some(false))
+        }
+        "latency_or_size_degradation" => {
+            event.kind == "tool_call"
+                && ((has_risk_flag(hypothesis, "slow_p95")
+                    && event.facts["duration_ms"].as_u64().unwrap_or(0) >= SLOW_P95_MS)
+                    || (has_risk_flag(hypothesis, "large_result")
+                        && event.facts["result_size"].as_u64().unwrap_or(0) >= LARGE_RESULT_SIZE))
+        }
+        _ => false,
+    }
+}
+
+fn event_refutes_hypothesis(
+    hypothesis_kind: &str,
+    hypothesis: &GosLiteNode,
+    event: &EventSpineEvent,
+) -> bool {
+    match hypothesis_kind {
+        "failure_mode" => event.kind == "tool_call" && event.ok == Some(true),
+        "latency_or_size_degradation" => {
+            event.kind == "tool_call"
+                && (!has_risk_flag(hypothesis, "slow_p95")
+                    || event.facts["duration_ms"].as_u64().unwrap_or(0) < SLOW_P95_MS)
+                && (!has_risk_flag(hypothesis, "large_result")
+                    || event.facts["result_size"].as_u64().unwrap_or(0) < LARGE_RESULT_SIZE)
+        }
+        _ => false,
+    }
+}
+
+fn has_risk_flag(hypothesis: &GosLiteNode, flag: &str) -> bool {
+    hypothesis.attrs["risk_flags"]
+        .as_array()
+        .map(|flags| flags.iter().any(|value| value.as_str() == Some(flag)))
+        .unwrap_or(false)
 }
 
 fn gos_lite_human_gate_packet(snapshot: &GosLiteSnapshot) -> Value {
