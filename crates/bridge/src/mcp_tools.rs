@@ -5721,12 +5721,12 @@ fn vision_grounding_ocr_error(error: Value) -> ToolResult {
 // ===========================================================================
 
 pub struct DesktopActionTool {
-    _hub: Hub,
+    hub: Hub,
 }
 
 impl DesktopActionTool {
     pub fn new(hub: Hub) -> Self {
-        Self { _hub: hub }
+        Self { hub }
     }
 }
 
@@ -5832,6 +5832,18 @@ impl McpTool for DesktopActionTool {
         // ever passes --confirm; host injection is never silent/inline.
         let host_target = !dry_run && !is_isolated;
         if host_target && !confirm_host && !use_grant {
+            // Anti-laundering: a host action that the MCP refuses to inject did
+            // NOT take effect — stamp it not_verified so it can never read as a
+            // silent success on the event spine.
+            record_desktop_action_event(
+                &self.hub,
+                &action,
+                "refused",
+                false,
+                "host_mutation_not_exposed",
+                json!({ "mode": "refused", "host_target": true }),
+            )
+            .await;
             return Ok(desktop_action_error(json!({
                 "code": "host_mutation_not_exposed",
                 "message": "this MCP injects only dry_run or isolated (non-host display + swaysock) \
@@ -5943,6 +5955,20 @@ impl McpTool for DesktopActionTool {
         let (stdout, stdout_truncated) = lossy_truncate(&output.stdout);
         let (stderr, stderr_truncated) = lossy_truncate(&output.stderr);
 
+        let mode = if dry_run {
+            "dry-run"
+        } else if !host_target {
+            "isolated"
+        } else if use_grant {
+            "host-grant"
+        } else {
+            "pending-host-confirm"
+        };
+        let ok = output.status.success();
+        // Capture the error text for the event before `stderr` is moved into the
+        // mcp_wrapper payload below.
+        let event_err = if ok { String::new() } else { stderr.clone() };
+
         // desktop_action.py prints a JSON record; nonzero exit = blocked/error.
         match serde_json::from_str::<Value>(&stdout) {
             Ok(mut payload) => {
@@ -5952,7 +5978,7 @@ impl McpTool for DesktopActionTool {
                         json!({
                             "tool": self.name(),
                             "read_only": false,
-                            "mode": if dry_run { "dry-run" } else if !host_target { "isolated" } else if use_grant { "host-grant" } else { "pending-host-confirm" },
+                            "mode": mode,
                             "host_protected": true,
                             "duration_ms": duration_ms,
                             "exit_code": output.status.code().unwrap_or(-1),
@@ -5961,8 +5987,20 @@ impl McpTool for DesktopActionTool {
                         }),
                     );
                 }
+                // SSB Phase-1 typed event spine: stamp the verify-first verdict
+                // for this injection AT ACTION TIME (Unknown on success — no
+                // readback; NotVerified on a failed/blocked injection).
+                record_desktop_action_event(
+                    &self.hub,
+                    &action,
+                    mode,
+                    ok,
+                    &event_err,
+                    json!({ "mode": mode, "dry_run": dry_run, "exit_code": output.status.code().unwrap_or(-1) }),
+                )
+                .await;
                 let mut result = ToolResult::json_text(&payload);
-                if !output.status.success() {
+                if !ok {
                     result.is_error = true;
                 }
                 Ok(result)
@@ -6012,6 +6050,36 @@ fn desktop_action_error(error: Value) -> ToolResult {
     }));
     result.is_error = true;
     result
+}
+
+/// SSB Phase-1 typed event spine: emit a verify-first semantic event for a
+/// `desktop_action` outcome AT ACTION TIME. Best-effort — a telemetry write must
+/// never fail the action. The verdict records whether input was actually injected
+/// without readback (Unknown), refused/failed (NotVerified — the anti-laundering
+/// signal), or intentionally not injected in dry-run/pending modes (Unknown).
+async fn record_desktop_action_event(
+    hub: &Hub,
+    action: &str,
+    mode: &str,
+    ok: bool,
+    err_msg: &str,
+    facts: Value,
+) {
+    if let Some(store) = &hub.store {
+        let verdict = crate::semantic_event::classify_action(mode, ok, err_msg);
+        let ev = crate::semantic_event::SemanticEvent {
+            ts: dispatch_now_secs(),
+            actor: "mcp".to_string(),
+            source: "desktop".to_string(),
+            action: action.to_string(),
+            target: None,
+            verdict,
+            facts,
+        };
+        if let Err(e) = store.record_semantic_event(ev.to_record()).await {
+            tracing::debug!(error = %e, "record_semantic_event (desktop_action) failed");
+        }
+    }
 }
 
 // ===========================================================================
@@ -22698,6 +22766,127 @@ impl McpTool for ToolAtlasSnapshotTool {
     }
 }
 
+pub struct GosLiteSnapshotTool {
+    hub: Hub,
+}
+impl GosLiteSnapshotTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for GosLiteSnapshotTool {
+    fn name(&self) -> &'static str {
+        "gos_lite_snapshot"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only GoS-lite belief-graph projection over the same Tool Atlas \
+                 telemetry as tool_atlas_snapshot. Converts grounded failing/degraded tool facts \
+                 into explicit Signal/Evidence/Hypothesis nodes and support/refines edges so an \
+                 agent can reason about which tool failures are actionable. It does not call \
+                 tools, write state, change profiles, or ask an LLM to fill missing evidence."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "window_secs": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 31536000,
+                        "default": 86400,
+                        "description": "Look-back window in seconds."
+                    },
+                    "source": {
+                        "type": "string",
+                        "enum": ["codex", "hook", "claude", "gemini", "manual", "other", "legacy"],
+                        "description": "Optional caller-source filter. Omit for all traffic."
+                    },
+                    "client_name": {
+                        "type": "string",
+                        "description": "Optional exact MCP clientInfo.name filter."
+                    },
+                    "profile": {
+                        "type": "string",
+                        "enum": ["essential", "standard", "all", "legacy"],
+                        "description": "Optional AGENT_BRIDGE_TOOL_PROFILE filter."
+                    },
+                    "model": {
+                        "type": "string",
+                        "description": "Optional AGENT_BRIDGE_MODEL filter."
+                    },
+                    "model_reasoning_effort": {
+                        "type": "string",
+                        "description": "Optional AGENT_BRIDGE_MODEL_REASONING_EFFORT filter."
+                    },
+                    "codex_host": {
+                        "type": "string",
+                        "enum": ["desktop", "cli", "ide", "legacy"],
+                        "description": "Optional AGENT_BRIDGE_CODEX_HOST filter for Codex desktop/CLI/IDE slices."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let window_secs = args
+            .get("window_secs")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(86_400)
+            .clamp(60, 31_536_000);
+        let filter = dispatch_filter_from_args(&args);
+        let current_tools: Vec<String> = build_registry(self.hub.clone())
+            .list()
+            .into_iter()
+            .map(|schema| schema.name)
+            .collect();
+        let stats_limit = current_tools.len().max(1).min(200) as u32;
+        let stats = match store
+            .mcp_tool_call_stats_filtered(window_secs, stats_limit, filter.clone())
+            .await
+        {
+            Ok(rows) => rows,
+            Err(e) => {
+                return Ok(ToolResult::error(format!(
+                    "mcp_tool_call_stats_filtered: {e}"
+                )))
+            }
+        };
+        let recent_errors = match store
+            .recent_mcp_tool_errors(ab_store::MCP_TOOL_ERROR_RING_CAP)
+            .await
+        {
+            Ok(rows) => rows,
+            Err(e) => return Ok(ToolResult::error(format!("recent_mcp_tool_errors: {e}"))),
+        };
+        let atlas =
+            crate::tool_atlas::build_tool_atlas_snapshot(crate::tool_atlas::ToolAtlasInput {
+                generated_at: dispatch_now_secs(),
+                window_secs,
+                current_tools,
+                stats,
+                recent_errors,
+            });
+        let snapshot = crate::gos_lite::build_gos_lite_snapshot_from_tool_atlas(&atlas);
+        let mut payload = serde_json::to_value(&snapshot).unwrap_or_else(|_| json!({}));
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert("filter".to_string(), dispatch_filter_json(&filter));
+            obj.insert(
+                "note".to_string(),
+                json!("Read-only GoS-lite projection derived from the same Tool Atlas telemetry. It does not call tools, write memories, change profiles, or replace the event spine."),
+            );
+        }
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
 // ===========================================================================
 //                 mcp_lifecycle_digest - borrowed-patterns status
 // ===========================================================================
@@ -38943,6 +39132,15 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Essential,
         Arc::new(ToolAtlasSnapshotTool::new(hub.clone())),
     );
+    // GoS-lite belief-graph projection over the same Tool Atlas telemetry.
+    // Niche on purpose: specialty read-only diagnostic, reachable via
+    // AGENT_BRIDGE_TOOL_PROFILE=all; promote later if usage warrants it.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(GosLiteSnapshotTool::new(hub.clone())),
+    );
     reg_if(
         &mut reg,
         policy,
@@ -44731,6 +44929,27 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             .collect();
 
         assert!(names.iter().any(|n| n == "tool_atlas_snapshot"));
+    }
+
+    #[test]
+    fn registry_exposes_gos_lite_snapshot_tool_in_all_profile() {
+        // gos_lite_snapshot is registered at Tier::Niche, so it is reachable
+        // through the `all` profile but intentionally absent from lean profiles.
+        let all = ToolPolicy::from_values(None, None, None, Some("all"));
+        let all_names: Vec<String> = build_registry_with_policy(Hub::builder().build(), all)
+            .list()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        assert!(all_names.iter().any(|n| n == "gos_lite_snapshot"));
+
+        let lean = ToolPolicy::from_values(Some("codex-lean"), None, None, None);
+        let lean_names: Vec<String> = build_registry_with_policy(Hub::builder().build(), lean)
+            .list()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        assert!(!lean_names.iter().any(|n| n == "gos_lite_snapshot"));
     }
 
     #[test]

@@ -153,6 +153,74 @@ pub fn classify_click(is_ref: bool, ok: bool, err_msg: &str) -> Verdict {
     }
 }
 
+/// Classify a `desktop_action` outcome into a verify-first verdict. Pure + total
+/// so the "no green laundering" guarantee is unit-testable without a live desktop.
+///
+/// `desktop_action` injects input but never reads back the resulting UI state
+/// (that is `desktop_verify`'s separate job), so a *successful injection* is
+/// honestly [`VerdictStatus::Unknown`], NOT `Verified` — the same anti-laundering
+/// distinction as the CSS-click path in [`classify_click`].
+///
+/// - `mode`    — the execution mode the wrapper resolved:
+///   `"dry-run"`, `"isolated"`, `"host-grant"`, `"pending-host-confirm"`, or
+///   `"refused"` (a preflight block such as host injection not being exposed).
+/// - `ok`      — whether the underlying call/script reported success.
+/// - `err_msg` — the error/stderr text when `ok` is false (empty otherwise).
+///
+/// Mapping:
+/// - refused                                  → NotVerified (the action never ran)
+/// - dry-run / pending-host-confirm + ok      → Unknown (no input injected by design)
+/// - dry-run / pending-host-confirm + !ok     → NotVerified (the stage/dry-run failed)
+/// - isolated / host-grant + ok               → Unknown (injected, effect not read back)
+/// - isolated / host-grant + !ok              → NotVerified (the injection failed/blocked)
+pub fn classify_action(mode: &str, ok: bool, err_msg: &str) -> Verdict {
+    match mode {
+        // Preflight refusal: the action never ran (host injection not exposed,
+        // bad target, missing script...). It did NOT take effect, so it is
+        // recorded honestly as not_verified — never laundered to a green success.
+        "refused" => Verdict {
+            status: VerdictStatus::NotVerified,
+            method: "preflight_refusal".to_string(),
+            evidence: json!({ "reason": err_msg }),
+        },
+        // No input was injected by design: dry-run logs intent only;
+        // pending-host-confirm just stages a token for a later human confirm.
+        "dry-run" | "pending-host-confirm" => {
+            if ok {
+                Verdict {
+                    status: VerdictStatus::Unknown,
+                    method: format!("{mode}_no_injection"),
+                    evidence: json!({ "note": "no input injected; action effect not produced" }),
+                }
+            } else {
+                Verdict {
+                    status: VerdictStatus::NotVerified,
+                    method: format!("{mode}_failed"),
+                    evidence: json!({ "error": err_msg }),
+                }
+            }
+        }
+        // Input was actually injected — isolated nested compositor, or host via a
+        // human-minted grant. desktop_action has no readback, so a successful
+        // injection is Unknown (not Verified); a failed/blocked one is NotVerified.
+        _ => {
+            if ok {
+                Verdict {
+                    status: VerdictStatus::Unknown,
+                    method: format!("{mode}_injected_no_readback"),
+                    evidence: json!({ "note": "input injected; effect not read back (use desktop_verify)" }),
+                }
+            } else {
+                Verdict {
+                    status: VerdictStatus::NotVerified,
+                    method: format!("{mode}_injection_failed"),
+                    evidence: json!({ "error": err_msg }),
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,5 +308,60 @@ mod tests {
         assert_eq!(rec.target.as_deref(), Some("@e5"));
         assert!(rec.evidence.is_none());
         assert!(rec.facts.contains("@e5"));
+    }
+
+    #[test]
+    fn action_isolated_ok_is_unknown_never_faked_verified() {
+        // Injection succeeded but desktop_action has no readback, so the honest
+        // verdict is Unknown — claiming Verified here would be laundering.
+        let v = classify_action("isolated", true, "");
+        assert_eq!(v.status, VerdictStatus::Unknown);
+        assert_eq!(v.status.as_ok(), None);
+    }
+
+    #[test]
+    fn action_isolated_failure_is_not_verified() {
+        let v = classify_action("isolated", false, "sway-ipc backend refused output socket");
+        assert_eq!(v.status, VerdictStatus::NotVerified);
+        assert_eq!(v.status.as_ok(), Some(false));
+    }
+
+    #[test]
+    fn action_refused_host_is_not_verified_not_green() {
+        // The falsifier: a host action that was refused (never injected) MUST be
+        // not_verified, never reported as a green success.
+        let v = classify_action("refused", false, "host_mutation_not_exposed");
+        assert_eq!(v.status, VerdictStatus::NotVerified);
+        assert_eq!(v.status.as_ok(), Some(false));
+    }
+
+    #[test]
+    fn action_dry_run_ok_is_unknown_no_injection() {
+        // Dry-run injects nothing by design; it is not a success and not a
+        // failure — honestly Unknown.
+        let v = classify_action("dry-run", true, "");
+        assert_eq!(v.status, VerdictStatus::Unknown);
+        assert!(v.method.contains("no_injection"));
+    }
+
+    #[test]
+    fn action_pending_host_confirm_ok_is_unknown_no_injection() {
+        // Staging a confirm token injects nothing; the effect is deferred, so
+        // Unknown, never Verified.
+        let v = classify_action("pending-host-confirm", true, "");
+        assert_eq!(v.status, VerdictStatus::Unknown);
+    }
+
+    #[test]
+    fn action_host_grant_ok_is_unknown_no_readback() {
+        let v = classify_action("host-grant", true, "");
+        assert_eq!(v.status, VerdictStatus::Unknown);
+        assert!(v.method.contains("injected_no_readback"));
+    }
+
+    #[test]
+    fn action_dry_run_failure_is_not_verified() {
+        let v = classify_action("dry-run", false, "script crashed");
+        assert_eq!(v.status, VerdictStatus::NotVerified);
     }
 }
