@@ -1,0 +1,115 @@
+use ab_bridge::gos_lite::build_gos_lite_snapshot_from_tool_atlas;
+use ab_bridge::tool_atlas::{
+    build_tool_atlas_snapshot, ToolAtlasFailureSample, ToolAtlasInput, ToolAtlasSnapshot,
+};
+use ab_store::{McpToolCallStats, McpToolErrorRecord};
+
+fn stat(name: &str, calls: u64, errors: u64, p95: u32, avg_result_size: f64) -> McpToolCallStats {
+    McpToolCallStats {
+        tool_name: name.to_string(),
+        call_count: calls,
+        error_count: errors,
+        avg_duration_ms: f64::from(p95) / 2.0,
+        p95_duration_ms: p95,
+        max_duration_ms: p95,
+        avg_result_size,
+        client_name: None,
+        profile: None,
+        source: Some("codex".to_string()),
+        model: None,
+        model_reasoning_effort: None,
+        codex_host: None,
+    }
+}
+
+fn atlas_with_failure_and_latency() -> ToolAtlasSnapshot {
+    build_tool_atlas_snapshot(ToolAtlasInput {
+        generated_at: 1_781_450_000,
+        window_secs: 86_400,
+        current_tools: vec!["memory_save".to_string()],
+        stats: vec![
+            stat("browser_click", 4, 3, 32, 191.0),
+            stat("memory_save", 4, 0, 2_586, 561.0),
+        ],
+        recent_errors: vec![McpToolErrorRecord {
+            ts: 1_781_448_517,
+            tool_name: "browser_click".to_string(),
+            message: "browser: invalid argument: ref @e2 element is disabled".to_string(),
+        }],
+    })
+}
+
+#[test]
+fn gos_lite_projects_tool_failures_into_grounded_belief_graph() {
+    let atlas = atlas_with_failure_and_latency();
+
+    let snapshot = build_gos_lite_snapshot_from_tool_atlas(&atlas);
+
+    assert_eq!(snapshot.schema_version, 1);
+    assert_eq!(snapshot.status, "needs_investigation");
+    assert_eq!(snapshot.next_action, "investigate_failure");
+    assert_eq!(snapshot.summary.failing_tools, 1);
+    assert_eq!(snapshot.summary.degraded_tools, 1);
+
+    let failure_hypothesis = snapshot
+        .nodes
+        .iter()
+        .find(|node| node.id == "hypothesis:tool:browser_click:failure_mode")
+        .expect("browser_click failure hypothesis");
+    assert_eq!(failure_hypothesis.node_type, "Hypothesis");
+
+    let grounded_evidence = snapshot
+        .nodes
+        .iter()
+        .find(|node| node.node_type == "Evidence" && node.label.contains("disabled"))
+        .expect("failure sample evidence");
+    assert_eq!(
+        grounded_evidence.attrs["provenance_source"],
+        "tool_atlas.failure_samples"
+    );
+
+    assert!(snapshot.edges.iter().any(|edge| {
+        edge.src == grounded_evidence.id
+            && edge.dst == failure_hypothesis.id
+            && edge.edge_type == "support"
+    }));
+}
+
+#[test]
+fn gos_lite_uses_risk_flags_as_degradation_evidence_without_fabricating_failures() {
+    let atlas = atlas_with_failure_and_latency();
+
+    let snapshot = build_gos_lite_snapshot_from_tool_atlas(&atlas);
+
+    let latency_hypothesis = snapshot
+        .nodes
+        .iter()
+        .find(|node| node.id == "hypothesis:tool:memory_save:latency_or_size_degradation")
+        .expect("memory_save degradation hypothesis");
+
+    let latency_evidence = snapshot
+        .nodes
+        .iter()
+        .find(|node| node.node_type == "Evidence" && node.label.contains("p95 latency"))
+        .expect("latency evidence");
+    assert_eq!(
+        latency_evidence.attrs["provenance_source"],
+        "tool_atlas.risk_flags"
+    );
+
+    assert!(snapshot.edges.iter().any(|edge| {
+        edge.src == latency_evidence.id
+            && edge.dst == latency_hypothesis.id
+            && edge.edge_type == "support"
+    }));
+
+    let fabricated_memory_failures: Vec<&ToolAtlasFailureSample> = atlas
+        .tools
+        .iter()
+        .find(|tool| tool.tool_name == "memory_save")
+        .expect("memory_save")
+        .failure_samples
+        .iter()
+        .collect();
+    assert!(fabricated_memory_failures.is_empty());
+}

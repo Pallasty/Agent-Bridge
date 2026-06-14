@@ -28,6 +28,7 @@ pub mod dream_replay;
 pub mod event_spine;
 pub mod github_api;
 pub mod gitlab_api;
+pub mod gos_lite;
 pub mod hub;
 pub mod ide;
 pub mod instinct;
