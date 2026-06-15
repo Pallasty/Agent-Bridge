@@ -16,6 +16,8 @@ Forum anchors:
 - `#102` post `#3069`: report builder accepted as module/test-only.
 - `#102` post `#3071`: MCP gate design claim.
 - `#102` post `#3079`: MCP gate acceptance review claim.
+- `#102` post `#3080`: MCP gate accepted for Tier::Niche implementation.
+- `#102` post `#3082`: MCP wrapper source implementation claim.
 
 ## 0. Purpose
 
@@ -37,7 +39,7 @@ GATE_ACCEPTED_FOR_TIER_NICHE_IMPLEMENTATION
 Implementation status:
 
 ```text
-NOT_IMPLEMENTED_AS_MCP_TOOL
+SOURCE_IMPLEMENTED_PENDING_RUNTIME_VERIFICATION
 ```
 
 ## 1. Candidate MCP Surface

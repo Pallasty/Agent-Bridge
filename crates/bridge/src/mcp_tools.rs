@@ -37727,6 +37727,327 @@ fn reg_if(reg: &mut ToolRegistry, policy: ToolPolicy, tier: Tier, tool: Arc<dyn 
 }
 
 // ===========================================================================
+//        LSWR interaction-feedback consumption report MCP wrapper
+// ===========================================================================
+
+pub const LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_MCP_SCHEMA: &str =
+    "agent_bridge.lswr.interaction_feedback_consumption_report_mcp.v0";
+
+pub struct LswrInteractionFeedbackConsumptionReportTool;
+
+impl LswrInteractionFeedbackConsumptionReportTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl McpTool for LswrInteractionFeedbackConsumptionReportTool {
+    fn name(&self) -> &'static str {
+        "lswr_interaction_feedback_consumption_report"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only LSWR interaction-feedback consumption report wrapper. \
+                 Consumes exactly one explicit report_input JSON object and returns an MCP \
+                 transport envelope with the pure report embedded unchanged. It never \
+                 accepts host paths, URLs, live runtime handles, screenshots, GUI captures, \
+                 #94 outcome ingestion requests, Onsen scene identifiers, patch/action/invoke \
+                 requests, writes, or filesystem sources."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "report_input": {
+                        "type": "object",
+                        "description": "Explicit interaction-feedback fixture, evidence packet, consumption preflight, or wrapper with exactly one accepted fixture or packet object. Pass the JSON object itself, not a path, URL, live runtime handle, GUI capture, screenshot, #94 outcome id, or action/write request."
+                    }
+                },
+                "required": ["report_input"],
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        match lswr_interaction_feedback_consumption_report_payload(args) {
+            Ok(payload) => Ok(ToolResult::json_text(&payload)),
+            Err(error) => Ok(lswr_interaction_feedback_consumption_report_error(error)),
+        }
+    }
+}
+
+const LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_FORBIDDEN_INPUT_KEYS: &[&str] = &[
+    "path",
+    "file",
+    "file_path",
+    "host_path",
+    "fixture_path",
+    "packet_path",
+    "preflight_path",
+    "url",
+    "runtime",
+    "runtime_url",
+    "live_runtime",
+    "host",
+    "gui_capture",
+    "screenshot",
+    "image",
+    "ocr",
+    "action",
+    "patch",
+    "invoke",
+    "write",
+    "dry_run",
+    "outcome_id",
+    "onsen_scene",
+];
+
+fn lswr_interaction_feedback_consumption_report_payload(
+    args: Value,
+) -> std::result::Result<Value, Value> {
+    let Some(args_obj) = args.as_object() else {
+        return Err(json!({
+            "code": "invalid_arguments",
+            "message": "arguments must be a JSON object with one explicit report_input field"
+        }));
+    };
+
+    let forbidden = forbidden_interaction_feedback_report_keys(args_obj);
+    if !forbidden.is_empty() {
+        return Err(json!({
+            "code": "indirect_source_not_exposed",
+            "message": "lswr_interaction_feedback_consumption_report accepts only an explicit report_input payload",
+            "forbidden_keys": forbidden,
+            "allowed_keys": ["report_input"],
+            "safety_boundary": interaction_feedback_consumption_report_boundary()
+        }));
+    }
+
+    let unknown = args_obj
+        .keys()
+        .filter(|key| key.as_str() != "report_input")
+        .cloned()
+        .collect::<Vec<_>>();
+    if !unknown.is_empty() {
+        return Err(json!({
+            "code": "unknown_arguments",
+            "message": "only report_input is accepted",
+            "unknown_keys": unknown,
+            "allowed_keys": ["report_input"]
+        }));
+    }
+
+    let Some(report_input) = args_obj.get("report_input") else {
+        return Err(json!({
+            "code": "missing_report_input",
+            "message": "report_input is required",
+            "accepted_schemas": interaction_feedback_consumption_report_accepted_schemas()
+        }));
+    };
+    if !report_input.is_object() {
+        return Err(json!({
+            "code": "invalid_report_input",
+            "message": "report_input must be a JSON object",
+            "accepted_schemas": interaction_feedback_consumption_report_accepted_schemas()
+        }));
+    }
+
+    let input_kind = validate_interaction_feedback_consumption_report_input(report_input)?;
+    let report = crate::lswr_interaction_feedback::build_interaction_feedback_consumption_report(
+        report_input,
+    );
+    Ok(json!({
+        "schema": LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_MCP_SCHEMA,
+        "tool": "lswr_interaction_feedback_consumption_report",
+        "tier": "niche",
+        "transport": "mcp",
+        "mcp_tool_registered": true,
+        "writes_state": false,
+        "store_access_required": false,
+        "live_runtime_lookup_attempted": false,
+        "input_kind": input_kind,
+        "report_schema": report.get("schema").cloned().unwrap_or(Value::Null),
+        "boundary": interaction_feedback_consumption_report_boundary(),
+        "report": report
+    }))
+}
+
+fn validate_interaction_feedback_consumption_report_input(
+    report_input: &Value,
+) -> std::result::Result<&'static str, Value> {
+    let Some(input_obj) = report_input.as_object() else {
+        return Err(json!({
+            "code": "invalid_report_input",
+            "message": "report_input must be a JSON object",
+            "accepted_schemas": interaction_feedback_consumption_report_accepted_schemas()
+        }));
+    };
+
+    let forbidden = forbidden_interaction_feedback_report_keys(input_obj);
+    if !forbidden.is_empty() {
+        return Err(json!({
+            "code": "indirect_report_input_source_not_exposed",
+            "message": "report_input must not expose path, runtime, screenshot, action, write, #94, or Onsen input affordances",
+            "forbidden_keys": forbidden,
+            "allowed_direct_schemas": interaction_feedback_consumption_report_accepted_schemas(),
+            "allowed_wrapper_keys": ["fixture", "packet"],
+            "safety_boundary": interaction_feedback_consumption_report_boundary()
+        }));
+    }
+
+    if let Some(schema) = report_input.get("schema").and_then(Value::as_str) {
+        return match schema {
+            crate::lswr_interaction_feedback::LSWR_INTERACTION_FEEDBACK_FIXTURE_SCHEMA => {
+                Ok("fixture")
+            }
+            crate::lswr_interaction_feedback::LSWR_INTERACTION_FEEDBACK_EVIDENCE_PACKET_SCHEMA => {
+                Ok("evidence_packet")
+            }
+            crate::lswr_interaction_feedback::LSWR_INTERACTION_FEEDBACK_CONSUMPTION_PREFLIGHT_SCHEMA => {
+                Ok("consumption_preflight")
+            }
+            _ => Err(json!({
+                "code": "unsupported_report_input_schema",
+                "message": "report_input schema is not accepted by this MCP wrapper",
+                "received_schema": schema,
+                "accepted_schemas": interaction_feedback_consumption_report_accepted_schemas()
+            })),
+        };
+    }
+
+    let accepted_wrapper_keys = ["fixture", "packet"];
+    let present = accepted_wrapper_keys
+        .iter()
+        .copied()
+        .filter(|key| input_obj.contains_key(*key))
+        .collect::<Vec<_>>();
+    if present.is_empty() {
+        return Err(json!({
+            "code": "missing_explicit_fixture_or_packet",
+            "message": "wrapper report_input must contain exactly one fixture or packet object",
+            "allowed_wrapper_keys": accepted_wrapper_keys,
+            "accepted_schemas": interaction_feedback_consumption_report_accepted_schemas()
+        }));
+    }
+    if present.len() > 1 {
+        return Err(json!({
+            "code": "multiple_accepted_report_inputs",
+            "message": "wrapper report_input must contain exactly one accepted fixture or packet object",
+            "present_keys": present,
+            "allowed_wrapper_keys": accepted_wrapper_keys
+        }));
+    }
+
+    let unknown = input_obj
+        .keys()
+        .filter(|key| !accepted_wrapper_keys.contains(&key.as_str()))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !unknown.is_empty() {
+        return Err(json!({
+            "code": "unknown_report_input_wrapper_keys",
+            "message": "wrapper report_input accepts only fixture or packet, and exactly one of them",
+            "unknown_keys": unknown,
+            "allowed_wrapper_keys": accepted_wrapper_keys
+        }));
+    }
+
+    let key = present[0];
+    let Some(wrapped) = report_input.get(key) else {
+        return Err(json!({
+            "code": "missing_wrapper_payload",
+            "message": "accepted wrapper key is missing its payload",
+            "wrapper_key": key
+        }));
+    };
+    if !wrapped.is_object() {
+        return Err(json!({
+            "code": "invalid_wrapper_payload",
+            "message": "wrapper payload must be a JSON object",
+            "wrapper_key": key
+        }));
+    }
+
+    let expected_schema = if key == "fixture" {
+        crate::lswr_interaction_feedback::LSWR_INTERACTION_FEEDBACK_FIXTURE_SCHEMA
+    } else {
+        crate::lswr_interaction_feedback::LSWR_INTERACTION_FEEDBACK_EVIDENCE_PACKET_SCHEMA
+    };
+    let received_schema = wrapped.get("schema").and_then(Value::as_str);
+    if received_schema != Some(expected_schema) {
+        return Err(json!({
+            "code": "wrapper_schema_mismatch",
+            "message": "wrapper payload schema does not match the selected wrapper key",
+            "wrapper_key": key,
+            "received_schema": received_schema.unwrap_or("<missing>"),
+            "required_schema": expected_schema
+        }));
+    }
+
+    Ok(if key == "fixture" {
+        "fixture_wrapper"
+    } else {
+        "packet_wrapper"
+    })
+}
+
+fn forbidden_interaction_feedback_report_keys(obj: &Map<String, Value>) -> Vec<&'static str> {
+    LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_FORBIDDEN_INPUT_KEYS
+        .iter()
+        .copied()
+        .filter(|key| obj.contains_key(*key))
+        .collect()
+}
+
+fn interaction_feedback_consumption_report_accepted_schemas() -> Value {
+    json!([
+        crate::lswr_interaction_feedback::LSWR_INTERACTION_FEEDBACK_FIXTURE_SCHEMA,
+        crate::lswr_interaction_feedback::LSWR_INTERACTION_FEEDBACK_EVIDENCE_PACKET_SCHEMA,
+        crate::lswr_interaction_feedback::LSWR_INTERACTION_FEEDBACK_CONSUMPTION_PREFLIGHT_SCHEMA
+    ])
+}
+
+fn interaction_feedback_consumption_report_boundary() -> Value {
+    json!({
+        "read_only": true,
+        "input_mode": "explicit_report_input_payload",
+        "host_path": false,
+        "live_runtime": false,
+        "gui_capture": false,
+        "screenshot": false,
+        "file_read": false,
+        "outcome_ingestion": false,
+        "onsen_mutation": false,
+        "action": false,
+        "invoke": false,
+        "mutation_surface": "none",
+        "writes_state": false,
+        "store_access_required": false
+    })
+}
+
+fn lswr_interaction_feedback_consumption_report_error(error: Value) -> ToolResult {
+    let mut result = ToolResult::json_text(&json!({
+        "schema": "agent_bridge.lswr.interaction_feedback_consumption_report_mcp_error.v0",
+        "status": "error",
+        "tool": "lswr_interaction_feedback_consumption_report",
+        "tier": "niche",
+        "transport": "mcp",
+        "mcp_tool_registered": true,
+        "writes_state": false,
+        "store_access_required": false,
+        "live_runtime_lookup_attempted": false,
+        "error": error,
+        "boundary": interaction_feedback_consumption_report_boundary()
+    }));
+    result.is_error = true;
+    result
+}
+
+// ===========================================================================
 //                 LSWR read-only bridge display wrapper (P34)
 // ===========================================================================
 
@@ -40851,6 +41172,15 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Niche,
         Arc::new(crate::world_tools::WorldPresentTool::new()),
+    );
+    // LSWR interaction feedback: MCP transport wrapper over the pure
+    // consumption report builder. Niche/all only; accepts only one explicit
+    // report_input object and keeps the embedded pure report unchanged.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(LswrInteractionFeedbackConsumptionReportTool::new()),
     );
     // LSWR P34: real but gated read-only display wrapper over an explicit P28
     // report packet. Niche/all only; no host path, live runtime, GUI capture,
@@ -47422,11 +47752,17 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
                 "{t} must stay out of standard"
             );
         }
-        // P34 read-only bridge display wrapper follows the same all-profile opt-in
-        // shape as the LSWR world tools, but stays read-only and packet-backed.
+        // LSWR interaction-feedback/report display wrappers follow the same
+        // all-profile opt-in shape as the world tools, but stay read-only and
+        // explicit-payload-backed.
+        assert!(all.includes(Tier::Niche, "lswr_interaction_feedback_consumption_report"));
+        assert!(!std_p.includes(Tier::Niche, "lswr_interaction_feedback_consumption_report"));
         assert!(all.includes(Tier::Niche, "lswr_readonly_bridge_display"));
         assert!(!std_p.includes(Tier::Niche, "lswr_readonly_bridge_display"));
         let codex_essential = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+        assert!(
+            !codex_essential.includes(Tier::Niche, "lswr_interaction_feedback_consumption_report")
+        );
         assert!(!codex_essential.includes(Tier::Niche, "lswr_readonly_bridge_display"));
         assert!(!codex_essential.includes(Tier::Niche, "lswr_outcome_admissions"));
         assert!(!codex_essential.includes(Tier::Niche, "lswr_outcome_admissions_dry_run"));
@@ -47489,10 +47825,22 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         assert!(
             schemas
                 .iter()
+                .any(|s| s.name == "lswr_interaction_feedback_consumption_report"),
+            "lswr_interaction_feedback_consumption_report must register under the all profile"
+        );
+        assert!(
+            schemas
+                .iter()
                 .any(|s| s.name == "lswr_readonly_bridge_display"),
             "lswr_readonly_bridge_display must register under the all profile"
         );
         let standard_schemas = build_registry_with_policy(Hub::builder().build(), std_p).list();
+        assert!(
+            !standard_schemas
+                .iter()
+                .any(|s| s.name == "lswr_interaction_feedback_consumption_report"),
+            "lswr_interaction_feedback_consumption_report must stay out of standard"
+        );
         assert!(
             !standard_schemas
                 .iter()
@@ -47525,6 +47873,12 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         );
         let codex_schemas =
             build_registry_with_policy(Hub::builder().build(), codex_essential).list();
+        assert!(
+            !codex_schemas
+                .iter()
+                .any(|s| s.name == "lswr_interaction_feedback_consumption_report"),
+            "lswr_interaction_feedback_consumption_report must stay out of codex-essential"
+        );
         assert!(
             !codex_schemas
                 .iter()
@@ -47660,6 +48014,380 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
             crate::lswr_outcome_admission::LSWR_OUTCOME_ADMISSION_APPROVAL_THREAD_ID
         );
         assert_eq!(request_props["max_writes"]["maximum"], 1);
+    }
+
+    #[test]
+    fn lswr_interaction_feedback_consumption_report_mcp_schema_is_explicit_report_input_only() {
+        let all = ToolPolicy::from_values(None, None, None, Some("all"));
+        let schemas = build_registry_with_policy(Hub::builder().build(), all).list();
+        let tool = schemas
+            .iter()
+            .find(|s| s.name == "lswr_interaction_feedback_consumption_report")
+            .expect("lswr_interaction_feedback_consumption_report schema");
+
+        assert!(tool.description.contains("Read-only"));
+        assert!(tool.description.contains("explicit report_input"));
+        assert!(tool.input_schema["properties"]
+            .get("report_input")
+            .is_some());
+        assert_eq!(tool.input_schema["required"], json!(["report_input"]));
+        assert_eq!(
+            tool.input_schema["additionalProperties"],
+            serde_json::Value::Bool(false)
+        );
+        for forbidden in [
+            "path",
+            "file_path",
+            "host_path",
+            "fixture_path",
+            "packet_path",
+            "preflight_path",
+            "url",
+            "runtime",
+            "runtime_url",
+            "live_runtime",
+            "gui_capture",
+            "screenshot",
+            "image",
+            "ocr",
+            "action",
+            "patch",
+            "invoke",
+            "write",
+            "dry_run",
+            "outcome_id",
+            "onsen_scene",
+        ] {
+            assert!(
+                tool.input_schema["properties"].get(forbidden).is_none(),
+                "{forbidden} must not be exposed as an input property"
+            );
+        }
+    }
+
+    #[test]
+    fn lswr_interaction_feedback_consumption_report_mcp_registers_under_all_only() {
+        let all = ToolPolicy::from_values(None, None, None, Some("all"));
+        let all_dev = ToolPolicy::from_values(Some("all-dev"), None, None, None);
+        let standard = ToolPolicy::from_values(None, None, None, Some("standard"));
+        let codex_essential = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+        let codex_lean = ToolPolicy::from_values(Some("codex-lean"), None, None, None);
+        let gemini_lean = ToolPolicy::from_values(Some("gemini-lean"), None, None, None);
+        let hook_lifecycle = ToolPolicy::from_values(Some("hook-lifecycle"), None, None, None);
+
+        assert!(all.includes(Tier::Niche, "lswr_interaction_feedback_consumption_report"));
+        assert!(all_dev.includes(Tier::Niche, "lswr_interaction_feedback_consumption_report"));
+        assert!(!standard.includes(Tier::Niche, "lswr_interaction_feedback_consumption_report"));
+        assert!(
+            !codex_essential.includes(Tier::Niche, "lswr_interaction_feedback_consumption_report")
+        );
+        assert!(!codex_lean.includes(Tier::Niche, "lswr_interaction_feedback_consumption_report"));
+        assert!(!gemini_lean.includes(Tier::Niche, "lswr_interaction_feedback_consumption_report"));
+        assert!(
+            !hook_lifecycle.includes(Tier::Niche, "lswr_interaction_feedback_consumption_report")
+        );
+
+        for (policy, expected) in [
+            (all, true),
+            (all_dev, true),
+            (standard, false),
+            (codex_essential, false),
+            (codex_lean, false),
+            (gemini_lean, false),
+            (hook_lifecycle, false),
+        ] {
+            let registered = build_registry_with_policy(Hub::builder().build(), policy)
+                .list()
+                .iter()
+                .any(|schema| schema.name == "lswr_interaction_feedback_consumption_report");
+            assert_eq!(
+                registered,
+                expected,
+                "unexpected profile exposure for {}",
+                policy.label()
+            );
+        }
+    }
+
+    fn lswr_interaction_feedback_fixture() -> Value {
+        serde_json::from_str(include_str!(
+            "../tests/fixtures/lswr_interaction_feedback_fixture_v0.json"
+        ))
+        .expect("interaction feedback fixture")
+    }
+
+    fn lswr_interaction_feedback_packet() -> Value {
+        crate::lswr_interaction_feedback::build_interaction_feedback_evidence_packet(
+            &lswr_interaction_feedback_fixture(),
+        )
+    }
+
+    fn lswr_interaction_feedback_preflight() -> Value {
+        crate::lswr_interaction_feedback::build_interaction_feedback_packet_consumption_preflight(
+            &lswr_interaction_feedback_fixture(),
+        )
+    }
+
+    #[tokio::test]
+    async fn lswr_interaction_feedback_consumption_report_mcp_returns_envelope_for_fixture() {
+        let tool = LswrInteractionFeedbackConsumptionReportTool::new();
+        let out = tool
+            .execute(
+                json!({"report_input": lswr_interaction_feedback_fixture()}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+
+        assert!(!out.is_error);
+        let payload = result_text_as_json(&out);
+        assert_eq!(
+            payload["schema"],
+            LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_MCP_SCHEMA
+        );
+        assert_eq!(
+            payload["tool"],
+            "lswr_interaction_feedback_consumption_report"
+        );
+        assert_eq!(payload["tier"], "niche");
+        assert_eq!(payload["transport"], "mcp");
+        assert_eq!(payload["mcp_tool_registered"], true);
+        assert_eq!(payload["writes_state"], false);
+        assert_eq!(payload["store_access_required"], false);
+        assert_eq!(payload["live_runtime_lookup_attempted"], false);
+        assert_eq!(payload["boundary"]["read_only"], true);
+        assert_eq!(payload["boundary"]["mutation_surface"], "none");
+        assert_eq!(
+            payload["report_schema"],
+            crate::lswr_interaction_feedback::LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_SCHEMA
+        );
+
+        let report = &payload["report"];
+        assert_eq!(
+            report["schema"],
+            crate::lswr_interaction_feedback::LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_SCHEMA
+        );
+        assert_eq!(report["accepted"], true);
+        assert_eq!(report["preflight_verdict"], "accepted");
+        assert_eq!(report["world_verdict"], "not_verified");
+        assert_eq!(report["json_canonical"], true);
+        assert_eq!(report["markdown_source"], "preflight");
+        assert_eq!(report["writes_state"], false);
+        assert_eq!(report["store_access_required"], false);
+        assert_eq!(report["mcp_tool_registered"], false);
+        assert_eq!(report["implicit_live_runtime_lookup_attempted"], false);
+    }
+
+    #[tokio::test]
+    async fn lswr_interaction_feedback_consumption_report_mcp_accepts_packet_preflight_and_wrapper()
+    {
+        let tool = LswrInteractionFeedbackConsumptionReportTool::new();
+        let packet = lswr_interaction_feedback_packet();
+        let preflight = lswr_interaction_feedback_preflight();
+        let fixture = lswr_interaction_feedback_fixture();
+
+        let packet_out = tool
+            .execute(json!({"report_input": packet}), &ToolContext::default())
+            .await
+            .expect("packet execute");
+        let preflight_out = tool
+            .execute(json!({"report_input": preflight}), &ToolContext::default())
+            .await
+            .expect("preflight execute");
+        let wrapper_out = tool
+            .execute(
+                json!({"report_input": {"fixture": fixture}}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("wrapper execute");
+
+        for (out, expected_kind) in [
+            (packet_out, "evidence_packet"),
+            (preflight_out, "consumption_preflight"),
+            (wrapper_out, "fixture_wrapper"),
+        ] {
+            assert!(!out.is_error);
+            let payload = result_text_as_json(&out);
+            assert_eq!(payload["input_kind"], expected_kind);
+            assert_eq!(
+                payload["report"]["schema"],
+                crate::lswr_interaction_feedback::LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_SCHEMA
+            );
+            assert_eq!(payload["report"]["mcp_tool_registered"], false);
+        }
+    }
+
+    #[tokio::test]
+    async fn lswr_interaction_feedback_consumption_report_mcp_refuses_indirect_sources_and_unknowns(
+    ) {
+        let tool = LswrInteractionFeedbackConsumptionReportTool::new();
+
+        let top_level_forbidden = tool
+            .execute(
+                json!({
+                    "report_input": lswr_interaction_feedback_fixture(),
+                    "file_path": "/tmp/feedback.json",
+                    "runtime_url": "http://127.0.0.1:9000"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        assert!(top_level_forbidden.is_error);
+        let payload = result_text_as_json(&top_level_forbidden);
+        assert_eq!(payload["error"]["code"], "indirect_source_not_exposed");
+        assert_eq!(payload["writes_state"], false);
+        assert_eq!(payload["boundary"]["live_runtime"], false);
+        let forbidden = payload["error"]["forbidden_keys"]
+            .as_array()
+            .expect("forbidden keys");
+        assert!(forbidden.iter().any(|v| v == "file_path"));
+        assert!(forbidden.iter().any(|v| v == "runtime_url"));
+
+        for key in LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_FORBIDDEN_INPUT_KEYS {
+            let mut args = json!({"report_input": lswr_interaction_feedback_fixture()});
+            args.as_object_mut()
+                .expect("args object")
+                .insert((*key).to_string(), json!("blocked"));
+            let out = tool
+                .execute(args, &ToolContext::default())
+                .await
+                .expect("execute");
+            assert!(out.is_error, "{key} must be rejected at top level");
+            let payload = result_text_as_json(&out);
+            assert_eq!(payload["error"]["code"], "indirect_source_not_exposed");
+            assert_eq!(payload["writes_state"], false);
+        }
+
+        let unknown = tool
+            .execute(
+                json!({
+                    "report_input": lswr_interaction_feedback_fixture(),
+                    "extra": true
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        assert!(unknown.is_error);
+        let payload = result_text_as_json(&unknown);
+        assert_eq!(payload["error"]["code"], "unknown_arguments");
+
+        let nested_forbidden = tool
+            .execute(
+                json!({"report_input": {"fixture_path": "/tmp/fixture.json"}}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        assert!(nested_forbidden.is_error);
+        let payload = result_text_as_json(&nested_forbidden);
+        assert_eq!(
+            payload["error"]["code"],
+            "indirect_report_input_source_not_exposed"
+        );
+        assert_eq!(payload["boundary"]["host_path"], false);
+        assert_eq!(payload["boundary"]["writes_state"], false);
+
+        for key in LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_FORBIDDEN_INPUT_KEYS {
+            let mut report_input = json!({});
+            report_input
+                .as_object_mut()
+                .expect("report input object")
+                .insert((*key).to_string(), json!("blocked"));
+            let out = tool
+                .execute(
+                    json!({"report_input": report_input}),
+                    &ToolContext::default(),
+                )
+                .await
+                .expect("execute");
+            assert!(out.is_error, "{key} must be rejected inside report_input");
+            let payload = result_text_as_json(&out);
+            assert_eq!(
+                payload["error"]["code"],
+                "indirect_report_input_source_not_exposed"
+            );
+            assert_eq!(payload["boundary"]["writes_state"], false);
+        }
+    }
+
+    #[tokio::test]
+    async fn lswr_interaction_feedback_consumption_report_mcp_rejects_missing_multiple_and_wrong_schema(
+    ) {
+        let tool = LswrInteractionFeedbackConsumptionReportTool::new();
+        let fixture = lswr_interaction_feedback_fixture();
+        let packet = lswr_interaction_feedback_packet();
+
+        let missing = tool
+            .execute(json!({}), &ToolContext::default())
+            .await
+            .expect("execute");
+        assert!(missing.is_error);
+        let payload = result_text_as_json(&missing);
+        assert_eq!(payload["error"]["code"], "missing_report_input");
+        assert_eq!(payload["live_runtime_lookup_attempted"], false);
+
+        let multiple = tool
+            .execute(
+                json!({"report_input": {"fixture": fixture, "packet": packet}}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        assert!(multiple.is_error);
+        let payload = result_text_as_json(&multiple);
+        assert_eq!(payload["error"]["code"], "multiple_accepted_report_inputs");
+
+        let wrong_schema = tool
+            .execute(
+                json!({"report_input": {"schema": "agent_bridge.lswr.wrong_input.v0"}}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        assert!(wrong_schema.is_error);
+        let payload = result_text_as_json(&wrong_schema);
+        assert_eq!(payload["error"]["code"], "unsupported_report_input_schema");
+        assert_eq!(payload["writes_state"], false);
+        assert_eq!(payload["store_access_required"], false);
+    }
+
+    #[tokio::test]
+    async fn lswr_interaction_feedback_consumption_report_mcp_preserves_laundered_verdict_blockers()
+    {
+        let mut packet = lswr_interaction_feedback_packet();
+        packet["guardrails"]["writes_state"] = json!(true);
+        packet["readback"]["latest_verification_verdict"] = json!("verified");
+
+        let tool = LswrInteractionFeedbackConsumptionReportTool::new();
+        let out = tool
+            .execute(json!({"report_input": packet}), &ToolContext::default())
+            .await
+            .expect("execute");
+
+        assert!(!out.is_error);
+        let payload = result_text_as_json(&out);
+        assert_eq!(
+            payload["schema"],
+            LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_MCP_SCHEMA
+        );
+        assert_eq!(payload["mcp_tool_registered"], true);
+        assert_eq!(payload["writes_state"], false);
+        assert_eq!(payload["report"]["accepted"], false);
+        assert_eq!(payload["report"]["preflight_verdict"], "blocked");
+        assert_eq!(payload["report"]["world_verdict"], "verified");
+        assert_eq!(payload["report"]["mcp_tool_registered"], false);
+        let failure_reasons = payload["report"]["failure_reasons"]
+            .as_array()
+            .expect("failure reasons");
+        assert!(failure_reasons
+            .iter()
+            .any(|reason| reason == "C2:guardrails_preserved"));
+        assert!(failure_reasons
+            .iter()
+            .any(|reason| reason == "C3:no_verification_laundering"));
     }
 
     #[test]
