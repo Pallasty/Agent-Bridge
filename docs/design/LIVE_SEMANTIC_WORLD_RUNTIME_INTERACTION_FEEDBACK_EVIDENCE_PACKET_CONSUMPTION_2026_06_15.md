@@ -326,5 +326,11 @@ mutation, or verification verdict rewrite.
 Design a separate MCP registration gate for an all/niche read-only tool.
 ```
 
+The gate design is tracked in:
+
+```text
+LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_MCP_GATE_2026_06_15.md
+```
+
 Do not start with a live runtime adapter, writer, default-profile tool, or #94
 ingestion path.

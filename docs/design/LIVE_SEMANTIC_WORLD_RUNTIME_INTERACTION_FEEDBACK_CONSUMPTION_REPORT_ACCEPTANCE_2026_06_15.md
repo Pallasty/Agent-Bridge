@@ -164,6 +164,12 @@ Still not accepted:
 The next safe slice is a separate MCP registration gate design for an all/niche
 read-only tool, if a tool surface is still desired.
 
+That gate design is tracked in:
+
+```text
+LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_MCP_GATE_2026_06_15.md
+```
+
 That gate must prove:
 
 - explicit JSON-object input only;
