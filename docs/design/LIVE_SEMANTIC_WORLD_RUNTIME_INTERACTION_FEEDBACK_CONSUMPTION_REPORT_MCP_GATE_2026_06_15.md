@@ -67,7 +67,7 @@ Allowed input shape:
 - `agent_bridge.lswr.interaction_feedback_consumption_preflight.v0`;
 - a wrapper object with exactly one accepted `fixture` or `packet` object.
 
-Allowed output:
+Allowed embedded report:
 
 ```text
 agent_bridge.lswr.interaction_feedback_consumption_report.v0
@@ -137,13 +137,35 @@ needed, it requires a separate local file-read policy gate.
 
 ## 3. Output Contract
 
-Success output must be the pure report object:
+Success output should be an MCP transport envelope:
+
+```json
+{
+  "schema": "agent_bridge.lswr.interaction_feedback_consumption_report_mcp.v0",
+  "tool": "lswr_interaction_feedback_consumption_report",
+  "tier": "niche",
+  "transport": "mcp",
+  "mcp_tool_registered": true,
+  "writes_state": false,
+  "store_access_required": false,
+  "live_runtime_lookup_attempted": false,
+  "report_schema": "agent_bridge.lswr.interaction_feedback_consumption_report.v0",
+  "report": {}
+}
+```
+
+The embedded `report` must be the pure report object:
 
 ```text
 agent_bridge.lswr.interaction_feedback_consumption_report.v0
 ```
 
-The report must include:
+The MCP wrapper must not mutate the embedded pure report. In particular, the
+pure report may keep `mcp_tool_registered=false` to describe the underlying
+report builder, while the outer MCP envelope records that the transport is
+registered.
+
+The embedded report must include:
 
 - `preflight`;
 - `markdown`;
@@ -216,12 +238,13 @@ convert the report to success.
 |---|---|---|
 | G1: Explicit object input | MCP schema requires only `report_input` | No path, URL, screenshot, runtime handle, or unknown key is accepted. |
 | G2: Pure module delegation | Handler calls `build_interaction_feedback_consumption_report(...)` | MCP layer does not reimplement weaker gates. |
-| G3: Profile gating | Registry tests cover all, all-dev, standard/default, Codex-essential, lean, Gemini, and hook profiles | Visible only under all/niche; hidden elsewhere. |
-| G4: Canonical JSON | Output includes `json_canonical=true`, `markdown_source=preflight`, and embedded `preflight` | Markdown remains presentation only. |
-| G5: Guardrail visibility | Output and Markdown show no-store/no-MCP/no-live-runtime/no-#94/no-Onsen guardrails | Human review can audit the same result. |
-| G6: Failed gate visibility | Missing input and laundered packet tests return blocked reports or structured errors | Failed gates and blockers remain readable when a report is returned. |
-| G7: No truth laundering | Tests preserve blocked/unsafe verdicts | Human feedback cannot become verification evidence. |
-| G8: No side effects | Unit tests and boundary scan prove no store, memory, runtime, #94, or Onsen calls | Tool is a transport wrapper only. |
+| G3: Transport envelope | Output wraps the pure report in an MCP envelope | `mcp_tool_registered=true` belongs to the envelope; embedded pure report remains unchanged. |
+| G4: Profile gating | Registry tests cover all, all-dev, standard/default, Codex-essential, lean, Gemini, and hook profiles | Visible only under all/niche; hidden elsewhere. |
+| G5: Canonical JSON | Embedded report includes `json_canonical=true`, `markdown_source=preflight`, and embedded `preflight` | Markdown remains presentation only. |
+| G6: Guardrail visibility | Output and Markdown show no-store/no-live-runtime/no-#94/no-Onsen guardrails | Human review can audit the same result. |
+| G7: Failed gate visibility | Missing input and laundered packet tests return blocked reports or structured errors | Failed gates and blockers remain readable when a report is returned. |
+| G8: No truth laundering | Tests preserve blocked/unsafe verdicts | Human feedback cannot become verification evidence. |
+| G9: No side effects | Unit tests and boundary scan prove no store, memory, runtime, #94, or Onsen calls | Tool is a transport wrapper only. |
 
 ## 7. Required Regression Set
 
@@ -256,6 +279,8 @@ is stable:
 - missing input returns a blocked report or structured error without live
   lookup;
 - laundered verdict stays blocked and visible;
+- outer envelope has `mcp_tool_registered=true`, while embedded pure report
+  remains unchanged;
 - existing interaction-feedback fixture/preflight/report tests still pass.
 
 ## 8. Required Runtime Verification
@@ -317,7 +342,7 @@ implementation should:
 4. Reject path, URL, screenshot, runtime, action, write, #94, and Onsen input
    affordances before building a report.
 5. Call `build_interaction_feedback_consumption_report(&report_input)`.
-6. Return the report unchanged.
+6. Return an MCP envelope with the pure report embedded unchanged.
 7. Add profile-gating and schema tests before posting DONE.
 
 Do not add file input, runtime discovery, store/memory access, #94 ingestion, or
