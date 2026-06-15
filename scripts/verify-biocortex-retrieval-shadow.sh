@@ -158,6 +158,31 @@ jq -e '
     and .expected_input.additional_properties == false
 ' "$tmp_lswr_feedback_mcp_surface" >/dev/null
 
+tmp_lswr_feedback_next_revision_plan="$tmpdir/lswr-interaction-feedback-next-revision-plan.json"
+run cargo run -q -p ab-bridge --example lswr_interaction_feedback_next_revision_plan_smoke -- \
+    --format json \
+    --assert-ready \
+    --assert-read-only > "$tmp_lswr_feedback_next_revision_plan"
+jq -e '
+    .schema == "agent_bridge.lswr.interaction_feedback_next_revision_plan.v0"
+    and .source_schema == "agent_bridge.lswr.interaction_feedback_consumption_report.v0"
+    and .source_accepted == true
+    and .source_world_verdict == "not_verified"
+    and .plan_verdict == "ready_for_revision"
+    and .next_revision.patch_id == "patch_arrival_bath_move_002"
+    and .next_revision.failed_clause_ids == ["effect_walkway_clearance_001"]
+    and .next_revision.must_cite == ["verify_patch_arrival_bath_move_001", "fb_arrival_crowded_001"]
+    and .next_revision.preserved_world_verdict == "not_verified"
+    and .next_revision.allowed_to_apply == false
+    and .next_revision.allowed_to_ingest == false
+    and .agent_action_contract.do_not_rewrite_world_verdict == true
+    and .guardrails.read_only == true
+    and .guardrails.applies_patch == false
+    and .writes_state == false
+    and .store_access_required == false
+    and .mcp_tool_registered == false
+' "$tmp_lswr_feedback_next_revision_plan" >/dev/null
+
 tmp_missing_lswr_feedback_input="$tmpdir/missing-lswr-interaction-feedback-input.json"
 printf '{}\n' > "$tmp_missing_lswr_feedback_input"
 tmp_missing_lswr_feedback_consumption_preflight="$tmpdir/missing-lswr-interaction-feedback-consumption-preflight.json"

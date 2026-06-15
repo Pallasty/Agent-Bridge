@@ -1,13 +1,15 @@
 use ab_bridge::lswr_interaction_feedback::{
     build_interaction_feedback_consumption_report, build_interaction_feedback_evidence_packet,
+    build_interaction_feedback_next_revision_plan,
     build_interaction_feedback_packet_consumption_preflight, build_interaction_feedback_readback,
     build_interaction_feedback_validation_envelope,
     render_interaction_feedback_consumption_preflight_report,
+    render_interaction_feedback_next_revision_plan,
     render_interaction_feedback_validation_envelope, validate_interaction_feedback_fixture,
     LSWR_INTERACTION_FEEDBACK_CONSUMPTION_PREFLIGHT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_EVIDENCE_PACKET_SCHEMA, LSWR_INTERACTION_FEEDBACK_FIXTURE_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_READBACK_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_NEXT_REVISION_PLAN_SCHEMA, LSWR_INTERACTION_FEEDBACK_READBACK_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_VALIDATION_ENVELOPE_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_VALIDATION_SCHEMA,
 };
@@ -399,6 +401,108 @@ fn interaction_feedback_consumption_report_does_not_rewrite_laundered_verdict() 
     assert!(markdown.contains("- C2 guardrails_preserved: `failed`"));
     assert!(markdown.contains("- C3 no_verification_laundering: `failed`"));
     assert!(markdown.contains("- feedback_changes_world_verdict_allowed: `false`"));
+}
+
+#[test]
+fn interaction_feedback_next_revision_plan_selects_report_cited_patch() {
+    let fixture = fixture();
+    let report = build_interaction_feedback_consumption_report(&fixture);
+    let plan = build_interaction_feedback_next_revision_plan(&report);
+    let markdown = render_interaction_feedback_next_revision_plan(&plan);
+
+    assert_eq!(
+        plan["schema"],
+        LSWR_INTERACTION_FEEDBACK_NEXT_REVISION_PLAN_SCHEMA
+    );
+    assert_eq!(
+        plan["source_schema"],
+        LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_SCHEMA
+    );
+    assert_eq!(plan["source_accepted"], true);
+    assert_eq!(plan["plan_verdict"], "ready_for_revision");
+    assert_eq!(plan["status"], "ready");
+    assert_eq!(plan["source_world_verdict"], "not_verified");
+    assert_eq!(
+        plan["next_revision"]["patch_id"],
+        "patch_arrival_bath_move_002"
+    );
+    assert_eq!(
+        plan["next_revision"]["failed_clause_ids"],
+        json!(["effect_walkway_clearance_001"])
+    );
+    assert_eq!(
+        plan["next_revision"]["feedback_issue"],
+        "visual_density_too_high"
+    );
+    assert_eq!(
+        plan["next_revision"]["must_cite"],
+        json!([
+            "verify_patch_arrival_bath_move_001",
+            "fb_arrival_crowded_001"
+        ])
+    );
+    assert_eq!(
+        plan["next_revision"]["preserved_world_verdict"],
+        "not_verified"
+    );
+    assert_eq!(
+        plan["agent_action_contract"]["do_not_rewrite_world_verdict"],
+        true
+    );
+    assert_eq!(plan["guardrails"]["applies_patch"], false);
+    assert_eq!(plan["implicit_live_runtime_lookup_attempted"], false);
+    assert_eq!(plan["writes_state"], false);
+    assert_eq!(plan["store_access_required"], false);
+    assert_eq!(plan["mcp_tool_registered"], false);
+
+    assert!(markdown.contains("- plan_verdict: `ready_for_revision`"));
+    assert!(markdown.contains("- patch_id: `patch_arrival_bath_move_002`"));
+    assert!(markdown
+        .contains("- must_cite: `verify_patch_arrival_bath_move_001, fb_arrival_crowded_001`"));
+    assert!(markdown.contains("- preserved_world_verdict: `not_verified`"));
+}
+
+#[test]
+fn interaction_feedback_next_revision_plan_accepts_fixture_directly() {
+    let plan = build_interaction_feedback_next_revision_plan(&fixture());
+
+    assert_eq!(plan["plan_verdict"], "ready_for_revision");
+    assert_eq!(plan["source_accepted"], true);
+    assert_eq!(plan["next_revision"]["allowed_to_apply"], false);
+    assert_eq!(plan["next_revision"]["allowed_to_ingest"], false);
+}
+
+#[test]
+fn interaction_feedback_next_revision_plan_blocks_laundered_source() {
+    let fixture = fixture();
+    let mut packet = build_interaction_feedback_evidence_packet(&fixture);
+    packet["guardrails"]["writes_state"] = json!(true);
+    packet["readback"]["latest_verification_verdict"] = json!("verified");
+
+    let plan = build_interaction_feedback_next_revision_plan(&packet);
+    let markdown = render_interaction_feedback_next_revision_plan(&plan);
+
+    assert_eq!(plan["source_accepted"], false);
+    assert_eq!(plan["plan_verdict"], "blocked");
+    assert_eq!(plan["status"], "blocked");
+    assert_eq!(plan["source_world_verdict"], "verified");
+    assert_eq!(
+        plan["failure_reasons"],
+        json!([
+            "source_report_not_accepted",
+            "world_verdict_must_remain_not_verified"
+        ])
+    );
+    assert_eq!(plan["next_revision"]["allowed_to_apply"], false);
+    assert_eq!(
+        plan["agent_action_contract"]["do_not_rewrite_world_verdict"],
+        true
+    );
+    assert_eq!(plan["guardrails"]["writes_state"], false);
+    assert_eq!(plan["guardrails"]["queries_live_runtime"], false);
+    assert!(markdown.contains("- source_world_verdict: `verified`"));
+    assert!(markdown.contains("- plan_verdict: `blocked`"));
+    assert!(markdown.contains("world_verdict_must_remain_not_verified"));
 }
 
 #[test]

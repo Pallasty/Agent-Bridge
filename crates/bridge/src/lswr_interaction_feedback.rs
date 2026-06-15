@@ -16,6 +16,8 @@ pub const LSWR_INTERACTION_FEEDBACK_CONSUMPTION_PREFLIGHT_SCHEMA: &str =
     "agent_bridge.lswr.interaction_feedback_consumption_preflight.v0";
 pub const LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_SCHEMA: &str =
     "agent_bridge.lswr.interaction_feedback_consumption_report.v0";
+pub const LSWR_INTERACTION_FEEDBACK_NEXT_REVISION_PLAN_SCHEMA: &str =
+    "agent_bridge.lswr.interaction_feedback_next_revision_plan.v0";
 
 const EXPECTED_EVENT_TYPES: [&str; 8] = [
     "human.select",
@@ -514,6 +516,200 @@ pub fn render_interaction_feedback_consumption_preflight_report(preflight: &Valu
     lines.join("\n")
 }
 
+pub fn build_interaction_feedback_next_revision_plan(input: &Value) -> Value {
+    let report = if input.get("schema").and_then(Value::as_str)
+        == Some(LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_SCHEMA)
+    {
+        input.clone()
+    } else {
+        build_interaction_feedback_consumption_report(input)
+    };
+    let readback = report.get("readback").cloned().unwrap_or(Value::Null);
+    let source_accepted = report.get("accepted").and_then(Value::as_bool) == Some(true)
+        && report.get("preflight_verdict").and_then(Value::as_str) == Some("accepted");
+
+    let mut failure_reasons = Vec::new();
+    if !source_accepted {
+        failure_reasons.push("source_report_not_accepted".to_string());
+    }
+    if readback["latest_verification_verdict"] != "not_verified" {
+        failure_reasons.push("world_verdict_must_remain_not_verified".to_string());
+    }
+    if readback["failed_clause_ids"]
+        .as_array()
+        .map(Vec::is_empty)
+        .unwrap_or(true)
+    {
+        failure_reasons.push("failed_clause_ids_missing".to_string());
+    }
+    if readback["revision_should_cite"]
+        .as_array()
+        .map(Vec::is_empty)
+        .unwrap_or(true)
+    {
+        failure_reasons.push("revision_sources_missing".to_string());
+    }
+    if readback["next_revision_patch_id"]
+        .as_str()
+        .filter(|value| !value.is_empty())
+        .is_none()
+    {
+        failure_reasons.push("next_revision_patch_id_missing".to_string());
+    }
+    if readback["latest_feedback_issue"]
+        .as_str()
+        .filter(|value| !value.is_empty())
+        .is_none()
+    {
+        failure_reasons.push("feedback_issue_missing".to_string());
+    }
+
+    let ready = failure_reasons.is_empty();
+    let reason = if ready {
+        "explicit_feedback_report_revision_plan_ready".to_string()
+    } else {
+        failure_reasons
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "next_revision_plan_blocked".to_string())
+    };
+
+    json!({
+        "schema": LSWR_INTERACTION_FEEDBACK_NEXT_REVISION_PLAN_SCHEMA,
+        "source_schema": report.get("schema").cloned().unwrap_or(Value::Null),
+        "source_fixture_id": report.get("fixture_id").cloned().unwrap_or(Value::Null),
+        "source_accepted": source_accepted,
+        "source_status": report.get("status").cloned().unwrap_or(Value::Null),
+        "source_world_verdict": report.get("world_verdict").cloned().unwrap_or(Value::Null),
+        "source_world_result_verdict": report.get("world_result_verdict").cloned().unwrap_or(Value::Null),
+        "plan_verdict": if ready { "ready_for_revision" } else { "blocked" },
+        "status": if ready { "ready" } else { "blocked" },
+        "reason": reason,
+        "failure_reasons": failure_reasons,
+        "guardrails": next_revision_plan_guardrails(),
+        "input_contract": {
+            "accepted_inputs": ["consumption_report", "preflight", "packet", "fixture"],
+            "explicit_input_required": true,
+            "implicit_live_runtime_lookup_allowed": false
+        },
+        "next_revision": {
+            "patch_id": readback.get("next_revision_patch_id").cloned().unwrap_or(Value::Null),
+            "selected_entities": readback.get("selected_entities").cloned().unwrap_or(Value::Null),
+            "failed_clause_ids": readback.get("failed_clause_ids").cloned().unwrap_or(Value::Null),
+            "human_decision": readback.get("latest_human_decision").cloned().unwrap_or(Value::Null),
+            "feedback_issue": readback.get("latest_feedback_issue").cloned().unwrap_or(Value::Null),
+            "must_cite": readback.get("revision_should_cite").cloned().unwrap_or(Value::Null),
+            "preserved_world_verdict": readback.get("latest_verification_verdict").cloned().unwrap_or(Value::Null),
+            "recommended_step": if ready {
+                "draft_semantic_patch_revision"
+            } else {
+                "repair_or_supply_accepted_feedback_report"
+            },
+            "allowed_to_apply": false,
+            "allowed_to_ingest": false
+        },
+        "agent_action_contract": {
+            "mode": "plan_next_patch_only",
+            "do_not_apply_patch": true,
+            "do_not_ingest_outcome": true,
+            "do_not_write_memory": true,
+            "do_not_query_live_runtime": true,
+            "do_not_rewrite_world_verdict": true,
+            "use_revision_sources_as_required_citations": true,
+            "treat_human_feedback_as_revision_input": true
+        },
+        "readback": readback,
+        "report": report,
+        "implicit_live_runtime_lookup_attempted": false,
+        "writes_state": false,
+        "store_access_required": false,
+        "mcp_tool_registered": false,
+        "note": "pure next-revision plan: derives an AI-readable revision target from an explicit consumption report without applying patches or writing state"
+    })
+}
+
+pub fn render_interaction_feedback_next_revision_plan(plan: &Value) -> String {
+    let mut lines = Vec::new();
+    lines.push("# LSWR Interaction Feedback Next Revision Plan".to_string());
+    lines.push(String::new());
+    push_markdown_kv(&mut lines, "schema", &plan["schema"]);
+    push_markdown_kv(&mut lines, "plan_verdict", &plan["plan_verdict"]);
+    push_markdown_kv(&mut lines, "status", &plan["status"]);
+    push_markdown_kv(&mut lines, "reason", &plan["reason"]);
+    push_markdown_kv(&mut lines, "source_schema", &plan["source_schema"]);
+    push_markdown_kv(&mut lines, "source_accepted", &plan["source_accepted"]);
+    push_markdown_kv(
+        &mut lines,
+        "source_world_verdict",
+        &plan["source_world_verdict"],
+    );
+    push_markdown_kv(
+        &mut lines,
+        "source_world_result_verdict",
+        &plan["source_world_result_verdict"],
+    );
+    push_markdown_kv(&mut lines, "failure_reasons", &plan["failure_reasons"]);
+    push_markdown_kv(
+        &mut lines,
+        "implicit_live_runtime_lookup_attempted",
+        &plan["implicit_live_runtime_lookup_attempted"],
+    );
+
+    lines.push(String::new());
+    lines.push("## Guardrails".to_string());
+    lines.push(String::new());
+    for key in [
+        "read_only",
+        "mutation_surface",
+        "writes_state",
+        "store_access_required",
+        "mcp_tool_registered",
+        "queries_live_runtime",
+        "outcome_ingestion_allowed",
+        "feedback_changes_world_verdict_allowed",
+        "applies_patch",
+    ] {
+        push_markdown_kv(&mut lines, key, &plan["guardrails"][key]);
+    }
+
+    lines.push(String::new());
+    lines.push("## Next Revision".to_string());
+    lines.push(String::new());
+    for key in [
+        "patch_id",
+        "selected_entities",
+        "failed_clause_ids",
+        "human_decision",
+        "feedback_issue",
+        "must_cite",
+        "preserved_world_verdict",
+        "recommended_step",
+        "allowed_to_apply",
+        "allowed_to_ingest",
+    ] {
+        push_markdown_kv(&mut lines, key, &plan["next_revision"][key]);
+    }
+
+    lines.push(String::new());
+    lines.push("## Agent Action Contract".to_string());
+    lines.push(String::new());
+    for key in [
+        "mode",
+        "do_not_apply_patch",
+        "do_not_ingest_outcome",
+        "do_not_write_memory",
+        "do_not_query_live_runtime",
+        "do_not_rewrite_world_verdict",
+        "use_revision_sources_as_required_citations",
+        "treat_human_feedback_as_revision_input",
+    ] {
+        push_markdown_kv(&mut lines, key, &plan["agent_action_contract"][key]);
+    }
+
+    lines.push(String::new());
+    lines.join("\n")
+}
+
 pub fn build_interaction_feedback_readback(fixture: &Value) -> Value {
     let selected_entities =
         fixture["interaction_state_after"]["active_view"]["selected_entities"].clone();
@@ -780,6 +976,22 @@ fn consumption_input_contract() -> Value {
         "explicit_input_required": true,
         "accepted_inputs": ["packet", "fixture"],
         "implicit_live_runtime_lookup_allowed": false
+    })
+}
+
+fn next_revision_plan_guardrails() -> Value {
+    json!({
+        "read_only": true,
+        "mutation_surface": "none",
+        "writes_state": false,
+        "store_access_required": false,
+        "mcp_tool_registered": false,
+        "queries_live_runtime": false,
+        "implicit_live_runtime_lookup_allowed": false,
+        "default_profile_exposure_allowed": false,
+        "outcome_ingestion_allowed": false,
+        "feedback_changes_world_verdict_allowed": false,
+        "applies_patch": false
     })
 }
 
