@@ -57,6 +57,17 @@
     "blocked_by": "missing_checkout_or_accessible_repository_url",
     "required_input": "provide_or_sync_onsen_step_b_checkout_or_repository_url"
   },
+  "recovery_probe": {
+    "script": "scripts/probe-onsen-step-b-host-source.sh",
+    "schema": "agent_bridge.biocortex_retrieval.onsen_step_b_host_source_probe.v0",
+    "ready": true,
+    "read_only": true,
+    "supports_no_remote_mode": true,
+    "supports_strict_mode": true,
+    "does_not_clone": true,
+    "does_not_start_host": true,
+    "next_use": "run_after_checkout_or_repository_url_is_available"
+  },
   "boundary": {
     "calls_memory_search": false,
     "runs_biocortex": false,

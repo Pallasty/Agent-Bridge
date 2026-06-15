@@ -1353,6 +1353,7 @@
   },
   "next_step": "provide_or_sync_onsen_step_b_checkout_or_repository_url_then_launch_dev_host",
   "loopback_lswr_host_attach_preflight_blocked": true,
+  "onsen_step_b_host_source_probe_script_ready": true,
   "loopback_lswr_host_attach_preflight": {
     "doc": "docs/design/BIOCORTEX_RETRIEVAL_LOOPBACK_LSWR_HOST_ATTACH_PREFLIGHT_2026_06_15.md",
     "fixture": "docs/design/fixtures/biocortex-retrieval-loopback-lswr-host-attach-preflight-2026-06-15.json",
@@ -1396,6 +1397,8 @@
     "can_launch_real_onsen_step_b_host_now": false,
     "can_collect_verified_runtime_action_result_now": false,
     "blocked_by": "missing_checkout_or_accessible_repository_url",
+    "recovery_probe_script": "scripts/probe-onsen-step-b-host-source.sh",
+    "recovery_probe_ready": true,
     "calls_memory_search": false,
     "runs_biocortex": false,
     "writes_approval": false,

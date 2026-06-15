@@ -44,6 +44,25 @@ repository from this environment:
 The local `prototypes/lswr-web-prototype` remains useful as a prototype, but it
 is not the accepted newline-JSON TCP onsen Step B world-tool host.
 
+## Recovery Probe
+
+The source-resolution path now has a reusable read-only probe:
+
+```text
+scripts/probe-onsen-step-b-host-source.sh
+```
+
+The probe checks:
+
+- candidate checkout presence and git branch/head;
+- candidate git remotes with `git ls-remote`, unless `--no-remote` is passed;
+- loopback listener state for the expected newline-JSON TCP endpoint;
+- whether the next step is still source sync, host launch, or live probe rerun.
+
+It does not clone repositories, start a host, execute LSWR actions, call
+`memory_search`, run BioCortex, write approval state, mutate the default
+Agent-Bridge DB, or change default retrieval order.
+
 ## Boundary
 
 This source-resolution slice does not:
@@ -69,4 +88,10 @@ launch the newline-JSON TCP dev host and rerun the live
 
 ```text
 provide_or_sync_onsen_step_b_checkout_or_repository_url_then_launch_dev_host
+```
+
+After the checkout or repository URL is available, run:
+
+```text
+scripts/probe-onsen-step-b-host-source.sh --checkout /path/to/onsen-step-b
 ```

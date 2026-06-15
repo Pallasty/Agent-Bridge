@@ -1259,6 +1259,8 @@ this Linux checkout:
 - no listener is present on `127.0.0.1:37691`;
 - obvious GitHub SSH candidates were checked and did not produce a usable
   repository from this environment;
+- a read-only recovery probe is ready at
+  `scripts/probe-onsen-step-b-host-source.sh`;
 - the next project action is refined to
   `provide_or_sync_onsen_step_b_checkout_or_repository_url_then_launch_dev_host`.
 
