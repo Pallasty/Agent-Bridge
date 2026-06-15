@@ -10,6 +10,30 @@ cleanup() {
 }
 trap cleanup EXIT
 
+run_with_timeout() {
+    local timeout_secs="$1"
+    shift
+    if command -v timeout >/dev/null 2>&1; then
+        timeout "$timeout_secs" "$@"
+    elif command -v gtimeout >/dev/null 2>&1; then
+        gtimeout "$timeout_secs" "$@"
+    else
+        python3 -c '
+import subprocess
+import sys
+
+timeout_secs = float(sys.argv[1])
+cmd = sys.argv[2:]
+cmd_display = " ".join(cmd)
+try:
+    raise SystemExit(subprocess.run(cmd, timeout=timeout_secs).returncode)
+except subprocess.TimeoutExpired:
+    print(f"timeout after {timeout_secs:g}s: {cmd_display}", file=sys.stderr)
+    raise SystemExit(124)
+' "$timeout_secs" "$@"
+    fi
+}
+
 input_jsonl="$tmpdir/in.jsonl"
 output_jsonl="$tmpdir/out.jsonl"
 stderr_log="$tmpdir/stderr.log"
@@ -789,7 +813,7 @@ with open(path, "w", encoding="utf-8") as f:
         f.write(json.dumps(message, separators=(",", ":")) + "\n")
 PY
 
-timeout "${AB_MCP_SMOKE_TIMEOUT_SECS:-180}" \
+run_with_timeout "${AB_MCP_SMOKE_TIMEOUT_SECS:-180}" \
     env -u AB_BIOCORTEX_RETRIEVAL_DISABLE \
     AGENT_BRIDGE_TOOL_PROFILE="${AGENT_BRIDGE_TOOL_PROFILE:-standard}" \
     cargo run -q -p ab-bridge --no-default-features -- mcp \

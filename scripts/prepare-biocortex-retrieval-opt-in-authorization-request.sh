@@ -194,7 +194,7 @@ jq -n \
                 may_implement_ordering_now: $trial_review[0].may_implement_ordering_now
             },
             order_diff_packet:
-                if $order_diff[0] == null then
+                (if $order_diff[0] == null then
                     {
                         provided: false,
                         required: false,
@@ -253,9 +253,9 @@ jq -n \
                         ordering_behavior_connected: $order_diff[0].ordering_behavior_connected,
                         may_implement_ordering_now: $order_diff[0].may_implement_ordering_now
                     }
-                end,
+                end),
             redacted_order_artifact:
-                if $redacted_order[0] == null then
+                (if $redacted_order[0] == null then
                     {
                         provided: false,
                         required: false,
@@ -331,7 +331,7 @@ jq -n \
                         ordering_behavior_connected: $redacted_order[0].ordering_behavior_connected,
                         may_implement_ordering_now: $redacted_order[0].may_implement_ordering_now
                     }
-                end,
+                end),
             docs: {
                 runtime_proof: "docs/design/BIOCORTEX_RETRIEVAL_RUNTIME_PROOF_2026_06_11.md",
                 default_influence_contract: "docs/design/BIOCORTEX_RETRIEVAL_DEFAULT_INFLUENCE_CONTRACT_2026_06_11.md",

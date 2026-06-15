@@ -2010,7 +2010,7 @@ jq -e '
 ' "$approval_packet" >/dev/null
 
 review_bundle="$tmpdir/runtime-approval-review"
-run scripts/prepare-biocortex-retrieval-approval-review.sh \
+run bash scripts/prepare-biocortex-retrieval-approval-review.sh \
     --out-dir "$review_bundle" \
     --reviewer "verify-bundle" \
     --agent-attestor "verify-bundle" \
@@ -2662,7 +2662,7 @@ run env AB_BIOCORTEX_RS="$biocortex_rs" CARGO_INCREMENTAL=0 \
     --features biocortex-retrieval-shadow
 
 runtime_proof="$tmpdir/runtime-boundary-proof"
-run scripts/prove-biocortex-retrieval-runtime-boundary.sh \
+run bash scripts/prove-biocortex-retrieval-runtime-boundary.sh \
     --out-dir "$runtime_proof" \
     --checkout "$biocortex_rs" \
     --samples 3
