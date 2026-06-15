@@ -403,6 +403,8 @@ pub fn build_interaction_feedback_consumption_report(input: &Value) -> Value {
         "fixture_id": preflight.get("fixture_id").cloned().unwrap_or(Value::Null),
         "readback": preflight.get("readback").cloned().unwrap_or(Value::Null),
         "markdown": markdown,
+        "markdown_source": "preflight",
+        "json_canonical": true,
         "preflight": preflight,
         "implicit_live_runtime_lookup_attempted": preflight
             .get("implicit_live_runtime_lookup_attempted")

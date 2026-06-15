@@ -346,6 +346,8 @@ fn interaction_feedback_consumption_report_renders_stable_markdown() {
     assert_eq!(report["preflight_verdict"], "accepted");
     assert_eq!(report["world_verdict"], "not_verified");
     assert_eq!(report["markdown"], CONSUMPTION_MARKDOWN);
+    assert_eq!(report["markdown_source"], "preflight");
+    assert_eq!(report["json_canonical"], true);
     assert_eq!(report["preflight"], preflight);
     assert_eq!(report["input_contract"]["explicit_input_required"], true);
     assert_eq!(report["implicit_live_runtime_lookup_attempted"], false);

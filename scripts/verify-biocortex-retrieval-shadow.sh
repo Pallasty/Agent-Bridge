@@ -105,6 +105,39 @@ jq -e '
     and .implicit_live_runtime_lookup_attempted == false
 ' "$tmp_lswr_feedback_consumption_preflight" >/dev/null
 
+tmp_lswr_feedback_consumption_report="$tmpdir/lswr-interaction-feedback-consumption-report.json"
+run cargo run -q -p ab-bridge --example lswr_interaction_feedback_consumption_report_smoke -- \
+    --format json \
+    --assert-golden \
+    --assert-read-only > "$tmp_lswr_feedback_consumption_report"
+jq -e '
+    .schema == "agent_bridge.lswr.interaction_feedback_consumption_report.v0"
+    and .preflight_schema == "agent_bridge.lswr.interaction_feedback_consumption_preflight.v0"
+    and .accepted == true
+    and .preflight_verdict == "accepted"
+    and .status == "accepted"
+    and .input_kind == "fixture"
+    and .source_kind == "fixture"
+    and .world_verdict == "not_verified"
+    and .world_result_verdict == "not_verified"
+    and .json_canonical == true
+    and .markdown_source == "preflight"
+    and (.markdown | contains("C3 no_verification_laundering: `passed`"))
+    and (.markdown | contains("revision_should_cite: `verify_patch_arrival_bath_move_001, fb_arrival_crowded_001`"))
+    and .writes_state == false
+    and .store_access_required == false
+    and .mcp_tool_registered == false
+    and .guardrails.read_only == true
+    and .guardrails.writes_state == false
+    and .guardrails.store_access_required == false
+    and .guardrails.mcp_tool_registered == false
+    and .guardrails.live_runtime_lookup_allowed == false
+    and .guardrails.implicit_live_runtime_lookup_allowed == false
+    and .guardrails.default_profile_exposure_allowed == false
+    and .guardrails.outcome_ingestion_allowed == false
+    and .preflight.implicit_live_runtime_lookup_attempted == false
+' "$tmp_lswr_feedback_consumption_report" >/dev/null
+
 tmp_missing_lswr_feedback_input="$tmpdir/missing-lswr-interaction-feedback-input.json"
 printf '{}\n' > "$tmp_missing_lswr_feedback_input"
 tmp_missing_lswr_feedback_consumption_preflight="$tmpdir/missing-lswr-interaction-feedback-consumption-preflight.json"
