@@ -24,6 +24,8 @@ pub const LSWR_INTERACTION_FEEDBACK_ARGUMENT_CONTEXT_SCHEMA: &str =
     "agent_bridge.lswr.interaction_feedback_argument_context.v0";
 pub const LSWR_INTERACTION_FEEDBACK_PATCH_EXECUTION_PREFLIGHT_SCHEMA: &str =
     "agent_bridge.lswr.interaction_feedback_patch_execution_preflight.v0";
+pub const LSWR_INTERACTION_FEEDBACK_PATCH_APPLY_REQUEST_SCHEMA: &str =
+    "agent_bridge.lswr.interaction_feedback_patch_apply_request.v0";
 
 const EXPECTED_EVENT_TYPES: [&str; 8] = [
     "human.select",
@@ -1119,6 +1121,234 @@ pub fn render_interaction_feedback_patch_execution_preflight(preflight: &Value) 
     lines.join("\n")
 }
 
+pub fn build_interaction_feedback_patch_apply_request(input: &Value) -> Value {
+    let (input_kind, preflight) = extract_apply_request_input(input);
+    let schema_ok = preflight.get("schema").and_then(Value::as_str)
+        == Some(LSWR_INTERACTION_FEEDBACK_PATCH_EXECUTION_PREFLIGHT_SCHEMA);
+    let resolved_patch = &preflight["resolved_patch"];
+    let guardrails = &preflight["guardrails"];
+
+    let mut failure_reasons = Vec::new();
+    if !schema_ok {
+        failure_reasons.push("patch_execution_preflight_required".to_string());
+    }
+    if schema_ok && preflight["preflight_verdict"] != "ready_for_execution_request" {
+        failure_reasons.push("source_preflight_not_ready".to_string());
+    }
+    if schema_ok && preflight["source_world_verdict"] != "not_verified" {
+        failure_reasons.push("source_world_verdict_must_remain_not_verified".to_string());
+    }
+    if schema_ok && resolved_patch["ready_for_execution_request"] != true {
+        failure_reasons.push("resolved_patch_not_ready".to_string());
+    }
+    if schema_ok && resolved_patch["args"].is_null() {
+        failure_reasons.push("resolved_patch_args_required".to_string());
+    }
+    if schema_ok
+        && resolved_patch["required_citations"]
+            .as_array()
+            .map(Vec::is_empty)
+            .unwrap_or(true)
+    {
+        failure_reasons.push("required_citations_missing".to_string());
+    }
+    if schema_ok && resolved_patch["execution_performed"] != false {
+        failure_reasons.push("source_preflight_must_not_execute_patch".to_string());
+    }
+    if schema_ok && resolved_patch["apply_allowed_by_this_tool"] != false {
+        failure_reasons.push("source_preflight_apply_authority_must_remain_false".to_string());
+    }
+    if schema_ok
+        && (guardrails["read_only"] != true
+            || guardrails["writes_state"] != false
+            || guardrails["queries_live_runtime"] != false
+            || guardrails["applies_patch"] != false)
+    {
+        failure_reasons.push("source_preflight_guardrails_not_read_only".to_string());
+    }
+
+    let ready = failure_reasons.is_empty();
+    let reason = if ready {
+        "external_apply_request_ready".to_string()
+    } else {
+        failure_reasons
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "apply_request_blocked".to_string())
+    };
+    let request_id = if ready {
+        apply_request_id_for_patch(&resolved_patch["patch_id"])
+    } else {
+        Value::Null
+    };
+    let patch = if ready {
+        json!({
+            "patch_id": resolved_patch.get("patch_id").cloned().unwrap_or(Value::Null),
+            "op": resolved_patch.get("op").cloned().unwrap_or(Value::Null),
+            "operation_hint": resolved_patch.get("operation_hint").cloned().unwrap_or(Value::Null),
+            "target_entities": resolved_patch.get("target_entities").cloned().unwrap_or(Value::Null),
+            "args": resolved_patch.get("args").cloned().unwrap_or(Value::Null),
+            "required_citations": resolved_patch.get("required_citations").cloned().unwrap_or(Value::Null),
+            "expected_effect_requirements": resolved_patch
+                .get("expected_effect_requirements")
+                .cloned()
+                .unwrap_or(Value::Null)
+        })
+    } else {
+        Value::Null
+    };
+    let target_runtime = if ready {
+        json!({
+            "runtime_family": "lswr",
+            "world_id": preflight["argument_context"].get("world_id").cloned().unwrap_or(Value::Null),
+            "branch_id": preflight["argument_context"].get("branch_id").cloned().unwrap_or(Value::Null),
+            "executor": "separate_lswr_patch_executor"
+        })
+    } else {
+        Value::Null
+    };
+
+    json!({
+        "schema": LSWR_INTERACTION_FEEDBACK_PATCH_APPLY_REQUEST_SCHEMA,
+        "input_kind": input_kind,
+        "source_schema": preflight.get("schema").cloned().unwrap_or(Value::Null),
+        "source_preflight_verdict": preflight.get("preflight_verdict").cloned().unwrap_or(Value::Null),
+        "source_world_verdict": preflight.get("source_world_verdict").cloned().unwrap_or(Value::Null),
+        "apply_request_verdict": if ready { "ready_for_external_executor" } else { "blocked" },
+        "status": if ready { "ready" } else { "blocked" },
+        "reason": reason,
+        "failure_reasons": unique_strings(failure_reasons),
+        "guardrails": apply_request_guardrails(),
+        "input_contract": {
+            "accepted_inputs": ["patch_execution_preflight", "wrapper_with_preflight"],
+            "requires_ready_preflight": true,
+            "normalizes_draft_or_fixture": false,
+            "external_executor_required": true
+        },
+        "apply_request": {
+            "request_id": request_id,
+            "target_runtime": target_runtime,
+            "patch": patch,
+            "preconditions": {
+                "source_world_verdict_must_remain": "not_verified",
+                "verify_required_citations_before_apply": true,
+                "external_executor_must_verify_postcondition": true,
+                "do_not_rewrite_feedback_verdict": true
+            },
+            "ready_for_external_submission": ready,
+            "requires_operator_gate": true,
+            "requires_external_executor": true,
+            "apply_performed": false,
+            "submitted_by_this_tool": false,
+            "outcome_ingestion_allowed_by_this_tool": false
+        },
+        "agent_action_contract": {
+            "mode": "apply_request_boundary_only",
+            "may_submit_to_separate_executor_after_operator_gate": ready,
+            "do_not_apply_patch": true,
+            "do_not_submit_patch_from_this_tool": true,
+            "do_not_ingest_outcome": true,
+            "do_not_write_memory": true,
+            "do_not_query_live_runtime": true,
+            "do_not_rewrite_world_verdict": true,
+            "external_executor_required": true,
+            "preserve_required_citations": true,
+            "require_post_apply_verification": true
+        },
+        "source_preflight": if schema_ok { preflight } else { Value::Null },
+        "implicit_live_runtime_lookup_attempted": false,
+        "writes_state": false,
+        "store_access_required": false,
+        "mcp_tool_registered": false,
+        "note": "pure apply-request boundary: emits an external executor request envelope but never submits or applies the patch"
+    })
+}
+
+pub fn render_interaction_feedback_patch_apply_request(request: &Value) -> String {
+    let mut lines = Vec::new();
+    lines.push("# LSWR Interaction Feedback Patch Apply Request Boundary".to_string());
+    lines.push(String::new());
+    push_markdown_kv(&mut lines, "schema", &request["schema"]);
+    push_markdown_kv(
+        &mut lines,
+        "apply_request_verdict",
+        &request["apply_request_verdict"],
+    );
+    push_markdown_kv(&mut lines, "status", &request["status"]);
+    push_markdown_kv(&mut lines, "reason", &request["reason"]);
+    push_markdown_kv(
+        &mut lines,
+        "source_preflight_verdict",
+        &request["source_preflight_verdict"],
+    );
+    push_markdown_kv(
+        &mut lines,
+        "source_world_verdict",
+        &request["source_world_verdict"],
+    );
+    push_markdown_kv(&mut lines, "failure_reasons", &request["failure_reasons"]);
+    push_markdown_kv(
+        &mut lines,
+        "implicit_live_runtime_lookup_attempted",
+        &request["implicit_live_runtime_lookup_attempted"],
+    );
+
+    lines.push(String::new());
+    lines.push("## Guardrails".to_string());
+    lines.push(String::new());
+    for key in [
+        "read_only",
+        "mutation_surface",
+        "writes_state",
+        "store_access_required",
+        "mcp_tool_registered",
+        "queries_live_runtime",
+        "submits_apply_request",
+        "applies_patch",
+        "outcome_ingestion_allowed",
+    ] {
+        push_markdown_kv(&mut lines, key, &request["guardrails"][key]);
+    }
+
+    lines.push(String::new());
+    lines.push("## Apply Request".to_string());
+    lines.push(String::new());
+    for key in [
+        "request_id",
+        "target_runtime",
+        "patch",
+        "ready_for_external_submission",
+        "requires_operator_gate",
+        "requires_external_executor",
+        "apply_performed",
+        "submitted_by_this_tool",
+        "outcome_ingestion_allowed_by_this_tool",
+    ] {
+        push_markdown_kv(&mut lines, key, &request["apply_request"][key]);
+    }
+
+    lines.push(String::new());
+    lines.push("## Agent Action Contract".to_string());
+    lines.push(String::new());
+    for key in [
+        "mode",
+        "may_submit_to_separate_executor_after_operator_gate",
+        "do_not_apply_patch",
+        "do_not_submit_patch_from_this_tool",
+        "do_not_ingest_outcome",
+        "do_not_write_memory",
+        "do_not_query_live_runtime",
+        "do_not_rewrite_world_verdict",
+        "external_executor_required",
+        "require_post_apply_verification",
+    ] {
+        push_markdown_kv(&mut lines, key, &request["agent_action_contract"][key]);
+    }
+
+    lines.push(String::new());
+    lines.join("\n")
+}
+
 pub fn build_interaction_feedback_readback(fixture: &Value) -> Value {
     let selected_entities =
         fixture["interaction_state_after"]["active_view"]["selected_entities"].clone();
@@ -1510,6 +1740,20 @@ fn extract_execution_preflight_input(input: &Value) -> (&'static str, Value, Opt
     )
 }
 
+fn extract_apply_request_input(input: &Value) -> (&'static str, Value) {
+    if input.get("schema").and_then(Value::as_str)
+        == Some(LSWR_INTERACTION_FEEDBACK_PATCH_EXECUTION_PREFLIGHT_SCHEMA)
+    {
+        return ("patch_execution_preflight", input.clone());
+    }
+
+    if let Some(preflight) = input.get("preflight") {
+        return ("preflight_wrapper", preflight.clone());
+    }
+
+    ("invalid_input", input.clone())
+}
+
 fn validate_argument_context(argument_context: Option<&Value>) -> Value {
     let Some(context) = argument_context else {
         return json!({
@@ -1599,6 +1843,32 @@ fn execution_preflight_guardrails() -> Value {
         "feedback_changes_world_verdict_allowed": false,
         "applies_patch": false
     })
+}
+
+fn apply_request_guardrails() -> Value {
+    json!({
+        "read_only": true,
+        "mutation_surface": "none",
+        "writes_state": false,
+        "store_access_required": false,
+        "mcp_tool_registered": false,
+        "queries_live_runtime": false,
+        "implicit_live_runtime_lookup_allowed": false,
+        "default_profile_exposure_allowed": false,
+        "submits_apply_request": false,
+        "outcome_ingestion_allowed": false,
+        "feedback_changes_world_verdict_allowed": false,
+        "applies_patch": false,
+        "external_executor_required": true
+    })
+}
+
+fn apply_request_id_for_patch(patch_id: &Value) -> Value {
+    let Some(patch_id) = patch_id.as_str() else {
+        return Value::Null;
+    };
+    let suffix = patch_id.strip_prefix("patch_").unwrap_or(patch_id);
+    json!(format!("apply_request_{suffix}"))
 }
 
 fn unique_strings(items: Vec<String>) -> Vec<String> {
