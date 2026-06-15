@@ -7,6 +7,7 @@ Parent documents:
 - [Interaction feedback next revision plan](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_NEXT_REVISION_PLAN_2026_06_15.md)
 - [Interaction feedback semantic patch draft](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_SEMANTIC_PATCH_DRAFT_2026_06_15.md)
 - [Interaction feedback semantic patch draft acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_SEMANTIC_PATCH_DRAFT_ACCEPTANCE_2026_06_15.md)
+- [Interaction feedback patch execution preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_PATCH_EXECUTION_PREFLIGHT_ACCEPTANCE_2026_06_15.md)
 
 Forum anchors:
 - `#102` post `#3109`: execution preflight implementation claim.
@@ -141,7 +142,7 @@ present.
 
 ## 4. Implementation Status
 
-Status: `SOURCE_IMPLEMENTED_PENDING_ACCEPTANCE`.
+Status: `ACCEPTED_PREFLIGHT_ONLY`.
 
 Implemented surfaces:
 
@@ -152,3 +153,6 @@ Implemented surfaces:
 This is deliberately not an MCP wrapper and deliberately not a patch executor.
 Any future execution surface needs a separate gate with live runtime, apply, and
 outcome-ingestion boundaries reviewed independently.
+
+Acceptance is recorded in
+`LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_PATCH_EXECUTION_PREFLIGHT_ACCEPTANCE_2026_06_15.md`.
