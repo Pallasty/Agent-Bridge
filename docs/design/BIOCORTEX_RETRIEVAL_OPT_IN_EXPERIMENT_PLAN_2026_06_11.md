@@ -62,8 +62,11 @@ permission. The first downstream checkpoint is now selected as the Semantic
 System Bus LSWR action/result runtime-evidence checkpoint. The ready downstream
 AIO runtime-evidence handoff packet is now connected to a read-only SSB/LSWR
 action-result review fixture, and a read-only SSB adapter fixture now projects
-the handoff into a conservative `not_verified` SSB action-result shape. The next
-step is to collect live LSWR action-result runtime evidence.
+the handoff into a conservative `not_verified` SSB action-result shape. A live
+read-only LSWR `world_visibility_query` runtime observation was then collected:
+the MCP tool is present, but the loopback LSWR host was unreachable, so the
+runtime action result remains `not_verified`. The next step is to start or
+attach a loopback LSWR host and rerun the same live probe.
 
 ```json
 {
@@ -112,6 +115,7 @@ step is to collect live LSWR action-result runtime evidence.
   "downstream_aio_runtime_evidence_handoff_ready": true,
   "ssb_lswr_action_result_review_fixture_ready": true,
   "read_only_ssb_adapter_fixture_ready": true,
+  "live_lswr_action_result_runtime_evidence_observed_not_verified": true,
   "controlled_explicit_opt_in_fts_trial_ready": true,
   "post_runtime_evidence_backed_controlled_trial_ready": true,
   "post_runtime_live_candidate_evidence_ready": true,
@@ -179,6 +183,11 @@ Read-only SSB adapter fixture:
 
 - `docs/design/BIOCORTEX_RETRIEVAL_READ_ONLY_SSB_ADAPTER_FIXTURE_2026_06_15.md`
 - `docs/design/fixtures/biocortex-retrieval-read-only-ssb-adapter-fixture-2026-06-15.json`
+
+Live LSWR action-result runtime evidence:
+
+- `docs/design/BIOCORTEX_RETRIEVAL_LIVE_LSWR_ACTION_RESULT_RUNTIME_EVIDENCE_2026_06_15.md`
+- `docs/design/fixtures/biocortex-retrieval-live-lswr-action-result-runtime-evidence-2026-06-15.json`
 
 Authorization request packet:
 
@@ -1114,8 +1123,42 @@ Slice 44 builds the read-only SSB adapter fixture from the handoff:
   BioCortex, write approval, change default retrieval order, call AiOT runtime,
   execute LSWR actions, emit a runtime SSB action result, or include raw
   query/key/content/side-signal/human-decision payloads;
+- the prior next project action
+  `collect_live_lswr_action_result_runtime_evidence` is completed by Slice 45
+  as a live but `not_verified` observation.
+
+## Live LSWR Action-Result Runtime Evidence
+
+Slice 45 runs the read-only live LSWR action-result probe:
+
+- committed document:
+  `docs/design/BIOCORTEX_RETRIEVAL_LIVE_LSWR_ACTION_RESULT_RUNTIME_EVIDENCE_2026_06_15.md`;
+- committed machine-readable fixture:
+  `docs/design/fixtures/biocortex-retrieval-live-lswr-action-result-runtime-evidence-2026-06-15.json`;
+- fixture schema:
+  `agent_bridge.biocortex_retrieval.live_lswr_action_result_runtime_evidence.v0`;
+- observed tool:
+  `world_visibility_query`;
+- MCP profile used for the short-lived probe: `all`;
+- tool listing result: `world_visibility_query` present with `tools_count=240`;
+- endpoint observed: `127.0.0.1:37691`;
+- action-result schema:
+  `agent_bridge.semantic_bus.action_result.v0`;
+- action-result verdict: `not_verified`;
+- reason: `world_host_unreachable`;
+- `verified_to=null`;
+- `recover=inspect_host_or_visibility_evidence`;
+- `raw_available=false`;
+- the live envelope carried `host_response=null`; no host raw payload was
+  included;
+- this is runtime observation evidence, not verified LSWR host evidence, and it
+  must not be ingested as a verified runtime result or used for training;
+- the observation remains read-only and does not call `memory_search`, run
+  BioCortex, write approval, change default retrieval order, call AiOT runtime,
+  execute LSWR actions, emit a durable runtime SSB action result, or include raw
+  key/content/side-signal/human-decision payloads;
 - the next project action is
-  `collect_live_lswr_action_result_runtime_evidence`.
+  `start_or_attach_loopback_lswr_host_then_rerun_live_action_result_probe`.
 
 ## Fail-Open Rules
 

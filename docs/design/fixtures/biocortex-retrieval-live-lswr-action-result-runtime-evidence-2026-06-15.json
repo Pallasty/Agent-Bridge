@@ -1,0 +1,93 @@
+{
+  "schema": "agent_bridge.biocortex_retrieval.live_lswr_action_result_runtime_evidence.v0",
+  "created_at": "2026-06-15T00:00:00Z",
+  "status": "observed_not_verified",
+  "read_only": true,
+  "implementation_stage": "live_lswr_action_result_runtime_evidence_collection",
+  "source_adapter_fixture": {
+    "schema": "agent_bridge.biocortex_retrieval.read_only_ssb_adapter_fixture.v0",
+    "status": "ready",
+    "fixture": "docs/design/fixtures/biocortex-retrieval-read-only-ssb-adapter-fixture-2026-06-15.json",
+    "included": false
+  },
+  "mcp_probe": {
+    "tool_profile": "all",
+    "tools_count": 240,
+    "tool_listed": true,
+    "tool": "world_visibility_query",
+    "call_executed": true,
+    "include_raw": false
+  },
+  "live_observation": {
+    "schema": "agent_bridge.world_tool.v0",
+    "ok": false,
+    "verified": false,
+    "reason": "world_host_unreachable",
+    "endpoint": {
+      "host": "127.0.0.1",
+      "port": 37691,
+      "timeout_ms": 750
+    },
+    "request": {
+      "request_id": "biocortex-live-lswr-evidence-20260615",
+      "world_tool": "world_visibility_query",
+      "entities": [
+        "semantic_system_bus_lswr_action_result_runtime_evidence_checkpoint"
+      ]
+    },
+    "verify": {
+      "method": "live_viewport_pixel_coverage",
+      "verified_to": null,
+      "host_reason": "world_host_unreachable"
+    },
+    "host_response_field_present": true,
+    "host_response_is_null": true,
+    "host_response_payload_present": false
+  },
+  "action_result": {
+    "schema": "agent_bridge.semantic_bus.action_result.v0",
+    "source_schema": "agent_bridge.world_tool.v0",
+    "adapter": "lswr.onsen",
+    "world_tool": "world_visibility_query",
+    "action_type": "world.visibility.query",
+    "action_id": "lswr:world_visibility_query:biocortex-live-lswr-evidence-20260615:result",
+    "request_id": "biocortex-live-lswr-evidence-20260615",
+    "subject_id": "lswr:onsen:world",
+    "event_ids": [
+      "evt-lswr-world_visibility_query-biocortex-live-lswr-evidence-20260615"
+    ],
+    "verdict": "not_verified",
+    "reason": "world_host_unreachable",
+    "verified_to": null,
+    "verification_method": "live_viewport_pixel_coverage",
+    "recover": "inspect_host_or_visibility_evidence",
+    "raw_available": false
+  },
+  "evidence_boundary": {
+    "live_mcp_call_attempted": true,
+    "runtime_host_reached": false,
+    "verified_runtime_action_result_collected": false,
+    "not_verified_runtime_action_result_collected": true,
+    "must_not_be_ingested_as_verified_runtime_evidence": true,
+    "must_not_be_used_for_training": true,
+    "requires_live_host_before_verified": true
+  },
+  "boundary": {
+    "calls_memory_search": false,
+    "runs_biocortex": false,
+    "writes_approval": false,
+    "changes_memory_search_order": false,
+    "default_search_order_change_allowed": false,
+    "calls_aiot_runtime": false,
+    "executes_lswr_actions": false,
+    "emits_durable_runtime_action_result": false,
+    "mutates_default_agent_bridge_db": false,
+    "host_response_included": false,
+    "raw_queries_included": false,
+    "raw_keys_included": false,
+    "content_included": false,
+    "side_signal_raw_included": false,
+    "human_decision_text_included": false
+  },
+  "next_step": "start_or_attach_loopback_lswr_host_then_rerun_live_action_result_probe"
+}

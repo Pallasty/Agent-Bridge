@@ -58,8 +58,13 @@ This adapter fixture does not:
 
 ## Next Step
 
-Collect live LSWR action-result runtime evidence:
+Live LSWR action-result runtime evidence has been observed but not verified:
+
+- `docs/design/BIOCORTEX_RETRIEVAL_LIVE_LSWR_ACTION_RESULT_RUNTIME_EVIDENCE_2026_06_15.md`
+- `docs/design/fixtures/biocortex-retrieval-live-lswr-action-result-runtime-evidence-2026-06-15.json`
+
+Start or attach the loopback LSWR host, then rerun the live probe:
 
 ```text
-collect_live_lswr_action_result_runtime_evidence
+start_or_attach_loopback_lswr_host_then_rerun_live_action_result_probe
 ```

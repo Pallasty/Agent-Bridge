@@ -80,5 +80,6 @@
     "side_signal_raw_included": false,
     "human_decision_text_included": false
   },
-  "next_step": "collect_live_lswr_action_result_runtime_evidence"
+  "next_step": "completed_by_live_lswr_action_result_runtime_evidence_observation",
+  "next_step_completed": true
 }
