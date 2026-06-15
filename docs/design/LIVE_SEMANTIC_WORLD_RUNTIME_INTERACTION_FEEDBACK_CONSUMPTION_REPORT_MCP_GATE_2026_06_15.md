@@ -18,6 +18,8 @@ Forum anchors:
 - `#102` post `#3079`: MCP gate acceptance review claim.
 - `#102` post `#3080`: MCP gate accepted for Tier::Niche implementation.
 - `#102` post `#3082`: MCP wrapper source implementation claim.
+- `#102` post `#3085`: MCP wrapper source implementation DONE.
+- `#102` post `#3088`: deployed `.real` runtime verification DONE.
 
 ## 0. Purpose
 
@@ -39,7 +41,29 @@ GATE_ACCEPTED_FOR_TIER_NICHE_IMPLEMENTATION
 Implementation status:
 
 ```text
-SOURCE_IMPLEMENTED_PENDING_RUNTIME_VERIFICATION
+DEPLOYED_AND_RUNTIME_VERIFIED
+```
+
+Runtime verification summary:
+
+```text
+implementation_commit=ba0d0703e7c2ff107f0fe08a2cb4813c3fdcc15e
+deploy_target=/Users/pallasting/.local/bin/agent-bridge.real
+all_profile_tools_list=present
+all_dev_tools_list=present
+standard_profile_tools_list=absent
+codex_essential_tools_list=absent
+fixture_call=accepted
+packet_call=accepted
+preflight_call=accepted
+missing_input_call=structured_error
+multiple_input_call=structured_error
+forbidden_source_call=structured_error
+laundered_verdict_call=blocked_report_visible
+outer_mcp_tool_registered=true
+embedded_pure_report_mcp_tool_registered=false
+writes_state=false
+live_runtime_lookup_attempted=false
 ```
 
 ## 1. Candidate MCP Surface
