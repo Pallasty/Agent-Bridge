@@ -5,6 +5,7 @@
 //! agent session lifecycle rows) so callers can inspect whether telemetry can
 //! support replay/explainability before we persist a unified event table.
 
+use crate::tool_diagnostics::classify_tool_error;
 use ab_store::{McpToolCallRow, McpToolErrorRecord, SemanticEventRecord, StoredSession};
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -158,6 +159,7 @@ pub fn mcp_event_spine_snapshot(
         if error.ts < cutoff {
             continue;
         }
+        let diagnostic_class = classify_tool_error(&error.tool_name, &error.message);
         raw.push(RawEvent {
             ts: error.ts,
             source: "mcp_tool_errors",
@@ -168,6 +170,8 @@ pub fn mcp_event_spine_snapshot(
             facts: json!({
                 "tool_name": error.tool_name,
                 "message": error.message,
+                "diagnostic_class": diagnostic_class.as_str(),
+                "expected": diagnostic_class.is_expected(),
             }),
         });
     }
@@ -567,6 +571,28 @@ mod tests {
         assert_eq!(snapshot.events[1].facts["session_id"], "ses-failed");
         assert_eq!(snapshot.events[1].facts["runtime_id"], "claude-code");
         assert_eq!(snapshot.events[1].facts["exit_code"], 1);
+        assert!(snapshot.integrity.verified);
+    }
+
+    #[test]
+    fn event_spine_classifies_expected_tool_error_facts_without_marking_ok() {
+        let snapshot = mcp_event_spine_snapshot(
+            &[],
+            &[error(101, "work_memory", "get requires key")],
+            &[],
+            &[],
+            60,
+            10,
+            120,
+        );
+
+        assert_eq!(snapshot.event_count, 1);
+        let event = &snapshot.events[0];
+        assert_eq!(event.source, "mcp_tool_errors");
+        assert_eq!(event.kind, "tool_error");
+        assert_eq!(event.ok, Some(false));
+        assert_eq!(event.facts["diagnostic_class"], "expected_input_validation");
+        assert_eq!(event.facts["expected"], true);
         assert!(snapshot.integrity.verified);
     }
 

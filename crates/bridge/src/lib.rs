@@ -71,6 +71,7 @@ pub mod socket_path;
 pub mod sync;
 pub mod tailscale_api;
 pub mod tool_atlas;
+pub(crate) mod tool_diagnostics;
 pub mod warp_actions;
 pub mod warp_scheme;
 pub mod world_tools;

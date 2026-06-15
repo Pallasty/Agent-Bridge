@@ -1,5 +1,6 @@
 //! Read-only Tool Atlas projection over MCP dispatch telemetry.
 
+use crate::tool_diagnostics::{classify_tool_error, ToolErrorDiagnosticClass};
 use ab_store::{McpToolCallStats, McpToolErrorRecord};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -304,59 +305,31 @@ fn expected_gate_flag(
     {
         return Some("historical_unexposed_failure");
     }
-    if samples
-        .iter()
-        .all(|sample| is_expected_confirmation_error(tool_name, &sample.message))
-    {
+    if samples.iter().all(|sample| {
+        classify_tool_error(tool_name, &sample.message)
+            == ToolErrorDiagnosticClass::ExpectedConfirmation
+    }) {
         return Some("expected_confirmation");
     }
-    if samples
-        .iter()
-        .all(|sample| is_expected_safety_gate(tool_name, &sample.message))
-    {
+    if samples.iter().all(|sample| {
+        classify_tool_error(tool_name, &sample.message)
+            == ToolErrorDiagnosticClass::ExpectedSafetyGate
+    }) {
         return Some("expected_safety_gate");
     }
-    if samples
-        .iter()
-        .all(|sample| is_expected_input_validation(tool_name, &sample.message))
-    {
+    if samples.iter().all(|sample| {
+        classify_tool_error(tool_name, &sample.message)
+            == ToolErrorDiagnosticClass::ExpectedInputValidation
+    }) {
         return Some("expected_input_validation");
     }
-    if samples
-        .iter()
-        .all(|sample| is_expected_runtime_unavailable(tool_name, &sample.message))
-    {
+    if samples.iter().all(|sample| {
+        classify_tool_error(tool_name, &sample.message)
+            == ToolErrorDiagnosticClass::ExpectedRuntimeUnavailable
+    }) {
         return Some("expected_runtime_unavailable");
     }
     None
-}
-
-fn is_expected_confirmation_error(tool_name: &str, message: &str) -> bool {
-    tool_name == "agent_session_reconcile"
-        && message.contains("requires apply_confirmation=\"finalise_stale_sessions\"")
-}
-
-fn is_expected_safety_gate(tool_name: &str, message: &str) -> bool {
-    tool_name == "desktop_action" && message.contains("host_mutation_not_exposed")
-}
-
-fn is_expected_input_validation(tool_name: &str, message: &str) -> bool {
-    match tool_name {
-        "memory_save" => matches!(
-            message,
-            "missing or empty 'key'" | "missing or empty 'kind'"
-        ),
-        "work_memory" => message == "get requires key",
-        _ => false,
-    }
-}
-
-fn is_expected_runtime_unavailable(tool_name: &str, message: &str) -> bool {
-    tool_name.starts_with("mobile_")
-        && (message.contains("spawn adb failed")
-            || message.contains("adb not on PATH")
-            || message.contains("No Android devices")
-            || message.contains("no Android devices"))
 }
 
 fn is_historical_unexposed_browser_failure(tool_name: &str, message: &str) -> bool {
