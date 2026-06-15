@@ -12,6 +12,8 @@ pub const LSWR_INTERACTION_FEEDBACK_VALIDATION_ENVELOPE_SCHEMA: &str =
     "agent_bridge.lswr.interaction_feedback_validation_envelope.v0";
 pub const LSWR_INTERACTION_FEEDBACK_EVIDENCE_PACKET_SCHEMA: &str =
     "agent_bridge.lswr.interaction_feedback_evidence_packet.v0";
+pub const LSWR_INTERACTION_FEEDBACK_CONSUMPTION_PREFLIGHT_SCHEMA: &str =
+    "agent_bridge.lswr.interaction_feedback_consumption_preflight.v0";
 
 const EXPECTED_EVENT_TYPES: [&str; 8] = [
     "human.select",
@@ -203,6 +205,170 @@ pub fn build_interaction_feedback_evidence_packet(fixture: &Value) -> Value {
         "envelope": envelope,
         "note": "local evidence only: pure fixture render, no MCP call, no store access, no memory write"
     })
+}
+
+pub fn build_interaction_feedback_packet_consumption_preflight(input: &Value) -> Value {
+    let (input_kind, packet, extraction_failure) = extract_consumption_packet(input);
+    let guardrails = consumption_preflight_guardrails();
+
+    let mut gates = Vec::new();
+    let explicit_input = packet.is_some();
+    gates.push(consumption_gate(
+        "C1",
+        "explicit_input_only",
+        explicit_input,
+        if explicit_input {
+            "explicit fixture or evidence packet supplied"
+        } else {
+            "missing explicit fixture or evidence packet"
+        },
+    ));
+
+    if let Some(packet) = packet {
+        let packet_guardrails = &packet["guardrails"];
+        let guardrails_preserved = packet_guardrails["read_only"] == true
+            && packet_guardrails["writes_state"] == false
+            && packet_guardrails["store_access_required"] == false
+            && packet_guardrails["mcp_tool_registered"] == false
+            && packet_guardrails["feedback_changes_world_verdict_allowed"] == false;
+        gates.push(consumption_gate(
+            "C2",
+            "guardrails_preserved",
+            guardrails_preserved,
+            "packet guardrails must stay read-only, no-store, no-MCP, no-verdict-laundering",
+        ));
+
+        let failed_verdict_preserved =
+            packet["readback"]["latest_verification_verdict"] == "not_verified";
+        gates.push(consumption_gate(
+            "C3",
+            "no_verification_laundering",
+            failed_verdict_preserved,
+            "human feedback must not upgrade latest_verification_verdict",
+        ));
+
+        let revision_sources = packet["readback"]["revision_should_cite"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let cites_failed_verification = revision_sources
+            .iter()
+            .any(|source| source == "verify_patch_arrival_bath_move_001");
+        let cites_feedback = revision_sources
+            .iter()
+            .any(|source| source == "fb_arrival_crowded_001");
+        gates.push(consumption_gate(
+            "C4",
+            "agent_can_choose_next_revision_source",
+            cites_failed_verification && cites_feedback,
+            "revision_should_cite must include failed verification and feedback ids",
+        ));
+
+        let markdown = packet["markdown"].as_str().unwrap_or("");
+        let human_auditable = markdown.contains("effect_walkway_clearance_001")
+            && markdown.contains("visual_density_too_high")
+            && markdown.contains("verify_patch_arrival_bath_move_001")
+            && markdown.contains("fb_arrival_crowded_001");
+        gates.push(consumption_gate(
+            "C5",
+            "human_can_audit_same_result",
+            human_auditable,
+            "rendered markdown must expose failed clause, feedback issue, and revision sources",
+        ));
+
+        let failure_reasons = consumption_failure_reasons(&gates);
+        let blockers = consumption_blockers(&failure_reasons);
+        let accepted = failure_reasons.is_empty();
+        let reason = if accepted {
+            "explicit_input_consumption_preflight_passed".to_string()
+        } else {
+            failure_reasons
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "consumption_preflight_failed".to_string())
+        };
+
+        json!({
+            "schema": LSWR_INTERACTION_FEEDBACK_CONSUMPTION_PREFLIGHT_SCHEMA,
+            "input_kind": input_kind,
+            "source_kind": normalized_consumption_source_kind(input_kind),
+            "accepted": accepted,
+            "preflight_verdict": if accepted { "accepted" } else { "blocked" },
+            "status": if accepted { "accepted" } else { "blocked" },
+            "world_verdict": packet["readback"]["latest_verification_verdict"].clone(),
+            "world_result_verdict": packet["readback"]["latest_verification_verdict"].clone(),
+            "reason": reason,
+            "failure_reasons": failure_reasons,
+            "blockers": blockers,
+            "guardrails": guardrails,
+            "input_contract": consumption_input_contract(),
+            "acceptance_matrix": gates,
+            "packet_schema": packet.get("schema").cloned().unwrap_or(Value::Null),
+            "fixture_id": packet.get("fixture_id").cloned().unwrap_or(Value::Null),
+            "readback": packet.get("readback").cloned().unwrap_or(Value::Null),
+            "packet": packet,
+            "implicit_live_runtime_lookup_attempted": false,
+            "note": "pure consumption preflight: explicit input only, no MCP call, no store access, no memory write"
+        })
+    } else {
+        gates.push(consumption_gate(
+            "C2",
+            "guardrails_preserved",
+            false,
+            "no packet supplied to inspect guardrails",
+        ));
+        gates.push(consumption_gate(
+            "C3",
+            "no_verification_laundering",
+            false,
+            "no packet supplied to inspect verification verdict",
+        ));
+        gates.push(consumption_gate(
+            "C4",
+            "agent_can_choose_next_revision_source",
+            false,
+            "no packet supplied to inspect revision sources",
+        ));
+        gates.push(consumption_gate(
+            "C5",
+            "human_can_audit_same_result",
+            false,
+            "no packet supplied to inspect rendered markdown",
+        ));
+
+        let mut failure_reasons = consumption_failure_reasons(&gates);
+        if let Some(reason) = extraction_failure {
+            failure_reasons.push(reason);
+        }
+        let blockers = consumption_blockers(&failure_reasons);
+        let reason = failure_reasons
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "missing_explicit_fixture_or_packet".to_string());
+
+        json!({
+            "schema": LSWR_INTERACTION_FEEDBACK_CONSUMPTION_PREFLIGHT_SCHEMA,
+            "input_kind": input_kind,
+            "source_kind": "none",
+            "accepted": false,
+            "preflight_verdict": "blocked",
+            "status": "blocked",
+            "world_verdict": "not_verified",
+            "world_result_verdict": "not_verified",
+            "reason": reason,
+            "failure_reasons": failure_reasons,
+            "blockers": blockers,
+            "guardrails": guardrails,
+            "input_contract": consumption_input_contract(),
+            "acceptance_matrix": gates,
+            "packet_schema": Value::Null,
+            "fixture_id": Value::Null,
+            "readback": Value::Null,
+            "packet": Value::Null,
+            "implicit_live_runtime_lookup_attempted": false,
+            "note": "pure consumption preflight: explicit input only, no MCP call, no store access, no memory write"
+        })
+    }
 }
 
 pub fn build_interaction_feedback_readback(fixture: &Value) -> Value {
@@ -406,6 +572,135 @@ fn strip_readback_schema(readback: &Value) -> Value {
         map.remove("requires_screenshot_for_primary_readback");
     }
     stripped
+}
+
+fn extract_consumption_packet(input: &Value) -> (&'static str, Option<Value>, Option<String>) {
+    match input.get("schema").and_then(Value::as_str) {
+        Some(LSWR_INTERACTION_FEEDBACK_EVIDENCE_PACKET_SCHEMA) => {
+            return ("evidence_packet", Some(input.clone()), None)
+        }
+        Some(LSWR_INTERACTION_FEEDBACK_FIXTURE_SCHEMA) => {
+            return (
+                "fixture",
+                Some(build_interaction_feedback_evidence_packet(input)),
+                None,
+            )
+        }
+        _ => {}
+    }
+
+    if let Some(packet) = input.get("packet") {
+        if packet.get("schema").and_then(Value::as_str)
+            == Some(LSWR_INTERACTION_FEEDBACK_EVIDENCE_PACKET_SCHEMA)
+        {
+            return ("packet_wrapper", Some(packet.clone()), None);
+        }
+    }
+
+    if let Some(fixture) = input.get("fixture") {
+        if fixture.get("schema").and_then(Value::as_str)
+            == Some(LSWR_INTERACTION_FEEDBACK_FIXTURE_SCHEMA)
+        {
+            return (
+                "fixture_wrapper",
+                Some(build_interaction_feedback_evidence_packet(fixture)),
+                None,
+            );
+        }
+    }
+
+    let failure = match input.get("schema").and_then(Value::as_str) {
+        Some(schema) => format!("unsupported_input_schema:{schema}"),
+        None => "missing_explicit_fixture_or_packet".to_string(),
+    };
+    ("missing_or_invalid", None, Some(failure))
+}
+
+fn consumption_preflight_guardrails() -> Value {
+    json!({
+        "read_only": true,
+        "mutation_surface": "none",
+        "writes_state": false,
+        "store_access_required": false,
+        "mcp_tool_registered": false,
+        "queries_live_runtime": false,
+        "live_runtime_lookup_allowed": false,
+        "implicit_live_runtime_lookup_allowed": false,
+        "default_profile_exposure_allowed": false,
+        "outcome_ingestion_allowed": false,
+        "feedback_changes_world_verdict_allowed": false
+    })
+}
+
+fn consumption_input_contract() -> Value {
+    json!({
+        "explicit_input_required": true,
+        "accepted_inputs": ["packet", "fixture"],
+        "implicit_live_runtime_lookup_allowed": false
+    })
+}
+
+fn normalized_consumption_source_kind(input_kind: &str) -> &'static str {
+    match input_kind {
+        "evidence_packet" | "packet_wrapper" => "packet",
+        "fixture" | "fixture_wrapper" => "fixture",
+        _ => "none",
+    }
+}
+
+fn consumption_gate(gate: &str, name: &str, passed: bool, evidence: &str) -> Value {
+    json!({
+        "gate": gate,
+        "id": gate,
+        "name": name,
+        "passed": passed,
+        "evidence": evidence
+    })
+}
+
+fn consumption_failure_reasons(gates: &[Value]) -> Vec<String> {
+    gates
+        .iter()
+        .filter(|gate| gate["passed"] != true)
+        .map(|gate| {
+            format!(
+                "{}:{}",
+                gate["gate"].as_str().unwrap_or("unknown"),
+                gate["name"].as_str().unwrap_or("unknown")
+            )
+        })
+        .collect()
+}
+
+fn consumption_blockers(failure_reasons: &[String]) -> Vec<String> {
+    let mut blockers = failure_reasons.to_vec();
+    for reason in failure_reasons {
+        if reason == "missing_explicit_fixture_or_packet" {
+            push_unique_blocker(&mut blockers, "explicit_packet_or_fixture_required");
+        }
+        if reason.starts_with("C1:") {
+            push_unique_blocker(&mut blockers, "explicit_packet_or_fixture_required");
+        }
+        if reason.starts_with("C2:") {
+            push_unique_blocker(&mut blockers, "guardrails_not_preserved");
+        }
+        if reason.starts_with("C3:") {
+            push_unique_blocker(&mut blockers, "verification_laundering_guard_failed");
+        }
+        if reason.starts_with("C4:") {
+            push_unique_blocker(&mut blockers, "revision_sources_not_recoverable");
+        }
+        if reason.starts_with("C5:") {
+            push_unique_blocker(&mut blockers, "human_audit_fields_not_visible");
+        }
+    }
+    blockers
+}
+
+fn push_unique_blocker(blockers: &mut Vec<String>, blocker: &str) {
+    if !blockers.iter().any(|existing| existing == blocker) {
+        blockers.push(blocker.to_string());
+    }
 }
 
 fn events(fixture: &Value) -> Option<&Vec<Value>> {

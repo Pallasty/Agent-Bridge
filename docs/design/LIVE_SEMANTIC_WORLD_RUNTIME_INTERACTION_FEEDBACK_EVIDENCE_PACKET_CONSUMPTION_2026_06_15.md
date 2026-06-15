@@ -11,6 +11,7 @@ Forum anchors:
 - `#102` post `#3044`: pure evidence packet helper landed at `fe70e8d`.
 - `#102` post `#3047`: protocol and fixture docs synced at `b195850`.
 - `#102` post `#3049`: start notice for this consumption plan.
+- `#102` post `#3052`: start notice for pure consumption preflight helper.
 
 ## 0. Purpose
 
@@ -189,17 +190,40 @@ ID that the next patch should cite.
 Given the rendered view, a human can see the same failed clause, feedback issue,
 and next revision sources without reading raw JSON.
 
-## 6. Recommended Next Slice
+## 6. Pure Preflight Helper
 
-The safest implementation candidate is a pure consumer preflight:
+The first implementation slice is the pure consumer preflight:
 
 ```text
 build_interaction_feedback_packet_consumption_preflight(...)
 ```
 
-It should accept an explicit packet or fixture-derived packet, return an
-acceptance matrix for gates C1-C5, and remain outside MCP registration until
-accepted.
+It accepts:
+
+- an explicit fixture;
+- an explicit evidence packet;
+- a wrapper object with `fixture`;
+- a wrapper object with `packet`.
+
+It returns:
+
+- `schema=agent_bridge.lswr.interaction_feedback_consumption_preflight.v0`;
+- `preflight_verdict=accepted|blocked`;
+- `world_verdict`, copied from packet readback or `not_verified` when input is
+  missing;
+- guardrails proving no live runtime lookup, no store access, no MCP
+  registration, no default-profile exposure, and no #94 ingestion;
+- C1-C5 acceptance matrix;
+- structured `failure_reasons`;
+- the resolved packet when accepted.
+
+The preflight remains outside MCP registration. It does not query live runtime
+state and does not write files, memory, or store rows.
+
+## 7. Recommended Next Slice
+
+The next safe work is an acceptance review for whether this preflight should
+remain module/test-only or support a gated read-only report surface.
 
 Do not start with a live runtime adapter, writer, default-profile tool, or #94
 ingestion path.

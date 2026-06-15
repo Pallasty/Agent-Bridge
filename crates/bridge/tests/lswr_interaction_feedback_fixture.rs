@@ -1,7 +1,9 @@
 use ab_bridge::lswr_interaction_feedback::{
-    build_interaction_feedback_evidence_packet, build_interaction_feedback_readback,
+    build_interaction_feedback_evidence_packet,
+    build_interaction_feedback_packet_consumption_preflight, build_interaction_feedback_readback,
     build_interaction_feedback_validation_envelope,
     render_interaction_feedback_validation_envelope, validate_interaction_feedback_fixture,
+    LSWR_INTERACTION_FEEDBACK_CONSUMPTION_PREFLIGHT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_EVIDENCE_PACKET_SCHEMA, LSWR_INTERACTION_FEEDBACK_FIXTURE_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_READBACK_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_VALIDATION_ENVELOPE_SCHEMA,
@@ -188,6 +190,139 @@ fn interaction_feedback_fixture_builds_evidence_packet() {
 }
 
 #[test]
+fn interaction_feedback_consumption_preflight_accepts_explicit_fixture() {
+    let fixture = fixture();
+    let preflight = build_interaction_feedback_packet_consumption_preflight(&fixture);
+
+    assert_eq!(
+        preflight["schema"],
+        LSWR_INTERACTION_FEEDBACK_CONSUMPTION_PREFLIGHT_SCHEMA
+    );
+    assert_eq!(preflight["input_kind"], "fixture");
+    assert_eq!(preflight["accepted"], true);
+    assert_eq!(preflight["preflight_verdict"], "accepted");
+    assert_eq!(preflight["world_verdict"], "not_verified");
+    assert_eq!(
+        preflight["reason"],
+        "explicit_input_consumption_preflight_passed"
+    );
+    assert_eq!(preflight["failure_reasons"], json!([]));
+    assert_eq!(preflight["guardrails"]["writes_state"], false);
+    assert_eq!(preflight["guardrails"]["store_access_required"], false);
+    assert_eq!(preflight["guardrails"]["mcp_tool_registered"], false);
+    assert_eq!(
+        preflight["guardrails"]["implicit_live_runtime_lookup_allowed"],
+        false
+    );
+    assert_eq!(preflight["implicit_live_runtime_lookup_attempted"], false);
+    assert_eq!(
+        preflight["packet_schema"],
+        LSWR_INTERACTION_FEEDBACK_EVIDENCE_PACKET_SCHEMA
+    );
+    assert_eq!(
+        preflight["fixture_id"],
+        "lswr_interaction_feedback_loop_001"
+    );
+    assert_eq!(
+        preflight["readback"]["revision_should_cite"],
+        json!([
+            "verify_patch_arrival_bath_move_001",
+            "fb_arrival_crowded_001"
+        ])
+    );
+    assert_consumption_gates_pass(&preflight);
+}
+
+#[test]
+fn interaction_feedback_consumption_preflight_accepts_explicit_packet() {
+    let fixture = fixture();
+    let packet = build_interaction_feedback_evidence_packet(&fixture);
+    let preflight = build_interaction_feedback_packet_consumption_preflight(&packet);
+
+    assert_eq!(preflight["input_kind"], "evidence_packet");
+    assert_eq!(preflight["accepted"], true);
+    assert_eq!(preflight["world_verdict"], "not_verified");
+    assert_eq!(
+        preflight["packet_schema"],
+        LSWR_INTERACTION_FEEDBACK_EVIDENCE_PACKET_SCHEMA
+    );
+    assert_eq!(
+        preflight["packet"]["schema"],
+        LSWR_INTERACTION_FEEDBACK_EVIDENCE_PACKET_SCHEMA
+    );
+    assert_consumption_gates_pass(&preflight);
+}
+
+#[test]
+fn interaction_feedback_consumption_preflight_accepts_wrapped_fixture() {
+    let fixture = fixture();
+    let preflight =
+        build_interaction_feedback_packet_consumption_preflight(&json!({ "fixture": fixture }));
+
+    assert_eq!(preflight["input_kind"], "fixture_wrapper");
+    assert_eq!(preflight["accepted"], true);
+    assert_eq!(preflight["world_verdict"], "not_verified");
+    assert_consumption_gates_pass(&preflight);
+}
+
+#[test]
+fn interaction_feedback_consumption_preflight_blocks_missing_input() {
+    let preflight = build_interaction_feedback_packet_consumption_preflight(&json!({}));
+
+    assert_eq!(
+        preflight["schema"],
+        LSWR_INTERACTION_FEEDBACK_CONSUMPTION_PREFLIGHT_SCHEMA
+    );
+    assert_eq!(preflight["input_kind"], "missing_or_invalid");
+    assert_eq!(preflight["accepted"], false);
+    assert_eq!(preflight["preflight_verdict"], "blocked");
+    assert_eq!(preflight["world_verdict"], "not_verified");
+    assert_eq!(preflight["reason"], "C1:explicit_input_only");
+    assert_eq!(
+        preflight["guardrails"]["implicit_live_runtime_lookup_allowed"],
+        false
+    );
+    assert_eq!(preflight["implicit_live_runtime_lookup_attempted"], false);
+    assert_eq!(preflight["packet"], Value::Null);
+    assert!(preflight["blockers"]
+        .as_array()
+        .expect("blockers")
+        .contains(&json!("explicit_packet_or_fixture_required")));
+    assert_eq!(preflight["acceptance_matrix"][0]["gate"], "C1");
+    assert_eq!(preflight["acceptance_matrix"][0]["passed"], false);
+    assert_eq!(preflight["acceptance_matrix"][1]["gate"], "C2");
+    assert_eq!(preflight["acceptance_matrix"][1]["passed"], false);
+}
+
+#[test]
+fn interaction_feedback_consumption_preflight_rejects_laundered_packet() {
+    let fixture = fixture();
+    let mut packet = build_interaction_feedback_evidence_packet(&fixture);
+    packet["guardrails"]["writes_state"] = json!(true);
+    packet["readback"]["latest_verification_verdict"] = json!("verified");
+
+    let preflight = build_interaction_feedback_packet_consumption_preflight(&packet);
+
+    assert_eq!(preflight["input_kind"], "evidence_packet");
+    assert_eq!(preflight["accepted"], false);
+    assert_eq!(preflight["preflight_verdict"], "blocked");
+    assert_eq!(preflight["world_verdict"], "verified");
+    assert_eq!(preflight["acceptance_matrix"][1]["gate"], "C2");
+    assert_eq!(preflight["acceptance_matrix"][1]["passed"], false);
+    assert_eq!(preflight["acceptance_matrix"][2]["gate"], "C3");
+    assert_eq!(preflight["acceptance_matrix"][2]["passed"], false);
+    assert!(preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("C2:guardrails_preserved")));
+    assert!(preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("C3:no_verification_laundering")));
+    assert_eq!(preflight["implicit_live_runtime_lookup_attempted"], false);
+}
+
+#[test]
 fn interaction_feedback_validator_reports_tampered_fixture() {
     let mut fixture = fixture();
     fixture["events"][5]["refs"]["cause_event_id"] = json!("missing_event");
@@ -246,4 +381,15 @@ fn interaction_feedback_fixture_pretty_json_roundtrips() {
 
 fn fixture() -> Value {
     serde_json::from_str(FIXTURE_JSON).expect("interaction feedback fixture json")
+}
+
+fn assert_consumption_gates_pass(preflight: &Value) {
+    let gates = preflight["acceptance_matrix"]
+        .as_array()
+        .expect("acceptance matrix");
+    assert_eq!(gates.len(), 5);
+    for (idx, expected_id) in ["C1", "C2", "C3", "C4", "C5"].iter().enumerate() {
+        assert_eq!(gates[idx]["gate"], *expected_id);
+        assert_eq!(gates[idx]["passed"], true, "{expected_id} should pass");
+    }
 }
