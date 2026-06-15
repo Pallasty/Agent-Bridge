@@ -11,6 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
 use crate::lswr_present::LSWR_PRESENT_PACKET_SCHEMA;
 use crate::present::{ArtifactInfo, OUTCOME_SIDECAR_SUFFIX};
@@ -21,6 +22,8 @@ pub const LSWR_OUTCOME_ADMISSIONS_PROJECTION_SCHEMA: &str =
     "agent_bridge.lswr.outcome_admissions.v0";
 pub const LSWR_OUTCOME_ADMISSION_DRY_RUN_SCHEMA: &str =
     "agent_bridge.lswr.outcome_admission_dry_run.v0";
+pub const LSWR_OUTCOME_ADMISSION_INGEST_PLAN_SCHEMA: &str =
+    "agent_bridge.lswr.outcome_admission_ingest_plan.v0";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LswrAdmissionClass {
@@ -316,6 +319,82 @@ pub fn outcome_admission_dry_run_candidates(
     })
 }
 
+/// Step E4b/E4c read-only approval packet over an E3 dry-run result.
+///
+/// This is intentionally not a writer. It canonicalizes the E3 would-write
+/// candidate rows, computes a stable review hash, and marks every row as
+/// requiring explicit review. The optional `active_rows` set is produced by a
+/// non-mutating keyed probe in the MCP wrapper; when absent, the active-row
+/// status is reported as unknown rather than guessed.
+pub fn outcome_admission_ingest_plan_from_dry_run(
+    dry_run: &Value,
+    generated_at: u64,
+    active_rows: Option<&BTreeSet<String>>,
+) -> Value {
+    let mut rows: Vec<Value> = dry_run
+        .get("candidates")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|candidate| canonical_ingest_plan_row(candidate, active_rows))
+        .collect();
+
+    rows.sort_by(|a, b| {
+        let ak = str_at(a, &["key"]).unwrap_or("");
+        let bk = str_at(b, &["key"]).unwrap_or("");
+        ak.cmp(bk)
+    });
+
+    let candidate_keys: Vec<Value> = rows
+        .iter()
+        .filter_map(|row| str_at(row, &["key"]).map(|key| Value::String(key.to_string())))
+        .collect();
+    let skipped_unkeyed_candidate_count = dry_run
+        .get("candidates")
+        .and_then(Value::as_array)
+        .map(|candidates| candidates.len().saturating_sub(rows.len()))
+        .unwrap_or(0);
+    let active_row_known_count = rows
+        .iter()
+        .filter(|row| row.get("active_row_exists").is_some_and(|v| v.is_boolean()))
+        .count();
+    let active_row_exists_count = rows
+        .iter()
+        .filter(|row| row.get("active_row_exists").and_then(Value::as_bool) == Some(true))
+        .count();
+    let plan_hash = outcome_admission_ingest_plan_hash(&rows);
+
+    json!({
+        "schema": LSWR_OUTCOME_ADMISSION_INGEST_PLAN_SCHEMA,
+        "dry_run": true,
+        "writes_state": false,
+        "generated_at": generated_at,
+        "window_secs": dry_run.get("window_secs").cloned().unwrap_or(Value::Null),
+        "source_schema": dry_run.get("schema").cloned().unwrap_or(Value::Null),
+        "source_candidate_count": dry_run.get("candidate_count").cloned().unwrap_or(Value::Null),
+        "candidate_count": rows.len(),
+        "candidate_keys": candidate_keys,
+        "skipped_unkeyed_candidate_count": skipped_unkeyed_candidate_count,
+        "active_row_check": if active_rows.is_some() { "checked" } else { "not_checked" },
+        "active_row_known_count": active_row_known_count,
+        "active_row_exists_count": active_row_exists_count,
+        "plan_hash_algorithm": "sha256",
+        "plan_hash_scope": "canonical_e4_ingest_plan_rows_v0",
+        "plan_hash": plan_hash,
+        "requires_owner_review": true,
+        "write_tool_open": false,
+        "future_write_tool": "lswr_outcome_admissions_ingest",
+        "note": "read-only E4 approval packet: no store writes, no dry_run=false switch, no present_outcomes_ingest call.",
+        "rows": rows,
+    })
+}
+
+pub fn outcome_admission_ingest_plan_hash(rows: &[Value]) -> String {
+    let canonical = serde_json::to_vec(&Value::Array(rows.to_vec())).unwrap_or_default();
+    let digest = Sha256::digest(canonical);
+    format!("sha256:{digest:x}")
+}
+
 fn admission_record(
     source_packet: &Value,
     expression: &Value,
@@ -395,6 +474,31 @@ fn artifact_rejection(artifact: &ArtifactInfo, reason: &str) -> Value {
             "expression_source": "none",
         },
     })
+}
+
+fn canonical_ingest_plan_row(
+    candidate: &Value,
+    active_rows: Option<&BTreeSet<String>>,
+) -> Option<Value> {
+    let key = str_at(candidate, &["memory", "key"])?;
+    let active_row_exists = active_rows
+        .map(|rows| Value::Bool(rows.contains(key)))
+        .unwrap_or(Value::Null);
+
+    Some(json!({
+        "key": key,
+        "kind": str_at(candidate, &["memory", "kind"]),
+        "scope": str_at(candidate, &["memory", "scope"]),
+        "present_artifact_id": candidate.get("present_artifact_id").cloned().unwrap_or(Value::Null),
+        "active_row_exists": active_row_exists,
+        "write_allowed": false,
+        "requires_review": true,
+        "memory": candidate.get("memory").cloned().unwrap_or(Value::Null),
+        "outcome_record": candidate.get("outcome_record").cloned().unwrap_or(Value::Null),
+        "source": candidate.get("source").cloned().unwrap_or(Value::Null),
+        "expression": candidate.get("expression").cloned().unwrap_or(Value::Null),
+        "admission": candidate.get("admission").cloned().unwrap_or(Value::Null),
+    }))
 }
 
 fn admission_to_outcome_record(admission: &Value, generated_at: u64) -> Option<Value> {
@@ -1119,5 +1223,80 @@ mod tests {
             dry_run["candidates"][0]["memory"]["key"],
             "outcome_admission_a"
         );
+    }
+
+    #[test]
+    fn ingest_plan_hash_is_stable_across_candidate_order() {
+        let packet = verified_patch_packet();
+
+        let mut expr_a = expression();
+        expr_a["present_artifact_id"] = json!("admission_a");
+        expr_a["artifact_id"] = json!("admission_a");
+        let admission_a = classify_outcome_admission(&packet, &expr_a, Some(&packet));
+
+        let mut expr_b = expression();
+        expr_b["present_artifact_id"] = json!("admission_b");
+        expr_b["artifact_id"] = json!("admission_b");
+        let admission_b = classify_outcome_admission(&packet, &expr_b, Some(&packet));
+
+        let dry_ab = outcome_admission_dry_run_candidates(
+            &[admission_a.clone(), admission_b.clone()],
+            1_780_000_020,
+            86_400,
+            25,
+        );
+        let dry_ba = outcome_admission_dry_run_candidates(
+            &[admission_b, admission_a],
+            1_780_000_020,
+            86_400,
+            25,
+        );
+
+        let plan_ab = outcome_admission_ingest_plan_from_dry_run(&dry_ab, 1_780_000_030, None);
+        let plan_ba = outcome_admission_ingest_plan_from_dry_run(&dry_ba, 1_780_000_031, None);
+
+        assert_eq!(plan_ab["schema"], LSWR_OUTCOME_ADMISSION_INGEST_PLAN_SCHEMA);
+        assert_eq!(plan_ab["dry_run"], true);
+        assert_eq!(plan_ab["writes_state"], false);
+        assert_eq!(plan_ab["write_tool_open"], false);
+        assert_eq!(plan_ab["candidate_count"], json!(2));
+        assert_eq!(plan_ab["plan_hash"], plan_ba["plan_hash"]);
+        assert!(plan_ab["plan_hash"]
+            .as_str()
+            .unwrap()
+            .starts_with("sha256:"));
+        assert_eq!(plan_ab["rows"][0]["key"], "outcome_admission_a");
+        assert_eq!(plan_ab["rows"][1]["key"], "outcome_admission_b");
+    }
+
+    #[test]
+    fn ingest_plan_hash_changes_when_reviewed_row_changes() {
+        let packet = verified_patch_packet();
+        let admission = classify_outcome_admission(&packet, &expression(), Some(&packet));
+        let dry_run = outcome_admission_dry_run_candidates(&[admission], 1_780_000_020, 86_400, 25);
+        let original = outcome_admission_ingest_plan_from_dry_run(&dry_run, 1_780_000_030, None);
+
+        let mut tampered = dry_run.clone();
+        tampered["candidates"][0]["memory"]["content"] = json!("changed content");
+        let changed = outcome_admission_ingest_plan_from_dry_run(&tampered, 1_780_000_031, None);
+
+        assert_ne!(original["plan_hash"], changed["plan_hash"]);
+    }
+
+    #[test]
+    fn ingest_plan_records_active_row_state_without_write_permission() {
+        let packet = verified_patch_packet();
+        let admission = classify_outcome_admission(&packet, &expression(), Some(&packet));
+        let dry_run = outcome_admission_dry_run_candidates(&[admission], 1_780_000_020, 86_400, 25);
+        let active_rows = BTreeSet::from(["outcome_ab_step_e_fixture".to_string()]);
+        let plan =
+            outcome_admission_ingest_plan_from_dry_run(&dry_run, 1_780_000_030, Some(&active_rows));
+
+        assert_eq!(plan["active_row_check"], "checked");
+        assert_eq!(plan["active_row_known_count"], json!(1));
+        assert_eq!(plan["active_row_exists_count"], json!(1));
+        assert_eq!(plan["rows"][0]["active_row_exists"], true);
+        assert_eq!(plan["rows"][0]["write_allowed"], false);
+        assert_eq!(plan["rows"][0]["requires_review"], true);
     }
 }

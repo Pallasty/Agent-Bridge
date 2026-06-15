@@ -38,7 +38,7 @@ use ab_terminal::{OscEvent, OscParser, SpawnOptions, SplitDir, TerminalBlock};
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
 use serde_json::{json, Map, Value};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -11097,6 +11097,176 @@ impl McpTool for LswrOutcomeAdmissionsDryRunTool {
             }
         }
         Ok(ToolResult::json_text(&dry_run))
+    }
+}
+
+/// LSWR Step E4c: READ-ONLY approval packet over the E3 dry-run plan.
+///
+/// This tool deliberately exposes no write mode. It computes the E3 dry-run
+/// candidates, canonicalizes them into an approval packet with a stable plan
+/// hash, and optionally marks currently active outcome rows via non-mutating
+/// `memory_search` probes.
+pub struct LswrOutcomeAdmissionsApprovalPacketTool {
+    hub: Hub,
+}
+impl LswrOutcomeAdmissionsApprovalPacketTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for LswrOutcomeAdmissionsApprovalPacketTool {
+    fn name(&self) -> &'static str {
+        "lswr_outcome_admissions_approval_packet"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "LSWR Step E4c: READ-ONLY approval packet over the E3 dry-run \
+                 candidate plan. Scans persisted LSWR Step D present artifacts, reuses \
+                 the E2/E3 gates, computes a stable sha256 plan_hash over canonical \
+                 candidate rows, and reports active_row_exists using non-mutating \
+                 memory_search probes when a store is configured. Writes nothing, exposes \
+                 no dry_run=false or max_writes switch, calls no memory_save, and never \
+                 invokes present_outcomes_ingest."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "window_secs": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 31536000,
+                        "default": 86400,
+                        "description": "Look-back window over present artifacts by provenance timestamp."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 200,
+                        "description": "Max HTML artifacts scanned (most-recent-first before timestamp filtering)."
+                    },
+                    "max_candidates": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 200,
+                        "default": 25,
+                        "description": "Hard cap on planned present_outcome candidate rows included in the review packet."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let window_secs = args
+            .get("window_secs")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(86_400)
+            .clamp(60, 31_536_000);
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(200)
+            .clamp(1, 500) as usize;
+        let max_candidates = args
+            .get("max_candidates")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(25)
+            .clamp(1, 200) as usize;
+
+        let now = dispatch_now_secs();
+        let cutoff = now.saturating_sub(window_secs).max(0) as u64;
+        let dir = crate::present::presentations_dir();
+        let artifacts: Vec<_> = crate::present::list_artifacts(&dir, limit, Some("html"))
+            .into_iter()
+            .filter(|a| a.ts.map_or(true, |t| t >= cutoff))
+            .collect();
+        let projection = crate::lswr_outcome_admission::outcome_admissions_projection(
+            &artifacts,
+            false,
+            now.max(0) as u64,
+            window_secs as u64,
+        );
+        let admissions: Vec<Value> = projection
+            .get("admissions")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let dry_run = crate::lswr_outcome_admission::outcome_admission_dry_run_candidates(
+            &admissions,
+            now.max(0) as u64,
+            window_secs as u64,
+            max_candidates,
+        );
+
+        let active_rows = if let Some(store) = &self.hub.store {
+            let keys: Vec<String> = dry_run
+                .get("candidates")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|candidate| {
+                    candidate
+                        .get("memory")
+                        .and_then(|m| m.get("key"))
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                })
+                .collect();
+            let mut active = BTreeSet::new();
+            for key in keys {
+                let exists = store
+                    .memory_search(&key, &[], 5)
+                    .await
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|hit| hit.record.key == key);
+                if exists {
+                    active.insert(key);
+                }
+            }
+            Some(active)
+        } else {
+            None
+        };
+
+        let mut plan = crate::lswr_outcome_admission::outcome_admission_ingest_plan_from_dry_run(
+            &dry_run,
+            now.max(0) as u64,
+            active_rows.as_ref(),
+        );
+        if let Some(obj) = plan.as_object_mut() {
+            obj.insert("dir".into(), json!(dir.display().to_string()));
+            obj.insert("limit".into(), json!(limit));
+            obj.insert("max_candidates".into(), json!(max_candidates));
+            obj.insert(
+                "store_probe".into(),
+                json!(if active_rows.is_some() {
+                    "memory_search_active_only"
+                } else {
+                    "store_unavailable"
+                }),
+            );
+            for key in [
+                "scanned_artifacts",
+                "skipped_non_lswr_count",
+                "artifact_read_error_count",
+                "lswr_artifact_count",
+                "training_eligible_count",
+                "audit_only_count",
+                "rejected_count",
+                "reason_counts",
+            ] {
+                if let Some(value) = projection.get(key) {
+                    obj.insert(key.into(), value.clone());
+                }
+            }
+        }
+        Ok(ToolResult::json_text(&plan))
     }
 }
 
@@ -32447,7 +32617,10 @@ impl McpTool for SessionFinalizeTool {
             verdict,
             facts: json!({ "dry_run": dry_run, "decay_archived": decay_archived, "removed_count": removed_n }),
         };
-        if let Err(e) = store.record_semantic_event(lifecycle_event.to_record()).await {
+        if let Err(e) = store
+            .record_semantic_event(lifecycle_event.to_record())
+            .await
+        {
             tracing::debug!(error = %e, "record_semantic_event (session_finalize) failed");
         }
 
@@ -40388,6 +40561,14 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Niche,
         Arc::new(LswrOutcomeAdmissionsDryRunTool::new(hub.clone())),
     );
+    // LSWR Step E4c: read-only approval packet with deterministic plan_hash.
+    // Niche (opt-in), no write flag and no memory writes.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(LswrOutcomeAdmissionsApprovalPacketTool::new(hub.clone())),
+    );
     // Slice B (v0): read-only outcome→memory drift projection. Reports which
     // verified outcomes are/aren't represented in memory (tamper-evident chain);
     // writes nothing, non-mutating probe. Niche (opt-in).
@@ -46979,6 +47160,9 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         // LSWR Step E3 admission dry-run adapter is also Niche/all only.
         assert!(all.includes(Tier::Niche, "lswr_outcome_admissions_dry_run"));
         assert!(!std_p.includes(Tier::Niche, "lswr_outcome_admissions_dry_run"));
+        // LSWR Step E4c approval packet is also Niche/all only and read-only.
+        assert!(all.includes(Tier::Niche, "lswr_outcome_admissions_approval_packet"));
+        assert!(!std_p.includes(Tier::Niche, "lswr_outcome_admissions_approval_packet"));
         // Audio embodiment present_voice is the same Niche opt-in shape.
         assert!(all.includes(Tier::Niche, "present_voice"));
         assert!(!std_p.includes(Tier::Niche, "present_voice"));
@@ -47007,6 +47191,7 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         assert!(!codex_essential.includes(Tier::Niche, "lswr_readonly_bridge_display"));
         assert!(!codex_essential.includes(Tier::Niche, "lswr_outcome_admissions"));
         assert!(!codex_essential.includes(Tier::Niche, "lswr_outcome_admissions_dry_run"));
+        assert!(!codex_essential.includes(Tier::Niche, "lswr_outcome_admissions_approval_packet"));
         let schemas = build_registry_with_policy(Hub::builder().build(), all).list();
         assert!(
             schemas.iter().any(|s| s.name == "present"),
@@ -47033,6 +47218,12 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
                 .iter()
                 .any(|s| s.name == "lswr_outcome_admissions_dry_run"),
             "lswr_outcome_admissions_dry_run must register under the all profile"
+        );
+        assert!(
+            schemas
+                .iter()
+                .any(|s| s.name == "lswr_outcome_admissions_approval_packet"),
+            "lswr_outcome_admissions_approval_packet must register under the all profile"
         );
         assert!(
             schemas.iter().any(|s| s.name == "present_voice"),
@@ -47074,6 +47265,12 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
                 .any(|s| s.name == "lswr_outcome_admissions_dry_run"),
             "lswr_outcome_admissions_dry_run must stay out of standard"
         );
+        assert!(
+            !standard_schemas
+                .iter()
+                .any(|s| s.name == "lswr_outcome_admissions_approval_packet"),
+            "lswr_outcome_admissions_approval_packet must stay out of standard"
+        );
         let codex_schemas =
             build_registry_with_policy(Hub::builder().build(), codex_essential).list();
         assert!(
@@ -47087,6 +47284,12 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
                 .iter()
                 .any(|s| s.name == "lswr_outcome_admissions_dry_run"),
             "lswr_outcome_admissions_dry_run must stay out of codex-essential"
+        );
+        assert!(
+            !codex_schemas
+                .iter()
+                .any(|s| s.name == "lswr_outcome_admissions_approval_packet"),
+            "lswr_outcome_admissions_approval_packet must stay out of codex-essential"
         );
     }
 
@@ -47112,6 +47315,44 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
             assert!(
                 tool.input_schema["properties"].get(forbidden).is_none(),
                 "{forbidden} must not be exposed by the E3 dry-run tool"
+            );
+        }
+    }
+
+    #[test]
+    fn lswr_outcome_admissions_approval_packet_schema_has_no_write_switch() {
+        let all = ToolPolicy::from_values(None, None, None, Some("all"));
+        let schemas = build_registry_with_policy(Hub::builder().build(), all).list();
+        let tool = schemas
+            .iter()
+            .find(|s| s.name == "lswr_outcome_admissions_approval_packet")
+            .expect("lswr_outcome_admissions_approval_packet schema");
+
+        assert!(tool.description.contains("READ-ONLY"));
+        assert!(tool.description.contains("plan_hash"));
+        assert!(tool.description.contains("Writes nothing"));
+        assert_eq!(
+            tool.input_schema["additionalProperties"],
+            serde_json::Value::Bool(false)
+        );
+        assert!(tool.input_schema["properties"]
+            .get("max_candidates")
+            .is_some());
+        for forbidden in [
+            "dry_run",
+            "dry_run_false",
+            "max_writes",
+            "write",
+            "persist",
+            "memory_save",
+            "apply_confirmation",
+            "approval_post_id",
+            "reviewed_plan_hash",
+            "candidate_keys",
+        ] {
+            assert!(
+                tool.input_schema["properties"].get(forbidden).is_none(),
+                "{forbidden} must not be exposed by the E4c read-only approval packet tool"
             );
         }
     }

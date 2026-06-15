@@ -235,3 +235,27 @@ Recommended next action is owner review of this document. If accepted, the next
 coding slice should be E4b/E4c only: pure plan hash plus read-only approval
 packet. The actual `dry_run=false` writer should remain a later, separately
 approved slice.
+
+## 11. E4b/E4c Implementation Status
+
+Implemented after owner go-ahead in the Codex lane:
+
+- pure plan-hash support in `lswr_outcome_admission`;
+- all-profile-only read-only tool `lswr_outcome_admissions_approval_packet`;
+- response schema `agent_bridge.lswr.outcome_admission_ingest_plan.v0`;
+- stable `sha256:` plan hash over canonical candidate rows sorted by memory key;
+- optional active-row status via non-mutating `memory_search` probes;
+- `dry_run=true`, `writes_state=false`, and `write_tool_open=false` in the
+  returned packet.
+
+Still not implemented:
+
+- no `lswr_outcome_admissions_ingest` writer;
+- no `dry_run=false` surface;
+- no `max_writes` input;
+- no `present_outcomes_ingest(dry_run=false)` call;
+- no Codex-essential or standard profile exposure.
+
+The next owner-gated step remains E4d: explicit writer design/implementation
+with confirmation token, approval post id, reviewed plan hash, candidate keys,
+and first-run cap.
