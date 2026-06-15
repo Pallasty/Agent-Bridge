@@ -5942,8 +5942,8 @@ async fn real_main() -> Result<()> {
                 dry_run,
                 json,
             } => {
-                let r =
-                    run_dream_prune_coact_noise(*max_count, *older_than_days, *dry_run, *json).await;
+                let r = run_dream_prune_coact_noise(*max_count, *older_than_days, *dry_run, *json)
+                    .await;
                 // #110 Fix B: a real edge prune drops S4; mark hygiene so C3
                 // doesn't read it as edge loss. Dry-run changes nothing → skip.
                 if r.is_ok() && !*dry_run {
@@ -5956,8 +5956,7 @@ async fn real_main() -> Result<()> {
                 dry_run,
                 json,
             } => {
-                let r =
-                    run_dream_prune_degenerate_relates(blacklist_tags, *dry_run, *json).await;
+                let r = run_dream_prune_degenerate_relates(blacklist_tags, *dry_run, *json).await;
                 // #110 Fix B: degenerate-relates prune drops S4 edges.
                 if r.is_ok() && !*dry_run {
                     ab_bridge::c3_self_check::stamp_hygiene_run();

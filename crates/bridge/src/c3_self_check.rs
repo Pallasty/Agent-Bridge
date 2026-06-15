@@ -1096,8 +1096,8 @@ mod tests {
     #[test]
     fn hygiene_marker_roundtrip_and_window() {
         let _hg = HYGIENE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let marker = std::env::temp_dir()
-            .join(format!("ab-c3-hygiene-marker-{}", std::process::id()));
+        let marker =
+            std::env::temp_dir().join(format!("ab-c3-hygiene-marker-{}", std::process::id()));
         std::env::set_var("AB_C3_HYGIENE_MARKER", &marker);
         let _ = fs::remove_file(&marker);
 
@@ -1126,8 +1126,7 @@ mod tests {
         let _hg = HYGIENE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let _g = S234_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         _reset_s234_snapshot_for_tests();
-        let marker = std::env::temp_dir()
-            .join(format!("ab-c3-hyg-guard-{}", std::process::id()));
+        let marker = std::env::temp_dir().join(format!("ab-c3-hyg-guard-{}", std::process::id()));
         std::env::set_var("AB_C3_HYGIENE_MARKER", &marker);
         stamp_hygiene_run(); // mark hygiene as just-run
 
@@ -1141,10 +1140,8 @@ mod tests {
         let t1 = t0 + Duration::from_secs(S234_WINDOW_SECS + 5);
         let out = s234_check_against_snapshot_guarded(mk_counts(500, 100, 2000), t1);
         assert!(
-            out.iter().all(|e| !matches!(
-                e.signal,
-                S234Signal::S2Memories | S234Signal::S4MemoryEdges
-            )),
+            out.iter()
+                .all(|e| !matches!(e.signal, S234Signal::S2Memories | S234Signal::S4MemoryEdges)),
             "hygiene window must suppress S2/S4 (got {out:?})"
         );
 
