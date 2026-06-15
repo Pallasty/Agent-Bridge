@@ -80,6 +80,12 @@ The next hop now has a reusable read-only plan generator:
 scripts/plan-onsen-step-b-host-launch.sh
 ```
 
+The current blocked launch-plan result is recorded in:
+
+```text
+docs/design/fixtures/biocortex-retrieval-onsen-step-b-host-launch-plan-2026-06-15.json
+```
+
 The plan consumes the source probe output, or runs the source probe itself, and
 emits a machine-readable `onsen_step_b_host_launch_plan.v0` envelope. It never
 starts Godot, starts a host process, clones source, executes LSWR actions, or
