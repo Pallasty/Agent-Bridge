@@ -1,38 +1,32 @@
-use std::collections::{BTreeMap, BTreeSet};
-
+use ab_bridge::lswr_interaction_feedback::{
+    build_interaction_feedback_readback, validate_interaction_feedback_fixture,
+    LSWR_INTERACTION_FEEDBACK_FIXTURE_SCHEMA, LSWR_INTERACTION_FEEDBACK_READBACK_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_VALIDATION_SCHEMA,
+};
 use serde_json::{json, Value};
 
 const FIXTURE_JSON: &str = include_str!("fixtures/lswr_interaction_feedback_fixture_v0.json");
 
 #[test]
-fn interaction_feedback_fixture_has_expected_loop_and_boundaries() {
+fn interaction_feedback_fixture_validates_through_pure_module() {
     let fixture = fixture();
+    let report = validate_interaction_feedback_fixture(&fixture);
 
-    assert_eq!(
-        fixture["schema"],
-        "agent_bridge.lswr.interaction_feedback_fixture.v0"
-    );
+    assert_eq!(fixture["schema"], LSWR_INTERACTION_FEEDBACK_FIXTURE_SCHEMA);
     assert_eq!(fixture["requires_screenshot_for_primary_readback"], false);
     assert_eq!(fixture["events"].as_array().expect("events").len(), 8);
     assert_eq!(fixture["feedback"].as_array().expect("feedback").len(), 1);
+    assert!(report.valid, "{:?}", report.failure_reasons);
+    assert!(report.failure_reasons.is_empty());
 
-    let event_types: Vec<&str> = events(&fixture)
-        .iter()
-        .map(|event| event["event_type"].as_str().expect("event_type"))
-        .collect();
+    let report_value = report.to_value();
     assert_eq!(
-        event_types,
-        vec![
-            "human.select",
-            "ai.patch_proposed",
-            "runtime.patch_result",
-            "presentation.state_changed",
-            "runtime.verification_result",
-            "human.reject",
-            "feedback.explicit_text",
-            "ai.patch_proposed",
-        ]
+        report_value["schema"],
+        LSWR_INTERACTION_FEEDBACK_VALIDATION_SCHEMA
     );
+    assert_eq!(report_value["writes_state"], false);
+    assert_eq!(report_value["store_access_required"], false);
+    assert_eq!(report_value["mcp_tool_registered"], false);
 
     for forbidden in [
         "memory_save",
@@ -47,91 +41,19 @@ fn interaction_feedback_fixture_has_expected_loop_and_boundaries() {
 }
 
 #[test]
-fn interaction_feedback_fixture_preserves_causality_and_verification_honesty() {
+fn interaction_feedback_fixture_builds_expected_readback_report() {
     let fixture = fixture();
-    let events = events(&fixture);
-    let mut event_positions = BTreeMap::new();
+    let readback = build_interaction_feedback_readback(&fixture);
 
-    for (idx, event) in events.iter().enumerate() {
-        let event_id = event["event_id"].as_str().expect("event_id");
-        assert!(
-            event_positions.insert(event_id, idx).is_none(),
-            "duplicate event id: {event_id}"
-        );
-    }
-
-    for (idx, event) in events.iter().enumerate() {
-        let cause = event["refs"]["cause_event_id"].as_str();
-        if let Some(cause) = cause {
-            let cause_idx = *event_positions
-                .get(cause)
-                .unwrap_or_else(|| panic!("missing cause event: {cause}"));
-            assert!(
-                cause_idx < idx,
-                "cause event must appear before child event: {cause}"
-            );
-        }
-    }
-
-    let verification = event_by_id(&fixture, "evt_verify_patch_001");
-    assert_eq!(verification["verification"]["verdict"], "not_verified");
     assert_eq!(
-        verification["verification"]["reason"],
-        "expected_effect_clause_failed"
+        readback["schema"],
+        LSWR_INTERACTION_FEEDBACK_READBACK_SCHEMA
     );
+    assert_eq!(readback["requires_screenshot_for_primary_readback"], false);
     assert_eq!(
-        verification["verification"]["evidence"]["failed_clause_ids"],
-        json!(["effect_walkway_clearance_001"])
-    );
-
-    let reject = event_by_id(&fixture, "evt_human_reject_001");
-    assert_eq!(reject["payload"]["decision"], "reject");
-    assert_eq!(reject["payload"]["does_not_change_verification"], true);
-    assert_eq!(
-        reject["refs"]["cause_event_id"], "evt_verify_patch_001",
-        "human review must point at verification instead of rewriting it"
-    );
-
-    assert_eq!(
-        fixture["verification_page"]["verifications"][0]["verdict"],
-        "not_verified"
-    );
-}
-
-#[test]
-fn interaction_feedback_fixture_preserves_feedback_and_revision_hints() {
-    let fixture = fixture();
-    let feedback_event = event_by_id(&fixture, "evt_feedback_text_001");
-    let feedback_record = &fixture["feedback"][0];
-
-    assert_eq!(
-        feedback_event["payload"]["raw"]["text"],
-        feedback_record["raw"]["text"]
-    );
-    assert_eq!(
-        feedback_record["verification_relation"]["changes_world_verdict"],
-        false
-    );
-    assert_eq!(
-        feedback_record["verification_relation"]["related_verification_event_id"],
-        "evt_verify_patch_001"
-    );
-
-    let revision_patch = &event_by_id(&fixture, "evt_ai_patch_proposed_002")["payload"]["patch"];
-    let sources: BTreeSet<&str> = revision_patch["revision_sources"]
-        .as_array()
-        .expect("revision sources")
-        .iter()
-        .map(|value| value.as_str().expect("source"))
-        .collect();
-
-    assert!(sources.contains("verify_patch_arrival_bath_move_001"));
-    assert!(sources.contains("fb_arrival_crowded_001"));
-
-    let report = readback_report(&fixture);
-    assert_eq!(
-        report,
+        readback,
         json!({
+            "schema": LSWR_INTERACTION_FEEDBACK_READBACK_SCHEMA,
             "selected_entities": ["bath"],
             "latest_visible_change": "patch_arrival_bath_move_001",
             "latest_verification_verdict": "not_verified",
@@ -143,9 +65,30 @@ fn interaction_feedback_fixture_preserves_feedback_and_revision_hints() {
             "revision_should_cite": [
                 "verify_patch_arrival_bath_move_001",
                 "fb_arrival_crowded_001"
-            ]
+            ],
+            "requires_screenshot_for_primary_readback": false
         })
     );
+}
+
+#[test]
+fn interaction_feedback_validator_reports_tampered_fixture() {
+    let mut fixture = fixture();
+    fixture["events"][5]["refs"]["cause_event_id"] = json!("missing_event");
+    fixture["feedback"][0]["verification_relation"]["changes_world_verdict"] = json!(true);
+
+    let report = validate_interaction_feedback_fixture(&fixture);
+
+    assert!(!report.valid);
+    assert!(report
+        .failure_reasons
+        .contains(&"cause_event_missing:missing_event".to_string()));
+    assert!(report
+        .failure_reasons
+        .contains(&"human_reject_not_anchored_to_verification".to_string()));
+    assert!(report
+        .failure_reasons
+        .contains(&"feedback_changes_world_verdict".to_string()));
 }
 
 #[test]
@@ -159,23 +102,4 @@ fn interaction_feedback_fixture_pretty_json_roundtrips() {
 
 fn fixture() -> Value {
     serde_json::from_str(FIXTURE_JSON).expect("interaction feedback fixture json")
-}
-
-fn events(fixture: &Value) -> Vec<&Value> {
-    fixture["events"]
-        .as_array()
-        .expect("events")
-        .iter()
-        .collect()
-}
-
-fn event_by_id<'a>(fixture: &'a Value, id: &str) -> &'a Value {
-    events(fixture)
-        .into_iter()
-        .find(|event| event["event_id"] == id)
-        .unwrap_or_else(|| panic!("missing event: {id}"))
-}
-
-fn readback_report(fixture: &Value) -> Value {
-    fixture["expected_agent_readback"].clone()
 }
