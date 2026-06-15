@@ -10978,6 +10978,128 @@ impl McpTool for LswrOutcomeAdmissionsTool {
     }
 }
 
+/// LSWR Step E3: DRY-RUN adapter from E2 admissions to #94 present_outcome rows.
+///
+/// This tool deliberately exposes no write flag. It computes the same
+/// training_eligible admission projection as E2, then returns the planned
+/// memory rows that a future explicit ingest step could persist.
+pub struct LswrOutcomeAdmissionsDryRunTool {
+    _hub: Hub,
+}
+impl LswrOutcomeAdmissionsDryRunTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { _hub: hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for LswrOutcomeAdmissionsDryRunTool {
+    fn name(&self) -> &'static str {
+        "lswr_outcome_admissions_dry_run"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "LSWR Step E3: DRY-RUN-ONLY adapter from Step E2 \
+                 training_eligible admissions to #94-compatible present_outcome memory \
+                 candidates. Scans persisted LSWR Step D present artifacts, classifies \
+                 admissions, filters to training_eligible only, and returns the would-write \
+                 rows with deterministic key/kind/scope/tags/content. Writes nothing, exposes \
+                 no dry_run=false switch, calls no memory_save, and never invokes \
+                 present_outcomes_ingest."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "window_secs": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 31536000,
+                        "default": 86400,
+                        "description": "Look-back window over present artifacts by provenance timestamp."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 200,
+                        "description": "Max HTML artifacts scanned (most-recent-first before timestamp filtering)."
+                    },
+                    "max_candidates": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 200,
+                        "default": 25,
+                        "description": "Hard cap on planned present_outcome candidate rows returned by this dry run."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let window_secs = args
+            .get("window_secs")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(86_400)
+            .clamp(60, 31_536_000);
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(200)
+            .clamp(1, 500) as usize;
+        let max_candidates = args
+            .get("max_candidates")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(25)
+            .clamp(1, 200) as usize;
+
+        let now = dispatch_now_secs();
+        let cutoff = now.saturating_sub(window_secs).max(0) as u64;
+        let dir = crate::present::presentations_dir();
+        let artifacts: Vec<_> = crate::present::list_artifacts(&dir, limit, Some("html"))
+            .into_iter()
+            .filter(|a| a.ts.map_or(true, |t| t >= cutoff))
+            .collect();
+        let projection = crate::lswr_outcome_admission::outcome_admissions_projection(
+            &artifacts,
+            false,
+            now.max(0) as u64,
+            window_secs as u64,
+        );
+        let admissions: Vec<Value> = projection
+            .get("admissions")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let mut dry_run = crate::lswr_outcome_admission::outcome_admission_dry_run_candidates(
+            &admissions,
+            now.max(0) as u64,
+            window_secs as u64,
+            max_candidates,
+        );
+        if let Some(obj) = dry_run.as_object_mut() {
+            obj.insert("dir".into(), json!(dir.display().to_string()));
+            obj.insert("limit".into(), json!(limit));
+            for key in [
+                "scanned_artifacts",
+                "skipped_non_lswr_count",
+                "artifact_read_error_count",
+                "lswr_artifact_count",
+                "audit_only_count",
+                "rejected_count",
+                "reason_counts",
+            ] {
+                if let Some(value) = projection.get(key) {
+                    obj.insert(key.into(), value.clone());
+                }
+            }
+        }
+        Ok(ToolResult::json_text(&dry_run))
+    }
+}
+
 // ── Output-expression lane Slice B (v0) ───────────────────────────────────
 // Two tools: a read-only outcome→memory drift projection (always-on, zero
 // risk, zero owner coordination), and an opt-in, dry-run-default, capped
@@ -40258,6 +40380,14 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Niche,
         Arc::new(LswrOutcomeAdmissionsTool::new(hub.clone())),
     );
+    // LSWR Step E3: dry-run adapter from E2 admissions to #94-compatible
+    // present_outcome candidates. Niche (opt-in), no write flag.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(LswrOutcomeAdmissionsDryRunTool::new(hub.clone())),
+    );
     // Slice B (v0): read-only outcome→memory drift projection. Reports which
     // verified outcomes are/aren't represented in memory (tamper-evident chain);
     // writes nothing, non-mutating probe. Niche (opt-in).
@@ -46846,6 +46976,9 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         // LSWR Step E2 admission projection is also Niche/all only.
         assert!(all.includes(Tier::Niche, "lswr_outcome_admissions"));
         assert!(!std_p.includes(Tier::Niche, "lswr_outcome_admissions"));
+        // LSWR Step E3 admission dry-run adapter is also Niche/all only.
+        assert!(all.includes(Tier::Niche, "lswr_outcome_admissions_dry_run"));
+        assert!(!std_p.includes(Tier::Niche, "lswr_outcome_admissions_dry_run"));
         // Audio embodiment present_voice is the same Niche opt-in shape.
         assert!(all.includes(Tier::Niche, "present_voice"));
         assert!(!std_p.includes(Tier::Niche, "present_voice"));
@@ -46873,6 +47006,7 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         let codex_essential = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         assert!(!codex_essential.includes(Tier::Niche, "lswr_readonly_bridge_display"));
         assert!(!codex_essential.includes(Tier::Niche, "lswr_outcome_admissions"));
+        assert!(!codex_essential.includes(Tier::Niche, "lswr_outcome_admissions_dry_run"));
         let schemas = build_registry_with_policy(Hub::builder().build(), all).list();
         assert!(
             schemas.iter().any(|s| s.name == "present"),
@@ -46893,6 +47027,12 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         assert!(
             schemas.iter().any(|s| s.name == "lswr_outcome_admissions"),
             "lswr_outcome_admissions must register under the all profile"
+        );
+        assert!(
+            schemas
+                .iter()
+                .any(|s| s.name == "lswr_outcome_admissions_dry_run"),
+            "lswr_outcome_admissions_dry_run must register under the all profile"
         );
         assert!(
             schemas.iter().any(|s| s.name == "present_voice"),
@@ -46928,6 +47068,12 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
                 .any(|s| s.name == "lswr_outcome_admissions"),
             "lswr_outcome_admissions must stay out of standard"
         );
+        assert!(
+            !standard_schemas
+                .iter()
+                .any(|s| s.name == "lswr_outcome_admissions_dry_run"),
+            "lswr_outcome_admissions_dry_run must stay out of standard"
+        );
         let codex_schemas =
             build_registry_with_policy(Hub::builder().build(), codex_essential).list();
         assert!(
@@ -46936,6 +47082,38 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
                 .any(|s| s.name == "lswr_outcome_admissions"),
             "lswr_outcome_admissions must stay out of codex-essential"
         );
+        assert!(
+            !codex_schemas
+                .iter()
+                .any(|s| s.name == "lswr_outcome_admissions_dry_run"),
+            "lswr_outcome_admissions_dry_run must stay out of codex-essential"
+        );
+    }
+
+    #[test]
+    fn lswr_outcome_admissions_dry_run_schema_has_no_write_switch() {
+        let all = ToolPolicy::from_values(None, None, None, Some("all"));
+        let schemas = build_registry_with_policy(Hub::builder().build(), all).list();
+        let tool = schemas
+            .iter()
+            .find(|s| s.name == "lswr_outcome_admissions_dry_run")
+            .expect("lswr_outcome_admissions_dry_run schema");
+
+        assert!(tool.description.contains("DRY-RUN-ONLY"));
+        assert!(tool.description.contains("Writes nothing"));
+        assert_eq!(
+            tool.input_schema["additionalProperties"],
+            serde_json::Value::Bool(false)
+        );
+        assert!(tool.input_schema["properties"]
+            .get("max_candidates")
+            .is_some());
+        for forbidden in ["dry_run", "max_writes", "write", "persist", "memory_save"] {
+            assert!(
+                tool.input_schema["properties"].get(forbidden).is_none(),
+                "{forbidden} must not be exposed by the E3 dry-run tool"
+            );
+        }
     }
 
     #[test]

@@ -7,18 +7,20 @@
 //! no MCP calls and no memory writes. The E2 projection below performs
 //! read-only artifact IO, but still writes nothing.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde_json::{json, Value};
 
 use crate::lswr_present::LSWR_PRESENT_PACKET_SCHEMA;
 use crate::present::{ArtifactInfo, OUTCOME_SIDECAR_SUFFIX};
-use crate::present_ingest::OUTCOME_MEMORY_KIND;
+use crate::present_ingest::{build_outcome_memory, OUTCOME_MEMORY_KIND};
 
 pub const LSWR_OUTCOME_ADMISSION_SCHEMA: &str = "agent_bridge.lswr.outcome_admission.v0";
 pub const LSWR_OUTCOME_ADMISSIONS_PROJECTION_SCHEMA: &str =
     "agent_bridge.lswr.outcome_admissions.v0";
+pub const LSWR_OUTCOME_ADMISSION_DRY_RUN_SCHEMA: &str =
+    "agent_bridge.lswr.outcome_admission_dry_run.v0";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LswrAdmissionClass {
@@ -221,6 +223,99 @@ pub fn outcome_admissions_projection(
     })
 }
 
+/// Step E3 dry-run adapter from E2 admissions to #94-compatible memory rows.
+///
+/// This is intentionally pure: it performs no IO, calls no store APIs, and
+/// always returns a planned candidate set only. Only `training_eligible`
+/// admissions can flow through; audit-only/rejected records remain evidence.
+pub fn outcome_admission_dry_run_candidates(
+    admissions: &[Value],
+    generated_at: u64,
+    window_secs: u64,
+    max_candidates: usize,
+) -> Value {
+    let mut training_eligible_count = 0usize;
+    let mut skipped_non_training_eligible_count = 0usize;
+    let mut skipped_unbuildable_count = 0usize;
+    let mut skipped_duplicate_key_count = 0usize;
+    let mut skipped_over_cap = 0usize;
+    let mut seen_keys: BTreeSet<String> = BTreeSet::new();
+    let mut candidates: Vec<Value> = Vec::new();
+
+    for (admission_index, admission) in admissions.iter().enumerate() {
+        let is_training_eligible = str_at(admission, &["admission", "class"])
+            == Some("training_eligible")
+            && admission
+                .get("admission")
+                .and_then(|v| v.get("eligible"))
+                .and_then(Value::as_bool)
+                == Some(true);
+        if !is_training_eligible {
+            skipped_non_training_eligible_count += 1;
+            continue;
+        }
+        training_eligible_count += 1;
+
+        let Some(outcome_record) = admission_to_outcome_record(admission, generated_at) else {
+            skipped_unbuildable_count += 1;
+            continue;
+        };
+        let Some(mem) =
+            build_outcome_memory(&outcome_record, generated_at.min(i64::MAX as u64) as i64)
+        else {
+            skipped_unbuildable_count += 1;
+            continue;
+        };
+        if !seen_keys.insert(mem.key.clone()) {
+            skipped_duplicate_key_count += 1;
+            continue;
+        }
+        if candidates.len() >= max_candidates {
+            skipped_over_cap += 1;
+            continue;
+        }
+
+        candidates.push(json!({
+            "admission_index": admission_index,
+            "present_artifact_id": outcome_record.get("artifact_id").cloned().unwrap_or(Value::Null),
+            "dry_run": true,
+            "write_allowed": false,
+            "memory": {
+                "key": mem.key,
+                "kind": mem.kind,
+                "scope": mem.scope,
+                "tags": mem.tags,
+                "content": mem.content,
+                "related_keys": mem.related_keys,
+                "importance": mem.importance,
+            },
+            "outcome_record": outcome_record,
+            "source": admission.get("source").cloned().unwrap_or(Value::Null),
+            "expression": admission.get("expression").cloned().unwrap_or(Value::Null),
+            "admission": admission.get("admission").cloned().unwrap_or(Value::Null),
+        }));
+    }
+
+    json!({
+        "schema": LSWR_OUTCOME_ADMISSION_DRY_RUN_SCHEMA,
+        "dry_run": true,
+        "writes_state": false,
+        "generated_at": generated_at,
+        "window_secs": window_secs,
+        "admission_count": admissions.len(),
+        "training_eligible_count": training_eligible_count,
+        "candidate_count": candidates.len(),
+        "skipped_non_training_eligible_count": skipped_non_training_eligible_count,
+        "skipped_unbuildable_count": skipped_unbuildable_count,
+        "skipped_duplicate_key_count": skipped_duplicate_key_count,
+        "skipped_over_cap": skipped_over_cap,
+        "max_candidates": max_candidates,
+        "memory_kind": OUTCOME_MEMORY_KIND,
+        "note": "dry-run only: planned #94-compatible present_outcome memory rows from training_eligible LSWR admissions; no store writes, no present_outcomes_ingest call.",
+        "candidates": candidates,
+    })
+}
+
 fn admission_record(
     source_packet: &Value,
     expression: &Value,
@@ -300,6 +395,61 @@ fn artifact_rejection(artifact: &ArtifactInfo, reason: &str) -> Value {
             "expression_source": "none",
         },
     })
+}
+
+fn admission_to_outcome_record(admission: &Value, generated_at: u64) -> Option<Value> {
+    if str_at(admission, &["admission", "reason"]) != Some("eligible") {
+        return None;
+    }
+    if str_at(admission, &["source", "world_verdict"]) != Some("verified") {
+        return None;
+    }
+    if str_at(admission, &["source", "world_reason"]).is_some() {
+        return None;
+    }
+    if str_at(admission, &["expression", "verify_status"]) != Some("rendered_ok") {
+        return None;
+    }
+
+    let artifact_id = first_str(
+        admission,
+        &[&["artifact", "id"], &["source", "present_artifact_id"]],
+    )?;
+    let ts = admission
+        .get("artifact")
+        .and_then(|v| v.get("ts"))
+        .and_then(Value::as_u64)
+        .unwrap_or(generated_at);
+    let world_tool = str_at(admission, &["source", "world_tool"])?;
+    let verify_method = str_at(admission, &["source", "verify_method"])?;
+    let verified_to = str_at(admission, &["source", "verified_to"])?;
+    let intent = format!("LSWR training-eligible {world_tool} outcome verified to {verified_to}");
+
+    Some(json!({
+        "artifact_id": artifact_id,
+        "ts": ts,
+        "intent": intent,
+        "action_tool": "lswr_outcome_admission",
+        "kind": "lswr_world_outcome",
+        "verify_status": "rendered_ok",
+        "verify_method": verify_method,
+        "embody_status": str_at(admission, &["expression", "embody_status"]).unwrap_or("not_applicable"),
+        "interactive_status": str_at(admission, &["expression", "interactive_status"]).unwrap_or("not_applicable"),
+        "decision": str_at(admission, &["expression", "decision"]),
+        "token_match": admission
+            .get("expression")
+            .and_then(|v| v.get("token_match"))
+            .and_then(Value::as_bool),
+        "chain_head": str_at(admission, &["expression", "chain_head"]),
+        "verified_to": verified_to,
+        "not_verified": Value::Null,
+        "lswr": {
+            "world_tool": str_at(admission, &["source", "world_tool"]),
+            "world_verdict": str_at(admission, &["source", "world_verdict"]),
+            "world_reason": str_at(admission, &["source", "world_reason"]),
+            "admission_reason": str_at(admission, &["admission", "reason"]),
+        },
+    }))
 }
 
 fn supported_world_tool(tool: Option<&str>) -> bool {
@@ -862,5 +1012,112 @@ mod tests {
         );
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn dry_run_candidates_build_present_outcome_row_for_training_eligible_admission() {
+        let packet = verified_patch_packet();
+        let admission = classify_outcome_admission(&packet, &expression(), Some(&packet));
+        let dry_run = outcome_admission_dry_run_candidates(&[admission], 1_780_000_020, 86_400, 25);
+
+        assert_eq!(dry_run["schema"], LSWR_OUTCOME_ADMISSION_DRY_RUN_SCHEMA);
+        assert_eq!(dry_run["dry_run"], true);
+        assert_eq!(dry_run["writes_state"], false);
+        assert_eq!(dry_run["admission_count"], json!(1));
+        assert_eq!(dry_run["training_eligible_count"], json!(1));
+        assert_eq!(dry_run["candidate_count"], json!(1));
+        assert_eq!(dry_run["memory_kind"], OUTCOME_MEMORY_KIND);
+
+        let candidate = &dry_run["candidates"][0];
+        assert_eq!(candidate["present_artifact_id"], "ab_step_e_fixture");
+        assert_eq!(candidate["write_allowed"], false);
+        assert_eq!(candidate["memory"]["key"], "outcome_ab_step_e_fixture");
+        assert_eq!(candidate["memory"]["kind"], OUTCOME_MEMORY_KIND);
+        assert_eq!(candidate["memory"]["scope"], "outcome:ab_step_e_fixture");
+        assert!(candidate["memory"]["content"]
+            .as_str()
+            .unwrap()
+            .contains("\"action_tool\": \"lswr_outcome_admission\""));
+        assert_eq!(
+            candidate["outcome_record"]["action_tool"],
+            "lswr_outcome_admission"
+        );
+        assert_eq!(candidate["outcome_record"]["kind"], "lswr_world_outcome");
+        assert_eq!(
+            candidate["outcome_record"]["verified_to"],
+            "onsen_live_root_viewport"
+        );
+        let tags = candidate["memory"]["tags"].as_array().unwrap();
+        assert!(tags.iter().any(|v| v == "present_outcome"));
+        assert!(tags.iter().any(|v| v == "verified_outcome"));
+        assert!(tags.iter().any(|v| v == "auto_ingested"));
+        assert!(tags.iter().any(|v| v == "verify:rendered_ok"));
+    }
+
+    #[test]
+    fn dry_run_candidates_skip_audit_only_and_rejected_admissions() {
+        let audit_packet = expected_effect_failure_packet();
+        let audit = classify_outcome_admission(&audit_packet, &expression(), Some(&audit_packet));
+
+        let reject_packet = verified_patch_packet();
+        let mut reject_expr = expression();
+        reject_expr["token_match"] = json!(false);
+        let rejected =
+            classify_outcome_admission(&reject_packet, &reject_expr, Some(&reject_packet));
+
+        let dry_run =
+            outcome_admission_dry_run_candidates(&[audit, rejected], 1_780_000_020, 86_400, 25);
+
+        assert_eq!(dry_run["candidate_count"], json!(0));
+        assert_eq!(dry_run["training_eligible_count"], json!(0));
+        assert_eq!(dry_run["skipped_non_training_eligible_count"], json!(2));
+        assert_eq!(dry_run["skipped_unbuildable_count"], json!(0));
+        assert_eq!(dry_run["candidates"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn dry_run_candidates_refuse_laundered_training_eligible_axes() {
+        let packet = verified_patch_packet();
+        let mut admission = classify_outcome_admission(&packet, &expression(), Some(&packet));
+        admission["expression"]["verify_status"] = json!("blank");
+
+        let dry_run = outcome_admission_dry_run_candidates(&[admission], 1_780_000_020, 86_400, 25);
+
+        assert_eq!(dry_run["training_eligible_count"], json!(1));
+        assert_eq!(dry_run["candidate_count"], json!(0));
+        assert_eq!(dry_run["skipped_unbuildable_count"], json!(1));
+        assert_eq!(dry_run["candidates"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn dry_run_candidates_dedupe_keys_and_respect_cap() {
+        let packet = verified_patch_packet();
+
+        let mut expr_a = expression();
+        expr_a["present_artifact_id"] = json!("admission_a");
+        expr_a["artifact_id"] = json!("admission_a");
+        let first = classify_outcome_admission(&packet, &expr_a, Some(&packet));
+        let duplicate = classify_outcome_admission(&packet, &expr_a, Some(&packet));
+
+        let mut expr_b = expression();
+        expr_b["present_artifact_id"] = json!("admission_b");
+        expr_b["artifact_id"] = json!("admission_b");
+        let capped = classify_outcome_admission(&packet, &expr_b, Some(&packet));
+
+        let dry_run = outcome_admission_dry_run_candidates(
+            &[first, duplicate, capped],
+            1_780_000_020,
+            86_400,
+            1,
+        );
+
+        assert_eq!(dry_run["training_eligible_count"], json!(3));
+        assert_eq!(dry_run["candidate_count"], json!(1));
+        assert_eq!(dry_run["skipped_duplicate_key_count"], json!(1));
+        assert_eq!(dry_run["skipped_over_cap"], json!(1));
+        assert_eq!(
+            dry_run["candidates"][0]["memory"]["key"],
+            "outcome_admission_a"
+        );
     }
 }
