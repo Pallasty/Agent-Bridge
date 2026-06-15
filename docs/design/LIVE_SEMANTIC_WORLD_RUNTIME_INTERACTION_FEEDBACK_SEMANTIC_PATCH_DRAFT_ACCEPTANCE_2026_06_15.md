@@ -129,5 +129,9 @@ Still not accepted:
 
 ## 6. Next Slice
 
-The next safe slice is a separate execution-gate preflight that consumes this
-draft and refuses to proceed until live world state is explicitly supplied.
+The next safe slice was completed as a separate execution-gate preflight that
+consumes this draft and refuses to proceed until explicit argument context is
+supplied:
+
+- [Interaction feedback patch execution preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_PATCH_EXECUTION_PREFLIGHT_2026_06_15.md)
+- [Interaction feedback patch execution preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_PATCH_EXECUTION_PREFLIGHT_ACCEPTANCE_2026_06_15.md)

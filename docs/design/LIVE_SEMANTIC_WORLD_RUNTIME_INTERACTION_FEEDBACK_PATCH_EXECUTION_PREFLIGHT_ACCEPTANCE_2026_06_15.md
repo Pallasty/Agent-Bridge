@@ -92,6 +92,13 @@ git diff --check
 
 Passed with pre-existing warnings only.
 
+```text
+AB_BIOCORTEX_RS=/Data/CascadeProjects/biocortex-rs scripts/verify-biocortex-retrieval-shadow.sh
+```
+
+Passed after wiring the blocked-without-context and ready-with-explicit-context
+smoke paths into the full verifier.
+
 ## 3. Boundary Review
 
 Accepted behavior:
