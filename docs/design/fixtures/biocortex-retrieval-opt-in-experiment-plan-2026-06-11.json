@@ -1,7 +1,7 @@
 {
   "schema": "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0",
   "created_at": "2026-06-11T00:00:00Z",
-  "status": "ssb_lswr_action_result_review_fixture_ready",
+  "status": "read_only_ssb_adapter_fixture_ready",
   "approval_state": "opt_in_implementation_authorized",
   "runtime_adapter_approved": false,
   "default_search_order_change_allowed": false,
@@ -44,6 +44,7 @@
   "downstream_aio_integration_checkpoint_selected": true,
   "downstream_aio_runtime_evidence_handoff_ready": true,
   "ssb_lswr_action_result_review_fixture_ready": true,
+  "read_only_ssb_adapter_fixture_ready": true,
   "controlled_explicit_opt_in_fts_trial_ready": true,
   "post_runtime_evidence_backed_controlled_trial_ready": true,
   "post_runtime_live_candidate_evidence_ready": true,
@@ -1248,7 +1249,30 @@
     "writes_approval": false,
     "changes_memory_search_order": false,
     "default_search_order_change_allowed": false,
-    "next_step": "build_read_only_ssb_adapter_fixture_from_handoff"
+    "next_step": "completed_by_read_only_ssb_adapter_fixture",
+    "next_step_completed": true
   },
-  "next_step": "build_read_only_ssb_adapter_fixture_from_handoff"
+  "read_only_ssb_adapter_fixture": {
+    "doc": "docs/design/BIOCORTEX_RETRIEVAL_READ_ONLY_SSB_ADAPTER_FIXTURE_2026_06_15.md",
+    "fixture": "docs/design/fixtures/biocortex-retrieval-read-only-ssb-adapter-fixture-2026-06-15.json",
+    "source_review_fixture": "docs/design/fixtures/biocortex-retrieval-ssb-lswr-action-result-review-fixture-2026-06-15.json",
+    "schema": "agent_bridge.biocortex_retrieval.read_only_ssb_adapter_fixture.v0",
+    "status": "ready",
+    "read_only": true,
+    "fixture_ready": true,
+    "target_schema_family": "agent_bridge.semantic_bus.action_result.v0",
+    "candidate_action_result_schema": "agent_bridge.semantic_bus.action_result.v0",
+    "fixture_only": true,
+    "runtime_executed": false,
+    "emits_runtime_action_result": false,
+    "executes_lswr_actions": false,
+    "calls_aiot_runtime": false,
+    "calls_memory_search": false,
+    "runs_biocortex": false,
+    "writes_approval": false,
+    "changes_memory_search_order": false,
+    "default_search_order_change_allowed": false,
+    "next_step": "collect_live_lswr_action_result_runtime_evidence"
+  },
+  "next_step": "collect_live_lswr_action_result_runtime_evidence"
 }

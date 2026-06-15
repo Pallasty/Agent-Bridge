@@ -61,8 +61,9 @@ granting default, hybrid, semantic, approval-write, or production-use
 permission. The first downstream checkpoint is now selected as the Semantic
 System Bus LSWR action/result runtime-evidence checkpoint. The ready downstream
 AIO runtime-evidence handoff packet is now connected to a read-only SSB/LSWR
-action-result review fixture. The next step is to build the read-only SSB
-adapter fixture from the handoff.
+action-result review fixture, and a read-only SSB adapter fixture now projects
+the handoff into a conservative `not_verified` SSB action-result shape. The next
+step is to collect live LSWR action-result runtime evidence.
 
 ```json
 {
@@ -110,6 +111,7 @@ adapter fixture from the handoff.
   "downstream_aio_integration_checkpoint_selected": true,
   "downstream_aio_runtime_evidence_handoff_ready": true,
   "ssb_lswr_action_result_review_fixture_ready": true,
+  "read_only_ssb_adapter_fixture_ready": true,
   "controlled_explicit_opt_in_fts_trial_ready": true,
   "post_runtime_evidence_backed_controlled_trial_ready": true,
   "post_runtime_live_candidate_evidence_ready": true,
@@ -172,6 +174,11 @@ SSB/LSWR action-result review fixture:
 
 - `docs/design/BIOCORTEX_RETRIEVAL_SSB_LSWR_ACTION_RESULT_REVIEW_FIXTURE_2026_06_15.md`
 - `docs/design/fixtures/biocortex-retrieval-ssb-lswr-action-result-review-fixture-2026-06-15.json`
+
+Read-only SSB adapter fixture:
+
+- `docs/design/BIOCORTEX_RETRIEVAL_READ_ONLY_SSB_ADAPTER_FIXTURE_2026_06_15.md`
+- `docs/design/fixtures/biocortex-retrieval-read-only-ssb-adapter-fixture-2026-06-15.json`
 
 Authorization request packet:
 
@@ -1081,8 +1088,34 @@ fixture:
   BioCortex, write approval, change default retrieval order, call AiOT runtime,
   execute LSWR actions, emit `agent_bridge.semantic_bus.action_result.v0`, or
   include raw query/key/content/side-signal/human-decision payloads;
+- the prior next project action
+  `build_read_only_ssb_adapter_fixture_from_handoff` is completed by Slice 44.
+
+## Read-Only SSB Adapter Fixture
+
+Slice 44 builds the read-only SSB adapter fixture from the handoff:
+
+- committed document:
+  `docs/design/BIOCORTEX_RETRIEVAL_READ_ONLY_SSB_ADAPTER_FIXTURE_2026_06_15.md`;
+- committed machine-readable fixture:
+  `docs/design/fixtures/biocortex-retrieval-read-only-ssb-adapter-fixture-2026-06-15.json`;
+- fixture schema:
+  `agent_bridge.biocortex_retrieval.read_only_ssb_adapter_fixture.v0`;
+- target contract:
+  `agent_bridge.semantic_bus.action_result.v0`;
+- status: `ready`;
+- the fixture projects the BioCortex handoff into a conservative
+  `candidate_action_result` with `verdict=not_verified`,
+  `reason=fixture_only_no_lswr_runtime_execution`,
+  `recover=inspect_host_or_visibility_evidence`, and `raw_available=false`;
+- the candidate is fixture-only and must not be ingested as runtime evidence or
+  used for training;
+- the fixture remains read-only and does not call `memory_search`, run
+  BioCortex, write approval, change default retrieval order, call AiOT runtime,
+  execute LSWR actions, emit a runtime SSB action result, or include raw
+  query/key/content/side-signal/human-decision payloads;
 - the next project action is
-  `build_read_only_ssb_adapter_fixture_from_handoff`.
+  `collect_live_lswr_action_result_runtime_evidence`.
 
 ## Fail-Open Rules
 

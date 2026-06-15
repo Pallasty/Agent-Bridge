@@ -1,0 +1,84 @@
+{
+  "schema": "agent_bridge.biocortex_retrieval.read_only_ssb_adapter_fixture.v0",
+  "created_at": "2026-06-15T00:00:00Z",
+  "status": "ready",
+  "read_only": true,
+  "implementation_stage": "read_only_ssb_adapter_fixture_from_handoff",
+  "source_review_fixture": {
+    "schema": "agent_bridge.biocortex_retrieval.ssb_lswr_action_result_review_fixture.v0",
+    "status": "ready",
+    "fixture": "docs/design/fixtures/biocortex-retrieval-ssb-lswr-action-result-review-fixture-2026-06-15.json",
+    "included": false
+  },
+  "input_contract": {
+    "review_fixture_included": false,
+    "raw_queries_included": false,
+    "raw_keys_included": false,
+    "content_included": false,
+    "side_signal_raw_included": false,
+    "human_decision_text_included": false
+  },
+  "adapter_fixture": {
+    "fixture_ready": true,
+    "fixture_only": true,
+    "runtime_executed": false,
+    "executes_lswr_actions": false,
+    "emits_runtime_action_result": false,
+    "requires_live_lswr_evidence_before_verified": true,
+    "purpose": "Project the BioCortex handoff into the Semantic System Bus action_result shape without pretending an LSWR runtime action occurred."
+  },
+  "candidate_action_result": {
+    "schema": "agent_bridge.semantic_bus.action_result.v0",
+    "source_schema": "agent_bridge.world_tool.v0",
+    "adapter": "biocortex.downstream_aio.read_only_fixture",
+    "world_tool": "world_visibility_query",
+    "action_type": "world.visibility.query",
+    "action_id": "biocortex:ssb-lswr-runtime-evidence:read-only-fixture",
+    "request_id": "biocortex-ssb-lswr-action-result-review-20260615",
+    "subject_id": "semantic_system_bus_lswr_action_result_runtime_evidence_checkpoint",
+    "event_ids": [
+      "evt-biocortex-ssb-lswr-adapter-fixture-20260615"
+    ],
+    "verdict": "not_verified",
+    "reason": "fixture_only_no_lswr_runtime_execution",
+    "verified_to": null,
+    "verification_method": "read_only_contract_projection",
+    "recover": "inspect_host_or_visibility_evidence",
+    "raw_available": false
+  },
+  "action_result_boundary": {
+    "fixture_only": true,
+    "must_not_be_ingested_as_runtime_evidence": true,
+    "must_not_be_used_for_training": true,
+    "requires_future_live_runtime_evidence": true,
+    "no_laundering_reason": "BioCortex handoff counts are runtime-backed retrieval evidence, not LSWR host action-result evidence."
+  },
+  "handoff_evidence_projection": {
+    "selected_checkpoint": "semantic_system_bus_lswr_action_result_runtime_evidence_checkpoint",
+    "target_schema_family": "agent_bridge.semantic_bus.action_result.v0",
+    "fixture_count": 4,
+    "total_query_count": 8,
+    "total_runs_biocortex_count": 8,
+    "total_side_signal_ok_count": 8,
+    "total_experimental_source_count": 8,
+    "total_actual_order_changed_count": 8,
+    "raw_payload_absent": true
+  },
+  "boundary": {
+    "calls_memory_search": false,
+    "runs_biocortex": false,
+    "writes_approval": false,
+    "changes_memory_search_order": false,
+    "default_search_order_change_allowed": false,
+    "calls_aiot_runtime": false,
+    "executes_lswr_actions": false,
+    "emits_runtime_action_result": false,
+    "mutates_default_agent_bridge_db": false,
+    "raw_queries_included": false,
+    "raw_keys_included": false,
+    "content_included": false,
+    "side_signal_raw_included": false,
+    "human_decision_text_included": false
+  },
+  "next_step": "collect_live_lswr_action_result_runtime_evidence"
+}

@@ -51,8 +51,13 @@ This review fixture does not:
 
 ## Next Step
 
-Build the read-only SSB adapter fixture from this handoff:
+The read-only SSB adapter fixture is ready:
+
+- `docs/design/BIOCORTEX_RETRIEVAL_READ_ONLY_SSB_ADAPTER_FIXTURE_2026_06_15.md`
+- `docs/design/fixtures/biocortex-retrieval-read-only-ssb-adapter-fixture-2026-06-15.json`
+
+Collect live LSWR action-result runtime evidence:
 
 ```text
-build_read_only_ssb_adapter_fixture_from_handoff
+collect_live_lswr_action_result_runtime_evidence
 ```

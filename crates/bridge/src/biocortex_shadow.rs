@@ -4145,6 +4145,7 @@ pub fn biocortex_retrieval_opt_in_authorization_decision_packet(
                 || status == "downstream_aio_integration_checkpoint_selected"
                 || status == "downstream_aio_runtime_evidence_handoff_ready"
                 || status == "ssb_lswr_action_result_review_fixture_ready"
+                || status == "read_only_ssb_adapter_fixture_ready"
         })
         .unwrap_or(false);
 
@@ -4506,6 +4507,7 @@ pub fn biocortex_retrieval_opt_in_post_implementation_review_gate(
                 || status == "downstream_aio_integration_checkpoint_selected"
                 || status == "downstream_aio_runtime_evidence_handoff_ready"
                 || status == "ssb_lswr_action_result_review_fixture_ready"
+                || status == "read_only_ssb_adapter_fixture_ready"
         })
         .unwrap_or(false);
     let plan_implementation_allowed = value_bool_is(plan.get("implementation_allowed"), true);

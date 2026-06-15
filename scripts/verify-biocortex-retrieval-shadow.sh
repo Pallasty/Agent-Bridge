@@ -64,6 +64,7 @@ opt_in_plan="docs/design/fixtures/biocortex-retrieval-opt-in-experiment-plan-202
 downstream_aio_checkpoint_selection="docs/design/fixtures/biocortex-retrieval-downstream-aio-checkpoint-selection-2026-06-15.json"
 downstream_aio_runtime_evidence_handoff="docs/design/fixtures/biocortex-retrieval-downstream-aio-runtime-evidence-handoff-2026-06-15.json"
 ssb_lswr_action_result_review_fixture="docs/design/fixtures/biocortex-retrieval-ssb-lswr-action-result-review-fixture-2026-06-15.json"
+read_only_ssb_adapter_fixture="docs/design/fixtures/biocortex-retrieval-read-only-ssb-adapter-fixture-2026-06-15.json"
 opt_in_batch_query_cases="docs/design/fixtures/biocortex-retrieval-opt-in-batch-diagnostic-queries-2026-06-12.json"
 opt_in_controlled_order_fixture="docs/design/fixtures/biocortex-retrieval-opt-in-controlled-order-fixture-2026-06-12.json"
 opt_in_expanded_corpus_fixture="docs/design/fixtures/biocortex-retrieval-opt-in-expanded-controlled-corpus-2026-06-12.json"
@@ -133,7 +134,7 @@ jq -e '
 ' "$opt_in_controlled_order_fixture" >/dev/null
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0"
-    and .status == "ssb_lswr_action_result_review_fixture_ready"
+    and .status == "read_only_ssb_adapter_fixture_ready"
     and .approval_state == "opt_in_implementation_authorized"
     and .runtime_adapter_approved == false
     and .default_search_order_change_allowed == false
@@ -163,6 +164,7 @@ jq -e '
     and .downstream_aio_integration_checkpoint_selected == true
     and .downstream_aio_runtime_evidence_handoff_ready == true
     and .ssb_lswr_action_result_review_fixture_ready == true
+    and .read_only_ssb_adapter_fixture_ready == true
     and .downstream_aio_checkpoint_selection.selection_status == "downstream_aio_integration_checkpoint_selected"
     and .downstream_aio_checkpoint_selection.selected_checkpoint == "semantic_system_bus_lswr_action_result_runtime_evidence_checkpoint"
     and .downstream_aio_checkpoint_selection.selected_checkpoint_family == "semantic_system_bus"
@@ -196,6 +198,20 @@ jq -e '
     and .ssb_lswr_action_result_review_fixture.runs_biocortex == false
     and .ssb_lswr_action_result_review_fixture.writes_approval == false
     and .ssb_lswr_action_result_review_fixture.default_search_order_change_allowed == false
+    and .read_only_ssb_adapter_fixture.status == "ready"
+    and .read_only_ssb_adapter_fixture.schema == "agent_bridge.biocortex_retrieval.read_only_ssb_adapter_fixture.v0"
+    and .read_only_ssb_adapter_fixture.fixture_ready == true
+    and .read_only_ssb_adapter_fixture.target_schema_family == "agent_bridge.semantic_bus.action_result.v0"
+    and .read_only_ssb_adapter_fixture.candidate_action_result_schema == "agent_bridge.semantic_bus.action_result.v0"
+    and .read_only_ssb_adapter_fixture.fixture_only == true
+    and .read_only_ssb_adapter_fixture.runtime_executed == false
+    and .read_only_ssb_adapter_fixture.emits_runtime_action_result == false
+    and .read_only_ssb_adapter_fixture.executes_lswr_actions == false
+    and .read_only_ssb_adapter_fixture.calls_aiot_runtime == false
+    and .read_only_ssb_adapter_fixture.calls_memory_search == false
+    and .read_only_ssb_adapter_fixture.runs_biocortex == false
+    and .read_only_ssb_adapter_fixture.writes_approval == false
+    and .read_only_ssb_adapter_fixture.default_search_order_change_allowed == false
     and .ordering_behavior_connected == false
     and .explicit_opt_in_fts_ordering_behavior_connected == true
     and .explicit_opt_in_fts_runtime_adapter_connected == true
@@ -1026,6 +1042,61 @@ jq -e '
     and .boundary.side_signal_raw_included == false
     and .next_step == "build_read_only_ssb_adapter_fixture_from_handoff"
 ' "$ssb_lswr_action_result_review_fixture" >/dev/null
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.read_only_ssb_adapter_fixture.v0"
+    and .status == "ready"
+    and .read_only == true
+    and .implementation_stage == "read_only_ssb_adapter_fixture_from_handoff"
+    and .source_review_fixture.schema == "agent_bridge.biocortex_retrieval.ssb_lswr_action_result_review_fixture.v0"
+    and .source_review_fixture.status == "ready"
+    and .source_review_fixture.fixture == "docs/design/fixtures/biocortex-retrieval-ssb-lswr-action-result-review-fixture-2026-06-15.json"
+    and .input_contract.review_fixture_included == false
+    and .input_contract.raw_queries_included == false
+    and .input_contract.raw_keys_included == false
+    and .input_contract.content_included == false
+    and .input_contract.side_signal_raw_included == false
+    and .adapter_fixture.fixture_ready == true
+    and .adapter_fixture.fixture_only == true
+    and .adapter_fixture.runtime_executed == false
+    and .adapter_fixture.executes_lswr_actions == false
+    and .adapter_fixture.emits_runtime_action_result == false
+    and .adapter_fixture.requires_live_lswr_evidence_before_verified == true
+    and .candidate_action_result.schema == "agent_bridge.semantic_bus.action_result.v0"
+    and .candidate_action_result.source_schema == "agent_bridge.world_tool.v0"
+    and .candidate_action_result.adapter == "biocortex.downstream_aio.read_only_fixture"
+    and .candidate_action_result.world_tool == "world_visibility_query"
+    and .candidate_action_result.action_type == "world.visibility.query"
+    and .candidate_action_result.action_id == "biocortex:ssb-lswr-runtime-evidence:read-only-fixture"
+    and .candidate_action_result.request_id == "biocortex-ssb-lswr-action-result-review-20260615"
+    and .candidate_action_result.subject_id == "semantic_system_bus_lswr_action_result_runtime_evidence_checkpoint"
+    and (.candidate_action_result.event_ids | length) == 1
+    and .candidate_action_result.verdict == "not_verified"
+    and .candidate_action_result.reason == "fixture_only_no_lswr_runtime_execution"
+    and .candidate_action_result.verified_to == null
+    and .candidate_action_result.verification_method == "read_only_contract_projection"
+    and .candidate_action_result.recover == "inspect_host_or_visibility_evidence"
+    and .candidate_action_result.raw_available == false
+    and .action_result_boundary.fixture_only == true
+    and .action_result_boundary.must_not_be_ingested_as_runtime_evidence == true
+    and .action_result_boundary.must_not_be_used_for_training == true
+    and .action_result_boundary.requires_future_live_runtime_evidence == true
+    and .handoff_evidence_projection.fixture_count == 4
+    and .handoff_evidence_projection.total_query_count == 8
+    and .handoff_evidence_projection.total_actual_order_changed_count == 8
+    and .boundary.calls_memory_search == false
+    and .boundary.runs_biocortex == false
+    and .boundary.writes_approval == false
+    and .boundary.changes_memory_search_order == false
+    and .boundary.default_search_order_change_allowed == false
+    and .boundary.calls_aiot_runtime == false
+    and .boundary.executes_lswr_actions == false
+    and .boundary.emits_runtime_action_result == false
+    and .boundary.raw_queries_included == false
+    and .boundary.raw_keys_included == false
+    and .boundary.content_included == false
+    and .boundary.side_signal_raw_included == false
+    and .next_step == "collect_live_lswr_action_result_runtime_evidence"
+' "$read_only_ssb_adapter_fixture" >/dev/null
 
 tmp_downstream_aio_runtime_evidence_handoff="$tmpdir/downstream-aio-runtime-evidence-handoff.json"
 run cargo run -p ab-bridge --no-default-features -- \
@@ -1922,7 +1993,7 @@ jq -e '
     and .writes_approval == false
     and .accepts_optional_order_diff_packet == true
     and .accepts_optional_redacted_order_artifact == true
-    and .opt_in_plan.status == "ssb_lswr_action_result_review_fixture_ready"
+    and .opt_in_plan.status == "read_only_ssb_adapter_fixture_ready"
     and .opt_in_plan.order_diff_packet_implemented == true
     and .opt_in_plan.authorization_request_order_diff_evidence_implemented == true
     and .opt_in_plan.redacted_order_artifact_implemented == true
@@ -2705,7 +2776,7 @@ jq -e '
     and .request_summary.runtime_adapter_approved == false
     and .request_summary.default_search_order_change_allowed == false
     and .request_summary.writes_approval == false
-    and .request_summary.opt_in_plan_status == "ssb_lswr_action_result_review_fixture_ready"
+    and .request_summary.opt_in_plan_status == "read_only_ssb_adapter_fixture_ready"
     and .authorized_implementation.may_implement_opt_in_experiment == true
     and .authorized_implementation.may_add_runtime_enable_env == "AB_BIOCORTEX_RETRIEVAL_OPT_IN"
     and .authorized_implementation.may_add_per_call_opt_in_surface == true
@@ -2776,7 +2847,7 @@ jq -e '
     and .evidence_summary.default_search_order_change_allowed == false
     and .evidence_summary.ordering_behavior_connected == false
     and .evidence_summary.post_implementation_review_required == true
-    and .plan_summary.status == "ssb_lswr_action_result_review_fixture_ready"
+    and .plan_summary.status == "read_only_ssb_adapter_fixture_ready"
     and .plan_summary.implementation_allowed == true
     and .plan_summary.store_opt_in_search_wrapper_implemented == true
     and .plan_summary.authorization_decision_consumer_implemented == true
