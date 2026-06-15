@@ -58,7 +58,9 @@ BioCortex movements with default retrieval still unchanged. The aio2 handoff
 review for that semantic-diverse corpus is now recorded and accepts the
 evidence for selecting a downstream AIO integration checkpoint, without
 granting default, hybrid, semantic, approval-write, or production-use
-permission.
+permission. The first downstream checkpoint is now selected as the Semantic
+System Bus LSWR action/result runtime-evidence checkpoint. The next step is to
+build a read-only downstream AIO runtime-evidence handoff packet.
 
 ```json
 {
@@ -103,6 +105,8 @@ permission.
   "post_runtime_semantic_diverse_live_candidate_evidence_ready": true,
   "post_semantic_diverse_review_recorded": true,
   "post_semantic_diverse_review_ready": true,
+  "downstream_aio_integration_checkpoint_selected": true,
+  "downstream_aio_runtime_evidence_handoff_ready": false,
   "controlled_explicit_opt_in_fts_trial_ready": true,
   "post_runtime_evidence_backed_controlled_trial_ready": true,
   "post_runtime_live_candidate_evidence_ready": true,
@@ -150,6 +154,11 @@ Post-semantic-diverse review:
 
 - `docs/design/BIOCORTEX_RETRIEVAL_POST_SEMANTIC_DIVERSE_REVIEW_2026_06_15.md`
 - `docs/design/fixtures/biocortex-retrieval-post-semantic-diverse-review-2026-06-15.json`
+
+Downstream AIO checkpoint selection:
+
+- `docs/design/BIOCORTEX_RETRIEVAL_DOWNSTREAM_AIO_CHECKPOINT_SELECTION_2026_06_15.md`
+- `docs/design/fixtures/biocortex-retrieval-downstream-aio-checkpoint-selection-2026-06-15.json`
 
 Authorization request packet:
 
@@ -984,6 +993,30 @@ Slice 40 records the aio2 handoff review for the semantic-diverse corpus:
   influence, semantic retrieval influence, approval writes, default
   `memory_search` order changes, production use without a downstream gate, or
   additional raw query/key/content/side-signal disclosure.
+
+## Downstream AIO Checkpoint Selection
+
+Slice 41 selects the first downstream AIO integration checkpoint:
+
+- committed document:
+  `docs/design/BIOCORTEX_RETRIEVAL_DOWNSTREAM_AIO_CHECKPOINT_SELECTION_2026_06_15.md`;
+- committed machine-readable selection:
+  `docs/design/fixtures/biocortex-retrieval-downstream-aio-checkpoint-selection-2026-06-15.json`;
+- selection status: `downstream_aio_integration_checkpoint_selected`;
+- selected checkpoint:
+  `semantic_system_bus_lswr_action_result_runtime_evidence_checkpoint`;
+- selected family: Semantic System Bus / LSWR action-result runtime evidence;
+- first consumer: `agent_bridge_semantic_system_bus`;
+- direct AiOT runtime consumption selected: `false`;
+- first handoff schema:
+  `agent_bridge.biocortex_retrieval.downstream_aio_runtime_evidence_handoff.v0`;
+- the checkpoint remains read-only and does not authorize default retrieval
+  influence, hybrid retrieval influence, semantic retrieval influence,
+  approval writes, default `memory_search` order changes, production use,
+  direct AiOT runtime consumption, or LSWR action execution from BioCortex
+  evidence;
+- the next project action is
+  `build_downstream_aio_runtime_evidence_handoff_packet`.
 
 ## Fail-Open Rules
 

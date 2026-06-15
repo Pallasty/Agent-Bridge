@@ -61,6 +61,7 @@ grep -q 'return baseline list' "$contract_doc"
 grep -q 'Authorization for one mode does not imply authorization for another mode' "$contract_doc"
 
 opt_in_plan="docs/design/fixtures/biocortex-retrieval-opt-in-experiment-plan-2026-06-11.json"
+downstream_aio_checkpoint_selection="docs/design/fixtures/biocortex-retrieval-downstream-aio-checkpoint-selection-2026-06-15.json"
 opt_in_batch_query_cases="docs/design/fixtures/biocortex-retrieval-opt-in-batch-diagnostic-queries-2026-06-12.json"
 opt_in_controlled_order_fixture="docs/design/fixtures/biocortex-retrieval-opt-in-controlled-order-fixture-2026-06-12.json"
 opt_in_expanded_corpus_fixture="docs/design/fixtures/biocortex-retrieval-opt-in-expanded-controlled-corpus-2026-06-12.json"
@@ -130,7 +131,7 @@ jq -e '
 ' "$opt_in_controlled_order_fixture" >/dev/null
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0"
-    and .status == "post_semantic_diverse_review_recorded"
+    and .status == "downstream_aio_integration_checkpoint_selected"
     and .approval_state == "opt_in_implementation_authorized"
     and .runtime_adapter_approved == false
     and .default_search_order_change_allowed == false
@@ -157,6 +158,17 @@ jq -e '
     and .store_opt_in_order_connection_implemented == true
     and .store_opt_in_runtime_adapter_connection_implemented == true
     and .runtime_readiness_packet_implemented == true
+    and .downstream_aio_integration_checkpoint_selected == true
+    and .downstream_aio_runtime_evidence_handoff_ready == false
+    and .downstream_aio_checkpoint_selection.selection_status == "downstream_aio_integration_checkpoint_selected"
+    and .downstream_aio_checkpoint_selection.selected_checkpoint == "semantic_system_bus_lswr_action_result_runtime_evidence_checkpoint"
+    and .downstream_aio_checkpoint_selection.selected_checkpoint_family == "semantic_system_bus"
+    and .downstream_aio_checkpoint_selection.selected_surface == "lswr_action_result_runtime_evidence"
+    and .downstream_aio_checkpoint_selection.direct_aiot_consumption_selected == false
+    and .downstream_aio_checkpoint_selection.checkpoint_must_be_read_only == true
+    and .downstream_aio_checkpoint_selection.first_handoff_schema == "agent_bridge.biocortex_retrieval.downstream_aio_runtime_evidence_handoff.v0"
+    and .downstream_aio_checkpoint_selection.default_search_order_change_allowed == false
+    and .downstream_aio_checkpoint_selection.writes_approval == false
     and .ordering_behavior_connected == false
     and .explicit_opt_in_fts_ordering_behavior_connected == true
     and .explicit_opt_in_fts_runtime_adapter_connected == true
@@ -845,6 +857,45 @@ jq -e '
     and .human_review_boundary.requires_separate_human_decision_before_implementation == false
     and .human_review_boundary.requires_post_implementation_review_before_ordering_use == true
 ' "$opt_in_plan" >/dev/null
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.downstream_aio_checkpoint_selection.v0"
+    and .status == "downstream_aio_integration_checkpoint_selected"
+    and .source_review.source_status == "post_semantic_diverse_review_recorded"
+    and .source_review.evidence_accepted == true
+    and .source_review.ready_for_downstream_aio_checkpoint_selection == true
+    and .selected_checkpoint.id == "semantic_system_bus_lswr_action_result_runtime_evidence_checkpoint"
+    and .selected_checkpoint.family == "semantic_system_bus"
+    and .selected_checkpoint.surface == "lswr_action_result_runtime_evidence"
+    and .selected_checkpoint.first_consumer == "agent_bridge_semantic_system_bus"
+    and .selected_checkpoint.direct_aiot_consumption_selected == false
+    and .accepted_evidence_summary.fixture_count == 4
+    and .accepted_evidence_summary.total_query_count == 8
+    and .accepted_evidence_summary.total_runs_biocortex_count == 8
+    and .accepted_evidence_summary.total_actual_order_changed_count == 8
+    and .accepted_evidence_summary.expected_met == true
+    and .checkpoint_contract.checkpoint_must_be_read_only == true
+    and .checkpoint_contract.first_handoff_schema == "agent_bridge.biocortex_retrieval.downstream_aio_runtime_evidence_handoff.v0"
+    and .checkpoint_contract.may_build_handoff_packet == true
+    and .checkpoint_contract.may_compare_against_ssb_runtime_evidence_contract == true
+    and .checkpoint_contract.may_enable_default_retrieval == false
+    and .checkpoint_contract.may_enable_hybrid_retrieval == false
+    and .checkpoint_contract.may_enable_semantic_retrieval == false
+    and .checkpoint_contract.may_write_approval == false
+    and .checkpoint_contract.may_call_aiot_runtime == false
+    and .checkpoint_contract.may_execute_lswr_actions_from_biocortex_evidence == false
+    and .ssb_alignment.runtime_backed_evidence == true
+    and .ssb_alignment.no_laundering_boundary_required == true
+    and .boundary.default_search_order_change_allowed == false
+    and .boundary.default_retrieval_influence_authorized == false
+    and .boundary.hybrid_retrieval_influence_authorized == false
+    and .boundary.semantic_retrieval_influence_authorized == false
+    and .boundary.direct_aiot_runtime_use_authorized == false
+    and .boundary.raw_queries_included == false
+    and .boundary.raw_keys_included == false
+    and .boundary.content_included == false
+    and .boundary.side_signal_raw_included == false
+    and .next_step == "build_downstream_aio_runtime_evidence_handoff_packet"
+' "$downstream_aio_checkpoint_selection" >/dev/null
 
 opt_in_auth_template="docs/design/fixtures/biocortex-retrieval-opt-in-authorization-request-template-2026-06-11.json"
 jq -e '
@@ -1711,7 +1762,7 @@ jq -e '
     and .writes_approval == false
     and .accepts_optional_order_diff_packet == true
     and .accepts_optional_redacted_order_artifact == true
-    and .opt_in_plan.status == "post_semantic_diverse_review_recorded"
+    and .opt_in_plan.status == "downstream_aio_integration_checkpoint_selected"
     and .opt_in_plan.order_diff_packet_implemented == true
     and .opt_in_plan.authorization_request_order_diff_evidence_implemented == true
     and .opt_in_plan.redacted_order_artifact_implemented == true
@@ -2494,7 +2545,7 @@ jq -e '
     and .request_summary.runtime_adapter_approved == false
     and .request_summary.default_search_order_change_allowed == false
     and .request_summary.writes_approval == false
-    and .request_summary.opt_in_plan_status == "post_semantic_diverse_review_recorded"
+    and .request_summary.opt_in_plan_status == "downstream_aio_integration_checkpoint_selected"
     and .authorized_implementation.may_implement_opt_in_experiment == true
     and .authorized_implementation.may_add_runtime_enable_env == "AB_BIOCORTEX_RETRIEVAL_OPT_IN"
     and .authorized_implementation.may_add_per_call_opt_in_surface == true
@@ -2565,7 +2616,7 @@ jq -e '
     and .evidence_summary.default_search_order_change_allowed == false
     and .evidence_summary.ordering_behavior_connected == false
     and .evidence_summary.post_implementation_review_required == true
-    and .plan_summary.status == "post_semantic_diverse_review_recorded"
+    and .plan_summary.status == "downstream_aio_integration_checkpoint_selected"
     and .plan_summary.implementation_allowed == true
     and .plan_summary.store_opt_in_search_wrapper_implemented == true
     and .plan_summary.authorization_decision_consumer_implemented == true

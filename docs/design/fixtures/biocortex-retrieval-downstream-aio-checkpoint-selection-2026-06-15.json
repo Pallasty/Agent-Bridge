@@ -1,0 +1,80 @@
+{
+  "schema": "agent_bridge.biocortex_retrieval.downstream_aio_checkpoint_selection.v0",
+  "status": "downstream_aio_integration_checkpoint_selected",
+  "generated_at": "2026-06-15T00:00:00Z",
+  "selector": "codex:aio2:downstream-aio-checkpoint-selection-20260615",
+  "source_review": {
+    "doc": "docs/design/BIOCORTEX_RETRIEVAL_POST_SEMANTIC_DIVERSE_REVIEW_2026_06_15.md",
+    "fixture": "docs/design/fixtures/biocortex-retrieval-post-semantic-diverse-review-2026-06-15.json",
+    "source_status": "post_semantic_diverse_review_recorded",
+    "evidence_accepted": true,
+    "ready_for_downstream_aio_checkpoint_selection": true
+  },
+  "selected_checkpoint": {
+    "id": "semantic_system_bus_lswr_action_result_runtime_evidence_checkpoint",
+    "family": "semantic_system_bus",
+    "surface": "lswr_action_result_runtime_evidence",
+    "first_consumer": "agent_bridge_semantic_system_bus",
+    "direct_aiot_consumption_selected": false,
+    "reason": "LSWR action/result is the most mature Agent-Bridge runtime evidence and no-laundering pilot, so it is the safest first AIO evidence consumer before any direct AiOT or production retrieval path."
+  },
+  "references": {
+    "semantic_system_bus_roadmap": "docs/design/SEMANTIC_SYSTEM_BUS_ROADMAP_2026_06_07.md",
+    "lswr_action_result_pilot": "docs/design/SEMANTIC_SYSTEM_BUS_LSWR_ACTION_RESULT_2026_06_07.md",
+    "post_semantic_diverse_review_doc": "docs/design/BIOCORTEX_RETRIEVAL_POST_SEMANTIC_DIVERSE_REVIEW_2026_06_15.md",
+    "post_semantic_diverse_review_fixture": "docs/design/fixtures/biocortex-retrieval-post-semantic-diverse-review-2026-06-15.json"
+  },
+  "accepted_evidence_summary": {
+    "authorization_scope": "explicit_opt_in_fts_runtime_influence",
+    "fixture_count": 4,
+    "total_query_count": 8,
+    "total_baseline_empty_count": 0,
+    "total_runs_biocortex_count": 8,
+    "total_side_signal_ok_count": 8,
+    "total_experimental_source_count": 8,
+    "total_actual_order_changed_count": 8,
+    "expected_met": true,
+    "all_cases_evidence_ready": true,
+    "all_status_surfaces_blocked": true,
+    "all_status_surfaces_side_effect_free": true
+  },
+  "checkpoint_contract": {
+    "checkpoint_must_be_read_only": true,
+    "first_handoff_schema": "agent_bridge.biocortex_retrieval.downstream_aio_runtime_evidence_handoff.v0",
+    "may_build_handoff_packet": true,
+    "may_compare_against_ssb_runtime_evidence_contract": true,
+    "may_enable_default_retrieval": false,
+    "may_enable_hybrid_retrieval": false,
+    "may_enable_semantic_retrieval": false,
+    "may_write_approval": false,
+    "may_mutate_default_agent_bridge_db": false,
+    "may_call_aiot_runtime": false,
+    "may_execute_lswr_actions_from_biocortex_evidence": false
+  },
+  "ssb_alignment": {
+    "runtime_backed_evidence": true,
+    "redacted_evidence_only": true,
+    "no_laundering_boundary_required": true,
+    "verification_boundary_required": true,
+    "recover_field_required": true,
+    "raw_available_must_not_expose_raw_payload": true,
+    "preserve_source_payload_compatibility": true
+  },
+  "boundary": {
+    "writes_approval": false,
+    "mutates_default_agent_bridge_db": false,
+    "default_search_order_change_allowed": false,
+    "default_memory_search_order_changed": false,
+    "default_retrieval_influence_authorized": false,
+    "hybrid_retrieval_influence_authorized": false,
+    "semantic_retrieval_influence_authorized": false,
+    "production_use_authorized": false,
+    "direct_aiot_runtime_use_authorized": false,
+    "raw_queries_included": false,
+    "raw_keys_included": false,
+    "content_included": false,
+    "side_signal_raw_included": false,
+    "human_decision_text_included": false
+  },
+  "next_step": "build_downstream_aio_runtime_evidence_handoff_packet"
+}
