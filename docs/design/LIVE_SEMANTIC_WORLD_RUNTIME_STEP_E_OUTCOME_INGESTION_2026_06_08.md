@@ -13,6 +13,52 @@ Board anchors:
 - `#92`: output / expression lane and `present()` honesty surfaces.
 - `#6`: memory graph substrate and `present_outcome` cohort policy.
 
+## Implementation Status - 2026-06-15
+
+E0-E3 are implemented on Agent-Bridge `master` at `7523241`.
+
+Implemented surfaces:
+
+- E1 pure classifier: `classify_outcome_admission`.
+- E2 read-only projection: `lswr_outcome_admissions`.
+- E3 dry-run adapter: `lswr_outcome_admissions_dry_run`.
+
+The E3 adapter is dry-run only:
+
+- transforms only `training_eligible` admissions into #94-compatible
+  `present_outcome` candidate rows;
+- reuses the existing #94 `build_outcome_memory` constructor;
+- exposes no `dry_run=false`, `max_writes`, `write`, `persist`, or
+  `memory_save` input;
+- calls no store write API and does not invoke `present_outcomes_ingest`.
+
+Runtime profile boundary:
+
+- `AGENT_BRIDGE_TOOL_PROFILE=all`: E3 is visible.
+- `AGENT_BRIDGE_TOOL_PROFILE=standard`: E3 is not visible.
+- `AGENT_BRIDGE_TOOLSET=codex-essential`: E3 is not visible.
+
+Verification evidence from 2026-06-15:
+
+- `cargo test -p ab-bridge lswr_outcome_admission -- --nocapture`
+  passed with 17 focused tests.
+- `cargo test -p ab-bridge present_is_niche_opt_in_and_registers_under_all -- --nocapture`
+  passed.
+- `cargo test -p ab-bridge lswr_outcome_admissions_dry_run_schema_has_no_write_switch -- --nocapture`
+  passed.
+- `cargo check -p ab-bridge --all-targets` passed with only existing warnings.
+- A deployed all-profile MCP stdio `tools/list` probe returned
+  `has_e3=true`, input properties exactly `limit`, `max_candidates`,
+  `window_secs`, and `additionalProperties=false`.
+- Standard and Codex-essential stdio probes returned `has_e3=false`.
+- A non-empty runtime probe using a temporary Step D artifact and outcome
+  sidecar returned `candidate_count=1`, `dry_run=true`, `writes_state=false`,
+  `memory_kind=present_outcome`, and a deterministic
+  `outcome_<artifact_id>` candidate key.
+
+E4 remains intentionally unopened. A manual opt-in write path requires a
+separate owner approval and a fresh dry-run-first design slice.
+
 ## 0. Purpose
 
 Step D proved that LSWR world results can be expressed as present-compatible
