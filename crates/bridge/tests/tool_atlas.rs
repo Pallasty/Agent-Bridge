@@ -285,6 +285,37 @@ fn tool_atlas_treats_memory_save_missing_required_key_as_expected_input_validati
 }
 
 #[test]
+fn tool_atlas_treats_work_memory_missing_key_as_expected_input_validation() {
+    let snapshot = build_tool_atlas_snapshot(ToolAtlasInput {
+        generated_at: 1_779_910_000,
+        window_secs: 600,
+        current_tools: vec!["work_memory".to_string()],
+        stats: vec![stat("work_memory", 3, 1, 23, 629.0)],
+        recent_errors: vec![McpToolErrorRecord {
+            ts: 1_779_909_990,
+            tool_name: "work_memory".to_string(),
+            message: "get requires key".to_string(),
+        }],
+    });
+
+    assert_eq!(snapshot.summary.failing_tool_count, 0);
+
+    let work_memory = snapshot
+        .tools
+        .iter()
+        .find(|tool| tool.tool_name == "work_memory")
+        .expect("work_memory");
+
+    assert_eq!(work_memory.error_count, 1);
+    assert_eq!(work_memory.health, "healthy");
+    assert_eq!(work_memory.recommendation, "keep");
+    assert!(work_memory
+        .risk_flags
+        .contains(&"expected_input_validation".to_string()));
+    assert!(!work_memory.risk_flags.contains(&"has_errors".to_string()));
+}
+
+#[test]
 fn tool_atlas_treats_mobile_adb_missing_as_expected_runtime_unavailable() {
     let snapshot = build_tool_atlas_snapshot(ToolAtlasInput {
         generated_at: 1_779_910_000,

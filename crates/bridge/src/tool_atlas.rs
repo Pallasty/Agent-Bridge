@@ -341,11 +341,14 @@ fn is_expected_safety_gate(tool_name: &str, message: &str) -> bool {
 }
 
 fn is_expected_input_validation(tool_name: &str, message: &str) -> bool {
-    tool_name == "memory_save"
-        && matches!(
+    match tool_name {
+        "memory_save" => matches!(
             message,
             "missing or empty 'key'" | "missing or empty 'kind'"
-        )
+        ),
+        "work_memory" => message == "get requires key",
+        _ => false,
+    }
 }
 
 fn is_expected_runtime_unavailable(tool_name: &str, message: &str) -> bool {
