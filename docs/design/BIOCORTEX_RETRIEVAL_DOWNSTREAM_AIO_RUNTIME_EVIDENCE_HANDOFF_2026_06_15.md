@@ -75,10 +75,17 @@ action-result runtime evidence contract. It carries:
 - explicit `may_execute_lswr_actions=false`;
 - explicit `may_call_aiot_runtime=false`.
 
+## SSB Review Fixture
+
+The read-only SSB/LSWR action-result review fixture is ready:
+
+- `docs/design/BIOCORTEX_RETRIEVAL_SSB_LSWR_ACTION_RESULT_REVIEW_FIXTURE_2026_06_15.md`
+- `docs/design/fixtures/biocortex-retrieval-ssb-lswr-action-result-review-fixture-2026-06-15.json`
+
 ## Next Step
 
-Connect this packet to a read-only SSB/LSWR action-result review fixture:
+Build the read-only SSB adapter fixture from this handoff:
 
 ```text
-connect_handoff_packet_to_ssb_lswr_action_result_review_fixture
+build_read_only_ssb_adapter_fixture_from_handoff
 ```
