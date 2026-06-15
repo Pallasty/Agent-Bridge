@@ -1,7 +1,9 @@
 use ab_bridge::lswr_interaction_feedback::{
-    build_interaction_feedback_readback, build_interaction_feedback_validation_envelope,
+    build_interaction_feedback_evidence_packet, build_interaction_feedback_readback,
+    build_interaction_feedback_validation_envelope,
     render_interaction_feedback_validation_envelope, validate_interaction_feedback_fixture,
-    LSWR_INTERACTION_FEEDBACK_FIXTURE_SCHEMA, LSWR_INTERACTION_FEEDBACK_READBACK_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_EVIDENCE_PACKET_SCHEMA, LSWR_INTERACTION_FEEDBACK_FIXTURE_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_READBACK_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_VALIDATION_ENVELOPE_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_VALIDATION_SCHEMA,
 };
@@ -139,6 +141,50 @@ fn interaction_feedback_validation_envelope_renders_stable_markdown() {
     let markdown = render_interaction_feedback_validation_envelope(&envelope);
 
     assert_eq!(markdown, ENVELOPE_MARKDOWN);
+}
+
+#[test]
+fn interaction_feedback_fixture_builds_evidence_packet() {
+    let fixture = fixture();
+    let packet = build_interaction_feedback_evidence_packet(&fixture);
+
+    assert_eq!(
+        packet["schema"],
+        LSWR_INTERACTION_FEEDBACK_EVIDENCE_PACKET_SCHEMA
+    );
+    assert_eq!(packet["fixture_id"], "lswr_interaction_feedback_loop_001");
+    assert_eq!(
+        packet["fixture_schema"],
+        LSWR_INTERACTION_FEEDBACK_FIXTURE_SCHEMA
+    );
+    assert_eq!(
+        packet["envelope_schema"],
+        LSWR_INTERACTION_FEEDBACK_VALIDATION_ENVELOPE_SCHEMA
+    );
+    assert_eq!(
+        packet["validation_schema"],
+        LSWR_INTERACTION_FEEDBACK_VALIDATION_SCHEMA
+    );
+    assert_eq!(
+        packet["readback_schema"],
+        LSWR_INTERACTION_FEEDBACK_READBACK_SCHEMA
+    );
+    assert_eq!(packet["readback_mode"], "interaction_feedback_detailed");
+    assert_eq!(packet["valid"], true);
+    assert_eq!(packet["failure_reasons"], json!([]));
+    assert_eq!(packet["markdown"], ENVELOPE_MARKDOWN);
+    assert_eq!(
+        packet["envelope"]["schema"],
+        LSWR_INTERACTION_FEEDBACK_VALIDATION_ENVELOPE_SCHEMA
+    );
+    assert_eq!(packet["guardrails"]["read_only"], true);
+    assert_eq!(packet["guardrails"]["writes_state"], false);
+    assert_eq!(packet["guardrails"]["store_access_required"], false);
+    assert_eq!(packet["guardrails"]["mcp_tool_registered"], false);
+    assert_eq!(
+        packet["note"],
+        "local evidence only: pure fixture render, no MCP call, no store access, no memory write"
+    );
 }
 
 #[test]

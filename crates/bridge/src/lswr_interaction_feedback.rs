@@ -10,6 +10,8 @@ pub const LSWR_INTERACTION_FEEDBACK_READBACK_SCHEMA: &str =
     "agent_bridge.lswr.interaction_feedback_readback.v0";
 pub const LSWR_INTERACTION_FEEDBACK_VALIDATION_ENVELOPE_SCHEMA: &str =
     "agent_bridge.lswr.interaction_feedback_validation_envelope.v0";
+pub const LSWR_INTERACTION_FEEDBACK_EVIDENCE_PACKET_SCHEMA: &str =
+    "agent_bridge.lswr.interaction_feedback_evidence_packet.v0";
 
 const EXPECTED_EVENT_TYPES: [&str; 8] = [
     "human.select",
@@ -179,6 +181,28 @@ pub fn render_interaction_feedback_validation_envelope(envelope: &Value) -> Stri
 
     lines.push(String::new());
     lines.join("\n")
+}
+
+pub fn build_interaction_feedback_evidence_packet(fixture: &Value) -> Value {
+    let envelope = build_interaction_feedback_validation_envelope(fixture);
+    let markdown = render_interaction_feedback_validation_envelope(&envelope);
+
+    json!({
+        "schema": LSWR_INTERACTION_FEEDBACK_EVIDENCE_PACKET_SCHEMA,
+        "fixture_id": fixture.get("fixture_id").cloned().unwrap_or(Value::Null),
+        "fixture_schema": fixture.get("schema").cloned().unwrap_or(Value::Null),
+        "envelope_schema": envelope.get("schema").cloned().unwrap_or(Value::Null),
+        "validation_schema": envelope.get("validation_schema").cloned().unwrap_or(Value::Null),
+        "readback_schema": envelope.get("readback_schema").cloned().unwrap_or(Value::Null),
+        "readback_mode": envelope.get("readback_mode").cloned().unwrap_or(Value::Null),
+        "valid": envelope.get("valid").cloned().unwrap_or(Value::Null),
+        "failure_reasons": envelope.get("failure_reasons").cloned().unwrap_or(Value::Null),
+        "guardrails": envelope.get("guardrails").cloned().unwrap_or(Value::Null),
+        "readback": envelope.get("readback").cloned().unwrap_or(Value::Null),
+        "markdown": markdown,
+        "envelope": envelope,
+        "note": "local evidence only: pure fixture render, no MCP call, no store access, no memory write"
+    })
 }
 
 pub fn build_interaction_feedback_readback(fixture: &Value) -> Value {

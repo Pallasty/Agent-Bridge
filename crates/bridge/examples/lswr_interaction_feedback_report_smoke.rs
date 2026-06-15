@@ -5,10 +5,11 @@
 //! and does not touch live world/runtime state.
 
 use ab_bridge::lswr_interaction_feedback::{
-    build_interaction_feedback_validation_envelope, render_interaction_feedback_validation_envelope,
+    build_interaction_feedback_evidence_packet, build_interaction_feedback_validation_envelope,
+    render_interaction_feedback_validation_envelope,
 };
 use anyhow::{bail, Context, Result};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 const FIXTURE_JSON: &str =
     include_str!("../tests/fixtures/lswr_interaction_feedback_fixture_v0.json");
@@ -21,6 +22,7 @@ fn main() -> Result<()> {
         serde_json::from_str(FIXTURE_JSON).context("parse interaction feedback fixture JSON")?;
     let envelope = build_interaction_feedback_validation_envelope(&fixture);
     let markdown = render_interaction_feedback_validation_envelope(&envelope);
+    let packet = build_interaction_feedback_evidence_packet(&fixture);
 
     if args.assert_golden && markdown != EXPECTED_MARKDOWN {
         bail!("rendered Markdown does not match golden fixture");
@@ -31,34 +33,14 @@ fn main() -> Result<()> {
 
     match args.format {
         OutputFormat::Markdown => println!("{markdown}"),
-        OutputFormat::Json => println!(
-            "{}",
-            serde_json::to_string_pretty(&summary(&fixture, &envelope, &markdown))?
-        ),
+        OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&packet)?),
         OutputFormat::Both => {
             println!("{markdown}");
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&summary(&fixture, &envelope, &markdown))?
-            );
+            println!("{}", serde_json::to_string_pretty(&packet)?);
         }
     }
 
     Ok(())
-}
-
-fn summary(fixture: &Value, envelope: &Value, markdown: &str) -> Value {
-    json!({
-        "schema": "agent_bridge.lswr.interaction_feedback_report_smoke.v0",
-        "fixture_id": fixture.get("fixture_id").cloned().unwrap_or(Value::Null),
-        "fixture_schema": fixture.get("schema").cloned().unwrap_or(Value::Null),
-        "envelope_schema": envelope.get("schema").cloned().unwrap_or(Value::Null),
-        "valid": envelope.get("valid").cloned().unwrap_or(Value::Null),
-        "guardrails": envelope.get("guardrails").cloned().unwrap_or(Value::Null),
-        "readback": envelope.get("readback").cloned().unwrap_or(Value::Null),
-        "markdown": markdown,
-        "note": "local smoke only: pure fixture render, no MCP call, no store access, no memory write",
-    })
 }
 
 fn assert_read_only_contract(envelope: &Value) -> Result<()> {
