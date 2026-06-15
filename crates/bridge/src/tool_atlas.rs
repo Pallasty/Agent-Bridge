@@ -211,6 +211,7 @@ fn atlas_entry(
     let actionable_error_count = if has_expected_gate { 0 } else { error_count };
     let risk_flags = risk_flags(
         tool_name,
+        exposed,
         actionable_error_count,
         p95_duration_ms,
         avg_result_size,
@@ -256,6 +257,7 @@ fn usage_class(call_count: u64) -> &'static str {
 
 fn risk_flags(
     tool_name: &str,
+    exposed: bool,
     error_count: u64,
     p95_duration_ms: u32,
     avg_result_size: f64,
@@ -271,6 +273,8 @@ fn risk_flags(
     if p95_duration_ms >= SLOW_P95_MS {
         if is_expected_wait_tool(tool_name) {
             flags.push("expected_wait".to_string());
+        } else if !exposed {
+            flags.push("historical_unexposed_latency".to_string());
         } else {
             flags.push("slow_p95".to_string());
         }
@@ -368,6 +372,7 @@ fn has_actionable_risk_flags(risk_flags: &[String]) -> bool {
                 | "expected_safety_gate"
                 | "expected_input_validation"
                 | "expected_runtime_unavailable"
+                | "historical_unexposed_latency"
                 | "historical_unexposed_failure"
         )
     })

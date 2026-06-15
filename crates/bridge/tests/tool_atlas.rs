@@ -165,6 +165,31 @@ fn tool_atlas_treats_agent_session_wait_latency_as_expected() {
 }
 
 #[test]
+fn tool_atlas_treats_unexposed_slow_tools_as_historical() {
+    let snapshot = build_tool_atlas_snapshot(ToolAtlasInput {
+        generated_at: 1_779_910_000,
+        window_secs: 600,
+        current_tools: vec!["tool_atlas_snapshot".to_string()],
+        stats: vec![stat("session_lifecycle_step", 10, 0, 2_048, 1_734.0)],
+        recent_errors: Vec::new(),
+    });
+
+    let lifecycle = snapshot
+        .tools
+        .iter()
+        .find(|tool| tool.tool_name == "session_lifecycle_step")
+        .expect("session_lifecycle_step");
+
+    assert!(!lifecycle.exposed);
+    assert_eq!(lifecycle.health, "healthy");
+    assert_eq!(lifecycle.recommendation, "keep");
+    assert!(lifecycle
+        .risk_flags
+        .contains(&"historical_unexposed_latency".to_string()));
+    assert!(!lifecycle.risk_flags.contains(&"slow_p95".to_string()));
+}
+
+#[test]
 fn tool_atlas_treats_session_reconcile_confirmation_gate_as_expected() {
     let snapshot = build_tool_atlas_snapshot(ToolAtlasInput {
         generated_at: 1_779_910_000,
