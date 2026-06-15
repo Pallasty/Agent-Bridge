@@ -38507,6 +38507,260 @@ fn render_lswr_readonly_bridge_display_mcp_surface_report(
     report
 }
 
+pub const LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_MCP_SURFACE_REPORT_SCHEMA: &str =
+    "agent_bridge.lswr.interaction_feedback_consumption_report_mcp_surface_report.v0";
+
+pub fn lswr_interaction_feedback_consumption_report_mcp_surface_report() -> Value {
+    const TOOL: &str = "lswr_interaction_feedback_consumption_report";
+    let profile_rows = lswr_interaction_feedback_consumption_report_surface_profile_rows();
+    let all_schema = lswr_interaction_feedback_consumption_report_schema_for_policy(
+        ToolPolicy::from_values(None, None, None, Some("all")),
+    );
+    let checks = lswr_interaction_feedback_consumption_report_surface_checks(
+        &profile_rows,
+        all_schema.as_ref(),
+    );
+    let verdict = if checks.iter().all(|row| row["verdict"] == "passed") {
+        "passed"
+    } else {
+        "failed"
+    };
+    let visible_in = profile_rows
+        .iter()
+        .filter(|row| row["registered"].as_bool().unwrap_or(false))
+        .filter_map(|row| row["label"].as_str().map(|s| s.to_string()))
+        .collect::<Vec<_>>();
+    let report_markdown = render_lswr_interaction_feedback_consumption_report_mcp_surface_report(
+        verdict,
+        &profile_rows,
+        &checks,
+    );
+
+    json!({
+        "schema": LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_MCP_SURFACE_REPORT_SCHEMA,
+        "tool": TOOL,
+        "decision": "REGISTERED_NICHE_MCP_GATE",
+        "implementation_status": "IMPLEMENTED_AS_NICHE_MCP_TOOL",
+        "verdict": verdict,
+        "visible_in": visible_in,
+        "profile_rows": profile_rows,
+        "schema_present_in_all_profile": all_schema.is_some(),
+        "pure_report_schema": crate::lswr_interaction_feedback::LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_SCHEMA,
+        "transport_envelope_schema": LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_MCP_SCHEMA,
+        "tool_tier": "niche",
+        "expected_input": {
+            "top_level_keys": ["report_input"],
+            "additional_properties": false,
+            "input_mode": "explicit_object_only"
+        },
+        "safety_boundary": {
+            "read_only": true,
+            "mcp_registry_change": false,
+            "store_access": false,
+            "memory_write": false,
+            "live_runtime_lookup": false,
+            "host_path": false,
+            "file_path": false,
+            "gui_capture": false,
+            "outcome_ingestion": false,
+            "onsen_mutation": false,
+            "mutation_surface": "none",
+            "mcp_surface_change": "registered_niche_tool_only"
+        },
+        "checks": checks,
+        "guidance": [
+            "Use this report as post-registration evidence that the wrapper is niche/all-only and hidden from default, Codex-essential, lean, Gemini, and hook profiles.",
+            "The MCP wrapper returns a transport envelope for explicit report_input JSON and embeds the pure consumption report unchanged.",
+            "Do not add file paths, live runtime lookup, store access, #94 ingestion, Onsen mutation, or default/codex-essential exposure in follow-up commits."
+        ],
+        "report_markdown": report_markdown
+    })
+}
+
+fn lswr_interaction_feedback_consumption_report_surface_profile_rows() -> Vec<Value> {
+    [
+        ("profile-standard", None, None, Some("standard"), false),
+        ("profile-all", None, None, Some("all"), true),
+        (
+            "codex-essential",
+            Some("codex-essential"),
+            None,
+            None,
+            false,
+        ),
+        ("codex-lean", Some("codex-lean"), None, None, false),
+        (
+            "claude-standard",
+            Some("claude-standard"),
+            None,
+            None,
+            false,
+        ),
+        ("gemini-lean", Some("gemini-lean"), None, None, false),
+        ("hook-lifecycle", Some("hook-lifecycle"), None, None, false),
+        ("all-dev", Some("all-dev"), None, None, true),
+    ]
+    .into_iter()
+    .map(|(label, toolset, client, profile, expected_registered)| {
+        let policy = ToolPolicy::from_values(toolset, client, None, profile);
+        let registered =
+            lswr_interaction_feedback_consumption_report_schema_for_policy(policy).is_some();
+        json!({
+            "label": label,
+            "toolset": policy.label(),
+            "profile": policy.profile().label(),
+            "registered": registered,
+            "expected_registered": expected_registered,
+            "matches_expected": registered == expected_registered,
+        })
+    })
+    .collect()
+}
+
+fn lswr_interaction_feedback_consumption_report_schema_for_policy(
+    policy: ToolPolicy,
+) -> Option<ToolSchema> {
+    build_registry_with_policy(Hub::builder().build(), policy)
+        .list()
+        .into_iter()
+        .find(|schema| schema.name == "lswr_interaction_feedback_consumption_report")
+}
+
+fn lswr_interaction_feedback_consumption_report_surface_checks(
+    profile_rows: &[Value],
+    all_schema: Option<&ToolSchema>,
+) -> Vec<Value> {
+    let profile_matrix_ok = profile_rows
+        .iter()
+        .all(|row| row["matches_expected"].as_bool().unwrap_or(false));
+    let all_visible = profile_registered(profile_rows, "profile-all");
+    let all_dev_visible = profile_registered(profile_rows, "all-dev");
+    let standard_hidden = !profile_registered(profile_rows, "profile-standard");
+    let codex_essential_hidden = !profile_registered(profile_rows, "codex-essential");
+    let codex_lean_hidden = !profile_registered(profile_rows, "codex-lean");
+    let gemini_lean_hidden = !profile_registered(profile_rows, "gemini-lean");
+    let hook_lifecycle_hidden = !profile_registered(profile_rows, "hook-lifecycle");
+    let explicit_report_input_only = all_schema
+        .and_then(|schema| schema.input_schema.get("properties"))
+        .and_then(Value::as_object)
+        .map(|props| props.len() == 1 && props.contains_key("report_input"))
+        .unwrap_or(false);
+    let required_report_input = all_schema
+        .and_then(|schema| schema.input_schema.get("required"))
+        .and_then(Value::as_array)
+        .map(|required| required.len() == 1 && required.iter().any(|v| v == "report_input"))
+        .unwrap_or(false);
+    let no_additional_properties = all_schema
+        .map(|schema| schema.input_schema["additionalProperties"] == Value::Bool(false))
+        .unwrap_or(false);
+    let forbidden_inputs_absent = all_schema
+        .and_then(|schema| schema.input_schema.get("properties"))
+        .and_then(Value::as_object)
+        .map(|props| {
+            LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_FORBIDDEN_INPUT_KEYS
+                .iter()
+                .all(|key| !props.contains_key(*key))
+        })
+        .unwrap_or(false);
+    let pure_report_schema_available =
+        crate::lswr_interaction_feedback::LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_SCHEMA
+            == "agent_bridge.lswr.interaction_feedback_consumption_report.v0";
+
+    vec![
+        surface_check(
+            "profile_matrix",
+            profile_matrix_ok,
+            true,
+            "registered profiles match expected all-profile/all-dev exposure only",
+        ),
+        surface_check(
+            "all_profile_visible",
+            all_visible,
+            true,
+            "profile=all exposes the candidate after the explicit registration slice",
+        ),
+        surface_check(
+            "all_dev_visible",
+            all_dev_visible,
+            true,
+            "toolset=all-dev exposes the candidate through the all profile",
+        ),
+        surface_check(
+            "standard_hidden",
+            standard_hidden,
+            true,
+            "standard/default profile hides the candidate",
+        ),
+        surface_check(
+            "codex_essential_hidden",
+            codex_essential_hidden,
+            true,
+            "codex-essential hides the candidate",
+        ),
+        surface_check(
+            "lean_and_hook_hidden",
+            codex_lean_hidden && gemini_lean_hidden && hook_lifecycle_hidden,
+            true,
+            "codex-lean, gemini-lean, and hook-lifecycle hide the candidate",
+        ),
+        surface_check(
+            "schema_present",
+            all_schema.is_some(),
+            true,
+            "all-profile registry includes a schema for the candidate",
+        ),
+        surface_check(
+            "explicit_report_input_only",
+            explicit_report_input_only && required_report_input && no_additional_properties,
+            true,
+            "schema exposes only required report_input and denies additional properties",
+        ),
+        surface_check(
+            "forbidden_inputs_absent",
+            forbidden_inputs_absent,
+            true,
+            "path/live-runtime/gui-capture/action/write inputs are absent from the schema",
+        ),
+        surface_check(
+            "pure_report_schema_available",
+            pure_report_schema_available,
+            true,
+            "pure module report schema is available through the MCP wrapper",
+        ),
+    ]
+}
+
+fn render_lswr_interaction_feedback_consumption_report_mcp_surface_report(
+    verdict: &str,
+    profile_rows: &[Value],
+    checks: &[Value],
+) -> String {
+    let mut report = String::new();
+    report.push_str("# LSWR Interaction Feedback Consumption Report MCP Surface\n\n");
+    report.push_str(&format!("Verdict: `{verdict}`\n\n"));
+    report.push_str("Decision: `REGISTERED_NICHE_MCP_GATE`\n\n");
+    report.push_str("## Profiles\n\n");
+    for row in profile_rows {
+        report.push_str(&format!(
+            "- `{}`: registered=`{}` expected=`{}`\n",
+            row["label"].as_str().unwrap_or("?"),
+            row["registered"].as_bool().unwrap_or(false),
+            row["expected_registered"].as_bool().unwrap_or(false),
+        ));
+    }
+    report.push_str("\n## Checks\n\n");
+    for check in checks {
+        report.push_str(&format!(
+            "- `{}`: `{}` ({}) - {}\n",
+            check["label"].as_str().unwrap_or("?"),
+            check["verdict"].as_str().unwrap_or("?"),
+            check["tone"].as_str().unwrap_or("?"),
+            check["evidence"].as_str().unwrap_or("")
+        ));
+    }
+    report
+}
+
 pub struct SkillsRecommendTool {
     hub: Hub,
 }

@@ -59,7 +59,7 @@ Verification evidence from #3054/#3055:
 | Keep preflight module/test-only | `ACCEPTED` | Current helper is pure, explicit-input, and test-covered. |
 | Add pure module report builder | `GO` | A report builder can render the accepted preflight without expanding authority. |
 | Add example/smoke report runner | `GO` | Example output is local stdout only and follows the current smoke pattern. |
-| Register MCP tool | `HOLD` | Needs separate all-profile/niche gate review and registry-surface ownership check. |
+| Register MCP tool | `ACCEPTED_NICHE_ONLY` | Completed by the separate all-profile/niche MCP gate; default-profile exposure remains out of scope. |
 | Add default-profile exposure | `NO-GO` | Interaction-feedback consumption remains experimental. |
 | Query live LSWR runtime | `NO-GO` | Consumption must accept explicit packets/pages, not discover state implicitly. |
 | Write store/memory/#94 outcomes | `NO-GO` | Human feedback cannot become persisted training or verification truth here. |

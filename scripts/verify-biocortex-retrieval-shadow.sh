@@ -138,6 +138,9 @@ jq -e '
     and .preflight.implicit_live_runtime_lookup_attempted == false
 ' "$tmp_lswr_feedback_consumption_report" >/dev/null
 
+run cargo test -p ab-bridge lswr_interaction_feedback_consumption_report_mcp -- --nocapture
+run cargo test -p ab-bridge --test lswr_interaction_feedback_mcp_surface -- --nocapture
+
 tmp_missing_lswr_feedback_input="$tmpdir/missing-lswr-interaction-feedback-input.json"
 printf '{}\n' > "$tmp_missing_lswr_feedback_input"
 tmp_missing_lswr_feedback_consumption_preflight="$tmpdir/missing-lswr-interaction-feedback-consumption-preflight.json"
