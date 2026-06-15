@@ -32284,6 +32284,51 @@ impl McpTool for SessionFinalizeTool {
             None
         };
 
+        // SSB lifecycle producer (roadmap §2 "hooks → bus events"): emit the
+        // session-finalize lifecycle as a typed semantic event on the same unified
+        // contract as browser/desktop/mobile. Unlike input taps, finalize HAS
+        // readback (the maintenance counts), so a real run is Verified — the first
+        // producer whose verified verdict rests on a concrete effect count rather
+        // than an actionability probe. A dry-run made no change, so it is Unknown.
+        let removed_n = removed.len();
+        let verdict = if dry_run {
+            crate::semantic_event::Verdict {
+                status: crate::semantic_event::VerdictStatus::Unknown,
+                method: "dry_run_no_changes".to_string(),
+                evidence: json!({ "note": "dry-run: no maintenance applied" }),
+            }
+        } else {
+            crate::semantic_event::Verdict {
+                status: crate::semantic_event::VerdictStatus::Verified,
+                method: "finalize_readback".to_string(),
+                evidence: json!({ "decay_archived": decay_archived, "removed_count": removed_n }),
+            }
+        };
+        let lifecycle_event = crate::semantic_event::SemanticEvent {
+            ts: dispatch_now_secs(),
+            actor: "mcp".to_string(),
+            source: "session".to_string(),
+            action: "finalize".to_string(),
+            target: None,
+            object: crate::semantic_event::SemanticObject {
+                object_type: "session".to_string(),
+                source_adapter: "session".to_string(),
+                label: None,
+                object_id: None,
+            },
+            affordance: crate::semantic_event::Affordance {
+                action_type: "finalize".to_string(),
+                risk_level: "low".to_string(),
+                requires_gate: false,
+                expected_effect: Some("decay + compact stale memories".to_string()),
+            },
+            verdict,
+            facts: json!({ "dry_run": dry_run, "decay_archived": decay_archived, "removed_count": removed_n }),
+        };
+        if let Err(e) = store.record_semantic_event(lifecycle_event.to_record()).await {
+            tracing::debug!(error = %e, "record_semantic_event (session_finalize) failed");
+        }
+
         Ok(ToolResult::json_text(&json!({
             "dry_run": dry_run,
             "decay": {
