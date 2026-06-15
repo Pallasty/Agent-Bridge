@@ -5,6 +5,7 @@
 Parent policy:
 
 - [Step E Outcome Ingestion Policy](LIVE_SEMANTIC_WORLD_RUNTIME_STEP_E_OUTCOME_INGESTION_2026_06_08.md)
+- [Step E4d Writer Preflight](LIVE_SEMANTIC_WORLD_RUNTIME_STEP_E4D_WRITER_PREFLIGHT_2026_06_15.md)
 
 Board anchors:
 
@@ -270,3 +271,8 @@ Still not implemented:
 The next owner-gated step remains E4d: explicit writer design/implementation
 with confirmation token, approval post id, reviewed plan hash, candidate keys,
 and first-run cap.
+
+Before implementing the writer, follow the
+[Step E4d Writer Preflight](LIVE_SEMANTIC_WORLD_RUNTIME_STEP_E4D_WRITER_PREFLIGHT_2026_06_15.md).
+The recommended next coding slice is still read-only: pure request validation
+and a validation preview, not `memory_save`.
