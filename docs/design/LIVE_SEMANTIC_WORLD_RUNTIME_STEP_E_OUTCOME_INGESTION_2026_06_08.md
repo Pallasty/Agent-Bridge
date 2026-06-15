@@ -63,6 +63,9 @@ Verification evidence from 2026-06-15:
 E4 remains intentionally unopened. A manual opt-in write path requires a
 separate owner approval and a fresh dry-run-first design slice.
 
+The E4 approval-before-code design package is
+[Step E4 Manual Opt-In Write Design](LIVE_SEMANTIC_WORLD_RUNTIME_STEP_E4_MANUAL_OPT_IN_WRITE_DESIGN_2026_06_15.md).
+
 ## 0. Purpose
 
 Step D proved that LSWR world results can be expressed as present-compatible
