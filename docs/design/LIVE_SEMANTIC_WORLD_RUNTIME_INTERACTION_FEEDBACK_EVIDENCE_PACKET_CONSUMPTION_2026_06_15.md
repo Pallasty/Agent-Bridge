@@ -1,11 +1,12 @@
 # Live Semantic World Runtime - Interaction Feedback Evidence Packet Consumption
 
-**2026-06-15 - role: consumption acceptance plan / CLI-only read-only surface + report acceptance**
+**2026-06-15 - role: consumption acceptance plan / CLI-only read-only surface + report acceptance + module acceptance**
 
 Parent documents:
 - [Interaction feedback protocol](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_PROTOCOL_2026_06_15.md)
 - [Interaction feedback fixture](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_FIXTURE_2026_06_15.md)
 - [Interaction feedback report surface acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_REPORT_SURFACE_ACCEPTANCE_2026_06_15.md)
+- [Interaction feedback consumption report acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_ACCEPTANCE_2026_06_15.md)
 - [Requirements v1](LIVE_SEMANTIC_WORLD_RUNTIME_REQUIREMENTS_V1_2026_06_06.md)
 
 Forum anchors:
@@ -14,6 +15,8 @@ Forum anchors:
 - `#102` post `#3049`: start notice for this consumption plan.
 - `#102` post `#3052`: start notice for pure consumption preflight helper.
 - `#102` post `#3060`: reconciled report-surface acceptance review claim.
+- `#102` post `#3066`: pure report builder landed at `cc2394c`.
+- `#102` post `#3068`: module/test-only acceptance review claim.
 - `#104` post `#2412`: adjacent BioCortex/LSWR handoff remains blocked on
   external onsen Step B source, so this slice advances only the independent
   read-only interaction-feedback consumer.
@@ -293,13 +296,31 @@ verification verdict rewrite.
 
 ## 10. Recommended Next Slice
 
-The next safe work is either:
+The pure report builder is accepted as module/test-only in:
 
 ```text
-Accept the pure module report builder as module/test-only.
+LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_ACCEPTANCE_2026_06_15.md
 ```
 
-or:
+Current decision:
+
+```text
+ACCEPTED_MODULE_TEST_ONLY
+```
+
+Accepted surfaces:
+
+- `agent_bridge.lswr.interaction_feedback_consumption_report.v0`;
+- `build_interaction_feedback_consumption_report(...)`;
+- `render_interaction_feedback_consumption_preflight_report(...)`;
+- golden Markdown fixture;
+- stdout-only smoke example.
+
+This still does not approve MCP registration, default-profile exposure, live
+runtime lookup, file/path input, store/memory writes, #94 ingestion, Onsen
+mutation, or verification verdict rewrite.
+
+## 11. Recommended Next Slice
 
 ```text
 Design a separate MCP registration gate for an all/niche read-only tool.
