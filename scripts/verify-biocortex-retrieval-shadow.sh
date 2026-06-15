@@ -140,6 +140,23 @@ jq -e '
 
 run cargo test -p ab-bridge lswr_interaction_feedback_consumption_report_mcp -- --nocapture
 run cargo test -p ab-bridge --test lswr_interaction_feedback_mcp_surface -- --nocapture
+tmp_lswr_feedback_mcp_surface="$tmpdir/lswr-interaction-feedback-mcp-surface.json"
+run cargo run -q -p ab-bridge --example lswr_interaction_feedback_mcp_surface -- \
+    --format json \
+    --assert-passed \
+    --assert-niche-only > "$tmp_lswr_feedback_mcp_surface"
+jq -e '
+    .schema == "agent_bridge.lswr.interaction_feedback_consumption_report_mcp_surface_report.v0"
+    and .tool == "lswr_interaction_feedback_consumption_report"
+    and .verdict == "passed"
+    and .visible_in == ["profile-all", "all-dev"]
+    and .safety_boundary.read_only == true
+    and .safety_boundary.live_runtime_lookup == false
+    and .safety_boundary.store_access == false
+    and .safety_boundary.memory_write == false
+    and .expected_input.top_level_keys == ["report_input"]
+    and .expected_input.additional_properties == false
+' "$tmp_lswr_feedback_mcp_surface" >/dev/null
 
 tmp_missing_lswr_feedback_input="$tmpdir/missing-lswr-interaction-feedback-input.json"
 printf '{}\n' > "$tmp_missing_lswr_feedback_input"
