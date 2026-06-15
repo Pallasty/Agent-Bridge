@@ -208,6 +208,71 @@
       text-transform: inherit;
     }
     #breadcrumb button:hover { color: #e4e4e8; }
+    #depth-rail {
+      position: absolute;
+      top: 42px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      padding: 2px;
+      background: rgba(12, 12, 18, 0.78);
+      border: 1px solid #1f1f2a;
+      border-radius: 5px;
+      backdrop-filter: blur(6px);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.24);
+      z-index: 21;
+    }
+    #depth-rail button {
+      min-width: 58px;
+      max-width: 88px;
+      display: grid;
+      grid-template-rows: auto auto;
+      gap: 1px;
+      background: transparent;
+      border: none;
+      color: #6f6f7d;
+      padding: 4px 7px;
+      border-radius: 3px;
+      cursor: pointer;
+      font-family: inherit;
+      text-align: left;
+      transition: color 120ms, background 120ms;
+    }
+    #depth-rail button .step-label,
+    #depth-rail button .step-detail {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      line-height: 1.1;
+    }
+    #depth-rail button .step-label {
+      color: inherit;
+      font-size: 10px;
+      font-weight: 650;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    #depth-rail button .step-detail {
+      color: #4f4f5b;
+      font-size: 9px;
+      letter-spacing: 0.03em;
+    }
+    #depth-rail button.available:not(:disabled):hover {
+      color: #e4e4e8;
+      background: #161620;
+    }
+    #depth-rail button.active {
+      color: #0a0a10;
+      background: #ffe070;
+    }
+    #depth-rail button.active .step-detail { color: #3c3218; }
+    #depth-rail button.locked {
+      cursor: default;
+      opacity: 0.42;
+    }
+    #depth-rail button:disabled { cursor: default; }
     #view-presets {
       display: flex;
       gap: 3px;
@@ -2663,6 +2728,7 @@
     <div id="title">Palace · <span class="count" id="stats">loading…</span></div>
     <input id="search" type="text" placeholder="search key / kind / tag …" autocomplete="off">
     <div id="breadcrumb">Atlas / all regions</div>
+    <div id="depth-rail" aria-label="navigation depth"></div>
     <div id="view-presets" aria-label="view presets">
       <button type="button" data-view-preset="overview" class="active" title="show the whole selected region">Atlas</button>
       <button type="button" data-view-preset="fresh" title="recently touched memories">Fresh</button>
@@ -3128,6 +3194,7 @@ function isAtlasDistrictOverview() {
 function renderBreadcrumb() {
   const el = document.getElementById("breadcrumb");
   if (!el) return;
+  renderDepthRail();
   const region = state.atlasRegions.find(r => r.id === state.activeRegion);
   const preset = state.viewPreset === "overview" ? "Observatory" : state.viewPreset;
   let focusedLabel = state.focused || "";
@@ -3157,6 +3224,59 @@ function renderBreadcrumb() {
     parts.push(`<span class="crumb-hot">${escapeHTML(preset)}</span>`);
   }
   el.innerHTML = parts.join(" / ");
+}
+
+function depthRailStepState(step) {
+  if (step === "atlas") return (!state.activeRegion && !state.focused) ? "active" : "available";
+  if (step === "region") return state.focused ? "available" : (state.activeRegion ? "active" : "locked");
+  if (step === "node") return state.focused ? "active" : (state.activeRegion ? "available" : "locked");
+  return "locked";
+}
+
+function renderDepthRail() {
+  const rail = document.getElementById("depth-rail");
+  if (!rail) return;
+  const region = state.atlasRegions.find(r => r.id === state.activeRegion);
+  const nodeLabel = state.focused
+    ? (state.cy && state.cy.getElementById(state.focused).length > 0
+      ? (state.cy.getElementById(state.focused).data("label") || state.focused)
+      : state.focused)
+    : "choose memory";
+  const atlasState = depthRailStepState("atlas");
+  const regionState = depthRailStepState("region");
+  const nodeState = depthRailStepState("node");
+  const atlasDetail = `${state.atlasRegions.length || 0} regions`;
+  const regionDetail = region ? region.label : "select region";
+  const regionDisabled = regionState === "locked" ? " disabled" : "";
+  const nodeDisabled = state.focused ? "" : " disabled";
+  rail.innerHTML =
+    `<button type="button" class="${escapeHTML(atlasState)}" data-depth-step="atlas">` +
+      `<span class="step-label">Atlas</span>` +
+      `<span class="step-detail" title="${escapeHTML(atlasDetail)}">${escapeHTML(atlasDetail)}</span>` +
+      `</button>` +
+    `<button type="button" class="${escapeHTML(regionState)}" data-depth-step="region"${regionDisabled}>` +
+      `<span class="step-label">Region</span>` +
+      `<span class="step-detail" title="${escapeHTML(regionDetail)}">${escapeHTML(regionDetail)}</span>` +
+      `</button>` +
+    `<button type="button" class="${escapeHTML(nodeState)}" data-depth-step="node"${nodeDisabled}>` +
+      `<span class="step-label">Node</span>` +
+      `<span class="step-detail" title="${escapeHTML(nodeLabel)}">${escapeHTML(nodeLabel)}</span>` +
+      `</button>`;
+}
+
+function handleDepthRailClick(step) {
+  if (step === "atlas") {
+    clearAtlasRegion();
+    return;
+  }
+  if (step === "region" && state.activeRegion) {
+    selectAtlasRegion(state.activeRegion);
+    return;
+  }
+  if (step === "node" && state.focused) {
+    focusOnNode(state.focused);
+    showSidePanel(state.focused);
+  }
 }
 
 function syncViewPresetButtons() {
@@ -6319,6 +6439,13 @@ document.getElementById("breadcrumb").addEventListener("click", (e) => {
     showRegionWorkbench(region.dataset.focusRegion);
     zoomToAtlasRegion(region.dataset.focusRegion);
   }
+});
+
+document.getElementById("depth-rail").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-depth-step]");
+  if (!btn || btn.disabled) return;
+  const step = btn.dataset.depthStep;
+  handleDepthRailClick(step);
 });
 
 const searchInput = document.getElementById("search");

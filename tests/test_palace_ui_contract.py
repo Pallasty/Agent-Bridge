@@ -59,6 +59,24 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("Region", html)
         self.assertIn("Node", html)
 
+    def test_depth_rail_exposes_three_level_navigation(self):
+        html = palace_html()
+
+        self.assertIn('id="depth-rail"', html)
+        self.assertIn("function renderDepthRail()", html)
+        self.assertIn("function depthRailStepState(step)", html)
+        self.assertIn("function handleDepthRailClick(step)", html)
+        self.assertIn('data-depth-step="atlas"', html)
+        self.assertIn('data-depth-step="region"', html)
+        self.assertIn('data-depth-step="node"', html)
+        self.assertIn("Atlas", html)
+        self.assertIn("Region", html)
+        self.assertIn("Node", html)
+        self.assertIn("renderDepthRail();", html)
+        self.assertIn("handleDepthRailClick(step);", html)
+        self.assertIn("state.focused ? \"active\"", html)
+        self.assertIn("state.activeRegion ? \"available\"", html)
+
     def test_view_state_persists_to_url_and_local_storage(self):
         html = palace_html()
 
