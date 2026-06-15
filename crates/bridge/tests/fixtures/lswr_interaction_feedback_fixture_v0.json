@@ -1,71 +1,3 @@
-# Live Semantic World Runtime - Interaction Feedback Fixture
-
-**2026-06-15 - role: fixture / docs-only**
-
-Parent documents:
-- [Interaction feedback protocol](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_PROTOCOL_2026_06_15.md)
-- [Event and feedback schema](LIVE_SEMANTIC_WORLD_RUNTIME_EVENT_FEEDBACK_SCHEMA_2026_06_06.md)
-- [Human input mapping](LIVE_SEMANTIC_WORLD_RUNTIME_HUMAN_INPUT_MAPPING_2026_06_06.md)
-- [Requirements v1](LIVE_SEMANTIC_WORLD_RUNTIME_REQUIREMENTS_V1_2026_06_06.md)
-
-Forum anchors:
-- `#102` post `#3015`: interaction feedback protocol done.
-- `#102` post `#3016`: E4 deploy/doc boundary follow-up.
-- `#102` post `#3018`: start notice for this fixture slice.
-
-## 0. Purpose
-
-This fixture makes the interaction feedback protocol concrete.
-
-It models one complete structured loop:
-
-```text
-human.select
-  -> ai.patch_proposed
-  -> runtime.patch_result
-  -> presentation.state_changed
-  -> runtime.verification_result
-  -> human.reject
-  -> feedback.explicit_text
-  -> ai.patch_proposed
-```
-
-The fixture is intentionally docs-only. It does not add code, register MCP
-tools, touch Onsen, open a writer, call `memory_save`, or introduce #94
-ingestion.
-
-## Artifacts
-
-- Design fixture source:
-  `docs/design/LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_FIXTURE_2026_06_15.md`
-- Test fixture:
-  `crates/bridge/tests/fixtures/lswr_interaction_feedback_fixture_v0.json`
-- Pure validator/report test:
-  `crates/bridge/tests/lswr_interaction_feedback_fixture.rs`
-
-## 1. Fixture Scenario
-
-Scenario:
-
-- The human selects the `bath` in `arrival_area`.
-- The AI proposes moving the bath to improve arrival sightline.
-- The runtime applies the logical patch.
-- The presentation refreshes and the human-visible surface changes.
-- Verification confirms the bath is visible, but one expected-effect clause
-  fails because the walkway remains too narrow.
-- The human rejects the presentation and adds a text note.
-- The AI proposes a revision that cites both the failed expected-effect clause
-  and the explicit human feedback.
-
-This proves the key distinction:
-
-```text
-logical patch applied != human-visible success != human preference accepted
-```
-
-## 2. Machine-Checkable Fixture
-
-```json
 {
   "schema": "agent_bridge.lswr.interaction_feedback_fixture.v0",
   "fixture_id": "lswr_interaction_feedback_loop_001",
@@ -83,7 +15,10 @@ logical patch applied != human-visible success != human preference accepted
       {
         "entity_id": "bath",
         "semantic_role": "arrival_landmark",
-        "cell": [2, 3],
+        "cell": [
+          2,
+          3
+        ],
         "screen_area": 0.004,
         "walkway_clearance_cells": 1
       }
@@ -143,18 +78,27 @@ logical patch applied != human-visible success != human preference accepted
         "surface": "live_viewer"
       },
       "refs": {
-        "entities": ["bath"],
-        "spaces": ["arrival_area"],
+        "entities": [
+          "bath"
+        ],
+        "spaces": [
+          "arrival_area"
+        ],
         "viewport": "onsen_live_root_viewport",
         "patch_id": null,
         "cause_event_id": null
       },
       "payload": {
         "selection_state": "selected",
-        "selected_entities": ["bath"],
+        "selected_entities": [
+          "bath"
+        ],
         "previous_entities": [],
         "selection_source": "pointer_click",
-        "screen_position": [840, 512]
+        "screen_position": [
+          840,
+          512
+        ]
       },
       "verification": null,
       "provenance": {
@@ -178,8 +122,12 @@ logical patch applied != human-visible success != human preference accepted
         "surface": "agent_api"
       },
       "refs": {
-        "entities": ["bath"],
-        "spaces": ["arrival_area"],
+        "entities": [
+          "bath"
+        ],
+        "spaces": [
+          "arrival_area"
+        ],
         "viewport": "onsen_live_root_viewport",
         "patch_id": "patch_arrival_bath_move_001",
         "cause_event_id": "evt_human_select_bath_001"
@@ -189,7 +137,10 @@ logical patch applied != human-visible success != human preference accepted
           "op": "move",
           "entity": "bath",
           "args": {
-            "cell": [4, 3]
+            "cell": [
+              4,
+              3
+            ]
           },
           "reason": "Improve arrival sightline while keeping the bath readable from the entry camera.",
           "expected_effect": [
@@ -233,8 +184,12 @@ logical patch applied != human-visible success != human preference accepted
         "surface": "world_adapter"
       },
       "refs": {
-        "entities": ["bath"],
-        "spaces": ["arrival_area"],
+        "entities": [
+          "bath"
+        ],
+        "spaces": [
+          "arrival_area"
+        ],
         "viewport": "onsen_live_root_viewport",
         "patch_id": "patch_arrival_bath_move_001",
         "cause_event_id": "evt_ai_patch_proposed_001"
@@ -243,16 +198,24 @@ logical patch applied != human-visible success != human preference accepted
         "attempted": true,
         "applied": true,
         "before": {
-          "bath.cell": [2, 3],
+          "bath.cell": [
+            2,
+            3
+          ],
           "bath.screen_area": 0.004,
           "arrival_area.main_walkway.walkway_clearance_cells": 1
         },
         "after": {
-          "bath.cell": [4, 3],
+          "bath.cell": [
+            4,
+            3
+          ],
           "bath.screen_area": 0.006,
           "arrival_area.main_walkway.walkway_clearance_cells": 1
         },
-        "affected_entities": ["bath"],
+        "affected_entities": [
+          "bath"
+        ],
         "rollback_group": "arrival_readability_pass_001"
       },
       "verification": null,
@@ -277,8 +240,12 @@ logical patch applied != human-visible success != human preference accepted
         "surface": "live_viewer"
       },
       "refs": {
-        "entities": ["bath"],
-        "spaces": ["arrival_area"],
+        "entities": [
+          "bath"
+        ],
+        "spaces": [
+          "arrival_area"
+        ],
         "viewport": "onsen_live_root_viewport",
         "patch_id": "patch_arrival_bath_move_001",
         "cause_event_id": "evt_runtime_patch_result_001"
@@ -286,7 +253,9 @@ logical patch applied != human-visible success != human preference accepted
       "payload": {
         "render_refreshed": true,
         "visible_change": true,
-        "change_markers": ["bath"],
+        "change_markers": [
+          "bath"
+        ],
         "disturbance": {
           "flicker_frames": 0,
           "camera_jitter": false
@@ -314,8 +283,12 @@ logical patch applied != human-visible success != human preference accepted
         "surface": "world_adapter"
       },
       "refs": {
-        "entities": ["bath"],
-        "spaces": ["arrival_area"],
+        "entities": [
+          "bath"
+        ],
+        "spaces": [
+          "arrival_area"
+        ],
         "viewport": "onsen_live_root_viewport",
         "patch_id": "patch_arrival_bath_move_001",
         "cause_event_id": "evt_presentation_changed_001"
@@ -349,7 +322,9 @@ logical patch applied != human-visible success != human preference accepted
         "method": "expected_effect_falsifier",
         "verified_to": null,
         "evidence": {
-          "failed_clause_ids": ["effect_walkway_clearance_001"],
+          "failed_clause_ids": [
+            "effect_walkway_clearance_001"
+          ],
           "host_reason": "walkway_clearance_below_threshold",
           "source": "onsen_live_root_viewport"
         }
@@ -375,8 +350,12 @@ logical patch applied != human-visible success != human preference accepted
         "surface": "review_card"
       },
       "refs": {
-        "entities": ["bath"],
-        "spaces": ["arrival_area"],
+        "entities": [
+          "bath"
+        ],
+        "spaces": [
+          "arrival_area"
+        ],
         "viewport": "onsen_live_root_viewport",
         "patch_id": "patch_arrival_bath_move_001",
         "cause_event_id": "evt_verify_patch_001"
@@ -409,8 +388,12 @@ logical patch applied != human-visible success != human preference accepted
         "surface": "review_card"
       },
       "refs": {
-        "entities": ["bath"],
-        "spaces": ["arrival_area"],
+        "entities": [
+          "bath"
+        ],
+        "spaces": [
+          "arrival_area"
+        ],
         "viewport": "onsen_live_root_viewport",
         "patch_id": "patch_arrival_bath_move_001",
         "cause_event_id": "evt_human_reject_001"
@@ -444,8 +427,12 @@ logical patch applied != human-visible success != human preference accepted
         "surface": "agent_api"
       },
       "refs": {
-        "entities": ["bath"],
-        "spaces": ["arrival_area"],
+        "entities": [
+          "bath"
+        ],
+        "spaces": [
+          "arrival_area"
+        ],
         "viewport": "onsen_live_root_viewport",
         "patch_id": "patch_arrival_bath_move_002",
         "cause_event_id": "evt_feedback_text_001"
@@ -455,7 +442,10 @@ logical patch applied != human-visible success != human preference accepted
           "op": "move",
           "entity": "bath",
           "args": {
-            "cell": [5, 2]
+            "cell": [
+              5,
+              2
+            ]
           },
           "reason": "Revision after failed walkway clearance and explicit crowded-layout feedback.",
           "revision_sources": [
@@ -502,8 +492,12 @@ logical patch applied != human-visible success != human preference accepted
         "participant_kind": "human"
       },
       "target": {
-        "entities": ["bath"],
-        "spaces": ["arrival_area"],
+        "entities": [
+          "bath"
+        ],
+        "spaces": [
+          "arrival_area"
+        ],
         "patch_id": "patch_arrival_bath_move_001",
         "viewport": "onsen_live_root_viewport"
       },
@@ -514,7 +508,11 @@ logical patch applied != human-visible success != human preference accepted
       "normalized": {
         "issue": "visual_density_too_high",
         "desired_direction": "increase_walkway_clearance",
-        "semantic_axes": ["readability", "navigation", "arrival_identity"],
+        "semantic_axes": [
+          "readability",
+          "navigation",
+          "arrival_identity"
+        ],
         "confidence": 0.82
       },
       "verification_relation": {
@@ -535,7 +533,9 @@ logical patch applied != human-visible success != human preference accepted
         "patch_id": "patch_arrival_bath_move_001",
         "verdict": "not_verified",
         "reason": "expected_effect_clause_failed",
-        "failed_clause_ids": ["effect_walkway_clearance_001"]
+        "failed_clause_ids": [
+          "effect_walkway_clearance_001"
+        ]
       }
     ]
   },
@@ -550,7 +550,9 @@ logical patch applied != human-visible success != human preference accepted
         "patch_id": "patch_arrival_bath_move_001",
         "render_refreshed": true,
         "visible_change": true,
-        "change_markers": ["bath"],
+        "change_markers": [
+          "bath"
+        ],
         "human_visible_disturbance": {
           "flicker_frames": 0,
           "camera_jitter": false
@@ -567,7 +569,9 @@ logical patch applied != human-visible success != human preference accepted
     "active_view": {
       "viewport": "onsen_live_root_viewport",
       "camera": "main",
-      "selected_entities": ["bath"],
+      "selected_entities": [
+        "bath"
+      ],
       "active_space": "arrival_area"
     },
     "latest_event_id": "evt_ai_patch_proposed_002",
@@ -575,7 +579,9 @@ logical patch applied != human-visible success != human preference accepted
     "latest_verification_id": "verify_patch_arrival_bath_move_001",
     "presentation_status": {
       "render_fresh": true,
-      "visible_change_markers": ["bath"],
+      "visible_change_markers": [
+        "bath"
+      ],
       "human_visible_disturbance": {
         "measured": true,
         "flicker_frames": 0
@@ -583,11 +589,15 @@ logical patch applied != human-visible success != human preference accepted
     }
   },
   "expected_agent_readback": {
-    "selected_entities": ["bath"],
+    "selected_entities": [
+      "bath"
+    ],
     "latest_visible_change": "patch_arrival_bath_move_001",
     "latest_verification_verdict": "not_verified",
     "latest_verification_reason": "expected_effect_clause_failed",
-    "failed_clause_ids": ["effect_walkway_clearance_001"],
+    "failed_clause_ids": [
+      "effect_walkway_clearance_001"
+    ],
     "latest_human_decision": "reject",
     "latest_feedback_issue": "visual_density_too_high",
     "next_revision_patch_id": "patch_arrival_bath_move_002",
@@ -606,59 +616,3 @@ logical patch applied != human-visible success != human preference accepted
     "primary_readback_requires_no_screenshot"
   ]
 }
-```
-
-## 3. Readback Expectations
-
-An AI agent should be able to answer the following from the fixture without
-screenshot evidence:
-
-| Question | Expected answer |
-|---|---|
-| What did the human focus on? | `bath` in `arrival_area` |
-| What did the AI try? | Move `bath` from `[2, 3]` to `[4, 3]` |
-| Did the runtime apply the patch? | yes, `runtime.patch_result.applied=true` |
-| Did the presentation visibly change? | yes, `presentation.state_changed.visible_change=true` |
-| Did the expected effect pass? | no, `expected_effect_clause_failed` |
-| Which clause failed? | `effect_walkway_clearance_001` |
-| Did the human accept it? | no, `human.reject` |
-| What did the human say? | "The bath is visible now, but the entrance still feels crowded." |
-| What should the AI do next? | propose a revision that preserves visibility and increases walkway clearance |
-
-## 4. Acceptance Mapping
-
-| Protocol falsifier | Fixture evidence |
-|---|---|
-| `IFP1` | `human.select`, `feedback.explicit_text`, and `human.reject` carry entity, space, viewport, patch, and raw text refs |
-| `IFP2` | `runtime.patch_result` and `presentation.state_changed` are separate records |
-| `IFP3` | `verification.verdict="not_verified"` remains unchanged after `human.reject` |
-| `IFP4` | explicit text feedback has raw text, normalized issue, and confidence |
-| `IFP5` | second AI patch cites both `verify_patch_arrival_bath_move_001` and `fb_arrival_crowded_001` |
-| `IFP6` | this fixture has one AI editor; future multi-agent fixtures can add critic feedback without patch authority |
-
-## 5. Boundaries
-
-This fixture does not:
-
-- implement an event store;
-- register MCP tools;
-- invoke or patch a live runtime;
-- write memory;
-- ingest #94 outcomes;
-- open `dry_run=false`;
-- claim default-profile exposure;
-- require screenshots for primary readback.
-
-## 6. Recommended Next Work
-
-Next implementation should remain read-only:
-
-1. Move this JSON fixture into a test fixture file.
-2. Add a pure validator that checks:
-   - event ID uniqueness;
-   - referenced cause events exist;
-   - patch IDs chain correctly;
-   - failed verification survives human review;
-   - revision patches cite both failed verification and feedback.
-3. Add a report formatter that produces the readback table in section 3.
-4. Keep any MCP exposure all-profile/niche until accepted.
