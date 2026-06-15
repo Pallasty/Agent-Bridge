@@ -69,9 +69,11 @@ live_lswr_action_result_runtime_evidence="docs/design/fixtures/biocortex-retriev
 loopback_lswr_action_result_verified_probe="docs/design/fixtures/biocortex-retrieval-loopback-lswr-action-result-verified-probe-2026-06-15.json"
 loopback_lswr_host_attach_preflight="docs/design/fixtures/biocortex-retrieval-loopback-lswr-host-attach-preflight-2026-06-15.json"
 onsen_step_b_source_resolution="docs/design/fixtures/biocortex-retrieval-onsen-step-b-source-resolution-2026-06-15.json"
+onsen_step_b_host_source_probe_script="scripts/probe-onsen-step-b-host-source.sh"
 opt_in_batch_query_cases="docs/design/fixtures/biocortex-retrieval-opt-in-batch-diagnostic-queries-2026-06-12.json"
 opt_in_controlled_order_fixture="docs/design/fixtures/biocortex-retrieval-opt-in-controlled-order-fixture-2026-06-12.json"
 opt_in_expanded_corpus_fixture="docs/design/fixtures/biocortex-retrieval-opt-in-expanded-controlled-corpus-2026-06-12.json"
+bash -n "$onsen_step_b_host_source_probe_script"
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.opt_in_batch_diagnostic_query_cases.v0"
     and .read_only == true
@@ -173,6 +175,7 @@ jq -e '
     and .loopback_lswr_action_result_verified_fixture_host_observed == true
     and .loopback_lswr_host_attach_preflight_blocked == true
     and .onsen_step_b_source_resolution_blocked == true
+    and .onsen_step_b_host_source_probe_script_ready == true
     and .downstream_aio_checkpoint_selection.selection_status == "downstream_aio_integration_checkpoint_selected"
     and .downstream_aio_checkpoint_selection.selected_checkpoint == "semantic_system_bus_lswr_action_result_runtime_evidence_checkpoint"
     and .downstream_aio_checkpoint_selection.selected_checkpoint_family == "semantic_system_bus"
@@ -297,10 +300,19 @@ jq -e '
     and .onsen_step_b_source_resolution.port_37691_listening == false
     and .onsen_step_b_source_resolution.remote_resolution_attempted == true
     and .onsen_step_b_source_resolution.usable_remote_found == false
+    and .onsen_step_b_source_resolution.onsen_hd_remote_checked == true
+    and .onsen_step_b_source_resolution.onsen_hd_remote_accessible == true
+    and .onsen_step_b_source_resolution.onsen_hd_remote_head == "79993b494cf6e41fbacb33f2ab2c6ea9ea544771"
+    and .onsen_step_b_source_resolution.onsen_hd_remote_is_accepted_step_b_source == false
+    and .onsen_step_b_source_resolution.onsen_hd_remote_has_expected_branch == false
+    and .onsen_step_b_source_resolution.onsen_hd_remote_has_documented_head == false
+    and .onsen_step_b_source_resolution.onsen_hd_remote_has_world_tool_host_contract == false
     and .onsen_step_b_source_resolution.real_onsen_step_b_host_source_found == false
     and .onsen_step_b_source_resolution.can_launch_real_onsen_step_b_host_now == false
     and .onsen_step_b_source_resolution.can_collect_verified_runtime_action_result_now == false
     and .onsen_step_b_source_resolution.blocked_by == "missing_checkout_or_accessible_repository_url"
+    and .onsen_step_b_source_resolution.recovery_probe_script == "scripts/probe-onsen-step-b-host-source.sh"
+    and .onsen_step_b_source_resolution.recovery_probe_ready == true
     and .onsen_step_b_source_resolution.calls_memory_search == false
     and .onsen_step_b_source_resolution.runs_biocortex == false
     and .onsen_step_b_source_resolution.writes_approval == false
@@ -1397,7 +1409,16 @@ jq -e '
     and .local_resolution.prototype_present == true
     and .local_resolution.prototype_is_required_step_b_host == false
     and .remote_resolution.attempted == true
-    and (.remote_resolution.git_ssh_candidates | length) == 2
+    and (.remote_resolution.git_ssh_candidates | length) == 3
+    and (.remote_resolution.git_ssh_candidates[] | select(.url == "git@github.com:pallasting/Onsen-HD.git") | .result) == "repository_accessible_but_not_accepted_step_b_source"
+    and .remote_resolution.additional_candidate_inspection.candidate == "git@github.com:pallasting/Onsen-HD.git"
+    and .remote_resolution.additional_candidate_inspection.local_checkout == "/Data/CascadeProjects/Onsen-HD"
+    and .remote_resolution.additional_candidate_inspection.head == "79993b494cf6e41fbacb33f2ab2c6ea9ea544771"
+    and .remote_resolution.additional_candidate_inspection.accepted_branch_found == false
+    and .remote_resolution.additional_candidate_inspection.accepted_head_found == false
+    and .remote_resolution.additional_candidate_inspection.world_tool_host_contract_found == false
+    and .remote_resolution.additional_candidate_inspection.expected_port_found == false
+    and .remote_resolution.additional_candidate_inspection.result == "not_accepted_step_b_host_source"
     and .remote_resolution.usable_remote_found == false
     and .result.agent_bridge_client_side_ready == true
     and .result.real_onsen_step_b_host_source_found == false
@@ -1405,6 +1426,14 @@ jq -e '
     and .result.can_collect_verified_runtime_action_result_now == false
     and .result.blocked_by == "missing_checkout_or_accessible_repository_url"
     and .result.required_input == "provide_or_sync_onsen_step_b_checkout_or_repository_url"
+    and .recovery_probe.script == "scripts/probe-onsen-step-b-host-source.sh"
+    and .recovery_probe.schema == "agent_bridge.biocortex_retrieval.onsen_step_b_host_source_probe.v0"
+    and .recovery_probe.ready == true
+    and .recovery_probe.read_only == true
+    and .recovery_probe.supports_no_remote_mode == true
+    and .recovery_probe.supports_strict_mode == true
+    and .recovery_probe.does_not_clone == true
+    and .recovery_probe.does_not_start_host == true
     and .boundary.calls_memory_search == false
     and .boundary.runs_biocortex == false
     and .boundary.writes_approval == false
@@ -1422,6 +1451,43 @@ jq -e '
     and .boundary.human_decision_text_included == false
     and .next_step == "provide_or_sync_onsen_step_b_checkout_or_repository_url_then_launch_dev_host"
 ' "$onsen_step_b_source_resolution" >/dev/null
+
+tmp_onsen_step_b_host_source_probe="$tmpdir/onsen-step-b-host-source-probe.json"
+"$onsen_step_b_host_source_probe_script" \
+    --no-remote \
+    --checkout "$tmpdir/missing-onsen-step-b-checkout" \
+    --out "$tmp_onsen_step_b_host_source_probe"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.onsen_step_b_host_source_probe.v0"
+    and .status == "blocked_missing_onsen_step_b_source"
+    and .read_only == true
+    and .expected.branch == "codex/live-semantic-phase0-t1"
+    and .expected.head == "10d58ee"
+    and .expected.endpoint.host == "127.0.0.1"
+    and .expected.endpoint.port == 37691
+    and .expected.endpoint.protocol == "newline_json_tcp"
+    and .expected.world_tool == "world_visibility_query"
+    and .checkout.present == false
+    and .checkout.is_git == false
+    and .remote_resolution.attempted == false
+    and .remote_resolution.usable_remote_found == false
+    and (.remote_resolution.candidates | length) == 0
+    and .result.source_found == false
+    and .result.ready_for_live_probe == false
+    and .result.blocked_by == "missing_checkout_or_accessible_repository_url"
+    and .result.next_step == "provide_or_sync_onsen_step_b_checkout_or_repository_url"
+    and .boundary.clones_repository == false
+    and .boundary.starts_host == false
+    and .boundary.calls_memory_search == false
+    and .boundary.runs_biocortex == false
+    and .boundary.writes_approval == false
+    and .boundary.changes_memory_search_order == false
+    and .boundary.default_search_order_change_allowed == false
+    and .boundary.calls_aiot_runtime == false
+    and .boundary.executes_lswr_actions == false
+    and .boundary.emits_durable_runtime_action_result == false
+    and .boundary.mutates_default_agent_bridge_db == false
+' "$tmp_onsen_step_b_host_source_probe" >/dev/null
 
 tmp_downstream_aio_runtime_evidence_handoff="$tmpdir/downstream-aio-runtime-evidence-handoff.json"
 run cargo run -p ab-bridge --no-default-features -- \
