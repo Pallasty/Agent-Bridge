@@ -178,11 +178,12 @@ Rationale:
 - The report surface can be tested from checked-in fixtures and remain outside
   runtime/MCP exposure.
 
-Next slice:
+Approved implementation slice:
 
 ```text
 Add pure interaction-feedback consumption report builder + Markdown renderer.
 ```
 
-Keep the next slice out of MCP registration, runtime lookup, writes, and #94
-ingestion.
+Implementation must stay out of MCP registration, runtime lookup, writes, and
+#94 ingestion. Any later MCP exposure still needs the separate gate in section
+5.

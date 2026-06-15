@@ -1,9 +1,11 @@
 use ab_bridge::lswr_interaction_feedback::{
-    build_interaction_feedback_evidence_packet,
+    build_interaction_feedback_consumption_report, build_interaction_feedback_evidence_packet,
     build_interaction_feedback_packet_consumption_preflight, build_interaction_feedback_readback,
     build_interaction_feedback_validation_envelope,
+    render_interaction_feedback_consumption_preflight_report,
     render_interaction_feedback_validation_envelope, validate_interaction_feedback_fixture,
     LSWR_INTERACTION_FEEDBACK_CONSUMPTION_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_EVIDENCE_PACKET_SCHEMA, LSWR_INTERACTION_FEEDBACK_FIXTURE_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_READBACK_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_VALIDATION_ENVELOPE_SCHEMA,
@@ -14,6 +16,8 @@ use serde_json::{json, Value};
 const FIXTURE_JSON: &str = include_str!("fixtures/lswr_interaction_feedback_fixture_v0.json");
 const ENVELOPE_MARKDOWN: &str =
     include_str!("fixtures/lswr_interaction_feedback_validation_envelope_v0.md");
+const CONSUMPTION_MARKDOWN: &str =
+    include_str!("fixtures/lswr_interaction_feedback_consumption_report_v0.md");
 
 #[test]
 fn interaction_feedback_fixture_validates_through_pure_module() {
@@ -320,6 +324,79 @@ fn interaction_feedback_consumption_preflight_rejects_laundered_packet() {
         .expect("failure reasons")
         .contains(&json!("C3:no_verification_laundering")));
     assert_eq!(preflight["implicit_live_runtime_lookup_attempted"], false);
+}
+
+#[test]
+fn interaction_feedback_consumption_report_renders_stable_markdown() {
+    let fixture = fixture();
+    let preflight = build_interaction_feedback_packet_consumption_preflight(&fixture);
+    let markdown = render_interaction_feedback_consumption_preflight_report(&preflight);
+    let report = build_interaction_feedback_consumption_report(&fixture);
+
+    assert_eq!(markdown, CONSUMPTION_MARKDOWN);
+    assert_eq!(
+        report["schema"],
+        LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_SCHEMA
+    );
+    assert_eq!(
+        report["preflight_schema"],
+        LSWR_INTERACTION_FEEDBACK_CONSUMPTION_PREFLIGHT_SCHEMA
+    );
+    assert_eq!(report["accepted"], true);
+    assert_eq!(report["preflight_verdict"], "accepted");
+    assert_eq!(report["world_verdict"], "not_verified");
+    assert_eq!(report["markdown"], CONSUMPTION_MARKDOWN);
+    assert_eq!(report["preflight"], preflight);
+    assert_eq!(report["input_contract"]["explicit_input_required"], true);
+    assert_eq!(report["implicit_live_runtime_lookup_attempted"], false);
+    assert_eq!(report["writes_state"], false);
+    assert_eq!(report["store_access_required"], false);
+    assert_eq!(report["mcp_tool_registered"], false);
+}
+
+#[test]
+fn interaction_feedback_consumption_report_accepts_explicit_preflight() {
+    let fixture = fixture();
+    let preflight = build_interaction_feedback_packet_consumption_preflight(&fixture);
+    let report = build_interaction_feedback_consumption_report(&preflight);
+
+    assert_eq!(report["accepted"], true);
+    assert_eq!(report["input_kind"], "fixture");
+    assert_eq!(report["preflight"], preflight);
+    assert_eq!(report["markdown"], CONSUMPTION_MARKDOWN);
+}
+
+#[test]
+fn interaction_feedback_consumption_report_renders_blocked_missing_input() {
+    let report = build_interaction_feedback_consumption_report(&json!({}));
+    let markdown = report["markdown"].as_str().expect("markdown");
+
+    assert_eq!(report["accepted"], false);
+    assert_eq!(report["preflight_verdict"], "blocked");
+    assert_eq!(report["world_verdict"], "not_verified");
+    assert!(markdown.contains("- C1 explicit_input_only: `failed`"));
+    assert!(markdown.contains("- C5 human_can_audit_same_result: `failed`"));
+    assert!(markdown.contains("explicit_packet_or_fixture_required"));
+    assert!(markdown.contains("- implicit_live_runtime_lookup_attempted: `false`"));
+}
+
+#[test]
+fn interaction_feedback_consumption_report_does_not_rewrite_laundered_verdict() {
+    let fixture = fixture();
+    let mut packet = build_interaction_feedback_evidence_packet(&fixture);
+    packet["guardrails"]["writes_state"] = json!(true);
+    packet["readback"]["latest_verification_verdict"] = json!("verified");
+
+    let report = build_interaction_feedback_consumption_report(&packet);
+    let markdown = report["markdown"].as_str().expect("markdown");
+
+    assert_eq!(report["accepted"], false);
+    assert_eq!(report["preflight_verdict"], "blocked");
+    assert_eq!(report["world_verdict"], "verified");
+    assert!(markdown.contains("- world_verdict: `verified`"));
+    assert!(markdown.contains("- C2 guardrails_preserved: `failed`"));
+    assert!(markdown.contains("- C3 no_verification_laundering: `failed`"));
+    assert!(markdown.contains("- feedback_changes_world_verdict_allowed: `false`"));
 }
 
 #[test]

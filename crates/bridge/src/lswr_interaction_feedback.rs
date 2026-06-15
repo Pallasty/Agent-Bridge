@@ -14,6 +14,8 @@ pub const LSWR_INTERACTION_FEEDBACK_EVIDENCE_PACKET_SCHEMA: &str =
     "agent_bridge.lswr.interaction_feedback_evidence_packet.v0";
 pub const LSWR_INTERACTION_FEEDBACK_CONSUMPTION_PREFLIGHT_SCHEMA: &str =
     "agent_bridge.lswr.interaction_feedback_consumption_preflight.v0";
+pub const LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_SCHEMA: &str =
+    "agent_bridge.lswr.interaction_feedback_consumption_report.v0";
 
 const EXPECTED_EVENT_TYPES: [&str; 8] = [
     "human.select",
@@ -369,6 +371,145 @@ pub fn build_interaction_feedback_packet_consumption_preflight(input: &Value) ->
             "note": "pure consumption preflight: explicit input only, no MCP call, no store access, no memory write"
         })
     }
+}
+
+pub fn build_interaction_feedback_consumption_report(input: &Value) -> Value {
+    let preflight = if input.get("schema").and_then(Value::as_str)
+        == Some(LSWR_INTERACTION_FEEDBACK_CONSUMPTION_PREFLIGHT_SCHEMA)
+    {
+        input.clone()
+    } else {
+        build_interaction_feedback_packet_consumption_preflight(input)
+    };
+    let markdown = render_interaction_feedback_consumption_preflight_report(&preflight);
+
+    json!({
+        "schema": LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_SCHEMA,
+        "preflight_schema": preflight.get("schema").cloned().unwrap_or(Value::Null),
+        "accepted": preflight.get("accepted").cloned().unwrap_or(Value::Bool(false)),
+        "preflight_verdict": preflight.get("preflight_verdict").cloned().unwrap_or(Value::Null),
+        "status": preflight.get("status").cloned().unwrap_or(Value::Null),
+        "input_kind": preflight.get("input_kind").cloned().unwrap_or(Value::Null),
+        "source_kind": preflight.get("source_kind").cloned().unwrap_or(Value::Null),
+        "world_verdict": preflight.get("world_verdict").cloned().unwrap_or(Value::Null),
+        "world_result_verdict": preflight.get("world_result_verdict").cloned().unwrap_or(Value::Null),
+        "reason": preflight.get("reason").cloned().unwrap_or(Value::Null),
+        "failure_reasons": preflight.get("failure_reasons").cloned().unwrap_or(Value::Null),
+        "blockers": preflight.get("blockers").cloned().unwrap_or(Value::Null),
+        "guardrails": preflight.get("guardrails").cloned().unwrap_or(Value::Null),
+        "input_contract": preflight.get("input_contract").cloned().unwrap_or(Value::Null),
+        "acceptance_matrix": preflight.get("acceptance_matrix").cloned().unwrap_or(Value::Null),
+        "packet_schema": preflight.get("packet_schema").cloned().unwrap_or(Value::Null),
+        "fixture_id": preflight.get("fixture_id").cloned().unwrap_or(Value::Null),
+        "readback": preflight.get("readback").cloned().unwrap_or(Value::Null),
+        "markdown": markdown,
+        "preflight": preflight,
+        "implicit_live_runtime_lookup_attempted": preflight
+            .get("implicit_live_runtime_lookup_attempted")
+            .cloned()
+            .unwrap_or(Value::Bool(false)),
+        "writes_state": false,
+        "store_access_required": false,
+        "mcp_tool_registered": false,
+        "note": "pure consumption report: renders canonical preflight only, no MCP call, no store access, no memory write"
+    })
+}
+
+pub fn render_interaction_feedback_consumption_preflight_report(preflight: &Value) -> String {
+    let mut lines = Vec::new();
+    lines.push("# LSWR Interaction Feedback Consumption Report".to_string());
+    lines.push(String::new());
+    push_markdown_kv(&mut lines, "schema", &preflight["schema"]);
+    push_markdown_kv(
+        &mut lines,
+        "preflight_verdict",
+        &preflight["preflight_verdict"],
+    );
+    push_markdown_kv(&mut lines, "accepted", &preflight["accepted"]);
+    push_markdown_kv(&mut lines, "status", &preflight["status"]);
+    push_markdown_kv(&mut lines, "input_kind", &preflight["input_kind"]);
+    push_markdown_kv(&mut lines, "source_kind", &preflight["source_kind"]);
+    push_markdown_kv(&mut lines, "world_verdict", &preflight["world_verdict"]);
+    push_markdown_kv(
+        &mut lines,
+        "world_result_verdict",
+        &preflight["world_result_verdict"],
+    );
+    push_markdown_kv(&mut lines, "reason", &preflight["reason"]);
+    push_markdown_kv(&mut lines, "failure_reasons", &preflight["failure_reasons"]);
+    push_markdown_kv(&mut lines, "blockers", &preflight["blockers"]);
+    push_markdown_kv(
+        &mut lines,
+        "implicit_live_runtime_lookup_attempted",
+        &preflight["implicit_live_runtime_lookup_attempted"],
+    );
+
+    lines.push(String::new());
+    lines.push("## Guardrails".to_string());
+    lines.push(String::new());
+    for key in [
+        "read_only",
+        "mutation_surface",
+        "writes_state",
+        "store_access_required",
+        "mcp_tool_registered",
+        "queries_live_runtime",
+        "live_runtime_lookup_allowed",
+        "implicit_live_runtime_lookup_allowed",
+        "default_profile_exposure_allowed",
+        "outcome_ingestion_allowed",
+        "feedback_changes_world_verdict_allowed",
+    ] {
+        push_markdown_kv(&mut lines, key, &preflight["guardrails"][key]);
+    }
+
+    lines.push(String::new());
+    lines.push("## Acceptance Matrix".to_string());
+    lines.push(String::new());
+    if let Some(gates) = preflight["acceptance_matrix"].as_array() {
+        for gate in gates {
+            let gate_id = gate["gate"].as_str().unwrap_or("unknown");
+            let name = gate["name"].as_str().unwrap_or("unknown");
+            let status = if gate["passed"] == true {
+                "passed"
+            } else {
+                "failed"
+            };
+            let evidence = markdown_value(&gate["evidence"]);
+            lines.push(format!("- {gate_id} {name}: `{status}` - {evidence}"));
+        }
+    } else {
+        lines.push("- none".to_string());
+    }
+
+    lines.push(String::new());
+    lines.push("## Readback".to_string());
+    lines.push(String::new());
+    for key in [
+        "latest_verification_verdict",
+        "latest_verification_reason",
+        "failed_clause_ids",
+        "latest_human_decision",
+        "latest_feedback_issue",
+        "next_revision_patch_id",
+        "revision_should_cite",
+    ] {
+        push_markdown_kv(&mut lines, key, &preflight["readback"][key]);
+    }
+
+    lines.push(String::new());
+    lines.push("## Canonical Source".to_string());
+    lines.push(String::new());
+    push_markdown_kv(&mut lines, "packet_schema", &preflight["packet_schema"]);
+    push_markdown_kv(&mut lines, "fixture_id", &preflight["fixture_id"]);
+    lines.push("- json_remains_canonical: `true`".to_string());
+    lines.push("- markdown_writes_state: `false`".to_string());
+    lines.push(
+        "- note: `Markdown renders the preflight object; it does not replace it.`".to_string(),
+    );
+
+    lines.push(String::new());
+    lines.join("\n")
 }
 
 pub fn build_interaction_feedback_readback(fixture: &Value) -> Value {

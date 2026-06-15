@@ -262,12 +262,47 @@ This approves a pure Markdown/report builder over explicit input and accepted
 preflight output. It does not approve MCP registration, default-profile exposure,
 live runtime lookup, writes, or #94 ingestion.
 
-## 9. Recommended Next Slice
+## 9. Pure Report Builder Slice
 
-The next safe work is:
+The pure report-builder slice implements:
 
 ```text
-Add pure interaction-feedback consumption report builder + Markdown renderer.
+agent_bridge.lswr.interaction_feedback_consumption_report.v0
+```
+
+Module helpers:
+
+```text
+build_interaction_feedback_consumption_report(...)
+render_interaction_feedback_consumption_preflight_report(...)
+```
+
+The builder accepts an explicit fixture, evidence packet, wrapper object, or
+already-built preflight object. It derives Markdown from the canonical
+preflight object and keeps JSON as the authority.
+
+Smoke path:
+
+```text
+cargo run -p ab-bridge --example lswr_interaction_feedback_consumption_report_smoke -- --assert-golden --assert-read-only
+```
+
+The slice remains pure: no MCP registration, no runtime lookup, no file/path
+input, no store/memory write, no #94 ingestion, no Onsen mutation, and no
+verification verdict rewrite.
+
+## 10. Recommended Next Slice
+
+The next safe work is either:
+
+```text
+Accept the pure module report builder as module/test-only.
+```
+
+or:
+
+```text
+Design a separate MCP registration gate for an all/niche read-only tool.
 ```
 
 Do not start with a live runtime adapter, writer, default-profile tool, or #94
