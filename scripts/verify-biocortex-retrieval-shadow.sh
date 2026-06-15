@@ -130,7 +130,7 @@ jq -e '
 ' "$opt_in_controlled_order_fixture" >/dev/null
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0"
-    and .status == "runtime_readiness_packet_implemented"
+    and .status == "post_semantic_diverse_review_recorded"
     and .approval_state == "opt_in_implementation_authorized"
     and .runtime_adapter_approved == false
     and .default_search_order_change_allowed == false
@@ -1690,7 +1690,7 @@ jq -e '
 ' "$runtime_proof/proof-summary.json" >/dev/null
 
 opt_in_auth_request="$tmpdir/opt-in-authorization-request"
-run scripts/prepare-biocortex-retrieval-opt-in-authorization-request.sh \
+run bash scripts/prepare-biocortex-retrieval-opt-in-authorization-request.sh \
     --out-dir "$opt_in_auth_request" \
     --reviewer "verify-bundle" \
     --runtime-proof-summary "$runtime_proof/proof-summary.json" \
@@ -1711,7 +1711,7 @@ jq -e '
     and .writes_approval == false
     and .accepts_optional_order_diff_packet == true
     and .accepts_optional_redacted_order_artifact == true
-    and .opt_in_plan.status == "runtime_readiness_packet_implemented"
+    and .opt_in_plan.status == "post_semantic_diverse_review_recorded"
     and .opt_in_plan.order_diff_packet_implemented == true
     and .opt_in_plan.authorization_request_order_diff_evidence_implemented == true
     and .opt_in_plan.redacted_order_artifact_implemented == true
@@ -2494,7 +2494,7 @@ jq -e '
     and .request_summary.runtime_adapter_approved == false
     and .request_summary.default_search_order_change_allowed == false
     and .request_summary.writes_approval == false
-    and .request_summary.opt_in_plan_status == "runtime_readiness_packet_implemented"
+    and .request_summary.opt_in_plan_status == "post_semantic_diverse_review_recorded"
     and .authorized_implementation.may_implement_opt_in_experiment == true
     and .authorized_implementation.may_add_runtime_enable_env == "AB_BIOCORTEX_RETRIEVAL_OPT_IN"
     and .authorized_implementation.may_add_per_call_opt_in_surface == true
@@ -2565,7 +2565,7 @@ jq -e '
     and .evidence_summary.default_search_order_change_allowed == false
     and .evidence_summary.ordering_behavior_connected == false
     and .evidence_summary.post_implementation_review_required == true
-    and .plan_summary.status == "runtime_readiness_packet_implemented"
+    and .plan_summary.status == "post_semantic_diverse_review_recorded"
     and .plan_summary.implementation_allowed == true
     and .plan_summary.store_opt_in_search_wrapper_implemented == true
     and .plan_summary.authorization_decision_consumer_implemented == true

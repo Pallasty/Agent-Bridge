@@ -1,7 +1,7 @@
 {
   "schema": "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0",
   "created_at": "2026-06-11T00:00:00Z",
-  "status": "post_runtime_semantic_diverse_live_candidate_evidence_ready",
+  "status": "post_semantic_diverse_review_recorded",
   "approval_state": "opt_in_implementation_authorized",
   "runtime_adapter_approved": false,
   "default_search_order_change_allowed": false,
@@ -39,6 +39,8 @@
   "post_runtime_live_candidate_runner_verified": true,
   "post_runtime_multi_case_live_candidate_fixture_recorded": true,
   "post_runtime_multi_case_live_candidate_evidence_ready": true,
+  "post_semantic_diverse_review_recorded": true,
+  "post_semantic_diverse_review_ready": true,
   "controlled_explicit_opt_in_fts_trial_ready": true,
   "post_runtime_evidence_backed_controlled_trial_ready": true,
   "post_runtime_live_candidate_evidence_ready": true,
@@ -1138,5 +1140,30 @@
     "raw_probe_query_or_key_leak_check": "passed",
     "next_step": "handoff_to_aio2_for_post_semantic_diverse_review"
   },
-  "next_step": "handoff_to_aio2_for_post_semantic_diverse_review"
+  "post_semantic_diverse_review": {
+    "doc": "docs/design/BIOCORTEX_RETRIEVAL_POST_SEMANTIC_DIVERSE_REVIEW_2026_06_15.md",
+    "fixture": "docs/design/fixtures/biocortex-retrieval-post-semantic-diverse-review-2026-06-15.json",
+    "reviewer": "codex:aio2:post-semantic-diverse-review-20260615",
+    "source_status": "post_runtime_semantic_diverse_live_candidate_evidence_ready",
+    "review_status": "post_semantic_diverse_review_recorded",
+    "evidence_accepted": true,
+    "fixture_expansion_complete_for_agent_bridge": true,
+    "ready_for_downstream_aio_checkpoint_selection": true,
+    "default_search_order_change_allowed": false,
+    "default_memory_search_unchanged": true,
+    "hybrid_retrieval_unchanged": true,
+    "semantic_retrieval_unchanged": true,
+    "raw_probe_query_or_key_leak_check": "passed",
+    "does_not_authorize": [
+      "default_retrieval_influence_fts",
+      "default_retrieval_influence_hybrid",
+      "default_retrieval_influence_semantic",
+      "approval_writes",
+      "default_memory_search_order_change",
+      "production_use_without_downstream_gate",
+      "additional_raw_query_key_content_or_side_signal_disclosure"
+    ],
+    "next_step": "select_downstream_aio_integration_checkpoint_for_runtime_backed_evidence"
+  },
+  "next_step": "select_downstream_aio_integration_checkpoint_for_runtime_backed_evidence"
 }

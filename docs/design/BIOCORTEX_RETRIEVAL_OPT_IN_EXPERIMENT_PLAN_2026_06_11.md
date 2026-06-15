@@ -54,7 +54,11 @@ manual command assembly. The same runner now has a multi-case fixture that
 observes three protected explicit opt-in order movements across three batch
 query cases. A semantic-diverse corpus runner now replays four independent
 non-production fixture cases across isolated stores, producing eight protected
-BioCortex movements with default retrieval still unchanged.
+BioCortex movements with default retrieval still unchanged. The aio2 handoff
+review for that semantic-diverse corpus is now recorded and accepts the
+evidence for selecting a downstream AIO integration checkpoint, without
+granting default, hybrid, semantic, approval-write, or production-use
+permission.
 
 ```json
 {
@@ -97,6 +101,8 @@ BioCortex movements with default retrieval still unchanged.
   "post_runtime_multi_case_live_candidate_evidence_ready": true,
   "post_runtime_semantic_diverse_live_candidate_corpus_recorded": true,
   "post_runtime_semantic_diverse_live_candidate_evidence_ready": true,
+  "post_semantic_diverse_review_recorded": true,
+  "post_semantic_diverse_review_ready": true,
   "controlled_explicit_opt_in_fts_trial_ready": true,
   "post_runtime_evidence_backed_controlled_trial_ready": true,
   "post_runtime_live_candidate_evidence_ready": true,
@@ -139,6 +145,11 @@ Post-runtime semantic-diverse live-candidate corpus:
 - `docs/design/BIOCORTEX_RETRIEVAL_POST_RUNTIME_SEMANTIC_DIVERSE_LIVE_CANDIDATE_2026_06_14.md`
 - `docs/design/fixtures/biocortex-retrieval-post-runtime-semantic-diverse-live-candidate-corpus-2026-06-14.json`
 - `docs/design/fixtures/biocortex-retrieval-post-runtime-semantic-diverse-live-candidate-2026-06-14.json`
+
+Post-semantic-diverse review:
+
+- `docs/design/BIOCORTEX_RETRIEVAL_POST_SEMANTIC_DIVERSE_REVIEW_2026_06_15.md`
+- `docs/design/fixtures/biocortex-retrieval-post-semantic-diverse-review-2026-06-15.json`
 
 Authorization request packet:
 
@@ -952,6 +963,27 @@ Slice 38 adds a multi-case post-runtime live-candidate fixture:
   memory contents, and raw side-signal rows;
 - default `memory_search`, hybrid search, semantic search, approval writes,
   raw query/key/content redaction, and default search order remain unchanged.
+
+## Post-Semantic-Diverse Review
+
+Slice 40 records the aio2 handoff review for the semantic-diverse corpus:
+
+- committed document:
+  `docs/design/BIOCORTEX_RETRIEVAL_POST_SEMANTIC_DIVERSE_REVIEW_2026_06_15.md`;
+- committed machine-readable review:
+  `docs/design/fixtures/biocortex-retrieval-post-semantic-diverse-review-2026-06-15.json`;
+- accepted source status:
+  `post_runtime_semantic_diverse_live_candidate_evidence_ready`;
+- review status: `post_semantic_diverse_review_recorded`;
+- evidence accepted for downstream AIO checkpoint selection: `true`;
+- Agent-Bridge fixture expansion complete unless a downstream checkpoint
+  exposes a new evidence gap;
+- the next project action is
+  `select_downstream_aio_integration_checkpoint_for_runtime_backed_evidence`;
+- the review does not authorize default retrieval influence, hybrid retrieval
+  influence, semantic retrieval influence, approval writes, default
+  `memory_search` order changes, production use without a downstream gate, or
+  additional raw query/key/content/side-signal disclosure.
 
 ## Fail-Open Rules
 

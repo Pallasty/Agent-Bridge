@@ -4124,6 +4124,8 @@ pub fn biocortex_retrieval_opt_in_authorization_decision_packet(
                 || status == "store_opt_in_order_connection_implemented"
                 || status == "store_opt_in_runtime_adapter_connection_implemented"
                 || status == "runtime_readiness_packet_implemented"
+                || status == "post_runtime_semantic_diverse_live_candidate_evidence_ready"
+                || status == "post_semantic_diverse_review_recorded"
         })
         .unwrap_or(false);
 
@@ -4480,6 +4482,8 @@ pub fn biocortex_retrieval_opt_in_post_implementation_review_gate(
                 || status == "store_opt_in_order_connection_implemented"
                 || status == "store_opt_in_runtime_adapter_connection_implemented"
                 || status == "runtime_readiness_packet_implemented"
+                || status == "post_runtime_semantic_diverse_live_candidate_evidence_ready"
+                || status == "post_semantic_diverse_review_recorded"
         })
         .unwrap_or(false);
     let plan_implementation_allowed = value_bool_is(plan.get("implementation_allowed"), true);
