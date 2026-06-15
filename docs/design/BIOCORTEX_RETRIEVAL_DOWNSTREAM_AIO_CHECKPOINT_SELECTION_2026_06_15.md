@@ -58,9 +58,11 @@ Primary references:
 - `docs/design/BIOCORTEX_RETRIEVAL_POST_SEMANTIC_DIVERSE_REVIEW_2026_06_15.md`
 - `docs/design/fixtures/biocortex-retrieval-post-semantic-diverse-review-2026-06-15.json`
 
-First handoff artifact to build next:
+First handoff artifact:
 
 - `agent_bridge.biocortex_retrieval.downstream_aio_runtime_evidence_handoff.v0`
+- `docs/design/BIOCORTEX_RETRIEVAL_DOWNSTREAM_AIO_RUNTIME_EVIDENCE_HANDOFF_2026_06_15.md`
+- `docs/design/fixtures/biocortex-retrieval-downstream-aio-runtime-evidence-handoff-2026-06-15.json`
 
 ## Required Contract
 
@@ -103,8 +105,9 @@ under a read-only or explicitly opt-in boundary.
 
 ## Next Step
 
-Build the read-only downstream AIO runtime evidence handoff packet:
+The read-only downstream AIO runtime evidence handoff packet is now ready. The
+next project action is:
 
 ```text
-build_downstream_aio_runtime_evidence_handoff_packet
+connect_handoff_packet_to_ssb_lswr_action_result_review_fixture
 ```
