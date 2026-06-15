@@ -300,6 +300,13 @@ jq -e '
     and .onsen_step_b_source_resolution.port_37691_listening == false
     and .onsen_step_b_source_resolution.remote_resolution_attempted == true
     and .onsen_step_b_source_resolution.usable_remote_found == false
+    and .onsen_step_b_source_resolution.onsen_hd_remote_checked == true
+    and .onsen_step_b_source_resolution.onsen_hd_remote_accessible == true
+    and .onsen_step_b_source_resolution.onsen_hd_remote_head == "79993b494cf6e41fbacb33f2ab2c6ea9ea544771"
+    and .onsen_step_b_source_resolution.onsen_hd_remote_is_accepted_step_b_source == false
+    and .onsen_step_b_source_resolution.onsen_hd_remote_has_expected_branch == false
+    and .onsen_step_b_source_resolution.onsen_hd_remote_has_documented_head == false
+    and .onsen_step_b_source_resolution.onsen_hd_remote_has_world_tool_host_contract == false
     and .onsen_step_b_source_resolution.real_onsen_step_b_host_source_found == false
     and .onsen_step_b_source_resolution.can_launch_real_onsen_step_b_host_now == false
     and .onsen_step_b_source_resolution.can_collect_verified_runtime_action_result_now == false
@@ -1402,7 +1409,16 @@ jq -e '
     and .local_resolution.prototype_present == true
     and .local_resolution.prototype_is_required_step_b_host == false
     and .remote_resolution.attempted == true
-    and (.remote_resolution.git_ssh_candidates | length) == 2
+    and (.remote_resolution.git_ssh_candidates | length) == 3
+    and (.remote_resolution.git_ssh_candidates[] | select(.url == "git@github.com:pallasting/Onsen-HD.git") | .result) == "repository_accessible_but_not_accepted_step_b_source"
+    and .remote_resolution.additional_candidate_inspection.candidate == "git@github.com:pallasting/Onsen-HD.git"
+    and .remote_resolution.additional_candidate_inspection.local_checkout == "/Data/CascadeProjects/Onsen-HD"
+    and .remote_resolution.additional_candidate_inspection.head == "79993b494cf6e41fbacb33f2ab2c6ea9ea544771"
+    and .remote_resolution.additional_candidate_inspection.accepted_branch_found == false
+    and .remote_resolution.additional_candidate_inspection.accepted_head_found == false
+    and .remote_resolution.additional_candidate_inspection.world_tool_host_contract_found == false
+    and .remote_resolution.additional_candidate_inspection.expected_port_found == false
+    and .remote_resolution.additional_candidate_inspection.result == "not_accepted_step_b_host_source"
     and .remote_resolution.usable_remote_found == false
     and .result.agent_bridge_client_side_ready == true
     and .result.real_onsen_step_b_host_source_found == false

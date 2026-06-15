@@ -45,9 +45,33 @@
       {
         "url": "git@github.com:pallasting/onsen.git",
         "result": "repository_not_found_or_inaccessible"
+      },
+      {
+        "url": "git@github.com:pallasting/Onsen-HD.git",
+        "result": "repository_accessible_but_not_accepted_step_b_source",
+        "head": "79993b494cf6e41fbacb33f2ab2c6ea9ea544771",
+        "branch_count": 1,
+        "relevant_branch_found": false,
+        "documented_head_found": false,
+        "step_b_world_tools_found": false,
+        "expected_port_found": false,
+        "local_probe_checkout": "/Data/CascadeProjects/Onsen-HD"
       }
     ],
-    "usable_remote_found": false
+    "usable_remote_found": false,
+    "additional_candidate_inspection": {
+      "candidate": "git@github.com:pallasting/Onsen-HD.git",
+      "local_checkout": "/Data/CascadeProjects/Onsen-HD",
+      "head": "79993b494cf6e41fbacb33f2ab2c6ea9ea544771",
+      "branches": [
+        "main"
+      ],
+      "accepted_branch_found": false,
+      "accepted_head_found": false,
+      "world_tool_host_contract_found": false,
+      "expected_port_found": false,
+      "result": "not_accepted_step_b_host_source"
+    }
   },
   "result": {
     "agent_bridge_client_side_ready": true,

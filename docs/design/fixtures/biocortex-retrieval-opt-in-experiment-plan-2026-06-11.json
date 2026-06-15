@@ -1403,6 +1403,13 @@
     "runs_biocortex": false,
     "writes_approval": false,
     "default_search_order_change_allowed": false,
-    "next_step": "provide_or_sync_onsen_step_b_checkout_or_repository_url_then_launch_dev_host"
+    "next_step": "provide_or_sync_onsen_step_b_checkout_or_repository_url_then_launch_dev_host",
+    "onsen_hd_remote_checked": true,
+    "onsen_hd_remote_accessible": true,
+    "onsen_hd_remote_head": "79993b494cf6e41fbacb33f2ab2c6ea9ea544771",
+    "onsen_hd_remote_is_accepted_step_b_source": false,
+    "onsen_hd_remote_has_expected_branch": false,
+    "onsen_hd_remote_has_documented_head": false,
+    "onsen_hd_remote_has_world_tool_host_contract": false
   }
 }

@@ -1259,6 +1259,10 @@ this Linux checkout:
 - no listener is present on `127.0.0.1:37691`;
 - obvious GitHub SSH candidates were checked and did not produce a usable
   repository from this environment;
+- `git@github.com:pallasting/Onsen-HD.git` is accessible at
+  `79993b494cf6e41fbacb33f2ab2c6ea9ea544771`, but it is not the accepted Step B
+  source: it lacks the documented branch/head and the expected world-tool host
+  contract;
 - a read-only recovery probe is ready at
   `scripts/probe-onsen-step-b-host-source.sh`;
 - the next project action is refined to

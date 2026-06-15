@@ -134,7 +134,13 @@ if [[ "$no_remote" -eq 0 ]]; then
         tmp_out="$(mktemp "${TMPDIR:-/tmp}/ab-onsen-step-b-lsremote-XXXXXX.txt")"
         if timeout 15 git ls-remote "$repo_url" HEAD "refs/heads/$expected_branch" >"$tmp_out" 2>&1; then
             if [[ -s "$tmp_out" ]]; then
-                result="reachable"
+                if grep -Fq "refs/heads/$expected_branch" "$tmp_out"; then
+                    result="reachable_expected_branch_found"
+                elif grep -Fq "$expected_head" "$tmp_out"; then
+                    result="reachable_expected_head_found"
+                else
+                    result="reachable_but_not_accepted_step_b_source"
+                fi
             else
                 result="reachable_no_matching_ref"
             fi
@@ -151,7 +157,10 @@ if [[ "$no_remote" -eq 0 ]]; then
 fi
 
 remote_usable=false
-if jq -s -e 'any(.[]; .result == "reachable")' "$repo_results_file" >/dev/null; then
+if jq -s -e '
+    any(.[]; .result == "reachable_expected_branch_found"
+        or .result == "reachable_expected_head_found")
+' "$repo_results_file" >/dev/null; then
     remote_usable=true
 fi
 

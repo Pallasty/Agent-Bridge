@@ -35,11 +35,18 @@ The documented macOS worktree is not present on this Linux host. The candidate
 Linux path `/Data/CascadeProjects/onsen-hd-live-semantic-phase0` is also absent,
 and there is no listener on `127.0.0.1:37691`.
 
-Two obvious GitHub SSH candidates were checked and did not resolve to a usable
-repository from this environment:
+Three GitHub SSH candidates have now been checked:
 
 - `git@github.com:pallasting/onsen-hd-live-semantic-phase0.git`
 - `git@github.com:pallasting/onsen.git`
+- `git@github.com:pallasting/Onsen-HD.git`
+
+The first two did not resolve to a usable repository from this environment.
+`Onsen-HD` is accessible, but it is not the accepted Step B host source: it only
+exposes `main` at `79993b494cf6e41fbacb33f2ab2c6ea9ea544771`, does not contain
+the documented `codex/live-semantic-phase0-t1` branch or `10d58ee` head, and did
+not expose the expected `world_query`, `world_patch`, `world_visibility_query`,
+or `127.0.0.1:37691` host contract during inspection.
 
 The local `prototypes/lswr-web-prototype` remains useful as a prototype, but it
 is not the accepted newline-JSON TCP onsen Step B world-tool host.
