@@ -23,7 +23,7 @@ if [ -z "$biocortex_rs" ] || [ ! -f "$biocortex_rs/Cargo.toml" ]; then
     exit 2
 fi
 
-bash scripts/check-biocortex-checkout-hygiene.sh "$biocortex_rs"
+AB_BIOCORTEX_RS="$biocortex_rs" bash scripts/check-verification-dependencies.sh --all --quiet
 
 tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/ab-biocortex-retrieval-verify-XXXXXX")"
 cleanup() {

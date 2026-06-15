@@ -242,6 +242,19 @@ of the following:
 
 ## Verification Command Bundle
 
+Run the fast dependency doctor before the full bundle when the external
+BioCortex checkout may have drifted:
+
+```bash
+AB_BIOCORTEX_RS=/Data/CascadeProjects/biocortex-rs \
+scripts/check-verification-dependencies.sh --all
+```
+
+The doctor is read-only. It checks required local shell tools plus BioCortex
+checkout hygiene and fails before long proof work if the checkout is missing,
+not a git checkout, dirty, diverged, or behind its tracked upstream. It never
+fetches, repairs, mutates the external checkout, or writes Agent-Bridge state.
+
 Use the checked-in bundle before any stronger runtime discussion:
 
 ```bash
