@@ -1,13 +1,15 @@
 use ab_bridge::lswr_interaction_feedback::{
     build_interaction_feedback_readback, build_interaction_feedback_validation_envelope,
-    validate_interaction_feedback_fixture, LSWR_INTERACTION_FEEDBACK_FIXTURE_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_READBACK_SCHEMA,
+    render_interaction_feedback_validation_envelope, validate_interaction_feedback_fixture,
+    LSWR_INTERACTION_FEEDBACK_FIXTURE_SCHEMA, LSWR_INTERACTION_FEEDBACK_READBACK_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_VALIDATION_ENVELOPE_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_VALIDATION_SCHEMA,
 };
 use serde_json::{json, Value};
 
 const FIXTURE_JSON: &str = include_str!("fixtures/lswr_interaction_feedback_fixture_v0.json");
+const ENVELOPE_MARKDOWN: &str =
+    include_str!("fixtures/lswr_interaction_feedback_validation_envelope_v0.md");
 
 #[test]
 fn interaction_feedback_fixture_validates_through_pure_module() {
@@ -128,6 +130,15 @@ fn interaction_feedback_fixture_builds_readonly_validation_envelope() {
         envelope["next_agent_action_contract"]["forbid_ingestion_or_state_write"],
         true
     );
+}
+
+#[test]
+fn interaction_feedback_validation_envelope_renders_stable_markdown() {
+    let fixture = fixture();
+    let envelope = build_interaction_feedback_validation_envelope(&fixture);
+    let markdown = render_interaction_feedback_validation_envelope(&envelope);
+
+    assert_eq!(markdown, ENVELOPE_MARKDOWN);
 }
 
 #[test]

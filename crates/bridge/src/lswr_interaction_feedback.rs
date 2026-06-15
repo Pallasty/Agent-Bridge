@@ -108,6 +108,79 @@ pub fn build_interaction_feedback_validation_envelope(fixture: &Value) -> Value 
     })
 }
 
+pub fn render_interaction_feedback_validation_envelope(envelope: &Value) -> String {
+    let mut lines = Vec::new();
+    lines.push("# LSWR Interaction Feedback Validation".to_string());
+    lines.push(String::new());
+    push_markdown_kv(&mut lines, "schema", &envelope["schema"]);
+    push_markdown_kv(&mut lines, "fixture_schema", &envelope["fixture_schema"]);
+    push_markdown_kv(
+        &mut lines,
+        "validation_schema",
+        &envelope["validation_schema"],
+    );
+    push_markdown_kv(&mut lines, "readback_schema", &envelope["readback_schema"]);
+    push_markdown_kv(&mut lines, "readback_mode", &envelope["readback_mode"]);
+    push_markdown_kv(&mut lines, "valid", &envelope["valid"]);
+    push_markdown_kv(&mut lines, "failure_reasons", &envelope["failure_reasons"]);
+    push_markdown_kv(
+        &mut lines,
+        "requires_screenshot_for_primary_readback",
+        &envelope["requires_screenshot_for_primary_readback"],
+    );
+
+    lines.push(String::new());
+    lines.push("## Guardrails".to_string());
+    lines.push(String::new());
+    for key in [
+        "read_only",
+        "mutation_surface",
+        "writes_state",
+        "store_access_required",
+        "mcp_tool_registered",
+        "primary_readback_requires_screenshot",
+        "feedback_changes_world_verdict_allowed",
+    ] {
+        push_markdown_kv(&mut lines, key, &envelope["guardrails"][key]);
+    }
+
+    lines.push(String::new());
+    lines.push("## Readback".to_string());
+    lines.push(String::new());
+    for key in [
+        "selected_entities",
+        "latest_visible_change",
+        "latest_verification_verdict",
+        "latest_verification_reason",
+        "failed_clause_ids",
+        "latest_human_decision",
+        "latest_feedback_issue",
+        "next_revision_patch_id",
+        "revision_should_cite",
+    ] {
+        push_markdown_kv(&mut lines, key, &envelope["readback"][key]);
+    }
+
+    lines.push(String::new());
+    lines.push("## Next Agent Action Contract".to_string());
+    lines.push(String::new());
+    for key in [
+        "preserve_failed_world_verdict",
+        "treat_human_feedback_as_revision_input",
+        "require_revision_sources_from_readback",
+        "forbid_ingestion_or_state_write",
+    ] {
+        push_markdown_kv(
+            &mut lines,
+            key,
+            &envelope["next_agent_action_contract"][key],
+        );
+    }
+
+    lines.push(String::new());
+    lines.join("\n")
+}
+
 pub fn build_interaction_feedback_readback(fixture: &Value) -> Value {
     let selected_entities =
         fixture["interaction_state_after"]["active_view"]["selected_entities"].clone();
@@ -325,6 +398,26 @@ fn event_by_id<'a>(fixture: &'a Value, event_id: &str) -> Option<&'a Value> {
     events(fixture)?
         .iter()
         .find(|event| event["event_id"] == event_id)
+}
+
+fn push_markdown_kv(lines: &mut Vec<String>, key: &str, value: &Value) {
+    lines.push(format!("- {key}: `{}`", markdown_value(value)));
+}
+
+fn markdown_value(value: &Value) -> String {
+    match value {
+        Value::Array(items) if items.is_empty() => "none".to_string(),
+        Value::Array(items) => items
+            .iter()
+            .map(markdown_value)
+            .collect::<Vec<_>>()
+            .join(", "),
+        Value::Bool(value) => value.to_string(),
+        Value::Null => "null".to_string(),
+        Value::Number(value) => value.to_string(),
+        Value::String(value) => value.clone(),
+        Value::Object(_) => value.to_string(),
+    }
 }
 
 #[cfg(test)]
