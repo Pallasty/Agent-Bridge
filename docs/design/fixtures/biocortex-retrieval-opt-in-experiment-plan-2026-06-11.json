@@ -1,7 +1,7 @@
 {
   "schema": "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0",
   "created_at": "2026-06-11T00:00:00Z",
-  "status": "loopback_lswr_action_result_verified_fixture_host_observed",
+  "status": "loopback_lswr_host_attach_preflight_blocked",
   "approval_state": "opt_in_implementation_authorized",
   "runtime_adapter_approved": false,
   "default_search_order_change_allowed": false,
@@ -1297,8 +1297,8 @@
     "verified_to": null,
     "recover": "inspect_host_or_visibility_evidence",
     "raw_available": false,
-    "host_response_field_present": true,
-    "host_response_is_null": true,
+    "host_response_field_present": false,
+    "host_response_is_null": false,
     "host_response_included": false,
     "verified_runtime_action_result_collected": false,
     "not_verified_runtime_action_result_collected": true,
@@ -1348,7 +1348,31 @@
     "emits_durable_runtime_action_result": false,
     "changes_memory_search_order": false,
     "default_search_order_change_allowed": false,
-    "next_step": "attach_real_onsen_lswr_host_then_collect_verified_live_viewport_action_result"
+    "next_step": "completed_by_loopback_lswr_host_attach_preflight",
+    "next_step_completed": true
   },
-  "next_step": "attach_real_onsen_lswr_host_then_collect_verified_live_viewport_action_result"
+  "next_step": "restore_or_clone_onsen_step_b_host_checkout_then_launch_dev_host",
+  "loopback_lswr_host_attach_preflight_blocked": true,
+  "loopback_lswr_host_attach_preflight": {
+    "doc": "docs/design/BIOCORTEX_RETRIEVAL_LOOPBACK_LSWR_HOST_ATTACH_PREFLIGHT_2026_06_15.md",
+    "fixture": "docs/design/fixtures/biocortex-retrieval-loopback-lswr-host-attach-preflight-2026-06-15.json",
+    "status": "blocked_missing_loopback_host_checkout",
+    "schema": "agent_bridge.biocortex_retrieval.loopback_lswr_host_attach_preflight.v0",
+    "read_only": true,
+    "target_endpoint": "127.0.0.1:37691",
+    "target_protocol": "newline_json_tcp",
+    "world_visibility_query_present": true,
+    "mcp_tool_profile": "all",
+    "port_37691_listening": false,
+    "onsen_step_b_checkout_present": false,
+    "web_prototype_is_loopback_lsswr_host": false,
+    "can_rerun_live_probe": true,
+    "can_collect_verified_runtime_action_result_now": false,
+    "blocked_by_missing_real_onsen_host": true,
+    "calls_memory_search": false,
+    "runs_biocortex": false,
+    "writes_approval": false,
+    "default_search_order_change_allowed": false,
+    "next_step": "restore_or_clone_onsen_step_b_host_checkout_then_launch_dev_host"
+  }
 }

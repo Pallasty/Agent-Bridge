@@ -77,6 +77,7 @@ listener on `127.0.0.1:37691`.
 ```json
 {
   "schema": "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0",
+  "status": "loopback_lswr_host_attach_preflight_blocked",
   "approval_state": "opt_in_implementation_authorized",
   "runtime_adapter_approved": false,
   "default_search_order_change_allowed": false,
@@ -123,6 +124,7 @@ listener on `127.0.0.1:37691`.
   "read_only_ssb_adapter_fixture_ready": true,
   "live_lswr_action_result_runtime_evidence_observed_not_verified": true,
   "loopback_lswr_action_result_verified_fixture_host_observed": true,
+  "loopback_lswr_host_attach_preflight_blocked": true,
   "controlled_explicit_opt_in_fts_trial_ready": true,
   "post_runtime_evidence_backed_controlled_trial_ready": true,
   "post_runtime_live_candidate_evidence_ready": true,
@@ -195,6 +197,16 @@ Live LSWR action-result runtime evidence:
 
 - `docs/design/BIOCORTEX_RETRIEVAL_LIVE_LSWR_ACTION_RESULT_RUNTIME_EVIDENCE_2026_06_15.md`
 - `docs/design/fixtures/biocortex-retrieval-live-lswr-action-result-runtime-evidence-2026-06-15.json`
+
+Loopback LSWR action-result verified fixture-host probe:
+
+- `docs/design/BIOCORTEX_RETRIEVAL_LOOPBACK_LSWR_ACTION_RESULT_VERIFIED_PROBE_2026_06_15.md`
+- `docs/design/fixtures/biocortex-retrieval-loopback-lswr-action-result-verified-probe-2026-06-15.json`
+
+Loopback LSWR host attach preflight:
+
+- `docs/design/BIOCORTEX_RETRIEVAL_LOOPBACK_LSWR_HOST_ATTACH_PREFLIGHT_2026_06_15.md`
+- `docs/design/fixtures/biocortex-retrieval-loopback-lswr-host-attach-preflight-2026-06-15.json`
 
 Authorization request packet:
 
@@ -1198,6 +1210,31 @@ host:
   BioCortex, write approval, change default retrieval order, call AiOT runtime,
   execute LSWR actions, or emit a durable runtime SSB action result;
 - the host-attach preflight is recorded by Slice 47.
+
+## Loopback LSWR Host Attach Preflight
+
+Slice 47 checks whether the verified loopback probe can now be rerun against
+the intended real onsen Step B host:
+
+- committed document:
+  `docs/design/BIOCORTEX_RETRIEVAL_LOOPBACK_LSWR_HOST_ATTACH_PREFLIGHT_2026_06_15.md`;
+- committed machine-readable fixture:
+  `docs/design/fixtures/biocortex-retrieval-loopback-lswr-host-attach-preflight-2026-06-15.json`;
+- fixture schema:
+  `agent_bridge.biocortex_retrieval.loopback_lswr_host_attach_preflight.v0`;
+- status: `blocked_missing_loopback_host_checkout`;
+- intended endpoint: `127.0.0.1:37691`;
+- intended protocol: `newline_json_tcp`;
+- `world_visibility_query` client surface is present under MCP profile `all`;
+- no listener is present on `127.0.0.1:37691`;
+- the documented macOS onsen Step B checkout is not present on this Linux host;
+- the candidate Linux onsen Step B checkout is not present;
+- `prototypes/lswr-web-prototype` exists, but is not the newline-JSON TCP onsen
+  world-tool host required by this probe;
+- the prior next project action
+  `attach_real_onsen_lswr_host_then_collect_verified_live_viewport_action_result`
+  is refined to
+  `restore_or_clone_onsen_step_b_host_checkout_then_launch_dev_host`.
 
 ## Fail-Open Rules
 

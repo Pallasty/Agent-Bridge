@@ -389,7 +389,7 @@ jq -e '
     and .writes_approval == false
     and .accepts_optional_order_diff_packet == true
     and .accepts_optional_redacted_order_artifact == true
-    and .opt_in_plan.status == "loopback_lswr_action_result_verified_fixture_host_observed"
+    and .opt_in_plan.status == "loopback_lswr_host_attach_preflight_blocked"
     and .opt_in_plan.approval_state == "opt_in_implementation_authorized"
     and .opt_in_plan.order_diff_packet_implemented == true
     and .opt_in_plan.authorization_request_order_diff_evidence_implemented == true

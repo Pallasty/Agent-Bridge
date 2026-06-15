@@ -67,6 +67,7 @@ ssb_lswr_action_result_review_fixture="docs/design/fixtures/biocortex-retrieval-
 read_only_ssb_adapter_fixture="docs/design/fixtures/biocortex-retrieval-read-only-ssb-adapter-fixture-2026-06-15.json"
 live_lswr_action_result_runtime_evidence="docs/design/fixtures/biocortex-retrieval-live-lswr-action-result-runtime-evidence-2026-06-15.json"
 loopback_lswr_action_result_verified_probe="docs/design/fixtures/biocortex-retrieval-loopback-lswr-action-result-verified-probe-2026-06-15.json"
+loopback_lswr_host_attach_preflight="docs/design/fixtures/biocortex-retrieval-loopback-lswr-host-attach-preflight-2026-06-15.json"
 opt_in_batch_query_cases="docs/design/fixtures/biocortex-retrieval-opt-in-batch-diagnostic-queries-2026-06-12.json"
 opt_in_controlled_order_fixture="docs/design/fixtures/biocortex-retrieval-opt-in-controlled-order-fixture-2026-06-12.json"
 opt_in_expanded_corpus_fixture="docs/design/fixtures/biocortex-retrieval-opt-in-expanded-controlled-corpus-2026-06-12.json"
@@ -136,7 +137,7 @@ jq -e '
 ' "$opt_in_controlled_order_fixture" >/dev/null
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0"
-    and .status == "loopback_lswr_action_result_verified_fixture_host_observed"
+    and .status == "loopback_lswr_host_attach_preflight_blocked"
     and .approval_state == "opt_in_implementation_authorized"
     and .runtime_adapter_approved == false
     and .default_search_order_change_allowed == false
@@ -169,6 +170,7 @@ jq -e '
     and .read_only_ssb_adapter_fixture_ready == true
     and .live_lswr_action_result_runtime_evidence_observed_not_verified == true
     and .loopback_lswr_action_result_verified_fixture_host_observed == true
+    and .loopback_lswr_host_attach_preflight_blocked == true
     and .downstream_aio_checkpoint_selection.selection_status == "downstream_aio_integration_checkpoint_selected"
     and .downstream_aio_checkpoint_selection.selected_checkpoint == "semantic_system_bus_lswr_action_result_runtime_evidence_checkpoint"
     and .downstream_aio_checkpoint_selection.selected_checkpoint_family == "semantic_system_bus"
@@ -231,8 +233,8 @@ jq -e '
     and .live_lswr_action_result_runtime_evidence.verified_to == null
     and .live_lswr_action_result_runtime_evidence.recover == "inspect_host_or_visibility_evidence"
     and .live_lswr_action_result_runtime_evidence.raw_available == false
-    and .live_lswr_action_result_runtime_evidence.host_response_field_present == true
-    and .live_lswr_action_result_runtime_evidence.host_response_is_null == true
+    and .live_lswr_action_result_runtime_evidence.host_response_field_present == false
+    and .live_lswr_action_result_runtime_evidence.host_response_is_null == false
     and .live_lswr_action_result_runtime_evidence.host_response_included == false
     and .live_lswr_action_result_runtime_evidence.verified_runtime_action_result_collected == false
     and .live_lswr_action_result_runtime_evidence.not_verified_runtime_action_result_collected == true
@@ -263,6 +265,22 @@ jq -e '
     and .loopback_lswr_action_result_verified_probe.runs_biocortex == false
     and .loopback_lswr_action_result_verified_probe.writes_approval == false
     and .loopback_lswr_action_result_verified_probe.default_search_order_change_allowed == false
+    and .loopback_lswr_host_attach_preflight.status == "blocked_missing_loopback_host_checkout"
+    and .loopback_lswr_host_attach_preflight.schema == "agent_bridge.biocortex_retrieval.loopback_lswr_host_attach_preflight.v0"
+    and .loopback_lswr_host_attach_preflight.read_only == true
+    and .loopback_lswr_host_attach_preflight.target_endpoint == "127.0.0.1:37691"
+    and .loopback_lswr_host_attach_preflight.target_protocol == "newline_json_tcp"
+    and .loopback_lswr_host_attach_preflight.world_visibility_query_present == true
+    and .loopback_lswr_host_attach_preflight.mcp_tool_profile == "all"
+    and .loopback_lswr_host_attach_preflight.port_37691_listening == false
+    and .loopback_lswr_host_attach_preflight.onsen_step_b_checkout_present == false
+    and .loopback_lswr_host_attach_preflight.web_prototype_is_loopback_lsswr_host == false
+    and .loopback_lswr_host_attach_preflight.can_rerun_live_probe == true
+    and .loopback_lswr_host_attach_preflight.can_collect_verified_runtime_action_result_now == false
+    and .loopback_lswr_host_attach_preflight.calls_memory_search == false
+    and .loopback_lswr_host_attach_preflight.runs_biocortex == false
+    and .loopback_lswr_host_attach_preflight.writes_approval == false
+    and .loopback_lswr_host_attach_preflight.default_search_order_change_allowed == false
     and .ordering_behavior_connected == false
     and .explicit_opt_in_fts_ordering_behavior_connected == true
     and .explicit_opt_in_fts_runtime_adapter_connected == true
@@ -1177,8 +1195,8 @@ jq -e '
     and .live_observation.verify.method == "live_viewport_pixel_coverage"
     and .live_observation.verify.verified_to == null
     and .live_observation.verify.host_reason == "world_host_unreachable"
-    and .live_observation.host_response_field_present == true
-    and .live_observation.host_response_is_null == true
+    and .live_observation.host_response_field_present == false
+    and .live_observation.host_response_is_null == false
     and .live_observation.host_response_payload_present == false
     and .action_result.schema == "agent_bridge.semantic_bus.action_result.v0"
     and .action_result.source_schema == "agent_bridge.world_tool.v0"
@@ -1286,8 +1304,54 @@ jq -e '
     and .boundary.content_included == false
     and .boundary.side_signal_raw_included == false
     and .boundary.human_decision_text_included == false
-    and .next_step == "attach_real_onsen_lswr_host_then_collect_verified_live_viewport_action_result"
+    and .next_step == "completed_by_loopback_lswr_host_attach_preflight"
+    and .next_step_completed == true
 ' "$loopback_lswr_action_result_verified_probe" >/dev/null
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.loopback_lswr_host_attach_preflight.v0"
+    and .status == "blocked_missing_loopback_host_checkout"
+    and .read_only == true
+    and .implementation_stage == "loopback_lswr_host_attach_preflight"
+    and .source_loopback_fixture_probe.schema == "agent_bridge.biocortex_retrieval.loopback_lswr_action_result_verified_probe.v0"
+    and .source_loopback_fixture_probe.status == "verified_fixture_host_observed"
+    and .source_loopback_fixture_probe.fixture == "docs/design/fixtures/biocortex-retrieval-loopback-lswr-action-result-verified-probe-2026-06-15.json"
+    and .target_endpoint.host == "127.0.0.1"
+    and .target_endpoint.port == 37691
+    and .target_endpoint.protocol == "newline_json_tcp"
+    and .observed_listener.port_37691_listening == false
+    and .observed_listener.connect_attempted == true
+    and .observed_listener.connect_succeeded == false
+    and .local_checkout_scan.onsen_step_b_checkout_present == false
+    and .local_checkout_scan.documented_macos_checkout_present_on_this_host == false
+    and .local_checkout_scan.candidate_linux_checkout_present == false
+    and .agent_bridge_client_surface.world_visibility_query_present == true
+    and .agent_bridge_client_surface.mcp_profile_required == "all"
+    and .agent_bridge_client_surface.client_side_ready == true
+    and .prototype_assessment.present == true
+    and .prototype_assessment.web_prototype_is_loopback_lsswr_host == false
+    and .result.can_rerun_live_probe == true
+    and .result.can_collect_verified_runtime_action_result_now == false
+    and .result.blocked_by_missing_real_onsen_host == true
+    and .result.fixture_host_probe_completed == true
+    and .result.real_onsen_runtime_verified == false
+    and .result.human_visible_viewport_verified == false
+    and .boundary.calls_memory_search == false
+    and .boundary.runs_biocortex == false
+    and .boundary.writes_approval == false
+    and .boundary.changes_memory_search_order == false
+    and .boundary.default_search_order_change_allowed == false
+    and .boundary.calls_aiot_runtime == false
+    and .boundary.executes_lswr_actions == false
+    and .boundary.emits_durable_runtime_action_result == false
+    and .boundary.mutates_default_agent_bridge_db == false
+    and .boundary.host_response_included == false
+    and .boundary.raw_queries_included == false
+    and .boundary.raw_keys_included == false
+    and .boundary.content_included == false
+    and .boundary.side_signal_raw_included == false
+    and .boundary.human_decision_text_included == false
+    and .next_step == "restore_or_clone_onsen_step_b_host_checkout_then_launch_dev_host"
+' "$loopback_lswr_host_attach_preflight" >/dev/null
 
 tmp_downstream_aio_runtime_evidence_handoff="$tmpdir/downstream-aio-runtime-evidence-handoff.json"
 run cargo run -p ab-bridge --no-default-features -- \
@@ -2184,7 +2248,7 @@ jq -e '
     and .writes_approval == false
     and .accepts_optional_order_diff_packet == true
     and .accepts_optional_redacted_order_artifact == true
-    and .opt_in_plan.status == "loopback_lswr_action_result_verified_fixture_host_observed"
+    and .opt_in_plan.status == "loopback_lswr_host_attach_preflight_blocked"
     and .opt_in_plan.order_diff_packet_implemented == true
     and .opt_in_plan.authorization_request_order_diff_evidence_implemented == true
     and .opt_in_plan.redacted_order_artifact_implemented == true
@@ -2967,7 +3031,7 @@ jq -e '
     and .request_summary.runtime_adapter_approved == false
     and .request_summary.default_search_order_change_allowed == false
     and .request_summary.writes_approval == false
-    and .request_summary.opt_in_plan_status == "loopback_lswr_action_result_verified_fixture_host_observed"
+    and .request_summary.opt_in_plan_status == "loopback_lswr_host_attach_preflight_blocked"
     and .authorized_implementation.may_implement_opt_in_experiment == true
     and .authorized_implementation.may_add_runtime_enable_env == "AB_BIOCORTEX_RETRIEVAL_OPT_IN"
     and .authorized_implementation.may_add_per_call_opt_in_surface == true
@@ -3038,7 +3102,7 @@ jq -e '
     and .evidence_summary.default_search_order_change_allowed == false
     and .evidence_summary.ordering_behavior_connected == false
     and .evidence_summary.post_implementation_review_required == true
-    and .plan_summary.status == "loopback_lswr_action_result_verified_fixture_host_observed"
+    and .plan_summary.status == "loopback_lswr_host_attach_preflight_blocked"
     and .plan_summary.implementation_allowed == true
     and .plan_summary.store_opt_in_search_wrapper_implemented == true
     and .plan_summary.authorization_decision_consumer_implemented == true

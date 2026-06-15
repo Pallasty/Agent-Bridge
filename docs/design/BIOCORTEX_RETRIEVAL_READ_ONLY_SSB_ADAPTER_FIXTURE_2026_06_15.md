@@ -66,9 +66,12 @@ loopback fixture host:
 - `docs/design/fixtures/biocortex-retrieval-live-lswr-action-result-runtime-evidence-2026-06-15.json`
 - `docs/design/BIOCORTEX_RETRIEVAL_LOOPBACK_LSWR_ACTION_RESULT_VERIFIED_PROBE_2026_06_15.md`
 - `docs/design/fixtures/biocortex-retrieval-loopback-lswr-action-result-verified-probe-2026-06-15.json`
+- `docs/design/BIOCORTEX_RETRIEVAL_LOOPBACK_LSWR_HOST_ATTACH_PREFLIGHT_2026_06_15.md`
+- `docs/design/fixtures/biocortex-retrieval-loopback-lswr-host-attach-preflight-2026-06-15.json`
 
-Attach a real onsen LSWR host, then collect verified live-viewport evidence:
+Restore or clone the accepted onsen Step B host checkout, launch the
+newline-JSON TCP dev host, then rerun the live probe:
 
 ```text
-attach_real_onsen_lswr_host_then_collect_verified_live_viewport_action_result
+restore_or_clone_onsen_step_b_host_checkout_then_launch_dev_host
 ```

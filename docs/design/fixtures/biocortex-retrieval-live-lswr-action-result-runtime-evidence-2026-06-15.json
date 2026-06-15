@@ -40,8 +40,8 @@
       "verified_to": null,
       "host_reason": "world_host_unreachable"
     },
-    "host_response_field_present": true,
-    "host_response_is_null": true,
+    "host_response_field_present": false,
+    "host_response_is_null": false,
     "host_response_payload_present": false
   },
   "action_result": {

@@ -1,0 +1,69 @@
+{
+  "schema": "agent_bridge.biocortex_retrieval.loopback_lswr_host_attach_preflight.v0",
+  "created_at": "2026-06-15T00:00:00Z",
+  "status": "blocked_missing_loopback_host_checkout",
+  "read_only": true,
+  "implementation_stage": "loopback_lswr_host_attach_preflight",
+  "source_loopback_fixture_probe": {
+    "schema": "agent_bridge.biocortex_retrieval.loopback_lswr_action_result_verified_probe.v0",
+    "status": "verified_fixture_host_observed",
+    "fixture": "docs/design/fixtures/biocortex-retrieval-loopback-lswr-action-result-verified-probe-2026-06-15.json",
+    "included": false
+  },
+  "target_endpoint": {
+    "host": "127.0.0.1",
+    "port": 37691,
+    "protocol": "newline_json_tcp",
+    "intended_surface": "onsen_step_b_lswr_world_tool_host"
+  },
+  "observed_listener": {
+    "port_37691_listening": false,
+    "connect_attempted": true,
+    "connect_succeeded": false,
+    "failure_reason": "connection_refused_or_no_listener"
+  },
+  "local_checkout_scan": {
+    "onsen_step_b_checkout_present": false,
+    "documented_macos_checkout": "/Users/pallasting/Projects/onsen-hd-live-semantic-phase0",
+    "documented_macos_checkout_present_on_this_host": false,
+    "candidate_linux_checkout": "/Data/CascadeProjects/onsen-hd-live-semantic-phase0",
+    "candidate_linux_checkout_present": false
+  },
+  "agent_bridge_client_surface": {
+    "world_visibility_query_present": true,
+    "mcp_profile_required": "all",
+    "client_side_ready": true
+  },
+  "prototype_assessment": {
+    "path": "prototypes/lswr-web-prototype",
+    "present": true,
+    "web_prototype_is_loopback_lsswr_host": false,
+    "reason": "prototype_is_not_newline_json_tcp_onsen_world_tool_host"
+  },
+  "result": {
+    "can_rerun_live_probe": true,
+    "can_collect_verified_runtime_action_result_now": false,
+    "blocked_by_missing_real_onsen_host": true,
+    "fixture_host_probe_completed": true,
+    "real_onsen_runtime_verified": false,
+    "human_visible_viewport_verified": false
+  },
+  "boundary": {
+    "calls_memory_search": false,
+    "runs_biocortex": false,
+    "writes_approval": false,
+    "changes_memory_search_order": false,
+    "default_search_order_change_allowed": false,
+    "calls_aiot_runtime": false,
+    "executes_lswr_actions": false,
+    "emits_durable_runtime_action_result": false,
+    "mutates_default_agent_bridge_db": false,
+    "host_response_included": false,
+    "raw_queries_included": false,
+    "raw_keys_included": false,
+    "content_included": false,
+    "side_signal_raw_included": false,
+    "human_decision_text_included": false
+  },
+  "next_step": "restore_or_clone_onsen_step_b_host_checkout_then_launch_dev_host"
+}
