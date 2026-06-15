@@ -1,6 +1,8 @@
 use ab_bridge::lswr_interaction_feedback::{
-    build_interaction_feedback_readback, validate_interaction_feedback_fixture,
-    LSWR_INTERACTION_FEEDBACK_FIXTURE_SCHEMA, LSWR_INTERACTION_FEEDBACK_READBACK_SCHEMA,
+    build_interaction_feedback_readback, build_interaction_feedback_validation_envelope,
+    validate_interaction_feedback_fixture, LSWR_INTERACTION_FEEDBACK_FIXTURE_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_READBACK_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_VALIDATION_ENVELOPE_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_VALIDATION_SCHEMA,
 };
 use serde_json::{json, Value};
@@ -72,6 +74,63 @@ fn interaction_feedback_fixture_builds_expected_readback_report() {
 }
 
 #[test]
+fn interaction_feedback_fixture_builds_readonly_validation_envelope() {
+    let fixture = fixture();
+    let envelope = build_interaction_feedback_validation_envelope(&fixture);
+
+    assert_eq!(
+        envelope["schema"],
+        LSWR_INTERACTION_FEEDBACK_VALIDATION_ENVELOPE_SCHEMA
+    );
+    assert_eq!(
+        envelope["fixture_schema"],
+        LSWR_INTERACTION_FEEDBACK_FIXTURE_SCHEMA
+    );
+    assert_eq!(
+        envelope["expected_fixture_schema"],
+        LSWR_INTERACTION_FEEDBACK_FIXTURE_SCHEMA
+    );
+    assert_eq!(
+        envelope["validation_schema"],
+        LSWR_INTERACTION_FEEDBACK_VALIDATION_SCHEMA
+    );
+    assert_eq!(
+        envelope["readback_schema"],
+        LSWR_INTERACTION_FEEDBACK_READBACK_SCHEMA
+    );
+    assert_eq!(envelope["readback_mode"], "interaction_feedback_detailed");
+    assert_eq!(envelope["requires_screenshot_for_primary_readback"], false);
+    assert_eq!(envelope["valid"], true);
+    assert_eq!(envelope["failure_reasons"], json!([]));
+    assert_eq!(envelope["guardrails"]["read_only"], true);
+    assert_eq!(envelope["guardrails"]["mutation_surface"], "none");
+    assert_eq!(envelope["guardrails"]["writes_state"], false);
+    assert_eq!(envelope["guardrails"]["store_access_required"], false);
+    assert_eq!(envelope["guardrails"]["mcp_tool_registered"], false);
+    assert_eq!(
+        envelope["guardrails"]["primary_readback_requires_screenshot"],
+        false
+    );
+    assert_eq!(
+        envelope["guardrails"]["feedback_changes_world_verdict_allowed"],
+        false
+    );
+    assert_eq!(
+        envelope["report"]["schema"],
+        LSWR_INTERACTION_FEEDBACK_VALIDATION_SCHEMA
+    );
+    assert_eq!(envelope["report"]["readback"], envelope["readback"]);
+    assert_eq!(
+        envelope["next_agent_action_contract"]["preserve_failed_world_verdict"],
+        true
+    );
+    assert_eq!(
+        envelope["next_agent_action_contract"]["forbid_ingestion_or_state_write"],
+        true
+    );
+}
+
+#[test]
 fn interaction_feedback_validator_reports_tampered_fixture() {
     let mut fixture = fixture();
     fixture["events"][5]["refs"]["cause_event_id"] = json!("missing_event");
@@ -89,6 +148,34 @@ fn interaction_feedback_validator_reports_tampered_fixture() {
     assert!(report
         .failure_reasons
         .contains(&"feedback_changes_world_verdict".to_string()));
+}
+
+#[test]
+fn interaction_feedback_envelope_reports_tampered_fixture_without_panicking() {
+    let mut fixture = fixture();
+    fixture["schema"] = json!("wrong.schema");
+    fixture["requires_screenshot_for_primary_readback"] = json!(true);
+
+    let envelope = build_interaction_feedback_validation_envelope(&fixture);
+
+    assert_eq!(
+        envelope["schema"],
+        LSWR_INTERACTION_FEEDBACK_VALIDATION_ENVELOPE_SCHEMA
+    );
+    assert_eq!(envelope["fixture_schema"], "wrong.schema");
+    assert_eq!(envelope["valid"], false);
+    assert!(envelope["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("schema_mismatch")));
+    assert!(envelope["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("primary_readback_requires_screenshot")));
+    assert_eq!(envelope["guardrails"]["writes_state"], false);
+    assert_eq!(envelope["guardrails"]["store_access_required"], false);
+    assert_eq!(envelope["guardrails"]["mcp_tool_registered"], false);
+    assert_eq!(envelope["report"]["valid"], false);
 }
 
 #[test]

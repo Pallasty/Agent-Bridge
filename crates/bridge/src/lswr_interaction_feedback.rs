@@ -8,6 +8,8 @@ pub const LSWR_INTERACTION_FEEDBACK_VALIDATION_SCHEMA: &str =
     "agent_bridge.lswr.interaction_feedback_validation.v0";
 pub const LSWR_INTERACTION_FEEDBACK_READBACK_SCHEMA: &str =
     "agent_bridge.lswr.interaction_feedback_readback.v0";
+pub const LSWR_INTERACTION_FEEDBACK_VALIDATION_ENVELOPE_SCHEMA: &str =
+    "agent_bridge.lswr.interaction_feedback_validation_envelope.v0";
 
 const EXPECTED_EVENT_TYPES: [&str; 8] = [
     "human.select",
@@ -70,6 +72,40 @@ pub fn validate_interaction_feedback_fixture(
         failure_reasons,
         readback,
     }
+}
+
+pub fn build_interaction_feedback_validation_envelope(fixture: &Value) -> Value {
+    let report = validate_interaction_feedback_fixture(fixture);
+    let report_value = report.to_value();
+
+    json!({
+        "schema": LSWR_INTERACTION_FEEDBACK_VALIDATION_ENVELOPE_SCHEMA,
+        "fixture_schema": fixture.get("schema").cloned().unwrap_or(Value::Null),
+        "expected_fixture_schema": LSWR_INTERACTION_FEEDBACK_FIXTURE_SCHEMA,
+        "validation_schema": LSWR_INTERACTION_FEEDBACK_VALIDATION_SCHEMA,
+        "readback_schema": LSWR_INTERACTION_FEEDBACK_READBACK_SCHEMA,
+        "readback_mode": "interaction_feedback_detailed",
+        "requires_screenshot_for_primary_readback": false,
+        "valid": report.valid,
+        "failure_reasons": report.failure_reasons,
+        "guardrails": {
+            "read_only": true,
+            "mutation_surface": "none",
+            "writes_state": false,
+            "store_access_required": false,
+            "mcp_tool_registered": false,
+            "primary_readback_requires_screenshot": false,
+            "feedback_changes_world_verdict_allowed": false
+        },
+        "report": report_value,
+        "readback": report.readback,
+        "next_agent_action_contract": {
+            "preserve_failed_world_verdict": true,
+            "treat_human_feedback_as_revision_input": true,
+            "require_revision_sources_from_readback": true,
+            "forbid_ingestion_or_state_write": true
+        }
+    })
 }
 
 pub fn build_interaction_feedback_readback(fixture: &Value) -> Value {
