@@ -8,6 +8,7 @@ Parent documents:
 - [Interaction feedback consumption report acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_ACCEPTANCE_2026_06_15.md)
 - [Interaction feedback consumption report MCP gate](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_MCP_GATE_2026_06_15.md)
 - [Interaction feedback next revision plan acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_NEXT_REVISION_PLAN_ACCEPTANCE_2026_06_15.md)
+- [Interaction feedback semantic patch draft acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_SEMANTIC_PATCH_DRAFT_ACCEPTANCE_2026_06_15.md)
 
 Forum anchors:
 - `#102` post `#3095`: MCP surface smoke runner landed at `ee16c33`.
@@ -128,3 +129,7 @@ Implemented surfaces:
 
 This is deliberately not an MCP wrapper. If a future MCP surface is useful, it
 needs the same separate all/niche gate review used for the consumption report.
+
+The downstream semantic patch draft follow-up is now accepted as module/test-only
+in
+`LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_SEMANTIC_PATCH_DRAFT_ACCEPTANCE_2026_06_15.md`.

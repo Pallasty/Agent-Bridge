@@ -6,6 +6,7 @@ Parent documents:
 - [Interaction feedback protocol](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_PROTOCOL_2026_06_15.md)
 - [Interaction feedback next revision plan](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_NEXT_REVISION_PLAN_2026_06_15.md)
 - [Interaction feedback next revision plan acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_NEXT_REVISION_PLAN_ACCEPTANCE_2026_06_15.md)
+- [Interaction feedback semantic patch draft acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_SEMANTIC_PATCH_DRAFT_ACCEPTANCE_2026_06_15.md)
 
 Forum anchors:
 - `#102` post `#3101`: next-revision plan accepted as
@@ -128,7 +129,7 @@ The draft must set `apply_allowed=false`, `ingest_allowed=false`,
 
 ## 4. Implementation Status
 
-Status: `SOURCE_IMPLEMENTED_PENDING_ACCEPTANCE`.
+Status: `ACCEPTED_MODULE_TEST_ONLY`.
 
 Implemented surfaces:
 
@@ -138,3 +139,6 @@ Implemented surfaces:
 
 This is deliberately not an MCP wrapper. If a future MCP surface is useful, it
 needs a separate all/niche gate review.
+
+Acceptance is recorded in
+`LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_SEMANTIC_PATCH_DRAFT_ACCEPTANCE_2026_06_15.md`.

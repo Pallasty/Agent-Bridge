@@ -7,6 +7,7 @@ Parent documents:
 - [Interaction feedback evidence packet consumption](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_EVIDENCE_PACKET_CONSUMPTION_2026_06_15.md)
 - [Interaction feedback consumption report acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_ACCEPTANCE_2026_06_15.md)
 - [Interaction feedback next revision plan](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_NEXT_REVISION_PLAN_2026_06_15.md)
+- [Interaction feedback semantic patch draft acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_SEMANTIC_PATCH_DRAFT_ACCEPTANCE_2026_06_15.md)
 
 Forum anchors:
 - `#102` post `#3097`: a separate lane claimed the full
@@ -169,6 +170,9 @@ Still not accepted:
 
 The next safe product slice is to use this plan object as an internal planning
 input for drafting the next semantic patch revision.
+
+That follow-up is now accepted as module/test-only in
+`LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_SEMANTIC_PATCH_DRAFT_ACCEPTANCE_2026_06_15.md`.
 
 If an MCP surface is desired later, it requires a separate all/niche gate review
 with the same constraints used for the consumption report MCP wrapper.

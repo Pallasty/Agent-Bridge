@@ -184,6 +184,41 @@ jq -e '
     and .mcp_tool_registered == false
 ' "$tmp_lswr_feedback_next_revision_plan" >/dev/null
 
+tmp_lswr_feedback_semantic_patch_draft="$tmpdir/lswr-interaction-feedback-semantic-patch-draft.json"
+run cargo run -q -p ab-bridge --example lswr_interaction_feedback_semantic_patch_draft_smoke -- \
+    --format json \
+    --assert-drafted \
+    --assert-read-only > "$tmp_lswr_feedback_semantic_patch_draft"
+jq -e '
+    .schema == "agent_bridge.lswr.interaction_feedback_semantic_patch_draft.v0"
+    and .source_schema == "agent_bridge.lswr.interaction_feedback_next_revision_plan.v0"
+    and .source_plan_verdict == "ready_for_revision"
+    and .source_world_verdict == "not_verified"
+    and .draft_verdict == "drafted"
+    and .semantic_patch_draft.patch_id == "patch_arrival_bath_move_002"
+    and .semantic_patch_draft.op == "semantic_revision"
+    and .semantic_patch_draft.operation_hint == "increase_walkway_clearance_by_repositioning_entity"
+    and .semantic_patch_draft.target_entities == ["bath"]
+    and .semantic_patch_draft.revision_sources == ["verify_patch_arrival_bath_move_001", "fb_arrival_crowded_001"]
+    and .semantic_patch_draft.constraints.failed_clause_ids == ["effect_walkway_clearance_001"]
+    and .semantic_patch_draft.constraints.feedback_issue == "visual_density_too_high"
+    and .semantic_patch_draft.constraints.preserve_world_verdict == "not_verified"
+    and (.semantic_patch_draft.constraints.expected_effect_requirements | length) == 2
+    and .semantic_patch_draft.unresolved_arguments == ["patch.args.cell"]
+    and .semantic_patch_draft.requires_live_world_state_for_arguments == true
+    and .semantic_patch_draft.live_world_state_queried == false
+    and .semantic_patch_draft.apply_allowed == false
+    and .semantic_patch_draft.ingest_allowed == false
+    and .agent_action_contract.resolve_arguments_before_apply == true
+    and .agent_action_contract.do_not_apply_patch == true
+    and .guardrails.read_only == true
+    and .guardrails.applies_patch == false
+    and .guardrails.queries_live_runtime == false
+    and .writes_state == false
+    and .store_access_required == false
+    and .mcp_tool_registered == false
+' "$tmp_lswr_feedback_semantic_patch_draft" >/dev/null
+
 tmp_missing_lswr_feedback_input="$tmpdir/missing-lswr-interaction-feedback-input.json"
 printf '{}\n' > "$tmp_missing_lswr_feedback_input"
 tmp_missing_lswr_feedback_consumption_preflight="$tmpdir/missing-lswr-interaction-feedback-consumption-preflight.json"
