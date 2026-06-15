@@ -67,7 +67,7 @@ Required write-mode inputs:
   "dry_run": false,
   "apply_confirmation": "persist_lswr_training_eligible_outcomes",
   "approval_thread_id": 102,
-  "approval_post_id": 0,
+  "approval_post_id": 1234,
   "reviewed_plan_hash": "sha256:...",
   "candidate_keys": ["outcome_<artifact_id>"],
   "max_writes": 1
@@ -77,6 +77,8 @@ Required write-mode inputs:
 The first implementation should also accept the normal E2/E3 scan controls
 (`window_secs`, `limit`, `max_candidates`) so it can recompute the plan. It must
 not accept raw candidate rows from the caller.
+The `approval_post_id` above is illustrative; zero or missing post ids are
+invalid.
 
 ## 4. Store Touch Order
 
