@@ -7,6 +7,7 @@ Parent documents:
 - [Interaction feedback fixture](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_FIXTURE_2026_06_15.md)
 - [Interaction feedback evidence packet consumption](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_EVIDENCE_PACKET_CONSUMPTION_2026_06_15.md)
 - [Interaction feedback report surface acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_REPORT_SURFACE_ACCEPTANCE_2026_06_15.md)
+- [Interaction feedback consumption report MCP gate](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_MCP_GATE_2026_06_15.md)
 - [Requirements v1](LIVE_SEMANTIC_WORLD_RUNTIME_REQUIREMENTS_V1_2026_06_06.md)
 
 Forum anchors:
@@ -164,10 +165,16 @@ Still not accepted:
 The next safe slice is a separate MCP registration gate design for an all/niche
 read-only tool, if a tool surface is still desired.
 
-That gate design is tracked in:
+That gate is now tracked in:
 
 ```text
 LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_MCP_GATE_2026_06_15.md
+```
+
+Current gate decision:
+
+```text
+GATE_DEFINED_IMPLEMENTATION_HOLD
 ```
 
 That gate must prove:

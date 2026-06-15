@@ -7,6 +7,7 @@ Parent documents:
 - [Interaction feedback fixture](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_FIXTURE_2026_06_15.md)
 - [Interaction feedback report surface acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_REPORT_SURFACE_ACCEPTANCE_2026_06_15.md)
 - [Interaction feedback consumption report acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_ACCEPTANCE_2026_06_15.md)
+- [Interaction feedback consumption report MCP gate](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_MCP_GATE_2026_06_15.md)
 - [Requirements v1](LIVE_SEMANTIC_WORLD_RUNTIME_REQUIREMENTS_V1_2026_06_06.md)
 
 Forum anchors:
@@ -17,6 +18,7 @@ Forum anchors:
 - `#102` post `#3060`: reconciled report-surface acceptance review claim.
 - `#102` post `#3066`: pure report builder landed at `cc2394c`.
 - `#102` post `#3068`: module/test-only acceptance review claim.
+- `#102` post `#3071`: MCP registration gate design claim.
 - `#104` post `#2412`: adjacent BioCortex/LSWR handoff remains blocked on
   external onsen Step B source, so this slice advances only the independent
   read-only interaction-feedback consumer.
@@ -322,15 +324,22 @@ mutation, or verification verdict rewrite.
 
 ## 11. Recommended Next Slice
 
-```text
-Design a separate MCP registration gate for an all/niche read-only tool.
-```
-
-The gate design is tracked in:
+The all/niche MCP gate is tracked in:
 
 ```text
 LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_MCP_GATE_2026_06_15.md
 ```
 
+Current decision:
+
+```text
+GATE_DEFINED_IMPLEMENTATION_HOLD
+```
+
+```text
+Accept or revise the MCP registration gate before any registry implementation.
+```
+
 Do not start with a live runtime adapter, writer, default-profile tool, or #94
-ingestion path.
+ingestion path. Do not implement the registry wrapper before the MCP gate is
+accepted on #102.
