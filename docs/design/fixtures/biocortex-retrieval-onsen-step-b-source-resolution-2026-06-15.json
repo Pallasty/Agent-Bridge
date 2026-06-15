@@ -95,6 +95,18 @@
     "distinguishes_reachable_nonmatching_remote": true,
     "nonmatching_git_checkout_is_not_source_found": true
   },
+  "host_launch_plan": {
+    "script": "scripts/plan-onsen-step-b-host-launch.sh",
+    "schema": "agent_bridge.biocortex_retrieval.onsen_step_b_host_launch_plan.v0",
+    "ready": true,
+    "read_only": true,
+    "uses_source_probe": true,
+    "does_not_clone": true,
+    "does_not_start_host": true,
+    "operator_launch_required": true,
+    "agent_bridge_client_only": true,
+    "next_use": "run_after_checkout_or_repository_url_is_available_or_after_source_probe_output"
+  },
   "boundary": {
     "calls_memory_search": false,
     "runs_biocortex": false,

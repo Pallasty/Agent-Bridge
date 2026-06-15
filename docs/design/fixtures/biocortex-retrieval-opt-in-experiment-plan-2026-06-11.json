@@ -1354,6 +1354,7 @@
   "next_step": "provide_or_sync_onsen_step_b_checkout_or_repository_url_then_launch_dev_host",
   "loopback_lswr_host_attach_preflight_blocked": true,
   "onsen_step_b_host_source_probe_script_ready": true,
+  "onsen_step_b_host_launch_plan_script_ready": true,
   "loopback_lswr_host_attach_preflight": {
     "doc": "docs/design/BIOCORTEX_RETRIEVAL_LOOPBACK_LSWR_HOST_ATTACH_PREFLIGHT_2026_06_15.md",
     "fixture": "docs/design/fixtures/biocortex-retrieval-loopback-lswr-host-attach-preflight-2026-06-15.json",
@@ -1399,6 +1400,10 @@
     "blocked_by": "missing_checkout_or_accessible_repository_url",
     "recovery_probe_script": "scripts/probe-onsen-step-b-host-source.sh",
     "recovery_probe_ready": true,
+    "host_launch_plan_script": "scripts/plan-onsen-step-b-host-launch.sh",
+    "host_launch_plan_ready": true,
+    "host_launch_plan_does_not_start_host": true,
+    "host_launch_plan_operator_launch_required": true,
     "calls_memory_search": false,
     "runs_biocortex": false,
     "writes_approval": false,

@@ -72,6 +72,21 @@ It does not clone repositories, start a host, execute LSWR actions, call
 `memory_search`, run BioCortex, write approval state, mutate the default
 Agent-Bridge DB, or change default retrieval order.
 
+## Host Launch Plan
+
+The next hop now has a reusable read-only plan generator:
+
+```text
+scripts/plan-onsen-step-b-host-launch.sh
+```
+
+The plan consumes the source probe output, or runs the source probe itself, and
+emits a machine-readable `onsen_step_b_host_launch_plan.v0` envelope. It never
+starts Godot, starts a host process, clones source, executes LSWR actions, or
+collects runtime evidence. If an accepted checkout is found but no listener is
+available yet, the plan marks the state as `ready_for_operator_host_launch` and
+keeps host launch owned by the operator or onsen runtime.
+
 ## Boundary
 
 This source-resolution slice does not:
@@ -103,4 +118,5 @@ After the checkout or repository URL is available, run:
 
 ```text
 scripts/probe-onsen-step-b-host-source.sh --checkout /path/to/onsen-step-b
+scripts/plan-onsen-step-b-host-launch.sh --checkout /path/to/onsen-step-b
 ```

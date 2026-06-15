@@ -1267,6 +1267,9 @@ this Linux checkout:
   nonmatching remote as still missing the accepted Step B source;
 - a read-only recovery probe is ready at
   `scripts/probe-onsen-step-b-host-source.sh`;
+- a read-only host launch plan generator is ready at
+  `scripts/plan-onsen-step-b-host-launch.sh`; it consumes source-probe state and
+  never starts Godot or the onsen host itself;
 - the next project action is refined to
   `provide_or_sync_onsen_step_b_checkout_or_repository_url_then_launch_dev_host`.
 

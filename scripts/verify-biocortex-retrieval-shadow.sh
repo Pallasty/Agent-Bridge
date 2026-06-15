@@ -70,10 +70,12 @@ loopback_lswr_action_result_verified_probe="docs/design/fixtures/biocortex-retri
 loopback_lswr_host_attach_preflight="docs/design/fixtures/biocortex-retrieval-loopback-lswr-host-attach-preflight-2026-06-15.json"
 onsen_step_b_source_resolution="docs/design/fixtures/biocortex-retrieval-onsen-step-b-source-resolution-2026-06-15.json"
 onsen_step_b_host_source_probe_script="scripts/probe-onsen-step-b-host-source.sh"
+onsen_step_b_host_launch_plan_script="scripts/plan-onsen-step-b-host-launch.sh"
 opt_in_batch_query_cases="docs/design/fixtures/biocortex-retrieval-opt-in-batch-diagnostic-queries-2026-06-12.json"
 opt_in_controlled_order_fixture="docs/design/fixtures/biocortex-retrieval-opt-in-controlled-order-fixture-2026-06-12.json"
 opt_in_expanded_corpus_fixture="docs/design/fixtures/biocortex-retrieval-opt-in-expanded-controlled-corpus-2026-06-12.json"
 bash -n "$onsen_step_b_host_source_probe_script"
+bash -n "$onsen_step_b_host_launch_plan_script"
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.opt_in_batch_diagnostic_query_cases.v0"
     and .read_only == true
@@ -176,6 +178,7 @@ jq -e '
     and .loopback_lswr_host_attach_preflight_blocked == true
     and .onsen_step_b_source_resolution_blocked == true
     and .onsen_step_b_host_source_probe_script_ready == true
+    and .onsen_step_b_host_launch_plan_script_ready == true
     and .downstream_aio_checkpoint_selection.selection_status == "downstream_aio_integration_checkpoint_selected"
     and .downstream_aio_checkpoint_selection.selected_checkpoint == "semantic_system_bus_lswr_action_result_runtime_evidence_checkpoint"
     and .downstream_aio_checkpoint_selection.selected_checkpoint_family == "semantic_system_bus"
@@ -313,6 +316,10 @@ jq -e '
     and .onsen_step_b_source_resolution.blocked_by == "missing_checkout_or_accessible_repository_url"
     and .onsen_step_b_source_resolution.recovery_probe_script == "scripts/probe-onsen-step-b-host-source.sh"
     and .onsen_step_b_source_resolution.recovery_probe_ready == true
+    and .onsen_step_b_source_resolution.host_launch_plan_script == "scripts/plan-onsen-step-b-host-launch.sh"
+    and .onsen_step_b_source_resolution.host_launch_plan_ready == true
+    and .onsen_step_b_source_resolution.host_launch_plan_does_not_start_host == true
+    and .onsen_step_b_source_resolution.host_launch_plan_operator_launch_required == true
     and .onsen_step_b_source_resolution.recovery_probe_requires_checkout_branch_or_head_match == true
     and .onsen_step_b_source_resolution.recovery_probe_rejects_nonmatching_git_checkout == true
     and .onsen_step_b_source_resolution.calls_memory_search == false
@@ -1439,6 +1446,15 @@ jq -e '
     and .recovery_probe.requires_checkout_branch_or_head_match == true
     and .recovery_probe.distinguishes_reachable_nonmatching_remote == true
     and .recovery_probe.nonmatching_git_checkout_is_not_source_found == true
+    and .host_launch_plan.script == "scripts/plan-onsen-step-b-host-launch.sh"
+    and .host_launch_plan.schema == "agent_bridge.biocortex_retrieval.onsen_step_b_host_launch_plan.v0"
+    and .host_launch_plan.ready == true
+    and .host_launch_plan.read_only == true
+    and .host_launch_plan.uses_source_probe == true
+    and .host_launch_plan.does_not_clone == true
+    and .host_launch_plan.does_not_start_host == true
+    and .host_launch_plan.operator_launch_required == true
+    and .host_launch_plan.agent_bridge_client_only == true
     and .boundary.calls_memory_search == false
     and .boundary.runs_biocortex == false
     and .boundary.writes_approval == false
@@ -1494,6 +1510,43 @@ jq -e '
     and .boundary.mutates_default_agent_bridge_db == false
 ' "$tmp_onsen_step_b_host_source_probe" >/dev/null
 
+tmp_onsen_step_b_host_launch_plan="$tmpdir/onsen-step-b-host-launch-plan.json"
+"$onsen_step_b_host_launch_plan_script" \
+    --no-remote \
+    --checkout "$tmpdir/missing-onsen-step-b-checkout" \
+    --out "$tmp_onsen_step_b_host_launch_plan"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.onsen_step_b_host_launch_plan.v0"
+    and .status == "blocked_missing_onsen_step_b_source"
+    and .read_only == true
+    and .source_probe.script == "scripts/probe-onsen-step-b-host-source.sh"
+    and .source_probe.source_found == false
+    and .source_probe.ready_for_live_probe == false
+    and .accepted_source.branch == "codex/live-semantic-phase0-t1"
+    and .accepted_source.head == "10d58ee"
+    and .expected_host.host == "127.0.0.1"
+    and .expected_host.port == 37691
+    and .expected_host.protocol == "newline_json_tcp"
+    and .expected_host.required_world_tool == "world_visibility_query"
+    and .launch_plan.action == "none"
+    and .launch_plan.operator_action_required == false
+    and .launch_plan.agent_bridge_starts_host == false
+    and .launch_plan.dev_or_probe_flag_required == true
+    and .launch_plan.onsen_runtime_must_own_launch == true
+    and .boundary.starts_host == false
+    and .boundary.clones_repository == false
+    and .boundary.executes_lswr_actions == false
+    and .boundary.calls_memory_search == false
+    and .boundary.runs_biocortex == false
+    and .boundary.writes_approval == false
+    and .boundary.changes_memory_search_order == false
+    and .boundary.default_search_order_change_allowed == false
+    and .boundary.calls_aiot_runtime == false
+    and .boundary.emits_durable_runtime_action_result == false
+    and .boundary.mutates_default_agent_bridge_db == false
+    and .next_step == "provide_or_sync_onsen_step_b_checkout_or_repository_url"
+' "$tmp_onsen_step_b_host_launch_plan" >/dev/null
+
 tmp_mismatched_onsen_checkout="$tmpdir/mismatched-onsen-step-b-checkout"
 mkdir -p "$tmp_mismatched_onsen_checkout"
 git -C "$tmp_mismatched_onsen_checkout" init -q
@@ -1520,6 +1573,22 @@ jq -e '
     and .result.blocked_by == "missing_checkout_or_accessible_repository_url"
     and .result.next_step == "provide_or_sync_onsen_step_b_checkout_or_repository_url"
 ' "$tmp_mismatched_onsen_probe" >/dev/null
+
+tmp_mismatched_onsen_launch_plan="$tmpdir/mismatched-onsen-step-b-host-launch-plan.json"
+"$onsen_step_b_host_launch_plan_script" \
+    --probe-json "$tmp_mismatched_onsen_probe" \
+    --out "$tmp_mismatched_onsen_launch_plan"
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.onsen_step_b_host_launch_plan.v0"
+    and .status == "blocked_missing_onsen_step_b_source"
+    and .source_probe.source_found == false
+    and .source_probe.ready_for_live_probe == false
+    and .launch_plan.action == "none"
+    and .launch_plan.agent_bridge_starts_host == false
+    and .boundary.starts_host == false
+    and .boundary.executes_lswr_actions == false
+    and .next_step == "provide_or_sync_onsen_step_b_checkout_or_repository_url"
+' "$tmp_mismatched_onsen_launch_plan" >/dev/null
 
 tmp_downstream_aio_runtime_evidence_handoff="$tmpdir/downstream-aio-runtime-evidence-handoff.json"
 run cargo run -p ab-bridge --no-default-features -- \
