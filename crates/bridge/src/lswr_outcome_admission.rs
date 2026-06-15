@@ -24,6 +24,12 @@ pub const LSWR_OUTCOME_ADMISSION_DRY_RUN_SCHEMA: &str =
     "agent_bridge.lswr.outcome_admission_dry_run.v0";
 pub const LSWR_OUTCOME_ADMISSION_INGEST_PLAN_SCHEMA: &str =
     "agent_bridge.lswr.outcome_admission_ingest_plan.v0";
+pub const LSWR_OUTCOME_ADMISSION_WRITE_PREFLIGHT_SCHEMA: &str =
+    "agent_bridge.lswr.outcome_admission_write_preflight.v0";
+pub const LSWR_OUTCOME_ADMISSION_WRITE_CONFIRMATION: &str =
+    "persist_lswr_training_eligible_outcomes";
+pub const LSWR_OUTCOME_ADMISSION_APPROVAL_THREAD_ID: u64 = 102;
+pub const LSWR_OUTCOME_ADMISSION_FIRST_WRITE_MAX_WRITES: u64 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LswrAdmissionClass {
@@ -393,6 +399,180 @@ pub fn outcome_admission_ingest_plan_hash(rows: &[Value]) -> String {
     let canonical = serde_json::to_vec(&Value::Array(rows.to_vec())).unwrap_or_default();
     let digest = Sha256::digest(canonical);
     format!("sha256:{digest:x}")
+}
+
+/// Step E4d read-only preflight over a future explicit write request.
+///
+/// This validates the request shape against a recomputed E4c plan without store
+/// access and without flipping any write permission. It is deliberately suitable
+/// for a read-only MCP preview before any `memory_save` path exists.
+pub fn validate_lswr_e4d_write_request(plan: &Value, request: &Value) -> Value {
+    let mut failure_reasons: Vec<String> = Vec::new();
+    let mut selected_keys: Vec<String> = Vec::new();
+    let mut selected_rows: Vec<Value> = Vec::new();
+    let mut seen_selected: BTreeSet<String> = BTreeSet::new();
+
+    let source_plan_schema = str_at(plan, &["schema"]);
+    if source_plan_schema != Some(LSWR_OUTCOME_ADMISSION_INGEST_PLAN_SCHEMA) {
+        failure_reasons.push("unsupported_plan_schema".into());
+    }
+
+    let plan_hash = str_at(plan, &["plan_hash"]);
+    if plan_hash.is_none() {
+        failure_reasons.push("missing_plan_hash".into());
+    }
+
+    let rows = plan
+        .get("rows")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut rows_by_key: BTreeMap<String, Value> = BTreeMap::new();
+    for row in rows {
+        if let Some(key) = str_at(&row, &["key"]) {
+            rows_by_key.insert(key.to_string(), row);
+        }
+    }
+
+    if !request.is_object() {
+        failure_reasons.push("request_not_object".into());
+    }
+
+    let request_dry_run_false = request.get("dry_run").and_then(Value::as_bool) == Some(false);
+    if !request_dry_run_false {
+        failure_reasons.push("dry_run_false_required".into());
+    }
+
+    let confirmation = str_at(request, &["apply_confirmation"]);
+    let confirmation_ok = confirmation == Some(LSWR_OUTCOME_ADMISSION_WRITE_CONFIRMATION);
+    if confirmation.is_none() {
+        failure_reasons.push("missing_confirmation_token".into());
+    } else if !confirmation_ok {
+        failure_reasons.push("wrong_confirmation_token".into());
+    }
+
+    let approval_thread_id = request.get("approval_thread_id").and_then(Value::as_u64);
+    if approval_thread_id.is_none() {
+        failure_reasons.push("missing_approval_thread_id".into());
+    } else if approval_thread_id != Some(LSWR_OUTCOME_ADMISSION_APPROVAL_THREAD_ID) {
+        failure_reasons.push("wrong_approval_thread_id".into());
+    }
+
+    let approval_post_id = request.get("approval_post_id").and_then(Value::as_u64);
+    if approval_post_id.is_none() || approval_post_id == Some(0) {
+        failure_reasons.push("missing_or_invalid_approval_post_id".into());
+    }
+
+    let reviewed_plan_hash = str_at(request, &["reviewed_plan_hash"]);
+    let plan_hash_ok = reviewed_plan_hash.is_some() && reviewed_plan_hash == plan_hash;
+    if reviewed_plan_hash.is_none() {
+        failure_reasons.push("missing_reviewed_plan_hash".into());
+    } else if !plan_hash_ok {
+        failure_reasons.push("plan_hash_mismatch".into());
+    }
+
+    let max_writes = request.get("max_writes").and_then(Value::as_u64);
+    if max_writes.is_none() {
+        failure_reasons.push("missing_or_invalid_max_writes".into());
+    } else if max_writes > Some(LSWR_OUTCOME_ADMISSION_FIRST_WRITE_MAX_WRITES) {
+        failure_reasons.push("max_writes_above_first_slice_cap".into());
+    }
+
+    match request.get("candidate_keys").and_then(Value::as_array) {
+        Some(keys) if keys.is_empty() => {
+            failure_reasons.push("empty_candidate_keys".into());
+        }
+        Some(keys) => {
+            for key in keys {
+                let Some(key) = key.as_str() else {
+                    failure_reasons.push("candidate_key_not_string".into());
+                    continue;
+                };
+                selected_keys.push(key.to_string());
+                if !seen_selected.insert(key.to_string()) {
+                    failure_reasons.push("duplicate_candidate_key".into());
+                }
+            }
+        }
+        None => failure_reasons.push("missing_or_invalid_candidate_keys".into()),
+    }
+
+    if let Some(max_writes) = max_writes {
+        if selected_keys.len() as u64 > max_writes {
+            failure_reasons.push("candidate_count_above_max_writes".into());
+        }
+    }
+
+    for key in &selected_keys {
+        let Some(row) = rows_by_key.get(key) else {
+            failure_reasons.push("unknown_candidate_key".into());
+            continue;
+        };
+
+        match row.get("active_row_exists").and_then(Value::as_bool) {
+            Some(false) => {}
+            Some(true) => failure_reasons.push("active_row_exists".into()),
+            None => failure_reasons.push("active_row_state_unknown".into()),
+        }
+
+        if row.get("write_allowed").and_then(Value::as_bool) != Some(false) {
+            failure_reasons.push("selected_row_write_allowed_not_false".into());
+        }
+        if row.get("requires_review").and_then(Value::as_bool) != Some(true) {
+            failure_reasons.push("selected_row_requires_review_not_true".into());
+        }
+
+        let memory = row.get("memory").unwrap_or(&Value::Null);
+        if !memory.is_object() {
+            failure_reasons.push("selected_row_memory_missing".into());
+        } else {
+            if str_at(memory, &["key"]) != Some(key.as_str()) {
+                failure_reasons.push("selected_row_memory_key_mismatch".into());
+            }
+            if str_at(memory, &["kind"]) != Some(OUTCOME_MEMORY_KIND) {
+                failure_reasons.push("selected_row_kind_not_present_outcome".into());
+            }
+            if str_at(memory, &["content"]).is_none() {
+                failure_reasons.push("selected_row_content_missing".into());
+            }
+        }
+
+        selected_rows.push(row.clone());
+    }
+
+    failure_reasons.sort();
+    failure_reasons.dedup();
+    let valid = failure_reasons.is_empty();
+    let failure_reasons_json: Vec<Value> = failure_reasons
+        .iter()
+        .map(|reason| Value::String(reason.clone()))
+        .collect();
+
+    json!({
+        "schema": LSWR_OUTCOME_ADMISSION_WRITE_PREFLIGHT_SCHEMA,
+        "valid": valid,
+        "dry_run": true,
+        "writes_state": false,
+        "store_access_required": false,
+        "write_tool_open": false,
+        "future_write_tool": "lswr_outcome_admissions_ingest",
+        "source_plan_schema": source_plan_schema,
+        "plan_hash": plan_hash,
+        "reviewed_plan_hash": reviewed_plan_hash,
+        "plan_hash_ok": plan_hash_ok,
+        "request_dry_run_false": request_dry_run_false,
+        "confirmation_ok": confirmation_ok,
+        "approval_thread_id": approval_thread_id,
+        "approval_post_id": approval_post_id,
+        "required_approval_thread_id": LSWR_OUTCOME_ADMISSION_APPROVAL_THREAD_ID,
+        "max_writes": max_writes,
+        "first_slice_max_writes": LSWR_OUTCOME_ADMISSION_FIRST_WRITE_MAX_WRITES,
+        "selected_count": selected_keys.len(),
+        "candidate_keys": selected_keys,
+        "failure_reasons": failure_reasons_json,
+        "selected_rows": selected_rows,
+        "note": "read-only E4d preflight: validates a future explicit write request against a recomputed E4c plan; no store access and no memory writes.",
+    })
 }
 
 fn admission_record(
@@ -1298,5 +1478,143 @@ mod tests {
         assert_eq!(plan["rows"][0]["active_row_exists"], true);
         assert_eq!(plan["rows"][0]["write_allowed"], false);
         assert_eq!(plan["rows"][0]["requires_review"], true);
+    }
+
+    fn preflight_plan_with_active_rows(active_rows: Option<&BTreeSet<String>>) -> Value {
+        let packet = verified_patch_packet();
+        let admission = classify_outcome_admission(&packet, &expression(), Some(&packet));
+        let dry_run = outcome_admission_dry_run_candidates(&[admission], 1_780_000_020, 86_400, 25);
+        outcome_admission_ingest_plan_from_dry_run(&dry_run, 1_780_000_030, active_rows)
+    }
+
+    fn valid_e4d_request(plan: &Value) -> Value {
+        json!({
+            "dry_run": false,
+            "apply_confirmation": LSWR_OUTCOME_ADMISSION_WRITE_CONFIRMATION,
+            "approval_thread_id": LSWR_OUTCOME_ADMISSION_APPROVAL_THREAD_ID,
+            "approval_post_id": 3004,
+            "reviewed_plan_hash": plan["plan_hash"],
+            "candidate_keys": [plan["candidate_keys"][0].clone()],
+            "max_writes": 1,
+        })
+    }
+
+    fn failure_reasons(result: &Value) -> BTreeSet<String> {
+        result
+            .get("failure_reasons")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect()
+    }
+
+    #[test]
+    fn e4d_write_preflight_accepts_exact_reviewed_shape_without_store_access() {
+        let empty_active = BTreeSet::new();
+        let plan = preflight_plan_with_active_rows(Some(&empty_active));
+        let request = valid_e4d_request(&plan);
+        let result = validate_lswr_e4d_write_request(&plan, &request);
+
+        assert_eq!(
+            result["schema"],
+            LSWR_OUTCOME_ADMISSION_WRITE_PREFLIGHT_SCHEMA
+        );
+        assert_eq!(result["valid"], true);
+        assert_eq!(result["dry_run"], true);
+        assert_eq!(result["writes_state"], false);
+        assert_eq!(result["store_access_required"], false);
+        assert_eq!(result["write_tool_open"], false);
+        assert_eq!(result["request_dry_run_false"], true);
+        assert_eq!(result["confirmation_ok"], true);
+        assert_eq!(result["plan_hash_ok"], true);
+        assert_eq!(result["selected_count"], json!(1));
+        assert_eq!(result["failure_reasons"], json!([]));
+        assert_eq!(
+            result["selected_rows"][0]["key"],
+            "outcome_ab_step_e_fixture"
+        );
+        assert_eq!(result["selected_rows"][0]["write_allowed"], false);
+    }
+
+    #[test]
+    fn e4d_write_preflight_rejects_missing_approval_contract_fields() {
+        let empty_active = BTreeSet::new();
+        let plan = preflight_plan_with_active_rows(Some(&empty_active));
+        let result = validate_lswr_e4d_write_request(&plan, &json!({}));
+        let reasons = failure_reasons(&result);
+
+        assert_eq!(result["valid"], false);
+        assert_eq!(result["writes_state"], false);
+        for required in [
+            "dry_run_false_required",
+            "missing_confirmation_token",
+            "missing_approval_thread_id",
+            "missing_or_invalid_approval_post_id",
+            "missing_reviewed_plan_hash",
+            "missing_or_invalid_max_writes",
+            "missing_or_invalid_candidate_keys",
+        ] {
+            assert!(
+                reasons.contains(required),
+                "missing failure reason {required}"
+            );
+        }
+    }
+
+    #[test]
+    fn e4d_write_preflight_rejects_mismatched_hash_unknown_keys_and_cap_overflow() {
+        let empty_active = BTreeSet::new();
+        let plan = preflight_plan_with_active_rows(Some(&empty_active));
+        let request = json!({
+            "dry_run": false,
+            "apply_confirmation": "wrong",
+            "approval_thread_id": 999,
+            "approval_post_id": 0,
+            "reviewed_plan_hash": "sha256:not-the-plan",
+            "candidate_keys": [
+                plan["candidate_keys"][0].clone(),
+                plan["candidate_keys"][0].clone(),
+                "unknown_outcome_key"
+            ],
+            "max_writes": 2,
+        });
+        let result = validate_lswr_e4d_write_request(&plan, &request);
+        let reasons = failure_reasons(&result);
+
+        assert_eq!(result["valid"], false);
+        assert_eq!(result["writes_state"], false);
+        for required in [
+            "wrong_confirmation_token",
+            "wrong_approval_thread_id",
+            "missing_or_invalid_approval_post_id",
+            "plan_hash_mismatch",
+            "duplicate_candidate_key",
+            "unknown_candidate_key",
+            "candidate_count_above_max_writes",
+            "max_writes_above_first_slice_cap",
+        ] {
+            assert!(
+                reasons.contains(required),
+                "missing failure reason {required}"
+            );
+        }
+    }
+
+    #[test]
+    fn e4d_write_preflight_rejects_active_or_unknown_active_state() {
+        let active_rows = BTreeSet::from(["outcome_ab_step_e_fixture".to_string()]);
+        let active_plan = preflight_plan_with_active_rows(Some(&active_rows));
+        let active_result =
+            validate_lswr_e4d_write_request(&active_plan, &valid_e4d_request(&active_plan));
+        assert!(failure_reasons(&active_result).contains("active_row_exists"));
+        assert_eq!(active_result["writes_state"], false);
+
+        let unknown_plan = preflight_plan_with_active_rows(None);
+        let unknown_result =
+            validate_lswr_e4d_write_request(&unknown_plan, &valid_e4d_request(&unknown_plan));
+        assert!(failure_reasons(&unknown_result).contains("active_row_state_unknown"));
+        assert_eq!(unknown_result["writes_state"], false);
     }
 }

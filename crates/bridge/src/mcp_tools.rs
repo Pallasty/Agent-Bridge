@@ -11270,6 +11270,234 @@ impl McpTool for LswrOutcomeAdmissionsApprovalPacketTool {
     }
 }
 
+/// LSWR Step E4d preflight: READ-ONLY validation of a future write request.
+///
+/// This tool intentionally is not the writer. It recomputes the E4c plan,
+/// validates an operator-supplied future write request against that plan, and
+/// always returns `writes_state=false`.
+pub struct LswrOutcomeAdmissionsWritePreflightTool {
+    hub: Hub,
+}
+impl LswrOutcomeAdmissionsWritePreflightTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for LswrOutcomeAdmissionsWritePreflightTool {
+    fn name(&self) -> &'static str {
+        "lswr_outcome_admissions_write_preflight"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "LSWR Step E4d: READ-ONLY write-request preflight over a \
+                 recomputed E4c approval packet. Accepts a proposed future \
+                 lswr_outcome_admissions_ingest request object, validates confirmation, \
+                 approval anchor, reviewed plan_hash, candidate keys, first-slice cap, \
+                 and active-row status, but writes nothing, exposes no executable writer, \
+                 calls no memory_save, and never invokes present_outcomes_ingest."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "window_secs": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 31536000,
+                        "default": 86400,
+                        "description": "Look-back window over present artifacts by provenance timestamp; used to recompute the E4c plan."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 200,
+                        "description": "Max HTML artifacts scanned (most-recent-first before timestamp filtering)."
+                    },
+                    "max_candidates": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 200,
+                        "default": 25,
+                        "description": "Hard cap on planned present_outcome candidate rows included in the recomputed E4c plan."
+                    },
+                    "request": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "description": "Proposed future writer request to validate; this preflight tool never executes it.",
+                        "properties": {
+                            "dry_run": {
+                                "type": "boolean",
+                                "const": false,
+                                "description": "Must be false in the future writer request shape; the preflight result itself still writes nothing."
+                            },
+                            "apply_confirmation": {
+                                "type": "string",
+                                "const": crate::lswr_outcome_admission::LSWR_OUTCOME_ADMISSION_WRITE_CONFIRMATION,
+                                "description": "Exact confirmation token required before any future writer can be implemented."
+                            },
+                            "approval_thread_id": {
+                                "type": "integer",
+                                "const": crate::lswr_outcome_admission::LSWR_OUTCOME_ADMISSION_APPROVAL_THREAD_ID,
+                                "description": "Board thread that must contain the owner approval post."
+                            },
+                            "approval_post_id": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "description": "Positive owner approval post id; zero or missing is invalid."
+                            },
+                            "reviewed_plan_hash": {
+                                "type": "string",
+                                "pattern": "^sha256:[0-9a-f]{64}$",
+                                "description": "Plan hash from the reviewed E4c approval packet."
+                            },
+                            "candidate_keys": {
+                                "type": "array",
+                                "minItems": 1,
+                                "items": {"type": "string"},
+                                "description": "Subset of candidate keys selected from the reviewed E4c plan."
+                            },
+                            "max_writes": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 1,
+                                "description": "First E4d slice cap; must be 1 or less."
+                            }
+                        }
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let window_secs = args
+            .get("window_secs")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(86_400)
+            .clamp(60, 31_536_000);
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(200)
+            .clamp(1, 500) as usize;
+        let max_candidates = args
+            .get("max_candidates")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(25)
+            .clamp(1, 200) as usize;
+        let request = args.get("request").cloned().unwrap_or(Value::Null);
+
+        let now = dispatch_now_secs();
+        let cutoff = now.saturating_sub(window_secs).max(0) as u64;
+        let dir = crate::present::presentations_dir();
+        let artifacts: Vec<_> = crate::present::list_artifacts(&dir, limit, Some("html"))
+            .into_iter()
+            .filter(|a| a.ts.map_or(true, |t| t >= cutoff))
+            .collect();
+        let projection = crate::lswr_outcome_admission::outcome_admissions_projection(
+            &artifacts,
+            false,
+            now.max(0) as u64,
+            window_secs as u64,
+        );
+        let admissions: Vec<Value> = projection
+            .get("admissions")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let dry_run = crate::lswr_outcome_admission::outcome_admission_dry_run_candidates(
+            &admissions,
+            now.max(0) as u64,
+            window_secs as u64,
+            max_candidates,
+        );
+
+        let active_rows = if let Some(store) = &self.hub.store {
+            let keys: Vec<String> = dry_run
+                .get("candidates")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|candidate| {
+                    candidate
+                        .get("memory")
+                        .and_then(|m| m.get("key"))
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                })
+                .collect();
+            let mut active = BTreeSet::new();
+            for key in keys {
+                let exists = store
+                    .memory_search(&key, &[], 5)
+                    .await
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|hit| hit.record.key == key);
+                if exists {
+                    active.insert(key);
+                }
+            }
+            Some(active)
+        } else {
+            None
+        };
+
+        let plan = crate::lswr_outcome_admission::outcome_admission_ingest_plan_from_dry_run(
+            &dry_run,
+            now.max(0) as u64,
+            active_rows.as_ref(),
+        );
+        let mut validation =
+            crate::lswr_outcome_admission::validate_lswr_e4d_write_request(&plan, &request);
+        if let Some(obj) = validation.as_object_mut() {
+            obj.insert("dir".into(), json!(dir.display().to_string()));
+            obj.insert("limit".into(), json!(limit));
+            obj.insert("max_candidates".into(), json!(max_candidates));
+            obj.insert(
+                "store_probe".into(),
+                json!(if active_rows.is_some() {
+                    "memory_search_active_only"
+                } else {
+                    "store_unavailable"
+                }),
+            );
+            obj.insert(
+                "approval_packet".into(),
+                json!({
+                    "schema": plan.get("schema").cloned().unwrap_or(Value::Null),
+                    "candidate_count": plan.get("candidate_count").cloned().unwrap_or(Value::Null),
+                    "candidate_keys": plan.get("candidate_keys").cloned().unwrap_or(Value::Null),
+                    "active_row_check": plan.get("active_row_check").cloned().unwrap_or(Value::Null),
+                    "active_row_exists_count": plan.get("active_row_exists_count").cloned().unwrap_or(Value::Null),
+                    "plan_hash": plan.get("plan_hash").cloned().unwrap_or(Value::Null),
+                    "writes_state": plan.get("writes_state").cloned().unwrap_or(Value::Null),
+                    "write_tool_open": plan.get("write_tool_open").cloned().unwrap_or(Value::Null),
+                }),
+            );
+            for key in [
+                "scanned_artifacts",
+                "skipped_non_lswr_count",
+                "artifact_read_error_count",
+                "lswr_artifact_count",
+                "training_eligible_count",
+                "audit_only_count",
+                "rejected_count",
+                "reason_counts",
+            ] {
+                if let Some(value) = projection.get(key) {
+                    obj.insert(key.into(), value.clone());
+                }
+            }
+        }
+        Ok(ToolResult::json_text(&validation))
+    }
+}
+
 // ── Output-expression lane Slice B (v0) ───────────────────────────────────
 // Two tools: a read-only outcome→memory drift projection (always-on, zero
 // risk, zero owner coordination), and an opt-in, dry-run-default, capped
@@ -40569,6 +40797,14 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Niche,
         Arc::new(LswrOutcomeAdmissionsApprovalPacketTool::new(hub.clone())),
     );
+    // LSWR Step E4d: read-only future-write request validator over the E4c plan.
+    // Niche (opt-in), no writer path and no memory writes.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(LswrOutcomeAdmissionsWritePreflightTool::new(hub.clone())),
+    );
     // Slice B (v0): read-only outcome→memory drift projection. Reports which
     // verified outcomes are/aren't represented in memory (tamper-evident chain);
     // writes nothing, non-mutating probe. Niche (opt-in).
@@ -47163,6 +47399,9 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         // LSWR Step E4c approval packet is also Niche/all only and read-only.
         assert!(all.includes(Tier::Niche, "lswr_outcome_admissions_approval_packet"));
         assert!(!std_p.includes(Tier::Niche, "lswr_outcome_admissions_approval_packet"));
+        // LSWR Step E4d preflight is also Niche/all only and read-only.
+        assert!(all.includes(Tier::Niche, "lswr_outcome_admissions_write_preflight"));
+        assert!(!std_p.includes(Tier::Niche, "lswr_outcome_admissions_write_preflight"));
         // Audio embodiment present_voice is the same Niche opt-in shape.
         assert!(all.includes(Tier::Niche, "present_voice"));
         assert!(!std_p.includes(Tier::Niche, "present_voice"));
@@ -47192,6 +47431,7 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         assert!(!codex_essential.includes(Tier::Niche, "lswr_outcome_admissions"));
         assert!(!codex_essential.includes(Tier::Niche, "lswr_outcome_admissions_dry_run"));
         assert!(!codex_essential.includes(Tier::Niche, "lswr_outcome_admissions_approval_packet"));
+        assert!(!codex_essential.includes(Tier::Niche, "lswr_outcome_admissions_write_preflight"));
         let schemas = build_registry_with_policy(Hub::builder().build(), all).list();
         assert!(
             schemas.iter().any(|s| s.name == "present"),
@@ -47224,6 +47464,12 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
                 .iter()
                 .any(|s| s.name == "lswr_outcome_admissions_approval_packet"),
             "lswr_outcome_admissions_approval_packet must register under the all profile"
+        );
+        assert!(
+            schemas
+                .iter()
+                .any(|s| s.name == "lswr_outcome_admissions_write_preflight"),
+            "lswr_outcome_admissions_write_preflight must register under the all profile"
         );
         assert!(
             schemas.iter().any(|s| s.name == "present_voice"),
@@ -47271,6 +47517,12 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
                 .any(|s| s.name == "lswr_outcome_admissions_approval_packet"),
             "lswr_outcome_admissions_approval_packet must stay out of standard"
         );
+        assert!(
+            !standard_schemas
+                .iter()
+                .any(|s| s.name == "lswr_outcome_admissions_write_preflight"),
+            "lswr_outcome_admissions_write_preflight must stay out of standard"
+        );
         let codex_schemas =
             build_registry_with_policy(Hub::builder().build(), codex_essential).list();
         assert!(
@@ -47290,6 +47542,12 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
                 .iter()
                 .any(|s| s.name == "lswr_outcome_admissions_approval_packet"),
             "lswr_outcome_admissions_approval_packet must stay out of codex-essential"
+        );
+        assert!(
+            !codex_schemas
+                .iter()
+                .any(|s| s.name == "lswr_outcome_admissions_write_preflight"),
+            "lswr_outcome_admissions_write_preflight must stay out of codex-essential"
         );
     }
 
@@ -47355,6 +47613,53 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
                 "{forbidden} must not be exposed by the E4c read-only approval packet tool"
             );
         }
+    }
+
+    #[test]
+    fn lswr_outcome_admissions_write_preflight_schema_is_read_only_validator() {
+        let all = ToolPolicy::from_values(None, None, None, Some("all"));
+        let schemas = build_registry_with_policy(Hub::builder().build(), all).list();
+        let tool = schemas
+            .iter()
+            .find(|s| s.name == "lswr_outcome_admissions_write_preflight")
+            .expect("lswr_outcome_admissions_write_preflight schema");
+
+        assert!(tool.description.contains("READ-ONLY"));
+        assert!(tool.description.contains("writes nothing"));
+        assert!(tool.description.contains("calls no memory_save"));
+        assert_eq!(
+            tool.input_schema["additionalProperties"],
+            serde_json::Value::Bool(false)
+        );
+        let props = &tool.input_schema["properties"];
+        assert!(props.get("request").is_some());
+        assert!(props.get("dry_run").is_none());
+        assert!(props.get("max_writes").is_none());
+        assert!(props.get("memory_save").is_none());
+        let request_props = &props["request"]["properties"];
+        for required in [
+            "dry_run",
+            "apply_confirmation",
+            "approval_thread_id",
+            "approval_post_id",
+            "reviewed_plan_hash",
+            "candidate_keys",
+            "max_writes",
+        ] {
+            assert!(
+                request_props.get(required).is_some(),
+                "{required} must be part of the proposed request object"
+            );
+        }
+        assert_eq!(
+            request_props["apply_confirmation"]["const"],
+            crate::lswr_outcome_admission::LSWR_OUTCOME_ADMISSION_WRITE_CONFIRMATION
+        );
+        assert_eq!(
+            request_props["approval_thread_id"]["const"],
+            crate::lswr_outcome_admission::LSWR_OUTCOME_ADMISSION_APPROVAL_THREAD_ID
+        );
+        assert_eq!(request_props["max_writes"]["maximum"], 1);
     }
 
     #[test]

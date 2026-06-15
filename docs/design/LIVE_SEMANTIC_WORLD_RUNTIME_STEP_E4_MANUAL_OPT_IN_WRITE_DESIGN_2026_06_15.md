@@ -237,7 +237,7 @@ coding slice should be E4b/E4c only: pure plan hash plus read-only approval
 packet. The actual `dry_run=false` writer should remain a later, separately
 approved slice.
 
-## 11. E4b/E4c Implementation Status
+## 11. E4b/E4c/E4d Read-Only Implementation Status
 
 Implemented after owner go-ahead in the Codex lane:
 
@@ -248,6 +248,18 @@ Implemented after owner go-ahead in the Codex lane:
 - optional active-row status via non-mutating `memory_search` probes;
 - `dry_run=true`, `writes_state=false`, and `write_tool_open=false` in the
   returned packet.
+
+E4d read-only preflight has also been added:
+
+- pure validator `validate_lswr_e4d_write_request(plan, request)`;
+- all-profile-only read-only tool `lswr_outcome_admissions_write_preflight`;
+- response schema `agent_bridge.lswr.outcome_admission_write_preflight.v0`;
+- validates a proposed future writer request against the recomputed E4c plan;
+- rejects missing/wrong confirmation, approval anchor, reviewed plan hash,
+  candidate keys, write caps, duplicate/unknown keys, active rows, and unknown
+  active-row status;
+- still returns `dry_run=true`, `writes_state=false`, `store_access_required=false`,
+  and `write_tool_open=false`.
 
 Repeatable non-empty smoke:
 
@@ -264,7 +276,8 @@ Still not implemented:
 
 - no `lswr_outcome_admissions_ingest` writer;
 - no `dry_run=false` surface;
-- no `max_writes` input;
+- no top-level executable `max_writes` input outside the read-only proposed
+  request object;
 - no `present_outcomes_ingest(dry_run=false)` call;
 - no Codex-essential or standard profile exposure.
 
@@ -274,5 +287,6 @@ and first-run cap.
 
 Before implementing the writer, follow the
 [Step E4d Writer Preflight](LIVE_SEMANTIC_WORLD_RUNTIME_STEP_E4D_WRITER_PREFLIGHT_2026_06_15.md).
-The recommended next coding slice is still read-only: pure request validation
-and a validation preview, not `memory_save`.
+The recommended next coding slice after this preflight is owner review, then a
+separately approved first-write implementation trial, not automatic
+`memory_save`.

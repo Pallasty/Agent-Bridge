@@ -14,11 +14,22 @@ Board anchors:
 
 ## 0. Status
 
-This document is a preflight gate, not an implementation.
+This document is a preflight gate, not a writer implementation.
 
-No Step E4d writer exists in this slice. E4d must remain closed until this
-checklist is reviewed and an owner approval post explicitly authorizes the next
-implementation slice.
+Step E4d now has a pure request validator plus a read-only MCP validation
+preview:
+
+- pure validator: `validate_lswr_e4d_write_request(plan, request)`;
+- all-profile-only read-only tool:
+  `lswr_outcome_admissions_write_preflight`;
+- response schema:
+  `agent_bridge.lswr.outcome_admission_write_preflight.v0`.
+
+The validation preview recomputes the live E4c approval packet, validates a
+proposed future write request against that exact plan, and still reports
+`writes_state=false`. No Step E4d writer exists in this slice. E4d must remain
+closed until this checklist is reviewed again and an owner approval post
+explicitly authorizes the first write implementation slice.
 
 ## 1. Safety Objective
 
@@ -100,7 +111,7 @@ Any failure before step 9 must report `writes_state=false`.
 
 ## 5. Pure Validation Function
 
-Before adding the MCP writer, implement a pure validator with no store access:
+Before adding the MCP writer, keep the pure validator with no store access:
 
 ```rust
 validate_lswr_e4d_write_request(plan, request) -> validation_result
@@ -147,8 +158,10 @@ Minimum validation responsibilities:
 
 The writer implementation must include tests for:
 
-1. pure validator accepts only the exact approved request shape;
+1. pure validator accepts only the exact approved request shape; implemented for
+   the read-only preflight slice;
 2. every failure-mode matrix row that can be unit-tested without a store;
+   partially implemented for the read-only preflight slice;
 3. store-unavailable path returns `writes_state=false`;
 4. active-row collision refuses the row before `memory_save`;
 5. unknown candidate key refuses before store access;
@@ -171,19 +184,27 @@ Before deployment, run:
 
 ```bash
 cargo test -p ab-bridge lswr_outcome_admission -- --nocapture
-cargo test -p ab-bridge lswr_outcome_admissions_ingest -- --nocapture
+cargo test -p ab-bridge lswr_outcome_admissions_write_preflight -- --nocapture
 cargo check -p ab-bridge --all-targets
 scripts/lswr_e4_approval_packet_smoke.sh
 ```
 
 After deployment, use fresh MCP stdio probes:
 
-- all-profile `tools/list` includes `lswr_outcome_admissions_ingest`;
+- all-profile `tools/list` includes `lswr_outcome_admissions_write_preflight`;
 - standard `tools/list` does not include it;
 - Codex-essential `tools/list` does not include it;
+- invalid preflight attempts return `writes_state=false`;
+- a valid preflight still returns `writes_state=false` and does not call
+  `memory_save`.
+
+Future writer acceptance, after separate owner approval:
+
+- all-profile `tools/list` includes `lswr_outcome_admissions_ingest`;
+- standard/Codex-essential do not include it;
 - invalid write attempts return `writes_state=false`;
-- a valid write trial must use a temporary or deliberately selected store and
-  `max_writes=1`.
+- the valid first write trial must use a temporary or deliberately selected
+  store and `max_writes=1`.
 
 ## 9. First Write Trial Evidence
 
@@ -223,11 +244,16 @@ edges, or Codex-essential exposure.
 
 ## 11. Recommended Next Slice
 
-Do not implement the writer directly.
+Do not implement the writer directly from here without another owner review.
 
-Recommended next coding slice:
+Completed read-only coding slice:
 
 1. add the pure request validator and tests;
 2. add a read-only validation preview that consumes the live E4c plan and a
-   proposed request object but still writes nothing;
+   proposed request object but still writes nothing.
+
+Recommended next step:
+
+1. deploy and profile-probe `lswr_outcome_admissions_write_preflight`;
+2. post evidence to `#102`;
 3. ask for owner review again before adding the actual `memory_save` path.
