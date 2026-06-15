@@ -1,6 +1,6 @@
 # Live Semantic World Runtime - Interaction Feedback Fixture
 
-**2026-06-15 - role: fixture / docs-only**
+**2026-06-15 - role: fixture / pure local evidence**
 
 Parent documents:
 - [Interaction feedback protocol](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_PROTOCOL_2026_06_15.md)
@@ -12,6 +12,8 @@ Forum anchors:
 - `#102` post `#3015`: interaction feedback protocol done.
 - `#102` post `#3016`: E4 deploy/doc boundary follow-up.
 - `#102` post `#3018`: start notice for this fixture slice.
+- `#102` post `#3044`: reusable evidence packet helper landed at `fe70e8d`.
+- `#102` post `#3045`: documentation sync for the landed helper.
 
 ## 0. Purpose
 
@@ -30,8 +32,9 @@ human.select
   -> ai.patch_proposed
 ```
 
-The fixture is intentionally docs-only. It does not add code, register MCP
-tools, touch Onsen, open a writer, call `memory_save`, or introduce #94
+The fixture started as docs-only and now has a pure local validator, Markdown
+renderer, smoke runner, and evidence packet helper. It still does not register
+MCP tools, touch Onsen, open a writer, call `memory_save`, or introduce #94
 ingestion.
 
 ## Artifacts
@@ -40,8 +43,14 @@ ingestion.
   `docs/design/LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_FIXTURE_2026_06_15.md`
 - Test fixture:
   `crates/bridge/tests/fixtures/lswr_interaction_feedback_fixture_v0.json`
+- Stable Markdown envelope fixture:
+  `crates/bridge/tests/fixtures/lswr_interaction_feedback_validation_envelope_v0.md`
 - Pure validator/report test:
   `crates/bridge/tests/lswr_interaction_feedback_fixture.rs`
+- Pure module:
+  `crates/bridge/src/lswr_interaction_feedback.rs`
+- Smoke runner:
+  `crates/bridge/examples/lswr_interaction_feedback_report_smoke.rs`
 
 ## 1. Fixture Scenario
 
@@ -649,16 +658,41 @@ This fixture does not:
 - claim default-profile exposure;
 - require screenshots for primary readback.
 
-## 6. Recommended Next Work
+## 6. Evidence Packet
 
-Next implementation should remain read-only:
+The reusable packet helper is:
 
-1. Move this JSON fixture into a test fixture file.
-2. Add a pure validator that checks:
-   - event ID uniqueness;
-   - referenced cause events exist;
-   - patch IDs chain correctly;
-   - failed verification survives human review;
-   - revision patches cite both failed verification and feedback.
-3. Add a report formatter that produces the readback table in section 3.
-4. Keep any MCP exposure all-profile/niche until accepted.
+```text
+build_interaction_feedback_evidence_packet(...)
+```
+
+It emits:
+
+```text
+agent_bridge.lswr.interaction_feedback_evidence_packet.v0
+```
+
+The packet contains the fixture ID, schema chain, validation verdict,
+failure reasons, guardrails, structured readback, rendered Markdown, embedded
+validation envelope, and a local-only note:
+
+```text
+local evidence only: pure fixture render, no MCP call, no store access, no memory write
+```
+
+This gives later consumers one explicit object to review before any runtime or
+MCP exposure is considered.
+
+## 7. Recommended Next Work
+
+Next work should remain read-only and acceptance-gated:
+
+1. Decide whether a future consumer should remain an example/smoke runner or
+   become an all-profile/niche read-only report surface.
+2. If a report surface is accepted, define a strict input contract that accepts
+   an explicit fixture or interaction page and rejects implicit live-runtime
+   queries.
+3. Keep the packet's no-write note and guardrails visible in any rendered
+   surface.
+4. Do not add a writer, #94 ingestion, store mutation, Onsen mutation, or
+   default-profile exposure in the next slice.

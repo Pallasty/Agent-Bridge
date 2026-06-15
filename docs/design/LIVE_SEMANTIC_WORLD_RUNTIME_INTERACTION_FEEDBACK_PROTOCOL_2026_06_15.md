@@ -12,6 +12,8 @@ Parent documents:
 Forum anchors:
 - `#102` post `#3010`: E4d read-only preflight closeout.
 - `#102` post `#3014`: start notice for this protocol slice.
+- `#102` post `#3044`: pure evidence packet helper landed at `fe70e8d`.
+- `#102` post `#3045`: documentation sync for the landed helper.
 
 ## 0. Purpose
 
@@ -359,14 +361,31 @@ produce a new patch proposal that cites both sources.
 Given an observer or critic agent, its feedback appears in the event/feedback
 stream without changing `world.state` or patch history.
 
-## 9. Minimal Implementation Slice
+## 9. Minimal Implementation Slice Status
 
-The next implementation slice should be read-only first:
+The first implementation slice is now read-only and local-only.
 
-1. Add a fixture for `interaction_state`, event page, feedback page, and
-   presentation page.
-2. Add a pure validator that checks event causality and verification honesty.
-3. Add a report generator that summarizes:
+Implemented artifacts:
+
+1. Fixture:
+   `crates/bridge/tests/fixtures/lswr_interaction_feedback_fixture_v0.json`
+2. Pure validator and readback builder:
+   `crates/bridge/src/lswr_interaction_feedback.rs`
+3. Stable Markdown envelope fixture:
+   `crates/bridge/tests/fixtures/lswr_interaction_feedback_validation_envelope_v0.md`
+4. Smoke runner:
+   `crates/bridge/examples/lswr_interaction_feedback_report_smoke.rs`
+5. Reusable evidence packet helper:
+   `build_interaction_feedback_evidence_packet(...)`
+
+The evidence packet schema is:
+
+```text
+agent_bridge.lswr.interaction_feedback_evidence_packet.v0
+```
+
+It summarizes:
+
    - active selection;
    - latest human input;
    - latest AI patch;
@@ -374,26 +393,25 @@ The next implementation slice should be read-only first:
    - latest verification;
    - latest feedback;
    - revision hints.
-4. Expose it only as an all-profile/niche dry-run report until accepted.
 
-No writer should be introduced in this slice.
+The slice remains outside runtime exposure. It registers no MCP tool, exposes no
+default-profile surface, writes no memory, touches no store, opens no writer,
+and does not route anything into #94 ingestion.
 
 ## 10. Recommended Next Work
 
-Proceed with a docs-and-fixtures acceptance slice:
+The next work should be an acceptance-planning slice for consumption, not a
+writer slice.
 
-```text
-LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_FIXTURE_2026_06_15.md
-```
+Candidate scope:
 
-That fixture should contain one complete loop:
+1. Decide whether the evidence packet should remain example-only or become an
+   all-profile/niche read-only report surface.
+2. Define the allowed input shape for such a surface, if accepted.
+3. Keep the packet consumer explicit: it must receive a fixture or accepted
+   interaction page, not query live runtime state implicitly.
+4. Preserve the existing no-laundering rule: human feedback may guide the next
+   revision, but it must not upgrade a lower-layer `not_verified` verdict.
 
-```text
-human.select -> ai.patch_proposed -> runtime.patch_result
-  -> presentation.state_changed -> runtime.verification_result
-  -> human.reject -> feedback.explicit_text -> ai.patch_proposed
-```
-
-The fixture is accepted only if the AI can recover the next revision direction
-from structured state alone, with screenshot evidence optional rather than
-required.
+Do not add a writer, #94 ingestion path, store mutation, or default-profile tool
+as part of the next step.
