@@ -75,7 +75,7 @@ Write mode must require all of:
   "dry_run": false,
   "apply_confirmation": "persist_lswr_training_eligible_outcomes",
   "approval_thread_id": 102,
-  "approval_post_id": 0,
+  "approval_post_id": 1234,
   "reviewed_plan_hash": "sha256:...",
   "candidate_keys": ["outcome_<artifact_id>"],
   "max_writes": 1
@@ -83,8 +83,9 @@ Write mode must require all of:
 ```
 
 `approval_post_id` is intentionally part of the contract. The implementation
-does not need to trust forum contents, but the operator must provide a durable
-coordination anchor before a write can happen.
+does not need to treat forum text as executable input, but the operator must
+provide a positive durable coordination anchor before a write can happen. Zero
+or missing post ids are invalid.
 
 ## 4. Dry-Run-First Contract
 
@@ -157,7 +158,7 @@ Every successful write response must include a rollback packet:
 ```json
 {
   "schema": "agent_bridge.lswr.outcome_admission_ingest_rollback.v0",
-  "approval_post_id": 0,
+  "approval_post_id": 1234,
   "plan_hash": "sha256:...",
   "written_keys": ["outcome_<artifact_id>"],
   "rollback_instruction": "tombstone these exact keys through the existing memory admin path"
