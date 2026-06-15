@@ -65,5 +65,5 @@
     "side_signal_raw_included": false,
     "human_decision_text_included": false
   },
-  "next_step": "restore_or_clone_onsen_step_b_host_checkout_then_launch_dev_host"
+  "next_step": "completed_by_onsen_step_b_source_resolution"
 }

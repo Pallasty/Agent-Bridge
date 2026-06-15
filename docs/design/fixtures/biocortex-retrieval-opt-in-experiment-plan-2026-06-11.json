@@ -1351,7 +1351,7 @@
     "next_step": "completed_by_loopback_lswr_host_attach_preflight",
     "next_step_completed": true
   },
-  "next_step": "restore_or_clone_onsen_step_b_host_checkout_then_launch_dev_host",
+  "next_step": "provide_or_sync_onsen_step_b_checkout_or_repository_url_then_launch_dev_host",
   "loopback_lswr_host_attach_preflight_blocked": true,
   "loopback_lswr_host_attach_preflight": {
     "doc": "docs/design/BIOCORTEX_RETRIEVAL_LOOPBACK_LSWR_HOST_ATTACH_PREFLIGHT_2026_06_15.md",
@@ -1373,6 +1373,33 @@
     "runs_biocortex": false,
     "writes_approval": false,
     "default_search_order_change_allowed": false,
-    "next_step": "restore_or_clone_onsen_step_b_host_checkout_then_launch_dev_host"
+    "next_step": "completed_by_onsen_step_b_source_resolution",
+    "next_step_completed": true
+  },
+  "onsen_step_b_source_resolution_blocked": true,
+  "onsen_step_b_source_resolution": {
+    "doc": "docs/design/BIOCORTEX_RETRIEVAL_ONSEN_STEP_B_SOURCE_RESOLUTION_2026_06_15.md",
+    "fixture": "docs/design/fixtures/biocortex-retrieval-onsen-step-b-source-resolution-2026-06-15.json",
+    "status": "blocked_missing_onsen_step_b_source",
+    "schema": "agent_bridge.biocortex_retrieval.onsen_step_b_source_resolution.v0",
+    "read_only": true,
+    "documented_worktree": "/Users/pallasting/Projects/onsen-hd-live-semantic-phase0",
+    "documented_branch": "codex/live-semantic-phase0-t1",
+    "documented_head": "10d58ee",
+    "expected_endpoint": "127.0.0.1:37691",
+    "expected_protocol": "newline_json_tcp",
+    "linux_candidate_worktree_present": false,
+    "port_37691_listening": false,
+    "remote_resolution_attempted": true,
+    "usable_remote_found": false,
+    "real_onsen_step_b_host_source_found": false,
+    "can_launch_real_onsen_step_b_host_now": false,
+    "can_collect_verified_runtime_action_result_now": false,
+    "blocked_by": "missing_checkout_or_accessible_repository_url",
+    "calls_memory_search": false,
+    "runs_biocortex": false,
+    "writes_approval": false,
+    "default_search_order_change_allowed": false,
+    "next_step": "provide_or_sync_onsen_step_b_checkout_or_repository_url_then_launch_dev_host"
   }
 }

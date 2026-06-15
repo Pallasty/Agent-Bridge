@@ -1234,7 +1234,33 @@ the intended real onsen Step B host:
 - the prior next project action
   `attach_real_onsen_lswr_host_then_collect_verified_live_viewport_action_result`
   is refined to
-  `restore_or_clone_onsen_step_b_host_checkout_then_launch_dev_host`.
+  `restore_or_clone_onsen_step_b_host_checkout_then_launch_dev_host`;
+- source resolution is recorded by Slice 48.
+
+## Onsen Step B Source Resolution
+
+Slice 48 resolves whether the accepted onsen Step B host source is available on
+this Linux checkout:
+
+- committed document:
+  `docs/design/BIOCORTEX_RETRIEVAL_ONSEN_STEP_B_SOURCE_RESOLUTION_2026_06_15.md`;
+- committed machine-readable fixture:
+  `docs/design/fixtures/biocortex-retrieval-onsen-step-b-source-resolution-2026-06-15.json`;
+- fixture schema:
+  `agent_bridge.biocortex_retrieval.onsen_step_b_source_resolution.v0`;
+- status: `blocked_missing_onsen_step_b_source`;
+- documented worktree:
+  `/Users/pallasting/Projects/onsen-hd-live-semantic-phase0`;
+- documented branch: `codex/live-semantic-phase0-t1`;
+- documented head: `10d58ee`;
+- expected endpoint: `127.0.0.1:37691`;
+- expected protocol: `newline_json_tcp`;
+- no accepted onsen Step B checkout is present on this Linux host;
+- no listener is present on `127.0.0.1:37691`;
+- obvious GitHub SSH candidates were checked and did not produce a usable
+  repository from this environment;
+- the next project action is refined to
+  `provide_or_sync_onsen_step_b_checkout_or_repository_url_then_launch_dev_host`.
 
 ## Fail-Open Rules
 

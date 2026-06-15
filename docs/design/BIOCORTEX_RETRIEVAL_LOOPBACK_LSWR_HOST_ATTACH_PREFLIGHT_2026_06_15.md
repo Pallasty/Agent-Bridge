@@ -56,9 +56,8 @@ This preflight does not:
 
 ## Next Step
 
-Restore or clone the accepted onsen Step B host checkout, launch the
-newline-JSON TCP dev host, then rerun the live `world_visibility_query` probe:
+The direct restore-or-clone step is refined by the source-resolution record:
 
 ```text
-restore_or_clone_onsen_step_b_host_checkout_then_launch_dev_host
+completed_by_onsen_step_b_source_resolution
 ```
