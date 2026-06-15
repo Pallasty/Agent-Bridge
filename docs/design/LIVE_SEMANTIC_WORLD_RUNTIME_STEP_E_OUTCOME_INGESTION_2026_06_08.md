@@ -55,6 +55,10 @@ Verification evidence from 2026-06-15:
   sidecar returned `candidate_count=1`, `dry_run=true`, `writes_state=false`,
   `memory_kind=present_outcome`, and a deterministic
   `outcome_<artifact_id>` candidate key.
+- The non-empty dry-run probe is now repeatable with:
+  `scripts/lswr_e3_dry_run_smoke.sh`. It creates only temporary Step D files and
+  #94-compatible E3 candidate previews; it performs no MCP call and no memory
+  write.
 
 E4 remains intentionally unopened. A manual opt-in write path requires a
 separate owner approval and a fresh dry-run-first design slice.
