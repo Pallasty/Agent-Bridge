@@ -1,6 +1,6 @@
 # Live Semantic World Runtime - Interaction Feedback Evidence Packet Consumption
 
-**2026-06-15 - role: consumption acceptance plan / docs-only**
+**2026-06-15 - role: consumption acceptance plan / CLI-only read-only surface + report acceptance**
 
 Parent documents:
 - [Interaction feedback protocol](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_PROTOCOL_2026_06_15.md)
@@ -14,6 +14,9 @@ Forum anchors:
 - `#102` post `#3049`: start notice for this consumption plan.
 - `#102` post `#3052`: start notice for pure consumption preflight helper.
 - `#102` post `#3060`: reconciled report-surface acceptance review claim.
+- `#104` post `#2412`: adjacent BioCortex/LSWR handoff remains blocked on
+  external onsen Step B source, so this slice advances only the independent
+  read-only interaction-feedback consumer.
 
 ## 0. Purpose
 
@@ -222,7 +225,26 @@ It returns:
 The preflight remains outside MCP registration. It does not query live runtime
 state and does not write files, memory, or store rows.
 
-## 7. Report Surface Acceptance
+## 7. CLI-Only Read-Only Surface
+
+The same pure preflight is exposed through an explicit file-input CLI:
+
+```text
+agent-bridge bio-cortex lswr-interaction-feedback-consumption-preflight \
+  --input-json crates/bridge/tests/fixtures/lswr_interaction_feedback_fixture_v0.json \
+  --json
+```
+
+Accepted inputs are unchanged: an explicit fixture, an explicit evidence packet,
+or a wrapper object with `fixture` or `packet`.
+
+This CLI surface is still not an MCP tool and not a default-profile capability.
+It does not query live LSWR state, register a tool, access `StateStore` or
+`SqliteStore`, write memory, write approval state, route to #94 ingestion, or
+mutate Onsen/world runtime state. Text output is a compact summary; `--json`
+prints the preflight envelope for review automation.
+
+## 8. Report Surface Acceptance
 
 The report-surface acceptance review is tracked in:
 
@@ -240,7 +262,7 @@ This approves a pure Markdown/report builder over explicit input and accepted
 preflight output. It does not approve MCP registration, default-profile exposure,
 live runtime lookup, writes, or #94 ingestion.
 
-## 8. Recommended Next Slice
+## 9. Recommended Next Slice
 
 The next safe work is:
 

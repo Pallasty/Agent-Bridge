@@ -71,11 +71,66 @@ loopback_lswr_host_attach_preflight="docs/design/fixtures/biocortex-retrieval-lo
 onsen_step_b_source_resolution="docs/design/fixtures/biocortex-retrieval-onsen-step-b-source-resolution-2026-06-15.json"
 onsen_step_b_host_source_probe_script="scripts/probe-onsen-step-b-host-source.sh"
 onsen_step_b_host_launch_plan_script="scripts/plan-onsen-step-b-host-launch.sh"
+lswr_interaction_feedback_fixture="crates/bridge/tests/fixtures/lswr_interaction_feedback_fixture_v0.json"
 opt_in_batch_query_cases="docs/design/fixtures/biocortex-retrieval-opt-in-batch-diagnostic-queries-2026-06-12.json"
 opt_in_controlled_order_fixture="docs/design/fixtures/biocortex-retrieval-opt-in-controlled-order-fixture-2026-06-12.json"
 opt_in_expanded_corpus_fixture="docs/design/fixtures/biocortex-retrieval-opt-in-expanded-controlled-corpus-2026-06-12.json"
 bash -n "$onsen_step_b_host_source_probe_script"
 bash -n "$onsen_step_b_host_launch_plan_script"
+
+tmp_lswr_feedback_consumption_preflight="$tmpdir/lswr-interaction-feedback-consumption-preflight.json"
+run cargo run -q -p ab-bridge --no-default-features -- \
+    bio-cortex lswr-interaction-feedback-consumption-preflight \
+    --input-json "$lswr_interaction_feedback_fixture" \
+    --json > "$tmp_lswr_feedback_consumption_preflight"
+jq -e '
+    .schema == "agent_bridge.lswr.interaction_feedback_consumption_preflight.v0"
+    and .accepted == true
+    and .preflight_verdict == "accepted"
+    and .status == "accepted"
+    and .input_kind == "fixture"
+    and .source_kind == "fixture"
+    and .world_verdict == "not_verified"
+    and .reason == "explicit_input_consumption_preflight_passed"
+    and (.failure_reasons | length) == 0
+    and (.acceptance_matrix | length) == 5
+    and ([.acceptance_matrix[].passed] | all(. == true))
+    and .guardrails.read_only == true
+    and .guardrails.writes_state == false
+    and .guardrails.store_access_required == false
+    and .guardrails.mcp_tool_registered == false
+    and .guardrails.implicit_live_runtime_lookup_allowed == false
+    and .guardrails.default_profile_exposure_allowed == false
+    and .guardrails.outcome_ingestion_allowed == false
+    and .implicit_live_runtime_lookup_attempted == false
+' "$tmp_lswr_feedback_consumption_preflight" >/dev/null
+
+tmp_missing_lswr_feedback_input="$tmpdir/missing-lswr-interaction-feedback-input.json"
+printf '{}\n' > "$tmp_missing_lswr_feedback_input"
+tmp_missing_lswr_feedback_consumption_preflight="$tmpdir/missing-lswr-interaction-feedback-consumption-preflight.json"
+run cargo run -q -p ab-bridge --no-default-features -- \
+    bio-cortex lswr-interaction-feedback-consumption-preflight \
+    --input-json "$tmp_missing_lswr_feedback_input" \
+    --json > "$tmp_missing_lswr_feedback_consumption_preflight"
+jq -e '
+    .schema == "agent_bridge.lswr.interaction_feedback_consumption_preflight.v0"
+    and .accepted == false
+    and .preflight_verdict == "blocked"
+    and .status == "blocked"
+    and .input_kind == "missing_or_invalid"
+    and .source_kind == "none"
+    and .world_verdict == "not_verified"
+    and .reason == "C1:explicit_input_only"
+    and (.blockers | index("explicit_packet_or_fixture_required")) != null
+    and .packet == null
+    and .guardrails.read_only == true
+    and .guardrails.writes_state == false
+    and .guardrails.store_access_required == false
+    and .guardrails.mcp_tool_registered == false
+    and .guardrails.implicit_live_runtime_lookup_allowed == false
+    and .implicit_live_runtime_lookup_attempted == false
+' "$tmp_missing_lswr_feedback_consumption_preflight" >/dev/null
+
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.opt_in_batch_diagnostic_query_cases.v0"
     and .read_only == true
