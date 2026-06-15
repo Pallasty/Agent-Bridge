@@ -89,5 +89,6 @@
     "side_signal_raw_included": false,
     "human_decision_text_included": false
   },
-  "next_step": "start_or_attach_loopback_lswr_host_then_rerun_live_action_result_probe"
+  "next_step": "completed_by_loopback_lswr_action_result_verified_fixture_host_probe",
+  "next_step_completed": true
 }

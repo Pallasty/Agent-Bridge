@@ -1,0 +1,127 @@
+{
+  "schema": "agent_bridge.biocortex_retrieval.loopback_lswr_action_result_verified_probe.v0",
+  "created_at": "2026-06-15T00:00:00Z",
+  "status": "verified_fixture_host_observed",
+  "read_only": true,
+  "implementation_stage": "loopback_lswr_action_result_verified_probe",
+  "source_live_observation_fixture": {
+    "schema": "agent_bridge.biocortex_retrieval.live_lswr_action_result_runtime_evidence.v0",
+    "status": "observed_not_verified",
+    "fixture": "docs/design/fixtures/biocortex-retrieval-live-lswr-action-result-runtime-evidence-2026-06-15.json",
+    "included": false
+  },
+  "mcp_probe": {
+    "tool_profile": "all",
+    "tools_count": 240,
+    "tool_listed": true,
+    "tool": "world_visibility_query",
+    "call_executed": true,
+    "include_raw": true,
+    "client": "codex-loopback-lswr-probe",
+    "request_id": "biocortex-loopback-lswr-evidence-20260615",
+    "endpoint": {
+      "host": "127.0.0.1",
+      "port": 40003,
+      "port_is_ephemeral_single_run": true,
+      "timeout_ms": 2000
+    }
+  },
+  "loopback_host": {
+    "kind": "one_shot_fixture_host",
+    "served_single_request": true,
+    "accepted_from": "127.0.0.1",
+    "real_onsen_runtime": false,
+    "human_visible_viewport": false,
+    "fixture_host_not_training_eligible": true,
+    "response_source": "loopback_fixture_host"
+  },
+  "live_observation": {
+    "schema": "agent_bridge.world_tool.v0",
+    "ok": true,
+    "verified": true,
+    "reason": null,
+    "endpoint": {
+      "host": "127.0.0.1",
+      "port": 40003,
+      "timeout_ms": 2000
+    },
+    "request": {
+      "request_id": "biocortex-loopback-lswr-evidence-20260615",
+      "world_tool": "world_visibility_query",
+      "entities": [
+        "semantic_system_bus_lswr_action_result_runtime_evidence_checkpoint"
+      ]
+    },
+    "verify": {
+      "method": "live_viewport_pixel_coverage",
+      "verified_to": "onsen_live_root_viewport",
+      "evidence": {
+        "screen_area": 0.041,
+        "bounds_screen_area": 0.062,
+        "flicker_frames": null,
+        "render_source": "loopback_fixture_host",
+        "render_path": "loopback_fixture_host",
+        "host_reason": null
+      }
+    },
+    "host_response_field_present": true,
+    "host_response_payload_present": true
+  },
+  "action_result": {
+    "schema": "agent_bridge.semantic_bus.action_result.v0",
+    "source_schema": "agent_bridge.world_tool.v0",
+    "adapter": "lswr.onsen",
+    "world_tool": "world_visibility_query",
+    "action_type": "world.visibility.query",
+    "action_id": "lswr:world_visibility_query:biocortex-loopback-lswr-evidence-20260615:result",
+    "request_id": "biocortex-loopback-lswr-evidence-20260615",
+    "subject_id": "lswr:onsen:world",
+    "event_ids": [
+      "evt-lswr-world_visibility_query-biocortex-loopback-lswr-evidence-20260615"
+    ],
+    "verdict": "verified",
+    "reason": null,
+    "verified_to": "onsen_live_root_viewport",
+    "verification_method": "live_viewport_pixel_coverage",
+    "recover": "proceed",
+    "raw_available": true
+  },
+  "host_response_summary": {
+    "included": true,
+    "verified": true,
+    "source": "loopback_fixture_host",
+    "entity_count": 1,
+    "screen_area": 0.041,
+    "bounds_screen_area": 0.062,
+    "occluded": false
+  },
+  "evidence_boundary": {
+    "live_mcp_call_attempted": true,
+    "loopback_host_reached": true,
+    "verified_fixture_action_result_collected": true,
+    "verified_real_onsen_action_result_collected": false,
+    "real_onsen_runtime_verified": false,
+    "human_visible_viewport_verified": false,
+    "must_not_be_ingested_as_real_onsen_runtime_evidence": true,
+    "must_not_be_used_for_training": true,
+    "requires_real_onsen_host_before_training_eligible": true
+  },
+  "boundary": {
+    "calls_memory_search": false,
+    "runs_biocortex": false,
+    "writes_approval": false,
+    "changes_memory_search_order": false,
+    "default_search_order_change_allowed": false,
+    "calls_aiot_runtime": false,
+    "executes_lswr_actions": false,
+    "emits_durable_runtime_action_result": false,
+    "mutates_default_agent_bridge_db": false,
+    "host_response_included": true,
+    "raw_queries_included": false,
+    "raw_keys_included": false,
+    "content_included": false,
+    "side_signal_raw_included": false,
+    "human_decision_text_included": false
+  },
+  "next_step": "attach_real_onsen_lswr_host_then_collect_verified_live_viewport_action_result"
+}

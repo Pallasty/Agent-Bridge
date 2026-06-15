@@ -55,9 +55,14 @@ This observation does not:
 
 ## Next Step
 
-Start or attach a loopback LSWR host, then rerun the same live action-result
-probe:
+The loopback fixture-host rerun is now recorded here:
+
+- `docs/design/BIOCORTEX_RETRIEVAL_LOOPBACK_LSWR_ACTION_RESULT_VERIFIED_PROBE_2026_06_15.md`
+- `docs/design/fixtures/biocortex-retrieval-loopback-lswr-action-result-verified-probe-2026-06-15.json`
+
+The remaining runtime step is to attach a real onsen LSWR host and collect
+verified live-viewport action-result evidence:
 
 ```text
-start_or_attach_loopback_lswr_host_then_rerun_live_action_result_probe
+attach_real_onsen_lswr_host_then_collect_verified_live_viewport_action_result
 ```

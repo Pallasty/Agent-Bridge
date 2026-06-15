@@ -65,8 +65,14 @@ action-result review fixture, and a read-only SSB adapter fixture now projects
 the handoff into a conservative `not_verified` SSB action-result shape. A live
 read-only LSWR `world_visibility_query` runtime observation was then collected:
 the MCP tool is present, but the loopback LSWR host was unreachable, so the
-runtime action result remains `not_verified`. The next step is to start or
-attach a loopback LSWR host and rerun the same live probe.
+runtime action result remains `not_verified`. A follow-up one-shot loopback
+fixture host now proves that the MCP `world_visibility_query` surface can
+return a `verified` `agent_bridge.semantic_bus.action_result.v0` wrapper when a
+loopback host responds. This is fixture-host evidence only; a real onsen live
+root viewport still must be attached before the result can be treated as real
+LSWR runtime evidence. A host-attach preflight then confirmed that this Linux
+checkout does not currently have the accepted onsen Step B runtime checkout or a
+listener on `127.0.0.1:37691`.
 
 ```json
 {
@@ -116,6 +122,7 @@ attach a loopback LSWR host and rerun the same live probe.
   "ssb_lswr_action_result_review_fixture_ready": true,
   "read_only_ssb_adapter_fixture_ready": true,
   "live_lswr_action_result_runtime_evidence_observed_not_verified": true,
+  "loopback_lswr_action_result_verified_fixture_host_observed": true,
   "controlled_explicit_opt_in_fts_trial_ready": true,
   "post_runtime_evidence_backed_controlled_trial_ready": true,
   "post_runtime_live_candidate_evidence_ready": true,
@@ -1149,16 +1156,48 @@ Slice 45 runs the read-only live LSWR action-result probe:
 - `verified_to=null`;
 - `recover=inspect_host_or_visibility_evidence`;
 - `raw_available=false`;
-- the live envelope carried `host_response=null`; no host raw payload was
-  included;
+- because the probe used `include_raw=false`, the returned envelope omitted the
+  `host_response` field and no host raw payload was included;
 - this is runtime observation evidence, not verified LSWR host evidence, and it
   must not be ingested as a verified runtime result or used for training;
 - the observation remains read-only and does not call `memory_search`, run
   BioCortex, write approval, change default retrieval order, call AiOT runtime,
   execute LSWR actions, emit a durable runtime SSB action result, or include raw
   key/content/side-signal/human-decision payloads;
-- the next project action is
-  `start_or_attach_loopback_lswr_host_then_rerun_live_action_result_probe`.
+- the prior next project action
+  `start_or_attach_loopback_lswr_host_then_rerun_live_action_result_probe` is
+  completed by Slice 46 against a controlled loopback fixture host.
+
+## Loopback LSWR Action-Result Verified Probe
+
+Slice 46 reruns the read-only live probe against a one-shot loopback fixture
+host:
+
+- committed document:
+  `docs/design/BIOCORTEX_RETRIEVAL_LOOPBACK_LSWR_ACTION_RESULT_VERIFIED_PROBE_2026_06_15.md`;
+- committed machine-readable fixture:
+  `docs/design/fixtures/biocortex-retrieval-loopback-lswr-action-result-verified-probe-2026-06-15.json`;
+- fixture schema:
+  `agent_bridge.biocortex_retrieval.loopback_lswr_action_result_verified_probe.v0`;
+- observed tool:
+  `world_visibility_query`;
+- MCP profile used for the short-lived probe: `all`;
+- tool listing result: `world_visibility_query` present with `tools_count=240`;
+- endpoint observed: `127.0.0.1:40003` as an ephemeral single-run port;
+- action-result schema:
+  `agent_bridge.semantic_bus.action_result.v0`;
+- action-result verdict: `verified`;
+- reason: `null`;
+- `verified_to=onsen_live_root_viewport`;
+- `recover=proceed`;
+- `raw_available=true`;
+- the returned envelope included the fixture host response payload;
+- this proves the MCP-to-action-result wrapping path against a controlled
+  loopback host, not a real onsen runtime or human-visible root viewport;
+- the observation remains read-only and does not call `memory_search`, run
+  BioCortex, write approval, change default retrieval order, call AiOT runtime,
+  execute LSWR actions, or emit a durable runtime SSB action result;
+- the host-attach preflight is recorded by Slice 47.
 
 ## Fail-Open Rules
 

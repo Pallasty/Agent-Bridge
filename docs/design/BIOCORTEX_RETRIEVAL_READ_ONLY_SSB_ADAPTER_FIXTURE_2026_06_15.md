@@ -58,13 +58,17 @@ This adapter fixture does not:
 
 ## Next Step
 
-Live LSWR action-result runtime evidence has been observed but not verified:
+Live LSWR action-result runtime evidence has been observed but not verified,
+and the MCP action-result wrapper has been verified against a one-shot
+loopback fixture host:
 
 - `docs/design/BIOCORTEX_RETRIEVAL_LIVE_LSWR_ACTION_RESULT_RUNTIME_EVIDENCE_2026_06_15.md`
 - `docs/design/fixtures/biocortex-retrieval-live-lswr-action-result-runtime-evidence-2026-06-15.json`
+- `docs/design/BIOCORTEX_RETRIEVAL_LOOPBACK_LSWR_ACTION_RESULT_VERIFIED_PROBE_2026_06_15.md`
+- `docs/design/fixtures/biocortex-retrieval-loopback-lswr-action-result-verified-probe-2026-06-15.json`
 
-Start or attach the loopback LSWR host, then rerun the live probe:
+Attach a real onsen LSWR host, then collect verified live-viewport evidence:
 
 ```text
-start_or_attach_loopback_lswr_host_then_rerun_live_action_result_probe
+attach_real_onsen_lswr_host_then_collect_verified_live_viewport_action_result
 ```

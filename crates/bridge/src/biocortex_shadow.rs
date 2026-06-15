@@ -4147,6 +4147,7 @@ pub fn biocortex_retrieval_opt_in_authorization_decision_packet(
                 || status == "ssb_lswr_action_result_review_fixture_ready"
                 || status == "read_only_ssb_adapter_fixture_ready"
                 || status == "live_lswr_action_result_runtime_evidence_observed_not_verified"
+                || status == "loopback_lswr_action_result_verified_fixture_host_observed"
         })
         .unwrap_or(false);
 
@@ -4510,6 +4511,7 @@ pub fn biocortex_retrieval_opt_in_post_implementation_review_gate(
                 || status == "ssb_lswr_action_result_review_fixture_ready"
                 || status == "read_only_ssb_adapter_fixture_ready"
                 || status == "live_lswr_action_result_runtime_evidence_observed_not_verified"
+                || status == "loopback_lswr_action_result_verified_fixture_host_observed"
         })
         .unwrap_or(false);
     let plan_implementation_allowed = value_bool_is(plan.get("implementation_allowed"), true);
