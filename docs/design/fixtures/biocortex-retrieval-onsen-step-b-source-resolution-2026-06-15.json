@@ -90,7 +90,10 @@
     "supports_strict_mode": true,
     "does_not_clone": true,
     "does_not_start_host": true,
-    "next_use": "run_after_checkout_or_repository_url_is_available"
+    "next_use": "run_after_checkout_or_repository_url_is_available",
+    "requires_checkout_branch_or_head_match": true,
+    "distinguishes_reachable_nonmatching_remote": true,
+    "nonmatching_git_checkout_is_not_source_found": true
   },
   "boundary": {
     "calls_memory_search": false,

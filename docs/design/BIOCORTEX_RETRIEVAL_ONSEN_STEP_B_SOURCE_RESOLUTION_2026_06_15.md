@@ -63,6 +63,8 @@ The probe checks:
 
 - candidate checkout presence and git branch/head;
 - candidate git remotes with `git ls-remote`, unless `--no-remote` is passed;
+- whether a checkout or remote actually matches the documented branch/head,
+  rather than merely being a reachable git repository;
 - loopback listener state for the expected newline-JSON TCP endpoint;
 - whether the next step is still source sync, host launch, or live probe rerun.
 

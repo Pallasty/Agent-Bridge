@@ -1263,6 +1263,8 @@ this Linux checkout:
   `79993b494cf6e41fbacb33f2ab2c6ea9ea544771`, but it is not the accepted Step B
   source: it lacks the documented branch/head and the expected world-tool host
   contract;
+- the recovery probe now treats a mismatched git checkout or reachable
+  nonmatching remote as still missing the accepted Step B source;
 - a read-only recovery probe is ready at
   `scripts/probe-onsen-step-b-host-source.sh`;
 - the next project action is refined to

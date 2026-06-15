@@ -1410,6 +1410,8 @@
     "onsen_hd_remote_is_accepted_step_b_source": false,
     "onsen_hd_remote_has_expected_branch": false,
     "onsen_hd_remote_has_documented_head": false,
-    "onsen_hd_remote_has_world_tool_host_contract": false
+    "onsen_hd_remote_has_world_tool_host_contract": false,
+    "recovery_probe_requires_checkout_branch_or_head_match": true,
+    "recovery_probe_rejects_nonmatching_git_checkout": true
   }
 }

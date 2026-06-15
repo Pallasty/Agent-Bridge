@@ -313,6 +313,8 @@ jq -e '
     and .onsen_step_b_source_resolution.blocked_by == "missing_checkout_or_accessible_repository_url"
     and .onsen_step_b_source_resolution.recovery_probe_script == "scripts/probe-onsen-step-b-host-source.sh"
     and .onsen_step_b_source_resolution.recovery_probe_ready == true
+    and .onsen_step_b_source_resolution.recovery_probe_requires_checkout_branch_or_head_match == true
+    and .onsen_step_b_source_resolution.recovery_probe_rejects_nonmatching_git_checkout == true
     and .onsen_step_b_source_resolution.calls_memory_search == false
     and .onsen_step_b_source_resolution.runs_biocortex == false
     and .onsen_step_b_source_resolution.writes_approval == false
@@ -1434,6 +1436,9 @@ jq -e '
     and .recovery_probe.supports_strict_mode == true
     and .recovery_probe.does_not_clone == true
     and .recovery_probe.does_not_start_host == true
+    and .recovery_probe.requires_checkout_branch_or_head_match == true
+    and .recovery_probe.distinguishes_reachable_nonmatching_remote == true
+    and .recovery_probe.nonmatching_git_checkout_is_not_source_found == true
     and .boundary.calls_memory_search == false
     and .boundary.runs_biocortex == false
     and .boundary.writes_approval == false
@@ -1488,6 +1493,33 @@ jq -e '
     and .boundary.emits_durable_runtime_action_result == false
     and .boundary.mutates_default_agent_bridge_db == false
 ' "$tmp_onsen_step_b_host_source_probe" >/dev/null
+
+tmp_mismatched_onsen_checkout="$tmpdir/mismatched-onsen-step-b-checkout"
+mkdir -p "$tmp_mismatched_onsen_checkout"
+git -C "$tmp_mismatched_onsen_checkout" init -q
+git -C "$tmp_mismatched_onsen_checkout" config user.email verify@example.invalid
+git -C "$tmp_mismatched_onsen_checkout" config user.name "verify bundle"
+git -C "$tmp_mismatched_onsen_checkout" checkout -q -B unrelated-main
+git -C "$tmp_mismatched_onsen_checkout" commit --allow-empty -q -m "verify mismatched onsen checkout"
+tmp_mismatched_onsen_probe="$tmpdir/mismatched-onsen-step-b-host-source-probe.json"
+"$onsen_step_b_host_source_probe_script" \
+    --no-remote \
+    --checkout "$tmp_mismatched_onsen_checkout" \
+    --out "$tmp_mismatched_onsen_probe"
+jq -e '
+    .status == "blocked_missing_onsen_step_b_source"
+    and .checkout.present == true
+    and .checkout.is_git == true
+    and .checkout.branch == "unrelated-main"
+    and .checkout.branch_matches_expected == false
+    and .checkout.head_matches_expected == false
+    and .remote_resolution.attempted == false
+    and .remote_resolution.usable_remote_found == false
+    and .result.source_found == false
+    and .result.ready_for_live_probe == false
+    and .result.blocked_by == "missing_checkout_or_accessible_repository_url"
+    and .result.next_step == "provide_or_sync_onsen_step_b_checkout_or_repository_url"
+' "$tmp_mismatched_onsen_probe" >/dev/null
 
 tmp_downstream_aio_runtime_evidence_handoff="$tmpdir/downstream-aio-runtime-evidence-handoff.json"
 run cargo run -p ab-bridge --no-default-features -- \

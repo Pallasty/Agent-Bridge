@@ -165,7 +165,7 @@ if jq -s -e '
 fi
 
 source_found=false
-if [[ "$checkout_present" == true && "$checkout_is_git" == true ]]; then
+if [[ "$checkout_branch_matches" == true || "$checkout_head_matches" == true ]]; then
     source_found=true
 elif [[ "$remote_usable" == true ]]; then
     source_found=true
