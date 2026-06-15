@@ -1,17 +1,22 @@
 use ab_bridge::lswr_interaction_feedback::{
     build_interaction_feedback_consumption_report, build_interaction_feedback_evidence_packet,
     build_interaction_feedback_next_revision_plan,
-    build_interaction_feedback_packet_consumption_preflight, build_interaction_feedback_readback,
+    build_interaction_feedback_packet_consumption_preflight,
+    build_interaction_feedback_patch_execution_preflight, build_interaction_feedback_readback,
     build_interaction_feedback_semantic_patch_draft,
     build_interaction_feedback_validation_envelope,
     render_interaction_feedback_consumption_preflight_report,
     render_interaction_feedback_next_revision_plan,
+    render_interaction_feedback_patch_execution_preflight,
     render_interaction_feedback_semantic_patch_draft,
     render_interaction_feedback_validation_envelope, validate_interaction_feedback_fixture,
+    LSWR_INTERACTION_FEEDBACK_ARGUMENT_CONTEXT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_CONSUMPTION_PREFLIGHT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_EVIDENCE_PACKET_SCHEMA, LSWR_INTERACTION_FEEDBACK_FIXTURE_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_NEXT_REVISION_PLAN_SCHEMA, LSWR_INTERACTION_FEEDBACK_READBACK_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_NEXT_REVISION_PLAN_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_PATCH_EXECUTION_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_READBACK_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_SEMANTIC_PATCH_DRAFT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_VALIDATION_ENVELOPE_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_VALIDATION_SCHEMA,
@@ -649,6 +654,163 @@ fn interaction_feedback_semantic_patch_draft_blocks_laundered_plan() {
 }
 
 #[test]
+fn interaction_feedback_patch_execution_preflight_blocks_without_argument_context() {
+    let draft = build_interaction_feedback_semantic_patch_draft(&fixture());
+    let preflight = build_interaction_feedback_patch_execution_preflight(&draft);
+    let markdown = render_interaction_feedback_patch_execution_preflight(&preflight);
+
+    assert_eq!(
+        preflight["schema"],
+        LSWR_INTERACTION_FEEDBACK_PATCH_EXECUTION_PREFLIGHT_SCHEMA
+    );
+    assert_eq!(preflight["input_kind"], "semantic_patch_draft");
+    assert_eq!(preflight["source_draft_verdict"], "drafted");
+    assert_eq!(preflight["source_world_verdict"], "not_verified");
+    assert_eq!(preflight["preflight_verdict"], "blocked");
+    assert_eq!(preflight["status"], "blocked");
+    assert_eq!(preflight["reason"], "explicit_argument_context_required");
+    assert_eq!(
+        preflight["argument_context_status"]["reason"],
+        "explicit_argument_context_required"
+    );
+    assert_eq!(
+        preflight["failure_reasons"],
+        json!([
+            "explicit_argument_context_required",
+            "patch_args_cell_unresolved"
+        ])
+    );
+    assert_eq!(preflight["resolved_patch"]["args"], Value::Null);
+    assert_eq!(
+        preflight["resolved_patch"]["ready_for_execution_request"],
+        false
+    );
+    assert_eq!(preflight["resolved_patch"]["execution_performed"], false);
+    assert_eq!(
+        preflight["resolved_patch"]["apply_allowed_by_this_tool"],
+        false
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["may_request_separate_apply_after_preflight"],
+        false
+    );
+    assert_eq!(preflight["implicit_live_runtime_lookup_attempted"], false);
+    assert_execution_preflight_read_only(&preflight);
+
+    assert!(markdown.contains("- preflight_verdict: `blocked`"));
+    assert!(markdown.contains("- reason: `explicit_argument_context_required`"));
+    assert!(markdown.contains("- ready_for_execution_request: `false`"));
+}
+
+#[test]
+fn interaction_feedback_patch_execution_preflight_resolves_explicit_argument_context() {
+    let draft = build_interaction_feedback_semantic_patch_draft(&fixture());
+    let preflight = build_interaction_feedback_patch_execution_preflight(&json!({
+        "draft": draft,
+        "argument_context": explicit_argument_context()
+    }));
+    let markdown = render_interaction_feedback_patch_execution_preflight(&preflight);
+
+    assert_eq!(
+        preflight["schema"],
+        LSWR_INTERACTION_FEEDBACK_PATCH_EXECUTION_PREFLIGHT_SCHEMA
+    );
+    assert_eq!(preflight["input_kind"], "draft_wrapper");
+    assert_eq!(preflight["source_draft_verdict"], "drafted");
+    assert_eq!(preflight["source_world_verdict"], "not_verified");
+    assert_eq!(
+        preflight["preflight_verdict"],
+        "ready_for_execution_request"
+    );
+    assert_eq!(preflight["status"], "ready");
+    assert_eq!(
+        preflight["reason"],
+        "explicit_argument_context_execution_preflight_ready"
+    );
+    assert_eq!(preflight["failure_reasons"], json!([]));
+    assert_eq!(preflight["argument_context_status"]["accepted"], true);
+    assert_eq!(
+        preflight["argument_context_status"]["context_schema"],
+        LSWR_INTERACTION_FEEDBACK_ARGUMENT_CONTEXT_SCHEMA
+    );
+    assert_eq!(preflight["resolved_patch"]["args"]["cell"], json!([5, 2]));
+    assert_eq!(
+        preflight["resolved_patch"]["resolved_arguments"]["patch.args.cell"],
+        json!([5, 2])
+    );
+    assert_eq!(
+        preflight["resolved_patch"]["required_citations"],
+        json!([
+            "verify_patch_arrival_bath_move_001",
+            "fb_arrival_crowded_001"
+        ])
+    );
+    assert_eq!(
+        preflight["resolved_patch"]["ready_for_execution_request"],
+        true
+    );
+    assert_eq!(preflight["resolved_patch"]["execution_performed"], false);
+    assert_eq!(
+        preflight["resolved_patch"]["apply_allowed_by_this_tool"],
+        false
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["may_request_separate_apply_after_preflight"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_rewrite_world_verdict"],
+        true
+    );
+    assert_eq!(preflight["implicit_live_runtime_lookup_attempted"], false);
+    assert_execution_preflight_read_only(&preflight);
+
+    assert!(markdown.contains("- preflight_verdict: `ready_for_execution_request`"));
+    assert!(markdown.contains("- resolved_arguments: `{\"patch.args.cell\":[5,2]}`"));
+    assert!(markdown.contains("- execution_performed: `false`"));
+}
+
+#[test]
+fn interaction_feedback_patch_execution_preflight_blocks_laundered_draft() {
+    let fixture = fixture();
+    let mut packet = build_interaction_feedback_evidence_packet(&fixture);
+    packet["guardrails"]["writes_state"] = json!(true);
+    packet["readback"]["latest_verification_verdict"] = json!("verified");
+    let draft = build_interaction_feedback_semantic_patch_draft(&packet);
+    let preflight = build_interaction_feedback_patch_execution_preflight(&json!({
+        "draft": draft,
+        "argument_context": explicit_argument_context()
+    }));
+
+    assert_eq!(preflight["preflight_verdict"], "blocked");
+    assert_eq!(preflight["status"], "blocked");
+    assert_eq!(preflight["source_draft_verdict"], "blocked");
+    assert_eq!(preflight["source_world_verdict"], "verified");
+    assert!(preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("source_draft_not_drafted")));
+    assert!(preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("source_world_verdict_must_remain_not_verified")));
+    assert_eq!(
+        preflight["resolved_patch"]["ready_for_execution_request"],
+        false
+    );
+    assert_eq!(preflight["resolved_patch"]["execution_performed"], false);
+    assert_eq!(
+        preflight["resolved_patch"]["apply_allowed_by_this_tool"],
+        false
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_rewrite_world_verdict"],
+        true
+    );
+    assert_execution_preflight_read_only(&preflight);
+}
+
+#[test]
 fn interaction_feedback_validator_reports_tampered_fixture() {
     let mut fixture = fixture();
     fixture["events"][5]["refs"]["cause_event_id"] = json!("missing_event");
@@ -707,6 +869,64 @@ fn interaction_feedback_fixture_pretty_json_roundtrips() {
 
 fn fixture() -> Value {
     serde_json::from_str(FIXTURE_JSON).expect("interaction feedback fixture json")
+}
+
+fn explicit_argument_context() -> Value {
+    json!({
+        "schema": LSWR_INTERACTION_FEEDBACK_ARGUMENT_CONTEXT_SCHEMA,
+        "world_id": "onsen_live_session",
+        "branch_id": "main",
+        "source": "explicit_fixture_context",
+        "live_runtime_queried_by_preflight": false,
+        "candidate_arguments": [{
+            "argument_path": "patch.args.cell",
+            "value": [5, 2],
+            "satisfies_expected_effect": true,
+            "evidence": {
+                "walkway_clearance_cells": 2,
+                "screen_area_after_estimate": 0.01,
+                "source": "explicit_test_context"
+            }
+        }]
+    })
+}
+
+fn assert_execution_preflight_read_only(preflight: &Value) {
+    assert_eq!(preflight["writes_state"], false);
+    assert_eq!(preflight["store_access_required"], false);
+    assert_eq!(preflight["mcp_tool_registered"], false);
+    assert_eq!(preflight["guardrails"]["read_only"], true);
+    assert_eq!(preflight["guardrails"]["mutation_surface"], "none");
+    assert_eq!(preflight["guardrails"]["writes_state"], false);
+    assert_eq!(preflight["guardrails"]["store_access_required"], false);
+    assert_eq!(preflight["guardrails"]["mcp_tool_registered"], false);
+    assert_eq!(preflight["guardrails"]["queries_live_runtime"], false);
+    assert_eq!(
+        preflight["guardrails"]["implicit_live_runtime_lookup_allowed"],
+        false
+    );
+    assert_eq!(preflight["guardrails"]["applies_patch"], false);
+    assert_eq!(preflight["guardrails"]["outcome_ingestion_allowed"], false);
+    assert_eq!(
+        preflight["guardrails"]["feedback_changes_world_verdict_allowed"],
+        false
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_apply_patch"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_ingest_outcome"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_write_memory"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_query_live_runtime"],
+        true
+    );
 }
 
 fn assert_consumption_gates_pass(preflight: &Value) {

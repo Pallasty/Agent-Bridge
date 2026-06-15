@@ -20,6 +20,10 @@ pub const LSWR_INTERACTION_FEEDBACK_NEXT_REVISION_PLAN_SCHEMA: &str =
     "agent_bridge.lswr.interaction_feedback_next_revision_plan.v0";
 pub const LSWR_INTERACTION_FEEDBACK_SEMANTIC_PATCH_DRAFT_SCHEMA: &str =
     "agent_bridge.lswr.interaction_feedback_semantic_patch_draft.v0";
+pub const LSWR_INTERACTION_FEEDBACK_ARGUMENT_CONTEXT_SCHEMA: &str =
+    "agent_bridge.lswr.interaction_feedback_argument_context.v0";
+pub const LSWR_INTERACTION_FEEDBACK_PATCH_EXECUTION_PREFLIGHT_SCHEMA: &str =
+    "agent_bridge.lswr.interaction_feedback_patch_execution_preflight.v0";
 
 const EXPECTED_EVENT_TYPES: [&str; 8] = [
     "human.select",
@@ -921,6 +925,200 @@ pub fn render_interaction_feedback_semantic_patch_draft(draft: &Value) -> String
     lines.join("\n")
 }
 
+pub fn build_interaction_feedback_patch_execution_preflight(input: &Value) -> Value {
+    let (input_kind, draft, argument_context) = extract_execution_preflight_input(input);
+    let source_drafted = draft.get("draft_verdict").and_then(Value::as_str) == Some("drafted");
+    let context_status = validate_argument_context(argument_context.as_ref());
+    let selected_argument = context_status
+        .get("selected_argument")
+        .cloned()
+        .unwrap_or(Value::Null);
+
+    let mut failure_reasons = Vec::new();
+    if !source_drafted {
+        failure_reasons.push("source_draft_not_drafted".to_string());
+    }
+    if draft["source_world_verdict"] != "not_verified" {
+        failure_reasons.push("source_world_verdict_must_remain_not_verified".to_string());
+    }
+    if context_status["accepted"] != true {
+        failure_reasons.push(
+            context_status["reason"]
+                .as_str()
+                .unwrap_or("argument_context_not_accepted")
+                .to_string(),
+        );
+    }
+    if selected_argument.is_null() {
+        failure_reasons.push("patch_args_cell_unresolved".to_string());
+    }
+
+    let ready = failure_reasons.is_empty();
+    let reason = if ready {
+        "explicit_argument_context_execution_preflight_ready".to_string()
+    } else {
+        failure_reasons
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "execution_preflight_blocked".to_string())
+    };
+
+    json!({
+        "schema": LSWR_INTERACTION_FEEDBACK_PATCH_EXECUTION_PREFLIGHT_SCHEMA,
+        "input_kind": input_kind,
+        "source_schema": draft.get("schema").cloned().unwrap_or(Value::Null),
+        "source_draft_verdict": draft.get("draft_verdict").cloned().unwrap_or(Value::Null),
+        "source_world_verdict": draft.get("source_world_verdict").cloned().unwrap_or(Value::Null),
+        "preflight_verdict": if ready { "ready_for_execution_request" } else { "blocked" },
+        "status": if ready { "ready" } else { "blocked" },
+        "reason": reason,
+        "failure_reasons": unique_strings(failure_reasons),
+        "guardrails": execution_preflight_guardrails(),
+        "input_contract": {
+            "accepted_inputs": ["semantic_patch_draft", "wrapper_with_draft_and_argument_context", "fixture"],
+            "explicit_argument_context_required": true,
+            "implicit_live_runtime_lookup_allowed": false
+        },
+        "argument_context": argument_context.unwrap_or(Value::Null),
+        "argument_context_status": context_status,
+        "resolved_patch": {
+            "patch_id": draft["semantic_patch_draft"].get("patch_id").cloned().unwrap_or(Value::Null),
+            "op": draft["semantic_patch_draft"].get("op").cloned().unwrap_or(Value::Null),
+            "operation_hint": draft["semantic_patch_draft"].get("operation_hint").cloned().unwrap_or(Value::Null),
+            "target_entities": draft["semantic_patch_draft"].get("target_entities").cloned().unwrap_or(Value::Null),
+            "args": if ready {
+                json!({"cell": selected_argument.get("value").cloned().unwrap_or(Value::Null)})
+            } else {
+                Value::Null
+            },
+            "resolved_arguments": if ready {
+                json!({"patch.args.cell": selected_argument.get("value").cloned().unwrap_or(Value::Null)})
+            } else {
+                Value::Null
+            },
+            "required_citations": draft["semantic_patch_draft"].get("revision_sources").cloned().unwrap_or(Value::Null),
+            "expected_effect_requirements": draft["semantic_patch_draft"]["constraints"].get("expected_effect_requirements").cloned().unwrap_or(Value::Null),
+            "ready_for_execution_request": ready,
+            "execution_performed": false,
+            "apply_allowed_by_this_tool": false,
+            "ingest_allowed_by_this_tool": false
+        },
+        "agent_action_contract": {
+            "mode": "execution_gate_preflight_only",
+            "may_request_separate_apply_after_preflight": ready,
+            "do_not_apply_patch": true,
+            "do_not_ingest_outcome": true,
+            "do_not_write_memory": true,
+            "do_not_query_live_runtime": true,
+            "do_not_rewrite_world_verdict": true,
+            "preserve_required_citations": true
+        },
+        "source_draft": draft,
+        "implicit_live_runtime_lookup_attempted": false,
+        "writes_state": false,
+        "store_access_required": false,
+        "mcp_tool_registered": false,
+        "note": "pure execution-gate preflight: resolves draft arguments only from explicit argument context and never applies the patch"
+    })
+}
+
+pub fn render_interaction_feedback_patch_execution_preflight(preflight: &Value) -> String {
+    let mut lines = Vec::new();
+    lines.push("# LSWR Interaction Feedback Patch Execution Preflight".to_string());
+    lines.push(String::new());
+    push_markdown_kv(&mut lines, "schema", &preflight["schema"]);
+    push_markdown_kv(
+        &mut lines,
+        "preflight_verdict",
+        &preflight["preflight_verdict"],
+    );
+    push_markdown_kv(&mut lines, "status", &preflight["status"]);
+    push_markdown_kv(&mut lines, "reason", &preflight["reason"]);
+    push_markdown_kv(
+        &mut lines,
+        "source_draft_verdict",
+        &preflight["source_draft_verdict"],
+    );
+    push_markdown_kv(
+        &mut lines,
+        "source_world_verdict",
+        &preflight["source_world_verdict"],
+    );
+    push_markdown_kv(&mut lines, "failure_reasons", &preflight["failure_reasons"]);
+    push_markdown_kv(
+        &mut lines,
+        "implicit_live_runtime_lookup_attempted",
+        &preflight["implicit_live_runtime_lookup_attempted"],
+    );
+
+    lines.push(String::new());
+    lines.push("## Guardrails".to_string());
+    lines.push(String::new());
+    for key in [
+        "read_only",
+        "mutation_surface",
+        "writes_state",
+        "store_access_required",
+        "mcp_tool_registered",
+        "queries_live_runtime",
+        "applies_patch",
+        "outcome_ingestion_allowed",
+        "feedback_changes_world_verdict_allowed",
+    ] {
+        push_markdown_kv(&mut lines, key, &preflight["guardrails"][key]);
+    }
+
+    lines.push(String::new());
+    lines.push("## Argument Context".to_string());
+    lines.push(String::new());
+    for key in [
+        "accepted",
+        "reason",
+        "context_schema",
+        "live_runtime_queried_by_preflight",
+    ] {
+        push_markdown_kv(&mut lines, key, &preflight["argument_context_status"][key]);
+    }
+
+    lines.push(String::new());
+    lines.push("## Resolved Patch".to_string());
+    lines.push(String::new());
+    for key in [
+        "patch_id",
+        "op",
+        "operation_hint",
+        "target_entities",
+        "args",
+        "resolved_arguments",
+        "required_citations",
+        "ready_for_execution_request",
+        "execution_performed",
+        "apply_allowed_by_this_tool",
+        "ingest_allowed_by_this_tool",
+    ] {
+        push_markdown_kv(&mut lines, key, &preflight["resolved_patch"][key]);
+    }
+
+    lines.push(String::new());
+    lines.push("## Agent Action Contract".to_string());
+    lines.push(String::new());
+    for key in [
+        "mode",
+        "may_request_separate_apply_after_preflight",
+        "do_not_apply_patch",
+        "do_not_ingest_outcome",
+        "do_not_write_memory",
+        "do_not_query_live_runtime",
+        "do_not_rewrite_world_verdict",
+        "preserve_required_citations",
+    ] {
+        push_markdown_kv(&mut lines, key, &preflight["agent_action_contract"][key]);
+    }
+
+    lines.push(String::new());
+    lines.join("\n")
+}
+
 pub fn build_interaction_feedback_readback(fixture: &Value) -> Value {
     let selected_entities =
         fixture["interaction_state_after"]["active_view"]["selected_entities"].clone();
@@ -1281,6 +1479,136 @@ fn semantic_patch_expected_effect_requirements(next_revision: &Value) -> Value {
     }
 
     Value::Array(requirements)
+}
+
+fn extract_execution_preflight_input(input: &Value) -> (&'static str, Value, Option<Value>) {
+    if input.get("schema").and_then(Value::as_str)
+        == Some(LSWR_INTERACTION_FEEDBACK_SEMANTIC_PATCH_DRAFT_SCHEMA)
+    {
+        return ("semantic_patch_draft", input.clone(), None);
+    }
+
+    if let Some(draft) = input.get("draft") {
+        let normalized_draft = if draft.get("schema").and_then(Value::as_str)
+            == Some(LSWR_INTERACTION_FEEDBACK_SEMANTIC_PATCH_DRAFT_SCHEMA)
+        {
+            draft.clone()
+        } else {
+            build_interaction_feedback_semantic_patch_draft(draft)
+        };
+        return (
+            "draft_wrapper",
+            normalized_draft,
+            input.get("argument_context").cloned(),
+        );
+    }
+
+    (
+        "implicit_draft_from_input",
+        build_interaction_feedback_semantic_patch_draft(input),
+        input.get("argument_context").cloned(),
+    )
+}
+
+fn validate_argument_context(argument_context: Option<&Value>) -> Value {
+    let Some(context) = argument_context else {
+        return json!({
+            "accepted": false,
+            "reason": "explicit_argument_context_required",
+            "context_schema": Value::Null,
+            "selected_argument": Value::Null,
+            "live_runtime_queried_by_preflight": false
+        });
+    };
+
+    if context.get("schema").and_then(Value::as_str)
+        != Some(LSWR_INTERACTION_FEEDBACK_ARGUMENT_CONTEXT_SCHEMA)
+    {
+        return json!({
+            "accepted": false,
+            "reason": "argument_context_schema_mismatch",
+            "context_schema": context.get("schema").cloned().unwrap_or(Value::Null),
+            "selected_argument": Value::Null,
+            "live_runtime_queried_by_preflight": false
+        });
+    }
+
+    if context
+        .get("live_runtime_queried_by_preflight")
+        .and_then(Value::as_bool)
+        != Some(false)
+    {
+        return json!({
+            "accepted": false,
+            "reason": "argument_context_claims_preflight_live_runtime_query",
+            "context_schema": context.get("schema").cloned().unwrap_or(Value::Null),
+            "selected_argument": Value::Null,
+            "live_runtime_queried_by_preflight": context
+                .get("live_runtime_queried_by_preflight")
+                .cloned()
+                .unwrap_or(Value::Null)
+        });
+    }
+
+    let selected_argument = context
+        .get("candidate_arguments")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(|candidate| {
+            candidate.get("argument_path").and_then(Value::as_str) == Some("patch.args.cell")
+                && candidate
+                    .get("satisfies_expected_effect")
+                    .and_then(Value::as_bool)
+                    == Some(true)
+                && candidate.get("value").is_some()
+        })
+        .cloned()
+        .unwrap_or(Value::Null);
+
+    if selected_argument.is_null() {
+        return json!({
+            "accepted": false,
+            "reason": "no_satisfying_patch_args_cell_candidate",
+            "context_schema": context.get("schema").cloned().unwrap_or(Value::Null),
+            "selected_argument": Value::Null,
+            "live_runtime_queried_by_preflight": false
+        });
+    }
+
+    json!({
+        "accepted": true,
+        "reason": "explicit_argument_context_accepted",
+        "context_schema": context.get("schema").cloned().unwrap_or(Value::Null),
+        "selected_argument": selected_argument,
+        "live_runtime_queried_by_preflight": false
+    })
+}
+
+fn execution_preflight_guardrails() -> Value {
+    json!({
+        "read_only": true,
+        "mutation_surface": "none",
+        "writes_state": false,
+        "store_access_required": false,
+        "mcp_tool_registered": false,
+        "queries_live_runtime": false,
+        "implicit_live_runtime_lookup_allowed": false,
+        "default_profile_exposure_allowed": false,
+        "outcome_ingestion_allowed": false,
+        "feedback_changes_world_verdict_allowed": false,
+        "applies_patch": false
+    })
+}
+
+fn unique_strings(items: Vec<String>) -> Vec<String> {
+    let mut unique = Vec::new();
+    for item in items {
+        if !unique.contains(&item) {
+            unique.push(item);
+        }
+    }
+    unique
 }
 
 fn normalized_consumption_source_kind(input_kind: &str) -> &'static str {
