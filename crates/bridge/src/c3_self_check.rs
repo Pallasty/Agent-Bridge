@@ -53,6 +53,64 @@ pub fn c3_disabled_via_env() -> bool {
     )
 }
 
+/// Window during which a recent bulk-hygiene run suppresses S2/S4 drop
+/// alerts (§3.4.4). Generous (2× the anchor window) on purpose: a drop
+/// caused by hygiene at time H is only *detected* at the first tick after
+/// the 5-min anchor ages out — up to ~one full window later — so a flat
+/// `S234_WINDOW_SECS` marker could expire before the alert it should
+/// suppress. Fix A already silences the common benign S2 case at the math
+/// layer; this guard is the belt-and-suspenders that also covers S4 (edge
+/// prunes have no conservation analog).
+pub const HYGIENE_SUPPRESS_SECS: u64 = S234_WINDOW_SECS * 2;
+
+/// Path to the "last bulk-hygiene run" marker. `AB_C3_HYGIENE_MARKER`
+/// overrides it (tests); else `~/.cache/agent-bridge/last_hygiene_run`.
+fn hygiene_marker_path() -> PathBuf {
+    if let Ok(p) = std::env::var("AB_C3_HYGIENE_MARKER") {
+        return PathBuf::from(p);
+    }
+    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(home).join(".cache/agent-bridge/last_hygiene_run")
+}
+
+/// Stamp the hygiene marker with the current unix time. Called by the
+/// daily bulk-hygiene ops (decay / prune / archive) so C3's S2-S4 drop
+/// detector can tell a scheduled hygiene shed from genuine data loss
+/// (§3.4.4 — the suppression the spec described but only the conservation
+/// proxy implemented). Best-effort: a write failure just risks a possible
+/// FP, never a crash.
+pub fn stamp_hygiene_run() {
+    let path = hygiene_marker_path();
+    if let Some(parent) = path.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let ts = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let _ = fs::write(&path, ts.to_string());
+}
+
+/// True if a bulk-hygiene run was stamped within [`HYGIENE_SUPPRESS_SECS`]
+/// of `now`. Missing / unparseable marker ⇒ `false` (fail OPEN: prefer a
+/// possible FP over masking a real drop). A future-dated stamp (clock skew)
+/// counts as recent.
+pub fn hygiene_recently_ran(now: SystemTime) -> bool {
+    let raw = match fs::read_to_string(hygiene_marker_path()) {
+        Ok(s) => s,
+        Err(_) => return false,
+    };
+    let stamp = match raw.trim().parse::<u64>() {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    let now_unix = now
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    now_unix.saturating_sub(stamp) < HYGIENE_SUPPRESS_SECS
+}
+
 /// Read `/proc/<pid>/cmdline`, return the first NUL-delimited token as
 /// `Option<String>`. Returns `None` if the file is unreadable or the
 /// cmdline is empty (kernel threads, zombies).
@@ -358,10 +416,19 @@ pub fn compute_s234_drops(prev: S234Counts, current: S234Counts) -> Vec<S234Drop
     // accidental-DELETE class) keeps the full alarm.
     if prev.memories_active > 0 && current.memories_active < prev.memories_active {
         let drop = prev.memories_active - current.memories_active;
-        let retired_rise = current
-            .memories_retired
-            .saturating_sub(prev.memories_retired);
-        let unexplained = drop.saturating_sub(retired_rise);
+        // Conservation credit (thread 27 #813, hardened #110): a benign
+        // active→retired transition lands the rows in the archived/superseded
+        // tiers, so credit the drop ONLY against the rise there — NOT against
+        // `memories_retired`, which also counts tombstoned. `purge-tombstones`
+        // hard-removes aged tombstoned rows in the SAME daily-hygiene window,
+        // so `memories_retired` can FALL even as active→archived happens; a
+        // `retired`-delta credit then saturates to 0 and S2 fires falsely
+        // (#110, 583→527 with retired 2104→1301). archived+superseded only
+        // ever rises on a benign transition and is immune to same-window purge.
+        let benign_credit = current
+            .memories_archived_superseded
+            .saturating_sub(prev.memories_archived_superseded);
+        let unexplained = drop.saturating_sub(benign_credit);
         let pct = drop as f64 / prev.memories_active as f64;
         let unexplained_pct = unexplained as f64 / prev.memories_active as f64;
         if unexplained_pct > S2_DROP_THRESHOLD {
@@ -462,6 +529,32 @@ pub fn s234_check_against_snapshot(current: S234Counts, now: SystemTime) -> Vec<
         }
     }
     out
+}
+
+/// §3.4.4 hygiene-aware wrapper around [`s234_check_against_snapshot`].
+/// Runs the normal anchor / threshold / rate-limit check, then drops the
+/// hygiene-shaped signals (S2 memories, S4 edges) when a bulk-hygiene run
+/// was stamped within [`HYGIENE_SUPPRESS_SECS`]. S3 (forum_threads) is
+/// never touched by hygiene, so it always passes through. This is the
+/// production entry point; the un-guarded function stays public for the
+/// pure-logic tests.
+pub fn s234_check_against_snapshot_guarded(
+    current: S234Counts,
+    now: SystemTime,
+) -> Vec<S234DropEvent> {
+    let events = s234_check_against_snapshot(current, now);
+    if events.is_empty() || !hygiene_recently_ran(now) {
+        return events;
+    }
+    events
+        .into_iter()
+        .filter(|ev| {
+            !matches!(
+                ev.signal,
+                S234Signal::S2Memories | S234Signal::S4MemoryEdges
+            )
+        })
+        .collect()
 }
 
 /// Resolve the sync/host label used in C3 S2-S4 alerts. `AB_SYNC_NODE` is the
@@ -727,6 +820,11 @@ mod tests {
     // stale state from a previous run within the same process.
     static S234_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+    // The two hygiene-marker tests both mutate the PROCESS-GLOBAL env var
+    // `AB_C3_HYGIENE_MARKER`; without serialization a parallel sibling can
+    // point the marker elsewhere mid-assert. Acquire before touching it.
+    static HYGIENE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn mk_counts(memories: u64, threads: u64, edges: u64) -> S234Counts {
         // retired=0 both sides keeps the conservation netting a no-op, so
         // the pre-#813 S2 tests still exercise the raw-drop path unchanged.
@@ -734,11 +832,19 @@ mod tests {
     }
 
     fn mk_counts_retired(memories: u64, threads: u64, edges: u64, retired: u64) -> S234Counts {
+        // `retired` here stands for the benign-transition tier that S2's
+        // conservation credit tests against. Post-#110 the credit reads
+        // `memories_archived_superseded`, so set BOTH to this value: the
+        // pre-#110 conservation tests keep their exact intent (credit =
+        // this number) while also exercising the new field. The dedicated
+        // purge tests below build the struct literally to make the two
+        // tiers diverge.
         S234Counts {
             memories_active: memories,
             forum_threads: threads,
             memory_edges: edges,
             memories_retired: retired,
+            memories_archived_superseded: retired,
         }
     }
 
@@ -927,5 +1033,122 @@ mod tests {
             compute_s234_drops(prev, cur).is_empty(),
             "small unexplained residual must stay below threshold"
         );
+    }
+
+    // ---- #110: Fix A (conservation robust to same-window purge) ----
+
+    #[test]
+    fn compute_s234_drops_s2_purge_in_window_does_not_false_fire() {
+        // #110 (2026-06-11): one daily-hygiene window archived 56 active rows
+        // (active 583→527; archived+superseded ↑56) AND purge-tombstones
+        // hard-removed ~803 aged tombstones in the SAME window
+        // (memories_retired 2104→1301, i.e. FELL). The old credit (retired
+        // rise) saturated to 0 and S2 fired falsely. Crediting
+        // archived+superseded (↑56) nets the benign 56-row archival to
+        // unexplained=0 → silent.
+        let prev = S234Counts {
+            memories_active: 583,
+            forum_threads: 50,
+            memory_edges: 1000,
+            memories_retired: 2104,
+            memories_archived_superseded: 200,
+        };
+        let cur = S234Counts {
+            memories_active: 527,
+            forum_threads: 50,
+            memory_edges: 1000,
+            memories_retired: 1301,            // fell: purge-tombstones
+            memories_archived_superseded: 256, // rose 56: archive-orphan-stubs
+        };
+        assert!(
+            compute_s234_drops(prev, cur).is_empty(),
+            "purge-in-window must not false-fire S2"
+        );
+    }
+
+    #[test]
+    fn compute_s234_drops_s2_genuine_loss_still_fires_despite_purge() {
+        // Conversely: active drops 56 with NO archived/superseded rise
+        // (genuine disappearance) while retired also falls (purge). Must
+        // still fire — Fix A must not blunt real-loss detection.
+        let prev = S234Counts {
+            memories_active: 583,
+            forum_threads: 50,
+            memory_edges: 1000,
+            memories_retired: 2104,
+            memories_archived_superseded: 200,
+        };
+        let cur = S234Counts {
+            memories_active: 527,
+            forum_threads: 50,
+            memory_edges: 1000,
+            memories_retired: 1301,
+            memories_archived_superseded: 200, // no benign credit
+        };
+        let events = compute_s234_drops(prev, cur);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].signal, S234Signal::S2Memories);
+        assert_eq!(events[0].unexplained_drop, 56);
+    }
+
+    // ---- #110: Fix B (§3.4.4 hygiene-run suppression marker) ----
+
+    #[test]
+    fn hygiene_marker_roundtrip_and_window() {
+        let _hg = HYGIENE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let marker = std::env::temp_dir()
+            .join(format!("ab-c3-hygiene-marker-{}", std::process::id()));
+        std::env::set_var("AB_C3_HYGIENE_MARKER", &marker);
+        let _ = fs::remove_file(&marker);
+
+        // No marker yet → not recent (fail open).
+        assert!(!hygiene_recently_ran(SystemTime::now()));
+
+        // Stamp → recent.
+        stamp_hygiene_run();
+        assert!(hygiene_recently_ran(SystemTime::now()));
+
+        // A stamp older than the suppress window → not recent.
+        let old = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            .saturating_sub(HYGIENE_SUPPRESS_SECS + 10);
+        fs::write(&marker, old.to_string()).unwrap();
+        assert!(!hygiene_recently_ran(SystemTime::now()));
+
+        std::env::remove_var("AB_C3_HYGIENE_MARKER");
+        let _ = fs::remove_file(&marker);
+    }
+
+    #[test]
+    fn guarded_check_suppresses_s2_s4_during_hygiene_window() {
+        let _hg = HYGIENE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let _g = S234_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        _reset_s234_snapshot_for_tests();
+        let marker = std::env::temp_dir()
+            .join(format!("ab-c3-hyg-guard-{}", std::process::id()));
+        std::env::set_var("AB_C3_HYGIENE_MARKER", &marker);
+        stamp_hygiene_run(); // mark hygiene as just-run
+
+        // Distinct base avoids rate-limiter sig collisions with sibling tests.
+        let base = 12_000_000 + (std::process::id() as u64);
+        let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(base);
+        // Seed anchor, then a large S2 + S4 drop after the window. Because a
+        // hygiene run was just stamped, both must be suppressed; S3 (which
+        // hygiene never touches) would still pass — none here.
+        let _ = s234_check_against_snapshot_guarded(mk_counts(1000, 100, 5000), t0);
+        let t1 = t0 + Duration::from_secs(S234_WINDOW_SECS + 5);
+        let out = s234_check_against_snapshot_guarded(mk_counts(500, 100, 2000), t1);
+        assert!(
+            out.iter().all(|e| !matches!(
+                e.signal,
+                S234Signal::S2Memories | S234Signal::S4MemoryEdges
+            )),
+            "hygiene window must suppress S2/S4 (got {out:?})"
+        );
+
+        std::env::remove_var("AB_C3_HYGIENE_MARKER");
+        let _ = fs::remove_file(&marker);
     }
 }

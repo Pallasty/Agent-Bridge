@@ -2002,6 +2002,18 @@ pub struct S234Counts {
     /// conserved) from genuine row disappearance (active↓ with no
     /// retired↑ — the inode-swap / accidental-DELETE failure class).
     pub memories_retired: u64,
+    /// Count of memories in the two *benign-transition* retired tiers:
+    /// `status IN ('archived','superseded')` AND `kind NOT IN
+    /// CATALOG_KINDS_C3`. This is the conservation credit S2 actually
+    /// tests against (NOT `memories_retired`): bulk hygiene moves active
+    /// rows here (active→archived / →superseded), whereas
+    /// `purge-tombstones` hard-removes rows from the *tombstoned* tier in
+    /// the same daily window — so `memories_retired` (which counts
+    /// tombstoned too) can FALL even as a benign active→archived
+    /// transition happens, zeroing a `retired`-delta credit and firing S2
+    /// falsely (#110, 2026-06-11). archived+superseded is immune to
+    /// same-window purge.
+    pub memories_archived_superseded: u64,
 }
 
 /// Filters for `memory_export` (v0.6). All None = export everything.

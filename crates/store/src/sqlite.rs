@@ -9294,6 +9294,16 @@ impl StateStore for SqliteStore {
             "SELECT COUNT(*) FROM memories \
              WHERE status != 'active' AND kind NOT IN ({placeholders})"
         );
+        // #110 hardening: the conservation credit S2 tests against. Bulk
+        // hygiene lands active→retired transitions in archived/superseded,
+        // while purge-tombstones removes rows from the tombstoned tier in
+        // the same window. Crediting against archived+superseded (not the
+        // whole retired set) keeps the benign active→archived credit intact
+        // even when a same-window purge shrinks the tombstoned tier.
+        let archived_superseded_query = format!(
+            "SELECT COUNT(*) FROM memories \
+             WHERE status IN ('archived','superseded') AND kind NOT IN ({placeholders})"
+        );
         let counts = self
             .conn
             .call(move |c| -> RusqliteResult<S234Counts> {
@@ -9311,6 +9321,11 @@ impl StateStore for SqliteStore {
                     rusqlite::params_from_iter(kind_params.iter()),
                     |r| r.get(0),
                 )?;
+                let memories_archived_superseded: i64 = c.query_row(
+                    &archived_superseded_query,
+                    rusqlite::params_from_iter(kind_params.iter()),
+                    |r| r.get(0),
+                )?;
                 let forum_threads: i64 =
                     c.query_row("SELECT COUNT(*) FROM forum_threads", [], |r| r.get(0))?;
                 let memory_edges: i64 =
@@ -9320,6 +9335,7 @@ impl StateStore for SqliteStore {
                     forum_threads: forum_threads.max(0) as u64,
                     memory_edges: memory_edges.max(0) as u64,
                     memories_retired: memories_retired.max(0) as u64,
+                    memories_archived_superseded: memories_archived_superseded.max(0) as u64,
                 })
             })
             .await

@@ -5915,7 +5915,15 @@ async fn real_main() -> Result<()> {
                 step,
                 floor,
                 json,
-            } => run_dream_decay_unused(*window_days, *step, *floor, *json).await,
+            } => {
+                // #110 Fix B: stamp the hygiene marker so the C3 S2-S4 drop
+                // detector suppresses the benign shed this run will cause.
+                let r = run_dream_decay_unused(*window_days, *step, *floor, *json).await;
+                if r.is_ok() {
+                    ab_bridge::c3_self_check::stamp_hygiene_run();
+                }
+                r
+            }
             DreamOp::ReinforceActive {
                 window_days,
                 min_access,
@@ -5933,12 +5941,29 @@ async fn real_main() -> Result<()> {
                 older_than_days,
                 dry_run,
                 json,
-            } => run_dream_prune_coact_noise(*max_count, *older_than_days, *dry_run, *json).await,
+            } => {
+                let r =
+                    run_dream_prune_coact_noise(*max_count, *older_than_days, *dry_run, *json).await;
+                // #110 Fix B: a real edge prune drops S4; mark hygiene so C3
+                // doesn't read it as edge loss. Dry-run changes nothing → skip.
+                if r.is_ok() && !*dry_run {
+                    ab_bridge::c3_self_check::stamp_hygiene_run();
+                }
+                r
+            }
             DreamOp::PruneDegenerateRelates {
                 blacklist_tags,
                 dry_run,
                 json,
-            } => run_dream_prune_degenerate_relates(blacklist_tags, *dry_run, *json).await,
+            } => {
+                let r =
+                    run_dream_prune_degenerate_relates(blacklist_tags, *dry_run, *json).await;
+                // #110 Fix B: degenerate-relates prune drops S4 edges.
+                if r.is_ok() && !*dry_run {
+                    ab_bridge::c3_self_check::stamp_hygiene_run();
+                }
+                r
+            }
             DreamOp::ArchiveOrphanStubs {
                 blacklist_tags,
                 older_than_days,
@@ -5947,7 +5972,7 @@ async fn real_main() -> Result<()> {
                 dry_run,
                 json,
             } => {
-                run_dream_archive_orphan_stubs(
+                let r = run_dream_archive_orphan_stubs(
                     blacklist_tags,
                     *older_than_days,
                     *max_archive,
@@ -5955,7 +5980,14 @@ async fn real_main() -> Result<()> {
                     *dry_run,
                     *json,
                 )
-                .await
+                .await;
+                // #110 Fix B: archive-orphan-stubs moves active→archived (the
+                // exact S2 drop in the #110 window). Mark hygiene so the
+                // detector treats it as benign even past Fix A's credit.
+                if r.is_ok() && !*dry_run {
+                    ab_bridge::c3_self_check::stamp_hygiene_run();
+                }
+                r
             }
             DreamOp::RestoreArchived { key, json } => run_dream_restore_archived(key, *json).await,
             DreamOp::ClusterProbe {
@@ -6840,7 +6872,7 @@ async fn real_main() -> Result<()> {
                                 Ok(counts) => {
                                     let now = std::time::SystemTime::now();
                                     let events =
-                                        ab_bridge::c3_self_check::s234_check_against_snapshot(
+                                        ab_bridge::c3_self_check::s234_check_against_snapshot_guarded(
                                             counts, now,
                                         );
                                     if !events.is_empty() {
