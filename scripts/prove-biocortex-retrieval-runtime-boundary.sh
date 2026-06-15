@@ -64,6 +64,8 @@ if [ -z "$biocortex_rs" ] || [ ! -f "$biocortex_rs/Cargo.toml" ]; then
     exit 2
 fi
 
+bash scripts/check-biocortex-checkout-hygiene.sh "$biocortex_rs"
+
 if [ -z "$out_dir" ]; then
     out_dir="$(mktemp -d "${TMPDIR:-/tmp}/ab-biocortex-runtime-proof-XXXXXX")"
 else
