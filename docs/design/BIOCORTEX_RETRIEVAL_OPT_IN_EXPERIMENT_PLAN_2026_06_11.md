@@ -1273,6 +1273,32 @@ this Linux checkout:
 - the next project action is refined to
   `provide_or_sync_onsen_step_b_checkout_or_repository_url_then_launch_dev_host`.
 
+## Onsen Step B Host Launch Plan
+
+Slice 49 records the launch-plan surface as a stable read-only fixture:
+
+- committed document:
+  `docs/design/BIOCORTEX_RETRIEVAL_ONSEN_STEP_B_HOST_LAUNCH_PLAN_2026_06_15.md`;
+- committed machine-readable fixture:
+  `docs/design/fixtures/biocortex-retrieval-onsen-step-b-host-launch-plan-2026-06-15.json`;
+- fixture schema:
+  `agent_bridge.biocortex_retrieval.onsen_step_b_host_launch_plan.v0`;
+- status: `blocked_missing_onsen_step_b_source`;
+- accepted Linux checkout path:
+  `/Data/CascadeProjects/onsen-hd-live-semantic-phase0`;
+- accepted branch/head:
+  `codex/live-semantic-phase0-t1` / `10d58ee`;
+- expected endpoint: `127.0.0.1:37691`;
+- required world tool: `world_visibility_query`;
+- source probe state remains `source_found=false` and
+  `ready_for_live_probe=false`;
+- launch action is `none` until the accepted source is available;
+- Agent-Bridge does not clone, start Godot, start the host, execute LSWR
+  actions, emit a durable runtime action result, call `memory_search`, run
+  BioCortex, write approval, or change default retrieval order;
+- the next project action is now the narrower unblocker
+  `provide_or_sync_onsen_step_b_checkout_or_repository_url`.
+
 ## Fail-Open Rules
 
 The experiment must return the baseline list for:

@@ -1379,6 +1379,7 @@
     "next_step_completed": true
   },
   "onsen_step_b_source_resolution_blocked": true,
+  "onsen_step_b_host_launch_plan_recorded": true,
   "onsen_step_b_source_resolution": {
     "doc": "docs/design/BIOCORTEX_RETRIEVAL_ONSEN_STEP_B_SOURCE_RESOLUTION_2026_06_15.md",
     "fixture": "docs/design/fixtures/biocortex-retrieval-onsen-step-b-source-resolution-2026-06-15.json",
@@ -1404,6 +1405,9 @@
     "host_launch_plan_ready": true,
     "host_launch_plan_does_not_start_host": true,
     "host_launch_plan_operator_launch_required": true,
+    "host_launch_plan_fixture": "docs/design/fixtures/biocortex-retrieval-onsen-step-b-host-launch-plan-2026-06-15.json",
+    "host_launch_plan_status": "blocked_missing_onsen_step_b_source",
+    "host_launch_plan_fixture_recorded": true,
     "calls_memory_search": false,
     "runs_biocortex": false,
     "writes_approval": false,
@@ -1418,5 +1422,26 @@
     "onsen_hd_remote_has_world_tool_host_contract": false,
     "recovery_probe_requires_checkout_branch_or_head_match": true,
     "recovery_probe_rejects_nonmatching_git_checkout": true
+  },
+  "onsen_step_b_host_launch_plan": {
+    "doc": "docs/design/BIOCORTEX_RETRIEVAL_ONSEN_STEP_B_HOST_LAUNCH_PLAN_2026_06_15.md",
+    "fixture": "docs/design/fixtures/biocortex-retrieval-onsen-step-b-host-launch-plan-2026-06-15.json",
+    "schema": "agent_bridge.biocortex_retrieval.onsen_step_b_host_launch_plan.v0",
+    "status": "blocked_missing_onsen_step_b_source",
+    "read_only": true,
+    "source_found": false,
+    "ready_for_live_probe": false,
+    "operator_action_required": false,
+    "agent_bridge_starts_host": false,
+    "expected_endpoint": "127.0.0.1:37691",
+    "required_world_tool": "world_visibility_query",
+    "starts_host": false,
+    "clones_repository": false,
+    "executes_lswr_actions": false,
+    "calls_memory_search": false,
+    "runs_biocortex": false,
+    "writes_approval": false,
+    "default_search_order_change_allowed": false,
+    "next_step": "provide_or_sync_onsen_step_b_checkout_or_repository_url"
   }
 }

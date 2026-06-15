@@ -1,0 +1,70 @@
+{
+  "schema": "agent_bridge.biocortex_retrieval.onsen_step_b_host_launch_plan.v0",
+  "created_at": "2026-06-15T00:00:00Z",
+  "status": "blocked_missing_onsen_step_b_source",
+  "read_only": true,
+  "source_fixture": "docs/design/fixtures/biocortex-retrieval-onsen-step-b-source-resolution-2026-06-15.json",
+  "source_probe": {
+    "script": "scripts/probe-onsen-step-b-host-source.sh",
+    "status": "blocked_missing_onsen_step_b_source",
+    "source_found": false,
+    "ready_for_live_probe": false,
+    "requires_checkout_branch_or_head_match": true,
+    "rejects_nonmatching_git_checkout": true
+  },
+  "accepted_source": {
+    "checkout": "/Data/CascadeProjects/onsen-hd-live-semantic-phase0",
+    "documented_macos_worktree": "/Users/pallasting/Projects/onsen-hd-live-semantic-phase0",
+    "branch": "codex/live-semantic-phase0-t1",
+    "head": "10d58ee",
+    "manifest_kind": "none",
+    "present_on_this_host": false
+  },
+  "expected_host": {
+    "host": "127.0.0.1",
+    "port": 37691,
+    "protocol": "newline_json_tcp",
+    "required_world_tool": "world_visibility_query",
+    "listening": false
+  },
+  "launch_plan": {
+    "action": "none",
+    "operator_action_required": false,
+    "agent_bridge_starts_host": false,
+    "dev_or_probe_flag_required": true,
+    "onsen_runtime_must_own_launch": true,
+    "source_must_be_available_before_launch": true,
+    "suggested_manual_checks": [
+      "sync or provide the accepted onsen Step B checkout or repository URL",
+      "confirm branch codex/live-semantic-phase0-t1 or head 10d58ee",
+      "launch the accepted checkout with its newline-JSON TCP dev/probe host enabled",
+      "confirm 127.0.0.1:37691 is listening",
+      "rerun world_visibility_query through Agent-Bridge"
+    ]
+  },
+  "next_commands": {
+    "source_probe_strict": "scripts/probe-onsen-step-b-host-source.sh --strict --checkout /Data/CascadeProjects/onsen-hd-live-semantic-phase0",
+    "launch_plan_after_checkout": "scripts/plan-onsen-step-b-host-launch.sh --checkout /Data/CascadeProjects/onsen-hd-live-semantic-phase0",
+    "live_probe_after_host_launch": "run Agent-Bridge world_visibility_query with AGENT_BRIDGE_TOOL_PROFILE=all against 127.0.0.1:37691"
+  },
+  "boundary": {
+    "starts_host": false,
+    "clones_repository": false,
+    "executes_lswr_actions": false,
+    "calls_memory_search": false,
+    "runs_biocortex": false,
+    "writes_approval": false,
+    "changes_memory_search_order": false,
+    "default_search_order_change_allowed": false,
+    "calls_aiot_runtime": false,
+    "emits_durable_runtime_action_result": false,
+    "mutates_default_agent_bridge_db": false,
+    "host_response_included": false,
+    "raw_queries_included": false,
+    "raw_keys_included": false,
+    "content_included": false,
+    "side_signal_raw_included": false,
+    "human_decision_text_included": false
+  },
+  "next_step": "provide_or_sync_onsen_step_b_checkout_or_repository_url"
+}

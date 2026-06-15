@@ -69,6 +69,7 @@ live_lswr_action_result_runtime_evidence="docs/design/fixtures/biocortex-retriev
 loopback_lswr_action_result_verified_probe="docs/design/fixtures/biocortex-retrieval-loopback-lswr-action-result-verified-probe-2026-06-15.json"
 loopback_lswr_host_attach_preflight="docs/design/fixtures/biocortex-retrieval-loopback-lswr-host-attach-preflight-2026-06-15.json"
 onsen_step_b_source_resolution="docs/design/fixtures/biocortex-retrieval-onsen-step-b-source-resolution-2026-06-15.json"
+onsen_step_b_host_launch_plan_fixture="docs/design/fixtures/biocortex-retrieval-onsen-step-b-host-launch-plan-2026-06-15.json"
 onsen_step_b_host_source_probe_script="scripts/probe-onsen-step-b-host-source.sh"
 onsen_step_b_host_launch_plan_script="scripts/plan-onsen-step-b-host-launch.sh"
 lswr_interaction_feedback_fixture="crates/bridge/tests/fixtures/lswr_interaction_feedback_fixture_v0.json"
@@ -287,6 +288,7 @@ jq -e '
     and .onsen_step_b_source_resolution_blocked == true
     and .onsen_step_b_host_source_probe_script_ready == true
     and .onsen_step_b_host_launch_plan_script_ready == true
+    and .onsen_step_b_host_launch_plan_recorded == true
     and .downstream_aio_checkpoint_selection.selection_status == "downstream_aio_integration_checkpoint_selected"
     and .downstream_aio_checkpoint_selection.selected_checkpoint == "semantic_system_bus_lswr_action_result_runtime_evidence_checkpoint"
     and .downstream_aio_checkpoint_selection.selected_checkpoint_family == "semantic_system_bus"
@@ -428,8 +430,28 @@ jq -e '
     and .onsen_step_b_source_resolution.host_launch_plan_ready == true
     and .onsen_step_b_source_resolution.host_launch_plan_does_not_start_host == true
     and .onsen_step_b_source_resolution.host_launch_plan_operator_launch_required == true
+    and .onsen_step_b_source_resolution.host_launch_plan_fixture == "docs/design/fixtures/biocortex-retrieval-onsen-step-b-host-launch-plan-2026-06-15.json"
+    and .onsen_step_b_source_resolution.host_launch_plan_status == "blocked_missing_onsen_step_b_source"
+    and .onsen_step_b_source_resolution.host_launch_plan_fixture_recorded == true
     and .onsen_step_b_source_resolution.recovery_probe_requires_checkout_branch_or_head_match == true
     and .onsen_step_b_source_resolution.recovery_probe_rejects_nonmatching_git_checkout == true
+    and .onsen_step_b_host_launch_plan.status == "blocked_missing_onsen_step_b_source"
+    and .onsen_step_b_host_launch_plan.schema == "agent_bridge.biocortex_retrieval.onsen_step_b_host_launch_plan.v0"
+    and .onsen_step_b_host_launch_plan.read_only == true
+    and .onsen_step_b_host_launch_plan.source_found == false
+    and .onsen_step_b_host_launch_plan.ready_for_live_probe == false
+    and .onsen_step_b_host_launch_plan.operator_action_required == false
+    and .onsen_step_b_host_launch_plan.agent_bridge_starts_host == false
+    and .onsen_step_b_host_launch_plan.expected_endpoint == "127.0.0.1:37691"
+    and .onsen_step_b_host_launch_plan.required_world_tool == "world_visibility_query"
+    and .onsen_step_b_host_launch_plan.starts_host == false
+    and .onsen_step_b_host_launch_plan.clones_repository == false
+    and .onsen_step_b_host_launch_plan.executes_lswr_actions == false
+    and .onsen_step_b_host_launch_plan.calls_memory_search == false
+    and .onsen_step_b_host_launch_plan.runs_biocortex == false
+    and .onsen_step_b_host_launch_plan.writes_approval == false
+    and .onsen_step_b_host_launch_plan.default_search_order_change_allowed == false
+    and .onsen_step_b_host_launch_plan.next_step == "provide_or_sync_onsen_step_b_checkout_or_repository_url"
     and .onsen_step_b_source_resolution.calls_memory_search == false
     and .onsen_step_b_source_resolution.runs_biocortex == false
     and .onsen_step_b_source_resolution.writes_approval == false
@@ -1556,6 +1578,9 @@ jq -e '
     and .recovery_probe.nonmatching_git_checkout_is_not_source_found == true
     and .host_launch_plan.script == "scripts/plan-onsen-step-b-host-launch.sh"
     and .host_launch_plan.schema == "agent_bridge.biocortex_retrieval.onsen_step_b_host_launch_plan.v0"
+    and .host_launch_plan.doc == "docs/design/BIOCORTEX_RETRIEVAL_ONSEN_STEP_B_HOST_LAUNCH_PLAN_2026_06_15.md"
+    and .host_launch_plan.fixture == "docs/design/fixtures/biocortex-retrieval-onsen-step-b-host-launch-plan-2026-06-15.json"
+    and .host_launch_plan.status == "blocked_missing_onsen_step_b_source"
     and .host_launch_plan.ready == true
     and .host_launch_plan.read_only == true
     and .host_launch_plan.uses_source_probe == true
@@ -1563,6 +1588,7 @@ jq -e '
     and .host_launch_plan.does_not_start_host == true
     and .host_launch_plan.operator_launch_required == true
     and .host_launch_plan.agent_bridge_client_only == true
+    and .host_launch_plan.fixture_recorded == true
     and .boundary.calls_memory_search == false
     and .boundary.runs_biocortex == false
     and .boundary.writes_approval == false
@@ -1580,6 +1606,45 @@ jq -e '
     and .boundary.human_decision_text_included == false
     and .next_step == "provide_or_sync_onsen_step_b_checkout_or_repository_url_then_launch_dev_host"
 ' "$onsen_step_b_source_resolution" >/dev/null
+
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.onsen_step_b_host_launch_plan.v0"
+    and .status == "blocked_missing_onsen_step_b_source"
+    and .read_only == true
+    and .source_probe.script == "scripts/probe-onsen-step-b-host-source.sh"
+    and .source_probe.source_found == false
+    and .source_probe.ready_for_live_probe == false
+    and .source_probe.requires_checkout_branch_or_head_match == true
+    and .source_probe.rejects_nonmatching_git_checkout == true
+    and .accepted_source.checkout == "/Data/CascadeProjects/onsen-hd-live-semantic-phase0"
+    and .accepted_source.documented_macos_worktree == "/Users/pallasting/Projects/onsen-hd-live-semantic-phase0"
+    and .accepted_source.branch == "codex/live-semantic-phase0-t1"
+    and .accepted_source.head == "10d58ee"
+    and .accepted_source.present_on_this_host == false
+    and .expected_host.host == "127.0.0.1"
+    and .expected_host.port == 37691
+    and .expected_host.protocol == "newline_json_tcp"
+    and .expected_host.required_world_tool == "world_visibility_query"
+    and .expected_host.listening == false
+    and .launch_plan.action == "none"
+    and .launch_plan.operator_action_required == false
+    and .launch_plan.agent_bridge_starts_host == false
+    and .launch_plan.dev_or_probe_flag_required == true
+    and .launch_plan.onsen_runtime_must_own_launch == true
+    and .launch_plan.source_must_be_available_before_launch == true
+    and .boundary.starts_host == false
+    and .boundary.clones_repository == false
+    and .boundary.executes_lswr_actions == false
+    and .boundary.calls_memory_search == false
+    and .boundary.runs_biocortex == false
+    and .boundary.writes_approval == false
+    and .boundary.changes_memory_search_order == false
+    and .boundary.default_search_order_change_allowed == false
+    and .boundary.calls_aiot_runtime == false
+    and .boundary.emits_durable_runtime_action_result == false
+    and .boundary.mutates_default_agent_bridge_db == false
+    and .next_step == "provide_or_sync_onsen_step_b_checkout_or_repository_url"
+' "$onsen_step_b_host_launch_plan_fixture" >/dev/null
 
 tmp_onsen_step_b_host_source_probe="$tmpdir/onsen-step-b-host-source-probe.json"
 "$onsen_step_b_host_source_probe_script" \
@@ -1653,6 +1718,25 @@ jq -e '
     and .boundary.emits_durable_runtime_action_result == false
     and .boundary.mutates_default_agent_bridge_db == false
     and .next_step == "provide_or_sync_onsen_step_b_checkout_or_repository_url"
+' "$tmp_onsen_step_b_host_launch_plan" >/dev/null
+jq -e --slurpfile fixture "$onsen_step_b_host_launch_plan_fixture" '
+    .schema == $fixture[0].schema
+    and .status == $fixture[0].status
+    and .read_only == $fixture[0].read_only
+    and .source_probe.source_found == $fixture[0].source_probe.source_found
+    and .source_probe.ready_for_live_probe == $fixture[0].source_probe.ready_for_live_probe
+    and .accepted_source.branch == $fixture[0].accepted_source.branch
+    and .accepted_source.head == $fixture[0].accepted_source.head
+    and .expected_host.host == $fixture[0].expected_host.host
+    and .expected_host.port == $fixture[0].expected_host.port
+    and .expected_host.protocol == $fixture[0].expected_host.protocol
+    and .expected_host.required_world_tool == $fixture[0].expected_host.required_world_tool
+    and .launch_plan.action == $fixture[0].launch_plan.action
+    and .launch_plan.agent_bridge_starts_host == $fixture[0].launch_plan.agent_bridge_starts_host
+    and .boundary.starts_host == $fixture[0].boundary.starts_host
+    and .boundary.clones_repository == $fixture[0].boundary.clones_repository
+    and .boundary.executes_lswr_actions == $fixture[0].boundary.executes_lswr_actions
+    and .next_step == $fixture[0].next_step
 ' "$tmp_onsen_step_b_host_launch_plan" >/dev/null
 
 tmp_mismatched_onsen_checkout="$tmpdir/mismatched-onsen-step-b-checkout"
