@@ -60,7 +60,8 @@ evidence for selecting a downstream AIO integration checkpoint, without
 granting default, hybrid, semantic, approval-write, or production-use
 permission. The first downstream checkpoint is now selected as the Semantic
 System Bus LSWR action/result runtime-evidence checkpoint. The next step is to
-build a read-only downstream AIO runtime-evidence handoff packet.
+connect the ready downstream AIO runtime-evidence handoff packet to a read-only
+SSB/LSWR action-result review fixture.
 
 ```json
 {
@@ -106,7 +107,7 @@ build a read-only downstream AIO runtime-evidence handoff packet.
   "post_semantic_diverse_review_recorded": true,
   "post_semantic_diverse_review_ready": true,
   "downstream_aio_integration_checkpoint_selected": true,
-  "downstream_aio_runtime_evidence_handoff_ready": false,
+  "downstream_aio_runtime_evidence_handoff_ready": true,
   "controlled_explicit_opt_in_fts_trial_ready": true,
   "post_runtime_evidence_backed_controlled_trial_ready": true,
   "post_runtime_live_candidate_evidence_ready": true,
@@ -159,6 +160,11 @@ Downstream AIO checkpoint selection:
 
 - `docs/design/BIOCORTEX_RETRIEVAL_DOWNSTREAM_AIO_CHECKPOINT_SELECTION_2026_06_15.md`
 - `docs/design/fixtures/biocortex-retrieval-downstream-aio-checkpoint-selection-2026-06-15.json`
+
+Downstream AIO runtime-evidence handoff:
+
+- `docs/design/BIOCORTEX_RETRIEVAL_DOWNSTREAM_AIO_RUNTIME_EVIDENCE_HANDOFF_2026_06_15.md`
+- `docs/design/fixtures/biocortex-retrieval-downstream-aio-runtime-evidence-handoff-2026-06-15.json`
 
 Authorization request packet:
 
@@ -1015,8 +1021,34 @@ Slice 41 selects the first downstream AIO integration checkpoint:
   approval writes, default `memory_search` order changes, production use,
   direct AiOT runtime consumption, or LSWR action execution from BioCortex
   evidence;
+- the prior next project action
+  `build_downstream_aio_runtime_evidence_handoff_packet` is completed by
+  Slice 42.
+
+## Downstream AIO Runtime-Evidence Handoff
+
+Slice 42 implements the read-only downstream AIO runtime-evidence handoff
+packet:
+
+- committed document:
+  `docs/design/BIOCORTEX_RETRIEVAL_DOWNSTREAM_AIO_RUNTIME_EVIDENCE_HANDOFF_2026_06_15.md`;
+- committed machine-readable packet:
+  `docs/design/fixtures/biocortex-retrieval-downstream-aio-runtime-evidence-handoff-2026-06-15.json`;
+- CLI:
+  `agent-bridge bio-cortex retrieval-downstream-aio-runtime-evidence-handoff`;
+- handoff schema:
+  `agent_bridge.biocortex_retrieval.downstream_aio_runtime_evidence_handoff.v0`;
+- handoff status: `ready`;
+- selected checkpoint:
+  `semantic_system_bus_lswr_action_result_runtime_evidence_checkpoint`;
+- target schema family: `agent_bridge.semantic_bus.action_result.v0`;
+- recover hint: `proceed_to_read_only_ssb_review`;
+- the packet remains read-only and does not call `memory_search`, run
+  BioCortex, write approval, change default retrieval order, call AiOT runtime,
+  execute LSWR actions, mutate the default Agent-Bridge DB, or include raw
+  query/key/content/side-signal/human-decision payloads;
 - the next project action is
-  `build_downstream_aio_runtime_evidence_handoff_packet`.
+  `connect_handoff_packet_to_ssb_lswr_action_result_review_fixture`.
 
 ## Fail-Open Rules
 

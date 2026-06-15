@@ -1,7 +1,7 @@
 {
   "schema": "agent_bridge.biocortex_retrieval.opt_in_experiment_plan.v0",
   "created_at": "2026-06-11T00:00:00Z",
-  "status": "downstream_aio_integration_checkpoint_selected",
+  "status": "downstream_aio_runtime_evidence_handoff_ready",
   "approval_state": "opt_in_implementation_authorized",
   "runtime_adapter_approved": false,
   "default_search_order_change_allowed": false,
@@ -42,7 +42,7 @@
   "post_semantic_diverse_review_recorded": true,
   "post_semantic_diverse_review_ready": true,
   "downstream_aio_integration_checkpoint_selected": true,
-  "downstream_aio_runtime_evidence_handoff_ready": false,
+  "downstream_aio_runtime_evidence_handoff_ready": true,
   "controlled_explicit_opt_in_fts_trial_ready": true,
   "post_runtime_evidence_backed_controlled_trial_ready": true,
   "post_runtime_live_candidate_evidence_ready": true,
@@ -1200,7 +1200,33 @@
       "lswr_action_execution_from_biocortex_evidence",
       "additional_raw_query_key_content_or_side_signal_disclosure"
     ],
-    "next_step": "build_downstream_aio_runtime_evidence_handoff_packet"
+    "next_step": "completed_by_downstream_aio_runtime_evidence_handoff_packet",
+    "next_step_completed": true
   },
-  "next_step": "build_downstream_aio_runtime_evidence_handoff_packet"
+  "downstream_aio_runtime_evidence_handoff": {
+    "doc": "docs/design/BIOCORTEX_RETRIEVAL_DOWNSTREAM_AIO_RUNTIME_EVIDENCE_HANDOFF_2026_06_15.md",
+    "fixture": "docs/design/fixtures/biocortex-retrieval-downstream-aio-runtime-evidence-handoff-2026-06-15.json",
+    "source_checkpoint_selection_fixture": "docs/design/fixtures/biocortex-retrieval-downstream-aio-checkpoint-selection-2026-06-15.json",
+    "source_post_semantic_diverse_review_fixture": "docs/design/fixtures/biocortex-retrieval-post-semantic-diverse-review-2026-06-15.json",
+    "cli": "agent-bridge bio-cortex retrieval-downstream-aio-runtime-evidence-handoff",
+    "schema": "agent_bridge.biocortex_retrieval.downstream_aio_runtime_evidence_handoff.v0",
+    "status": "ready",
+    "read_only": true,
+    "handoff_ready": true,
+    "selected_checkpoint": "semantic_system_bus_lswr_action_result_runtime_evidence_checkpoint",
+    "target_schema_family": "agent_bridge.semantic_bus.action_result.v0",
+    "recover": "proceed_to_read_only_ssb_review",
+    "may_compare_against_ssb_runtime_evidence_contract": true,
+    "may_emit_ssb_adapter_fixture": true,
+    "may_execute_lswr_actions": false,
+    "may_call_aiot_runtime": false,
+    "calls_memory_search": false,
+    "runs_biocortex": false,
+    "writes_approval": false,
+    "changes_memory_search_order": false,
+    "default_search_order_change_allowed": false,
+    "raw_probe_query_or_key_leak_check": "passed",
+    "next_step": "connect_handoff_packet_to_ssb_lswr_action_result_review_fixture"
+  },
+  "next_step": "connect_handoff_packet_to_ssb_lswr_action_result_review_fixture"
 }

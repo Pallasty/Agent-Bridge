@@ -66,6 +66,12 @@ pub const BIOCORTEX_RETRIEVAL_OPT_IN_RUNTIME_READINESS_PACKET_SCHEMA: &str =
     "agent_bridge.biocortex_retrieval.opt_in_runtime_readiness_packet.v0";
 pub const BIOCORTEX_RETRIEVAL_OPT_IN_RUNTIME_TRANSITION_GATE_SCHEMA: &str =
     "agent_bridge.biocortex_retrieval.opt_in_runtime_transition_gate.v0";
+pub const BIOCORTEX_RETRIEVAL_POST_SEMANTIC_DIVERSE_REVIEW_SCHEMA: &str =
+    "agent_bridge.biocortex_retrieval.post_semantic_diverse_review.v0";
+pub const BIOCORTEX_RETRIEVAL_DOWNSTREAM_AIO_CHECKPOINT_SELECTION_SCHEMA: &str =
+    "agent_bridge.biocortex_retrieval.downstream_aio_checkpoint_selection.v0";
+pub const BIOCORTEX_RETRIEVAL_DOWNSTREAM_AIO_RUNTIME_EVIDENCE_HANDOFF_SCHEMA: &str =
+    "agent_bridge.biocortex_retrieval.downstream_aio_runtime_evidence_handoff.v0";
 pub const BIOCORTEX_SUBSTRATE_REPLAY_PLAN_SCHEMA: &str =
     "agent_bridge.biocortex_substrate_replay_plan.v0";
 pub const BIOCORTEX_CHECKOUT_ENV: &str = "AB_BIOCORTEX_RS";
@@ -348,6 +354,16 @@ pub struct BioCortexRetrievalOptInRuntimeTransitionGateOptions {
     pub mode: String,
     pub per_call_opt_in: bool,
     pub operator_disabled: bool,
+    pub reviewer: Option<String>,
+    pub commit: Option<String>,
+    pub forum_post_id: Option<String>,
+    pub memory_key: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BioCortexRetrievalDownstreamAioRuntimeEvidenceHandoffOptions {
+    pub checkpoint_selection: Value,
+    pub post_semantic_diverse_review: Value,
     pub reviewer: Option<String>,
     pub commit: Option<String>,
     pub forum_post_id: Option<String>,
@@ -4127,6 +4143,7 @@ pub fn biocortex_retrieval_opt_in_authorization_decision_packet(
                 || status == "post_runtime_semantic_diverse_live_candidate_evidence_ready"
                 || status == "post_semantic_diverse_review_recorded"
                 || status == "downstream_aio_integration_checkpoint_selected"
+                || status == "downstream_aio_runtime_evidence_handoff_ready"
         })
         .unwrap_or(false);
 
@@ -4486,6 +4503,7 @@ pub fn biocortex_retrieval_opt_in_post_implementation_review_gate(
                 || status == "post_runtime_semantic_diverse_live_candidate_evidence_ready"
                 || status == "post_semantic_diverse_review_recorded"
                 || status == "downstream_aio_integration_checkpoint_selected"
+                || status == "downstream_aio_runtime_evidence_handoff_ready"
         })
         .unwrap_or(false);
     let plan_implementation_allowed = value_bool_is(plan.get("implementation_allowed"), true);
@@ -9875,6 +9893,477 @@ pub fn biocortex_retrieval_opt_in_runtime_transition_gate(
             "readiness_gated_explicit_opt_in_fts_transition_allowed"
         } else {
             "blocked"
+        },
+        "approval_writes_allowed": false,
+        "writes_approval": false,
+        "calls_memory_search": false,
+        "runs_biocortex": false,
+        "registers_embedding_backend": false,
+        "changes_memory_search_order": false,
+        "default_search_order_change_allowed": false,
+        "default_calls_unchanged": true,
+        "raw_queries_included": false,
+        "raw_keys_included": false,
+        "content_included": false,
+        "side_signal_raw_included": false,
+        "human_decision_text_included": false,
+    })
+}
+
+pub fn biocortex_retrieval_downstream_aio_runtime_evidence_handoff(
+    opts: BioCortexRetrievalDownstreamAioRuntimeEvidenceHandoffOptions,
+) -> Value {
+    let checkpoint = opts.checkpoint_selection;
+    let review = opts.post_semantic_diverse_review;
+
+    let checkpoint_schema_ok = value_str_eq(
+        checkpoint.get("schema"),
+        BIOCORTEX_RETRIEVAL_DOWNSTREAM_AIO_CHECKPOINT_SELECTION_SCHEMA,
+    );
+    let checkpoint_status_ok = value_str_eq(
+        checkpoint.get("status"),
+        "downstream_aio_integration_checkpoint_selected",
+    );
+    let selected_checkpoint_ok = value_str_eq(
+        checkpoint.pointer("/selected_checkpoint/id"),
+        "semantic_system_bus_lswr_action_result_runtime_evidence_checkpoint",
+    );
+    let selected_family_ok = value_str_eq(
+        checkpoint.pointer("/selected_checkpoint/family"),
+        "semantic_system_bus",
+    );
+    let selected_surface_ok = value_str_eq(
+        checkpoint.pointer("/selected_checkpoint/surface"),
+        "lswr_action_result_runtime_evidence",
+    );
+    let first_consumer_ok = value_str_eq(
+        checkpoint.pointer("/selected_checkpoint/first_consumer"),
+        "agent_bridge_semantic_system_bus",
+    );
+    let direct_aiot_not_selected = value_bool_is(
+        checkpoint.pointer("/selected_checkpoint/direct_aiot_consumption_selected"),
+        false,
+    );
+    let checkpoint_contract_read_only = value_bool_is(
+        checkpoint.pointer("/checkpoint_contract/checkpoint_must_be_read_only"),
+        true,
+    );
+    let checkpoint_handoff_schema_ok = value_str_eq(
+        checkpoint.pointer("/checkpoint_contract/first_handoff_schema"),
+        BIOCORTEX_RETRIEVAL_DOWNSTREAM_AIO_RUNTIME_EVIDENCE_HANDOFF_SCHEMA,
+    );
+    let checkpoint_may_build_handoff = value_bool_is(
+        checkpoint.pointer("/checkpoint_contract/may_build_handoff_packet"),
+        true,
+    );
+    let checkpoint_may_compare_ssb = value_bool_is(
+        checkpoint
+            .pointer("/checkpoint_contract/may_compare_against_ssb_runtime_evidence_contract"),
+        true,
+    );
+    let checkpoint_boundary_ok = value_bool_is(
+        checkpoint.pointer("/checkpoint_contract/may_enable_default_retrieval"),
+        false,
+    ) && value_bool_is(
+        checkpoint.pointer("/checkpoint_contract/may_enable_hybrid_retrieval"),
+        false,
+    ) && value_bool_is(
+        checkpoint.pointer("/checkpoint_contract/may_enable_semantic_retrieval"),
+        false,
+    ) && value_bool_is(
+        checkpoint.pointer("/checkpoint_contract/may_write_approval"),
+        false,
+    ) && value_bool_is(
+        checkpoint.pointer("/checkpoint_contract/may_mutate_default_agent_bridge_db"),
+        false,
+    ) && value_bool_is(
+        checkpoint.pointer("/checkpoint_contract/may_call_aiot_runtime"),
+        false,
+    ) && value_bool_is(
+        checkpoint.pointer("/checkpoint_contract/may_execute_lswr_actions_from_biocortex_evidence"),
+        false,
+    ) && value_bool_is(
+        checkpoint.pointer("/boundary/default_search_order_change_allowed"),
+        false,
+    ) && value_bool_is(
+        checkpoint.pointer("/boundary/default_retrieval_influence_authorized"),
+        false,
+    ) && value_bool_is(
+        checkpoint.pointer("/boundary/hybrid_retrieval_influence_authorized"),
+        false,
+    ) && value_bool_is(
+        checkpoint.pointer("/boundary/semantic_retrieval_influence_authorized"),
+        false,
+    ) && value_bool_is(
+        checkpoint.pointer("/boundary/direct_aiot_runtime_use_authorized"),
+        false,
+    );
+    let checkpoint_raw_absent =
+        value_bool_is(checkpoint.pointer("/boundary/raw_queries_included"), false)
+            && value_bool_is(checkpoint.pointer("/boundary/raw_keys_included"), false)
+            && value_bool_is(checkpoint.pointer("/boundary/content_included"), false)
+            && value_bool_is(
+                checkpoint.pointer("/boundary/side_signal_raw_included"),
+                false,
+            )
+            && value_bool_is(
+                checkpoint.pointer("/boundary/human_decision_text_included"),
+                false,
+            );
+    let ssb_alignment_ok = value_bool_is(
+        checkpoint.pointer("/ssb_alignment/runtime_backed_evidence"),
+        true,
+    ) && value_bool_is(
+        checkpoint.pointer("/ssb_alignment/redacted_evidence_only"),
+        true,
+    ) && value_bool_is(
+        checkpoint.pointer("/ssb_alignment/no_laundering_boundary_required"),
+        true,
+    ) && value_bool_is(
+        checkpoint.pointer("/ssb_alignment/verification_boundary_required"),
+        true,
+    ) && value_bool_is(
+        checkpoint.pointer("/ssb_alignment/recover_field_required"),
+        true,
+    ) && value_bool_is(
+        checkpoint.pointer("/ssb_alignment/raw_available_must_not_expose_raw_payload"),
+        true,
+    );
+
+    let review_schema_ok = value_str_eq(
+        review.get("schema"),
+        BIOCORTEX_RETRIEVAL_POST_SEMANTIC_DIVERSE_REVIEW_SCHEMA,
+    );
+    let review_status_ok = value_str_eq(
+        review.get("status"),
+        "post_semantic_diverse_review_recorded",
+    );
+    let review_evidence_accepted =
+        value_bool_is(review.pointer("/review_result/evidence_accepted"), true);
+    let review_ready_for_checkpoint = value_bool_is(
+        review.pointer("/review_result/ready_for_downstream_aio_checkpoint_selection"),
+        true,
+    );
+    let review_authorization_scope_ok = value_str_eq(
+        review.pointer("/accepted_evidence_summary/authorization_scope"),
+        "explicit_opt_in_fts_runtime_influence",
+    );
+    let review_expected_met = value_bool_is(
+        review.pointer("/accepted_evidence_summary/expected_met"),
+        true,
+    );
+    let review_all_cases_ready = value_bool_is(
+        review.pointer("/accepted_evidence_summary/all_cases_evidence_ready"),
+        true,
+    );
+    let review_status_surfaces_safe = value_bool_is(
+        review.pointer("/accepted_evidence_summary/all_status_surfaces_blocked"),
+        true,
+    ) && value_bool_is(
+        review.pointer("/accepted_evidence_summary/all_status_surfaces_side_effect_free"),
+        true,
+    );
+    let review_default_safe =
+        value_bool_is(
+            review.pointer("/accepted_evidence_summary/default_memory_search_unchanged"),
+            true,
+        ) && value_bool_is(
+            review.pointer("/accepted_evidence_summary/hybrid_retrieval_unchanged"),
+            true,
+        ) && value_bool_is(
+            review.pointer("/accepted_evidence_summary/semantic_retrieval_unchanged"),
+            true,
+        ) && value_bool_is(
+            review.pointer("/boundary/default_search_order_change_allowed"),
+            false,
+        ) && value_bool_is(
+            review.pointer("/boundary/default_retrieval_influence_authorized"),
+            false,
+        ) && value_bool_is(
+            review.pointer("/boundary/hybrid_retrieval_influence_authorized"),
+            false,
+        ) && value_bool_is(
+            review.pointer("/boundary/semantic_retrieval_influence_authorized"),
+            false,
+        ) && value_bool_is(review.pointer("/boundary/production_use_authorized"), false);
+    let review_raw_absent = value_bool_is(review.pointer("/boundary/raw_queries_included"), false)
+        && value_bool_is(review.pointer("/boundary/raw_keys_included"), false)
+        && value_bool_is(review.pointer("/boundary/content_included"), false)
+        && value_bool_is(review.pointer("/boundary/side_signal_raw_included"), false);
+    let review_gate_requirements_preserved = value_str_eq(
+        review.pointer("/required_gates_preserved/compile_feature"),
+        "biocortex-retrieval-opt-in",
+    ) && value_str_eq(
+        review.pointer("/required_gates_preserved/runtime_env"),
+        BIOCORTEX_RETRIEVAL_OPT_IN_ENABLE_ENV,
+    ) && value_str_eq(
+        review.pointer("/required_gates_preserved/operator_disable"),
+        BIOCORTEX_RETRIEVAL_DISABLE_ENV,
+    ) && value_bool_is(
+        review.pointer("/required_gates_preserved/per_call_opt_in_required"),
+        true,
+    ) && value_bool_is(
+        review.pointer("/required_gates_preserved/post_runtime_transition_gate_required"),
+        true,
+    ) && value_bool_is(
+        review.pointer("/required_gates_preserved/fail_open_to_baseline_required"),
+        true,
+    );
+
+    let fixture_count = review
+        .pointer("/accepted_evidence_summary/fixture_count")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let total_query_count = review
+        .pointer("/accepted_evidence_summary/total_query_count")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let total_runs_biocortex_count = review
+        .pointer("/accepted_evidence_summary/total_runs_biocortex_count")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let total_actual_order_changed_count = review
+        .pointer("/accepted_evidence_summary/total_actual_order_changed_count")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let evidence_counts_ok = fixture_count >= 4
+        && total_query_count >= 8
+        && total_runs_biocortex_count >= 8
+        && total_actual_order_changed_count >= 8;
+
+    let mut blockers = Vec::new();
+    push_string_blocker(
+        &mut blockers,
+        checkpoint_schema_ok,
+        "checkpoint_schema_invalid",
+    );
+    push_string_blocker(
+        &mut blockers,
+        checkpoint_status_ok,
+        "checkpoint_status_invalid",
+    );
+    push_string_blocker(
+        &mut blockers,
+        selected_checkpoint_ok,
+        "selected_checkpoint_unexpected",
+    );
+    push_string_blocker(
+        &mut blockers,
+        selected_family_ok,
+        "selected_checkpoint_family_unexpected",
+    );
+    push_string_blocker(
+        &mut blockers,
+        selected_surface_ok,
+        "selected_checkpoint_surface_unexpected",
+    );
+    push_string_blocker(
+        &mut blockers,
+        first_consumer_ok,
+        "first_consumer_unexpected",
+    );
+    push_string_blocker(
+        &mut blockers,
+        direct_aiot_not_selected,
+        "direct_aiot_runtime_selected",
+    );
+    push_string_blocker(
+        &mut blockers,
+        checkpoint_contract_read_only,
+        "checkpoint_not_read_only",
+    );
+    push_string_blocker(
+        &mut blockers,
+        checkpoint_handoff_schema_ok,
+        "handoff_schema_not_selected",
+    );
+    push_string_blocker(
+        &mut blockers,
+        checkpoint_may_build_handoff,
+        "handoff_packet_not_allowed",
+    );
+    push_string_blocker(
+        &mut blockers,
+        checkpoint_may_compare_ssb,
+        "ssb_contract_compare_not_allowed",
+    );
+    push_string_blocker(
+        &mut blockers,
+        checkpoint_boundary_ok,
+        "checkpoint_boundary_not_safe",
+    );
+    push_string_blocker(
+        &mut blockers,
+        checkpoint_raw_absent,
+        "checkpoint_raw_input_included",
+    );
+    push_string_blocker(&mut blockers, ssb_alignment_ok, "ssb_alignment_not_ready");
+    push_string_blocker(&mut blockers, review_schema_ok, "review_schema_invalid");
+    push_string_blocker(&mut blockers, review_status_ok, "review_status_invalid");
+    push_string_blocker(
+        &mut blockers,
+        review_evidence_accepted,
+        "review_evidence_not_accepted",
+    );
+    push_string_blocker(
+        &mut blockers,
+        review_ready_for_checkpoint,
+        "review_not_ready_for_checkpoint",
+    );
+    push_string_blocker(
+        &mut blockers,
+        review_authorization_scope_ok,
+        "review_scope_unexpected",
+    );
+    push_string_blocker(
+        &mut blockers,
+        review_expected_met,
+        "review_expected_not_met",
+    );
+    push_string_blocker(
+        &mut blockers,
+        review_all_cases_ready,
+        "review_cases_not_ready",
+    );
+    push_string_blocker(
+        &mut blockers,
+        review_status_surfaces_safe,
+        "review_status_surfaces_not_safe",
+    );
+    push_string_blocker(
+        &mut blockers,
+        review_default_safe,
+        "review_default_boundary_not_safe",
+    );
+    push_string_blocker(
+        &mut blockers,
+        review_raw_absent,
+        "review_raw_input_included",
+    );
+    push_string_blocker(
+        &mut blockers,
+        review_gate_requirements_preserved,
+        "review_required_gates_not_preserved",
+    );
+    push_string_blocker(
+        &mut blockers,
+        evidence_counts_ok,
+        "review_evidence_counts_insufficient",
+    );
+
+    let ready = blockers.is_empty();
+
+    json!({
+        "schema": BIOCORTEX_RETRIEVAL_DOWNSTREAM_AIO_RUNTIME_EVIDENCE_HANDOFF_SCHEMA,
+        "generated_at": now_secs(),
+        "read_only": true,
+        "downstream_aio_runtime_evidence_handoff": true,
+        "implementation_stage": "downstream_aio_runtime_evidence_handoff_packet",
+        "status": if ready { "ready" } else { "blocked" },
+        "authorization_scope": "explicit_opt_in_fts_runtime_influence",
+        "purpose": "Represent BioCortex runtime-backed retrieval evidence as a redacted downstream AIO/SSB handoff packet without enabling default retrieval, AiOT runtime consumption, or LSWR action execution.",
+        "reviewer": optional_string_json(opts.reviewer),
+        "commit": optional_string_json(opts.commit),
+        "forum_post_id": optional_string_json(opts.forum_post_id),
+        "memory_key": optional_string_json(opts.memory_key),
+        "input_contract": {
+            "checkpoint_selection_schema": checkpoint.get("schema").cloned().unwrap_or(Value::Null),
+            "post_semantic_diverse_review_schema": review.get("schema").cloned().unwrap_or(Value::Null),
+            "checkpoint_selection_included": false,
+            "post_semantic_diverse_review_included": false,
+            "requires_checkpoint_status": "downstream_aio_integration_checkpoint_selected",
+            "requires_review_status": "post_semantic_diverse_review_recorded",
+            "raw_queries_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "side_signal_raw_included": false,
+            "human_decision_text_included": false,
+        },
+        "checkpoint_summary": {
+            "checkpoint_schema_ok": checkpoint_schema_ok,
+            "checkpoint_status_ok": checkpoint_status_ok,
+            "selected_checkpoint": checkpoint.pointer("/selected_checkpoint/id").cloned().unwrap_or(Value::Null),
+            "selected_checkpoint_family": checkpoint.pointer("/selected_checkpoint/family").cloned().unwrap_or(Value::Null),
+            "selected_surface": checkpoint.pointer("/selected_checkpoint/surface").cloned().unwrap_or(Value::Null),
+            "first_consumer": checkpoint.pointer("/selected_checkpoint/first_consumer").cloned().unwrap_or(Value::Null),
+            "direct_aiot_consumption_selected": !direct_aiot_not_selected,
+            "checkpoint_must_be_read_only": checkpoint_contract_read_only,
+            "first_handoff_schema": checkpoint.pointer("/checkpoint_contract/first_handoff_schema").cloned().unwrap_or(Value::Null),
+            "may_compare_against_ssb_runtime_evidence_contract": checkpoint_may_compare_ssb,
+            "boundary_safe": checkpoint_boundary_ok,
+            "raw_inputs_absent": checkpoint_raw_absent,
+        },
+        "source_review_summary": {
+            "review_schema_ok": review_schema_ok,
+            "review_status": review.get("status").cloned().unwrap_or(Value::Null),
+            "evidence_accepted": review_evidence_accepted,
+            "ready_for_downstream_aio_checkpoint_selection": review_ready_for_checkpoint,
+            "authorization_scope": review.pointer("/accepted_evidence_summary/authorization_scope").cloned().unwrap_or(Value::Null),
+            "expected_met": review_expected_met,
+            "all_cases_evidence_ready": review_all_cases_ready,
+            "all_status_surfaces_blocked": value_bool_is(
+                review.pointer("/accepted_evidence_summary/all_status_surfaces_blocked"),
+                true,
+            ),
+            "all_status_surfaces_side_effect_free": value_bool_is(
+                review.pointer("/accepted_evidence_summary/all_status_surfaces_side_effect_free"),
+                true,
+            ),
+            "default_boundary_safe": review_default_safe,
+            "raw_inputs_absent": review_raw_absent,
+            "required_gates_preserved": review_gate_requirements_preserved,
+        },
+        "redacted_evidence_summary": {
+            "fixture_count": fixture_count,
+            "total_query_count": total_query_count,
+            "total_baseline_empty_count": review.pointer("/accepted_evidence_summary/total_baseline_empty_count").cloned().unwrap_or(Value::Null),
+            "total_runs_biocortex_count": total_runs_biocortex_count,
+            "total_side_signal_ok_count": review.pointer("/accepted_evidence_summary/total_side_signal_ok_count").cloned().unwrap_or(Value::Null),
+            "total_experimental_source_count": review.pointer("/accepted_evidence_summary/total_experimental_source_count").cloned().unwrap_or(Value::Null),
+            "total_actual_order_changed_count": total_actual_order_changed_count,
+            "expected_met": review_expected_met,
+            "evidence_counts_ok": evidence_counts_ok,
+            "raw_queries_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "side_signal_raw_included": false,
+        },
+        "ssb_handoff": {
+            "target_schema_family": "agent_bridge.semantic_bus.action_result.v0",
+            "target_checkpoint": "semantic_system_bus_lswr_action_result_runtime_evidence_checkpoint",
+            "runtime_backed_evidence": true,
+            "verification_boundary_required": true,
+            "no_laundering_boundary_required": true,
+            "recover": if ready { "proceed_to_read_only_ssb_review" } else { "fix_handoff_blockers" },
+            "raw_available": false,
+            "raw_available_must_not_expose_raw_payload": true,
+            "may_compare_against_ssb_runtime_evidence_contract": ready,
+            "may_emit_ssb_adapter_fixture": ready,
+            "may_execute_lswr_actions": false,
+            "may_call_aiot_runtime": false,
+            "may_mutate_default_agent_bridge_db": false,
+        },
+        "boundary_check": {
+            "handoff_ready": ready,
+            "blockers": blockers,
+            "this_packet_grants_new_authorization": false,
+            "this_packet_calls_memory_search": false,
+            "this_packet_runs_biocortex": false,
+            "this_packet_changes_return_order": false,
+            "this_packet_allows_default_search_order_change": false,
+            "this_packet_calls_aiot_runtime": false,
+            "this_packet_executes_lswr_actions": false,
+        },
+        "approval_state": "downstream_aio_handoff_only",
+        "authorization_state": if ready {
+            "ready_for_read_only_ssb_runtime_evidence_review"
+        } else {
+            "blocked"
+        },
+        "next_step": if ready {
+            "connect_handoff_packet_to_ssb_lswr_action_result_review_fixture"
+        } else {
+            "fix_downstream_aio_handoff_blockers"
         },
         "approval_writes_allowed": false,
         "writes_approval": false,
@@ -16341,6 +16830,242 @@ mod tests {
         )
     }
 
+    fn downstream_aio_checkpoint_selection_fixture() -> Value {
+        json!({
+            "schema": BIOCORTEX_RETRIEVAL_DOWNSTREAM_AIO_CHECKPOINT_SELECTION_SCHEMA,
+            "status": "downstream_aio_integration_checkpoint_selected",
+            "selected_checkpoint": {
+                "id": "semantic_system_bus_lswr_action_result_runtime_evidence_checkpoint",
+                "family": "semantic_system_bus",
+                "surface": "lswr_action_result_runtime_evidence",
+                "first_consumer": "agent_bridge_semantic_system_bus",
+                "direct_aiot_consumption_selected": false
+            },
+            "checkpoint_contract": {
+                "checkpoint_must_be_read_only": true,
+                "first_handoff_schema": BIOCORTEX_RETRIEVAL_DOWNSTREAM_AIO_RUNTIME_EVIDENCE_HANDOFF_SCHEMA,
+                "may_build_handoff_packet": true,
+                "may_compare_against_ssb_runtime_evidence_contract": true,
+                "may_enable_default_retrieval": false,
+                "may_enable_hybrid_retrieval": false,
+                "may_enable_semantic_retrieval": false,
+                "may_write_approval": false,
+                "may_mutate_default_agent_bridge_db": false,
+                "may_call_aiot_runtime": false,
+                "may_execute_lswr_actions_from_biocortex_evidence": false
+            },
+            "ssb_alignment": {
+                "runtime_backed_evidence": true,
+                "redacted_evidence_only": true,
+                "no_laundering_boundary_required": true,
+                "verification_boundary_required": true,
+                "recover_field_required": true,
+                "raw_available_must_not_expose_raw_payload": true
+            },
+            "boundary": {
+                "default_search_order_change_allowed": false,
+                "default_retrieval_influence_authorized": false,
+                "hybrid_retrieval_influence_authorized": false,
+                "semantic_retrieval_influence_authorized": false,
+                "direct_aiot_runtime_use_authorized": false,
+                "raw_queries_included": false,
+                "raw_keys_included": false,
+                "content_included": false,
+                "side_signal_raw_included": false,
+                "human_decision_text_included": false
+            }
+        })
+    }
+
+    fn downstream_aio_post_semantic_diverse_review_fixture() -> Value {
+        json!({
+            "schema": BIOCORTEX_RETRIEVAL_POST_SEMANTIC_DIVERSE_REVIEW_SCHEMA,
+            "status": "post_semantic_diverse_review_recorded",
+            "review_result": {
+                "evidence_accepted": true,
+                "ready_for_downstream_aio_checkpoint_selection": true
+            },
+            "accepted_evidence_summary": {
+                "authorization_scope": "explicit_opt_in_fts_runtime_influence",
+                "fixture_count": 4,
+                "total_query_count": 8,
+                "total_baseline_empty_count": 0,
+                "total_runs_biocortex_count": 8,
+                "total_side_signal_ok_count": 8,
+                "total_experimental_source_count": 8,
+                "total_actual_order_changed_count": 8,
+                "expected_met": true,
+                "all_cases_evidence_ready": true,
+                "all_status_surfaces_blocked": true,
+                "all_status_surfaces_side_effect_free": true,
+                "default_memory_search_unchanged": true,
+                "hybrid_retrieval_unchanged": true,
+                "semantic_retrieval_unchanged": true
+            },
+            "boundary": {
+                "default_search_order_change_allowed": false,
+                "default_retrieval_influence_authorized": false,
+                "hybrid_retrieval_influence_authorized": false,
+                "semantic_retrieval_influence_authorized": false,
+                "production_use_authorized": false,
+                "raw_queries_included": false,
+                "raw_keys_included": false,
+                "content_included": false,
+                "side_signal_raw_included": false
+            },
+            "required_gates_preserved": {
+                "compile_feature": "biocortex-retrieval-opt-in",
+                "runtime_env": BIOCORTEX_RETRIEVAL_OPT_IN_ENABLE_ENV,
+                "operator_disable": BIOCORTEX_RETRIEVAL_DISABLE_ENV,
+                "per_call_opt_in_required": true,
+                "post_runtime_transition_gate_required": true,
+                "fail_open_to_baseline_required": true
+            }
+        })
+    }
+
+    #[test]
+    fn downstream_aio_runtime_evidence_handoff_accepts_redacted_ready_checkpoint() {
+        let packet = biocortex_retrieval_downstream_aio_runtime_evidence_handoff(
+            BioCortexRetrievalDownstreamAioRuntimeEvidenceHandoffOptions {
+                checkpoint_selection: downstream_aio_checkpoint_selection_fixture(),
+                post_semantic_diverse_review: downstream_aio_post_semantic_diverse_review_fixture(),
+                reviewer: Some("codex".to_string()),
+                commit: Some("downstream-aio-handoff-commit".to_string()),
+                forum_post_id: Some("104".to_string()),
+                memory_key: Some("downstream-aio-handoff-memory".to_string()),
+            },
+        );
+
+        assert_eq!(
+            packet["schema"],
+            json!(BIOCORTEX_RETRIEVAL_DOWNSTREAM_AIO_RUNTIME_EVIDENCE_HANDOFF_SCHEMA)
+        );
+        assert_eq!(packet["read_only"], json!(true));
+        assert_eq!(
+            packet["downstream_aio_runtime_evidence_handoff"],
+            json!(true)
+        );
+        assert_eq!(packet["status"], json!("ready"));
+        assert_eq!(
+            packet["authorization_state"],
+            json!("ready_for_read_only_ssb_runtime_evidence_review")
+        );
+        assert_eq!(packet["boundary_check"]["handoff_ready"], json!(true));
+        assert_eq!(
+            packet["boundary_check"]["blockers"]
+                .as_array()
+                .expect("blockers")
+                .len(),
+            0
+        );
+        assert_eq!(
+            packet["checkpoint_summary"]["selected_checkpoint"],
+            json!("semantic_system_bus_lswr_action_result_runtime_evidence_checkpoint")
+        );
+        assert_eq!(
+            packet["checkpoint_summary"]["first_consumer"],
+            json!("agent_bridge_semantic_system_bus")
+        );
+        assert_eq!(
+            packet["redacted_evidence_summary"]["fixture_count"],
+            json!(4)
+        );
+        assert_eq!(
+            packet["redacted_evidence_summary"]["total_query_count"],
+            json!(8)
+        );
+        assert_eq!(
+            packet["redacted_evidence_summary"]["total_actual_order_changed_count"],
+            json!(8)
+        );
+        assert_eq!(
+            packet["ssb_handoff"]["recover"],
+            json!("proceed_to_read_only_ssb_review")
+        );
+        assert_eq!(
+            packet["ssb_handoff"]["may_emit_ssb_adapter_fixture"],
+            json!(true)
+        );
+        assert_eq!(packet["calls_memory_search"], json!(false));
+        assert_eq!(packet["runs_biocortex"], json!(false));
+        assert_eq!(
+            packet["boundary_check"]["this_packet_calls_aiot_runtime"],
+            json!(false)
+        );
+        assert_eq!(
+            packet["boundary_check"]["this_packet_executes_lswr_actions"],
+            json!(false)
+        );
+        assert_eq!(
+            packet["next_step"],
+            json!("connect_handoff_packet_to_ssb_lswr_action_result_review_fixture")
+        );
+    }
+
+    #[test]
+    fn downstream_aio_runtime_evidence_handoff_blocks_unsafe_inputs_without_echoing_raw() {
+        let mut checkpoint = downstream_aio_checkpoint_selection_fixture();
+        checkpoint["selected_checkpoint"]["direct_aiot_consumption_selected"] = json!(true);
+        checkpoint["checkpoint_contract"]["may_call_aiot_runtime"] = json!(true);
+        checkpoint["boundary"]["raw_queries_included"] = json!(true);
+        checkpoint["debug_raw_query"] = json!("secret downstream aio checkpoint raw query");
+
+        let mut review = downstream_aio_post_semantic_diverse_review_fixture();
+        review["accepted_evidence_summary"]["fixture_count"] = json!(1);
+        review["accepted_evidence_summary"]["total_query_count"] = json!(1);
+        review["boundary"]["default_search_order_change_allowed"] = json!(true);
+        review["boundary"]["raw_keys_included"] = json!(true);
+        review["debug_raw_key"] = json!("secret_downstream_aio_review_key");
+        review["debug_content"] = json!("secret downstream aio review content");
+
+        let packet = biocortex_retrieval_downstream_aio_runtime_evidence_handoff(
+            BioCortexRetrievalDownstreamAioRuntimeEvidenceHandoffOptions {
+                checkpoint_selection: checkpoint,
+                post_semantic_diverse_review: review,
+                reviewer: None,
+                commit: None,
+                forum_post_id: None,
+                memory_key: None,
+            },
+        );
+
+        assert_eq!(packet["status"], json!("blocked"));
+        assert_eq!(packet["boundary_check"]["handoff_ready"], json!(false));
+        let blockers = packet["boundary_check"]["blockers"]
+            .as_array()
+            .expect("blockers");
+        assert!(blockers.contains(&json!("direct_aiot_runtime_selected")));
+        assert!(blockers.contains(&json!("checkpoint_boundary_not_safe")));
+        assert!(blockers.contains(&json!("checkpoint_raw_input_included")));
+        assert!(blockers.contains(&json!("review_default_boundary_not_safe")));
+        assert!(blockers.contains(&json!("review_raw_input_included")));
+        assert!(blockers.contains(&json!("review_evidence_counts_insufficient")));
+        assert_eq!(
+            packet["ssb_handoff"]["recover"],
+            json!("fix_handoff_blockers")
+        );
+        assert_eq!(
+            packet["ssb_handoff"]["may_emit_ssb_adapter_fixture"],
+            json!(false)
+        );
+        assert_eq!(packet["calls_memory_search"], json!(false));
+        assert_eq!(packet["runs_biocortex"], json!(false));
+        assert_eq!(
+            packet["boundary_check"]["this_packet_calls_aiot_runtime"],
+            json!(false)
+        );
+        assert_eq!(
+            packet["boundary_check"]["this_packet_executes_lswr_actions"],
+            json!(false)
+        );
+
+        let serialized = serde_json::to_string(&packet).expect("handoff json");
+        assert!(!serialized.contains("secret downstream aio checkpoint raw query"));
+        assert!(!serialized.contains("secret_downstream_aio_review_key"));
+        assert!(!serialized.contains("secret downstream aio review content"));
+    }
+
     #[test]
     fn opt_in_runtime_transition_gate_allows_only_readiness_gated_fts_opt_in() {
         let gate = biocortex_retrieval_opt_in_runtime_transition_gate(
@@ -16644,6 +17369,137 @@ mod tests {
         assert!(!serialized.contains("secret transition readiness query"));
         assert!(!serialized.contains("secret_transition_readiness_key"));
         assert!(!serialized.contains("secret transition readiness content"));
+    }
+
+    #[test]
+    fn downstream_aio_runtime_evidence_handoff_accepts_selected_ssb_checkpoint() {
+        let checkpoint_selection = json!({
+            "schema": BIOCORTEX_RETRIEVAL_DOWNSTREAM_AIO_CHECKPOINT_SELECTION_SCHEMA,
+            "status": "downstream_aio_integration_checkpoint_selected",
+            "selected_checkpoint": {
+                "id": "semantic_system_bus_lswr_action_result_runtime_evidence_checkpoint",
+                "family": "semantic_system_bus",
+                "surface": "lswr_action_result_runtime_evidence",
+                "first_consumer": "agent_bridge_semantic_system_bus",
+                "direct_aiot_consumption_selected": false
+            },
+            "checkpoint_contract": {
+                "checkpoint_must_be_read_only": true,
+                "first_handoff_schema": BIOCORTEX_RETRIEVAL_DOWNSTREAM_AIO_RUNTIME_EVIDENCE_HANDOFF_SCHEMA,
+                "may_build_handoff_packet": true,
+                "may_compare_against_ssb_runtime_evidence_contract": true,
+                "may_enable_default_retrieval": false,
+                "may_enable_hybrid_retrieval": false,
+                "may_enable_semantic_retrieval": false,
+                "may_write_approval": false,
+                "may_mutate_default_agent_bridge_db": false,
+                "may_call_aiot_runtime": false,
+                "may_execute_lswr_actions_from_biocortex_evidence": false
+            },
+            "ssb_alignment": {
+                "runtime_backed_evidence": true,
+                "redacted_evidence_only": true,
+                "no_laundering_boundary_required": true,
+                "verification_boundary_required": true,
+                "recover_field_required": true,
+                "raw_available_must_not_expose_raw_payload": true
+            },
+            "boundary": {
+                "default_search_order_change_allowed": false,
+                "default_retrieval_influence_authorized": false,
+                "hybrid_retrieval_influence_authorized": false,
+                "semantic_retrieval_influence_authorized": false,
+                "direct_aiot_runtime_use_authorized": false,
+                "raw_queries_included": false,
+                "raw_keys_included": false,
+                "content_included": false,
+                "side_signal_raw_included": false,
+                "human_decision_text_included": false
+            }
+        });
+        let review = json!({
+            "schema": BIOCORTEX_RETRIEVAL_POST_SEMANTIC_DIVERSE_REVIEW_SCHEMA,
+            "status": "post_semantic_diverse_review_recorded",
+            "review_result": {
+                "evidence_accepted": true,
+                "ready_for_downstream_aio_checkpoint_selection": true
+            },
+            "accepted_evidence_summary": {
+                "authorization_scope": "explicit_opt_in_fts_runtime_influence",
+                "fixture_count": 4,
+                "total_query_count": 8,
+                "total_baseline_empty_count": 0,
+                "total_runs_biocortex_count": 8,
+                "total_side_signal_ok_count": 8,
+                "total_experimental_source_count": 8,
+                "total_actual_order_changed_count": 8,
+                "expected_met": true,
+                "all_cases_evidence_ready": true,
+                "all_status_surfaces_blocked": true,
+                "all_status_surfaces_side_effect_free": true,
+                "default_memory_search_unchanged": true,
+                "hybrid_retrieval_unchanged": true,
+                "semantic_retrieval_unchanged": true
+            },
+            "boundary": {
+                "default_search_order_change_allowed": false,
+                "default_retrieval_influence_authorized": false,
+                "hybrid_retrieval_influence_authorized": false,
+                "semantic_retrieval_influence_authorized": false,
+                "production_use_authorized": false,
+                "raw_queries_included": false,
+                "raw_keys_included": false,
+                "content_included": false,
+                "side_signal_raw_included": false
+            },
+            "required_gates_preserved": {
+                "compile_feature": "biocortex-retrieval-opt-in",
+                "runtime_env": BIOCORTEX_RETRIEVAL_OPT_IN_ENABLE_ENV,
+                "operator_disable": BIOCORTEX_RETRIEVAL_DISABLE_ENV,
+                "per_call_opt_in_required": true,
+                "post_runtime_transition_gate_required": true,
+                "fail_open_to_baseline_required": true
+            }
+        });
+
+        let handoff = biocortex_retrieval_downstream_aio_runtime_evidence_handoff(
+            BioCortexRetrievalDownstreamAioRuntimeEvidenceHandoffOptions {
+                checkpoint_selection,
+                post_semantic_diverse_review: review,
+                reviewer: Some("codex".to_string()),
+                commit: Some("handoff-commit".to_string()),
+                forum_post_id: Some("104".to_string()),
+                memory_key: Some("handoff-memory".to_string()),
+            },
+        );
+
+        assert_eq!(
+            handoff["schema"],
+            json!(BIOCORTEX_RETRIEVAL_DOWNSTREAM_AIO_RUNTIME_EVIDENCE_HANDOFF_SCHEMA)
+        );
+        assert_eq!(handoff["status"], json!("ready"));
+        assert_eq!(handoff["boundary_check"]["handoff_ready"], json!(true));
+        assert_eq!(handoff["boundary_check"]["blockers"], json!([]));
+        assert_eq!(
+            handoff["ssb_handoff"]["target_checkpoint"],
+            json!("semantic_system_bus_lswr_action_result_runtime_evidence_checkpoint")
+        );
+        assert_eq!(
+            handoff["ssb_handoff"]["may_compare_against_ssb_runtime_evidence_contract"],
+            json!(true)
+        );
+        assert_eq!(
+            handoff["ssb_handoff"]["may_call_aiot_runtime"],
+            json!(false)
+        );
+        assert_eq!(
+            handoff["ssb_handoff"]["may_execute_lswr_actions"],
+            json!(false)
+        );
+        assert_eq!(handoff["calls_memory_search"], json!(false));
+        assert_eq!(handoff["runs_biocortex"], json!(false));
+        assert_eq!(handoff["changes_memory_search_order"], json!(false));
+        assert_eq!(handoff["default_search_order_change_allowed"], json!(false));
     }
 
     #[tokio::test]

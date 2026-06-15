@@ -3,7 +3,8 @@ use ab_agent::{
     GitWorktreeManager, OpenCodeFamilyRuntime, OzAgentRuntime,
 };
 use ab_bridge::biocortex_shadow::{
-    biocortex_replay_comparison, biocortex_retrieval_opt_in_audit_report,
+    biocortex_replay_comparison, biocortex_retrieval_downstream_aio_runtime_evidence_handoff,
+    biocortex_retrieval_opt_in_audit_report,
     biocortex_retrieval_opt_in_authorization_decision_packet,
     biocortex_retrieval_opt_in_batch_diagnostics, biocortex_retrieval_opt_in_dry_run_plan,
     biocortex_retrieval_opt_in_execution_packet,
@@ -19,6 +20,7 @@ use ab_bridge::biocortex_shadow::{
     biocortex_retrieval_runtime_approval_packet_preview, biocortex_shadow_digest,
     supported_benchmarks, BioCortexReplayComparisonOptions,
     BioCortexRetrievalApprovalPacketOptions, BioCortexRetrievalCandidate,
+    BioCortexRetrievalDownstreamAioRuntimeEvidenceHandoffOptions,
     BioCortexRetrievalOptInAuditOptions, BioCortexRetrievalOptInAuthorizationDecisionPacketOptions,
     BioCortexRetrievalOptInBatchDiagnosticsOptions, BioCortexRetrievalOptInBatchQueryCase,
     BioCortexRetrievalOptInDryRunOptions, BioCortexRetrievalOptInExecutionPacketOptions,
@@ -3334,6 +3336,35 @@ enum BioCortexOp {
         #[arg(long)]
         json: bool,
     },
+    /// Build a read-only downstream AIO runtime-evidence handoff packet.
+    ///
+    /// This consumes the downstream checkpoint selection plus the
+    /// post-semantic-diverse review, then emits only a redacted SSB/LSWR-ready
+    /// handoff summary. It does not call `memory_search`, run BioCortex, call
+    /// AiOT, execute LSWR actions, write approval, or alter default retrieval.
+    RetrievalDownstreamAioRuntimeEvidenceHandoff {
+        /// JSON file produced by the downstream AIO checkpoint selection slice.
+        #[arg(long = "checkpoint-selection-json")]
+        checkpoint_selection_json: PathBuf,
+        /// JSON file produced by the post-semantic-diverse review slice.
+        #[arg(long = "post-semantic-diverse-review-json")]
+        post_semantic_diverse_review_json: PathBuf,
+        /// Reviewer identity or handle.
+        #[arg(long)]
+        reviewer: Option<String>,
+        /// Implementation commit under review.
+        #[arg(long)]
+        commit: Option<String>,
+        /// Forum post id linking the handoff packet.
+        #[arg(long)]
+        forum_post_id: Option<String>,
+        /// Memory key linking the handoff packet.
+        #[arg(long)]
+        memory_key: Option<String>,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
     /// Seed a non-production store fixture and run redacted batch diagnostics.
     ///
     /// This is a controlled order-movement probe. It requires an explicit
@@ -5700,6 +5731,27 @@ async fn real_main() -> Result<()> {
                     per_call_opt_in: *per_call_opt_in,
                     operator_disabled: *operator_disabled
                         || cli_env_truthy(BIOCORTEX_RETRIEVAL_DISABLE_ENV),
+                    reviewer: reviewer.clone(),
+                    commit: commit.clone(),
+                    forum_post_id: forum_post_id.clone(),
+                    memory_key: memory_key.clone(),
+                },
+                *json,
+            ),
+            BioCortexOp::RetrievalDownstreamAioRuntimeEvidenceHandoff {
+                checkpoint_selection_json,
+                post_semantic_diverse_review_json,
+                reviewer,
+                commit,
+                forum_post_id,
+                memory_key,
+                json,
+            } => run_biocortex_retrieval_downstream_aio_runtime_evidence_handoff(
+                checkpoint_selection_json,
+                post_semantic_diverse_review_json,
+                BioCortexRetrievalDownstreamAioRuntimeEvidenceHandoffOptions {
+                    checkpoint_selection: Value::Null,
+                    post_semantic_diverse_review: Value::Null,
                     reviewer: reviewer.clone(),
                     commit: commit.clone(),
                     forum_post_id: forum_post_id.clone(),
@@ -11655,6 +11707,72 @@ fn run_biocortex_retrieval_opt_in_runtime_transition_gate(
         shadow_json_display(payload.get("runs_biocortex"), "false"),
         shadow_json_display(payload.get("changes_memory_search_order"), "false"),
         shadow_json_display(payload.get("default_calls_unchanged"), "true")
+    );
+    Ok(())
+}
+
+fn run_biocortex_retrieval_downstream_aio_runtime_evidence_handoff(
+    checkpoint_selection_json: &std::path::Path,
+    post_semantic_diverse_review_json: &std::path::Path,
+    mut opts: BioCortexRetrievalDownstreamAioRuntimeEvidenceHandoffOptions,
+    as_json: bool,
+) -> Result<()> {
+    let checkpoint_body = std::fs::read_to_string(checkpoint_selection_json).map_err(|e| {
+        anyhow::anyhow!(
+            "read downstream AIO checkpoint selection JSON at {checkpoint_selection_json:?}: {e}"
+        )
+    })?;
+    opts.checkpoint_selection = serde_json::from_str(&checkpoint_body).map_err(|e| {
+        anyhow::anyhow!(
+            "parse downstream AIO checkpoint selection JSON at {checkpoint_selection_json:?}: {e}"
+        )
+    })?;
+    let review_body = std::fs::read_to_string(post_semantic_diverse_review_json).map_err(|e| {
+        anyhow::anyhow!(
+            "read post-semantic-diverse review JSON at {post_semantic_diverse_review_json:?}: {e}"
+        )
+    })?;
+    opts.post_semantic_diverse_review = serde_json::from_str(&review_body).map_err(|e| {
+        anyhow::anyhow!(
+            "parse post-semantic-diverse review JSON at {post_semantic_diverse_review_json:?}: {e}"
+        )
+    })?;
+
+    let payload = biocortex_retrieval_downstream_aio_runtime_evidence_handoff(opts);
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&payload)?);
+        return Ok(());
+    }
+
+    println!("# BioCortex downstream AIO runtime evidence handoff");
+    println!("schema={}", shadow_json_display(payload.get("schema"), "-"));
+    println!(
+        "status={} handoff_ready={} checkpoint={}",
+        shadow_json_display(payload.get("status"), "-"),
+        shadow_json_display(payload.pointer("/boundary_check/handoff_ready"), "false"),
+        shadow_json_display(
+            payload.pointer("/checkpoint_summary/selected_checkpoint"),
+            "-"
+        )
+    );
+    println!(
+        "ssb_target={} recover={} raw_available={}",
+        shadow_json_display(payload.pointer("/ssb_handoff/target_schema_family"), "-"),
+        shadow_json_display(payload.pointer("/ssb_handoff/recover"), "-"),
+        shadow_json_display(payload.pointer("/ssb_handoff/raw_available"), "false")
+    );
+    println!(
+        "calls_memory_search={} runs_biocortex={} calls_aiot_runtime={} executes_lswr_actions={}",
+        shadow_json_display(payload.get("calls_memory_search"), "false"),
+        shadow_json_display(payload.get("runs_biocortex"), "false"),
+        shadow_json_display(
+            payload.pointer("/boundary_check/this_packet_calls_aiot_runtime"),
+            "false"
+        ),
+        shadow_json_display(
+            payload.pointer("/boundary_check/this_packet_executes_lswr_actions"),
+            "false"
+        )
     );
     Ok(())
 }
