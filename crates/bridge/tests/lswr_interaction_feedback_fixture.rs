@@ -2,14 +2,17 @@ use ab_bridge::lswr_interaction_feedback::{
     build_interaction_feedback_consumption_report, build_interaction_feedback_evidence_packet,
     build_interaction_feedback_next_revision_plan,
     build_interaction_feedback_packet_consumption_preflight, build_interaction_feedback_readback,
+    build_interaction_feedback_semantic_patch_draft,
     build_interaction_feedback_validation_envelope,
     render_interaction_feedback_consumption_preflight_report,
     render_interaction_feedback_next_revision_plan,
+    render_interaction_feedback_semantic_patch_draft,
     render_interaction_feedback_validation_envelope, validate_interaction_feedback_fixture,
     LSWR_INTERACTION_FEEDBACK_CONSUMPTION_PREFLIGHT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_EVIDENCE_PACKET_SCHEMA, LSWR_INTERACTION_FEEDBACK_FIXTURE_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_NEXT_REVISION_PLAN_SCHEMA, LSWR_INTERACTION_FEEDBACK_READBACK_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_SEMANTIC_PATCH_DRAFT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_VALIDATION_ENVELOPE_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_VALIDATION_SCHEMA,
 };
@@ -503,6 +506,146 @@ fn interaction_feedback_next_revision_plan_blocks_laundered_source() {
     assert!(markdown.contains("- source_world_verdict: `verified`"));
     assert!(markdown.contains("- plan_verdict: `blocked`"));
     assert!(markdown.contains("world_verdict_must_remain_not_verified"));
+}
+
+#[test]
+fn interaction_feedback_semantic_patch_draft_uses_accepted_plan_without_applying() {
+    let plan = build_interaction_feedback_next_revision_plan(&fixture());
+    let draft = build_interaction_feedback_semantic_patch_draft(&plan);
+    let markdown = render_interaction_feedback_semantic_patch_draft(&draft);
+
+    assert_eq!(
+        draft["schema"],
+        LSWR_INTERACTION_FEEDBACK_SEMANTIC_PATCH_DRAFT_SCHEMA
+    );
+    assert_eq!(
+        draft["source_schema"],
+        LSWR_INTERACTION_FEEDBACK_NEXT_REVISION_PLAN_SCHEMA
+    );
+    assert_eq!(draft["source_plan_verdict"], "ready_for_revision");
+    assert_eq!(draft["source_world_verdict"], "not_verified");
+    assert_eq!(draft["draft_verdict"], "drafted");
+    assert_eq!(draft["status"], "drafted");
+    assert_eq!(
+        draft["semantic_patch_draft"]["patch_id"],
+        "patch_arrival_bath_move_002"
+    );
+    assert_eq!(
+        draft["semantic_patch_draft"]["operation_hint"],
+        "increase_walkway_clearance_by_repositioning_entity"
+    );
+    assert_eq!(
+        draft["semantic_patch_draft"]["target_entities"],
+        json!(["bath"])
+    );
+    assert_eq!(
+        draft["semantic_patch_draft"]["revision_sources"],
+        json!([
+            "verify_patch_arrival_bath_move_001",
+            "fb_arrival_crowded_001"
+        ])
+    );
+    assert_eq!(
+        draft["semantic_patch_draft"]["constraints"]["preserve_world_verdict"],
+        "not_verified"
+    );
+    assert_eq!(
+        draft["semantic_patch_draft"]["constraints"]["expected_effect_requirements"],
+        json!([
+            {
+                "target": "bath",
+                "metric": "screen_area",
+                "to_op": ">",
+                "to_value": 0.0,
+                "source": "preserve_visible_entity_readability"
+            },
+            {
+                "target": "arrival_area.main_walkway",
+                "metric": "walkway_clearance_cells",
+                "to_op": ">=",
+                "to_value": 2,
+                "source": "failed_clause_repair"
+            }
+        ])
+    );
+    assert_eq!(
+        draft["semantic_patch_draft"]["unresolved_arguments"],
+        json!(["patch.args.cell"])
+    );
+    assert_eq!(
+        draft["semantic_patch_draft"]["requires_live_world_state_for_arguments"],
+        true
+    );
+    assert_eq!(
+        draft["semantic_patch_draft"]["live_world_state_queried"],
+        false
+    );
+    assert_eq!(draft["semantic_patch_draft"]["apply_allowed"], false);
+    assert_eq!(draft["semantic_patch_draft"]["ingest_allowed"], false);
+    assert_eq!(draft["guardrails"]["queries_live_runtime"], false);
+    assert_eq!(draft["guardrails"]["applies_patch"], false);
+    assert_eq!(
+        draft["agent_action_contract"]["resolve_arguments_before_apply"],
+        true
+    );
+    assert_eq!(draft["agent_action_contract"]["do_not_apply_patch"], true);
+    assert_eq!(
+        draft["agent_action_contract"]["do_not_rewrite_world_verdict"],
+        true
+    );
+    assert_eq!(draft["writes_state"], false);
+    assert_eq!(draft["store_access_required"], false);
+    assert_eq!(draft["mcp_tool_registered"], false);
+
+    assert!(markdown.contains("- draft_verdict: `drafted`"));
+    assert!(markdown.contains("- patch_id: `patch_arrival_bath_move_002`"));
+    assert!(
+        markdown.contains("- operation_hint: `increase_walkway_clearance_by_repositioning_entity`")
+    );
+    assert!(markdown.contains("- unresolved_arguments: `patch.args.cell`"));
+    assert!(markdown.contains("- preserve_world_verdict: `not_verified`"));
+}
+
+#[test]
+fn interaction_feedback_semantic_patch_draft_accepts_fixture_directly() {
+    let draft = build_interaction_feedback_semantic_patch_draft(&fixture());
+
+    assert_eq!(draft["draft_verdict"], "drafted");
+    assert_eq!(
+        draft["semantic_patch_draft"]["patch_id"],
+        "patch_arrival_bath_move_002"
+    );
+    assert_eq!(draft["semantic_patch_draft"]["apply_allowed"], false);
+    assert_eq!(draft["implicit_live_runtime_lookup_attempted"], false);
+}
+
+#[test]
+fn interaction_feedback_semantic_patch_draft_blocks_laundered_plan() {
+    let fixture = fixture();
+    let mut packet = build_interaction_feedback_evidence_packet(&fixture);
+    packet["guardrails"]["writes_state"] = json!(true);
+    packet["readback"]["latest_verification_verdict"] = json!("verified");
+
+    let draft = build_interaction_feedback_semantic_patch_draft(&packet);
+    let markdown = render_interaction_feedback_semantic_patch_draft(&draft);
+
+    assert_eq!(draft["draft_verdict"], "blocked");
+    assert_eq!(draft["status"], "blocked");
+    assert_eq!(draft["source_plan_verdict"], "blocked");
+    assert_eq!(draft["source_world_verdict"], "verified");
+    assert!(draft["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("source_plan_not_ready")));
+    assert!(draft["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("source_world_verdict_must_remain_not_verified")));
+    assert_eq!(draft["semantic_patch_draft"]["apply_allowed"], false);
+    assert_eq!(draft["guardrails"]["writes_state"], false);
+    assert_eq!(draft["agent_action_contract"]["do_not_apply_patch"], true);
+    assert!(markdown.contains("- draft_verdict: `blocked`"));
+    assert!(markdown.contains("- source_world_verdict: `verified`"));
 }
 
 #[test]

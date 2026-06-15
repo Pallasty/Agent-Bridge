@@ -18,6 +18,8 @@ pub const LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_SCHEMA: &str =
     "agent_bridge.lswr.interaction_feedback_consumption_report.v0";
 pub const LSWR_INTERACTION_FEEDBACK_NEXT_REVISION_PLAN_SCHEMA: &str =
     "agent_bridge.lswr.interaction_feedback_next_revision_plan.v0";
+pub const LSWR_INTERACTION_FEEDBACK_SEMANTIC_PATCH_DRAFT_SCHEMA: &str =
+    "agent_bridge.lswr.interaction_feedback_semantic_patch_draft.v0";
 
 const EXPECTED_EVENT_TYPES: [&str; 8] = [
     "human.select",
@@ -710,6 +712,215 @@ pub fn render_interaction_feedback_next_revision_plan(plan: &Value) -> String {
     lines.join("\n")
 }
 
+pub fn build_interaction_feedback_semantic_patch_draft(input: &Value) -> Value {
+    let plan = if input.get("schema").and_then(Value::as_str)
+        == Some(LSWR_INTERACTION_FEEDBACK_NEXT_REVISION_PLAN_SCHEMA)
+    {
+        input.clone()
+    } else {
+        build_interaction_feedback_next_revision_plan(input)
+    };
+    let next_revision = plan.get("next_revision").cloned().unwrap_or(Value::Null);
+    let source_plan_ready =
+        plan.get("plan_verdict").and_then(Value::as_str) == Some("ready_for_revision");
+
+    let mut failure_reasons = Vec::new();
+    if !source_plan_ready {
+        failure_reasons.push("source_plan_not_ready".to_string());
+    }
+    if plan["source_world_verdict"] != "not_verified" {
+        failure_reasons.push("source_world_verdict_must_remain_not_verified".to_string());
+    }
+    if next_revision["patch_id"]
+        .as_str()
+        .filter(|value| !value.is_empty())
+        .is_none()
+    {
+        failure_reasons.push("patch_id_missing".to_string());
+    }
+    if next_revision["selected_entities"]
+        .as_array()
+        .map(Vec::is_empty)
+        .unwrap_or(true)
+    {
+        failure_reasons.push("target_entities_missing".to_string());
+    }
+    if next_revision["must_cite"]
+        .as_array()
+        .map(Vec::is_empty)
+        .unwrap_or(true)
+    {
+        failure_reasons.push("revision_sources_missing".to_string());
+    }
+    if next_revision["feedback_issue"]
+        .as_str()
+        .filter(|value| !value.is_empty())
+        .is_none()
+    {
+        failure_reasons.push("feedback_issue_missing".to_string());
+    }
+
+    let drafted = failure_reasons.is_empty();
+    let reason = if drafted {
+        "accepted_plan_semantic_patch_draft_ready".to_string()
+    } else {
+        failure_reasons
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "semantic_patch_draft_blocked".to_string())
+    };
+
+    json!({
+        "schema": LSWR_INTERACTION_FEEDBACK_SEMANTIC_PATCH_DRAFT_SCHEMA,
+        "source_schema": plan.get("schema").cloned().unwrap_or(Value::Null),
+        "source_plan_verdict": plan.get("plan_verdict").cloned().unwrap_or(Value::Null),
+        "source_world_verdict": plan.get("source_world_verdict").cloned().unwrap_or(Value::Null),
+        "draft_verdict": if drafted { "drafted" } else { "blocked" },
+        "status": if drafted { "drafted" } else { "blocked" },
+        "reason": reason,
+        "failure_reasons": failure_reasons,
+        "guardrails": semantic_patch_draft_guardrails(),
+        "input_contract": {
+            "accepted_inputs": ["next_revision_plan", "consumption_report", "preflight", "packet", "fixture"],
+            "explicit_input_required": true,
+            "implicit_live_runtime_lookup_allowed": false
+        },
+        "semantic_patch_draft": {
+            "patch_id": next_revision.get("patch_id").cloned().unwrap_or(Value::Null),
+            "op": "semantic_revision",
+            "operation_hint": semantic_patch_operation_hint(&next_revision),
+            "target_entities": next_revision.get("selected_entities").cloned().unwrap_or(Value::Null),
+            "reason": semantic_patch_reason(&next_revision),
+            "revision_sources": next_revision.get("must_cite").cloned().unwrap_or(Value::Null),
+            "constraints": {
+                "failed_clause_ids": next_revision.get("failed_clause_ids").cloned().unwrap_or(Value::Null),
+                "feedback_issue": next_revision.get("feedback_issue").cloned().unwrap_or(Value::Null),
+                "human_decision": next_revision.get("human_decision").cloned().unwrap_or(Value::Null),
+                "preserve_world_verdict": next_revision.get("preserved_world_verdict").cloned().unwrap_or(Value::Null),
+                "expected_effect_requirements": semantic_patch_expected_effect_requirements(&next_revision)
+            },
+            "unresolved_arguments": ["patch.args.cell"],
+            "requires_live_world_state_for_arguments": true,
+            "live_world_state_queried": false,
+            "apply_allowed": false,
+            "ingest_allowed": false
+        },
+        "agent_action_contract": {
+            "mode": "draft_semantic_patch_only",
+            "resolve_arguments_before_apply": true,
+            "do_not_apply_patch": true,
+            "do_not_ingest_outcome": true,
+            "do_not_write_memory": true,
+            "do_not_query_live_runtime": true,
+            "do_not_rewrite_world_verdict": true,
+            "cite_revision_sources": true
+        },
+        "source_plan": plan,
+        "implicit_live_runtime_lookup_attempted": false,
+        "writes_state": false,
+        "store_access_required": false,
+        "mcp_tool_registered": false,
+        "note": "pure semantic patch draft: converts an accepted next-revision plan into a draft-only patch target without resolving live-world arguments or applying the patch"
+    })
+}
+
+pub fn render_interaction_feedback_semantic_patch_draft(draft: &Value) -> String {
+    let mut lines = Vec::new();
+    lines.push("# LSWR Interaction Feedback Semantic Patch Draft".to_string());
+    lines.push(String::new());
+    push_markdown_kv(&mut lines, "schema", &draft["schema"]);
+    push_markdown_kv(&mut lines, "draft_verdict", &draft["draft_verdict"]);
+    push_markdown_kv(&mut lines, "status", &draft["status"]);
+    push_markdown_kv(&mut lines, "reason", &draft["reason"]);
+    push_markdown_kv(&mut lines, "source_schema", &draft["source_schema"]);
+    push_markdown_kv(
+        &mut lines,
+        "source_plan_verdict",
+        &draft["source_plan_verdict"],
+    );
+    push_markdown_kv(
+        &mut lines,
+        "source_world_verdict",
+        &draft["source_world_verdict"],
+    );
+    push_markdown_kv(&mut lines, "failure_reasons", &draft["failure_reasons"]);
+    push_markdown_kv(
+        &mut lines,
+        "implicit_live_runtime_lookup_attempted",
+        &draft["implicit_live_runtime_lookup_attempted"],
+    );
+
+    lines.push(String::new());
+    lines.push("## Guardrails".to_string());
+    lines.push(String::new());
+    for key in [
+        "read_only",
+        "mutation_surface",
+        "writes_state",
+        "store_access_required",
+        "mcp_tool_registered",
+        "queries_live_runtime",
+        "applies_patch",
+        "outcome_ingestion_allowed",
+        "feedback_changes_world_verdict_allowed",
+    ] {
+        push_markdown_kv(&mut lines, key, &draft["guardrails"][key]);
+    }
+
+    lines.push(String::new());
+    lines.push("## Semantic Patch Draft".to_string());
+    lines.push(String::new());
+    for key in [
+        "patch_id",
+        "op",
+        "operation_hint",
+        "target_entities",
+        "reason",
+        "revision_sources",
+        "unresolved_arguments",
+        "requires_live_world_state_for_arguments",
+        "live_world_state_queried",
+        "apply_allowed",
+        "ingest_allowed",
+    ] {
+        push_markdown_kv(&mut lines, key, &draft["semantic_patch_draft"][key]);
+    }
+    push_markdown_kv(
+        &mut lines,
+        "failed_clause_ids",
+        &draft["semantic_patch_draft"]["constraints"]["failed_clause_ids"],
+    );
+    push_markdown_kv(
+        &mut lines,
+        "feedback_issue",
+        &draft["semantic_patch_draft"]["constraints"]["feedback_issue"],
+    );
+    push_markdown_kv(
+        &mut lines,
+        "preserve_world_verdict",
+        &draft["semantic_patch_draft"]["constraints"]["preserve_world_verdict"],
+    );
+
+    lines.push(String::new());
+    lines.push("## Agent Action Contract".to_string());
+    lines.push(String::new());
+    for key in [
+        "mode",
+        "resolve_arguments_before_apply",
+        "do_not_apply_patch",
+        "do_not_ingest_outcome",
+        "do_not_write_memory",
+        "do_not_query_live_runtime",
+        "do_not_rewrite_world_verdict",
+        "cite_revision_sources",
+    ] {
+        push_markdown_kv(&mut lines, key, &draft["agent_action_contract"][key]);
+    }
+
+    lines.push(String::new());
+    lines.join("\n")
+}
+
 pub fn build_interaction_feedback_readback(fixture: &Value) -> Value {
     let selected_entities =
         fixture["interaction_state_after"]["active_view"]["selected_entities"].clone();
@@ -993,6 +1204,83 @@ fn next_revision_plan_guardrails() -> Value {
         "feedback_changes_world_verdict_allowed": false,
         "applies_patch": false
     })
+}
+
+fn semantic_patch_draft_guardrails() -> Value {
+    json!({
+        "read_only": true,
+        "mutation_surface": "none",
+        "writes_state": false,
+        "store_access_required": false,
+        "mcp_tool_registered": false,
+        "queries_live_runtime": false,
+        "implicit_live_runtime_lookup_allowed": false,
+        "default_profile_exposure_allowed": false,
+        "outcome_ingestion_allowed": false,
+        "feedback_changes_world_verdict_allowed": false,
+        "applies_patch": false
+    })
+}
+
+fn semantic_patch_operation_hint(next_revision: &Value) -> &'static str {
+    let feedback_issue = next_revision["feedback_issue"].as_str().unwrap_or("");
+    let failed_clause_ids = next_revision["failed_clause_ids"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let failed_walkway = failed_clause_ids
+        .iter()
+        .any(|clause| clause.as_str().unwrap_or("").contains("walkway_clearance"));
+
+    if feedback_issue == "visual_density_too_high" && failed_walkway {
+        "increase_walkway_clearance_by_repositioning_entity"
+    } else {
+        "revise_selected_entities_from_feedback"
+    }
+}
+
+fn semantic_patch_reason(next_revision: &Value) -> String {
+    let feedback_issue = next_revision["feedback_issue"]
+        .as_str()
+        .unwrap_or("unknown_feedback_issue");
+    let failed_clause_ids = markdown_value(&next_revision["failed_clause_ids"]);
+    format!(
+        "Draft a revision that addresses `{feedback_issue}` while preserving failed verification clauses `{failed_clause_ids}` as required evidence."
+    )
+}
+
+fn semantic_patch_expected_effect_requirements(next_revision: &Value) -> Value {
+    let mut requirements = vec![json!({
+        "target": next_revision
+            .get("selected_entities")
+            .and_then(Value::as_array)
+            .and_then(|entities| entities.first())
+            .cloned()
+            .unwrap_or(Value::Null),
+        "metric": "screen_area",
+        "to_op": ">",
+        "to_value": 0.0,
+        "source": "preserve_visible_entity_readability"
+    })];
+
+    let failed_clause_ids = next_revision["failed_clause_ids"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    if failed_clause_ids
+        .iter()
+        .any(|clause| clause.as_str().unwrap_or("").contains("walkway_clearance"))
+    {
+        requirements.push(json!({
+            "target": "arrival_area.main_walkway",
+            "metric": "walkway_clearance_cells",
+            "to_op": ">=",
+            "to_value": 2,
+            "source": "failed_clause_repair"
+        }));
+    }
+
+    Value::Array(requirements)
 }
 
 fn normalized_consumption_source_kind(input_kind: &str) -> &'static str {
