@@ -5,6 +5,7 @@
 Parent documents:
 - [Interaction feedback protocol](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_PROTOCOL_2026_06_15.md)
 - [Interaction feedback fixture](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_FIXTURE_2026_06_15.md)
+- [Interaction feedback report surface acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_REPORT_SURFACE_ACCEPTANCE_2026_06_15.md)
 - [Requirements v1](LIVE_SEMANTIC_WORLD_RUNTIME_REQUIREMENTS_V1_2026_06_06.md)
 
 Forum anchors:
@@ -12,6 +13,7 @@ Forum anchors:
 - `#102` post `#3047`: protocol and fixture docs synced at `b195850`.
 - `#102` post `#3049`: start notice for this consumption plan.
 - `#102` post `#3052`: start notice for pure consumption preflight helper.
+- `#102` post `#3060`: reconciled report-surface acceptance review claim.
 
 ## 0. Purpose
 
@@ -220,10 +222,31 @@ It returns:
 The preflight remains outside MCP registration. It does not query live runtime
 state and does not write files, memory, or store rows.
 
-## 7. Recommended Next Slice
+## 7. Report Surface Acceptance
 
-The next safe work is an acceptance review for whether this preflight should
-remain module/test-only or support a gated read-only report surface.
+The report-surface acceptance review is tracked in:
+
+```text
+LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_REPORT_SURFACE_ACCEPTANCE_2026_06_15.md
+```
+
+Current decision:
+
+```text
+GO_FOR_PURE_MODULE_REPORT_SURFACE
+```
+
+This approves a pure Markdown/report builder over explicit input and accepted
+preflight output. It does not approve MCP registration, default-profile exposure,
+live runtime lookup, writes, or #94 ingestion.
+
+## 8. Recommended Next Slice
+
+The next safe work is:
+
+```text
+Add pure interaction-feedback consumption report builder + Markdown renderer.
+```
 
 Do not start with a live runtime adapter, writer, default-profile tool, or #94
 ingestion path.
