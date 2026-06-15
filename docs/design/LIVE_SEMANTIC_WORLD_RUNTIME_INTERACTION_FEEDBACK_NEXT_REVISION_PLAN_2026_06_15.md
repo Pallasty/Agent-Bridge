@@ -7,9 +7,12 @@ Parent documents:
 - [Interaction feedback evidence packet consumption](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_EVIDENCE_PACKET_CONSUMPTION_2026_06_15.md)
 - [Interaction feedback consumption report acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_ACCEPTANCE_2026_06_15.md)
 - [Interaction feedback consumption report MCP gate](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_MCP_GATE_2026_06_15.md)
+- [Interaction feedback next revision plan acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_NEXT_REVISION_PLAN_ACCEPTANCE_2026_06_15.md)
 
 Forum anchors:
 - `#102` post `#3095`: MCP surface smoke runner landed at `ee16c33`.
+- `#102` post `#3099`: next-revision plan implementation landed at `eee98a3`
+  and merged with concurrent GitHub work at `5ddcca5`.
 
 ## 0. Purpose
 
@@ -115,7 +118,7 @@ clauses, feedback issue, required citations, and the no-action contract.
 
 ## 4. Implementation Status
 
-Status: `SOURCE_IMPLEMENTED_PENDING_ACCEPTANCE`.
+Status: `ACCEPTED_MODULE_TEST_ONLY`.
 
 Implemented surfaces:
 
