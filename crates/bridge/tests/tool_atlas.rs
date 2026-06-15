@@ -260,6 +260,37 @@ fn tool_atlas_treats_memory_save_missing_required_key_as_expected_input_validati
 }
 
 #[test]
+fn tool_atlas_treats_mobile_adb_missing_as_expected_runtime_unavailable() {
+    let snapshot = build_tool_atlas_snapshot(ToolAtlasInput {
+        generated_at: 1_779_910_000,
+        window_secs: 600,
+        current_tools: vec!["mobile_click".to_string()],
+        stats: vec![stat("mobile_click", 1, 1, 15, 215.0)],
+        recent_errors: vec![McpToolErrorRecord {
+            ts: 1_779_909_990,
+            tool_name: "mobile_click".to_string(),
+            message: "spawn adb failed: No such file or directory (os error 2)".to_string(),
+        }],
+    });
+
+    assert_eq!(snapshot.summary.failing_tool_count, 0);
+
+    let mobile_click = snapshot
+        .tools
+        .iter()
+        .find(|tool| tool.tool_name == "mobile_click")
+        .expect("mobile_click");
+
+    assert_eq!(mobile_click.error_count, 1);
+    assert_eq!(mobile_click.health, "healthy");
+    assert_eq!(mobile_click.recommendation, "keep");
+    assert!(mobile_click
+        .risk_flags
+        .contains(&"expected_runtime_unavailable".to_string()));
+    assert!(!mobile_click.risk_flags.contains(&"has_errors".to_string()));
+}
+
+#[test]
 fn tool_atlas_treats_unexposed_browser_input_errors_as_historical() {
     let snapshot = build_tool_atlas_snapshot(ToolAtlasInput {
         generated_at: 1_779_910_000,

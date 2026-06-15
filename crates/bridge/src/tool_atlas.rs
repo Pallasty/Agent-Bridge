@@ -318,6 +318,12 @@ fn expected_gate_flag(
     {
         return Some("expected_input_validation");
     }
+    if samples
+        .iter()
+        .all(|sample| is_expected_runtime_unavailable(tool_name, &sample.message))
+    {
+        return Some("expected_runtime_unavailable");
+    }
     None
 }
 
@@ -338,6 +344,14 @@ fn is_expected_input_validation(tool_name: &str, message: &str) -> bool {
         )
 }
 
+fn is_expected_runtime_unavailable(tool_name: &str, message: &str) -> bool {
+    tool_name.starts_with("mobile_")
+        && (message.contains("spawn adb failed")
+            || message.contains("adb not on PATH")
+            || message.contains("No Android devices")
+            || message.contains("no Android devices"))
+}
+
 fn is_historical_unexposed_browser_failure(tool_name: &str, message: &str) -> bool {
     matches!(tool_name, "browser_click" | "browser_snapshot")
         && (message == "missing 'page'"
@@ -353,6 +367,7 @@ fn has_actionable_risk_flags(risk_flags: &[String]) -> bool {
                 | "expected_confirmation"
                 | "expected_safety_gate"
                 | "expected_input_validation"
+                | "expected_runtime_unavailable"
                 | "historical_unexposed_failure"
         )
     })
