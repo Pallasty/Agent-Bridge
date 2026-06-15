@@ -248,6 +248,17 @@ Implemented after owner go-ahead in the Codex lane:
 - `dry_run=true`, `writes_state=false`, and `write_tool_open=false` in the
   returned packet.
 
+Repeatable non-empty smoke:
+
+```bash
+scripts/lswr_e4_approval_packet_smoke.sh
+```
+
+This local smoke reuses the Step E3 fixture generator, then asserts the E4c
+approval packet has a non-empty candidate set, `dry_run=true`,
+`writes_state=false`, `write_tool_open=false`, a `sha256:` plan hash, and no
+active rows. It does not call MCP and does not write memory.
+
 Still not implemented:
 
 - no `lswr_outcome_admissions_ingest` writer;

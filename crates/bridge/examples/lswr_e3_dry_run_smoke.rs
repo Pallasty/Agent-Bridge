@@ -5,7 +5,8 @@
 //! files. It writes no memory rows and does not call MCP.
 
 use ab_bridge::lswr_outcome_admission::{
-    outcome_admission_dry_run_candidates, outcome_admissions_projection,
+    outcome_admission_dry_run_candidates, outcome_admission_ingest_plan_from_dry_run,
+    outcome_admissions_projection,
 };
 use ab_bridge::lswr_present::{
     world_envelope_to_present_packet, write_present_packet_review_file, PresentPacketOptions,
@@ -15,6 +16,7 @@ use ab_bridge::present::{list_artifacts, write_outcome_sidecar};
 use ab_bridge::present_ingest::OUTCOME_MEMORY_KIND;
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 const GENERATED_AT: &str = "2026-06-15T00:00:00Z";
@@ -51,6 +53,9 @@ fn main() -> Result<()> {
         .unwrap_or_default();
     let dry_run =
         outcome_admission_dry_run_candidates(&admissions, GENERATED_AT_UNIX, WINDOW_SECS, 3);
+    let active_rows = BTreeSet::new();
+    let approval_packet =
+        outcome_admission_ingest_plan_from_dry_run(&dry_run, GENERATED_AT_UNIX, Some(&active_rows));
 
     let candidate_count = dry_run
         .get("candidate_count")
@@ -71,6 +76,9 @@ fn main() -> Result<()> {
         if !dry_run_flag || writes_state {
             bail!("E3 smoke must stay dry-run-only");
         }
+    }
+    if args.assert_approval_packet {
+        assert_e4_approval_packet(&approval_packet, candidate_count)?;
     }
 
     let first_candidate = dry_run
@@ -112,12 +120,29 @@ fn main() -> Result<()> {
                 .cloned()
                 .unwrap_or(Value::Null),
         },
+        "approval_packet": {
+            "schema": approval_packet.get("schema").cloned().unwrap_or(Value::Null),
+            "dry_run": approval_packet.get("dry_run").cloned().unwrap_or(Value::Null),
+            "writes_state": approval_packet.get("writes_state").cloned().unwrap_or(Value::Null),
+            "write_tool_open": approval_packet.get("write_tool_open").cloned().unwrap_or(Value::Null),
+            "candidate_count": approval_packet.get("candidate_count").cloned().unwrap_or(Value::Null),
+            "plan_hash": approval_packet.get("plan_hash").cloned().unwrap_or(Value::Null),
+            "active_row_check": approval_packet.get("active_row_check").cloned().unwrap_or(Value::Null),
+            "active_row_exists_count": approval_packet.get("active_row_exists_count").cloned().unwrap_or(Value::Null),
+            "first_candidate_key": approval_packet
+                .get("candidate_keys")
+                .and_then(Value::as_array)
+                .and_then(|rows| rows.first())
+                .cloned()
+                .unwrap_or(Value::Null),
+        },
         "assertions": {
             "non_empty": candidate_count > 0,
             "dry_run_only": dry_run_flag && !writes_state,
+            "approval_packet": args.assert_approval_packet,
             "memory_kind": OUTCOME_MEMORY_KIND,
         },
-        "note": "local smoke only: generated Step D files and E3 candidates; no MCP call and no memory write",
+        "note": "local smoke only: generated Step D files, E3 candidates, and E4 approval packet; no MCP call and no memory write",
     });
 
     println!("{}", serde_json::to_string_pretty(&summary)?);
@@ -182,15 +207,50 @@ fn expression_record(artifact_id: &str) -> Value {
     })
 }
 
+fn assert_e4_approval_packet(packet: &Value, e3_candidate_count: u64) -> Result<()> {
+    if packet.get("dry_run").and_then(Value::as_bool) != Some(true) {
+        bail!("E4 approval packet must report dry_run=true");
+    }
+    if packet.get("writes_state").and_then(Value::as_bool) != Some(false) {
+        bail!("E4 approval packet must report writes_state=false");
+    }
+    if packet.get("write_tool_open").and_then(Value::as_bool) != Some(false) {
+        bail!("E4 approval packet must keep write_tool_open=false");
+    }
+    if packet.get("candidate_count").and_then(Value::as_u64) != Some(e3_candidate_count) {
+        bail!("E4 approval packet candidate_count must match E3 candidate_count");
+    }
+    let plan_hash = packet
+        .get("plan_hash")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    if !plan_hash.starts_with("sha256:") || plan_hash.len() != "sha256:".len() + 64 {
+        bail!("E4 approval packet must include a sha256 plan_hash");
+    }
+    if packet.get("active_row_check").and_then(Value::as_str) != Some("checked") {
+        bail!("E4 approval packet smoke should mark active_row_check=checked");
+    }
+    if packet
+        .get("active_row_exists_count")
+        .and_then(Value::as_u64)
+        != Some(0)
+    {
+        bail!("E4 approval packet smoke should have no active rows");
+    }
+    Ok(())
+}
+
 struct Args {
     out_dir: PathBuf,
     assert_non_empty: bool,
+    assert_approval_packet: bool,
 }
 
 impl Args {
     fn parse(raw_args: impl IntoIterator<Item = String>) -> Result<Self> {
         let mut out_dir = None;
         let mut assert_non_empty = false;
+        let mut assert_approval_packet = false;
         let mut iter = raw_args.into_iter();
         while let Some(arg) = iter.next() {
             match arg.as_str() {
@@ -201,6 +261,7 @@ impl Args {
                     out_dir = Some(PathBuf::from(value));
                 }
                 "--assert-non-empty" => assert_non_empty = true,
+                "--assert-approval-packet" => assert_approval_packet = true,
                 "--help" | "-h" => bail!("{}", usage()),
                 _ => bail!("unknown argument: {arg}\n\n{}", usage()),
             }
@@ -209,6 +270,7 @@ impl Args {
         Ok(Self {
             out_dir: out_dir.unwrap_or_else(default_out_dir),
             assert_non_empty,
+            assert_approval_packet,
         })
     }
 }
@@ -221,5 +283,5 @@ fn default_out_dir() -> PathBuf {
 }
 
 fn usage() -> &'static str {
-    "usage: cargo run -p ab-bridge --example lswr_e3_dry_run_smoke -- [--out-dir PATH] [--assert-non-empty]"
+    "usage: cargo run -p ab-bridge --example lswr_e3_dry_run_smoke -- [--out-dir PATH] [--assert-non-empty] [--assert-approval-packet]"
 }
