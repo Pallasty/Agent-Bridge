@@ -1,6 +1,6 @@
 # Live Semantic World Runtime - Interaction Feedback Evidence Packet Consumption
 
-**2026-06-15 - role: consumption acceptance plan / CLI-only read-only surface + report acceptance + module acceptance**
+**2026-06-15 - role: consumption acceptance plan / CLI-only read-only surface + report acceptance + module acceptance + MCP gate acceptance**
 
 Parent documents:
 - [Interaction feedback protocol](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_PROTOCOL_2026_06_15.md)
@@ -8,6 +8,7 @@ Parent documents:
 - [Interaction feedback report surface acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_REPORT_SURFACE_ACCEPTANCE_2026_06_15.md)
 - [Interaction feedback consumption report acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_ACCEPTANCE_2026_06_15.md)
 - [Interaction feedback consumption report MCP gate](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_MCP_GATE_2026_06_15.md)
+- [Interaction feedback consumption report MCP gate acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_MCP_GATE_ACCEPTANCE_2026_06_15.md)
 - [Requirements v1](LIVE_SEMANTIC_WORLD_RUNTIME_REQUIREMENTS_V1_2026_06_06.md)
 
 Forum anchors:
@@ -19,6 +20,7 @@ Forum anchors:
 - `#102` post `#3066`: pure report builder landed at `cc2394c`.
 - `#102` post `#3068`: module/test-only acceptance review claim.
 - `#102` post `#3071`: MCP registration gate design claim.
+- `#102` post `#3079`: MCP registration gate acceptance review claim.
 - `#104` post `#2412`: adjacent BioCortex/LSWR handoff remains blocked on
   external onsen Step B source, so this slice advances only the independent
   read-only interaction-feedback consumer.
@@ -333,13 +335,13 @@ LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_MCP_GATE_202
 Current decision:
 
 ```text
-GATE_DEFINED_IMPLEMENTATION_HOLD
+GATE_ACCEPTED_FOR_TIER_NICHE_IMPLEMENTATION
 ```
 
 ```text
-Accept or revise the MCP registration gate before any registry implementation.
+Implement the accepted Tier::Niche MCP wrapper in a separate commit with schema
+and profile-gating tests.
 ```
 
 Do not start with a live runtime adapter, writer, default-profile tool, or #94
-ingestion path. Do not implement the registry wrapper before the MCP gate is
-accepted on #102.
+ingestion path.

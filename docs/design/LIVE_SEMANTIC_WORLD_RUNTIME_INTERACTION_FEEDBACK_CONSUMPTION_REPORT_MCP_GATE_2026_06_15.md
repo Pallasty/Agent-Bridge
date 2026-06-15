@@ -8,12 +8,14 @@ Parent documents:
 - [Interaction feedback evidence packet consumption](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_EVIDENCE_PACKET_CONSUMPTION_2026_06_15.md)
 - [Interaction feedback report surface acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_REPORT_SURFACE_ACCEPTANCE_2026_06_15.md)
 - [Interaction feedback consumption report acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_ACCEPTANCE_2026_06_15.md)
+- [Interaction feedback consumption report MCP gate acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_MCP_GATE_ACCEPTANCE_2026_06_15.md)
 - [Requirements v1](LIVE_SEMANTIC_WORLD_RUNTIME_REQUIREMENTS_V1_2026_06_06.md)
 
 Forum anchors:
 - `#102` post `#3066`: pure report builder landed.
 - `#102` post `#3069`: report builder accepted as module/test-only.
 - `#102` post `#3071`: MCP gate design claim.
+- `#102` post `#3079`: MCP gate acceptance review claim.
 
 ## 0. Purpose
 
@@ -29,7 +31,7 @@ verdicts.
 Current decision:
 
 ```text
-GATE_DEFINED_IMPLEMENTATION_HOLD
+GATE_ACCEPTED_FOR_TIER_NICHE_IMPLEMENTATION
 ```
 
 Implementation status:
@@ -318,8 +320,12 @@ narrow object-only transport wrapper.
 
 `GATE_DEFINED_IMPLEMENTATION_HOLD`
 
-The gate design is ready, but no MCP registration has been implemented. This is
-the current state.
+The gate design is ready, but no MCP registration has been implemented.
+
+`GATE_ACCEPTED_FOR_TIER_NICHE_IMPLEMENTATION`
+
+The gate is accepted for a separate implementation slice. This is the current
+state.
 
 `NOT_READY`
 
