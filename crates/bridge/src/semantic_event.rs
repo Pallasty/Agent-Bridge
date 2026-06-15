@@ -384,6 +384,42 @@ pub fn classify_mobile(ok: bool, err_msg: &str) -> Verdict {
     }
 }
 
+/// Classify a session-lifecycle step (`session_bootstrap`, `session_finalize`)
+/// into a verify-first verdict. This is the distinguishing property of lifecycle
+/// producers versus input taps: a tap dispatches with NO readback (→ Unknown),
+/// but a lifecycle step HAS readback — the concrete effect count (memory rows
+/// injected at bootstrap, memories compacted at finalize). So:
+///
+/// - ran + produced a concrete effect → Verified (the readback confirms it)
+/// - ran + no effect (empty scope / dry-run) → Unknown (honest: nothing to
+///   verify, but the step did NOT fail — never laundered to a green success)
+/// - the step itself failed → NotVerified (anti-laundering)
+///
+/// Rich domain counts belong in the event's `facts` field; this verdict carries
+/// only the generic lifecycle method/evidence (mirrors the sibling classifiers).
+pub fn classify_lifecycle(ran: bool, made_effect: bool, err_msg: &str) -> Verdict {
+    if !ran {
+        return Verdict {
+            status: VerdictStatus::NotVerified,
+            method: "lifecycle_failed".to_string(),
+            evidence: json!({ "error": err_msg }),
+        };
+    }
+    if made_effect {
+        Verdict {
+            status: VerdictStatus::Verified,
+            method: "lifecycle_readback".to_string(),
+            evidence: json!({ "note": "lifecycle step produced a readable effect" }),
+        }
+    } else {
+        Verdict {
+            status: VerdictStatus::Unknown,
+            method: "lifecycle_no_effect".to_string(),
+            evidence: json!({ "note": "lifecycle step ran but produced no effect (empty scope / dry-run)" }),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -582,6 +618,36 @@ mod tests {
         let v = classify_mobile(false, "selector matched 0 node(s)");
         assert_eq!(v.status, VerdictStatus::NotVerified);
         assert_eq!(v.method, "adb_tap_failed");
+    }
+
+    #[test]
+    fn lifecycle_with_effect_is_verified() {
+        // A bootstrap that injected memory rows (or a finalize that compacted
+        // some) HAS readback, so it is honestly Verified.
+        let v = classify_lifecycle(true, true, "");
+        assert_eq!(v.status, VerdictStatus::Verified);
+        assert_eq!(v.status.as_ok(), Some(true));
+        assert_eq!(v.method, "lifecycle_readback");
+    }
+
+    #[test]
+    fn lifecycle_empty_scope_is_unknown_not_green() {
+        // The falsifier: a bootstrap over an empty scope injected nothing. It
+        // did NOT fail, but it MUST NOT be laundered to a green Verified — an
+        // inert lifecycle step is honestly Unknown.
+        let v = classify_lifecycle(true, false, "");
+        assert_eq!(v.status, VerdictStatus::Unknown);
+        assert_eq!(v.status.as_ok(), None);
+        assert_eq!(v.method, "lifecycle_no_effect");
+    }
+
+    #[test]
+    fn lifecycle_failed_is_not_verified() {
+        // A lifecycle step that errored out never produced its effect.
+        let v = classify_lifecycle(false, false, "store unavailable");
+        assert_eq!(v.status, VerdictStatus::NotVerified);
+        assert_eq!(v.status.as_ok(), Some(false));
+        assert_eq!(v.method, "lifecycle_failed");
     }
 
     // ---- SSB conformance gate (roadmap Gate E) ----

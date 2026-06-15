@@ -20518,6 +20518,51 @@ fn cap_block_lines(lines: Vec<String>, budget: usize) -> Vec<String> {
     out
 }
 
+/// SSB lifecycle producer (roadmap §2 "hooks → bus events"): emit a
+/// `session_bootstrap` as a typed semantic event on the same unified
+/// Object/Affordance contract as browser/desktop/mobile and the symmetric
+/// `session_finalize` lifecycle producer. Bootstrap HAS readback (the count of
+/// memory rows it surfaced + the assembled payload), so a bootstrap that
+/// injected context is Verified; an empty-scope bootstrap injected nothing and
+/// is honestly Unknown — never laundered to a green success. Best-effort; the
+/// emit failure never affects the bootstrap output.
+async fn record_session_bootstrap_event(
+    store: &Arc<dyn StateStore>,
+    injected: bool,
+    memory_rows: usize,
+    output_lines: usize,
+) {
+    let verdict = crate::semantic_event::classify_lifecycle(true, injected, "");
+    let ev = crate::semantic_event::SemanticEvent {
+        ts: dispatch_now_secs(),
+        actor: "mcp".to_string(),
+        source: "session".to_string(),
+        action: "bootstrap".to_string(),
+        target: None,
+        object: crate::semantic_event::SemanticObject {
+            object_type: "session".to_string(),
+            source_adapter: "session".to_string(),
+            label: None,
+            object_id: None,
+        },
+        affordance: crate::semantic_event::Affordance {
+            action_type: "bootstrap".to_string(),
+            risk_level: "low".to_string(),
+            requires_gate: false,
+            expected_effect: Some("assemble + inject session context".to_string()),
+        },
+        verdict,
+        facts: json!({
+            "memory_rows": memory_rows,
+            "output_lines": output_lines,
+            "injected": injected,
+        }),
+    };
+    if let Err(e) = store.record_semantic_event(ev.to_record()).await {
+        tracing::debug!(error = %e, "record_semantic_event (session_bootstrap) failed");
+    }
+}
+
 pub struct SessionBootstrapTool {
     hub: Hub,
 }
@@ -20683,6 +20728,9 @@ impl McpTool for SessionBootstrapTool {
 
         if rows.is_empty() && error_section.is_empty() {
             let lifecycle_hint = session_lifecycle_hint();
+            // SSB lifecycle producer: an empty-scope bootstrap injected nothing,
+            // so it is honestly Unknown (ran, no effect) — not laundered green.
+            record_session_bootstrap_event(&store, false, 0, 0).await;
             return Ok(ToolResult::text(format!(
                 "(no scoped memories yet)\n\n{lifecycle_hint}"
             )));
@@ -21025,6 +21073,11 @@ impl McpTool for SessionBootstrapTool {
                 }
             });
         }
+
+        // SSB lifecycle producer: this bootstrap assembled and injected real
+        // context (memory rows + blocks), so it is Verified — readback is the
+        // surfaced row count + the assembled payload size.
+        record_session_bootstrap_event(&store, true, rows.len(), lines.len()).await;
 
         Ok(ToolResult::text(lines.join("\n")))
     }
