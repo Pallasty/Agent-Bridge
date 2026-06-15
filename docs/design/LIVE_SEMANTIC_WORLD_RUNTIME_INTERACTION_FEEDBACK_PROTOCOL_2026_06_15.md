@@ -8,6 +8,7 @@ Parent documents:
 - [Event and feedback schema](LIVE_SEMANTIC_WORLD_RUNTIME_EVENT_FEEDBACK_SCHEMA_2026_06_06.md)
 - [Human input mapping](LIVE_SEMANTIC_WORLD_RUNTIME_HUMAN_INPUT_MAPPING_2026_06_06.md)
 - [Step E4d writer preflight](LIVE_SEMANTIC_WORLD_RUNTIME_STEP_E4D_WRITER_PREFLIGHT_2026_06_15.md)
+- [Interaction feedback evidence packet consumption](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_EVIDENCE_PACKET_CONSUMPTION_2026_06_15.md)
 
 Forum anchors:
 - `#102` post `#3010`: E4d read-only preflight closeout.
@@ -415,3 +416,9 @@ Candidate scope:
 
 Do not add a writer, #94 ingestion path, store mutation, or default-profile tool
 as part of the next step.
+
+The consumption acceptance plan is tracked in:
+
+```text
+LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_EVIDENCE_PACKET_CONSUMPTION_2026_06_15.md
+```
