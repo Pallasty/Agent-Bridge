@@ -42636,11 +42636,41 @@ fn parse_review_interval_days(tags: &[String]) -> Option<i64> {
     None
 }
 
+/// One-line recover hint for a verify-first NotVerified event, keyed on the
+/// verdict method the producer stamped. Serves roadmap §3.5 ("provide a recover
+/// hint when the next local step is obvious") — it turns the inert-action
+/// surface from "this failed" into "this failed, here is the next step".
+/// Returns `None` when no obvious local remedy applies. Pure + total.
+fn recover_hint(verdict_method: &str) -> Option<&'static str> {
+    let m = verdict_method;
+    if m.contains("preflight_refusal") {
+        return Some("host 写未暴露:用 desktop_confirm 两阶段 或 use_grant 预授权窗");
+    }
+    if m.contains("no_device") || m.contains("adb") {
+        return Some("无 adb 设备:attach 设备后重试(mobile_health 查连接)");
+    }
+    if m.contains("cdp_actionability_probe") {
+        return Some("元素 disabled/隐藏/detached:browser_snapshot 重取后用新 @eN");
+    }
+    if m.contains("css_selector") {
+        return Some("CSS 选择器未命中:browser_snapshot 取稳定 @eN ref 再点");
+    }
+    if m == "lifecycle_failed" {
+        return Some("lifecycle 步骤失败(如 curate 全部 save 失败):查 store/磁盘");
+    }
+    if m.contains("injection_failed") || m.ends_with("_failed") {
+        return Some("注入失败:查目标 compositor/grant,或 desktop_verify 复核");
+    }
+    None
+}
+
 /// Format a "Recent Inert/Failed Actions" block from recent semantic-bus
 /// events — the verify-first NotVerified signal surfaced at cold start so an
 /// action that did NOT take effect last session (the anti-laundering signal the
 /// SSB producers emit) is visible instead of buried in the `semantic_events`
 /// log. Closes the SSB §3.6 loop (bus event → presentation/handoff surface).
+/// Each surfaced action carries a `recover:` next-step hint when one is obvious
+/// (roadmap §3.5).
 ///
 /// `events` are expected newest-first (as `recent_semantic_events` returns).
 /// Returns `None` when no NotVerified events exist, so the block is hidden on a
@@ -42682,6 +42712,9 @@ fn format_inert_actions_block(
             "  • {}/{}{tgt} — {} ({age_str} ago)",
             e.source, e.action, e.verdict_method
         ));
+        if let Some(hint) = recover_hint(&e.verdict_method) {
+            out.push(format!("      ↳ recover: {hint}"));
+        }
     }
     if n > max_items.max(1) {
         out.push(format!(
@@ -45814,6 +45847,26 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         // The verified row must NOT leak into the inert surface (anti-laundering
         // in reverse: we only surface the honestly-failed ones).
         assert!(!text.contains("ref_ok"), "verified row leaked: {text}");
+        // §3.5 recover hints accompany each surfaced inert action.
+        assert!(text.contains("↳ recover:"), "missing recover hint: {text}");
+        assert!(text.contains("use_grant"), "preflight recover hint: {text}");
+        assert!(text.contains("attach 设备"), "no_device recover hint: {text}");
+    }
+
+    #[test]
+    fn recover_hint_maps_known_failure_modes() {
+        assert!(recover_hint("preflight_refusal").unwrap().contains("desktop_confirm"));
+        assert!(recover_hint("dry-run_failed").unwrap().contains("desktop_verify"));
+        assert!(recover_hint("isolated_injection_failed").unwrap().contains("desktop_verify"));
+        assert!(recover_hint("no_device").unwrap().contains("adb"));
+        assert!(recover_hint("adb_tap_failed").unwrap().contains("adb"));
+        assert!(recover_hint("cdp_actionability_probe").unwrap().contains("browser_snapshot"));
+        assert!(recover_hint("css_selector_dispatch").unwrap().contains("@eN"));
+        assert!(recover_hint("lifecycle_failed").unwrap().contains("store"));
+        // Methods with no obvious local remedy get no hint (not every NotVerified
+        // is mechanically recoverable).
+        assert!(recover_hint("ref_resolution_or_transport").is_none());
+        assert!(recover_hint("some_unknown_method").is_none());
     }
 
     #[test]
