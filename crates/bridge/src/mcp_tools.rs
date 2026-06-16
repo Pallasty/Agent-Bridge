@@ -11502,6 +11502,391 @@ impl McpTool for LswrOutcomeAdmissionsWritePreflightTool {
     }
 }
 
+/// LSWR Step E4d/E4e explicit write tool: `lswr_outcome_admissions_ingest`.
+///
+/// This is the FIRST and ONLY LSWR outcome-admission writer. It is a thin,
+/// owner-gated consumer of the E3 candidate builder + the E4d validator. It does
+/// NOT reimplement any LSWR admission gate and it NEVER calls
+/// `present_outcomes_ingest`. Default mode is `dry_run=true` (returns the E4c
+/// approval plan + `plan_hash`, writes nothing). A durable write additionally
+/// requires `dry_run=false` PLUS the full owner approval contract validated by
+/// [`validate_lswr_e4d_write_request`]: `apply_confirmation`,
+/// `approval_thread_id=102`, a positive `approval_post_id`, a `reviewed_plan_hash`
+/// equal to the recomputed plan hash, `candidate_keys` ⊆ plan, `max_writes<=1`,
+/// and every selected row `active_row_exists=false` / `write_allowed=false` /
+/// `requires_review=true`.
+///
+/// Write semantics (design §5/§6): persists exactly the [`MemoryRecord`] produced
+/// by [`crate::present_ingest::build_outcome_memory`] for the SAME `outcome_record`
+/// the reviewed plan hash covered; re-probes and REFUSES active-row refreshes (the
+/// first slice creates a new deterministic row or does nothing); returns a
+/// rollback packet. all-profile only; hidden from standard and codex-essential.
+/// See `docs/design/LIVE_SEMANTIC_WORLD_RUNTIME_STEP_E4_MANUAL_OPT_IN_WRITE_DESIGN_2026_06_15.md`.
+pub struct LswrOutcomeAdmissionsIngestTool {
+    hub: Hub,
+}
+impl LswrOutcomeAdmissionsIngestTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for LswrOutcomeAdmissionsIngestTool {
+    fn name(&self) -> &'static str {
+        "lswr_outcome_admissions_ingest"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "LSWR Step E4d/E4e: owner-gated explicit writer that persists a \
+                 training_eligible LSWR outcome admission as a single ordinary present_outcome \
+                 memory row (key=outcome_<artifact_id>, kind=present_outcome, \
+                 scope=outcome:<artifact_id>, related_keys=[]). Thin consumer of the E3 \
+                 candidate builder + E4d validator: never reimplements admission gates, never \
+                 calls present_outcomes_ingest, never creates graph edges. dry_run=TRUE by \
+                 DEFAULT — returns the E4c plan (plan_hash + candidate_keys) and writes NOTHING. \
+                 A durable write requires dry_run=false AND the full owner approval contract: \
+                 apply_confirmation, approval_thread_id=102, a positive approval_post_id, \
+                 reviewed_plan_hash == the recomputed plan_hash, candidate_keys subset of plan, \
+                 and max_writes<=1. Fails closed (no store access) on any contract violation. \
+                 Refuses active-row refreshes; returns a rollback packet. all-profile only; \
+                 hidden from standard and codex-essential. Not automatic — a human triggers it."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "window_secs": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 31536000,
+                        "default": 86400,
+                        "description": "Look-back window over present artifacts by provenance timestamp; used to recompute the E4c plan."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 200,
+                        "description": "Max HTML artifacts scanned (most-recent-first before timestamp filtering)."
+                    },
+                    "max_candidates": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 200,
+                        "default": 25,
+                        "description": "Hard cap on planned present_outcome candidate rows in the recomputed E4c plan."
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "TRUE (default) returns the E4c plan + plan_hash and writes NOTHING. Set false to attempt a durable write (requires the full approval contract below)."
+                    },
+                    "apply_confirmation": {
+                        "type": "string",
+                        "const": crate::lswr_outcome_admission::LSWR_OUTCOME_ADMISSION_WRITE_CONFIRMATION,
+                        "description": "Exact confirmation token; required for any write."
+                    },
+                    "approval_thread_id": {
+                        "type": "integer",
+                        "const": crate::lswr_outcome_admission::LSWR_OUTCOME_ADMISSION_APPROVAL_THREAD_ID,
+                        "description": "Board thread that contains the owner approval post."
+                    },
+                    "approval_post_id": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Positive owner approval post id; zero or missing is invalid."
+                    },
+                    "reviewed_plan_hash": {
+                        "type": "string",
+                        "pattern": "^sha256:[0-9a-f]{64}$",
+                        "description": "Plan hash from the reviewed E4c approval packet; must equal the recomputed plan_hash."
+                    },
+                    "candidate_keys": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {"type": "string"},
+                        "description": "Subset of candidate keys selected from the reviewed E4c plan."
+                    },
+                    "max_writes": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 1,
+                        "description": "First E4 slice cap; must be 1 or less."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let window_secs = args
+            .get("window_secs")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(86_400)
+            .clamp(60, 31_536_000);
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(200)
+            .clamp(1, 500) as usize;
+        let max_candidates = args
+            .get("max_candidates")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(25)
+            .clamp(1, 200) as usize;
+        let dry_run = args.get("dry_run").and_then(|v| v.as_bool()).unwrap_or(true);
+
+        let now = dispatch_now_secs();
+        let cutoff = now.saturating_sub(window_secs).max(0) as u64;
+        let dir = crate::present::presentations_dir();
+        let artifacts: Vec<_> = crate::present::list_artifacts(&dir, limit, Some("html"))
+            .into_iter()
+            .filter(|a| a.ts.map_or(true, |t| t >= cutoff))
+            .collect();
+        let projection = crate::lswr_outcome_admission::outcome_admissions_projection(
+            &artifacts,
+            false,
+            now.max(0) as u64,
+            window_secs as u64,
+        );
+        let admissions: Vec<Value> = projection
+            .get("admissions")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let dry_run_candidates =
+            crate::lswr_outcome_admission::outcome_admission_dry_run_candidates(
+                &admissions,
+                now.max(0) as u64,
+                window_secs as u64,
+                max_candidates,
+            );
+
+        // Non-mutating active-row probe (identical to the E4c/E4d read-only path).
+        let store_opt = self.hub.store.clone();
+        let active_rows = if let Some(store) = &store_opt {
+            let keys: Vec<String> = dry_run_candidates
+                .get("candidates")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|candidate| {
+                    candidate
+                        .get("memory")
+                        .and_then(|m| m.get("key"))
+                        .and_then(Value::as_str)
+                        .map(str::to_string)
+                })
+                .collect();
+            let mut active = BTreeSet::new();
+            for key in keys {
+                let exists = store
+                    .memory_search(&key, &[], 5)
+                    .await
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|hit| hit.record.key == key);
+                if exists {
+                    active.insert(key);
+                }
+            }
+            Some(active)
+        } else {
+            None
+        };
+
+        let plan = crate::lswr_outcome_admission::outcome_admission_ingest_plan_from_dry_run(
+            &dry_run_candidates,
+            now.max(0) as u64,
+            active_rows.as_ref(),
+        );
+
+        // DEFAULT dry-run: return the E4c approval plan; write nothing.
+        if dry_run {
+            let mut out = plan.clone();
+            if let Some(obj) = out.as_object_mut() {
+                obj.insert("dir".into(), json!(dir.display().to_string()));
+                obj.insert(
+                    "store_probe".into(),
+                    json!(if active_rows.is_some() {
+                        "memory_search_active_only"
+                    } else {
+                        "store_unavailable"
+                    }),
+                );
+                obj.insert(
+                    "note".into(),
+                    json!(
+                        "dry-run (default): read plan_hash + candidate_keys, then call again \
+                         with dry_run:false + apply_confirmation + approval_thread_id:102 + \
+                         approval_post_id + reviewed_plan_hash + candidate_keys + max_writes:1 \
+                         to persist exactly one present_outcome row. Nothing written."
+                    ),
+                );
+            }
+            return Ok(ToolResult::json_text(&out));
+        }
+
+        // WRITE MODE. Re-pack the flat args into the validator's request object and
+        // fail closed before any store access unless the full contract holds.
+        let request = json!({
+            "dry_run": false,
+            "apply_confirmation": args.get("apply_confirmation").cloned().unwrap_or(Value::Null),
+            "approval_thread_id": args.get("approval_thread_id").cloned().unwrap_or(Value::Null),
+            "approval_post_id": args.get("approval_post_id").cloned().unwrap_or(Value::Null),
+            "reviewed_plan_hash": args.get("reviewed_plan_hash").cloned().unwrap_or(Value::Null),
+            "candidate_keys": args.get("candidate_keys").cloned().unwrap_or(Value::Null),
+            "max_writes": args.get("max_writes").cloned().unwrap_or(Value::Null),
+        });
+        let validation =
+            crate::lswr_outcome_admission::validate_lswr_e4d_write_request(&plan, &request);
+        let valid = validation.get("valid").and_then(Value::as_bool) == Some(true);
+        if !valid {
+            let mut out = validation.clone();
+            if let Some(obj) = out.as_object_mut() {
+                obj.insert("writes_state".into(), json!(false));
+                obj.insert("written_count".into(), json!(0));
+                obj.insert(
+                    "note".into(),
+                    json!("write refused: request failed E4d validation; no store access performed."),
+                );
+            }
+            return Ok(ToolResult::json_text(&out));
+        }
+
+        let store = match &store_opt {
+            Some(s) => s.clone(),
+            None => {
+                return Ok(ToolResult::json_text(&json!({
+                    "schema": crate::lswr_outcome_admission::LSWR_OUTCOME_ADMISSION_WRITE_RESULT_SCHEMA,
+                    "valid": true,
+                    "dry_run": false,
+                    "writes_state": false,
+                    "written_count": 0,
+                    "failure_reasons": ["no_store_configured"],
+                    "note": "valid request but no store configured; nothing written.",
+                })))
+            }
+        };
+
+        // Map each selected key back to the SAME outcome_record the plan hash covered,
+        // then rebuild the durable MemoryRecord via the #94 helper (design §5).
+        let candidates: Vec<Value> = dry_run_candidates
+            .get("candidates")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let max_writes = request.get("max_writes").and_then(Value::as_u64).unwrap_or(1) as usize;
+        let selected_keys: Vec<String> = request
+            .get("candidate_keys")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|k| k.as_str().map(str::to_string))
+            .collect();
+
+        let mut written: Vec<Value> = Vec::new();
+        let mut written_keys: Vec<String> = Vec::new();
+        let mut refused: Vec<Value> = Vec::new();
+        let mut write_count = 0usize;
+
+        for key in &selected_keys {
+            if write_count >= max_writes {
+                refused.push(json!({"key": key, "reason": "over_max_writes"}));
+                continue;
+            }
+            let Some(candidate) = candidates.iter().find(|c| {
+                c.get("memory")
+                    .and_then(|m| m.get("key"))
+                    .and_then(Value::as_str)
+                    == Some(key.as_str())
+            }) else {
+                refused.push(json!({"key": key, "reason": "candidate_not_found_at_write"}));
+                continue;
+            };
+            let outcome_record = candidate.get("outcome_record").cloned().unwrap_or(Value::Null);
+            let Some(mem) =
+                crate::present_ingest::build_outcome_memory(&outcome_record, now.max(0))
+            else {
+                refused.push(json!({"key": key, "reason": "unbuildable_at_write"}));
+                continue;
+            };
+            if mem.key != *key {
+                refused.push(json!({"key": key, "reason": "rebuilt_key_mismatch", "rebuilt_key": mem.key}));
+                continue;
+            }
+            // Re-probe right before write; first slice refuses an active-row refresh.
+            let active_now = store
+                .memory_search(&mem.key, &[], 5)
+                .await
+                .unwrap_or_default()
+                .iter()
+                .any(|h| h.record.key == mem.key);
+            if active_now {
+                refused.push(json!({"key": key, "reason": "active_row_exists_at_write"}));
+                continue;
+            }
+            match store.memory_save(&mem).await {
+                Ok(()) => {
+                    write_count += 1;
+                    written_keys.push(mem.key.clone());
+                    written.push(json!({
+                        "key": mem.key,
+                        "kind": mem.kind,
+                        "scope": mem.scope,
+                        "tags": mem.tags,
+                        "written": true,
+                    }));
+                }
+                Err(e) => {
+                    refused.push(json!({"key": key, "reason": "store_error", "error": e.to_string()}));
+                }
+            }
+        }
+
+        let plan_hash = plan.get("plan_hash").cloned().unwrap_or(Value::Null);
+        let approval_post_id = request.get("approval_post_id").cloned().unwrap_or(Value::Null);
+        let writes_state = !written_keys.is_empty();
+        let rollback = if writes_state {
+            json!({
+                "schema": crate::lswr_outcome_admission::LSWR_OUTCOME_ADMISSION_INGEST_ROLLBACK_SCHEMA,
+                "approval_post_id": approval_post_id,
+                "plan_hash": plan_hash,
+                "written_keys": written_keys,
+                "rollback_instruction": "tombstone these exact keys through the existing memory admin path",
+            })
+        } else {
+            Value::Null
+        };
+
+        Ok(ToolResult::json_text(&json!({
+            "schema": crate::lswr_outcome_admission::LSWR_OUTCOME_ADMISSION_WRITE_RESULT_SCHEMA,
+            "valid": true,
+            "dry_run": false,
+            "writes_state": writes_state,
+            "generated_at": now.max(0),
+            "plan_hash": plan_hash,
+            "approval_thread_id": crate::lswr_outcome_admission::LSWR_OUTCOME_ADMISSION_APPROVAL_THREAD_ID,
+            "approval_post_id": approval_post_id,
+            "max_writes": max_writes,
+            "selected_count": selected_keys.len(),
+            "written_count": write_count,
+            "written": written,
+            "written_keys": written_keys,
+            "refused": refused,
+            "rollback": rollback,
+            "memory_kind": crate::present_ingest::OUTCOME_MEMORY_KIND,
+            "store_probe": "memory_search_active_only",
+            "note": "E4 first-slice write: persists exactly the build_outcome_memory row(s) the \
+                     reviewed plan_hash covered; active-row refreshes refused; no \
+                     present_outcomes_ingest call; the rollback packet is operator guidance, \
+                     not an automatic undo.",
+        })))
+    }
+}
+
 // ── Output-expression lane Slice B (v0) ───────────────────────────────────
 // Two tools: a read-only outcome→memory drift projection (always-on, zero
 // risk, zero owner coordination), and an opt-in, dry-run-default, capped
@@ -41809,6 +42194,15 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Niche,
         Arc::new(LswrOutcomeAdmissionsWritePreflightTool::new(hub.clone())),
     );
+    // LSWR Step E4d/E4e: the ONLY LSWR outcome writer. Niche (all-profile only),
+    // dry_run=true default; a durable write requires the full owner approval
+    // contract + active-row refusal + rollback packet before any memory_save.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(LswrOutcomeAdmissionsIngestTool::new(hub.clone())),
+    );
     // Slice B (v0): read-only outcome→memory drift projection. Reports which
     // verified outcomes are/aren't represented in memory (tamper-evident chain);
     // writes nothing, non-mutating probe. Niche (opt-in).
@@ -48773,6 +49167,9 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
     // artifact is STILL written + dual-encoded (degrade, don't fail).
     #[tokio::test]
     async fn present_degrades_to_no_browser_and_still_writes_artifact() {
+        let _env = PRESENTATIONS_DIR_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         let dir = std::env::temp_dir().join(format!(
             "ab-present-test-{}-{}",
             std::process::id(),
@@ -48923,6 +49320,12 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
             "lswr_outcome_admissions_write_preflight must register under the all profile"
         );
         assert!(
+            schemas
+                .iter()
+                .any(|s| s.name == "lswr_outcome_admissions_ingest"),
+            "lswr_outcome_admissions_ingest must register under the all profile"
+        );
+        assert!(
             schemas.iter().any(|s| s.name == "present_voice"),
             "present_voice must register under the all profile"
         );
@@ -48986,6 +49389,12 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
                 .any(|s| s.name == "lswr_outcome_admissions_write_preflight"),
             "lswr_outcome_admissions_write_preflight must stay out of standard"
         );
+        assert!(
+            !standard_schemas
+                .iter()
+                .any(|s| s.name == "lswr_outcome_admissions_ingest"),
+            "lswr_outcome_admissions_ingest must stay out of standard"
+        );
         let codex_schemas =
             build_registry_with_policy(Hub::builder().build(), codex_essential).list();
         assert!(
@@ -49017,6 +49426,12 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
                 .iter()
                 .any(|s| s.name == "lswr_outcome_admissions_write_preflight"),
             "lswr_outcome_admissions_write_preflight must stay out of codex-essential"
+        );
+        assert!(
+            !codex_schemas
+                .iter()
+                .any(|s| s.name == "lswr_outcome_admissions_ingest"),
+            "lswr_outcome_admissions_ingest must stay out of codex-essential"
         );
     }
 
@@ -49129,6 +49544,321 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
             crate::lswr_outcome_admission::LSWR_OUTCOME_ADMISSION_APPROVAL_THREAD_ID
         );
         assert_eq!(request_props["max_writes"]["maximum"], 1);
+    }
+
+    // ── E4d/E4e explicit writer: lswr_outcome_admissions_ingest ───────────────
+
+    // AGENT_BRIDGE_PRESENTATIONS_DIR is process-global; tests that override it
+    // must serialize or they race (a concurrent test resets it mid-execute and
+    // the tool reads the wrong dir). Poison-tolerant so one failing test does not
+    // cascade into false failures in the others.
+    static PRESENTATIONS_DIR_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn lswr_outcome_admissions_ingest_schema_is_dry_run_default_write_gated() {
+        let all = ToolPolicy::from_values(None, None, None, Some("all"));
+        let schemas = build_registry_with_policy(Hub::builder().build(), all).list();
+        let tool = schemas
+            .iter()
+            .find(|s| s.name == "lswr_outcome_admissions_ingest")
+            .expect("lswr_outcome_admissions_ingest schema");
+        let props = &tool.input_schema["properties"];
+        // dry_run is a TOP-LEVEL flag defaulting to true (the writer is opt-in).
+        assert_eq!(props["dry_run"]["default"], serde_json::Value::Bool(true));
+        // The write contract fields are flat on the tool input (design §3 shape).
+        for required in [
+            "apply_confirmation",
+            "approval_thread_id",
+            "approval_post_id",
+            "reviewed_plan_hash",
+            "candidate_keys",
+            "max_writes",
+        ] {
+            assert!(
+                props.get(required).is_some(),
+                "{required} must be a top-level write-gate field"
+            );
+        }
+        assert_eq!(
+            props["apply_confirmation"]["const"],
+            crate::lswr_outcome_admission::LSWR_OUTCOME_ADMISSION_WRITE_CONFIRMATION
+        );
+        assert_eq!(
+            props["approval_thread_id"]["const"],
+            crate::lswr_outcome_admission::LSWR_OUTCOME_ADMISSION_APPROVAL_THREAD_ID
+        );
+        assert_eq!(props["max_writes"]["maximum"], 1);
+    }
+
+    // Fixtures: a render-grounded, token-matched, verified world_patch outcome
+    // that the E2/E3 pipeline classifies training_eligible (mirrors the
+    // lswr_outcome_admission projection test, replicated here via pub builders).
+    fn e4_ingest_verified_packet() -> Value {
+        let envelope = json!({
+            "schema": crate::lswr_present::WORLD_TOOL_SCHEMA,
+            "ok": true,
+            "verified": true,
+            "request": {
+                "world.patch": {
+                    "op": "move",
+                    "entity": "bath",
+                    "args": {"cell": [8, 0]},
+                    "expected_effect": {
+                        "target": "bath",
+                        "metric": "screen_area",
+                        "to_op": ">=",
+                        "to_value": 0.001
+                    }
+                }
+            },
+            "verify": {
+                "method": "live_viewport_pixel_coverage",
+                "verified_to": "onsen_live_root_viewport",
+                "evidence": {"screen_area": 0.003}
+            },
+            "host_response": {
+                "world.patch": {"applied": true, "entity": "bath", "op": "move"},
+                "expected_effect": {
+                    "verified": true,
+                    "metric": "screen_area",
+                    "actual": 0.003,
+                    "clauses": [{
+                        "metric": "screen_area",
+                        "actual": 0.003,
+                        "to_op": ">=",
+                        "to_value": 0.001,
+                        "verified": true
+                    }]
+                }
+            }
+        });
+        crate::lswr_present::world_envelope_to_present_packet(
+            "world_patch",
+            &envelope,
+            crate::lswr_present::PresentPacketOptions::new("2026-06-16T00:00:00Z")
+                .with_commit("e4test"),
+        )
+    }
+
+    fn e4_write_training_eligible_artifact(dir: &std::path::Path, id: &str) {
+        std::fs::create_dir_all(dir).expect("mkdir");
+        let packet = e4_ingest_verified_packet();
+        let html = crate::present::build_html(
+            crate::present::PresentKind::Html,
+            "<article>LSWR review</article>",
+            Some("LSWR review"),
+            Some(&packet),
+            Some(&json!({
+                "source_tool": "lswr_present",
+                "source_schema": packet.get("schema").cloned().unwrap_or(Value::Null),
+                "kind": "html",
+                "ts": crate::present::now_unix(),
+            })),
+        );
+        std::fs::write(dir.join(format!("{id}.html")), html).expect("write html");
+        let sidecar = json!({
+            "artifact_id": id,
+            "verify_status": "rendered_ok",
+            "verify_method": "browser_eval",
+            "embody_status": "not_applicable",
+            "interactive_status": "not_applicable",
+            "decision": "approved",
+            "token_match": true,
+        });
+        std::fs::write(
+            dir.join(format!("{id}.outcome.json")),
+            serde_json::to_string(&sidecar).expect("json"),
+        )
+        .expect("write sidecar");
+    }
+
+    fn e4_unique_presentations_dir(tag: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "ab-e4-ingest-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ))
+    }
+
+    #[tokio::test]
+    async fn lswr_outcome_admissions_ingest_dry_run_default_returns_plan_and_writes_nothing() {
+        let _env = PRESENTATIONS_DIR_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let (hub, store_dir) = mk_test_hub_with_store().await;
+        let dir = e4_unique_presentations_dir("dryrun");
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        std::env::set_var("AGENT_BRIDGE_PRESENTATIONS_DIR", &dir);
+
+        let tool = LswrOutcomeAdmissionsIngestTool::new(hub);
+        // No dry_run flag → defaults to true. Empty dir → zero candidates.
+        let out = tool
+            .execute(json!({"window_secs": 31_536_000}), &ToolContext::default())
+            .await
+            .expect("execute");
+        let res = result_text_as_json(&out);
+        assert!(!out.is_error);
+        assert_eq!(
+            res["schema"],
+            crate::lswr_outcome_admission::LSWR_OUTCOME_ADMISSION_INGEST_PLAN_SCHEMA
+        );
+        assert_eq!(res["writes_state"], serde_json::Value::Bool(false));
+        assert_eq!(res["candidate_count"], json!(0));
+        // plan_hash is present even for the empty plan (canonical hash over []).
+        assert!(res["plan_hash"].as_str().unwrap().starts_with("sha256:"));
+
+        std::env::remove_var("AGENT_BRIDGE_PRESENTATIONS_DIR");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&store_dir);
+    }
+
+    #[tokio::test]
+    async fn lswr_outcome_admissions_ingest_write_mode_fails_closed_before_store() {
+        let _env = PRESENTATIONS_DIR_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let (hub, store_dir) = mk_test_hub_with_store().await;
+        let dir = e4_unique_presentations_dir("failclosed");
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        std::env::set_var("AGENT_BRIDGE_PRESENTATIONS_DIR", &dir);
+
+        let tool = LswrOutcomeAdmissionsIngestTool::new(hub);
+        // dry_run:false but the request references a key/hash that cannot be in an
+        // empty plan → validation fails → nothing written, no resurrection.
+        let out = tool
+            .execute(
+                json!({
+                    "window_secs": 31_536_000,
+                    "dry_run": false,
+                    "apply_confirmation": crate::lswr_outcome_admission::LSWR_OUTCOME_ADMISSION_WRITE_CONFIRMATION,
+                    "approval_thread_id": 102,
+                    "approval_post_id": 999,
+                    "reviewed_plan_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                    "candidate_keys": ["outcome_does_not_exist"],
+                    "max_writes": 1
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let res = result_text_as_json(&out);
+        assert_eq!(res["writes_state"], serde_json::Value::Bool(false));
+        assert_eq!(res["valid"], serde_json::Value::Bool(false));
+        let failures = res["failure_reasons"].as_array().expect("failure_reasons");
+        assert!(!failures.is_empty(), "must report structured failures");
+
+        std::env::remove_var("AGENT_BRIDGE_PRESENTATIONS_DIR");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&store_dir);
+    }
+
+    #[tokio::test]
+    async fn lswr_outcome_admissions_ingest_persists_exactly_one_row_then_refuses_refresh() {
+        let _env = PRESENTATIONS_DIR_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let (hub, store_dir) = mk_test_hub_with_store().await;
+        let dir = e4_unique_presentations_dir("happy");
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        std::env::set_var("AGENT_BRIDGE_PRESENTATIONS_DIR", &dir);
+        let id = "e4inttest";
+        e4_write_training_eligible_artifact(&dir, id);
+        let expected_key = format!("outcome_{id}");
+
+        let tool = LswrOutcomeAdmissionsIngestTool::new(hub.clone());
+
+        // 1) Dry-run (default) returns the plan + a stable plan_hash + the key.
+        let plan_out = tool
+            .execute(json!({"window_secs": 31_536_000}), &ToolContext::default())
+            .await
+            .expect("execute dry-run");
+        let plan = result_text_as_json(&plan_out);
+        assert_eq!(plan["candidate_count"], json!(1));
+        let plan_hash = plan["plan_hash"].as_str().expect("plan_hash").to_string();
+        let candidate_keys = plan["candidate_keys"].as_array().expect("candidate_keys");
+        assert_eq!(candidate_keys.len(), 1);
+        assert_eq!(candidate_keys[0], json!(expected_key));
+
+        // Store has no such row yet.
+        let store = hub.store.clone().expect("store");
+        assert!(store
+            .memory_search(&expected_key, &[], 5)
+            .await
+            .unwrap_or_default()
+            .iter()
+            .all(|h| h.record.key != expected_key));
+
+        // 2) Real write with the full approval contract → exactly one row.
+        let write_out = tool
+            .execute(
+                json!({
+                    "window_secs": 31_536_000,
+                    "dry_run": false,
+                    "apply_confirmation": crate::lswr_outcome_admission::LSWR_OUTCOME_ADMISSION_WRITE_CONFIRMATION,
+                    "approval_thread_id": 102,
+                    "approval_post_id": 4242,
+                    "reviewed_plan_hash": plan_hash,
+                    "candidate_keys": [expected_key.clone()],
+                    "max_writes": 1
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute write");
+        let wrote = result_text_as_json(&write_out);
+        assert_eq!(wrote["valid"], serde_json::Value::Bool(true));
+        assert_eq!(wrote["writes_state"], serde_json::Value::Bool(true));
+        assert_eq!(wrote["written_count"], json!(1));
+        assert_eq!(wrote["written_keys"][0], json!(expected_key));
+        // Rollback packet present + correctly shaped (design §6).
+        assert_eq!(
+            wrote["rollback"]["schema"],
+            crate::lswr_outcome_admission::LSWR_OUTCOME_ADMISSION_INGEST_ROLLBACK_SCHEMA
+        );
+        assert_eq!(wrote["rollback"]["approval_post_id"], json!(4242));
+        assert_eq!(wrote["rollback"]["written_keys"][0], json!(expected_key));
+
+        // The durable row exists with the deterministic kind/scope.
+        let hits = store
+            .memory_search(&expected_key, &[], 5)
+            .await
+            .unwrap_or_default();
+        let row = hits
+            .iter()
+            .find(|h| h.record.key == expected_key)
+            .expect("persisted row");
+        assert_eq!(row.record.kind, crate::present_ingest::OUTCOME_MEMORY_KIND);
+        assert_eq!(row.record.scope.as_deref(), Some(format!("outcome:{id}").as_str()));
+
+        // 3) Repeat the identical write → first slice REFUSES the active-row refresh.
+        let again = tool
+            .execute(
+                json!({
+                    "window_secs": 31_536_000,
+                    "dry_run": false,
+                    "apply_confirmation": crate::lswr_outcome_admission::LSWR_OUTCOME_ADMISSION_WRITE_CONFIRMATION,
+                    "approval_thread_id": 102,
+                    "approval_post_id": 4242,
+                    "reviewed_plan_hash": plan_hash,
+                    "candidate_keys": [expected_key.clone()],
+                    "max_writes": 1
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute repeat");
+        let again = result_text_as_json(&again);
+        // After the row exists, the recomputed plan marks active_row_exists=true,
+        // so E4d validation rejects it (active_row_exists) before any write.
+        assert_eq!(again["writes_state"], serde_json::Value::Bool(false));
+        assert_eq!(again["written_count"], json!(0));
+
+        std::env::remove_var("AGENT_BRIDGE_PRESENTATIONS_DIR");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&store_dir);
     }
 
     #[test]

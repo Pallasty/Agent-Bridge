@@ -30,6 +30,13 @@ pub const LSWR_OUTCOME_ADMISSION_WRITE_CONFIRMATION: &str =
     "persist_lswr_training_eligible_outcomes";
 pub const LSWR_OUTCOME_ADMISSION_APPROVAL_THREAD_ID: u64 = 102;
 pub const LSWR_OUTCOME_ADMISSION_FIRST_WRITE_MAX_WRITES: u64 = 1;
+/// Result envelope schema for the E4d/E4e explicit writer
+/// (`lswr_outcome_admissions_ingest`). Distinct from the read-only preflight.
+pub const LSWR_OUTCOME_ADMISSION_WRITE_RESULT_SCHEMA: &str =
+    "agent_bridge.lswr.outcome_admission_write_result.v0";
+/// Rollback packet schema returned on every successful E4 write (design §6).
+pub const LSWR_OUTCOME_ADMISSION_INGEST_ROLLBACK_SCHEMA: &str =
+    "agent_bridge.lswr.outcome_admission_ingest_rollback.v0";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LswrAdmissionClass {
