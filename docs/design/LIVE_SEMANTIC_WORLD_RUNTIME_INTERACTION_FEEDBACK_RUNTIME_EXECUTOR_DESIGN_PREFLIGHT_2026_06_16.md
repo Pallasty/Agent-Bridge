@@ -167,3 +167,7 @@ The next safe slice is runtime executor authority-gate design. Runtime executor
 work should still split each authority gate into an independently reviewable
 design: live runtime lookup, operator submission, patch application,
 post-apply verification, and outcome ingestion.
+
+Follow-up authority-gate design:
+
+- [Interaction feedback runtime executor authority gates](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_AUTHORITY_GATES_2026_06_16.md)

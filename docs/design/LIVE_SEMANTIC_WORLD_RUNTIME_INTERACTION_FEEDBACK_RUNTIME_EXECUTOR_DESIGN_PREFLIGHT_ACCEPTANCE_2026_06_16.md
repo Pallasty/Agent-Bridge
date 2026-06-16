@@ -212,3 +212,7 @@ post-apply verification, and outcome ingestion independently reviewable.
 
 No future slice should treat this acceptance as permission to execute or mutate
 a live LSWR runtime.
+
+Follow-up authority-gate design:
+
+- [Interaction feedback runtime executor authority gates](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_AUTHORITY_GATES_2026_06_16.md)
