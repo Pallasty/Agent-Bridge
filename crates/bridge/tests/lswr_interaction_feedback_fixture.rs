@@ -5,6 +5,7 @@ use ab_bridge::lswr_interaction_feedback::{
     build_interaction_feedback_patch_apply_request,
     build_interaction_feedback_patch_execution_preflight, build_interaction_feedback_readback,
     build_interaction_feedback_runtime_executor_design_preflight,
+    build_interaction_feedback_runtime_executor_live_lookup_preflight,
     build_interaction_feedback_semantic_patch_draft,
     build_interaction_feedback_validation_envelope,
     render_interaction_feedback_consumption_preflight_report,
@@ -12,6 +13,7 @@ use ab_bridge::lswr_interaction_feedback::{
     render_interaction_feedback_patch_apply_request,
     render_interaction_feedback_patch_execution_preflight,
     render_interaction_feedback_runtime_executor_design_preflight,
+    render_interaction_feedback_runtime_executor_live_lookup_preflight,
     render_interaction_feedback_semantic_patch_draft,
     render_interaction_feedback_validation_envelope, validate_interaction_feedback_fixture,
     LSWR_INTERACTION_FEEDBACK_ARGUMENT_CONTEXT_SCHEMA,
@@ -23,9 +25,10 @@ use ab_bridge::lswr_interaction_feedback::{
     LSWR_INTERACTION_FEEDBACK_PATCH_EXECUTION_PREFLIGHT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_READBACK_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DESIGN_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_LIVE_LOOKUP_PREFLIGHT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_SEMANTIC_PATCH_DRAFT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_VALIDATION_ENVELOPE_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_VALIDATION_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_VALIDATION_SCHEMA, LSWR_RUNTIME_EXECUTOR_LIVE_LOOKUP_SNAPSHOT_SCHEMA,
 };
 use serde_json::{json, Value};
 
@@ -1176,6 +1179,219 @@ fn interaction_feedback_runtime_executor_design_preflight_blocks_tampered_apply_
 }
 
 #[test]
+fn interaction_feedback_runtime_executor_live_lookup_preflight_blocks_without_lookup_snapshot() {
+    let design_preflight = ready_runtime_executor_design_preflight();
+    let lookup_preflight =
+        build_interaction_feedback_runtime_executor_live_lookup_preflight(&design_preflight);
+    let markdown =
+        render_interaction_feedback_runtime_executor_live_lookup_preflight(&lookup_preflight);
+
+    assert_eq!(
+        lookup_preflight["schema"],
+        LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_LIVE_LOOKUP_PREFLIGHT_SCHEMA
+    );
+    assert_eq!(
+        lookup_preflight["input_kind"],
+        "runtime_executor_design_preflight"
+    );
+    assert_eq!(
+        lookup_preflight["source_design_preflight_verdict"],
+        "ready_for_runtime_executor_design"
+    );
+    assert_eq!(lookup_preflight["source_world_verdict"], "not_verified");
+    assert_eq!(lookup_preflight["lookup_preflight_verdict"], "blocked");
+    assert_eq!(lookup_preflight["status"], "blocked");
+    assert_eq!(
+        lookup_preflight["reason"],
+        "explicit_lookup_snapshot_required"
+    );
+    assert_eq!(
+        lookup_preflight["failure_reasons"],
+        json!(["explicit_lookup_snapshot_required"])
+    );
+    assert_eq!(
+        lookup_preflight["lookup_evidence"]["ready_for_operator_submission_review"],
+        false
+    );
+    assert_eq!(
+        lookup_preflight["lookup_evidence"]["ready_for_submission"],
+        false
+    );
+    assert_eq!(
+        lookup_preflight["lookup_evidence"]["ready_for_patch_application"],
+        false
+    );
+    assert_runtime_executor_live_lookup_preflight_read_only(&lookup_preflight);
+
+    assert!(markdown.contains("- lookup_preflight_verdict: `blocked`"));
+    assert!(markdown.contains("- ready_for_operator_submission_review: `false`"));
+}
+
+#[test]
+fn interaction_feedback_runtime_executor_live_lookup_preflight_accepts_explicit_snapshot() {
+    let design_preflight = ready_runtime_executor_design_preflight();
+    let lookup_preflight =
+        build_interaction_feedback_runtime_executor_live_lookup_preflight(&json!({
+            "design_preflight": design_preflight,
+            "lookup_snapshot": explicit_live_lookup_snapshot()
+        }));
+    let markdown =
+        render_interaction_feedback_runtime_executor_live_lookup_preflight(&lookup_preflight);
+
+    assert_eq!(
+        lookup_preflight["schema"],
+        LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_LIVE_LOOKUP_PREFLIGHT_SCHEMA
+    );
+    assert_eq!(
+        lookup_preflight["input_kind"],
+        "design_preflight_with_lookup_snapshot_wrapper"
+    );
+    assert_eq!(
+        lookup_preflight["lookup_snapshot_schema"],
+        LSWR_RUNTIME_EXECUTOR_LIVE_LOOKUP_SNAPSHOT_SCHEMA
+    );
+    assert_eq!(
+        lookup_preflight["lookup_preflight_verdict"],
+        "ready_for_operator_submission_review"
+    );
+    assert_eq!(lookup_preflight["status"], "ready");
+    assert_eq!(
+        lookup_preflight["reason"],
+        "live_lookup_preflight_ready_for_operator_submission_review"
+    );
+    assert_eq!(lookup_preflight["failure_reasons"], json!([]));
+    assert_eq!(
+        lookup_preflight["lookup_evidence"]["lookup_evidence_id"],
+        "live_lookup_arrival_bath_move_002"
+    );
+    assert_eq!(
+        lookup_preflight["lookup_evidence"]["source_design_request_id"],
+        "runtime_executor_design_arrival_bath_move_002"
+    );
+    assert_eq!(
+        lookup_preflight["lookup_evidence"]["source_apply_request_id"],
+        "apply_request_arrival_bath_move_002"
+    );
+    assert_eq!(
+        lookup_preflight["lookup_evidence"]["runtime_family"],
+        "lswr"
+    );
+    assert_eq!(
+        lookup_preflight["lookup_evidence"]["world_id"],
+        "onsen_live_session"
+    );
+    assert_eq!(lookup_preflight["lookup_evidence"]["branch_id"], "main");
+    assert_eq!(
+        lookup_preflight["lookup_evidence"]["runtime_generation"],
+        "runtime_gen_1284"
+    );
+    assert_eq!(
+        lookup_preflight["lookup_evidence"]["patch_id"],
+        "patch_arrival_bath_move_002"
+    );
+    assert_eq!(
+        lookup_preflight["lookup_evidence"]["target_entities"],
+        json!(["bath"])
+    );
+    assert_eq!(
+        lookup_preflight["lookup_evidence"]["ready_for_operator_submission_review"],
+        true
+    );
+    assert_eq!(
+        lookup_preflight["lookup_evidence"]["ready_for_submission"],
+        false
+    );
+    assert_eq!(
+        lookup_preflight["lookup_evidence"]["ready_for_patch_application"],
+        false
+    );
+    assert_eq!(
+        lookup_preflight["agent_action_contract"]["may_review_operator_submission_after_gate"],
+        true
+    );
+    assert_runtime_executor_live_lookup_preflight_read_only(&lookup_preflight);
+
+    assert!(markdown.contains("- lookup_preflight_verdict: `ready_for_operator_submission_review`"));
+    assert!(markdown.contains("- lookup_evidence_id: `live_lookup_arrival_bath_move_002`"));
+    assert!(markdown.contains("- ready_for_submission: `false`"));
+    assert!(markdown.contains("- ready_for_patch_application: `false`"));
+}
+
+#[test]
+fn interaction_feedback_runtime_executor_live_lookup_preflight_blocks_mismatched_snapshot() {
+    let design_preflight = ready_runtime_executor_design_preflight();
+    let mut snapshot = explicit_live_lookup_snapshot();
+    snapshot["branch_id"] = json!("experiment");
+    snapshot["target_entities_present"] = json!(false);
+    snapshot["entities_present"] = json!(["bench"]);
+    snapshot["mutation_performed"] = json!(true);
+
+    let lookup_preflight =
+        build_interaction_feedback_runtime_executor_live_lookup_preflight(&json!({
+            "design_preflight": design_preflight,
+            "lookup_snapshot": snapshot
+        }));
+
+    assert_eq!(lookup_preflight["lookup_preflight_verdict"], "blocked");
+    assert!(lookup_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("lookup_snapshot_must_not_mutate")));
+    assert!(lookup_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("branch_id_mismatch")));
+    assert!(lookup_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("target_entities_not_present")));
+    assert!(lookup_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("lookup_snapshot_missing_patch_entities")));
+    assert_eq!(
+        lookup_preflight["lookup_evidence"]["ready_for_operator_submission_review"],
+        false
+    );
+    assert_runtime_executor_live_lookup_preflight_read_only(&lookup_preflight);
+}
+
+#[test]
+fn interaction_feedback_runtime_executor_live_lookup_preflight_requires_design_preflight_input() {
+    let draft = build_interaction_feedback_semantic_patch_draft(&fixture());
+    let preflight = build_interaction_feedback_patch_execution_preflight(&json!({
+        "draft": draft,
+        "argument_context": explicit_argument_context()
+    }));
+    let apply_request = build_interaction_feedback_patch_apply_request(&preflight);
+    let lookup_preflight =
+        build_interaction_feedback_runtime_executor_live_lookup_preflight(&json!({
+            "design_preflight": apply_request,
+            "lookup_snapshot": explicit_live_lookup_snapshot()
+        }));
+
+    assert_eq!(
+        lookup_preflight["input_kind"],
+        "design_preflight_with_lookup_snapshot_wrapper"
+    );
+    assert_eq!(
+        lookup_preflight["source_schema"],
+        LSWR_INTERACTION_FEEDBACK_PATCH_APPLY_REQUEST_SCHEMA
+    );
+    assert_eq!(lookup_preflight["lookup_preflight_verdict"], "blocked");
+    assert_eq!(
+        lookup_preflight["reason"],
+        "runtime_executor_design_preflight_required"
+    );
+    assert!(lookup_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("runtime_executor_design_preflight_required")));
+    assert_eq!(lookup_preflight["source_design_preflight"], Value::Null);
+    assert_runtime_executor_live_lookup_preflight_read_only(&lookup_preflight);
+}
+
+#[test]
 fn interaction_feedback_validator_reports_tampered_fixture() {
     let mut fixture = fixture();
     fixture["events"][5]["refs"]["cause_event_id"] = json!("missing_event");
@@ -1253,6 +1469,50 @@ fn explicit_argument_context() -> Value {
                 "source": "explicit_test_context"
             }
         }]
+    })
+}
+
+fn ready_runtime_executor_design_preflight() -> Value {
+    let draft = build_interaction_feedback_semantic_patch_draft(&fixture());
+    let preflight = build_interaction_feedback_patch_execution_preflight(&json!({
+        "draft": draft,
+        "argument_context": explicit_argument_context()
+    }));
+    let apply_request = build_interaction_feedback_patch_apply_request(&preflight);
+    build_interaction_feedback_runtime_executor_design_preflight(&apply_request)
+}
+
+fn explicit_live_lookup_snapshot() -> Value {
+    json!({
+        "schema": LSWR_RUNTIME_EXECUTOR_LIVE_LOOKUP_SNAPSHOT_SCHEMA,
+        "runtime_family": "lswr",
+        "world_id": "onsen_live_session",
+        "branch_id": "main",
+        "runtime_generation": "runtime_gen_1284",
+        "tick": 1284,
+        "lookup_read_only": true,
+        "mutation_performed": false,
+        "submission_performed": false,
+        "application_performed": false,
+        "verification_performed": false,
+        "outcome_ingestion_allowed": false,
+        "target_entities_present": true,
+        "patch_target_still_valid": true,
+        "entities_present": ["bath"],
+        "entity_state": {
+            "bath": {
+                "entity_id": "bath",
+                "space": "arrival_area",
+                "cell": [4, 2],
+                "visible": true
+            }
+        },
+        "verification_ledger_cursor": "verify_patch_arrival_bath_move_001",
+        "presentation_state": {
+            "viewport": "onsen_live_root_viewport",
+            "render_fresh": true,
+            "selected_entities": ["bath"]
+        }
     })
 }
 
@@ -1395,6 +1655,78 @@ fn assert_runtime_executor_design_preflight_read_only(preflight: &Value) {
     );
     assert_eq!(
         preflight["agent_action_contract"]["do_not_write_memory"],
+        true
+    );
+}
+
+fn assert_runtime_executor_live_lookup_preflight_read_only(preflight: &Value) {
+    assert_eq!(preflight["writes_state"], false);
+    assert_eq!(preflight["store_access_required"], false);
+    assert_eq!(preflight["mcp_tool_registered"], false);
+    assert_eq!(preflight["implicit_live_runtime_lookup_attempted"], false);
+    assert_eq!(preflight["lookup_performed_by_this_tool"], false);
+    assert_eq!(preflight["guardrails"]["read_only"], true);
+    assert_eq!(preflight["guardrails"]["mutation_surface"], "none");
+    assert_eq!(preflight["guardrails"]["writes_state"], false);
+    assert_eq!(preflight["guardrails"]["store_access_required"], false);
+    assert_eq!(preflight["guardrails"]["mcp_tool_registered"], false);
+    assert_eq!(preflight["guardrails"]["queries_live_runtime"], false);
+    assert_eq!(
+        preflight["guardrails"]["requires_explicit_lookup_snapshot"],
+        true
+    );
+    assert_eq!(
+        preflight["guardrails"]["lookup_performed_by_this_tool"],
+        false
+    );
+    assert_eq!(
+        preflight["guardrails"]["implicit_live_runtime_lookup_allowed"],
+        false
+    );
+    assert_eq!(preflight["guardrails"]["submits_apply_request"], false);
+    assert_eq!(preflight["guardrails"]["applies_patch"], false);
+    assert_eq!(preflight["guardrails"]["verifies_post_apply_result"], false);
+    assert_eq!(preflight["guardrails"]["outcome_ingestion_allowed"], false);
+    assert_eq!(
+        preflight["guardrails"]["feedback_changes_world_verdict_allowed"],
+        false
+    );
+    assert_eq!(preflight["lookup_evidence"]["ready_for_submission"], false);
+    assert_eq!(
+        preflight["lookup_evidence"]["ready_for_patch_application"],
+        false
+    );
+    assert_eq!(preflight["lookup_evidence"]["mutation_performed"], false);
+    assert_eq!(
+        preflight["lookup_evidence"]["verification_performed"],
+        false
+    );
+    assert_eq!(
+        preflight["lookup_evidence"]["outcome_ingestion_allowed"],
+        false
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_submit_apply_request"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_apply_patch"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_ingest_outcome"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_write_memory"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_rewrite_world_verdict"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_verify_post_apply_result"],
         true
     );
 }
