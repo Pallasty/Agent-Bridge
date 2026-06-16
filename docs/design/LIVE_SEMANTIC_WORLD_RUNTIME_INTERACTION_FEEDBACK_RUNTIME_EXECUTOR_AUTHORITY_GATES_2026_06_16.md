@@ -1,6 +1,6 @@
 # Live Semantic World Runtime - Interaction Feedback Runtime Executor Authority Gates
 
-**2026-06-16 - status: design draft / no executor authority**
+**2026-06-16 - status: ACCEPTED_AUTHORITY_GATE_DESIGN_ONLY / no executor authority**
 
 Parent documents:
 
@@ -9,12 +9,16 @@ Parent documents:
 - [Interaction feedback patch apply request boundary acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_PATCH_APPLY_REQUEST_BOUNDARY_ACCEPTANCE_2026_06_16.md)
 - [Interaction feedback runtime executor design preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DESIGN_PREFLIGHT_2026_06_16.md)
 - [Interaction feedback runtime executor design preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DESIGN_PREFLIGHT_ACCEPTANCE_2026_06_16.md)
+- [Interaction feedback runtime executor authority gates acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_AUTHORITY_GATES_ACCEPTANCE_2026_06_16.md)
 
 Forum anchors:
 
 - `#102` post `#3163`: runtime executor design preflight accepted as
   design-preflight-only.
 - `#102` post `#3164`: authority-gate design claim.
+- `#102` post `#3167`: independent re-gate confirms the existing scaffolding is
+  inert and agrees with the authority-gate split.
+- `#102` post `#3169`: authority-gate design acceptance claim.
 
 ## 0. Purpose
 
