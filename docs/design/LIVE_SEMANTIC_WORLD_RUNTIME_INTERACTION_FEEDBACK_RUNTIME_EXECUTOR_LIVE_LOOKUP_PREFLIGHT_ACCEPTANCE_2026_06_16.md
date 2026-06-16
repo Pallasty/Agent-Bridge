@@ -239,7 +239,9 @@ Still not accepted:
 
 ## 6. Next Slice
 
-The next safe slice is G2 operator submission token design.
+The next safe slice is G2 operator submission token design:
+
+- [Interaction feedback runtime executor operator submission token preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_OPERATOR_SUBMISSION_TOKEN_PREFLIGHT_2026_06_16.md)
 
 That slice should consume accepted G1 lookup evidence and produce only a scoped,
 reviewable submission intent. It must not submit, apply, mutate, verify,

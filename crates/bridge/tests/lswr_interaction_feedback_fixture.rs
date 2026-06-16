@@ -7,6 +7,7 @@ use ab_bridge::lswr_interaction_feedback::{
     build_interaction_feedback_patch_execution_preflight, build_interaction_feedback_readback,
     build_interaction_feedback_runtime_executor_design_preflight,
     build_interaction_feedback_runtime_executor_live_lookup_preflight,
+    build_interaction_feedback_runtime_executor_operator_submission_token_preflight,
     build_interaction_feedback_semantic_patch_draft,
     build_interaction_feedback_validation_envelope,
     render_interaction_feedback_consumption_preflight_report,
@@ -16,6 +17,7 @@ use ab_bridge::lswr_interaction_feedback::{
     render_interaction_feedback_patch_execution_preflight,
     render_interaction_feedback_runtime_executor_design_preflight,
     render_interaction_feedback_runtime_executor_live_lookup_preflight,
+    render_interaction_feedback_runtime_executor_operator_submission_token_preflight,
     render_interaction_feedback_semantic_patch_draft,
     render_interaction_feedback_validation_envelope, validate_interaction_feedback_fixture,
     LSWR_INTERACTION_FEEDBACK_ARGUMENT_CONTEXT_SCHEMA,
@@ -29,9 +31,11 @@ use ab_bridge::lswr_interaction_feedback::{
     LSWR_INTERACTION_FEEDBACK_READBACK_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DESIGN_PREFLIGHT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_LIVE_LOOKUP_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_OPERATOR_SUBMISSION_TOKEN_PREFLIGHT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_SEMANTIC_PATCH_DRAFT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_VALIDATION_ENVELOPE_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_VALIDATION_SCHEMA, LSWR_RUNTIME_EXECUTOR_LIVE_LOOKUP_SNAPSHOT_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_OPERATOR_SUBMISSION_DECISION_SCHEMA,
 };
 use serde_json::{json, Value};
 
@@ -1622,6 +1626,228 @@ fn interaction_feedback_runtime_executor_live_lookup_preflight_requires_design_p
 }
 
 #[test]
+fn interaction_feedback_runtime_executor_operator_submission_token_preflight_blocks_without_operator_decision(
+) {
+    let lookup_preflight = ready_runtime_executor_live_lookup_preflight();
+    let submission_preflight =
+        build_interaction_feedback_runtime_executor_operator_submission_token_preflight(
+            &lookup_preflight,
+        );
+    let markdown = render_interaction_feedback_runtime_executor_operator_submission_token_preflight(
+        &submission_preflight,
+    );
+
+    assert_eq!(
+        submission_preflight["schema"],
+        LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_OPERATOR_SUBMISSION_TOKEN_PREFLIGHT_SCHEMA
+    );
+    assert_eq!(
+        submission_preflight["input_kind"],
+        "runtime_executor_live_lookup_preflight"
+    );
+    assert_eq!(
+        submission_preflight["source_lookup_preflight_verdict"],
+        "ready_for_operator_submission_review"
+    );
+    assert_eq!(submission_preflight["source_world_verdict"], "not_verified");
+    assert_eq!(
+        submission_preflight["operator_decision_schema"],
+        Value::Null
+    );
+    assert_eq!(
+        submission_preflight["submission_token_preflight_verdict"],
+        "blocked"
+    );
+    assert_eq!(submission_preflight["status"], "blocked");
+    assert_eq!(
+        submission_preflight["reason"],
+        "explicit_operator_submission_decision_required"
+    );
+    assert_eq!(
+        submission_preflight["failure_reasons"],
+        json!(["explicit_operator_submission_decision_required"])
+    );
+    assert_eq!(
+        submission_preflight["operator_submission_token"]["token_id"],
+        Value::Null
+    );
+    assert_eq!(
+        submission_preflight["operator_submission_token"]
+            ["ready_for_patch_application_gate_review"],
+        false
+    );
+    assert_runtime_executor_operator_submission_token_preflight_read_only(&submission_preflight);
+
+    assert!(markdown.contains("- submission_token_preflight_verdict: `blocked`"));
+    assert!(markdown.contains("- ready_for_patch_application_gate_review: `false`"));
+}
+
+#[test]
+fn interaction_feedback_runtime_executor_operator_submission_token_preflight_accepts_explicit_decision(
+) {
+    let lookup_preflight = ready_runtime_executor_live_lookup_preflight();
+    let submission_preflight =
+        build_interaction_feedback_runtime_executor_operator_submission_token_preflight(&json!({
+            "lookup_preflight": lookup_preflight,
+            "operator_decision": explicit_operator_submission_decision()
+        }));
+    let markdown = render_interaction_feedback_runtime_executor_operator_submission_token_preflight(
+        &submission_preflight,
+    );
+
+    assert_eq!(
+        submission_preflight["schema"],
+        LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_OPERATOR_SUBMISSION_TOKEN_PREFLIGHT_SCHEMA
+    );
+    assert_eq!(
+        submission_preflight["input_kind"],
+        "live_lookup_preflight_with_operator_decision_wrapper"
+    );
+    assert_eq!(
+        submission_preflight["operator_decision_schema"],
+        LSWR_RUNTIME_EXECUTOR_OPERATOR_SUBMISSION_DECISION_SCHEMA
+    );
+    assert_eq!(
+        submission_preflight["submission_token_preflight_verdict"],
+        "ready_for_patch_application_gate_review"
+    );
+    assert_eq!(submission_preflight["status"], "ready");
+    assert_eq!(
+        submission_preflight["reason"],
+        "operator_submission_token_preflight_ready_for_patch_application_gate_review"
+    );
+    assert_eq!(submission_preflight["failure_reasons"], json!([]));
+    assert_eq!(
+        submission_preflight["operator_submission_token"]["token_id"],
+        "submit_patch_arrival_bath_move_002"
+    );
+    assert_eq!(
+        submission_preflight["operator_submission_token"]["operator_decision_id"],
+        "operator_decision_arrival_bath_move_002"
+    );
+    assert_eq!(
+        submission_preflight["operator_submission_token"]["operator_id"],
+        "human:owner"
+    );
+    assert_eq!(
+        submission_preflight["operator_submission_token"]["lookup_evidence_id"],
+        "live_lookup_arrival_bath_move_002"
+    );
+    assert_eq!(
+        submission_preflight["operator_submission_token"]["runtime_generation"],
+        "runtime_gen_1284"
+    );
+    assert_eq!(
+        submission_preflight["operator_submission_token"]["patch_id"],
+        "patch_arrival_bath_move_002"
+    );
+    assert_eq!(
+        submission_preflight["operator_submission_token"]["idempotency_key"],
+        "patch_arrival_bath_move_002/runtime_gen_1284/operator_decision_arrival_bath_move_002"
+    );
+    assert_eq!(
+        submission_preflight["operator_submission_token"]["token_candidate_emitted_by_this_tool"],
+        true
+    );
+    assert_eq!(
+        submission_preflight["operator_submission_token"]["submission_token_persisted"],
+        false
+    );
+    assert_eq!(
+        submission_preflight["operator_submission_token"]
+            ["ready_for_patch_application_gate_review"],
+        true
+    );
+    assert_eq!(
+        submission_preflight["operator_submission_token"]["ready_for_executor_submission"],
+        false
+    );
+    assert_eq!(
+        submission_preflight["next_allowed_gate"],
+        "patch_application_gate_review"
+    );
+    assert_runtime_executor_operator_submission_token_preflight_read_only(&submission_preflight);
+
+    assert!(markdown.contains(
+        "- submission_token_preflight_verdict: `ready_for_patch_application_gate_review`"
+    ));
+    assert!(markdown.contains("- token_id: `submit_patch_arrival_bath_move_002`"));
+    assert!(markdown.contains("- ready_for_executor_submission: `false`"));
+}
+
+#[test]
+fn interaction_feedback_runtime_executor_operator_submission_token_preflight_blocks_bad_decision() {
+    let lookup_preflight = ready_runtime_executor_live_lookup_preflight();
+    let mut decision = explicit_operator_submission_decision();
+    decision["decision"] = json!("rejected");
+    decision["approved_scope"]["runtime_generation"] = json!("runtime_gen_stale");
+    decision["approved_scope"]["patch_id"] = json!("patch_other");
+    decision["patch_application_allowed"] = json!(true);
+    decision["writes_state"] = json!(true);
+
+    let submission_preflight =
+        build_interaction_feedback_runtime_executor_operator_submission_token_preflight(&json!({
+            "lookup_preflight": lookup_preflight,
+            "operator_decision": decision
+        }));
+
+    assert_eq!(
+        submission_preflight["submission_token_preflight_verdict"],
+        "blocked"
+    );
+    let failure_reasons = submission_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons");
+    assert!(failure_reasons.contains(&json!("operator_decision_must_be_approved")));
+    assert!(failure_reasons.contains(&json!(
+        "operator_decision_runtime_generation_scope_mismatch"
+    )));
+    assert!(failure_reasons.contains(&json!("operator_decision_patch_scope_mismatch")));
+    assert!(failure_reasons.contains(&json!("operator_decision_must_not_allow_patch_application")));
+    assert!(failure_reasons.contains(&json!("operator_decision_must_not_write_state")));
+    assert_eq!(
+        submission_preflight["operator_submission_token"]
+            ["ready_for_patch_application_gate_review"],
+        false
+    );
+    assert_runtime_executor_operator_submission_token_preflight_read_only(&submission_preflight);
+}
+
+#[test]
+fn interaction_feedback_runtime_executor_operator_submission_token_preflight_requires_lookup_input()
+{
+    let design_preflight = ready_runtime_executor_design_preflight();
+    let submission_preflight =
+        build_interaction_feedback_runtime_executor_operator_submission_token_preflight(&json!({
+            "lookup_preflight": design_preflight,
+            "operator_decision": explicit_operator_submission_decision()
+        }));
+
+    assert_eq!(
+        submission_preflight["input_kind"],
+        "live_lookup_preflight_with_operator_decision_wrapper"
+    );
+    assert_eq!(
+        submission_preflight["source_schema"],
+        LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DESIGN_PREFLIGHT_SCHEMA
+    );
+    assert_eq!(
+        submission_preflight["submission_token_preflight_verdict"],
+        "blocked"
+    );
+    assert_eq!(
+        submission_preflight["reason"],
+        "runtime_executor_live_lookup_preflight_required"
+    );
+    assert!(submission_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("runtime_executor_live_lookup_preflight_required")));
+    assert_eq!(submission_preflight["source_lookup_preflight"], Value::Null);
+    assert_runtime_executor_operator_submission_token_preflight_read_only(&submission_preflight);
+}
+
+#[test]
 fn interaction_feedback_validator_reports_tampered_fixture() {
     let mut fixture = fixture();
     fixture["events"][5]["refs"]["cause_event_id"] = json!("missing_event");
@@ -1743,6 +1969,39 @@ fn explicit_live_lookup_snapshot() -> Value {
             "render_fresh": true,
             "selected_entities": ["bath"]
         }
+    })
+}
+
+fn ready_runtime_executor_live_lookup_preflight() -> Value {
+    build_interaction_feedback_runtime_executor_live_lookup_preflight(&json!({
+        "design_preflight": ready_runtime_executor_design_preflight(),
+        "lookup_snapshot": explicit_live_lookup_snapshot()
+    }))
+}
+
+fn explicit_operator_submission_decision() -> Value {
+    json!({
+        "schema": LSWR_RUNTIME_EXECUTOR_OPERATOR_SUBMISSION_DECISION_SCHEMA,
+        "decision_id": "operator_decision_arrival_bath_move_002",
+        "decision": "approved",
+        "operator_id": "human:owner",
+        "approved_at": "2026-06-16T06:30:00Z",
+        "expires_at": "2026-06-16T23:59:59Z",
+        "requested_authority": "operator_submission_token_only",
+        "approved_scope": {
+            "lookup_evidence_id": "live_lookup_arrival_bath_move_002",
+            "world_id": "onsen_live_session",
+            "branch_id": "main",
+            "runtime_generation": "runtime_gen_1284",
+            "patch_id": "patch_arrival_bath_move_002",
+            "source_apply_request_id": "apply_request_arrival_bath_move_002"
+        },
+        "submission_performed": false,
+        "apply_request_submitted": false,
+        "patch_application_allowed": false,
+        "verification_allowed": false,
+        "outcome_ingestion_allowed": false,
+        "writes_state": false
     })
 }
 
@@ -2050,6 +2309,93 @@ fn assert_runtime_executor_live_lookup_preflight_read_only(preflight: &Value) {
     );
     assert_eq!(
         preflight["agent_action_contract"]["do_not_verify_post_apply_result"],
+        true
+    );
+}
+
+fn assert_runtime_executor_operator_submission_token_preflight_read_only(preflight: &Value) {
+    assert_eq!(preflight["writes_state"], false);
+    assert_eq!(preflight["store_access_required"], false);
+    assert_eq!(preflight["mcp_tool_registered"], false);
+    assert_eq!(preflight["submission_performed_by_this_tool"], false);
+    assert_eq!(preflight["apply_request_submitted_by_this_tool"], false);
+    assert_eq!(preflight["patch_application_performed_by_this_tool"], false);
+    assert_eq!(preflight["guardrails"]["read_only"], true);
+    assert_eq!(preflight["guardrails"]["mutation_surface"], "none");
+    assert_eq!(preflight["guardrails"]["writes_state"], false);
+    assert_eq!(preflight["guardrails"]["store_access_required"], false);
+    assert_eq!(preflight["guardrails"]["mcp_tool_registered"], false);
+    assert_eq!(
+        preflight["guardrails"]["requires_ready_live_lookup_preflight"],
+        true
+    );
+    assert_eq!(
+        preflight["guardrails"]["requires_explicit_operator_decision"],
+        true
+    );
+    assert_eq!(
+        preflight["guardrails"]["operator_authority_scope"],
+        "operator_submission_token_only"
+    );
+    assert_eq!(preflight["guardrails"]["submits_apply_request"], false);
+    assert_eq!(preflight["guardrails"]["applies_patch"], false);
+    assert_eq!(preflight["guardrails"]["verifies_post_apply_result"], false);
+    assert_eq!(preflight["guardrails"]["outcome_ingestion_allowed"], false);
+    assert_eq!(preflight["guardrails"]["persists_submission_token"], false);
+    assert_eq!(
+        preflight["guardrails"]["feedback_changes_world_verdict_allowed"],
+        false
+    );
+    assert_eq!(
+        preflight["operator_submission_token"]["submission_token_persisted"],
+        false
+    );
+    assert_eq!(
+        preflight["operator_submission_token"]["ready_for_executor_submission"],
+        false
+    );
+    assert_eq!(
+        preflight["operator_submission_token"]["apply_request_submitted"],
+        false
+    );
+    assert_eq!(
+        preflight["operator_submission_token"]["patch_application_performed"],
+        false
+    );
+    assert_eq!(
+        preflight["operator_submission_token"]["verification_performed"],
+        false
+    );
+    assert_eq!(
+        preflight["operator_submission_token"]["outcome_ingestion_allowed"],
+        false
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_submit_apply_request"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_apply_patch"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_ingest_outcome"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_write_memory"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_rewrite_world_verdict"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_verify_post_apply_result"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_persist_submission_token"],
         true
     );
 }
