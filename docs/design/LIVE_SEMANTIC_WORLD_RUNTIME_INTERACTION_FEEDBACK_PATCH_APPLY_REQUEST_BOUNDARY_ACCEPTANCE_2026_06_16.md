@@ -167,3 +167,9 @@ The next safe slice is a separate runtime executor design preflight. It should
 consume an accepted apply-request envelope but still block before any live LSWR
 lookup, request submission, patch application, or outcome ingestion until those
 authority boundaries are reviewed independently.
+
+Follow-up design preflight:
+
+- [Interaction feedback runtime executor design preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DESIGN_PREFLIGHT_2026_06_16.md)
+
+- [Interaction feedback runtime executor design preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DESIGN_PREFLIGHT_2026_06_16.md)

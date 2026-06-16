@@ -4,12 +4,14 @@ use ab_bridge::lswr_interaction_feedback::{
     build_interaction_feedback_packet_consumption_preflight,
     build_interaction_feedback_patch_apply_request,
     build_interaction_feedback_patch_execution_preflight, build_interaction_feedback_readback,
+    build_interaction_feedback_runtime_executor_design_preflight,
     build_interaction_feedback_semantic_patch_draft,
     build_interaction_feedback_validation_envelope,
     render_interaction_feedback_consumption_preflight_report,
     render_interaction_feedback_next_revision_plan,
     render_interaction_feedback_patch_apply_request,
     render_interaction_feedback_patch_execution_preflight,
+    render_interaction_feedback_runtime_executor_design_preflight,
     render_interaction_feedback_semantic_patch_draft,
     render_interaction_feedback_validation_envelope, validate_interaction_feedback_fixture,
     LSWR_INTERACTION_FEEDBACK_ARGUMENT_CONTEXT_SCHEMA,
@@ -20,6 +22,7 @@ use ab_bridge::lswr_interaction_feedback::{
     LSWR_INTERACTION_FEEDBACK_PATCH_APPLY_REQUEST_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_PATCH_EXECUTION_PREFLIGHT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_READBACK_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DESIGN_PREFLIGHT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_SEMANTIC_PATCH_DRAFT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_VALIDATION_ENVELOPE_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_VALIDATION_SCHEMA,
@@ -991,6 +994,188 @@ fn interaction_feedback_patch_apply_request_blocks_tampered_preflight_authority(
 }
 
 #[test]
+fn interaction_feedback_runtime_executor_design_preflight_blocks_without_ready_apply_request() {
+    let draft = build_interaction_feedback_semantic_patch_draft(&fixture());
+    let preflight = build_interaction_feedback_patch_execution_preflight(&draft);
+    let apply_request = build_interaction_feedback_patch_apply_request(&preflight);
+    let design_preflight =
+        build_interaction_feedback_runtime_executor_design_preflight(&apply_request);
+    let markdown = render_interaction_feedback_runtime_executor_design_preflight(&design_preflight);
+
+    assert_eq!(
+        design_preflight["schema"],
+        LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DESIGN_PREFLIGHT_SCHEMA
+    );
+    assert_eq!(design_preflight["input_kind"], "patch_apply_request");
+    assert_eq!(design_preflight["source_apply_request_verdict"], "blocked");
+    assert_eq!(design_preflight["source_world_verdict"], "not_verified");
+    assert_eq!(design_preflight["design_preflight_verdict"], "blocked");
+    assert_eq!(design_preflight["status"], "blocked");
+    assert_eq!(design_preflight["reason"], "source_apply_request_not_ready");
+    assert!(design_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("source_apply_request_not_ready")));
+    assert!(design_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("external_submission_readiness_missing")));
+    assert_eq!(
+        design_preflight["executor_design_request"]["ready_for_design_review"],
+        false
+    );
+    assert_eq!(
+        design_preflight["executor_design_request"]["ready_for_live_runtime_lookup"],
+        false
+    );
+    assert_eq!(
+        design_preflight["executor_design_request"]["ready_for_patch_application"],
+        false
+    );
+    assert_runtime_executor_design_preflight_read_only(&design_preflight);
+
+    assert!(markdown.contains("- design_preflight_verdict: `blocked`"));
+    assert!(markdown.contains("- ready_for_design_review: `false`"));
+}
+
+#[test]
+fn interaction_feedback_runtime_executor_design_preflight_accepts_ready_apply_request() {
+    let draft = build_interaction_feedback_semantic_patch_draft(&fixture());
+    let preflight = build_interaction_feedback_patch_execution_preflight(&json!({
+        "draft": draft,
+        "argument_context": explicit_argument_context()
+    }));
+    let apply_request = build_interaction_feedback_patch_apply_request(&preflight);
+    let design_preflight =
+        build_interaction_feedback_runtime_executor_design_preflight(&apply_request);
+    let markdown = render_interaction_feedback_runtime_executor_design_preflight(&design_preflight);
+
+    assert_eq!(
+        design_preflight["schema"],
+        LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DESIGN_PREFLIGHT_SCHEMA
+    );
+    assert_eq!(design_preflight["input_kind"], "patch_apply_request");
+    assert_eq!(
+        design_preflight["source_apply_request_verdict"],
+        "ready_for_external_executor"
+    );
+    assert_eq!(design_preflight["source_world_verdict"], "not_verified");
+    assert_eq!(
+        design_preflight["design_preflight_verdict"],
+        "ready_for_runtime_executor_design"
+    );
+    assert_eq!(design_preflight["status"], "ready");
+    assert_eq!(
+        design_preflight["reason"],
+        "runtime_executor_design_preflight_ready"
+    );
+    assert_eq!(design_preflight["failure_reasons"], json!([]));
+    assert_eq!(
+        design_preflight["executor_design_request"]["design_request_id"],
+        "runtime_executor_design_arrival_bath_move_002"
+    );
+    assert_eq!(
+        design_preflight["executor_design_request"]["source_apply_request_id"],
+        "apply_request_arrival_bath_move_002"
+    );
+    assert_eq!(
+        design_preflight["executor_design_request"]["target_runtime"]["executor"],
+        "separate_lswr_patch_executor"
+    );
+    assert_eq!(
+        design_preflight["executor_design_request"]["patch"]["args"]["cell"],
+        json!([5, 2])
+    );
+    assert_eq!(
+        design_preflight["executor_design_request"]["ready_for_design_review"],
+        true
+    );
+    assert_eq!(
+        design_preflight["executor_design_request"]["ready_for_live_runtime_lookup"],
+        false
+    );
+    assert_eq!(
+        design_preflight["executor_design_request"]["ready_for_submission"],
+        false
+    );
+    assert_eq!(
+        design_preflight["executor_design_request"]["ready_for_patch_application"],
+        false
+    );
+    assert_eq!(
+        design_preflight["agent_action_contract"]["may_design_runtime_executor_after_review"],
+        true
+    );
+    assert_runtime_executor_design_preflight_read_only(&design_preflight);
+
+    assert!(markdown.contains("- design_preflight_verdict: `ready_for_runtime_executor_design`"));
+    assert!(
+        markdown.contains("- design_request_id: `runtime_executor_design_arrival_bath_move_002`")
+    );
+    assert!(markdown.contains("- ready_for_live_runtime_lookup: `false`"));
+}
+
+#[test]
+fn interaction_feedback_runtime_executor_design_preflight_requires_apply_request_input() {
+    let draft = build_interaction_feedback_semantic_patch_draft(&fixture());
+    let preflight = build_interaction_feedback_patch_execution_preflight(&json!({
+        "draft": draft,
+        "argument_context": explicit_argument_context()
+    }));
+    let design_preflight = build_interaction_feedback_runtime_executor_design_preflight(&preflight);
+
+    assert_eq!(design_preflight["input_kind"], "invalid_input");
+    assert_eq!(
+        design_preflight["source_schema"],
+        LSWR_INTERACTION_FEEDBACK_PATCH_EXECUTION_PREFLIGHT_SCHEMA
+    );
+    assert_eq!(design_preflight["design_preflight_verdict"], "blocked");
+    assert_eq!(design_preflight["status"], "blocked");
+    assert_eq!(design_preflight["reason"], "patch_apply_request_required");
+    assert_eq!(
+        design_preflight["failure_reasons"],
+        json!(["patch_apply_request_required"])
+    );
+    assert_eq!(design_preflight["source_apply_request"], Value::Null);
+    assert_runtime_executor_design_preflight_read_only(&design_preflight);
+}
+
+#[test]
+fn interaction_feedback_runtime_executor_design_preflight_blocks_tampered_apply_request() {
+    let draft = build_interaction_feedback_semantic_patch_draft(&fixture());
+    let preflight = build_interaction_feedback_patch_execution_preflight(&json!({
+        "draft": draft,
+        "argument_context": explicit_argument_context()
+    }));
+    let mut apply_request = build_interaction_feedback_patch_apply_request(&preflight);
+    apply_request["apply_request"]["apply_performed"] = json!(true);
+    apply_request["apply_request"]["submitted_by_this_tool"] = json!(true);
+    apply_request["guardrails"]["submits_apply_request"] = json!(true);
+
+    let design_preflight =
+        build_interaction_feedback_runtime_executor_design_preflight(&apply_request);
+
+    assert_eq!(design_preflight["design_preflight_verdict"], "blocked");
+    assert!(design_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("source_apply_request_must_not_apply_patch")));
+    assert!(design_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("source_apply_request_must_not_be_submitted")));
+    assert!(design_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("source_apply_request_guardrails_not_read_only")));
+    assert_eq!(
+        design_preflight["executor_design_request"]["ready_for_design_review"],
+        false
+    );
+    assert_runtime_executor_design_preflight_read_only(&design_preflight);
+}
+
+#[test]
 fn interaction_feedback_validator_reports_tampered_fixture() {
     let mut fixture = fixture();
     fixture["events"][5]["refs"]["cause_event_id"] = json!("missing_event");
@@ -1146,6 +1331,70 @@ fn assert_apply_request_read_only(request: &Value) {
     );
     assert_eq!(
         request["agent_action_contract"]["do_not_query_live_runtime"],
+        true
+    );
+}
+
+fn assert_runtime_executor_design_preflight_read_only(preflight: &Value) {
+    assert_eq!(preflight["writes_state"], false);
+    assert_eq!(preflight["store_access_required"], false);
+    assert_eq!(preflight["mcp_tool_registered"], false);
+    assert_eq!(preflight["implicit_live_runtime_lookup_attempted"], false);
+    assert_eq!(preflight["guardrails"]["read_only"], true);
+    assert_eq!(preflight["guardrails"]["mutation_surface"], "none");
+    assert_eq!(preflight["guardrails"]["writes_state"], false);
+    assert_eq!(preflight["guardrails"]["store_access_required"], false);
+    assert_eq!(preflight["guardrails"]["mcp_tool_registered"], false);
+    assert_eq!(preflight["guardrails"]["queries_live_runtime"], false);
+    assert_eq!(
+        preflight["guardrails"]["implicit_live_runtime_lookup_allowed"],
+        false
+    );
+    assert_eq!(preflight["guardrails"]["submits_apply_request"], false);
+    assert_eq!(preflight["guardrails"]["applies_patch"], false);
+    assert_eq!(preflight["guardrails"]["outcome_ingestion_allowed"], false);
+    assert_eq!(
+        preflight["guardrails"]["feedback_changes_world_verdict_allowed"],
+        false
+    );
+    assert_eq!(
+        preflight["executor_design_request"]["ready_for_live_runtime_lookup"],
+        false
+    );
+    assert_eq!(
+        preflight["executor_design_request"]["ready_for_submission"],
+        false
+    );
+    assert_eq!(
+        preflight["executor_design_request"]["ready_for_patch_application"],
+        false
+    );
+    assert_eq!(
+        preflight["executor_design_request"]["execution_performed"],
+        false
+    );
+    assert_eq!(
+        preflight["executor_design_request"]["outcome_ingestion_allowed_by_this_tool"],
+        false
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_query_live_runtime"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_submit_apply_request"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_apply_patch"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_ingest_outcome"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_write_memory"],
         true
     );
 }
