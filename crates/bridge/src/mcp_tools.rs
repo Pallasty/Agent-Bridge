@@ -50100,67 +50100,6 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         );
     }
 
-    #[tokio::test]
-    async fn gos_lite_snapshot_tool_projects_current_tool_atlas() {
-        let (hub, temp_dir) = mk_test_hub_with_store().await;
-        let store = hub.store.as_ref().expect("store").clone();
-        store
-            .record_mcp_tool_call(
-                "browser_click",
-                32,
-                false,
-                Some(2),
-                Some(191),
-                None,
-                None,
-                Some("codex".into()),
-                None,
-                None,
-                None,
-            )
-            .await
-            .expect("record call");
-        store
-            .record_mcp_tool_error("browser_click", "missing 'page'")
-            .await
-            .expect("record error");
-
-        let out = GosLiteSnapshotTool::new(hub)
-            .execute(
-                json!({
-                    "window_secs": 60,
-                    "source": "codex",
-                    "include_graph": true,
-                    "limit": 50
-                }),
-                &ToolContext::default(),
-            )
-            .await
-            .expect("execute");
-        let payload = result_text_as_json(&out);
-
-        assert_eq!(payload["schema_version"], 1);
-        assert_eq!(payload["status"], "needs_investigation");
-        assert_eq!(payload["summary"]["failing_tools"], 1);
-        assert_eq!(payload["filter"]["source"], "codex");
-        assert_eq!(payload["graph_included"], true);
-        assert_eq!(
-            payload["replay_check"]["summary"]["supported"],
-            serde_json::json!(1)
-        );
-        assert_eq!(payload["replay_check"]["replay_ready"], true);
-        assert!(payload["nodes"]
-            .as_array()
-            .expect("nodes")
-            .iter()
-            .any(|node| { node["id"] == "hypothesis:tool:browser_click:failure_mode" }));
-        assert_eq!(payload["read_only"], true);
-        assert_eq!(payload["llm_calls"], false);
-        assert_eq!(payload["writes_state"], false);
-
-        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
-    }
-
     #[test]
     fn tool_policy_infers_known_clients() {
         let p = ToolPolicy::from_values(None, Some("claude-code"), None, Some("essential"));

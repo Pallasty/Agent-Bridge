@@ -433,10 +433,13 @@ fn has_large_result_risk_flag(hypothesis: &GosLiteNode) -> bool {
 }
 
 fn gos_lite_human_gate_packet(snapshot: &GosLiteSnapshot) -> Value {
-    let required = snapshot.summary.hypotheses > 0;
+    // The gate is always advertised as required so callers never auto-promote
+    // GoS-lite hypotheses into decisions; the reason still reflects whether the
+    // current telemetry window actually produced any hypotheses to review.
+    let has_hypotheses = snapshot.summary.hypotheses > 0;
     json!({
-        "required": required,
-        "reason": if required {
+        "required": true,
+        "reason": if has_hypotheses {
             "GoS-lite hypotheses are diagnostic candidates, not durable decisions."
         } else {
             "No hypotheses were generated for the selected telemetry window."
