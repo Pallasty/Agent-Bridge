@@ -8,6 +8,7 @@ Parent documents:
 - [Interaction feedback patch execution preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_PATCH_EXECUTION_PREFLIGHT_2026_06_15.md)
 - [Interaction feedback patch apply request boundary](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_PATCH_APPLY_REQUEST_BOUNDARY_2026_06_15.md)
 - [Interaction feedback patch apply request boundary acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_PATCH_APPLY_REQUEST_BOUNDARY_ACCEPTANCE_2026_06_16.md)
+- [Interaction feedback runtime executor design preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DESIGN_PREFLIGHT_ACCEPTANCE_2026_06_16.md)
 
 ## 0. Purpose
 
@@ -103,6 +104,11 @@ The action contract additionally requires:
 
 ## 4. Implementation Artifacts
 
+Acceptance status:
+
+- `ACCEPTED_RUNTIME_EXECUTOR_DESIGN_PREFLIGHT_ONLY`
+- Accepted by [runtime executor design preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DESIGN_PREFLIGHT_ACCEPTANCE_2026_06_16.md).
+
 Code:
 
 - `crates/bridge/src/lswr_interaction_feedback.rs`
@@ -154,7 +160,10 @@ This slice does not approve:
 
 ## 7. Next Slice
 
-The next safe slice is an acceptance review for this design-only preflight.
-After acceptance, runtime executor work should still split each authority gate
-into an independently reviewable design: live runtime lookup, operator
-submission, patch application, post-apply verification, and outcome ingestion.
+Acceptance is recorded in
+[runtime executor design preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DESIGN_PREFLIGHT_ACCEPTANCE_2026_06_16.md).
+
+The next safe slice is runtime executor authority-gate design. Runtime executor
+work should still split each authority gate into an independently reviewable
+design: live runtime lookup, operator submission, patch application,
+post-apply verification, and outcome ingestion.

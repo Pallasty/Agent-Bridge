@@ -171,5 +171,3 @@ authority boundaries are reviewed independently.
 Follow-up design preflight:
 
 - [Interaction feedback runtime executor design preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DESIGN_PREFLIGHT_2026_06_16.md)
-
-- [Interaction feedback runtime executor design preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DESIGN_PREFLIGHT_2026_06_16.md)
