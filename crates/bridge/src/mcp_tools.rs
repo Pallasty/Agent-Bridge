@@ -18264,7 +18264,7 @@ impl McpTool for MemoryListTool {
                 "properties": {
                     "kind":  { "type": "string", "description": "Optional kind filter." },
                     "sort":  { "type": "string", "enum": ["recent","frequent","newest"], "default": "recent" },
-                    "limit": { "type": "integer", "minimum": 1, "maximum": 200, "default": 20 },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 200, "default": 8 },
                     "content_max_chars": {
                         "type": "integer", "minimum": 0, "default": 280,
                         "description": "Per-row content truncation (chars, not bytes — CJK safe). 0 disables."
@@ -18294,7 +18294,7 @@ impl McpTool for MemoryListTool {
         let limit = args
             .get("limit")
             .and_then(|v| v.as_u64())
-            .unwrap_or(20)
+            .unwrap_or(8)
             .min(200) as u32;
         let max_chars = args
             .get("content_max_chars")
@@ -43408,6 +43408,49 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             .await
             .expect("clear ok");
         assert_eq!(result_json(&cleared)["deleted"], true);
+    }
+
+    #[tokio::test]
+    async fn memory_list_implicit_default_caps_overview_rows() {
+        let (hub, _temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.as_ref().expect("store");
+        for i in 0..12 {
+            store
+                .memory_save(&MemoryRecord {
+                    key: format!("memory_list_default_{i}"),
+                    kind: "fact".to_string(),
+                    content: format!("overview row {i} {}", "x".repeat(200)),
+                    tags: vec!["payload".to_string(), "overview".to_string()],
+                    related_keys: vec![format!("related_{i}")],
+                    scope: Some("project:/tmp/memory-list-default".to_string()),
+                    created_at: 1_780_000_000 + i,
+                    updated_at: 1_780_000_000 + i,
+                    last_accessed_at: 1_780_000_000 + i,
+                    access_count: 0,
+                    importance: 0.5,
+                    status: "active".to_string(),
+                    trigger_pattern: None,
+                    superseded_by: None,
+                })
+                .await
+                .expect("save memory");
+        }
+
+        let tool = MemoryListTool::new(hub);
+        let ctx = ToolContext::default();
+        let implicit = tool
+            .execute(json!({"kind": "fact", "sort": "newest"}), &ctx)
+            .await
+            .expect("implicit list");
+        let implicit = result_json(&implicit);
+        assert_eq!(implicit.as_array().expect("implicit rows").len(), 8);
+
+        let explicit = tool
+            .execute(json!({"kind": "fact", "sort": "newest", "limit": 12}), &ctx)
+            .await
+            .expect("explicit list");
+        let explicit = result_json(&explicit);
+        assert_eq!(explicit.as_array().expect("explicit rows").len(), 12);
     }
 
     #[tokio::test]
