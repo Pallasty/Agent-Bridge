@@ -20481,6 +20481,10 @@ const BUDGET_SIBLING_WARN: usize = 200;
 // B1 audit-gap v0 (2026-05-19) — project-state digest. 7 rows max
 // (3 decisions + 1 handoff + 3 projects) × ~120 char snippets ≈ 200 tokens.
 const BUDGET_PROJECT_DIGEST: usize = 220;
+// SSB §3.6 (2026-06-15) — recent verify-first NotVerified events surfaced at
+// cold start. Top 5 inert/failed actions × ~80 char ≈ 160 tokens; hidden when
+// none, so the budget only bites on a session that actually had a no-op.
+const BUDGET_INERT_ACTIONS: usize = 200;
 
 /// Trim a block of lines so the total estimated token count ≤ `budget`.
 ///
@@ -20966,6 +20970,24 @@ impl McpTool for SessionBootstrapTool {
                     String::new(),
                 ];
                 lines.extend(cap_block_lines(block_lines, BUDGET_DECISIONS_DUE));
+            }
+        }
+
+        // SSB §3.6 — surface recent verify-first NotVerified events at cold
+        // start. An action that was inert / failed / refused last session (the
+        // anti-laundering signal the producers emit) is shown here instead of
+        // staying buried in the semantic_events log — closing the loop from
+        // bus event → presentation/handoff surface. Hidden when none (clean
+        // session). Best-effort; a read failure never blocks bootstrap.
+        {
+            let now_ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            if let Ok(evs) = store.recent_semantic_events(7 * 86400, 100).await {
+                if let Some(block) = format_inert_actions_block(&evs, now_ts, 5) {
+                    lines.extend(cap_block_lines(block, BUDGET_INERT_ACTIONS));
+                }
             }
         }
 
@@ -42614,6 +42636,63 @@ fn parse_review_interval_days(tags: &[String]) -> Option<i64> {
     None
 }
 
+/// Format a "Recent Inert/Failed Actions" block from recent semantic-bus
+/// events — the verify-first NotVerified signal surfaced at cold start so an
+/// action that did NOT take effect last session (the anti-laundering signal the
+/// SSB producers emit) is visible instead of buried in the `semantic_events`
+/// log. Closes the SSB §3.6 loop (bus event → presentation/handoff surface).
+///
+/// `events` are expected newest-first (as `recent_semantic_events` returns).
+/// Returns `None` when no NotVerified events exist, so the block is hidden on a
+/// clean session (mirrors the due-review block). Pure + total so it is unit-
+/// testable without a store.
+fn format_inert_actions_block(
+    events: &[ab_store::SemanticEventRecord],
+    now_ts: i64,
+    max_items: usize,
+) -> Option<Vec<String>> {
+    let inert: Vec<&ab_store::SemanticEventRecord> = events
+        .iter()
+        .filter(|e| e.verdict_status == "not_verified")
+        .collect();
+    if inert.is_empty() {
+        return None;
+    }
+    let n = inert.len();
+    let mut out = vec![
+        format!("=== ⚠ Recent Inert/Failed Actions ({n}) — verify-first NotVerified ==="),
+        String::new(),
+    ];
+    for e in inert.iter().take(max_items.max(1)) {
+        let age = (now_ts - e.ts).max(0);
+        let age_str = if age < 3600 {
+            format!("{}m", age / 60)
+        } else if age < 86400 {
+            format!("{}h", age / 3600)
+        } else {
+            format!("{}d", age / 86400)
+        };
+        let tgt = e
+            .target
+            .as_deref()
+            .filter(|t| !t.is_empty())
+            .map(|t| format!(" {t}"))
+            .unwrap_or_default();
+        out.push(format!(
+            "  • {}/{}{tgt} — {} ({age_str} ago)",
+            e.source, e.action, e.verdict_method
+        ));
+    }
+    if n > max_items.max(1) {
+        out.push(format!(
+            "  … {} more (event_spine_snapshot for full)",
+            n - max_items.max(1)
+        ));
+    }
+    out.push(String::new());
+    Some(out)
+}
+
 /// Format a "Decisions Due for Review" block from a pool of decision records.
 /// Returns `None` if no record is due (no block will be injected).
 /// Sort order: most overdue first (largest `now - updated_at - interval`).
@@ -45681,6 +45760,84 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             mk_decision("d2", 0.9, &["review:30d"], now - 10 * 86400), // tagged but not due
         ];
         assert!(format_due_review_block(&rows, now).is_none());
+    }
+
+    fn mk_sev(
+        source: &str,
+        action: &str,
+        verdict: &str,
+        method: &str,
+        target: Option<&str>,
+        ts: i64,
+    ) -> ab_store::SemanticEventRecord {
+        ab_store::SemanticEventRecord {
+            ts,
+            actor: "mcp".into(),
+            source: source.into(),
+            action: action.into(),
+            target: target.map(|s| s.into()),
+            verdict_status: verdict.into(),
+            verdict_method: method.into(),
+            evidence: None,
+            facts: "{}".into(),
+            descriptor: None,
+        }
+    }
+
+    #[test]
+    fn inert_actions_block_hidden_when_no_not_verified() {
+        let now = 1_780_000_000_i64;
+        // Only verified + unknown → clean session, block hidden.
+        let evs = vec![
+            mk_sev("browser", "click", "verified", "ref_ok", Some("@e5"), now - 60),
+            mk_sev("session", "curate", "unknown", "lifecycle_no_effect", None, now - 120),
+        ];
+        assert!(format_inert_actions_block(&evs, now, 5).is_none());
+        assert!(format_inert_actions_block(&[], now, 5).is_none());
+    }
+
+    #[test]
+    fn inert_actions_block_surfaces_not_verified_only() {
+        let now = 1_780_000_000_i64;
+        let evs = vec![
+            mk_sev("desktop", "action", "not_verified", "preflight_refusal", None, now - 300),
+            mk_sev("browser", "click", "verified", "ref_ok", Some("@e1"), now - 600),
+            mk_sev("mobile", "tap", "not_verified", "no_device", Some("@n3"), now - 90000),
+        ];
+        let block = format_inert_actions_block(&evs, now, 5).expect("has inert events");
+        let text = block.join("\n");
+        // Count in header reflects the 2 not_verified events (verified excluded).
+        assert!(text.contains("Recent Inert/Failed Actions (2)"), "{text}");
+        assert!(text.contains("desktop/action"), "{text}");
+        assert!(text.contains("preflight_refusal"), "{text}");
+        assert!(text.contains("mobile/tap @n3"), "{text}");
+        // The verified row must NOT leak into the inert surface (anti-laundering
+        // in reverse: we only surface the honestly-failed ones).
+        assert!(!text.contains("ref_ok"), "verified row leaked: {text}");
+    }
+
+    #[test]
+    fn inert_actions_block_caps_and_counts_overflow() {
+        let now = 1_780_000_000_i64;
+        let evs: Vec<_> = (0..7)
+            .map(|i| {
+                mk_sev(
+                    "desktop",
+                    "action",
+                    "not_verified",
+                    "injection_failed",
+                    None,
+                    now - (i as i64) * 60,
+                )
+            })
+            .collect();
+        let block = format_inert_actions_block(&evs, now, 3).expect("has inert events");
+        let text = block.join("\n");
+        assert!(text.contains("Recent Inert/Failed Actions (7)"), "{text}");
+        // 3 shown + an overflow line for the remaining 4.
+        assert!(text.contains("… 4 more"), "{text}");
+        let bullets = text.matches("  • ").count();
+        assert_eq!(bullets, 3, "should cap to max_items: {text}");
     }
 
     #[test]
