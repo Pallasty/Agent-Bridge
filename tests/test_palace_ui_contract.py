@@ -249,6 +249,15 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("evidenceRows.map", html)
         self.assertIn("renderNodeDossier(m, graphNode, region)", html)
 
+    def test_node_detail_lens_distinguishes_store_linked_from_visible_orphan(self):
+        html = palace_html()
+
+        self.assertIn("function nodeGraphRoleLabel(graphData, relationSummary)", html)
+        self.assertIn("relationSummary.storeSummary.total", html)
+        self.assertIn('return "store-linked";', html)
+        self.assertIn("visible graph neighbors", html)
+        self.assertIn("${visibleRows.length} visible / ${storeTotal} store", html)
+
     def test_node_detail_lens_surfaces_signal_lane(self):
         html = palace_html()
 
@@ -269,6 +278,8 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn('id="workbench-node-edge-repair"', html)
         self.assertIn("node-edge-repair", html)
         self.assertIn("graphData.orphan", html)
+        self.assertIn("no visible graph edge", html)
+        self.assertIn("Store edges outside the current view stay read-only", html)
         self.assertIn("renderRegionOrphanCandidateShell(region)", html)
         self.assertIn("loadRegionOrphanCandidates(region.id);", html)
         self.assertIn("function bindNodeEdgeRepairActions(panel, regionId)", html)

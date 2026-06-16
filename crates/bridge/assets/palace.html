@@ -1158,6 +1158,7 @@
     #panel .node-dossier-fact.fresh .value { color: #5cc8c8; }
     #panel .node-dossier-fact.stale .value { color: #c8a96a; }
     #panel .node-dossier-fact.orphan .value { color: #8a8a9c; }
+    #panel .node-dossier-fact.store-linked .value { color: #5cc8c8; }
     #panel .workbench-section {
       margin-top: 15px;
       padding-top: 13px;
@@ -5259,10 +5260,26 @@ function nodeRoleLabel(graphData) {
   return "normal";
 }
 
-function nodeEvidenceRows(memory, graphData, region, relationSummary) {
+function nodeGraphRoleLabel(graphData, relationSummary) {
   const role = nodeRoleLabel(graphData);
+  const storeTotal = relationSummary && relationSummary.storeSummary
+    ? relationSummary.storeSummary.total
+    : 0;
+  if ((role === "orphan" || role === "unmapped") && storeTotal > 0) {
+    return "store-linked";
+  }
+  return role;
+}
+
+function nodeEvidenceRows(memory, graphData, region, relationSummary) {
+  const role = nodeGraphRoleLabel(graphData, relationSummary);
   const sourceLabel = memory.source === "markdown" ? "markdown" : "sqlite";
   const degree = graphData.degree || 0;
+  const visibleRows = relationSummary.rows || [];
+  const storeTotal = relationSummary.storeSummary.total || 0;
+  const relationValue = storeTotal > visibleRows.length
+    ? `${visibleRows.length} visible / ${storeTotal} store`
+    : `${visibleRows.length}`;
   const age = graphData.ageSecs === 0
     ? "fresh"
     : graphData.ageSecs && graphData.ageSecs < Number.MAX_SAFE_INTEGER
@@ -5272,8 +5289,8 @@ function nodeEvidenceRows(memory, graphData, region, relationSummary) {
     { label: "role", value: role, tone: role },
     { label: "region", value: region ? region.label : "unmapped", tone: "region" },
     { label: "kind", value: memory.kind || graphData.kind || "unknown", tone: "kind" },
-    { label: "degree", value: `${degree}`, tone: degree > 0 ? "graph" : "orphan" },
-    { label: "relations", value: `${relationSummary.rows.length}`, tone: relationSummary.rows.length ? "graph" : "orphan" },
+    { label: "degree", value: storeTotal > degree ? `${degree} visible` : `${degree}`, tone: degree > 0 ? "graph" : role },
+    { label: "relations", value: relationValue, tone: storeTotal > visibleRows.length ? "store-linked" : visibleRows.length ? "graph" : "orphan" },
     { label: "last touch", value: age, tone: role },
     { label: "access", value: `${memory.access_count || graphData.access || 0}`, tone: "access" },
     { label: "importance", value: `${(memory.importance || graphData.importance || 0).toFixed(2)}`, tone: "importance" },
@@ -5284,10 +5301,13 @@ function nodeEvidenceRows(memory, graphData, region, relationSummary) {
 function renderNodeDossier(memory, graphNode, region) {
   const graphData = graphNode && graphNode.length > 0 ? graphNode.data() : {};
   const relationSummary = summarizeWorkbenchRelations(memory, graphNode);
-  const role = nodeRoleLabel(graphData);
+  const role = nodeGraphRoleLabel(graphData, relationSummary);
   const evidenceRows = nodeEvidenceRows(memory, graphData, region, relationSummary);
+  const storeTotal = relationSummary.storeSummary.total || 0;
   const signal = relationSummary.strongest
     ? `${relationSummary.rows.length} linked · strongest ${relationSummary.strongest.weight > 0 ? relationSummary.strongest.weight.toFixed(2) : "link"}`
+    : storeTotal > relationSummary.rows.length
+      ? `${relationSummary.rows.length} visible · ${storeTotal} store`
     : `${relationSummary.rows.length} linked`;
   const title = memory.label || memory.key;
   const meta = `${memory.kind || graphData.kind || "memory"} · ${region ? region.label : "unmapped"} · ${role}`;
@@ -5311,11 +5331,19 @@ function renderNodeDossier(memory, graphNode, region) {
 function renderNodeSignalLane(memory, graphNode, region) {
   const graphData = graphNode && graphNode.length > 0 ? graphNode.data() : {};
   const summary = summarizeWorkbenchRelations(memory, graphNode);
-  const role = nodeRoleLabel(graphData);
+  const role = nodeGraphRoleLabel(graphData, summary);
   const degree = graphData.degree || 0;
+  const storeTotal = summary.storeSummary.total || 0;
   const kind = memory.kind || graphData.kind || "memory";
   const regionLabel = region ? region.label : "unmapped";
   const source = memory.source === "markdown" ? "markdown" : "sqlite";
+  const visibleGraphLabel = summary.rows.length === 1
+    ? "visible graph neighbor"
+    : "visible graph neighbors";
+  const storeEdgeLabel = `${storeTotal} store edge${storeTotal === 1 ? "" : "s"}`;
+  const graphDetail = storeTotal > summary.rows.length
+    ? `${summary.rows.length} ${visibleGraphLabel} · ${storeEdgeLabel}`
+    : `${summary.structuralCount} structural · ${summary.coactivationCount} cofire`;
   const strongest = summary.strongest;
   const next = strongest
     ? `<button type="button" class="node-signal-hop" data-node-signal-hop="${escapeHTML(strongest.key)}">
@@ -5333,7 +5361,7 @@ function renderNodeSignalLane(memory, graphNode, region) {
     <div class="node-signal-card graph">
       <span class="node-signal-label">graph</span>
       <span class="node-signal-value">${escapeHTML(role)} · ${degree}°</span>
-      <span class="node-signal-detail">${summary.structuralCount} structural · ${summary.coactivationCount} cofire</span>
+      <span class="node-signal-detail">${escapeHTML(graphDetail)}</span>
     </div>
     <div class="node-signal-card next">
       <span class="node-signal-label">next hop</span>
@@ -5951,6 +5979,10 @@ function renderRegionOrphanCandidateShell(region) {
 function renderNodeEdgeRepair(memory, graphNode, region) {
   const graphData = graphNode && graphNode.length > 0 ? graphNode.data() : {};
   if (!graphData.orphan) return "";
+  const relationSummary = summarizeWorkbenchRelations(memory, graphNode);
+  const storeLinkedHint = relationSummary.storeSummary.total > relationSummary.rows.length
+    ? " Store edges outside the current view stay read-only here; candidate repair skips already-linked records."
+    : "";
   if (!region) {
     return `<div class="workbench-section node-edge-repair" id="workbench-node-edge-repair" data-node-edge-repair="${escapeHTML(memory.key)}">
       <div class="workbench-section-title">Edge repair</div>
@@ -5960,7 +5992,7 @@ function renderNodeEdgeRepair(memory, graphNode, region) {
   return `<div class="workbench-section node-edge-repair" id="workbench-node-edge-repair" data-node-edge-repair="${escapeHTML(memory.key)}">
     <div class="workbench-section-title">Edge repair</div>
     <div class="repair-lede">
-      This node has no explicit graph edge. Review region-scoped candidates before applying any approved link.
+      This node has no visible graph edge. Review region-scoped candidates before applying any approved link.${escapeHTML(storeLinkedHint)}
     </div>
     ${renderRegionOrphanCandidateShell(region)}
   </div>`;
