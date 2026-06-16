@@ -24288,7 +24288,10 @@ fn dispatch_optimization_reasons(
     if s.call_count >= 3 && s.p95_duration_ms >= 1_000 {
         reasons.push("slow_p95");
     }
-    if s.call_count >= 3 && s.avg_result_size >= 24_000.0 {
+    if s.call_count >= 3
+        && s.avg_result_size >= 24_000.0
+        && !dispatch_expected_detail_payload_tool(&s.tool_name)
+    {
         reasons.push("large_average_result");
     }
     if has_actionable_errors
@@ -24298,6 +24301,10 @@ fn dispatch_optimization_reasons(
         reasons.push("high_error_rate");
     }
     reasons
+}
+
+fn dispatch_expected_detail_payload_tool(tool_name: &str) -> bool {
+    matches!(tool_name, "event_spine_snapshot" | "forum_read")
 }
 
 fn dispatch_codex_native_overlap(tool_name: &str) -> bool {
@@ -50222,6 +50229,29 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(reasons.contains(&"slow_p95"));
         assert!(reasons.contains(&"large_average_result"));
         assert!(reasons.contains(&"high_error_rate"));
+    }
+
+    #[test]
+    fn dispatch_audit_expected_detail_payloads_are_not_actionable() {
+        let s = ab_store::McpToolCallStats {
+            tool_name: "forum_read".to_string(),
+            call_count: 6,
+            error_count: 0,
+            avg_duration_ms: 0.0,
+            p95_duration_ms: 0,
+            max_duration_ms: 0,
+            avg_result_size: 29_160.0,
+            client_name: None,
+            profile: None,
+            source: None,
+            model: None,
+            model_reasoning_effort: None,
+            codex_host: None,
+        };
+
+        let reasons = dispatch_optimization_reasons(&s, &HashMap::new());
+
+        assert!(!reasons.contains(&"large_average_result"));
     }
 
     #[test]
