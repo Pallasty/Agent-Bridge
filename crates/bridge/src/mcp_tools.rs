@@ -667,6 +667,9 @@ fn compact_mcp_output_default_for_policy(policy: ToolPolicy) -> bool {
         || matches!(policy.profile(), ToolProfile::Compact)
 }
 
+const FORUM_READ_DEFAULT_LIMIT: u32 = 50;
+const FORUM_READ_COMPACT_DEFAULT_LIMIT: u32 = 8;
+
 pub(crate) fn truncate_chars(s: &str, max_chars: usize) -> (String, bool, usize) {
     let total = s.chars().count();
     if max_chars == 0 || total <= max_chars {
@@ -13936,7 +13939,7 @@ impl McpTool for ForumReadTool {
                     "board":         { "type": "string",  "description": "Read posts across this board (used when thread_id is absent)." },
                     "since_post_id": { "type": "integer", "description": "Exclusive cursor — only posts with id > this." },
                     "unread_for":    { "type": "string",  "description": "Session id; reads from that session's subscription cursor and advances it. (local-only)" },
-                    "limit":         { "type": "integer", "default": 50, "description": "Max rows (1–500)." },
+                    "limit":         { "type": "integer", "default": 50, "description": "Max rows (1–500). Omitted = 8 in compact output, 50 otherwise." },
                     "peer":          { "type": "string",  "description": "Optional tailnet peer host:port; if set, query that daemon-http instead of local. (v20)" },
                     "compact":       { "type": "boolean", "description": "Use compact projection defaults. Omitted = true for Codex compact toolsets, false otherwise." },
                     "body_max_chars": { "type": "integer", "description": "Per-post body preview length. 0 disables truncation. Omitted = 2000 in compact output, 0 otherwise." },
@@ -13958,19 +13961,23 @@ impl McpTool for ForumReadTool {
             .get("unread_for")
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty());
-        let limit = args
-            .get("limit")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(50)
-            .clamp(1, 500) as u32;
-        let peer = args
-            .get("peer")
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty());
         let compact = args
             .get("compact")
             .and_then(|v| v.as_bool())
             .unwrap_or_else(compact_mcp_output_default);
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .map(|v| v.clamp(1, 500) as u32)
+            .unwrap_or(if compact {
+                FORUM_READ_COMPACT_DEFAULT_LIMIT
+            } else {
+                FORUM_READ_DEFAULT_LIMIT
+            });
+        let peer = args
+            .get("peer")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty());
         let body_max_chars = args
             .get("body_max_chars")
             .and_then(|v| v.as_u64())
@@ -14056,6 +14063,7 @@ impl McpTool for ForumReadTool {
                 "compact": compact,
                 "body_max_chars": body_max_chars,
                 "include_refs": include_refs,
+                "limit": limit,
                 "truncated_posts": truncated_posts
             }
         })))
@@ -43434,6 +43442,66 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert_eq!(rows[0]["body_total_chars"], json!(6));
         assert_eq!(rows[0]["refs_omitted"], json!(true));
         assert!(rows[0].get("refs").is_none());
+    }
+
+    #[tokio::test]
+    async fn forum_read_compact_default_caps_implicit_limit() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.as_ref().expect("store").clone();
+        let created = store
+            .forum_post(
+                None,
+                Some("payload"),
+                Some("Compact payload"),
+                "codex",
+                "msg",
+                &"opening ".repeat(400),
+                None,
+                None,
+            )
+            .await
+            .expect("create thread");
+        for idx in 0..19 {
+            store
+                .forum_post(
+                    Some(created.thread_id),
+                    None,
+                    None,
+                    "codex",
+                    "reply",
+                    &format!("reply-{idx} {}", "body ".repeat(400)),
+                    None,
+                    None,
+                )
+                .await
+                .expect("reply");
+        }
+
+        let res = ForumReadTool::new(hub)
+            .execute(
+                json!({"thread_id": created.thread_id, "compact": true}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("forum_read");
+        let body = result_json(&res);
+
+        assert_eq!(body["projection"]["compact"], json!(true));
+        assert_eq!(body["projection"]["limit"], json!(8));
+        assert_eq!(body["count"], json!(8));
+        assert_eq!(body["projection"]["body_max_chars"], json!(2000));
+        assert_eq!(body["projection"]["truncated_posts"], json!(8));
+
+        let explicit = ForumReadTool::new(crate::Hub::builder().store(store).build())
+            .execute(
+                json!({"thread_id": created.thread_id, "compact": true, "limit": 12}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("explicit forum_read");
+        assert_eq!(result_json(&explicit)["count"], json!(12));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
     #[test]
