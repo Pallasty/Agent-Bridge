@@ -289,7 +289,16 @@ pub fn rescue_snapshot(daemon_pid: u32, ttl_secs: u64) -> Result<RescueReport, R
             .unwrap_or("state.db.unknown");
         let dest = recovery_root.join(base);
         let src_proc_path = PathBuf::from(format!("/proc/{daemon_pid}/fd/{fd}"));
-        let bytes = fs::copy(&src_proc_path, &dest)?;
+        // Best-effort: an individual fd can become uncopyable between enum and
+        // copy — a `(deleted)` file fully reclaimed, a racing unlink, or a
+        // permission flip. Salvaging a wedged daemon should grab whatever it
+        // can rather than abort the whole snapshot over one transient fd. (It
+        // also de-flakes the self-pid happy-path test, whose /proc/self/fd
+        // churns as sibling tests open/close their own state.db handles.)
+        let bytes = match fs::copy(&src_proc_path, &dest) {
+            Ok(n) => n,
+            Err(_) => continue,
+        };
         let sha = hash_file(&dest).unwrap_or_else(|_| "unhashable".into());
         copied.push(RescueCopied {
             fd: *fd,
@@ -298,6 +307,17 @@ pub fn rescue_snapshot(daemon_pid: u32, ttl_secs: u64) -> Result<RescueReport, R
             bytes,
             sha256: sha,
         });
+    }
+    if copied.is_empty() {
+        // Enumerated fds but salvaged nothing — don't pin a no-op rescue.
+        let _ = locks::release(&lock_path);
+        return Err(RescueError::Io(io::Error::new(
+            io::ErrorKind::Other,
+            format!(
+                "rescue salvaged 0 of {} state.db family fd(s) under /proc/{daemon_pid}/fd",
+                fds.len()
+            ),
+        )));
     }
 
     // Combined hash over the sorted (fd, sha256) pairs so two siblings
@@ -395,13 +415,31 @@ mod tests {
     #[test]
     fn enum_state_db_fds_returns_empty_for_self_pid_without_state_db() {
         let pid = std::process::id();
-        let _fds = enum_state_db_fds(pid);
-        // We don't assert empty — if test runner happens to have a
-        // file named state.db open we want to see the rescue path's
-        // input. Just confirm no panic + deterministic ordering by fd.
-        // Determinism check:
-        let again = enum_state_db_fds(pid);
-        assert_eq!(_fds.len(), again.len());
+        let fds = enum_state_db_fds(pid);
+        // This reads the live /proc/self/fd of the *shared* test-runner
+        // process. Under the parallel test harness, sibling tests open and
+        // close their own state.db handles concurrently, so the *count* is
+        // not stable between two calls — a former `len == len` assertion
+        // flaked here (e.g. 158 vs 159). Assert the function's real, churn-
+        // independent invariant instead: each call returns entries sorted
+        // ascending by fd, and every match is a recognized state.db file.
+        let mut expected_sorted = fds.clone();
+        expected_sorted.sort_by_key(|(fd, _)| *fd);
+        assert_eq!(
+            fds, expected_sorted,
+            "enum_state_db_fds must return entries sorted ascending by fd"
+        );
+        for (_fd, target) in &fds {
+            let fname = std::path::Path::new(target)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("");
+            let base = fname.strip_suffix(" (deleted)").unwrap_or(fname);
+            assert!(
+                STATE_DB_SUFFIXES.contains(&base),
+                "enum_state_db_fds matched a non-state.db target: {target}"
+            );
+        }
     }
 
     #[test]
@@ -428,11 +466,16 @@ mod tests {
     fn rescue_snapshot_returns_io_error_when_no_state_db_fds() {
         let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         with_env(|_locks, _recovery| {
-            // Use our own PID — we have no state.db FDs open. Pass a
-            // resource name we know isn't held to skip the attach
-            // branch.
+            // Target a pid that cannot exist (u32::MAX is far above any
+            // /proc pid_max), so `/proc/<pid>/fd` is unreadable and
+            // `enum_state_db_fds` returns empty deterministically. The old
+            // form used `std::process::id()` on the assumption "we have no
+            // state.db FDs open" — false under the parallel test runner,
+            // where sibling store tests keep ~150 state.db handles open in
+            // this very process, so rescue would salvage them and return Ok.
+            let dead_pid = u32::MAX;
             std::env::set_var("AB_LOCKS_DIR_UNIQUE_TAG", format!("{}", std::process::id()));
-            let r = rescue_snapshot(std::process::id(), 60);
+            let r = rescue_snapshot(dead_pid, 60);
             assert!(matches!(r, Err(RescueError::Io(_))));
             std::env::remove_var("AB_LOCKS_DIR_UNIQUE_TAG");
         });

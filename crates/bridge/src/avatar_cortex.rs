@@ -7873,7 +7873,16 @@ mod tests {
         })
     }
 
+    // The snapshot-append path under test goes through `snapshot::append_row`,
+    // which is compiled to a "seed substrate support is disabled at build time"
+    // error stub unless the `seed-substrate` feature is on. Without the feature
+    // this test fails deterministically (default `cargo test` build), so skip it
+    // there and let CI runs with `--features seed-substrate` exercise it.
     #[test]
+    #[cfg_attr(
+        not(feature = "seed-substrate"),
+        ignore = "needs --features seed-substrate (parquet snapshot::append_row is a disabled stub otherwise)"
+    )]
     fn avatar_cortex_replay_writes_isolated_snapshot() {
         let dir = tempfile::tempdir().expect("tempdir");
         let input = dir.path().join("events.jsonl");
