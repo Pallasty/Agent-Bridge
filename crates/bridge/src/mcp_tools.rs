@@ -1,6 +1,7 @@
 //! Built-in MCP tools — wrap the bridge's backend bundle and expose it to
 //! Claude Code (or any MCP client) over the `tools/call` channel.
 
+use crate::tool_diagnostics::{classify_tool_error, ToolErrorDiagnosticClass};
 use crate::warp_scheme::{
     dispatch_url as dispatch_warp_scheme_uri,
     scheme_launch_configuration as warp_scheme_launch_configuration,
@@ -23208,9 +23209,20 @@ impl McpTool for McpDispatchAuditTool {
 
         let hot_tools: Vec<Value> = stats.iter().take(top_n).map(dispatch_stat_json).collect();
 
+        let recent_error_rows = if stats.iter().any(|s| s.error_count > 0) {
+            store
+                .recent_mcp_tool_errors(ab_store::MCP_TOOL_ERROR_RING_CAP)
+                .await
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let error_diagnostics =
+            dispatch_error_diagnostics_by_tool(recent_error_rows.clone(), window_secs, &stats);
+
         let failing_tools: Vec<Value> = stats
             .iter()
-            .filter(|s| s.error_count > 0)
+            .filter(|s| dispatch_stat_has_actionable_errors(s, &error_diagnostics))
             .take(top_n)
             .map(|s| {
                 let mut v = dispatch_stat_json(s);
@@ -23227,7 +23239,7 @@ impl McpTool for McpDispatchAuditTool {
         let optimization_candidates: Vec<Value> = stats
             .iter()
             .filter_map(|s| {
-                let reasons = dispatch_optimization_reasons(s);
+                let reasons = dispatch_optimization_reasons(s, &error_diagnostics);
                 if reasons.is_empty() {
                     None
                 } else {
@@ -23264,14 +23276,17 @@ impl McpTool for McpDispatchAuditTool {
         let recent_errors = if recent_errors_limit == 0 {
             Vec::new()
         } else {
-            let rows = store
-                .recent_mcp_tool_errors(ab_store::MCP_TOOL_ERROR_RING_CAP)
-                .await
-                .unwrap_or_default();
-            dispatch_recent_errors_for_audit(rows, recent_errors_limit, window_secs, &stats)
+            dispatch_recent_errors_for_audit(
+                recent_error_rows,
+                recent_errors_limit,
+                window_secs,
+                &stats,
+                &error_diagnostics,
+            )
         };
 
-        let profile_suggestions = dispatch_profile_suggestions(&stats, &cold_tools);
+        let profile_suggestions =
+            dispatch_profile_suggestions(&stats, &cold_tools, &error_diagnostics);
 
         Ok(ToolResult::json_text(&json!({
             "profile": policy.profile().label(),
@@ -24038,13 +24053,14 @@ fn dispatch_recent_errors_for_audit(
     limit: u32,
     window_secs: i64,
     stats: &[ab_store::McpToolCallStats],
+    diagnostics: &HashMap<String, Vec<ToolErrorDiagnosticClass>>,
 ) -> Vec<ab_store::McpToolErrorRecord> {
     if limit == 0 {
         return Vec::new();
     }
     let failing_tools: HashSet<&str> = stats
         .iter()
-        .filter(|s| s.error_count > 0)
+        .filter(|s| dispatch_stat_has_actionable_errors(s, diagnostics))
         .map(|s| s.tool_name.as_str())
         .collect();
     if failing_tools.is_empty() {
@@ -24055,6 +24071,49 @@ fn dispatch_recent_errors_for_audit(
         .filter(|row| row.ts >= cutoff && failing_tools.contains(row.tool_name.as_str()))
         .take(limit as usize)
         .collect()
+}
+
+fn dispatch_error_diagnostics_by_tool(
+    rows: Vec<ab_store::McpToolErrorRecord>,
+    window_secs: i64,
+    stats: &[ab_store::McpToolCallStats],
+) -> HashMap<String, Vec<ToolErrorDiagnosticClass>> {
+    let error_tools: HashSet<&str> = stats
+        .iter()
+        .filter(|s| s.error_count > 0)
+        .map(|s| s.tool_name.as_str())
+        .collect();
+    if error_tools.is_empty() {
+        return HashMap::new();
+    }
+    let cutoff = dispatch_now_secs().saturating_sub(window_secs.max(0));
+    let mut diagnostics: HashMap<String, Vec<ToolErrorDiagnosticClass>> = HashMap::new();
+    for row in rows
+        .into_iter()
+        .filter(|row| row.ts >= cutoff && error_tools.contains(row.tool_name.as_str()))
+    {
+        diagnostics
+            .entry(row.tool_name.clone())
+            .or_default()
+            .push(classify_tool_error(&row.tool_name, &row.message));
+    }
+    diagnostics
+}
+
+fn dispatch_stat_has_actionable_errors(
+    s: &ab_store::McpToolCallStats,
+    diagnostics: &HashMap<String, Vec<ToolErrorDiagnosticClass>>,
+) -> bool {
+    if s.error_count == 0 {
+        return false;
+    }
+    let Some(classes) = diagnostics.get(&s.tool_name) else {
+        return true;
+    };
+    if classes.len() < s.error_count as usize {
+        return true;
+    }
+    !classes.iter().all(|class| class.is_expected())
 }
 
 fn dispatch_filter_from_args(args: &Value) -> McpToolCallFilter {
@@ -24160,9 +24219,13 @@ fn dispatch_error_rate(errors: u64, calls: u64) -> f64 {
     }
 }
 
-fn dispatch_optimization_reasons(s: &ab_store::McpToolCallStats) -> Vec<&'static str> {
+fn dispatch_optimization_reasons(
+    s: &ab_store::McpToolCallStats,
+    diagnostics: &HashMap<String, Vec<ToolErrorDiagnosticClass>>,
+) -> Vec<&'static str> {
     let mut reasons = Vec::new();
-    if s.error_count > 0 {
+    let has_actionable_errors = dispatch_stat_has_actionable_errors(s, diagnostics);
+    if has_actionable_errors {
         reasons.push("has_errors");
     }
     if s.call_count >= 3 && s.p95_duration_ms >= 1_000 {
@@ -24171,7 +24234,10 @@ fn dispatch_optimization_reasons(s: &ab_store::McpToolCallStats) -> Vec<&'static
     if s.call_count >= 3 && s.avg_result_size >= 24_000.0 {
         reasons.push("large_average_result");
     }
-    if s.call_count >= 10 && dispatch_error_rate(s.error_count, s.call_count) >= 0.20 {
+    if has_actionable_errors
+        && s.call_count >= 10
+        && dispatch_error_rate(s.error_count, s.call_count) >= 0.20
+    {
         reasons.push("high_error_rate");
     }
     reasons
@@ -24209,6 +24275,7 @@ fn dispatch_cold_tool_suggestion(tool_name: &str) -> &'static str {
 fn dispatch_profile_suggestions(
     stats: &[ab_store::McpToolCallStats],
     cold_tools: &[Value],
+    diagnostics: &HashMap<String, Vec<ToolErrorDiagnosticClass>>,
 ) -> Vec<String> {
     let mut suggestions = Vec::new();
     if stats.is_empty() {
@@ -24260,7 +24327,7 @@ fn dispatch_profile_suggestions(
 
     if stats
         .iter()
-        .any(|s| !dispatch_optimization_reasons(s).is_empty())
+        .any(|s| !dispatch_optimization_reasons(s, diagnostics).is_empty())
     {
         suggestions.push(
             "At least one observed tool has errors, slow p95 latency, or large results; inspect optimization_candidates before changing profile exposure."
@@ -43418,7 +43485,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             },
         ];
 
-        let scoped = dispatch_recent_errors_for_audit(rows, 5, 900, &stats);
+        let scoped = dispatch_recent_errors_for_audit(rows, 5, 900, &stats, &HashMap::new());
         assert_eq!(scoped.len(), 1);
         assert_eq!(scoped[0].tool_name, "forum_read");
         assert_eq!(scoped[0].message, "current scoped error");
@@ -50027,7 +50094,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             model_reasoning_effort: None,
             codex_host: None,
         };
-        let suggestions = dispatch_profile_suggestions(&[s], &[]);
+        let suggestions = dispatch_profile_suggestions(&[s], &[], &HashMap::new());
         assert!(suggestions
             .iter()
             .any(|s| s.contains("hot tools overlap Codex native surfaces")));
@@ -50050,11 +50117,42 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             model_reasoning_effort: None,
             codex_host: None,
         };
-        let reasons = dispatch_optimization_reasons(&s);
+        let reasons = dispatch_optimization_reasons(&s, &HashMap::new());
         assert!(reasons.contains(&"has_errors"));
         assert!(reasons.contains(&"slow_p95"));
         assert!(reasons.contains(&"large_average_result"));
         assert!(reasons.contains(&"high_error_rate"));
+    }
+
+    #[test]
+    fn dispatch_audit_expected_validation_errors_are_not_actionable() {
+        let now = dispatch_now_secs();
+        let s = ab_store::McpToolCallStats {
+            tool_name: "work_memory".to_string(),
+            call_count: 9,
+            error_count: 1,
+            avg_duration_ms: 52.0,
+            p95_duration_ms: 131,
+            max_duration_ms: 131,
+            avg_result_size: 591.0,
+            client_name: None,
+            profile: None,
+            source: None,
+            model: None,
+            model_reasoning_effort: None,
+            codex_host: None,
+        };
+        let rows = vec![ab_store::McpToolErrorRecord {
+            ts: now,
+            tool_name: "work_memory".to_string(),
+            message: "get requires key".to_string(),
+        }];
+        let diagnostics = dispatch_error_diagnostics_by_tool(rows, 900, std::slice::from_ref(&s));
+
+        assert!(!dispatch_stat_has_actionable_errors(&s, &diagnostics));
+        let reasons = dispatch_optimization_reasons(&s, &diagnostics);
+        assert!(!reasons.contains(&"has_errors"));
+        assert!(!reasons.contains(&"high_error_rate"));
     }
 
     #[test]
