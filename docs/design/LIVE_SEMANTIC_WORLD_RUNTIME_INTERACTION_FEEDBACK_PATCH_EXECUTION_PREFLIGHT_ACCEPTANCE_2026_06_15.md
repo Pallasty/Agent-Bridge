@@ -163,9 +163,10 @@ Still not accepted:
 
 ## 6. Next Slice
 
-The next safe slice has started as a separate apply-request boundary:
+The next safe slice was completed as a separate apply-request boundary:
 
 - [Interaction feedback patch apply request boundary](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_PATCH_APPLY_REQUEST_BOUNDARY_2026_06_15.md)
+- [Interaction feedback patch apply request boundary acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_PATCH_APPLY_REQUEST_BOUNDARY_ACCEPTANCE_2026_06_16.md)
 
 That slice still treats execution as a different authority level from preflight.
 It may package an external executor request, but live runtime lookup, patch
