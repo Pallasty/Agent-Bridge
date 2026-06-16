@@ -11549,7 +11549,8 @@ impl McpTool for LswrOutcomeAdmissionsIngestTool {
                  A durable write requires dry_run=false AND the full owner approval contract: \
                  apply_confirmation, approval_thread_id=102, a positive approval_post_id, \
                  reviewed_plan_hash == the recomputed plan_hash, candidate_keys subset of plan, \
-                 and max_writes<=1. Fails closed (no store access) on any contract violation. \
+                 and max_writes<=1. Fails closed (no memory_save; the only store access is a \
+                 non-mutating active-row probe) on any contract violation. \
                  Refuses active-row refreshes; returns a rollback packet. all-profile only; \
                  hidden from standard and codex-essential. Not automatic — a human triggers it."
                 .into(),
@@ -11750,7 +11751,7 @@ impl McpTool for LswrOutcomeAdmissionsIngestTool {
                 obj.insert("written_count".into(), json!(0));
                 obj.insert(
                     "note".into(),
-                    json!("write refused: request failed E4d validation; no store access performed."),
+                    json!("write refused: request failed E4d validation; no memory_save performed (the only prior store access is a non-mutating active-row probe)."),
                 );
             }
             return Ok(ToolResult::json_text(&out));
@@ -49672,6 +49673,187 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         .expect("write sidecar");
     }
 
+    // world.patch with verified=false / verified_to=null → the projection classifies
+    // it audit_only (source_world_not_verified), never training_eligible.
+    fn e4_ingest_world_not_verified_packet() -> Value {
+        let envelope = json!({
+            "schema": crate::lswr_present::WORLD_TOOL_SCHEMA,
+            "ok": true,
+            "verified": false,
+            "reason": "expected_effect_clause_failed",
+            "request": {
+                "world.patch": {
+                    "op": "move",
+                    "entity": "bath",
+                    "args": {"cell": [8, 0]},
+                    "expected_effect": {
+                        "target": "bath",
+                        "metric": "screen_area",
+                        "to_op": ">=",
+                        "to_value": 0.25
+                    }
+                }
+            },
+            "verify": {
+                "method": "live_viewport_pixel_coverage",
+                "verified_to": null,
+                "evidence": {"host_reason": "expected_effect_clause_failed"}
+            },
+            "host_response": {
+                "world.patch": {"applied": true, "entity": "bath", "op": "move"},
+                "expected_effect": {
+                    "verified": false,
+                    "reason": "expected_effect_clause_failed",
+                    "metric": "screen_area",
+                    "actual": 0.12,
+                    "clauses": [{
+                        "metric": "screen_area",
+                        "actual": 0.12,
+                        "to_op": ">=",
+                        "to_value": 0.25,
+                        "verified": false,
+                        "reason": "expected_effect_clause_failed"
+                    }]
+                }
+            }
+        });
+        crate::lswr_present::world_envelope_to_present_packet(
+            "world_patch",
+            &envelope,
+            crate::lswr_present::PresentPacketOptions::new("2026-06-16T00:00:00Z")
+                .with_commit("e4test"),
+        )
+    }
+
+    fn e4_write_artifact_with(dir: &std::path::Path, id: &str, packet: &Value, sidecar: Value) {
+        std::fs::create_dir_all(dir).expect("mkdir");
+        let html = crate::present::build_html(
+            crate::present::PresentKind::Html,
+            "<article>LSWR review</article>",
+            Some("LSWR review"),
+            Some(packet),
+            Some(&json!({
+                "source_tool": "lswr_present",
+                "source_schema": packet.get("schema").cloned().unwrap_or(Value::Null),
+                "kind": "html",
+                "ts": crate::present::now_unix(),
+            })),
+        );
+        std::fs::write(dir.join(format!("{id}.html")), html).expect("write html");
+        std::fs::write(
+            dir.join(format!("{id}.outcome.json")),
+            serde_json::to_string(&sidecar).expect("json"),
+        )
+        .expect("write sidecar");
+    }
+
+    // §8.7 / §8.8: a non-eligible artifact (audit_only or token-mismatch=rejected)
+    // must never become a writable candidate or get persisted — proven through the
+    // tool's real execute() path, not just the pure builder.
+    async fn e4_assert_non_eligible_never_writes(tag: &str, id: &str, packet: Value, sidecar: Value) {
+        let _env = PRESENTATIONS_DIR_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let (hub, store_dir) = mk_test_hub_with_store().await;
+        let dir = e4_unique_presentations_dir(tag);
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        std::env::set_var("AGENT_BRIDGE_PRESENTATIONS_DIR", &dir);
+        e4_write_artifact_with(&dir, id, &packet, sidecar);
+        let expected_key = format!("outcome_{id}");
+        let tool = LswrOutcomeAdmissionsIngestTool::new(hub.clone());
+
+        // dry-run: the non-eligible artifact yields zero candidates.
+        let plan = result_text_as_json(
+            &tool
+                .execute(json!({"window_secs": 31_536_000}), &ToolContext::default())
+                .await
+                .expect("dry-run"),
+        );
+        assert_eq!(
+            plan["candidate_count"],
+            json!(0),
+            "{tag}: non-eligible artifact must not become a candidate"
+        );
+
+        // write attempt referencing the would-be key → nothing written (fails closed).
+        let wrote = result_text_as_json(
+            &tool
+                .execute(
+                    json!({
+                        "window_secs": 31_536_000,
+                        "dry_run": false,
+                        "apply_confirmation": crate::lswr_outcome_admission::LSWR_OUTCOME_ADMISSION_WRITE_CONFIRMATION,
+                        "approval_thread_id": 102,
+                        "approval_post_id": 7,
+                        "reviewed_plan_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+                        "candidate_keys": [expected_key.clone()],
+                        "max_writes": 1
+                    }),
+                    &ToolContext::default(),
+                )
+                .await
+                .expect("write"),
+        );
+        assert_eq!(wrote["writes_state"], serde_json::Value::Bool(false));
+        assert_eq!(wrote["written_count"], json!(0));
+
+        // store has no such row.
+        let store = hub.store.clone().expect("store");
+        assert!(
+            store
+                .memory_search(&expected_key, &[], 5)
+                .await
+                .unwrap_or_default()
+                .iter()
+                .all(|h| h.record.key != expected_key),
+            "{tag}: non-eligible artifact must leave no persisted row"
+        );
+
+        std::env::remove_var("AGENT_BRIDGE_PRESENTATIONS_DIR");
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&store_dir);
+    }
+
+    #[tokio::test]
+    async fn lswr_outcome_admissions_ingest_excludes_audit_only_and_never_writes() {
+        // world-not-verified packet + rendered_ok sidecar → audit_only (§8.7).
+        e4_assert_non_eligible_never_writes(
+            "auditonly",
+            "e4auditonly",
+            e4_ingest_world_not_verified_packet(),
+            json!({
+                "artifact_id": "e4auditonly",
+                "verify_status": "rendered_ok",
+                "verify_method": "browser_eval",
+                "embody_status": "not_applicable",
+                "interactive_status": "not_applicable",
+                "decision": "approved",
+                "token_match": true
+            }),
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn lswr_outcome_admissions_ingest_excludes_token_mismatch_and_never_writes() {
+        // verified packet but token_match=false → rejected (token_mismatch) (§8.8).
+        e4_assert_non_eligible_never_writes(
+            "tokenmismatch",
+            "e4tokenmismatch",
+            e4_ingest_verified_packet(),
+            json!({
+                "artifact_id": "e4tokenmismatch",
+                "verify_status": "rendered_ok",
+                "verify_method": "browser_eval",
+                "embody_status": "not_applicable",
+                "interactive_status": "not_applicable",
+                "decision": "approved",
+                "token_match": false
+            }),
+        )
+        .await;
+    }
+
     fn e4_unique_presentations_dir(tag: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!(
             "ab-e4-ingest-{tag}-{}-{}",
@@ -49832,6 +50014,20 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
             .expect("persisted row");
         assert_eq!(row.record.kind, crate::present_ingest::OUTCOME_MEMORY_KIND);
         assert_eq!(row.record.scope.as_deref(), Some(format!("outcome:{id}").as_str()));
+        // Design §5/§8.9: deterministic tags + graph-orphan related_keys on the
+        // PERSISTED row (assert the durable row, not just the response).
+        assert!(row.record.related_keys.is_empty(), "related_keys must be []");
+        for tag in [
+            "present_outcome",
+            "verified_outcome",
+            "auto_ingested",
+            "verify:rendered_ok",
+        ] {
+            assert!(
+                row.record.tags.iter().any(|t| t == tag),
+                "persisted row must carry tag {tag}"
+            );
+        }
 
         // 3) Repeat the identical write → first slice REFUSES the active-row refresh.
         let again = tool
@@ -49855,6 +50051,21 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         // so E4d validation rejects it (active_row_exists) before any write.
         assert_eq!(again["writes_state"], serde_json::Value::Bool(false));
         assert_eq!(again["written_count"], json!(0));
+        // Prove the store itself, not just the response: still exactly ONE active
+        // row, unchanged created_at (no second/overwriting write happened).
+        let after = store
+            .memory_search(&expected_key, &[], 5)
+            .await
+            .unwrap_or_default();
+        let matching: Vec<_> = after
+            .iter()
+            .filter(|h| h.record.key == expected_key)
+            .collect();
+        assert_eq!(matching.len(), 1, "refused refresh must leave exactly one row");
+        assert_eq!(
+            matching[0].record.created_at, row.record.created_at,
+            "refused refresh must not rewrite the row"
+        );
 
         std::env::remove_var("AGENT_BRIDGE_PRESENTATIONS_DIR");
         let _ = std::fs::remove_dir_all(&dir);
