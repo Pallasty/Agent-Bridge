@@ -15,11 +15,12 @@ Board anchors:
 
 ## 0. Status
 
-This document is a design package only.
+This document is a design package; the writer it specifies is now implemented.
 
-No E4 write path is implemented by this document. E0-E3 are already implemented
-and deployed; E4 remains closed until owner approval is recorded after reviewing
-this design.
+E0-E3 were already implemented and deployed. **E4d/E4e are now SHIPPED** (see
+§11/§12): the explicit writer `lswr_outcome_admissions_ingest` was implemented,
+independently reviewed, merged to master, and deployed; the first owner-approved
+manual write (`max_writes=1`) was executed under board approval anchor #3186.
 
 ## 1. Purpose
 
@@ -229,14 +230,12 @@ Run with `max_writes=1` against a known non-production or deliberately selected
 candidate. Record the approval post, plan hash, written key, rollback packet, and
 post-write `memory_search` evidence on #102.
 
-## 10. Recommended Decision
+## 10. Recommended Decision (historical — superseded)
 
-Do not implement E4 write code yet.
-
-Recommended next action is owner review of this document. If accepted, the next
-coding slice should be E4b/E4c only: pure plan hash plus read-only approval
-packet. The actual `dry_run=false` writer should remain a later, separately
-approved slice.
+The original recommendation here ("do not implement E4 write code yet") has been
+superseded. E4b/E4c/E4d landed read-only first; owner review plus an explicit
+in-session GO then authorized the E4d writer and a single E4e first write. See
+§11/§12 for the as-shipped status.
 
 ## 11. E4b/E4c/E4d Read-Only Implementation Status
 
@@ -273,21 +272,42 @@ approval packet has a non-empty candidate set, `dry_run=true`,
 `writes_state=false`, `write_tool_open=false`, a `sha256:` plan hash, and no
 active rows. It does not call MCP and does not write memory.
 
-Still not implemented:
+E4d/E4e are now SHIPPED (2026-06-16):
 
-- no `lswr_outcome_admissions_ingest` writer;
-- no `dry_run=false` surface;
-- no top-level executable `max_writes` input outside the read-only proposed
-  request object;
-- no `present_outcomes_ingest(dry_run=false)` call;
-- no Codex-essential or standard profile exposure.
+- explicit writer `lswr_outcome_admissions_ingest` — all-profile only
+  (`Tier::Niche`; hidden from standard + codex-essential); `dry_run=true` default;
+  flat write-gate args (`apply_confirmation`, `approval_thread_id=102`, positive
+  `approval_post_id`, `reviewed_plan_hash`, `candidate_keys`, `max_writes<=1`);
+- it is a thin consumer of the E3 candidate builder + the E4d validator
+  `validate_lswr_e4d_write_request` — it does NOT reimplement admission gates,
+  does NOT call `present_outcomes_ingest`, and creates no graph edges;
+- fails closed (no `memory_save`) on any contract violation; re-probes and refuses
+  active-row refreshes; returns the §6 rollback packet
+  (`agent_bridge.lswr.outcome_admission_ingest_rollback.v0`) and a write-result
+  envelope (`agent_bridge.lswr.outcome_admission_write_result.v0`);
+- independently reviewed (3 adversarial skeptics: no safety leak, no write-path
+  bug) and hardened with §8.7/§8.8/§8.9 execute()-level acceptance tests;
+- merged to master and deployed live.
 
-The next owner-gated step remains E4d: explicit writer design/implementation
-with confirmation token, approval post id, reviewed plan hash, candidate keys,
-and first-run cap.
+E4e first manual write trial executed: `outcome_7853144917309ee1` (a
+render-grounded `world_visibility_query` outcome) was written with `max_writes=1`
+under board approval anchor #3186; an independent post-write `memory_search`
+confirmed the durable `status:active` row. Board trail: #3185 → #3186 → #3187 →
+#3192.
 
-Before implementing the writer, follow the
-[Step E4d Writer Preflight](LIVE_SEMANTIC_WORLD_RUNTIME_STEP_E4D_WRITER_PREFLIGHT_2026_06_15.md).
-The recommended next coding slice after this preflight is owner review, then a
-separately approved first-write implementation trial, not automatic
-`memory_save`.
+## 12. Known Limitation — window-edge plan_hash stability (fail-safe, deferred)
+
+The writer recomputes the E4c plan from a fresh `now - window_secs` look-back at
+write time. A candidate artifact sitting near the trailing window edge can fall
+out of scope between the dry-run read and the write, shrinking the plan and
+yielding a spurious `plan_hash_mismatch` that REFUSES an otherwise-legitimate
+write. This fails CLOSED (it can never produce a spurious match or a wrong
+write); it is self-recovering (re-run the dry-run for a fresh hash) and is
+avoided in practice by using a wide `window_secs` and writing promptly after the
+dry-run.
+
+A proper fix is deferred — not worth a shared-plan-contract change for a
+fail-safe edge case. The intended fix is to pin an absolute window anchor: have
+the dry-run plan echo its exact `cutoff`/`generated_at` bounds and have the
+writer recompute against those exact bounds instead of a freshly derived `now`,
+so the reviewed candidate set is reproducible regardless of elapsed time.
