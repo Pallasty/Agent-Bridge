@@ -177,7 +177,9 @@ Still not accepted:
 This G3 read-only patch-application gate preflight is accepted by
 [runtime executor patch application gate preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_APPLICATION_GATE_PREFLIGHT_ACCEPTANCE_2026_06_16.md).
 
-The next safe slice is separate patch executor invocation design. It must
-consume the G3 readiness packet and still distinguish between invoking a
-separate executor, observing application evidence, verifying postconditions,
-and ingesting any outcome.
+The next safe slice is
+[separate patch executor invocation preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_EXECUTOR_INVOCATION_PREFLIGHT_2026_06_16.md).
+It must consume the G3 readiness packet and still distinguish between emitting
+a reviewable invocation request envelope, submitting work to a separate
+executor, observing application evidence, verifying postconditions, and
+ingesting any outcome.

@@ -185,5 +185,7 @@ The G2 operator submission token preflight is accepted by
 The G3 patch application gate preflight is accepted by
 [runtime executor patch application gate preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_APPLICATION_GATE_PREFLIGHT_ACCEPTANCE_2026_06_16.md).
 
-The next safe slice is separate patch executor invocation design. It must
-remain separate from post-apply verification and outcome ingestion.
+The next safe slice is
+[separate patch executor invocation preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_EXECUTOR_INVOCATION_PREFLIGHT_2026_06_16.md).
+It must remain separate from executor queue submission, post-apply
+verification, and outcome ingestion.

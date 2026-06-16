@@ -9,6 +9,7 @@ use ab_bridge::lswr_interaction_feedback::{
     build_interaction_feedback_runtime_executor_live_lookup_preflight,
     build_interaction_feedback_runtime_executor_operator_submission_token_preflight,
     build_interaction_feedback_runtime_executor_patch_application_gate_preflight,
+    build_interaction_feedback_runtime_executor_patch_executor_invocation_preflight,
     build_interaction_feedback_semantic_patch_draft,
     build_interaction_feedback_validation_envelope,
     render_interaction_feedback_consumption_preflight_report,
@@ -20,6 +21,7 @@ use ab_bridge::lswr_interaction_feedback::{
     render_interaction_feedback_runtime_executor_live_lookup_preflight,
     render_interaction_feedback_runtime_executor_operator_submission_token_preflight,
     render_interaction_feedback_runtime_executor_patch_application_gate_preflight,
+    render_interaction_feedback_runtime_executor_patch_executor_invocation_preflight,
     render_interaction_feedback_semantic_patch_draft,
     render_interaction_feedback_validation_envelope, validate_interaction_feedback_fixture,
     LSWR_INTERACTION_FEEDBACK_ARGUMENT_CONTEXT_SCHEMA,
@@ -35,11 +37,13 @@ use ab_bridge::lswr_interaction_feedback::{
     LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_LIVE_LOOKUP_PREFLIGHT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_OPERATOR_SUBMISSION_TOKEN_PREFLIGHT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_APPLICATION_GATE_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_EXECUTOR_INVOCATION_PREFLIGHT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_SEMANTIC_PATCH_DRAFT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_VALIDATION_ENVELOPE_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_VALIDATION_SCHEMA, LSWR_RUNTIME_EXECUTOR_LIVE_LOOKUP_SNAPSHOT_SCHEMA,
     LSWR_RUNTIME_EXECUTOR_OPERATOR_SUBMISSION_DECISION_SCHEMA,
     LSWR_RUNTIME_EXECUTOR_PATCH_APPLICATION_GATE_DECISION_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_PATCH_EXECUTOR_INVOCATION_DECISION_SCHEMA,
 };
 use serde_json::{json, Value};
 
@@ -2073,6 +2077,240 @@ fn interaction_feedback_runtime_executor_patch_application_gate_preflight_requir
 }
 
 #[test]
+fn interaction_feedback_runtime_executor_patch_executor_invocation_preflight_blocks_without_invocation_decision(
+) {
+    let gate_preflight = ready_runtime_executor_patch_application_gate_preflight();
+    let invocation_preflight =
+        build_interaction_feedback_runtime_executor_patch_executor_invocation_preflight(
+            &gate_preflight,
+        );
+    let markdown = render_interaction_feedback_runtime_executor_patch_executor_invocation_preflight(
+        &invocation_preflight,
+    );
+
+    assert_eq!(
+        invocation_preflight["schema"],
+        LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_EXECUTOR_INVOCATION_PREFLIGHT_SCHEMA
+    );
+    assert_eq!(
+        invocation_preflight["input_kind"],
+        "runtime_executor_patch_application_gate_preflight"
+    );
+    assert_eq!(
+        invocation_preflight["source_patch_application_gate_preflight_verdict"],
+        "ready_for_separate_executor_invocation"
+    );
+    assert_eq!(
+        invocation_preflight["patch_executor_invocation_decision_schema"],
+        Value::Null
+    );
+    assert_eq!(
+        invocation_preflight["patch_executor_invocation_preflight_verdict"],
+        "blocked"
+    );
+    assert_eq!(invocation_preflight["status"], "blocked");
+    assert_eq!(
+        invocation_preflight["reason"],
+        "explicit_patch_executor_invocation_decision_required"
+    );
+    assert_eq!(
+        invocation_preflight["failure_reasons"],
+        json!(["explicit_patch_executor_invocation_decision_required"])
+    );
+    assert_eq!(
+        invocation_preflight["patch_executor_invocation_request"]["request_id"],
+        Value::Null
+    );
+    assert_eq!(
+        invocation_preflight["patch_executor_invocation_request"]
+            ["ready_for_separate_patch_executor_invocation_request"],
+        false
+    );
+    assert_runtime_executor_patch_executor_invocation_preflight_read_only(&invocation_preflight);
+
+    assert!(markdown.contains("- patch_executor_invocation_preflight_verdict: `blocked`"));
+    assert!(markdown.contains("- ready_for_separate_patch_executor_invocation_request: `false`"));
+}
+
+#[test]
+fn interaction_feedback_runtime_executor_patch_executor_invocation_preflight_accepts_explicit_decision(
+) {
+    let gate_preflight = ready_runtime_executor_patch_application_gate_preflight();
+    let invocation_preflight =
+        build_interaction_feedback_runtime_executor_patch_executor_invocation_preflight(&json!({
+            "patch_application_gate_preflight": gate_preflight,
+            "patch_executor_invocation_decision": explicit_patch_executor_invocation_decision()
+        }));
+    let markdown = render_interaction_feedback_runtime_executor_patch_executor_invocation_preflight(
+        &invocation_preflight,
+    );
+
+    assert_eq!(
+        invocation_preflight["schema"],
+        LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_EXECUTOR_INVOCATION_PREFLIGHT_SCHEMA
+    );
+    assert_eq!(
+        invocation_preflight["input_kind"],
+        "patch_application_gate_preflight_with_patch_executor_invocation_decision_wrapper"
+    );
+    assert_eq!(
+        invocation_preflight["patch_executor_invocation_decision_schema"],
+        LSWR_RUNTIME_EXECUTOR_PATCH_EXECUTOR_INVOCATION_DECISION_SCHEMA
+    );
+    assert_eq!(
+        invocation_preflight["patch_executor_invocation_preflight_verdict"],
+        "ready_for_separate_patch_executor_invocation_request"
+    );
+    assert_eq!(invocation_preflight["status"], "ready");
+    assert_eq!(
+        invocation_preflight["reason"],
+        "patch_executor_invocation_preflight_ready_for_invocation_request"
+    );
+    assert_eq!(invocation_preflight["failure_reasons"], json!([]));
+    assert_eq!(
+        invocation_preflight["patch_executor_invocation_request"]["request_id"],
+        "patch_executor_invocation_arrival_bath_move_002"
+    );
+    assert_eq!(
+        invocation_preflight["patch_executor_invocation_request"]["target_executor"],
+        "separate_lswr_patch_executor"
+    );
+    assert_eq!(
+        invocation_preflight["patch_executor_invocation_request"]["invocation_decision_id"],
+        "patch_executor_invocation_decision_arrival_bath_move_002"
+    );
+    assert_eq!(
+        invocation_preflight["patch_executor_invocation_request"]["patch_application_gate_id"],
+        "patch_application_gate_arrival_bath_move_002"
+    );
+    assert_eq!(
+        invocation_preflight["patch_executor_invocation_request"]["patch_id"],
+        "patch_arrival_bath_move_002"
+    );
+    assert_eq!(
+        invocation_preflight["patch_executor_invocation_request"]["idempotency_key"],
+        "patch_arrival_bath_move_002/runtime_gen_1284/patch_application_gate_arrival_bath_move_002/patch_executor_invocation_decision_arrival_bath_move_002"
+    );
+    assert_eq!(
+        invocation_preflight["patch_executor_invocation_request"]
+            ["ready_for_separate_patch_executor_invocation_request"],
+        true
+    );
+    assert_eq!(
+        invocation_preflight["patch_executor_invocation_request"]
+            ["invocation_request_emitted_by_this_tool"],
+        true
+    );
+    assert_eq!(
+        invocation_preflight["patch_executor_invocation_request"]
+            ["executor_invocation_performed_by_this_tool"],
+        false
+    );
+    assert_eq!(
+        invocation_preflight["next_allowed_gate"],
+        "separate_patch_executor_runtime_application_evidence"
+    );
+    assert_runtime_executor_patch_executor_invocation_preflight_read_only(&invocation_preflight);
+
+    assert!(markdown.contains(
+        "- patch_executor_invocation_preflight_verdict: `ready_for_separate_patch_executor_invocation_request`"
+    ));
+    assert!(markdown.contains("- request_id: `patch_executor_invocation_arrival_bath_move_002`"));
+    assert!(markdown.contains("- invocation_request_emitted_by_this_tool: `true`"));
+    assert!(markdown.contains("- executor_invocation_performed_by_this_tool: `false`"));
+}
+
+#[test]
+fn interaction_feedback_runtime_executor_patch_executor_invocation_preflight_blocks_bad_decision() {
+    let gate_preflight = ready_runtime_executor_patch_application_gate_preflight();
+    let mut decision = explicit_patch_executor_invocation_decision();
+    decision["decision"] = json!("rejected");
+    decision["approved_scope"]["runtime_generation"] = json!("runtime_gen_stale");
+    decision["approved_scope"]["patch_id"] = json!("patch_other");
+    decision["separate_patch_executor_invocation_allowed"] = json!(false);
+    decision["executor_invocation_performed"] = json!(true);
+    decision["executor_queue_submission_performed"] = json!(true);
+    decision["writes_state"] = json!(true);
+
+    let invocation_preflight =
+        build_interaction_feedback_runtime_executor_patch_executor_invocation_preflight(&json!({
+            "patch_application_gate_preflight": gate_preflight,
+            "patch_executor_invocation_decision": decision
+        }));
+
+    assert_eq!(
+        invocation_preflight["patch_executor_invocation_preflight_verdict"],
+        "blocked"
+    );
+    let failure_reasons = invocation_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons");
+    assert!(failure_reasons.contains(&json!(
+        "patch_executor_invocation_decision_must_be_approved"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "patch_executor_invocation_runtime_generation_scope_mismatch"
+    )));
+    assert!(failure_reasons.contains(&json!("patch_executor_invocation_patch_scope_mismatch")));
+    assert!(failure_reasons.contains(&json!(
+        "patch_executor_invocation_decision_must_allow_invocation"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "patch_executor_invocation_decision_must_not_invoke_executor"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "patch_executor_invocation_decision_must_not_submit_queue"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "patch_executor_invocation_decision_must_not_write_state"
+    )));
+    assert_eq!(
+        invocation_preflight["patch_executor_invocation_request"]
+            ["ready_for_separate_patch_executor_invocation_request"],
+        false
+    );
+    assert_runtime_executor_patch_executor_invocation_preflight_read_only(&invocation_preflight);
+}
+
+#[test]
+fn interaction_feedback_runtime_executor_patch_executor_invocation_preflight_requires_gate_input() {
+    let submission_preflight = ready_runtime_executor_operator_submission_token_preflight();
+    let invocation_preflight =
+        build_interaction_feedback_runtime_executor_patch_executor_invocation_preflight(&json!({
+            "patch_application_gate_preflight": submission_preflight,
+            "patch_executor_invocation_decision": explicit_patch_executor_invocation_decision()
+        }));
+
+    assert_eq!(
+        invocation_preflight["input_kind"],
+        "patch_application_gate_preflight_with_patch_executor_invocation_decision_wrapper"
+    );
+    assert_eq!(
+        invocation_preflight["source_schema"],
+        LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_OPERATOR_SUBMISSION_TOKEN_PREFLIGHT_SCHEMA
+    );
+    assert_eq!(
+        invocation_preflight["patch_executor_invocation_preflight_verdict"],
+        "blocked"
+    );
+    assert_eq!(
+        invocation_preflight["reason"],
+        "runtime_executor_patch_application_gate_preflight_required"
+    );
+    assert!(invocation_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!(
+            "runtime_executor_patch_application_gate_preflight_required"
+        )));
+    assert_eq!(
+        invocation_preflight["source_patch_application_gate_preflight"],
+        Value::Null
+    );
+    assert_runtime_executor_patch_executor_invocation_preflight_read_only(&invocation_preflight);
+}
+
+#[test]
 fn interaction_feedback_validator_reports_tampered_fixture() {
     let mut fixture = fixture();
     fixture["events"][5]["refs"]["cause_event_id"] = json!("missing_event");
@@ -2258,6 +2496,44 @@ fn explicit_patch_application_gate_decision() -> Value {
         },
         "separate_patch_executor_invocation_allowed": true,
         "executor_invocation_performed": false,
+        "apply_request_submitted": false,
+        "patch_application_performed": false,
+        "verification_allowed": false,
+        "outcome_ingestion_allowed": false,
+        "writes_state": false
+    })
+}
+
+fn ready_runtime_executor_patch_application_gate_preflight() -> Value {
+    build_interaction_feedback_runtime_executor_patch_application_gate_preflight(&json!({
+        "submission_token_preflight": ready_runtime_executor_operator_submission_token_preflight(),
+        "patch_application_gate_decision": explicit_patch_application_gate_decision()
+    }))
+}
+
+fn explicit_patch_executor_invocation_decision() -> Value {
+    json!({
+        "schema": LSWR_RUNTIME_EXECUTOR_PATCH_EXECUTOR_INVOCATION_DECISION_SCHEMA,
+        "decision_id": "patch_executor_invocation_decision_arrival_bath_move_002",
+        "decision": "approved",
+        "operator_id": "human:owner",
+        "approved_at": "2026-06-16T07:30:00Z",
+        "expires_at": "2026-06-16T23:59:59Z",
+        "requested_authority": "separate_patch_executor_invocation_only",
+        "approved_scope": {
+            "gate_id": "patch_application_gate_arrival_bath_move_002",
+            "gate_decision_id": "patch_application_gate_decision_arrival_bath_move_002",
+            "gate_idempotency_key": "patch_arrival_bath_move_002/runtime_gen_1284/submit_patch_arrival_bath_move_002/patch_application_gate_decision_arrival_bath_move_002",
+            "operator_submission_token_id": "submit_patch_arrival_bath_move_002",
+            "world_id": "onsen_live_session",
+            "branch_id": "main",
+            "runtime_generation": "runtime_gen_1284",
+            "patch_id": "patch_arrival_bath_move_002",
+            "source_apply_request_id": "apply_request_arrival_bath_move_002"
+        },
+        "separate_patch_executor_invocation_allowed": true,
+        "executor_invocation_performed": false,
+        "executor_queue_submission_performed": false,
         "apply_request_submitted": false,
         "patch_application_performed": false,
         "verification_allowed": false,
@@ -2748,6 +3024,107 @@ fn assert_runtime_executor_patch_application_gate_preflight_read_only(preflight:
     );
     assert_eq!(
         preflight["agent_action_contract"]["do_not_persist_submission_token"],
+        true
+    );
+}
+
+fn assert_runtime_executor_patch_executor_invocation_preflight_read_only(preflight: &Value) {
+    assert_eq!(preflight["writes_state"], false);
+    assert_eq!(preflight["store_access_required"], false);
+    assert_eq!(preflight["mcp_tool_registered"], false);
+    assert_eq!(
+        preflight["executor_invocation_performed_by_this_tool"],
+        false
+    );
+    assert_eq!(
+        preflight["executor_queue_submission_performed_by_this_tool"],
+        false
+    );
+    assert_eq!(preflight["apply_request_submitted_by_this_tool"], false);
+    assert_eq!(preflight["patch_application_performed_by_this_tool"], false);
+    assert_eq!(preflight["guardrails"]["read_only"], true);
+    assert_eq!(preflight["guardrails"]["mutation_surface"], "none");
+    assert_eq!(preflight["guardrails"]["writes_state"], false);
+    assert_eq!(preflight["guardrails"]["store_access_required"], false);
+    assert_eq!(preflight["guardrails"]["mcp_tool_registered"], false);
+    assert_eq!(
+        preflight["guardrails"]["requires_ready_patch_application_gate_preflight"],
+        true
+    );
+    assert_eq!(
+        preflight["guardrails"]["requires_explicit_patch_executor_invocation_decision"],
+        true
+    );
+    assert_eq!(
+        preflight["guardrails"]["patch_executor_invocation_authority_scope"],
+        "separate_patch_executor_invocation_only"
+    );
+    assert_eq!(preflight["guardrails"]["invokes_patch_executor"], false);
+    assert_eq!(preflight["guardrails"]["submits_executor_queue"], false);
+    assert_eq!(preflight["guardrails"]["submits_apply_request"], false);
+    assert_eq!(preflight["guardrails"]["applies_patch"], false);
+    assert_eq!(preflight["guardrails"]["verifies_post_apply_result"], false);
+    assert_eq!(preflight["guardrails"]["outcome_ingestion_allowed"], false);
+    assert_eq!(preflight["guardrails"]["persists_submission_token"], false);
+    assert_eq!(
+        preflight["guardrails"]["feedback_changes_world_verdict_allowed"],
+        false
+    );
+    assert_eq!(
+        preflight["patch_executor_invocation_request"]
+            ["executor_invocation_performed_by_this_tool"],
+        false
+    );
+    assert_eq!(
+        preflight["patch_executor_invocation_request"]["executor_queue_submission_performed"],
+        false
+    );
+    assert_eq!(
+        preflight["patch_executor_invocation_request"]["apply_request_submitted"],
+        false
+    );
+    assert_eq!(
+        preflight["patch_executor_invocation_request"]["patch_application_performed"],
+        false
+    );
+    assert_eq!(
+        preflight["patch_executor_invocation_request"]["verification_performed"],
+        false
+    );
+    assert_eq!(
+        preflight["patch_executor_invocation_request"]["outcome_ingestion_allowed"],
+        false
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_invoke_patch_executor"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_submit_executor_queue"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_submit_apply_request"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_apply_patch"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_ingest_outcome"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_write_memory"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_rewrite_world_verdict"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_verify_post_apply_result"],
         true
     );
 }

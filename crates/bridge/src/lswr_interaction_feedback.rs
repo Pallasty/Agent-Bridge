@@ -42,6 +42,10 @@ pub const LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_APPLICATION_GATE_PREF
     "agent_bridge.lswr.interaction_feedback_runtime_executor_patch_application_gate_preflight.v0";
 pub const LSWR_RUNTIME_EXECUTOR_PATCH_APPLICATION_GATE_DECISION_SCHEMA: &str =
     "agent_bridge.lswr.runtime_executor.patch_application_gate_decision.v0";
+pub const LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_EXECUTOR_INVOCATION_PREFLIGHT_SCHEMA:
+    &str = "agent_bridge.lswr.interaction_feedback_runtime_executor_patch_executor_invocation_preflight.v0";
+pub const LSWR_RUNTIME_EXECUTOR_PATCH_EXECUTOR_INVOCATION_DECISION_SCHEMA: &str =
+    "agent_bridge.lswr.runtime_executor.patch_executor_invocation_decision.v0";
 
 const EXPECTED_EVENT_TYPES: [&str; 8] = [
     "human.select",
@@ -3066,6 +3070,425 @@ pub fn render_interaction_feedback_runtime_executor_patch_application_gate_prefl
     lines.join("\n")
 }
 
+pub fn build_interaction_feedback_runtime_executor_patch_executor_invocation_preflight(
+    input: &Value,
+) -> Value {
+    let (input_kind, gate_preflight, invocation_decision) =
+        extract_runtime_executor_patch_executor_invocation_preflight_input(input);
+    let gate_schema_ok = gate_preflight.get("schema").and_then(Value::as_str)
+        == Some(LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_APPLICATION_GATE_PREFLIGHT_SCHEMA);
+    let decision_schema_ok = invocation_decision.get("schema").and_then(Value::as_str)
+        == Some(LSWR_RUNTIME_EXECUTOR_PATCH_EXECUTOR_INVOCATION_DECISION_SCHEMA);
+    let gate = &gate_preflight["patch_application_gate"];
+    let gate_guardrails = &gate_preflight["guardrails"];
+    let gate_contract = &gate_preflight["agent_action_contract"];
+    let approved_scope = &invocation_decision["approved_scope"];
+
+    let mut failure_reasons = Vec::new();
+    if !gate_schema_ok {
+        failure_reasons
+            .push("runtime_executor_patch_application_gate_preflight_required".to_string());
+    }
+    if gate_schema_ok
+        && gate_preflight["patch_application_gate_preflight_verdict"]
+            != "ready_for_separate_executor_invocation"
+    {
+        failure_reasons.push("source_patch_application_gate_preflight_not_ready".to_string());
+    }
+    if gate_schema_ok && gate_preflight["source_world_verdict"] != "not_verified" {
+        failure_reasons.push("source_world_verdict_must_remain_not_verified".to_string());
+    }
+    if gate_schema_ok && gate["ready_for_separate_patch_executor_invocation"] != true {
+        failure_reasons.push("source_gate_not_ready_for_patch_executor_invocation".to_string());
+    }
+    if gate_schema_ok && gate["separate_patch_executor_invocation_allowed_after_this_gate"] != true
+    {
+        failure_reasons.push("source_gate_does_not_allow_patch_executor_invocation".to_string());
+    }
+    if gate_schema_ok && gate["executor_invocation_performed_by_this_tool"] != false {
+        failure_reasons.push("source_gate_must_not_have_invoked_executor".to_string());
+    }
+    if gate_schema_ok && gate["apply_request_submitted"] != false {
+        failure_reasons.push("source_gate_must_not_submit_apply_request".to_string());
+    }
+    if gate_schema_ok && gate["patch_application_performed"] != false {
+        failure_reasons.push("source_gate_must_not_apply_patch".to_string());
+    }
+    if gate_schema_ok && gate["verification_performed"] != false {
+        failure_reasons.push("source_gate_must_not_verify".to_string());
+    }
+    if gate_schema_ok && gate["outcome_ingestion_allowed"] != false {
+        failure_reasons.push("source_gate_must_not_allow_ingestion".to_string());
+    }
+    if gate_schema_ok
+        && (gate_guardrails["read_only"] != true
+            || gate_guardrails["writes_state"] != false
+            || gate_guardrails["invokes_patch_executor"] != false
+            || gate_guardrails["submits_apply_request"] != false
+            || gate_guardrails["applies_patch"] != false
+            || gate_guardrails["verifies_post_apply_result"] != false
+            || gate_guardrails["outcome_ingestion_allowed"] != false)
+    {
+        failure_reasons.push("source_gate_guardrails_not_read_only".to_string());
+    }
+    if gate_schema_ok
+        && (gate_contract["may_invoke_separate_patch_executor_after_gate"] != true
+            || gate_contract["do_not_invoke_patch_executor"] != true
+            || gate_contract["do_not_submit_apply_request"] != true
+            || gate_contract["do_not_apply_patch"] != true
+            || gate_contract["do_not_ingest_outcome"] != true
+            || gate_contract["do_not_write_memory"] != true
+            || gate_contract["require_post_apply_verification_after_application"] != true
+            || gate_contract["require_separate_outcome_ingestion_review"] != true)
+    {
+        failure_reasons.push("source_gate_contract_not_protective".to_string());
+    }
+    if !decision_schema_ok {
+        failure_reasons.push("explicit_patch_executor_invocation_decision_required".to_string());
+    }
+    if decision_schema_ok && invocation_decision["decision"] != "approved" {
+        failure_reasons.push("patch_executor_invocation_decision_must_be_approved".to_string());
+    }
+    if decision_schema_ok
+        && invocation_decision["requested_authority"] != "separate_patch_executor_invocation_only"
+    {
+        failure_reasons
+            .push("patch_executor_invocation_authority_scope_not_invocation_only".to_string());
+    }
+    if decision_schema_ok
+        && invocation_decision["separate_patch_executor_invocation_allowed"] != true
+    {
+        failure_reasons
+            .push("patch_executor_invocation_decision_must_allow_invocation".to_string());
+    }
+    if decision_schema_ok && invocation_decision["operator_id"].as_str().is_none() {
+        failure_reasons.push("patch_executor_invocation_operator_id_required".to_string());
+    }
+    if decision_schema_ok && invocation_decision["decision_id"].as_str().is_none() {
+        failure_reasons.push("patch_executor_invocation_decision_id_required".to_string());
+    }
+    if decision_schema_ok && invocation_decision["expires_at"].as_str().is_none() {
+        failure_reasons.push("patch_executor_invocation_decision_expiry_required".to_string());
+    }
+    if decision_schema_ok && invocation_decision["approved_at"].as_str().is_none() {
+        failure_reasons.push("patch_executor_invocation_decision_timestamp_required".to_string());
+    }
+    if decision_schema_ok && invocation_decision["executor_invocation_performed"] != false {
+        failure_reasons
+            .push("patch_executor_invocation_decision_must_not_invoke_executor".to_string());
+    }
+    if decision_schema_ok && invocation_decision["executor_queue_submission_performed"] != false {
+        failure_reasons
+            .push("patch_executor_invocation_decision_must_not_submit_queue".to_string());
+    }
+    if decision_schema_ok && invocation_decision["apply_request_submitted"] != false {
+        failure_reasons
+            .push("patch_executor_invocation_decision_must_not_submit_apply_request".to_string());
+    }
+    if decision_schema_ok && invocation_decision["patch_application_performed"] != false {
+        failure_reasons.push("patch_executor_invocation_decision_must_not_apply_patch".to_string());
+    }
+    if decision_schema_ok && invocation_decision["verification_allowed"] != false {
+        failure_reasons
+            .push("patch_executor_invocation_decision_must_not_allow_verification".to_string());
+    }
+    if decision_schema_ok && invocation_decision["outcome_ingestion_allowed"] != false {
+        failure_reasons
+            .push("patch_executor_invocation_decision_must_not_allow_ingestion".to_string());
+    }
+    if decision_schema_ok && invocation_decision["writes_state"] != false {
+        failure_reasons.push("patch_executor_invocation_decision_must_not_write_state".to_string());
+    }
+    if gate_schema_ok && decision_schema_ok && approved_scope["gate_id"] != gate["gate_id"] {
+        failure_reasons.push("patch_executor_invocation_gate_scope_mismatch".to_string());
+    }
+    if gate_schema_ok
+        && decision_schema_ok
+        && approved_scope["gate_decision_id"] != gate["gate_decision_id"]
+    {
+        failure_reasons.push("patch_executor_invocation_gate_decision_scope_mismatch".to_string());
+    }
+    if gate_schema_ok
+        && decision_schema_ok
+        && approved_scope["gate_idempotency_key"] != gate["idempotency_key"]
+    {
+        failure_reasons
+            .push("patch_executor_invocation_gate_idempotency_scope_mismatch".to_string());
+    }
+    if gate_schema_ok
+        && decision_schema_ok
+        && approved_scope["operator_submission_token_id"] != gate["operator_submission_token_id"]
+    {
+        failure_reasons
+            .push("patch_executor_invocation_operator_submission_token_scope_mismatch".to_string());
+    }
+    if gate_schema_ok && decision_schema_ok && approved_scope["world_id"] != gate["world_id"] {
+        failure_reasons.push("patch_executor_invocation_world_scope_mismatch".to_string());
+    }
+    if gate_schema_ok && decision_schema_ok && approved_scope["branch_id"] != gate["branch_id"] {
+        failure_reasons.push("patch_executor_invocation_branch_scope_mismatch".to_string());
+    }
+    if gate_schema_ok
+        && decision_schema_ok
+        && approved_scope["runtime_generation"] != gate["runtime_generation"]
+    {
+        failure_reasons
+            .push("patch_executor_invocation_runtime_generation_scope_mismatch".to_string());
+    }
+    if gate_schema_ok && decision_schema_ok && approved_scope["patch_id"] != gate["patch_id"] {
+        failure_reasons.push("patch_executor_invocation_patch_scope_mismatch".to_string());
+    }
+    if gate_schema_ok
+        && decision_schema_ok
+        && approved_scope["source_apply_request_id"] != gate["source_apply_request_id"]
+    {
+        failure_reasons.push("patch_executor_invocation_apply_request_scope_mismatch".to_string());
+    }
+
+    let ready = failure_reasons.is_empty();
+    let reason = if ready {
+        "patch_executor_invocation_preflight_ready_for_invocation_request".to_string()
+    } else {
+        failure_reasons
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "patch_executor_invocation_preflight_blocked".to_string())
+    };
+    let invocation_request_id = if ready {
+        patch_executor_invocation_request_id_for_patch(&gate["patch_id"])
+    } else {
+        Value::Null
+    };
+    let invocation_idempotency_key = if ready {
+        patch_executor_invocation_idempotency_key(
+            &gate["patch_id"],
+            &gate["runtime_generation"],
+            &gate["gate_id"],
+            &invocation_decision["decision_id"],
+        )
+    } else {
+        Value::Null
+    };
+
+    json!({
+        "schema": LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_EXECUTOR_INVOCATION_PREFLIGHT_SCHEMA,
+        "input_kind": input_kind,
+        "source_schema": gate_preflight.get("schema").cloned().unwrap_or(Value::Null),
+        "source_patch_application_gate_preflight_verdict": gate_preflight
+            .get("patch_application_gate_preflight_verdict")
+            .cloned()
+            .unwrap_or(Value::Null),
+        "source_world_verdict": gate_preflight
+            .get("source_world_verdict")
+            .cloned()
+            .unwrap_or(Value::Null),
+        "patch_executor_invocation_decision_schema": invocation_decision.get("schema").cloned().unwrap_or(Value::Null),
+        "patch_executor_invocation_preflight_verdict": if ready { "ready_for_separate_patch_executor_invocation_request" } else { "blocked" },
+        "status": if ready { "ready" } else { "blocked" },
+        "reason": reason,
+        "failure_reasons": unique_strings(failure_reasons),
+        "guardrails": runtime_executor_patch_executor_invocation_preflight_guardrails(),
+        "input_contract": {
+            "accepted_inputs": ["patch_application_gate_preflight_with_patch_executor_invocation_decision", "wrapper_with_gate_preflight_and_invocation_decision"],
+            "requires_ready_patch_application_gate_preflight": true,
+            "requires_explicit_patch_executor_invocation_decision": true,
+            "patch_executor_invocation_authority_scope": "separate_patch_executor_invocation_only",
+            "emits_invocation_request_envelope": ready,
+            "invokes_patch_executor": false,
+            "submits_executor_queue": false,
+            "submits_apply_request": false,
+            "applies_patch": false
+        },
+        "patch_executor_invocation_request": {
+            "request_id": invocation_request_id,
+            "target_executor": if ready { json!("separate_lswr_patch_executor") } else { Value::Null },
+            "request_type": if ready { json!("patch_executor_invocation_request") } else { Value::Null },
+            "invocation_decision_id": if ready { invocation_decision.get("decision_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "operator_id": if ready { invocation_decision.get("operator_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "approved_at": if ready { invocation_decision.get("approved_at").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "expires_at": if ready { invocation_decision.get("expires_at").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "patch_application_gate_id": if ready { gate.get("gate_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "patch_application_gate_decision_id": if ready { gate.get("gate_decision_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "patch_application_gate_idempotency_key": if ready { gate.get("idempotency_key").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "operator_submission_token_id": if ready { gate.get("operator_submission_token_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "operator_submission_decision_id": if ready { gate.get("operator_submission_decision_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "lookup_evidence_id": if ready { gate.get("lookup_evidence_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "source_apply_request_id": if ready { gate.get("source_apply_request_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "world_id": if ready { gate.get("world_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "branch_id": if ready { gate.get("branch_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "runtime_generation": if ready { gate.get("runtime_generation").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "patch_id": if ready { gate.get("patch_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "target_entities": if ready { gate.get("target_entities").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "idempotency_key": invocation_idempotency_key,
+            "replay_guard": {
+                "idempotency_key": if ready {
+                    patch_executor_invocation_idempotency_key(
+                        &gate["patch_id"],
+                        &gate["runtime_generation"],
+                        &gate["gate_id"],
+                        &invocation_decision["decision_id"],
+                    )
+                } else {
+                    Value::Null
+                },
+                "requires_fresh_g3_patch_application_gate_preflight": true,
+                "runtime_generation_required": ready,
+                "single_use_intent": ready
+            },
+            "ready_for_separate_patch_executor_invocation_request": ready,
+            "invocation_request_emitted_by_this_tool": ready,
+            "executor_invocation_performed_by_this_tool": false,
+            "executor_queue_submission_performed": false,
+            "apply_request_submitted": false,
+            "patch_application_performed": false,
+            "verification_performed": false,
+            "outcome_ingestion_allowed": false
+        },
+        "next_allowed_gate": if ready { "separate_patch_executor_runtime_application_evidence" } else { "repair_patch_executor_invocation_input" },
+        "agent_action_contract": {
+            "mode": "runtime_executor_patch_executor_invocation_preflight_only",
+            "may_emit_invocation_request_envelope_after_gate": ready,
+            "do_not_invoke_patch_executor": true,
+            "do_not_submit_executor_queue": true,
+            "do_not_submit_apply_request": true,
+            "do_not_apply_patch": true,
+            "do_not_ingest_outcome": true,
+            "do_not_write_memory": true,
+            "do_not_rewrite_world_verdict": true,
+            "do_not_verify_post_apply_result": true,
+            "require_runtime_application_evidence_after_invocation": true,
+            "require_post_apply_verification_after_application": true,
+            "require_separate_outcome_ingestion_review": true
+        },
+        "source_patch_application_gate_preflight": if gate_schema_ok { gate_preflight } else { Value::Null },
+        "patch_executor_invocation_decision": if decision_schema_ok { invocation_decision } else { Value::Null },
+        "invocation_request_emitted_by_this_tool": ready,
+        "executor_invocation_performed_by_this_tool": false,
+        "executor_queue_submission_performed_by_this_tool": false,
+        "apply_request_submitted_by_this_tool": false,
+        "patch_application_performed_by_this_tool": false,
+        "writes_state": false,
+        "store_access_required": false,
+        "mcp_tool_registered": false,
+        "note": "pure G4 patch-executor invocation preflight: emits a reviewable invocation request envelope without invoking an executor, submitting a queue item, applying, verifying, ingesting, or mutating"
+    })
+}
+
+pub fn render_interaction_feedback_runtime_executor_patch_executor_invocation_preflight(
+    preflight: &Value,
+) -> String {
+    let mut lines = Vec::new();
+    lines.push(
+        "# LSWR Interaction Feedback Runtime Executor Patch Executor Invocation Preflight"
+            .to_string(),
+    );
+    lines.push(String::new());
+    push_markdown_kv(&mut lines, "schema", &preflight["schema"]);
+    push_markdown_kv(
+        &mut lines,
+        "patch_executor_invocation_preflight_verdict",
+        &preflight["patch_executor_invocation_preflight_verdict"],
+    );
+    push_markdown_kv(&mut lines, "status", &preflight["status"]);
+    push_markdown_kv(&mut lines, "reason", &preflight["reason"]);
+    push_markdown_kv(
+        &mut lines,
+        "source_patch_application_gate_preflight_verdict",
+        &preflight["source_patch_application_gate_preflight_verdict"],
+    );
+    push_markdown_kv(
+        &mut lines,
+        "patch_executor_invocation_decision_schema",
+        &preflight["patch_executor_invocation_decision_schema"],
+    );
+    push_markdown_kv(&mut lines, "failure_reasons", &preflight["failure_reasons"]);
+
+    lines.push(String::new());
+    lines.push("## Guardrails".to_string());
+    lines.push(String::new());
+    for key in [
+        "read_only",
+        "mutation_surface",
+        "writes_state",
+        "store_access_required",
+        "mcp_tool_registered",
+        "requires_ready_patch_application_gate_preflight",
+        "requires_explicit_patch_executor_invocation_decision",
+        "invokes_patch_executor",
+        "submits_executor_queue",
+        "submits_apply_request",
+        "applies_patch",
+        "verifies_post_apply_result",
+        "outcome_ingestion_allowed",
+    ] {
+        push_markdown_kv(&mut lines, key, &preflight["guardrails"][key]);
+    }
+
+    lines.push(String::new());
+    lines.push("## Patch Executor Invocation Request".to_string());
+    lines.push(String::new());
+    for key in [
+        "request_id",
+        "target_executor",
+        "request_type",
+        "invocation_decision_id",
+        "operator_id",
+        "approved_at",
+        "expires_at",
+        "patch_application_gate_id",
+        "patch_application_gate_decision_id",
+        "patch_application_gate_idempotency_key",
+        "operator_submission_token_id",
+        "operator_submission_decision_id",
+        "lookup_evidence_id",
+        "source_apply_request_id",
+        "world_id",
+        "branch_id",
+        "runtime_generation",
+        "patch_id",
+        "target_entities",
+        "idempotency_key",
+        "ready_for_separate_patch_executor_invocation_request",
+        "invocation_request_emitted_by_this_tool",
+        "executor_invocation_performed_by_this_tool",
+        "executor_queue_submission_performed",
+        "apply_request_submitted",
+        "patch_application_performed",
+        "verification_performed",
+        "outcome_ingestion_allowed",
+    ] {
+        push_markdown_kv(
+            &mut lines,
+            key,
+            &preflight["patch_executor_invocation_request"][key],
+        );
+    }
+
+    lines.push(String::new());
+    lines.push("## Agent Action Contract".to_string());
+    lines.push(String::new());
+    for key in [
+        "mode",
+        "may_emit_invocation_request_envelope_after_gate",
+        "do_not_invoke_patch_executor",
+        "do_not_submit_executor_queue",
+        "do_not_submit_apply_request",
+        "do_not_apply_patch",
+        "do_not_ingest_outcome",
+        "do_not_write_memory",
+        "do_not_rewrite_world_verdict",
+        "do_not_verify_post_apply_result",
+        "require_runtime_application_evidence_after_invocation",
+        "require_post_apply_verification_after_application",
+        "require_separate_outcome_ingestion_review",
+    ] {
+        push_markdown_kv(&mut lines, key, &preflight["agent_action_contract"][key]);
+    }
+
+    lines.push(String::new());
+    lines.join("\n")
+}
+
 pub fn build_interaction_feedback_readback(fixture: &Value) -> Value {
     let selected_entities =
         fixture["interaction_state_after"]["active_view"]["selected_entities"].clone();
@@ -3634,6 +4057,53 @@ fn extract_runtime_executor_patch_application_gate_preflight_input(
     }
 }
 
+fn extract_runtime_executor_patch_executor_invocation_preflight_input(
+    input: &Value,
+) -> (&'static str, Value, Value) {
+    if input.get("schema").and_then(Value::as_str)
+        == Some(LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_APPLICATION_GATE_PREFLIGHT_SCHEMA)
+    {
+        return (
+            "runtime_executor_patch_application_gate_preflight",
+            input.clone(),
+            Value::Null,
+        );
+    }
+
+    let gate_preflight = input
+        .get("patch_application_gate_preflight")
+        .or_else(|| input.get("runtime_executor_patch_application_gate_preflight"))
+        .or_else(|| input.get("gate_preflight"))
+        .or_else(|| input.get("preflight"))
+        .cloned()
+        .unwrap_or_else(|| input.clone());
+    let invocation_decision = input
+        .get("patch_executor_invocation_decision")
+        .or_else(|| input.get("executor_invocation_decision"))
+        .or_else(|| input.get("invocation_decision"))
+        .cloned()
+        .unwrap_or(Value::Null);
+
+    if input.get("patch_application_gate_preflight").is_some()
+        || input
+            .get("runtime_executor_patch_application_gate_preflight")
+            .is_some()
+        || input.get("gate_preflight").is_some()
+        || input.get("preflight").is_some()
+        || input.get("patch_executor_invocation_decision").is_some()
+        || input.get("executor_invocation_decision").is_some()
+        || input.get("invocation_decision").is_some()
+    {
+        (
+            "patch_application_gate_preflight_with_patch_executor_invocation_decision_wrapper",
+            gate_preflight,
+            invocation_decision,
+        )
+    } else {
+        ("invalid_input", gate_preflight, invocation_decision)
+    }
+}
+
 fn validate_argument_context(argument_context: Option<&Value>) -> Value {
     let Some(context) = argument_context else {
         return json!({
@@ -3845,6 +4315,30 @@ fn runtime_executor_patch_application_gate_preflight_guardrails() -> Value {
     })
 }
 
+fn runtime_executor_patch_executor_invocation_preflight_guardrails() -> Value {
+    json!({
+        "read_only": true,
+        "mutation_surface": "none",
+        "writes_state": false,
+        "store_access_required": false,
+        "mcp_tool_registered": false,
+        "queries_live_runtime": false,
+        "requires_ready_patch_application_gate_preflight": true,
+        "requires_explicit_patch_executor_invocation_decision": true,
+        "patch_executor_invocation_authority_scope": "separate_patch_executor_invocation_only",
+        "emits_invocation_request_envelope": true,
+        "invokes_patch_executor": false,
+        "submits_executor_queue": false,
+        "submits_apply_request": false,
+        "applies_patch": false,
+        "verifies_post_apply_result": false,
+        "outcome_ingestion_allowed": false,
+        "persists_submission_token": false,
+        "feedback_changes_world_verdict_allowed": false,
+        "runtime_executor_patch_executor_invocation_preflight_only": true
+    })
+}
+
 fn apply_request_id_for_patch(patch_id: &Value) -> Value {
     let Some(patch_id) = patch_id.as_str() else {
         return Value::Null;
@@ -3930,6 +4424,33 @@ fn patch_application_gate_idempotency_key(
     };
     json!(format!(
         "{patch_id}/{runtime_generation}/{token_id}/{decision_id}"
+    ))
+}
+
+fn patch_executor_invocation_request_id_for_patch(patch_id: &Value) -> Value {
+    let Some(patch_id) = patch_id.as_str() else {
+        return Value::Null;
+    };
+    let suffix = patch_id.strip_prefix("patch_").unwrap_or(patch_id);
+    json!(format!("patch_executor_invocation_{suffix}"))
+}
+
+fn patch_executor_invocation_idempotency_key(
+    patch_id: &Value,
+    runtime_generation: &Value,
+    gate_id: &Value,
+    decision_id: &Value,
+) -> Value {
+    let (Some(patch_id), Some(runtime_generation), Some(gate_id), Some(decision_id)) = (
+        patch_id.as_str(),
+        runtime_generation.as_str(),
+        gate_id.as_str(),
+        decision_id.as_str(),
+    ) else {
+        return Value::Null;
+    };
+    json!(format!(
+        "{patch_id}/{runtime_generation}/{gate_id}/{decision_id}"
     ))
 }
 

@@ -274,10 +274,11 @@ Still not accepted:
 
 ## 6. Next Slice
 
-The next safe slice is separate patch executor invocation design.
+The next safe slice is
+[separate patch executor invocation preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_EXECUTOR_INVOCATION_PREFLIGHT_2026_06_16.md).
 
 That slice must consume the accepted G3 readiness packet without treating it as
 proof that invocation, application, verification, ingestion, or verdict rewrite
-already happened. The invocation path must still distinguish executor
-invocation, runtime application evidence, G4 post-apply verification, and G5
-outcome ingestion.
+already happened. The invocation path must still distinguish emitting a
+reviewable invocation request envelope, executor queue submission, runtime
+application evidence, post-apply verification, and outcome ingestion.

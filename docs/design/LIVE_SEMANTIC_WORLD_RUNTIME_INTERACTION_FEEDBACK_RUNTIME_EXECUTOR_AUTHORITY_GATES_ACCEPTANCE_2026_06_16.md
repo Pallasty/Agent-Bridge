@@ -140,7 +140,9 @@ The G3 read-only patch application gate preflight is accepted separately:
 - [Interaction feedback runtime executor patch application gate preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_APPLICATION_GATE_PREFLIGHT_2026_06_16.md)
 - [Interaction feedback runtime executor patch application gate preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_APPLICATION_GATE_PREFLIGHT_ACCEPTANCE_2026_06_16.md)
 
-The next safe slice is separate patch executor invocation design. It must remain
-separate from patch application evidence, post-apply verification, outcome
-ingestion, store writes, memory writes, #94 writes, verdict rewrite, and MCP
-exposure unless those surfaces are accepted by later gates.
+The next safe slice is
+[separate patch executor invocation preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_EXECUTOR_INVOCATION_PREFLIGHT_2026_06_16.md).
+It must remain separate from executor queue submission, patch application
+evidence, post-apply verification, outcome ingestion, store writes, memory
+writes, #94 writes, verdict rewrite, and MCP exposure unless those surfaces are
+accepted by later gates.

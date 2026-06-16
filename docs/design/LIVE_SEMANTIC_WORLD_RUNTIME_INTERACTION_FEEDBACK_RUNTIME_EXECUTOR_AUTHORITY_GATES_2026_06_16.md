@@ -304,9 +304,10 @@ Recommended narrow slices:
    application.
 4. Add G3 patch application gate preflight, still without invoking or applying:
    [runtime executor patch application gate preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_APPLICATION_GATE_PREFLIGHT_2026_06_16.md).
-5. Add separate patch executor invocation design with dry-run, idempotency,
-   lock, and rollback evidence.
-6. Add G4 post-apply verification with expected-effect checks and presentation
+5. Add separate patch executor invocation preflight with dry-run, idempotency,
+   lock, and rollback evidence:
+   [runtime executor patch executor invocation preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_EXECUTOR_INVOCATION_PREFLIGHT_2026_06_16.md).
+6. Add post-apply verification with expected-effect checks and presentation
    evidence.
 7. Add G5 outcome ingestion only after the destination contract is accepted.
 
