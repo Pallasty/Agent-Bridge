@@ -8,6 +8,7 @@ Parent documents:
 - [Interaction feedback patch apply request boundary acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_PATCH_APPLY_REQUEST_BOUNDARY_ACCEPTANCE_2026_06_16.md)
 - [Interaction feedback runtime executor design preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DESIGN_PREFLIGHT_ACCEPTANCE_2026_06_16.md)
 - [Interaction feedback runtime executor authority gates](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_AUTHORITY_GATES_2026_06_16.md)
+- [Interaction feedback runtime executor operator submission token preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_OPERATOR_SUBMISSION_TOKEN_PREFLIGHT_ACCEPTANCE_2026_06_16.md)
 
 Forum anchors:
 
@@ -121,14 +122,19 @@ Still not accepted:
 - verification verdict rewrite;
 - a general-purpose autonomous executor.
 
-## 5. Accepted G1 And Next Slice
+## 5. Accepted G1/G2 And Next Slice
 
 The G1 read-only live runtime lookup preflight is accepted separately:
 
 - [Interaction feedback runtime executor live lookup preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_LIVE_LOOKUP_PREFLIGHT_2026_06_16.md)
 - [Interaction feedback runtime executor live lookup preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_LIVE_LOOKUP_PREFLIGHT_ACCEPTANCE_2026_06_16.md)
 
-The next safe slice is G2 operator submission token design. That slice should
-consume accepted G1 lookup evidence and produce scoped operator authority
-without submission, mutation, verification, ingestion, store writes, memory
-writes, #94 writes, or MCP exposure.
+The G2 read-only operator submission token preflight is accepted separately:
+
+- [Interaction feedback runtime executor operator submission token preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_OPERATOR_SUBMISSION_TOKEN_PREFLIGHT_2026_06_16.md)
+- [Interaction feedback runtime executor operator submission token preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_OPERATOR_SUBMISSION_TOKEN_PREFLIGHT_ACCEPTANCE_2026_06_16.md)
+
+The next safe slice is G3 patch application design. G3 is the first mutating
+gate, so it must remain separate from post-apply verification, outcome
+ingestion, store writes, memory writes, #94 writes, verdict rewrite, and MCP
+exposure unless those surfaces are accepted by later gates.

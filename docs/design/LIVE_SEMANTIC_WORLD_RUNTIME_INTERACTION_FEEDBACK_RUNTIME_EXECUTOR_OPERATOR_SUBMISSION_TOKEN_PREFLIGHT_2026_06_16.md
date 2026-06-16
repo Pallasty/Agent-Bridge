@@ -1,6 +1,6 @@
 # Live Semantic World Runtime - Interaction Feedback Runtime Executor Operator Submission Token Preflight
 
-**2026-06-16 - status: implemented pending acceptance / read-only G2**
+**2026-06-16 - status: ACCEPTED_G2_OPERATOR_SUBMISSION_TOKEN_PREFLIGHT_ONLY**
 
 Parent documents:
 
@@ -9,10 +9,12 @@ Parent documents:
 - [Interaction feedback runtime executor authority gates acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_AUTHORITY_GATES_ACCEPTANCE_2026_06_16.md)
 - [Interaction feedback runtime executor live lookup preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_LIVE_LOOKUP_PREFLIGHT_2026_06_16.md)
 - [Interaction feedback runtime executor live lookup preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_LIVE_LOOKUP_PREFLIGHT_ACCEPTANCE_2026_06_16.md)
+- [Interaction feedback runtime executor operator submission token preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_OPERATOR_SUBMISSION_TOKEN_PREFLIGHT_ACCEPTANCE_2026_06_16.md)
 
 Forum anchors:
 
 - `#102` post `#2437`: G2 operator submission token design/preflight claim.
+- `#102` post `#3191`: G2 acceptance closeout claim and verification summary.
 
 ## 0. Purpose
 
@@ -183,10 +185,11 @@ Still not accepted:
 - #94 ingestion;
 - verification verdict rewrite.
 
-## 7. Next Slice
+## 7. Acceptance And Next Slice
 
-The next safe slice is acceptance review for this G2 token preflight.
+This G2 read-only token-candidate preflight is accepted by
+[runtime executor operator submission token preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_OPERATOR_SUBMISSION_TOKEN_PREFLIGHT_ACCEPTANCE_2026_06_16.md).
 
-After acceptance, G3 patch application design should remain separate. It must
-consume G1 evidence and the G2 token candidate without treating either as
-permission to mutate until the patch-application gate itself is reviewed.
+The next safe slice is G3 patch application design. It must consume G1
+evidence and the G2 token candidate without treating either as permission to
+mutate until the patch-application gate itself is reviewed.

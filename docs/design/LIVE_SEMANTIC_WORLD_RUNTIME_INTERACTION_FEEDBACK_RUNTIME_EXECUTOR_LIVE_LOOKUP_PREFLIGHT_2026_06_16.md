@@ -9,6 +9,7 @@ Parent documents:
 - [Interaction feedback runtime executor authority gates](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_AUTHORITY_GATES_2026_06_16.md)
 - [Interaction feedback runtime executor authority gates acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_AUTHORITY_GATES_ACCEPTANCE_2026_06_16.md)
 - [Interaction feedback runtime executor live lookup preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_LIVE_LOOKUP_PREFLIGHT_ACCEPTANCE_2026_06_16.md)
+- [Interaction feedback runtime executor operator submission token preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_OPERATOR_SUBMISSION_TOKEN_PREFLIGHT_ACCEPTANCE_2026_06_16.md)
 
 Forum anchors:
 
@@ -173,11 +174,13 @@ Still not accepted:
 - #94 ingestion;
 - verification verdict rewrite.
 
-## 7. Next Slice
+## 7. Follow-Up Slice Status
 
 This G1 read-only preflight is accepted by
 [runtime executor live lookup preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_LIVE_LOOKUP_PREFLIGHT_ACCEPTANCE_2026_06_16.md).
 
-The next safe slice is G2 operator submission token design. It should remain
-separate from patch application and must consume G1 evidence without granting
-mutation.
+The G2 operator submission token preflight is accepted by
+[runtime executor operator submission token preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_OPERATOR_SUBMISSION_TOKEN_PREFLIGHT_ACCEPTANCE_2026_06_16.md).
+
+The next safe slice is G3 patch application design. It must remain separate
+from post-apply verification and outcome ingestion.
