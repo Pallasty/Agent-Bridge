@@ -123,12 +123,12 @@ Still not accepted:
 
 ## 5. Next Slice
 
-The next safe slice is G1 read-only live runtime lookup preflight.
-
-That slice should prove only that a target runtime can be queried and compared
-against the accepted design request without submission, mutation, verification,
-ingestion, store writes, memory writes, #94 writes, or MCP exposure.
-
-Follow-up G1 preflight:
+The G1 read-only live runtime lookup preflight is recorded separately:
 
 - [Interaction feedback runtime executor live lookup preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_LIVE_LOOKUP_PREFLIGHT_2026_06_16.md)
+- [Interaction feedback runtime executor live lookup preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_LIVE_LOOKUP_PREFLIGHT_ACCEPTANCE_2026_06_16.md)
+
+The next safe slice is G2 operator submission token design. That slice should
+consume accepted G1 lookup evidence and produce scoped operator authority
+without submission, mutation, verification, ingestion, store writes, memory
+writes, #94 writes, or MCP exposure.

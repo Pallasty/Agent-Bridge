@@ -1,6 +1,6 @@
 # Live Semantic World Runtime - Interaction Feedback Runtime Executor Live Lookup Preflight
 
-**2026-06-16 - status: implemented pending acceptance / read-only G1**
+**2026-06-16 - status: ACCEPTED_G1_LIVE_LOOKUP_PREFLIGHT_ONLY / read-only G1**
 
 Parent documents:
 
@@ -8,6 +8,7 @@ Parent documents:
 - [Interaction feedback runtime executor design preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DESIGN_PREFLIGHT_ACCEPTANCE_2026_06_16.md)
 - [Interaction feedback runtime executor authority gates](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_AUTHORITY_GATES_2026_06_16.md)
 - [Interaction feedback runtime executor authority gates acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_AUTHORITY_GATES_ACCEPTANCE_2026_06_16.md)
+- [Interaction feedback runtime executor live lookup preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_LIVE_LOOKUP_PREFLIGHT_ACCEPTANCE_2026_06_16.md)
 
 Forum anchors:
 
@@ -129,6 +130,11 @@ Verifier:
 
 - `scripts/verify-biocortex-retrieval-shadow.sh`
 
+Acceptance status:
+
+- `ACCEPTED_G1_LIVE_LOOKUP_PREFLIGHT_ONLY`
+- Accepted by [runtime executor live lookup preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_LIVE_LOOKUP_PREFLIGHT_ACCEPTANCE_2026_06_16.md).
+
 ## 5. Verification
 
 Targeted tests:
@@ -170,9 +176,11 @@ Still not accepted:
 - #94 ingestion;
 - verification verdict rewrite.
 
-## 7. Next Slice
+## 7. Acceptance
 
-The next safe slice is acceptance review for this G1 read-only preflight.
+Acceptance is recorded in
+[runtime executor live lookup preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_LIVE_LOOKUP_PREFLIGHT_ACCEPTANCE_2026_06_16.md).
 
-After acceptance, G2 operator submission token design should remain separate
-from patch application and must consume G1 evidence without granting mutation.
+The next safe slice is G2 operator submission token design. It should consume
+G1 evidence without granting patch application, post-apply verification,
+outcome ingestion, store writes, memory writes, #94 writes, or verdict rewrite.
