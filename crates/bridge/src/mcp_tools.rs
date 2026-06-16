@@ -23934,7 +23934,7 @@ async fn mcp_lifecycle_digest_payload(args: &Value, hub: &Hub) -> Value {
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
     let lifecycle_state = if readiness_warnings == 0 && failing_tool_count == 0 {
-        if include_runtime_health && runtime_status != "ok" {
+        if include_runtime_health && !mcp_lifecycle_runtime_status_ready(&runtime_status) {
             "stdio_ready_runtime_degraded"
         } else {
             "ready"
@@ -23989,6 +23989,10 @@ async fn mcp_lifecycle_digest_payload(args: &Value, hub: &Hub) -> Value {
         ),
         "note": "Borrowed from Theia-style lifecycle separation: profile/readiness/telemetry/runtime health are reported as separate axes. This tool is observational only."
     })
+}
+
+fn mcp_lifecycle_runtime_status_ready(runtime_status: &str) -> bool {
+    matches!(runtime_status, "ok" | "ready")
 }
 
 async fn mcp_lifecycle_tool_telemetry(hub: &Hub, window_secs: i64) -> Value {
@@ -24076,7 +24080,7 @@ fn mcp_lifecycle_recommendations(
             "Set include_runtime_health=true when diagnosing daemon-http or Palace availability."
                 .into(),
         );
-    } else if runtime_status != "ok" {
+    } else if !mcp_lifecycle_runtime_status_ready(runtime_status) {
         out.push("Treat daemon-http/Palace degradation as runtime health, separate from MCP stdio readiness.".into());
     }
     if out.is_empty() {
@@ -47032,6 +47036,21 @@ com.example.multiline, , \"Line one\nLine two\"\n";
                 .as_str()
                 .unwrap_or("")
                 .contains("include_runtime_health=true")));
+    }
+
+    #[test]
+    fn mcp_lifecycle_recommendations_treat_ready_runtime_as_healthy() {
+        let recommendations = mcp_lifecycle_recommendations(0, 0, true, "ready");
+
+        assert!(recommendations
+            .iter()
+            .any(|s| s.contains("MCP lifecycle axes look ready")));
+        assert!(!recommendations
+            .iter()
+            .any(|s| s.contains("runtime health")));
+
+        assert!(mcp_lifecycle_runtime_status_ready("ok"));
+        assert!(!mcp_lifecycle_runtime_status_ready("unknown"));
     }
 
     #[test]
