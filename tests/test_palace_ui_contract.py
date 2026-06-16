@@ -225,6 +225,16 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("strongest neighbor", html)
         self.assertIn("renderWorkbenchRelationSummary(m, graphNode)", html)
 
+    def test_node_workbench_explains_store_edges_hidden_from_current_view(self):
+        html = palace_html()
+
+        self.assertIn("function storeNeighborSummary(memory)", html)
+        self.assertIn("function renderHiddenStoreRelations(memory, visibleSummary)", html)
+        self.assertIn('id="workbench-hidden-store-relations"', html)
+        self.assertIn("memory.store_neighbors", html)
+        self.assertIn("outside the current graph view", html)
+        self.assertIn("renderHiddenStoreRelations(memory, summary)", html)
+
     def test_node_detail_lens_surfaces_dossier_evidence(self):
         html = palace_html()
 

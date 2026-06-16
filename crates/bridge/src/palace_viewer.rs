@@ -940,6 +940,44 @@ fn palace_content_preview(content: &str, max_chars: usize) -> String {
     preview
 }
 
+fn palace_store_neighbor_summary_value(key: &str, edges: &[ab_store::MemoryEdge]) -> Value {
+    let structural = edges
+        .iter()
+        .filter(|edge| edge.edge_type != "coactivation")
+        .count();
+    let coactivation = edges
+        .iter()
+        .filter(|edge| edge.edge_type == "coactivation")
+        .count();
+    let rows: Vec<Value> = edges
+        .iter()
+        .take(12)
+        .map(|edge| {
+            let (peer_key, direction) = if edge.from_key == key {
+                (edge.to_key.as_str(), "out")
+            } else if edge.to_key == key {
+                (edge.from_key.as_str(), "in")
+            } else {
+                (edge.to_key.as_str(), "external")
+            };
+            json!({
+                "peer_key": peer_key,
+                "edge_type": edge.edge_type,
+                "weight": (edge.weight * 1000.0).round() / 1000.0,
+                "direction": direction,
+            })
+        })
+        .collect();
+    json!({
+        "read_only": true,
+        "total": edges.len(),
+        "structural": structural,
+        "coactivation": coactivation,
+        "rows": rows,
+        "truncated": edges.len() > 12,
+    })
+}
+
 fn palace_candidate_allowed(source: &MemoryRecord, target: &MemoryRecord) -> bool {
     source.key != target.key
         && palace_memory_active(target)
@@ -2317,6 +2355,8 @@ async fn api_memory(
             let _ = s.store.record_coactivation(&coact_keys, None).await;
         }
 
+        let store_neighbors = s.store.memory_neighbors(&key).await.unwrap_or_default();
+
         return Ok(Json(json!({
             "key":          m.key,
             "kind":         m.kind,
@@ -2329,6 +2369,7 @@ async fn api_memory(
             "updated_at":   m.updated_at,
             "scope":        m.scope,
             "source":       "sqlite",
+            "store_neighbors": palace_store_neighbor_summary_value(&key, &store_neighbors),
         })));
     }
 
@@ -3722,6 +3763,34 @@ mod tests {
         assert_eq!(preview.skipped_existing_edges, 2);
         assert_eq!(preview.eligible_orphans, 1);
         assert_eq!(preview.would_link, 1);
+    }
+
+    #[test]
+    fn palace_store_neighbor_summary_counts_edges_outside_visible_graph() {
+        let edges = vec![
+            ab_store::MemoryEdge {
+                from_key: "memory_orphan".to_string(),
+                to_key: "memory_anchor".to_string(),
+                edge_type: "relates".to_string(),
+                weight: 1.0,
+            },
+            ab_store::MemoryEdge {
+                from_key: "memory_citation".to_string(),
+                to_key: "memory_orphan".to_string(),
+                edge_type: "coactivation".to_string(),
+                weight: 0.42,
+            },
+        ];
+
+        let summary = palace_store_neighbor_summary_value("memory_orphan", &edges);
+
+        assert_eq!(summary["read_only"], json!(true));
+        assert_eq!(summary["total"], json!(2));
+        assert_eq!(summary["structural"], json!(1));
+        assert_eq!(summary["coactivation"], json!(1));
+        assert_eq!(summary["rows"][0]["peer_key"], json!("memory_anchor"));
+        assert_eq!(summary["rows"][0]["edge_type"], json!("relates"));
+        assert_eq!(summary["rows"][1]["peer_key"], json!("memory_citation"));
     }
 
     #[test]

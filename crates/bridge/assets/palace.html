@@ -976,6 +976,53 @@
     #panel .relation-chip.structural .value { color: #c8c8d2; }
     #panel .relation-chip.coactivation .value { color: #5cc8c8; }
     #panel .relation-chip.strongest .value { color: #a87cff; }
+    #panel .relation-hidden-store {
+      margin-top: 8px;
+      padding: 8px;
+      border: 1px solid #252532;
+      border-radius: 4px;
+      background: #101018;
+    }
+    #panel .relation-hidden-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      color: #8a8a9c;
+      font-size: 9px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    #panel .relation-hidden-count {
+      color: #5cc8c8;
+      font-variant-numeric: tabular-nums;
+    }
+    #panel .relation-hidden-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      padding-top: 5px;
+      border-top: 1px solid #1f1f2a;
+      color: #d8d8e2;
+      font-size: 10px;
+      line-height: 1.35;
+    }
+    #panel .relation-hidden-row + .relation-hidden-row {
+      margin-top: 5px;
+    }
+    #panel .relation-hidden-peer {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #panel .relation-hidden-meta {
+      color: #8a8a9c;
+      font-size: 9px;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
     #panel .node-signal-lane {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -5160,8 +5207,26 @@ function workbenchNeighborRows(memory, graphNode) {
   return Array.from(byKey.values());
 }
 
+function storeNeighborSummary(memory) {
+  const raw = memory && memory.store_neighbors && typeof memory.store_neighbors === "object"
+    ? memory.store_neighbors
+    : {};
+  const count = value => {
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  };
+  return {
+    total: count(raw.total),
+    structural: count(raw.structural),
+    coactivation: count(raw.coactivation),
+    rows: Array.isArray(raw.rows) ? raw.rows : [],
+    truncated: !!raw.truncated,
+  };
+}
+
 function summarizeWorkbenchRelations(memory, graphNode) {
   const rows = workbenchNeighborRows(memory, graphNode);
+  const storeSummary = storeNeighborSummary(memory);
   const structuralCount = rows.filter(row =>
     Array.from(row.types).some(t => t !== "coactivation")
   ).length;
@@ -5179,8 +5244,10 @@ function summarizeWorkbenchRelations(memory, graphNode) {
       coactivationCount ? `${coactivationCount} coactivation` : null,
     ].filter(Boolean).join(" + ");
     lede = `${memory.kind || "memory"} reads as a ${role} node with ${mix || `${rows.length} linked`} relation${rows.length === 1 ? "" : "s"}.`;
+  } else if (storeSummary.total > 0) {
+    lede = `This memory has ${storeSummary.total} store edge${storeSummary.total === 1 ? "" : "s"} outside the current graph view.`;
   }
-  return { rows, structuralCount, coactivationCount, strongest, role, lede };
+  return { rows, structuralCount, coactivationCount, strongest, role, lede, storeSummary };
 }
 
 function nodeRoleLabel(graphData) {
@@ -5299,6 +5366,43 @@ function renderWorkbenchRelationSummary(memory, graphNode) {
         <span class="value" title="${escapeHTML(strongestTitle)}">${escapeHTML(strongestLabel)}</span>
       </div>
     </div>
+    ${renderHiddenStoreRelations(memory, summary)}
+  </div>`;
+}
+
+function renderHiddenStoreRelations(memory, visibleSummary) {
+  const store = storeNeighborSummary(memory);
+  const visibleRows = visibleSummary && Array.isArray(visibleSummary.rows)
+    ? visibleSummary.rows
+    : [];
+  const visibleKeys = new Set(visibleRows.map(row => row.key).filter(Boolean));
+  const hiddenRows = store.rows
+    .filter(row => row && row.peer_key && !visibleKeys.has(row.peer_key))
+    .slice(0, 4);
+  const hiddenCount = Math.max(0, store.total - visibleRows.length);
+  if (hiddenCount <= 0) return "";
+  const rows = hiddenRows.map(row => {
+    const weight = Number(row.weight);
+    const weightLabel = Number.isFinite(weight) && weight > 0 ? weight.toFixed(2) : "link";
+    const edgeType = row.edge_type || "edge";
+    const direction = row.direction ? ` · ${row.direction}` : "";
+    return `<div class="relation-hidden-row">
+      <span class="relation-hidden-peer" title="${escapeHTML(row.peer_key)}">${escapeHTML(row.peer_key)}</span>
+      <span class="relation-hidden-meta">${escapeHTML(edgeType)} · ${escapeHTML(weightLabel)}${escapeHTML(direction)}</span>
+    </div>`;
+  }).join("");
+  const more = store.truncated || hiddenCount > hiddenRows.length
+    ? `<div class="relation-hidden-row">
+        <span class="relation-hidden-peer">additional store edges</span>
+        <span class="relation-hidden-meta">+${hiddenCount - hiddenRows.length}</span>
+      </div>`
+    : "";
+  return `<div id="workbench-hidden-store-relations" class="relation-hidden-store" title="Store edges outside the current graph view">
+    <div class="relation-hidden-head">
+      <span>store edges outside the current graph view</span>
+      <span class="relation-hidden-count">${hiddenCount}</span>
+    </div>
+    ${rows}${more}
   </div>`;
 }
 
