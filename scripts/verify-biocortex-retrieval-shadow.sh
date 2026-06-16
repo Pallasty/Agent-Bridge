@@ -852,6 +852,130 @@ jq -e '
     and .mcp_tool_registered == false
 ' "$tmp_lswr_feedback_runtime_executor_operator_submission_token_preflight_ready" >/dev/null
 
+tmp_lswr_feedback_runtime_executor_patch_application_gate_preflight_blocked="$tmpdir/lswr-interaction-feedback-runtime-executor-patch-application-gate-preflight-blocked.json"
+run cargo run -q -p ab-bridge --example lswr_interaction_feedback_runtime_executor_patch_application_gate_preflight_smoke -- \
+    --format json \
+    --assert-blocked-without-patch-application-gate-decision \
+    --assert-read-only > "$tmp_lswr_feedback_runtime_executor_patch_application_gate_preflight_blocked"
+jq -e '
+    .schema == "agent_bridge.lswr.interaction_feedback_runtime_executor_patch_application_gate_preflight.v0"
+    and .source_schema == "agent_bridge.lswr.interaction_feedback_runtime_executor_operator_submission_token_preflight.v0"
+    and .source_submission_token_preflight_verdict == "ready_for_patch_application_gate_review"
+    and .source_world_verdict == "not_verified"
+    and .patch_application_gate_decision_schema == null
+    and .patch_application_gate_preflight_verdict == "blocked"
+    and .status == "blocked"
+    and .reason == "explicit_patch_application_gate_decision_required"
+    and .failure_reasons == ["explicit_patch_application_gate_decision_required"]
+    and .patch_application_gate.gate_id == null
+    and .patch_application_gate.ready_for_separate_patch_executor_invocation == false
+    and .patch_application_gate.separate_patch_executor_invocation_allowed_after_this_gate == false
+    and .patch_application_gate.executor_invocation_performed_by_this_tool == false
+    and .patch_application_gate.apply_request_submitted == false
+    and .patch_application_gate.patch_application_performed == false
+    and .patch_application_gate.verification_performed == false
+    and .patch_application_gate.outcome_ingestion_allowed == false
+    and .next_allowed_gate == "repair_patch_application_gate_input"
+    and .agent_action_contract.may_invoke_separate_patch_executor_after_gate == false
+    and .agent_action_contract.do_not_invoke_patch_executor == true
+    and .agent_action_contract.do_not_submit_apply_request == true
+    and .agent_action_contract.do_not_apply_patch == true
+    and .agent_action_contract.do_not_ingest_outcome == true
+    and .agent_action_contract.do_not_write_memory == true
+    and .agent_action_contract.do_not_rewrite_world_verdict == true
+    and .agent_action_contract.do_not_verify_post_apply_result == true
+    and .agent_action_contract.do_not_persist_submission_token == true
+    and .agent_action_contract.require_post_apply_verification_after_application == true
+    and .agent_action_contract.require_separate_outcome_ingestion_review == true
+    and .guardrails.read_only == true
+    and .guardrails.requires_ready_operator_submission_token_preflight == true
+    and .guardrails.requires_explicit_patch_application_gate_decision == true
+    and .guardrails.patch_application_authority_scope == "patch_application_executor_invocation_gate_only"
+    and .guardrails.invokes_patch_executor == false
+    and .guardrails.submits_apply_request == false
+    and .guardrails.applies_patch == false
+    and .guardrails.verifies_post_apply_result == false
+    and .guardrails.outcome_ingestion_allowed == false
+    and .guardrails.persists_submission_token == false
+    and .executor_invocation_performed_by_this_tool == false
+    and .apply_request_submitted_by_this_tool == false
+    and .patch_application_performed_by_this_tool == false
+    and .writes_state == false
+    and .store_access_required == false
+    and .mcp_tool_registered == false
+' "$tmp_lswr_feedback_runtime_executor_patch_application_gate_preflight_blocked" >/dev/null
+
+tmp_lswr_feedback_runtime_executor_patch_application_gate_preflight_ready="$tmpdir/lswr-interaction-feedback-runtime-executor-patch-application-gate-preflight-ready.json"
+run cargo run -q -p ab-bridge --example lswr_interaction_feedback_runtime_executor_patch_application_gate_preflight_smoke -- \
+    --with-patch-application-gate-decision \
+    --format json \
+    --assert-ready-for-separate-executor-invocation \
+    --assert-read-only > "$tmp_lswr_feedback_runtime_executor_patch_application_gate_preflight_ready"
+jq -e '
+    .schema == "agent_bridge.lswr.interaction_feedback_runtime_executor_patch_application_gate_preflight.v0"
+    and .source_schema == "agent_bridge.lswr.interaction_feedback_runtime_executor_operator_submission_token_preflight.v0"
+    and .source_submission_token_preflight_verdict == "ready_for_patch_application_gate_review"
+    and .source_world_verdict == "not_verified"
+    and .patch_application_gate_decision_schema == "agent_bridge.lswr.runtime_executor.patch_application_gate_decision.v0"
+    and .patch_application_gate_preflight_verdict == "ready_for_separate_executor_invocation"
+    and .status == "ready"
+    and .reason == "patch_application_gate_preflight_ready_for_separate_executor_invocation"
+    and (.failure_reasons | length) == 0
+    and .patch_application_gate.gate_id == "patch_application_gate_arrival_bath_move_002"
+    and .patch_application_gate.gate_type == "patch_application_executor_invocation_gate"
+    and .patch_application_gate.gate_decision_id == "patch_application_gate_decision_arrival_bath_move_002"
+    and .patch_application_gate.operator_id == "human:owner"
+    and .patch_application_gate.operator_submission_token_id == "submit_patch_arrival_bath_move_002"
+    and .patch_application_gate.operator_submission_token_idempotency_key == "patch_arrival_bath_move_002/runtime_gen_1284/operator_decision_arrival_bath_move_002"
+    and .patch_application_gate.operator_submission_decision_id == "operator_decision_arrival_bath_move_002"
+    and .patch_application_gate.lookup_evidence_id == "live_lookup_arrival_bath_move_002"
+    and .patch_application_gate.source_apply_request_id == "apply_request_arrival_bath_move_002"
+    and .patch_application_gate.world_id == "onsen_live_session"
+    and .patch_application_gate.branch_id == "main"
+    and .patch_application_gate.runtime_generation == "runtime_gen_1284"
+    and .patch_application_gate.patch_id == "patch_arrival_bath_move_002"
+    and .patch_application_gate.target_entities == ["bath"]
+    and .patch_application_gate.idempotency_key == "patch_arrival_bath_move_002/runtime_gen_1284/submit_patch_arrival_bath_move_002/patch_application_gate_decision_arrival_bath_move_002"
+    and .patch_application_gate.replay_guard.runtime_generation_required == true
+    and .patch_application_gate.replay_guard.single_use_intent == true
+    and .patch_application_gate.replay_guard.requires_fresh_g2_submission_token_preflight == true
+    and .patch_application_gate.ready_for_separate_patch_executor_invocation == true
+    and .patch_application_gate.separate_patch_executor_invocation_allowed_after_this_gate == true
+    and .patch_application_gate.executor_invocation_performed_by_this_tool == false
+    and .patch_application_gate.apply_request_submitted == false
+    and .patch_application_gate.patch_application_performed == false
+    and .patch_application_gate.verification_performed == false
+    and .patch_application_gate.outcome_ingestion_allowed == false
+    and .next_allowed_gate == "separate_patch_application_executor_invocation"
+    and .agent_action_contract.may_invoke_separate_patch_executor_after_gate == true
+    and .agent_action_contract.do_not_invoke_patch_executor == true
+    and .agent_action_contract.do_not_submit_apply_request == true
+    and .agent_action_contract.do_not_apply_patch == true
+    and .agent_action_contract.do_not_ingest_outcome == true
+    and .agent_action_contract.do_not_write_memory == true
+    and .agent_action_contract.do_not_rewrite_world_verdict == true
+    and .agent_action_contract.do_not_verify_post_apply_result == true
+    and .agent_action_contract.do_not_persist_submission_token == true
+    and .agent_action_contract.require_post_apply_verification_after_application == true
+    and .agent_action_contract.require_separate_outcome_ingestion_review == true
+    and .guardrails.read_only == true
+    and .guardrails.requires_ready_operator_submission_token_preflight == true
+    and .guardrails.requires_explicit_patch_application_gate_decision == true
+    and .guardrails.patch_application_authority_scope == "patch_application_executor_invocation_gate_only"
+    and .guardrails.invokes_patch_executor == false
+    and .guardrails.submits_apply_request == false
+    and .guardrails.applies_patch == false
+    and .guardrails.verifies_post_apply_result == false
+    and .guardrails.outcome_ingestion_allowed == false
+    and .guardrails.persists_submission_token == false
+    and .executor_invocation_performed_by_this_tool == false
+    and .apply_request_submitted_by_this_tool == false
+    and .patch_application_performed_by_this_tool == false
+    and .writes_state == false
+    and .store_access_required == false
+    and .mcp_tool_registered == false
+' "$tmp_lswr_feedback_runtime_executor_patch_application_gate_preflight_ready" >/dev/null
+
 tmp_missing_lswr_feedback_input="$tmpdir/missing-lswr-interaction-feedback-input.json"
 printf '{}\n' > "$tmp_missing_lswr_feedback_input"
 tmp_missing_lswr_feedback_consumption_preflight="$tmpdir/missing-lswr-interaction-feedback-consumption-preflight.json"
