@@ -10,6 +10,8 @@ Parent documents:
 - [Interaction feedback runtime executor live lookup preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_LIVE_LOOKUP_PREFLIGHT_2026_06_16.md)
 - [Interaction feedback runtime executor live lookup preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_LIVE_LOOKUP_PREFLIGHT_ACCEPTANCE_2026_06_16.md)
 - [Interaction feedback runtime executor operator submission token preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_OPERATOR_SUBMISSION_TOKEN_PREFLIGHT_2026_06_16.md)
+- [Interaction feedback runtime executor patch application gate preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_APPLICATION_GATE_PREFLIGHT_2026_06_16.md)
+- [Interaction feedback runtime executor patch application gate preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_APPLICATION_GATE_PREFLIGHT_ACCEPTANCE_2026_06_16.md)
 
 Forum anchors:
 
@@ -269,13 +271,14 @@ Still not accepted:
 - #94 ingestion;
 - verification verdict rewrite.
 
-## 6. Next Slice
+## 6. Follow-Up Slice Status
 
-The next safe slice is G3 patch application design.
+The G3 patch application gate preflight is now accepted separately:
 
-That slice must consume accepted G1 lookup evidence and accepted G2 token
-candidate evidence without treating either as automatic permission to mutate.
-G3 is the first mutating authority gate, so it must be reviewed separately and
-must still keep post-apply verification, outcome ingestion, store writes,
-memory writes, #94 writes, and verdict rewrite out of scope unless later gates
-accept them explicitly.
+- [Interaction feedback runtime executor patch application gate preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_APPLICATION_GATE_PREFLIGHT_2026_06_16.md)
+- [Interaction feedback runtime executor patch application gate preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_APPLICATION_GATE_PREFLIGHT_ACCEPTANCE_2026_06_16.md)
+
+The next safe slice is separate patch executor invocation design. It must
+consume accepted G3 readiness evidence without treating that evidence as proof
+that invocation, application, verification, ingestion, or verdict rewrite
+already happened.

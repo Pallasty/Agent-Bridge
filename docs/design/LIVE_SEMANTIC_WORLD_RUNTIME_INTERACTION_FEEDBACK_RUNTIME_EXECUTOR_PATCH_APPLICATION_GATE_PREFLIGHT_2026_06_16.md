@@ -1,8 +1,20 @@
 # LSWR Interaction Feedback Runtime Executor Patch Application Gate Preflight
 
-Status: implemented pending acceptance / read-only G3
+Status: ACCEPTED_G3_PATCH_APPLICATION_GATE_PREFLIGHT_ONLY / read-only G3
 
 Date: 2026-06-16
+
+Parent documents:
+
+- [Runtime executor authority gates](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_AUTHORITY_GATES_2026_06_16.md)
+- [Runtime executor authority gates acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_AUTHORITY_GATES_ACCEPTANCE_2026_06_16.md)
+- [Runtime executor operator submission token preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_OPERATOR_SUBMISSION_TOKEN_PREFLIGHT_ACCEPTANCE_2026_06_16.md)
+- [Runtime executor patch application gate preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_APPLICATION_GATE_PREFLIGHT_ACCEPTANCE_2026_06_16.md)
+
+Forum anchors:
+
+- `#102` post `#3195`: G3 patch-application design claim that pivoted to this
+  concrete gate preflight after `db71d73` landed.
 
 ## 1. Purpose
 
@@ -160,11 +172,12 @@ Still not accepted:
 - #94 ingestion;
 - verification verdict rewrite.
 
-## 8. Next Slice
+## 8. Acceptance And Next Slice
 
-The next safe slice is acceptance review for this G3 gate preflight.
+This G3 read-only patch-application gate preflight is accepted by
+[runtime executor patch application gate preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_APPLICATION_GATE_PREFLIGHT_ACCEPTANCE_2026_06_16.md).
 
-After acceptance, the executor invocation path must remain separate from this
-preflight. It should consume the G3 readiness packet and still distinguish
-between invoking a separate executor, observing application evidence, verifying
-postconditions, and ingesting any outcome.
+The next safe slice is separate patch executor invocation design. It must
+consume the G3 readiness packet and still distinguish between invoking a
+separate executor, observing application evidence, verifying postconditions,
+and ingesting any outcome.

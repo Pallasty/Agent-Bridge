@@ -190,9 +190,10 @@ Still not accepted:
 This G2 read-only token-candidate preflight is accepted by
 [runtime executor operator submission token preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_OPERATOR_SUBMISSION_TOKEN_PREFLIGHT_ACCEPTANCE_2026_06_16.md).
 
-G3 patch application gate preflight is now implemented pending acceptance:
+G3 patch application gate preflight is now accepted separately:
 
-- `docs/design/LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_APPLICATION_GATE_PREFLIGHT_2026_06_16.md`
+- [runtime executor patch application gate preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_APPLICATION_GATE_PREFLIGHT_2026_06_16.md)
+- [runtime executor patch application gate preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_APPLICATION_GATE_PREFLIGHT_ACCEPTANCE_2026_06_16.md)
 
 It consumes this G2 token candidate without treating it as permission to mutate:
 the G3 slice only validates a separate patch-application gate decision and

@@ -182,5 +182,8 @@ This G1 read-only preflight is accepted by
 The G2 operator submission token preflight is accepted by
 [runtime executor operator submission token preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_OPERATOR_SUBMISSION_TOKEN_PREFLIGHT_ACCEPTANCE_2026_06_16.md).
 
-The next safe slice is G3 patch application design. It must remain separate
-from post-apply verification and outcome ingestion.
+The G3 patch application gate preflight is accepted by
+[runtime executor patch application gate preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_APPLICATION_GATE_PREFLIGHT_ACCEPTANCE_2026_06_16.md).
+
+The next safe slice is separate patch executor invocation design. It must
+remain separate from post-apply verification and outcome ingestion.

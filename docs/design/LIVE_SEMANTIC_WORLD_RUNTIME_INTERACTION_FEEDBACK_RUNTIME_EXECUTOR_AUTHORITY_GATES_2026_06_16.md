@@ -302,11 +302,13 @@ Recommended narrow slices:
    blocked-path tests.
 3. Add G2 operator submission token design and tests, still without patch
    application.
-4. Add G3 patch application as a separate executor surface with dry-run,
-   idempotency, lock, and rollback evidence.
-5. Add G4 post-apply verification with expected-effect checks and presentation
+4. Add G3 patch application gate preflight, still without invoking or applying:
+   [runtime executor patch application gate preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_APPLICATION_GATE_PREFLIGHT_2026_06_16.md).
+5. Add separate patch executor invocation design with dry-run, idempotency,
+   lock, and rollback evidence.
+6. Add G4 post-apply verification with expected-effect checks and presentation
    evidence.
-6. Add G5 outcome ingestion only after the destination contract is accepted.
+7. Add G5 outcome ingestion only after the destination contract is accepted.
 
 The first implementation slice should stop at G1. It should prove that live
 runtime lookup can be read and compared without mutating or submitting
