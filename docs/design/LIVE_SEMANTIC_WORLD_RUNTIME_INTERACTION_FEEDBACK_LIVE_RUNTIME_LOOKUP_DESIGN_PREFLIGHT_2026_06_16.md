@@ -2,7 +2,7 @@
 
 **2026-06-16 - role: live-runtime-lookup design preflight / no host contact**
 
-Status: `SOURCE_IMPLEMENTED_VERIFIED_PENDING_ACCEPTANCE`
+Status: `ACCEPTED_LIVE_RUNTIME_LOOKUP_DESIGN_PREFLIGHT_ONLY`
 
 Parent documents:
 
@@ -10,6 +10,9 @@ Parent documents:
 - [Interaction feedback patch apply request boundary acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_PATCH_APPLY_REQUEST_BOUNDARY_ACCEPTANCE_2026_06_16.md)
 - [Interaction feedback runtime executor design preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DESIGN_PREFLIGHT_2026_06_16.md)
 - [Interaction feedback runtime executor design preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DESIGN_PREFLIGHT_ACCEPTANCE_2026_06_16.md)
+- [Interaction feedback runtime executor authority gates](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_AUTHORITY_GATES_2026_06_16.md)
+- [Interaction feedback runtime executor authority gates acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_AUTHORITY_GATES_ACCEPTANCE_2026_06_16.md)
+- [Interaction feedback live runtime lookup design preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_LIVE_RUNTIME_LOOKUP_DESIGN_PREFLIGHT_ACCEPTANCE_2026_06_16.md)
 
 ## 0. Purpose
 
@@ -118,6 +121,11 @@ The action contract additionally requires:
 
 ## 4. Implementation Artifacts
 
+Acceptance status:
+
+- `ACCEPTED_LIVE_RUNTIME_LOOKUP_DESIGN_PREFLIGHT_ONLY`
+- Accepted by [live runtime lookup design preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_LIVE_RUNTIME_LOOKUP_DESIGN_PREFLIGHT_ACCEPTANCE_2026_06_16.md).
+
 Code:
 
 - `crates/bridge/src/lswr_interaction_feedback.rs`
@@ -168,9 +176,12 @@ This slice does not approve:
 - MCP registration;
 - default-profile or Codex-essential exposure.
 
-## 7. Next Slice
+## 7. Acceptance
 
-The next safe slice is an acceptance review for this design-only lookup
-preflight. After acceptance, live runtime lookup work should still split host
-identity, operator visibility, timeout behavior, response redaction, and
-no-execution guarantees into an independently reviewable boundary.
+Acceptance is recorded in
+[live runtime lookup design preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_LIVE_RUNTIME_LOOKUP_DESIGN_PREFLIGHT_ACCEPTANCE_2026_06_16.md).
+
+The next safe slice is a separate G1 live runtime lookup boundary design. It
+should keep host identity, operator visibility, timeout behavior, response
+redaction, lookup result schema, stale-runtime handling, and no-execution
+guarantees independently reviewable.
