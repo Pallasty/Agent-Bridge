@@ -47238,7 +47238,10 @@ com.example.multiline, , \"Line one\nLine two\"\n";
 
         assert_eq!(snapshot.summary.failing_tool_count, 1);
         assert_eq!(lifecycle.health, "failing");
-        assert_eq!(lifecycle.failure_samples[0].message, "current scoped failure");
+        assert_eq!(
+            lifecycle.failure_samples[0].message,
+            "current scoped failure"
+        );
     }
 
     #[test]
