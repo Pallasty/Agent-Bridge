@@ -410,6 +410,107 @@ jq -e '
     and .mcp_tool_registered == false
 ' "$tmp_lswr_feedback_patch_apply_request_ready" >/dev/null
 
+tmp_lswr_feedback_runtime_executor_design_preflight_blocked="$tmpdir/lswr-interaction-feedback-runtime-executor-design-preflight-blocked.json"
+run cargo run -q -p ab-bridge --example lswr_interaction_feedback_runtime_executor_design_preflight_smoke -- \
+    --format json \
+    --assert-blocked-without-ready-apply-request \
+    --assert-read-only > "$tmp_lswr_feedback_runtime_executor_design_preflight_blocked"
+jq -e '
+    .schema == "agent_bridge.lswr.interaction_feedback_runtime_executor_design_preflight.v0"
+    and .source_schema == "agent_bridge.lswr.interaction_feedback_patch_apply_request.v0"
+    and .source_apply_request_verdict == "blocked"
+    and .source_world_verdict == "not_verified"
+    and .design_preflight_verdict == "blocked"
+    and .status == "blocked"
+    and .reason == "source_apply_request_not_ready"
+    and (.failure_reasons | index("source_apply_request_not_ready")) != null
+    and (.failure_reasons | index("external_submission_readiness_missing")) != null
+    and .executor_design_request.design_request_id == null
+    and .executor_design_request.source_apply_request_id == null
+    and .executor_design_request.target_runtime == null
+    and .executor_design_request.patch == null
+    and .executor_design_request.required_design_gates == ["live_runtime_lookup_gate", "operator_submission_gate", "patch_application_gate", "post_apply_verification_gate", "outcome_ingestion_gate"]
+    and .executor_design_request.ready_for_design_review == false
+    and .executor_design_request.ready_for_live_runtime_lookup == false
+    and .executor_design_request.ready_for_submission == false
+    and .executor_design_request.ready_for_patch_application == false
+    and .executor_design_request.execution_performed == false
+    and .executor_design_request.outcome_ingestion_allowed_by_this_tool == false
+    and .agent_action_contract.may_design_runtime_executor_after_review == false
+    and .agent_action_contract.do_not_query_live_runtime == true
+    and .agent_action_contract.do_not_submit_apply_request == true
+    and .agent_action_contract.do_not_apply_patch == true
+    and .agent_action_contract.do_not_ingest_outcome == true
+    and .agent_action_contract.do_not_write_memory == true
+    and .agent_action_contract.do_not_rewrite_world_verdict == true
+    and .agent_action_contract.require_operator_gate_before_submission == true
+    and .agent_action_contract.require_post_apply_verification_design == true
+    and .agent_action_contract.require_separate_outcome_ingestion_review == true
+    and .guardrails.read_only == true
+    and .guardrails.runtime_executor_design_only == true
+    and .guardrails.submits_apply_request == false
+    and .guardrails.applies_patch == false
+    and .guardrails.queries_live_runtime == false
+    and .implicit_live_runtime_lookup_attempted == false
+    and .writes_state == false
+    and .store_access_required == false
+    and .mcp_tool_registered == false
+' "$tmp_lswr_feedback_runtime_executor_design_preflight_blocked" >/dev/null
+
+tmp_lswr_feedback_runtime_executor_design_preflight_ready="$tmpdir/lswr-interaction-feedback-runtime-executor-design-preflight-ready.json"
+run cargo run -q -p ab-bridge --example lswr_interaction_feedback_runtime_executor_design_preflight_smoke -- \
+    --with-fixture-context \
+    --format json \
+    --assert-ready-for-design-review \
+    --assert-read-only > "$tmp_lswr_feedback_runtime_executor_design_preflight_ready"
+jq -e '
+    .schema == "agent_bridge.lswr.interaction_feedback_runtime_executor_design_preflight.v0"
+    and .source_schema == "agent_bridge.lswr.interaction_feedback_patch_apply_request.v0"
+    and .source_apply_request_verdict == "ready_for_external_executor"
+    and .source_world_verdict == "not_verified"
+    and .design_preflight_verdict == "ready_for_runtime_executor_design"
+    and .status == "ready"
+    and .reason == "runtime_executor_design_preflight_ready"
+    and (.failure_reasons | length) == 0
+    and .executor_design_request.design_request_id == "runtime_executor_design_arrival_bath_move_002"
+    and .executor_design_request.source_apply_request_id == "apply_request_arrival_bath_move_002"
+    and .executor_design_request.target_runtime.runtime_family == "lswr"
+    and .executor_design_request.target_runtime.world_id == "onsen_live_session"
+    and .executor_design_request.target_runtime.branch_id == "main"
+    and .executor_design_request.target_runtime.executor == "separate_lswr_patch_executor"
+    and .executor_design_request.patch.patch_id == "patch_arrival_bath_move_002"
+    and .executor_design_request.patch.op == "semantic_revision"
+    and .executor_design_request.patch.args.cell == [5, 2]
+    and .executor_design_request.patch.required_citations == ["verify_patch_arrival_bath_move_001", "fb_arrival_crowded_001"]
+    and .executor_design_request.required_design_gates == ["live_runtime_lookup_gate", "operator_submission_gate", "patch_application_gate", "post_apply_verification_gate", "outcome_ingestion_gate"]
+    and .executor_design_request.ready_for_design_review == true
+    and .executor_design_request.ready_for_live_runtime_lookup == false
+    and .executor_design_request.ready_for_submission == false
+    and .executor_design_request.ready_for_patch_application == false
+    and .executor_design_request.execution_performed == false
+    and .executor_design_request.outcome_ingestion_allowed_by_this_tool == false
+    and .executor_design_request.requires_separate_runtime_executor_approval == true
+    and .agent_action_contract.may_design_runtime_executor_after_review == true
+    and .agent_action_contract.do_not_query_live_runtime == true
+    and .agent_action_contract.do_not_submit_apply_request == true
+    and .agent_action_contract.do_not_apply_patch == true
+    and .agent_action_contract.do_not_ingest_outcome == true
+    and .agent_action_contract.do_not_write_memory == true
+    and .agent_action_contract.do_not_rewrite_world_verdict == true
+    and .agent_action_contract.require_operator_gate_before_submission == true
+    and .agent_action_contract.require_post_apply_verification_design == true
+    and .agent_action_contract.require_separate_outcome_ingestion_review == true
+    and .guardrails.read_only == true
+    and .guardrails.runtime_executor_design_only == true
+    and .guardrails.submits_apply_request == false
+    and .guardrails.applies_patch == false
+    and .guardrails.queries_live_runtime == false
+    and .implicit_live_runtime_lookup_attempted == false
+    and .writes_state == false
+    and .store_access_required == false
+    and .mcp_tool_registered == false
+' "$tmp_lswr_feedback_runtime_executor_design_preflight_ready" >/dev/null
+
 tmp_missing_lswr_feedback_input="$tmpdir/missing-lswr-interaction-feedback-input.json"
 printf '{}\n' > "$tmp_missing_lswr_feedback_input"
 tmp_missing_lswr_feedback_consumption_preflight="$tmpdir/missing-lswr-interaction-feedback-consumption-preflight.json"

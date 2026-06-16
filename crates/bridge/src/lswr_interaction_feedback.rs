@@ -26,6 +26,8 @@ pub const LSWR_INTERACTION_FEEDBACK_PATCH_EXECUTION_PREFLIGHT_SCHEMA: &str =
     "agent_bridge.lswr.interaction_feedback_patch_execution_preflight.v0";
 pub const LSWR_INTERACTION_FEEDBACK_PATCH_APPLY_REQUEST_SCHEMA: &str =
     "agent_bridge.lswr.interaction_feedback_patch_apply_request.v0";
+pub const LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DESIGN_PREFLIGHT_SCHEMA: &str =
+    "agent_bridge.lswr.interaction_feedback_runtime_executor_design_preflight.v0";
 
 const EXPECTED_EVENT_TYPES: [&str; 8] = [
     "human.select",
@@ -1349,6 +1351,256 @@ pub fn render_interaction_feedback_patch_apply_request(request: &Value) -> Strin
     lines.join("\n")
 }
 
+pub fn build_interaction_feedback_runtime_executor_design_preflight(input: &Value) -> Value {
+    let (input_kind, apply_request_packet) = extract_runtime_executor_design_preflight_input(input);
+    let schema_ok = apply_request_packet.get("schema").and_then(Value::as_str)
+        == Some(LSWR_INTERACTION_FEEDBACK_PATCH_APPLY_REQUEST_SCHEMA);
+    let apply_request = &apply_request_packet["apply_request"];
+    let guardrails = &apply_request_packet["guardrails"];
+    let contract = &apply_request_packet["agent_action_contract"];
+
+    let mut failure_reasons = Vec::new();
+    if !schema_ok {
+        failure_reasons.push("patch_apply_request_required".to_string());
+    }
+    if schema_ok && apply_request_packet["apply_request_verdict"] != "ready_for_external_executor" {
+        failure_reasons.push("source_apply_request_not_ready".to_string());
+    }
+    if schema_ok && apply_request_packet["source_world_verdict"] != "not_verified" {
+        failure_reasons.push("source_world_verdict_must_remain_not_verified".to_string());
+    }
+    if schema_ok && apply_request["ready_for_external_submission"] != true {
+        failure_reasons.push("external_submission_readiness_missing".to_string());
+    }
+    if schema_ok && apply_request["requires_operator_gate"] != true {
+        failure_reasons.push("operator_gate_required".to_string());
+    }
+    if schema_ok && apply_request["requires_external_executor"] != true {
+        failure_reasons.push("external_executor_required".to_string());
+    }
+    if schema_ok && apply_request["apply_performed"] != false {
+        failure_reasons.push("source_apply_request_must_not_apply_patch".to_string());
+    }
+    if schema_ok && apply_request["submitted_by_this_tool"] != false {
+        failure_reasons.push("source_apply_request_must_not_be_submitted".to_string());
+    }
+    if schema_ok && apply_request["outcome_ingestion_allowed_by_this_tool"] != false {
+        failure_reasons.push("source_apply_request_must_not_ingest_outcome".to_string());
+    }
+    if schema_ok && apply_request["patch"].is_null() {
+        failure_reasons.push("patch_payload_required".to_string());
+    }
+    if schema_ok && apply_request["patch"]["args"].is_null() {
+        failure_reasons.push("patch_args_required".to_string());
+    }
+    if schema_ok
+        && apply_request["patch"]["required_citations"]
+            .as_array()
+            .map(Vec::is_empty)
+            .unwrap_or(true)
+    {
+        failure_reasons.push("required_citations_missing".to_string());
+    }
+    if schema_ok
+        && (guardrails["read_only"] != true
+            || guardrails["writes_state"] != false
+            || guardrails["queries_live_runtime"] != false
+            || guardrails["submits_apply_request"] != false
+            || guardrails["applies_patch"] != false)
+    {
+        failure_reasons.push("source_apply_request_guardrails_not_read_only".to_string());
+    }
+    if schema_ok
+        && (contract["do_not_apply_patch"] != true
+            || contract["do_not_submit_patch_from_this_tool"] != true
+            || contract["do_not_query_live_runtime"] != true
+            || contract["do_not_ingest_outcome"] != true
+            || contract["external_executor_required"] != true)
+    {
+        failure_reasons.push("source_apply_request_contract_not_protective".to_string());
+    }
+
+    let ready = failure_reasons.is_empty();
+    let reason = if ready {
+        "runtime_executor_design_preflight_ready".to_string()
+    } else {
+        failure_reasons
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "runtime_executor_design_preflight_blocked".to_string())
+    };
+    let design_request_id = if ready {
+        executor_design_request_id_for_apply_request(&apply_request["request_id"])
+    } else {
+        Value::Null
+    };
+
+    json!({
+        "schema": LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DESIGN_PREFLIGHT_SCHEMA,
+        "input_kind": input_kind,
+        "source_schema": apply_request_packet.get("schema").cloned().unwrap_or(Value::Null),
+        "source_apply_request_verdict": apply_request_packet
+            .get("apply_request_verdict")
+            .cloned()
+            .unwrap_or(Value::Null),
+        "source_world_verdict": apply_request_packet
+            .get("source_world_verdict")
+            .cloned()
+            .unwrap_or(Value::Null),
+        "design_preflight_verdict": if ready { "ready_for_runtime_executor_design" } else { "blocked" },
+        "status": if ready { "ready" } else { "blocked" },
+        "reason": reason,
+        "failure_reasons": unique_strings(failure_reasons),
+        "guardrails": runtime_executor_design_preflight_guardrails(),
+        "input_contract": {
+            "accepted_inputs": ["patch_apply_request", "wrapper_with_apply_request"],
+            "requires_ready_apply_request": true,
+            "normalizes_preflight_or_fixture": false,
+            "runtime_executor_design_only": true
+        },
+        "executor_design_request": {
+            "design_request_id": design_request_id,
+            "source_apply_request_id": if ready {
+                apply_request.get("request_id").cloned().unwrap_or(Value::Null)
+            } else {
+                Value::Null
+            },
+            "target_runtime": if ready {
+                apply_request.get("target_runtime").cloned().unwrap_or(Value::Null)
+            } else {
+                Value::Null
+            },
+            "patch": if ready {
+                apply_request.get("patch").cloned().unwrap_or(Value::Null)
+            } else {
+                Value::Null
+            },
+            "required_design_gates": [
+                "live_runtime_lookup_gate",
+                "operator_submission_gate",
+                "patch_application_gate",
+                "post_apply_verification_gate",
+                "outcome_ingestion_gate"
+            ],
+            "ready_for_design_review": ready,
+            "ready_for_live_runtime_lookup": false,
+            "ready_for_submission": false,
+            "ready_for_patch_application": false,
+            "execution_performed": false,
+            "outcome_ingestion_allowed_by_this_tool": false,
+            "requires_separate_runtime_executor_approval": true
+        },
+        "agent_action_contract": {
+            "mode": "runtime_executor_design_preflight_only",
+            "may_design_runtime_executor_after_review": ready,
+            "do_not_query_live_runtime": true,
+            "do_not_submit_apply_request": true,
+            "do_not_apply_patch": true,
+            "do_not_ingest_outcome": true,
+            "do_not_write_memory": true,
+            "do_not_rewrite_world_verdict": true,
+            "require_operator_gate_before_submission": true,
+            "require_post_apply_verification_design": true,
+            "require_separate_outcome_ingestion_review": true
+        },
+        "source_apply_request": if schema_ok { apply_request_packet } else { Value::Null },
+        "implicit_live_runtime_lookup_attempted": false,
+        "writes_state": false,
+        "store_access_required": false,
+        "mcp_tool_registered": false,
+        "note": "pure runtime-executor design preflight: validates the apply-request envelope and never contacts, submits to, or mutates a runtime"
+    })
+}
+
+pub fn render_interaction_feedback_runtime_executor_design_preflight(preflight: &Value) -> String {
+    let mut lines = Vec::new();
+    lines.push("# LSWR Interaction Feedback Runtime Executor Design Preflight".to_string());
+    lines.push(String::new());
+    push_markdown_kv(&mut lines, "schema", &preflight["schema"]);
+    push_markdown_kv(
+        &mut lines,
+        "design_preflight_verdict",
+        &preflight["design_preflight_verdict"],
+    );
+    push_markdown_kv(&mut lines, "status", &preflight["status"]);
+    push_markdown_kv(&mut lines, "reason", &preflight["reason"]);
+    push_markdown_kv(
+        &mut lines,
+        "source_apply_request_verdict",
+        &preflight["source_apply_request_verdict"],
+    );
+    push_markdown_kv(
+        &mut lines,
+        "source_world_verdict",
+        &preflight["source_world_verdict"],
+    );
+    push_markdown_kv(&mut lines, "failure_reasons", &preflight["failure_reasons"]);
+    push_markdown_kv(
+        &mut lines,
+        "implicit_live_runtime_lookup_attempted",
+        &preflight["implicit_live_runtime_lookup_attempted"],
+    );
+
+    lines.push(String::new());
+    lines.push("## Guardrails".to_string());
+    lines.push(String::new());
+    for key in [
+        "read_only",
+        "mutation_surface",
+        "writes_state",
+        "store_access_required",
+        "mcp_tool_registered",
+        "queries_live_runtime",
+        "submits_apply_request",
+        "applies_patch",
+        "outcome_ingestion_allowed",
+    ] {
+        push_markdown_kv(&mut lines, key, &preflight["guardrails"][key]);
+    }
+
+    lines.push(String::new());
+    lines.push("## Executor Design Request".to_string());
+    lines.push(String::new());
+    for key in [
+        "design_request_id",
+        "source_apply_request_id",
+        "target_runtime",
+        "patch",
+        "required_design_gates",
+        "ready_for_design_review",
+        "ready_for_live_runtime_lookup",
+        "ready_for_submission",
+        "ready_for_patch_application",
+        "execution_performed",
+        "outcome_ingestion_allowed_by_this_tool",
+        "requires_separate_runtime_executor_approval",
+    ] {
+        push_markdown_kv(&mut lines, key, &preflight["executor_design_request"][key]);
+    }
+
+    lines.push(String::new());
+    lines.push("## Agent Action Contract".to_string());
+    lines.push(String::new());
+    for key in [
+        "mode",
+        "may_design_runtime_executor_after_review",
+        "do_not_query_live_runtime",
+        "do_not_submit_apply_request",
+        "do_not_apply_patch",
+        "do_not_ingest_outcome",
+        "do_not_write_memory",
+        "do_not_rewrite_world_verdict",
+        "require_operator_gate_before_submission",
+        "require_post_apply_verification_design",
+        "require_separate_outcome_ingestion_review",
+    ] {
+        push_markdown_kv(&mut lines, key, &preflight["agent_action_contract"][key]);
+    }
+
+    lines.push(String::new());
+    lines.join("\n")
+}
+
 pub fn build_interaction_feedback_readback(fixture: &Value) -> Value {
     let selected_entities =
         fixture["interaction_state_after"]["active_view"]["selected_entities"].clone();
@@ -1754,6 +2006,20 @@ fn extract_apply_request_input(input: &Value) -> (&'static str, Value) {
     ("invalid_input", input.clone())
 }
 
+fn extract_runtime_executor_design_preflight_input(input: &Value) -> (&'static str, Value) {
+    if input.get("schema").and_then(Value::as_str)
+        == Some(LSWR_INTERACTION_FEEDBACK_PATCH_APPLY_REQUEST_SCHEMA)
+    {
+        return ("patch_apply_request", input.clone());
+    }
+
+    if let Some(apply_request) = input.get("apply_request") {
+        return ("apply_request_wrapper", apply_request.clone());
+    }
+
+    ("invalid_input", input.clone())
+}
+
 fn validate_argument_context(argument_context: Option<&Value>) -> Value {
     let Some(context) = argument_context else {
         return json!({
@@ -1863,12 +2129,40 @@ fn apply_request_guardrails() -> Value {
     })
 }
 
+fn runtime_executor_design_preflight_guardrails() -> Value {
+    json!({
+        "read_only": true,
+        "mutation_surface": "none",
+        "writes_state": false,
+        "store_access_required": false,
+        "mcp_tool_registered": false,
+        "queries_live_runtime": false,
+        "implicit_live_runtime_lookup_allowed": false,
+        "default_profile_exposure_allowed": false,
+        "submits_apply_request": false,
+        "outcome_ingestion_allowed": false,
+        "feedback_changes_world_verdict_allowed": false,
+        "applies_patch": false,
+        "runtime_executor_design_only": true
+    })
+}
+
 fn apply_request_id_for_patch(patch_id: &Value) -> Value {
     let Some(patch_id) = patch_id.as_str() else {
         return Value::Null;
     };
     let suffix = patch_id.strip_prefix("patch_").unwrap_or(patch_id);
     json!(format!("apply_request_{suffix}"))
+}
+
+fn executor_design_request_id_for_apply_request(request_id: &Value) -> Value {
+    let Some(request_id) = request_id.as_str() else {
+        return Value::Null;
+    };
+    let suffix = request_id
+        .strip_prefix("apply_request_")
+        .unwrap_or(request_id);
+    json!(format!("runtime_executor_design_{suffix}"))
 }
 
 fn unique_strings(items: Vec<String>) -> Vec<String> {
