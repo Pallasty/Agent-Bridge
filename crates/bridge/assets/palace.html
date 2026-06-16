@@ -1017,6 +1017,20 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    #panel button.relation-hidden-peer {
+      padding: 0;
+      background: transparent;
+      border: none;
+      color: #d8d8e2;
+      cursor: pointer;
+      font: inherit;
+      text-align: left;
+    }
+    #panel button.relation-hidden-peer:hover {
+      color: #ffffff;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
     #panel .relation-hidden-meta {
       color: #8a8a9c;
       font-size: 9px;
@@ -5415,7 +5429,7 @@ function renderHiddenStoreRelations(memory, visibleSummary) {
     const edgeType = row.edge_type || "edge";
     const direction = row.direction ? ` · ${row.direction}` : "";
     return `<div class="relation-hidden-row">
-      <span class="relation-hidden-peer" title="${escapeHTML(row.peer_key)}">${escapeHTML(row.peer_key)}</span>
+      <button type="button" class="relation-hidden-peer" data-hidden-store-peer-key="${escapeHTML(row.peer_key)}" title="open ${escapeHTML(row.peer_key)}">${escapeHTML(row.peer_key)}</button>
       <span class="relation-hidden-meta">${escapeHTML(edgeType)} · ${escapeHTML(weightLabel)}${escapeHTML(direction)}</span>
     </div>`;
   }).join("");
@@ -6716,6 +6730,15 @@ function bindNodeSignalLaneActions(panel, memory) {
   });
 }
 
+function bindHiddenStoreRelationActions(panel) {
+  panel.querySelectorAll("[data-hidden-store-peer-key]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const key = btn.dataset.hiddenStorePeerKey;
+      jumpToWorkbenchNeighbor(key);
+    });
+  });
+}
+
 function bindWorkbenchNeighborActions(panel, memory) {
   panel.querySelectorAll("[data-neighbor-filter]").forEach(btn => {
     btn.addEventListener("click", () => {
@@ -6765,6 +6788,7 @@ function bindWorkbenchContentActions(panel, memory) {
 
 function bindWorkbenchActions(panel, memory) {
   bindNodeSignalLaneActions(panel, memory);
+  bindHiddenStoreRelationActions(panel);
   bindWorkbenchNeighborActions(panel, memory);
   bindWorkbenchContentActions(panel, memory);
   const copyBtn = panel.querySelector(".copy-key-btn");

@@ -235,6 +235,16 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("outside the current graph view", html)
         self.assertIn("renderHiddenStoreRelations(memory, summary)", html)
 
+    def test_hidden_store_relations_can_open_peer_memory(self):
+        html = palace_html()
+
+        self.assertIn("data-hidden-store-peer-key", html)
+        self.assertIn("function bindHiddenStoreRelationActions(panel)", html)
+        self.assertIn("[data-hidden-store-peer-key]", html)
+        self.assertIn("const key = btn.dataset.hiddenStorePeerKey;", html)
+        self.assertIn("jumpToWorkbenchNeighbor(key);", html)
+        self.assertIn("bindHiddenStoreRelationActions(panel);", html)
+
     def test_node_detail_lens_surfaces_dossier_evidence(self):
         html = palace_html()
 
