@@ -280,7 +280,9 @@ fn risk_flags(
             flags.push("slow_p95".to_string());
         }
     }
-    if avg_result_size >= LARGE_AVG_RESULT_SIZE {
+    if avg_result_size >= LARGE_AVG_RESULT_SIZE && is_expected_detail_payload_tool(tool_name) {
+        flags.push("expected_detail_payload".to_string());
+    } else if avg_result_size >= LARGE_AVG_RESULT_SIZE {
         flags.push("large_average_result".to_string());
     }
     flags
@@ -288,6 +290,10 @@ fn risk_flags(
 
 fn is_expected_wait_tool(tool_name: &str) -> bool {
     matches!(tool_name, "agent_session_wait")
+}
+
+fn is_expected_detail_payload_tool(tool_name: &str) -> bool {
+    matches!(tool_name, "event_spine_snapshot")
 }
 
 fn expected_gate_flag(
@@ -348,6 +354,7 @@ fn has_actionable_risk_flags(risk_flags: &[String]) -> bool {
                 | "expected_safety_gate"
                 | "expected_input_validation"
                 | "expected_runtime_unavailable"
+                | "expected_detail_payload"
                 | "historical_unexposed_latency"
                 | "historical_unexposed_failure"
         )

@@ -190,6 +190,32 @@ fn tool_atlas_treats_unexposed_slow_tools_as_historical() {
 }
 
 #[test]
+fn tool_atlas_treats_event_spine_explicit_events_as_expected_detail_payload() {
+    let snapshot = build_tool_atlas_snapshot(ToolAtlasInput {
+        generated_at: 1_779_910_000,
+        window_secs: 600,
+        current_tools: vec!["event_spine_snapshot".to_string()],
+        stats: vec![stat("event_spine_snapshot", 1, 0, 8, 32_630.0)],
+        recent_errors: Vec::new(),
+    });
+
+    let event_spine = snapshot
+        .tools
+        .iter()
+        .find(|tool| tool.tool_name == "event_spine_snapshot")
+        .expect("event_spine_snapshot");
+
+    assert_eq!(event_spine.health, "healthy");
+    assert_eq!(event_spine.recommendation, "keep");
+    assert!(event_spine
+        .risk_flags
+        .contains(&"expected_detail_payload".to_string()));
+    assert!(!event_spine
+        .risk_flags
+        .contains(&"large_average_result".to_string()));
+}
+
+#[test]
 fn tool_atlas_treats_session_reconcile_confirmation_gate_as_expected() {
     let snapshot = build_tool_atlas_snapshot(ToolAtlasInput {
         generated_at: 1_779_910_000,
