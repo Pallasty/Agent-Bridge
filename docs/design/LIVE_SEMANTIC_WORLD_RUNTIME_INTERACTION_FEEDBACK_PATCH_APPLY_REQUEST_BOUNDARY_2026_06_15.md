@@ -7,6 +7,7 @@ Parent documents:
 - [Interaction feedback semantic patch draft](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_SEMANTIC_PATCH_DRAFT_2026_06_15.md)
 - [Interaction feedback patch execution preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_PATCH_EXECUTION_PREFLIGHT_2026_06_15.md)
 - [Interaction feedback patch execution preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_PATCH_EXECUTION_PREFLIGHT_ACCEPTANCE_2026_06_15.md)
+- [Interaction feedback patch apply request boundary acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_PATCH_APPLY_REQUEST_BOUNDARY_ACCEPTANCE_2026_06_16.md)
 
 Forum anchors:
 - `#102` post `#2422`: preflight verifier wiring completion and next safe slice.
@@ -137,7 +138,7 @@ loop into a verified one.
 
 ## 4. Implementation Status
 
-Status: `SOURCE_IMPLEMENTED_VERIFIED_PENDING_ACCEPTANCE`.
+Status: `ACCEPTED_APPLY_REQUEST_ONLY`.
 
 Implemented surfaces:
 
@@ -194,3 +195,6 @@ Still not accepted:
 The next safe slice is acceptance review for this boundary. Actual patch
 application remains a separate authority level and needs an independent runtime
 executor design.
+
+Acceptance is recorded in
+`LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_PATCH_APPLY_REQUEST_BOUNDARY_ACCEPTANCE_2026_06_16.md`.
