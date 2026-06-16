@@ -94,6 +94,19 @@ bash -n scripts/verify-biocortex-retrieval-shadow.sh
 Passed:
 
 ```text
+AB_BIOCORTEX_RS=/Data/CascadeProjects/biocortex-rs scripts/verify-biocortex-retrieval-shadow.sh
+```
+
+Result:
+
+```text
+verify-biocortex-retrieval-shadow.sh: all checks passed
+biocortex_rs=/Data/CascadeProjects/biocortex-rs
+```
+
+Passed:
+
+```text
 cargo test -p ab-bridge --test lswr_interaction_feedback_fixture interaction_feedback_live_runtime_lookup_design_preflight -- --nocapture
 ```
 
