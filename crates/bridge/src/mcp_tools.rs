@@ -46064,8 +46064,22 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         let now = 1_780_000_000_i64;
         // Only verified + unknown → clean session, block hidden.
         let evs = vec![
-            mk_sev("browser", "click", "verified", "ref_ok", Some("@e5"), now - 60),
-            mk_sev("session", "curate", "unknown", "lifecycle_no_effect", None, now - 120),
+            mk_sev(
+                "browser",
+                "click",
+                "verified",
+                "ref_ok",
+                Some("@e5"),
+                now - 60,
+            ),
+            mk_sev(
+                "session",
+                "curate",
+                "unknown",
+                "lifecycle_no_effect",
+                None,
+                now - 120,
+            ),
         ];
         assert!(format_inert_actions_block(&evs, now, 5).is_none());
         assert!(format_inert_actions_block(&[], now, 5).is_none());
@@ -46075,9 +46089,30 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     fn inert_actions_block_surfaces_not_verified_only() {
         let now = 1_780_000_000_i64;
         let evs = vec![
-            mk_sev("desktop", "action", "not_verified", "preflight_refusal", None, now - 300),
-            mk_sev("browser", "click", "verified", "ref_ok", Some("@e1"), now - 600),
-            mk_sev("mobile", "tap", "not_verified", "no_device", Some("@n3"), now - 90000),
+            mk_sev(
+                "desktop",
+                "action",
+                "not_verified",
+                "preflight_refusal",
+                None,
+                now - 300,
+            ),
+            mk_sev(
+                "browser",
+                "click",
+                "verified",
+                "ref_ok",
+                Some("@e1"),
+                now - 600,
+            ),
+            mk_sev(
+                "mobile",
+                "tap",
+                "not_verified",
+                "no_device",
+                Some("@n3"),
+                now - 90000,
+            ),
         ];
         let block = format_inert_actions_block(&evs, now, 5).expect("has inert events");
         let text = block.join("\n");
@@ -46092,18 +46127,31 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         // §3.5 recover hints accompany each surfaced inert action.
         assert!(text.contains("↳ recover:"), "missing recover hint: {text}");
         assert!(text.contains("use_grant"), "preflight recover hint: {text}");
-        assert!(text.contains("attach 设备"), "no_device recover hint: {text}");
+        assert!(
+            text.contains("attach 设备"),
+            "no_device recover hint: {text}"
+        );
     }
 
     #[test]
     fn recover_hint_maps_known_failure_modes() {
-        assert!(recover_hint("preflight_refusal").unwrap().contains("desktop_confirm"));
-        assert!(recover_hint("dry-run_failed").unwrap().contains("desktop_verify"));
-        assert!(recover_hint("isolated_injection_failed").unwrap().contains("desktop_verify"));
+        assert!(recover_hint("preflight_refusal")
+            .unwrap()
+            .contains("desktop_confirm"));
+        assert!(recover_hint("dry-run_failed")
+            .unwrap()
+            .contains("desktop_verify"));
+        assert!(recover_hint("isolated_injection_failed")
+            .unwrap()
+            .contains("desktop_verify"));
         assert!(recover_hint("no_device").unwrap().contains("adb"));
         assert!(recover_hint("adb_tap_failed").unwrap().contains("adb"));
-        assert!(recover_hint("cdp_actionability_probe").unwrap().contains("browser_snapshot"));
-        assert!(recover_hint("css_selector_dispatch").unwrap().contains("@eN"));
+        assert!(recover_hint("cdp_actionability_probe")
+            .unwrap()
+            .contains("browser_snapshot"));
+        assert!(recover_hint("css_selector_dispatch")
+            .unwrap()
+            .contains("@eN"));
         assert!(recover_hint("lifecycle_failed").unwrap().contains("store"));
         // Methods with no obvious local remedy get no hint (not every NotVerified
         // is mechanically recoverable).
