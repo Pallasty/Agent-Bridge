@@ -265,6 +265,17 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("handleOrphanRepairClick(e, regionId)", html)
         self.assertIn("renderNodeEdgeRepair(m, graphNode, region)", html)
 
+    def test_orphan_candidate_empty_state_explains_guardrail_buckets(self):
+        html = palace_html()
+
+        self.assertIn("function renderOrphanCandidateDiagnostics(result)", html)
+        self.assertIn("orphan-candidate-diagnostics", html)
+        self.assertIn("orphan-candidate-diagnostic", html)
+        self.assertIn("skipped_existing_edges", html)
+        self.assertIn("store-linked", html)
+        self.assertIn("renderOrphanCandidateDiagnostics(result || {})", html)
+        self.assertIn("no eligible orphan candidates under current guardrails", html)
+
     def test_node_workbench_derives_region_for_deep_linked_orphans(self):
         html = palace_html()
 

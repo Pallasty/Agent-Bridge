@@ -1427,9 +1427,38 @@
     }
     #panel .orphan-candidate-summary {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 5px;
       margin-bottom: 7px;
+    }
+    #panel .orphan-candidate-diagnostics {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin: -1px 0 8px;
+      padding: 7px 8px;
+      background: rgba(10, 10, 16, 0.42);
+      border: 1px solid #1f1f2a;
+      border-radius: 4px;
+    }
+    #panel .orphan-candidate-diagnostic {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      color: #7a7a88;
+      font-size: 10px;
+      line-height: 1.35;
+    }
+    #panel .orphan-candidate-diagnostic .label {
+      color: #5cc8c8;
+      font-weight: 650;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    #panel .orphan-candidate-diagnostic .value {
+      min-width: 0;
+      text-align: right;
     }
     #panel .orphan-candidate-stat {
       min-width: 0;
@@ -5861,12 +5890,37 @@ function renderOrphanCandidateStats(result) {
   const stats = [
     ["safe", result.would_link || 0],
     ["eligible", result.eligible_orphans || 0],
+    ["linked", result.skipped_existing_edges || 0],
     ["filtered", filtered],
   ];
   return `<div class="orphan-candidate-summary">` + stats.map(([label, value]) =>
     `<div class="orphan-candidate-stat">
       <span class="label">${escapeHTML(label)}</span>
       <span class="value">${escapeHTML(String(value))}</span>
+    </div>`
+  ).join("") + `</div>`;
+}
+
+function renderOrphanCandidateDiagnostics(result) {
+  const examined = result && Number.isFinite(result.examined) ? result.examined : 0;
+  const linked = result && Number.isFinite(result.skipped_existing_edges) ? result.skipped_existing_edges : 0;
+  const blacklistedTag = result && Number.isFinite(result.skipped_blacklisted_orphan) ? result.skipped_blacklisted_orphan : 0;
+  const blacklistedKind = result && Number.isFinite(result.skipped_blacklisted_kind) ? result.skipped_blacklisted_kind : 0;
+  const lowScore = result && Number.isFinite(result.skipped_low_score) ? result.skipped_low_score : 0;
+  const noCandidate = result && Number.isFinite(result.skipped_no_candidates) ? result.skipped_no_candidates : 0;
+  const rows = [];
+  if (examined > 0) rows.push(["examined", `${examined} record${examined === 1 ? "" : "s"} matched this scope`]);
+  if (linked > 0) rows.push(["store-linked", `${linked} already have store graph edges`]);
+  if (blacklistedTag + blacklistedKind > 0) {
+    rows.push(["blacklist", `${blacklistedTag} tag-filtered · ${blacklistedKind} kind-filtered`]);
+  }
+  if (lowScore > 0) rows.push(["low-score", `${lowScore} below the current threshold`]);
+  if (noCandidate > 0) rows.push(["no-candidate", `${noCandidate} had no scoped target after guardrails`]);
+  if (rows.length === 0) return "";
+  return `<div class="orphan-candidate-diagnostics">` + rows.map(([label, value]) =>
+    `<div class="orphan-candidate-diagnostic">
+      <span class="label">${escapeHTML(label)}</span>
+      <span class="value">${escapeHTML(value)}</span>
     </div>`
   ).join("") + `</div>`;
 }
@@ -5914,7 +5968,7 @@ function renderOrphanCandidateActions(row, candidate) {
 function renderOrphanCandidateRows(result) {
   const rows = Array.isArray(result.rows) ? result.rows : [];
   if (rows.length === 0) {
-    return `<div class="maintenance-empty">no safe orphan candidates under current guardrails</div>`;
+    return `<div class="maintenance-empty">no eligible orphan candidates under current guardrails</div>`;
   }
   return `<div class="orphan-candidate-rows">` + rows.slice(0, 6).map(row => {
     const status = orphanCandidateStatusClass(row.status);
@@ -5956,6 +6010,7 @@ function renderRegionOrphanCandidateResult(result) {
   const regionId = result && result.region ? result.region : "";
   return `${renderOrphanCandidateHead("candidate links", readOnly, renderOrphanCandidatePlanButton(regionId))}
   ${renderOrphanCandidateStats(result || {})}
+  ${renderOrphanCandidateDiagnostics(result || {})}
   ${renderOrphanCandidateRows(result || {})}`;
 }
 

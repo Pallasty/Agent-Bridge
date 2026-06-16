@@ -291,6 +291,7 @@ struct PalaceOrphanCandidatePreview {
     would_link: u64,
     skipped_low_score: u64,
     skipped_no_candidates: u64,
+    skipped_existing_edges: u64,
     skipped_blacklisted_orphan: u64,
     skipped_blacklisted_kind: u64,
     rows: Vec<PalaceOrphanCandidatePreviewRow>,
@@ -1039,6 +1040,7 @@ fn preview_palace_orphan_candidates(
         }
         preview.examined += 1;
         if keys_with_edges.contains(&mem.key) {
+            preview.skipped_existing_edges += 1;
             continue;
         }
         if palace_memory_has_any_tag(mem, PALACE_ORPHAN_SKIP_TAGS) {
@@ -1359,6 +1361,7 @@ async fn api_orphan_candidates(
         "would_link": preview.would_link,
         "skipped_low_score": preview.skipped_low_score,
         "skipped_no_candidates": preview.skipped_no_candidates,
+        "skipped_existing_edges": preview.skipped_existing_edges,
         "skipped_blacklisted_orphan": preview.skipped_blacklisted_orphan,
         "skipped_blacklisted_kind": preview.skipped_blacklisted_kind,
         "review": {
@@ -3693,6 +3696,32 @@ mod tests {
             .suggestions
             .iter()
             .any(|s| s.key == "memory_auto_target"));
+    }
+
+    #[test]
+    fn palace_orphan_preview_counts_existing_edge_source_skips() {
+        let shared = "memory graph candidate preview health topology orphan repair signal explicit edge classification stable operator review alpha beta gamma";
+        let linked_source = test_mem("memory_linked_source", "lesson", shared, &["memory"]);
+        let orphan = test_mem("memory_orphan", "lesson", shared, &["memory"]);
+        let linked_target = test_mem(
+            "memory_linked_target",
+            "lesson",
+            "memory graph candidate preview health topology orphan repair signal explicit edge classification stable target beta gamma",
+            &["memory"],
+        );
+        let all = vec![linked_source, orphan, linked_target];
+        let keys_with_edges = HashSet::from([
+            "memory_linked_source".to_string(),
+            "memory_linked_target".to_string(),
+        ]);
+
+        let preview =
+            preview_palace_orphan_candidates(&all, &keys_with_edges, None, 0.85, 20, 10, 3);
+
+        assert_eq!(preview.examined, 3);
+        assert_eq!(preview.skipped_existing_edges, 2);
+        assert_eq!(preview.eligible_orphans, 1);
+        assert_eq!(preview.would_link, 1);
     }
 
     #[test]
