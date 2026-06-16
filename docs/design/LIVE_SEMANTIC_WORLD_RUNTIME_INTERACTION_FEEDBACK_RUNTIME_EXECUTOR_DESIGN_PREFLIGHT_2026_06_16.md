@@ -2,6 +2,8 @@
 
 **2026-06-16 - role: design-only preflight / no live executor authority**
 
+Status: `ACCEPTED_RUNTIME_EXECUTOR_DESIGN_PREFLIGHT_ONLY`.
+
 Parent documents:
 
 - [Interaction feedback protocol](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_PROTOCOL_2026_06_15.md)
@@ -158,7 +160,7 @@ This slice does not approve:
 - MCP registration;
 - default-profile or Codex-essential exposure.
 
-## 7. Next Slice
+## 7. Acceptance
 
 Acceptance is recorded in
 [runtime executor design preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DESIGN_PREFLIGHT_ACCEPTANCE_2026_06_16.md).
