@@ -186,6 +186,18 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("state.regionNodeFilter = filter;", html)
         self.assertIn("state.regionNodeSort = sort;", html)
 
+    def test_region_workbench_surfaces_entry_nodes_on_canvas(self):
+        html = palace_html()
+
+        self.assertIn("function regionEntryNodes(regionId)", html)
+        self.assertIn("function renderRegionEntryNodes(regionId)", html)
+        self.assertIn('id="region-entry-nodes"', html)
+        self.assertIn("region-entry-node", html)
+        self.assertIn("region-entry-link", html)
+        self.assertIn('n.addClass("region-entry-node")', html)
+        self.assertIn('cy.elements().removeClass("region-entry-node")', html)
+        self.assertIn("renderRegionEntryNodes(regionId)", html)
+
     def test_node_workbench_filters_and_sorts_neighbors(self):
         html = palace_html()
 

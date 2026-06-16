@@ -1064,6 +1064,58 @@
       text-transform: uppercase;
       margin-bottom: 8px;
     }
+    #panel .region-entry-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 7px;
+    }
+    #panel .region-entry-link {
+      min-width: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      padding: 9px;
+      background: #101018;
+      border: 1px solid #2a2a35;
+      border-left: 2px solid #ffe070;
+      border-radius: 4px;
+      color: #e4e4e8;
+      text-align: left;
+      cursor: pointer;
+      font-family: inherit;
+      transition: color 120ms, border-color 120ms, background 120ms;
+    }
+    #panel .region-entry-link:hover {
+      color: #ffffff;
+      border-color: #ffe070;
+      background: #17151d;
+    }
+    #panel .region-entry-main { min-width: 0; }
+    #panel .region-entry-label {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 11px;
+      font-weight: 650;
+    }
+    #panel .region-entry-meta {
+      display: block;
+      margin-top: 3px;
+      color: #777784;
+      font-size: 10px;
+      letter-spacing: 0.04em;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #panel .region-entry-score {
+      color: #ffe070;
+      font-size: 10px;
+      font-variant-numeric: tabular-nums;
+      white-space: nowrap;
+    }
     #panel .region-node-controls,
     #panel .neighbor-lens-controls {
       display: flex;
@@ -4319,6 +4371,18 @@ function buildCy(data) {
         "overlay-opacity": 0.24,
         "z-index": 1000,
       }},
+      { selector: "node.region-entry-node", style: {
+        "border-width": "data(displayBorderStrong)",
+        "border-color": "#ffe070",
+        "border-opacity": 0.95,
+        "label": "data(label)",
+        "text-opacity": 1,
+        "color": "#f4f0d0",
+        "overlay-color": "#ffe070",
+        "overlay-padding": "data(displayRelationHaloPad)",
+        "overlay-opacity": 0.22,
+        "z-index": 820,
+      }},
       { selector: "node:selected", style: {
         "border-width": "data(displayBorderStrong)", "border-color": "#ffffff", "border-opacity": 1,
       }},
@@ -4692,6 +4756,7 @@ function applyVisualState() {
 
   // Reset classes.
   cy.elements().removeClass("faded match focus-center focus-neighbor focus-edge atlas-detail-muted atlas-district-anchor");
+  cy.elements().removeClass("region-entry-node");
   clearRelationFocus();
 
   // Filter-fade: nodes failing source/kind get .faded.
@@ -4740,6 +4805,12 @@ function applyVisualState() {
     });
     cy.edges().not(".faded").forEach(e => {
       e.addClass("atlas-detail-muted");
+    });
+  }
+
+  if (state.activeRegion && !state.focused && !atlasOverview) {
+    regionEntryNodes(state.activeRegion).forEach(n => {
+      if (!n.hasClass("faded")) n.addClass("region-entry-node");
     });
   }
 
@@ -5404,6 +5475,33 @@ function sortRegionNodes(nodes) {
   });
 }
 
+function regionEntryNodes(regionId) {
+  return sortRegionNodes(regionNodesFor(regionId)).slice(0, 4);
+}
+
+function renderRegionEntryNodes(regionId) {
+  const nodes = regionEntryNodes(regionId);
+  if (nodes.length === 0) {
+    return `<div id="region-entry-nodes" class="region-entry-list">
+      <span class="neighbor-empty">no entry nodes in this region</span>
+    </div>`;
+  }
+  return `<div id="region-entry-nodes" class="region-entry-list">` + nodes.map(node => {
+    const d = node.data();
+    const key = node.id();
+    const label = d.label || key;
+    const role = regionNodeRole(d);
+    const degree = d.degree || 0;
+    return `<button type="button" class="region-entry-link" data-region-entry-key="${escapeHTML(key)}">
+      <span class="region-entry-main">
+        <span class="region-entry-label" title="${escapeHTML(key)}">${escapeHTML(label)}</span>
+        <span class="region-entry-meta">${escapeHTML(d.kind || "unknown")} · ${escapeHTML(role)}</span>
+      </span>
+      <span class="region-entry-score">${degree}°</span>
+    </button>`;
+  }).join("") + `</div>`;
+}
+
 function renderRegionNodeControls() {
   const filters = [
     ["all", "all"],
@@ -5991,6 +6089,10 @@ function showRegionWorkbench(regionId) {
           <div class="metric"><div class="label">edges</div><div class="value">${explicitEdges}</div></div>
         </div>
         <div class="workbench-section">
+          <div class="workbench-section-title">Entry nodes</div>
+          ${renderRegionEntryNodes(regionId)}
+        </div>
+        <div class="workbench-section">
           <div class="workbench-section-title">Maintenance</div>
           ${renderRegionMaintenanceActions(region)}
           ${renderRegionMaintenancePreview(regionId)}
@@ -6218,9 +6320,9 @@ function bindRegionWorkbenchActions(panel, regionId) {
       saveViewState();
     });
   });
-  panel.querySelectorAll(".region-node-link").forEach(btn => {
+  panel.querySelectorAll(".region-entry-link, .region-node-link").forEach(btn => {
     btn.addEventListener("click", () => {
-      const key = btn.dataset.regionNodeKey;
+      const key = btn.dataset.regionEntryKey || btn.dataset.regionNodeKey;
       jumpToRegionNode(key);
     });
   });
