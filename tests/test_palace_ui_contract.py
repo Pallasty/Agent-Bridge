@@ -252,6 +252,29 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("inspectWorkbenchRelation(panel, memory, key);", html)
         self.assertIn("renderNodeSignalLane(m, graphNode, region)", html)
 
+    def test_orphan_node_detail_embeds_edge_repair_console(self):
+        html = palace_html()
+
+        self.assertIn("function renderNodeEdgeRepair(memory, graphNode, region)", html)
+        self.assertIn('id="workbench-node-edge-repair"', html)
+        self.assertIn("node-edge-repair", html)
+        self.assertIn("graphData.orphan", html)
+        self.assertIn("renderRegionOrphanCandidateShell(region)", html)
+        self.assertIn("loadRegionOrphanCandidates(region.id);", html)
+        self.assertIn("function bindNodeEdgeRepairActions(panel, regionId)", html)
+        self.assertIn("handleOrphanRepairClick(e, regionId)", html)
+        self.assertIn("renderNodeEdgeRepair(m, graphNode, region)", html)
+
+    def test_node_workbench_derives_region_for_deep_linked_orphans(self):
+        html = palace_html()
+
+        self.assertIn("function nodeWorkbenchRegionFor(graphData)", html)
+        self.assertIn("if (!graphData.region && !graphData.id && !graphData.kind)", html)
+        self.assertIn("graphData.region || atlasRegionForNode(graphData)", html)
+        self.assertIn("label: atlasLabel(regionId)", html)
+        self.assertIn("orphans: graphData.orphan ? 1 : 0", html)
+        self.assertIn("nodeWorkbenchRegionFor(graphData)", html)
+
     def test_node_detail_lens_body_state_is_scoped_to_node_workbench(self):
         html = palace_html()
 

@@ -1707,6 +1707,22 @@
     #panel .orphan-approved-apply-result.blocked,
     #panel .orphan-approved-apply-result.partial { color: #c8a96a; }
     #panel .orphan-approved-apply-result.error { color: #d88080; }
+    #panel .node-edge-repair {
+      padding: 9px;
+      background: #0c0c12;
+      border: 1px solid #252532;
+      border-left: 2px solid #c8a96a;
+      border-radius: 5px;
+    }
+    #panel .node-edge-repair .repair-lede {
+      color: #858594;
+      font-size: 10px;
+      line-height: 1.4;
+      margin-bottom: 8px;
+    }
+    #panel .node-edge-repair .orphan-candidate-panel {
+      margin-top: 0;
+    }
     #panel .neighbor-list,
     #panel .region-node-list,
     #panel .source-stack {
@@ -5799,6 +5815,24 @@ function renderRegionOrphanCandidateShell(region) {
   </div>`;
 }
 
+function renderNodeEdgeRepair(memory, graphNode, region) {
+  const graphData = graphNode && graphNode.length > 0 ? graphNode.data() : {};
+  if (!graphData.orphan) return "";
+  if (!region) {
+    return `<div class="workbench-section node-edge-repair" id="workbench-node-edge-repair" data-node-edge-repair="${escapeHTML(memory.key)}">
+      <div class="workbench-section-title">Edge repair</div>
+      <div class="repair-lede">This node has no mapped region, so Palace cannot scope candidate links yet.</div>
+    </div>`;
+  }
+  return `<div class="workbench-section node-edge-repair" id="workbench-node-edge-repair" data-node-edge-repair="${escapeHTML(memory.key)}">
+    <div class="workbench-section-title">Edge repair</div>
+    <div class="repair-lede">
+      This node has no explicit graph edge. Review region-scoped candidates before applying any approved link.
+    </div>
+    ${renderRegionOrphanCandidateShell(region)}
+  </div>`;
+}
+
 function renderOrphanCandidateHead(title, status, actions = "") {
   return `<div class="orphan-candidate-head">
     <span>${escapeHTML(title)}</span>
@@ -6212,6 +6246,25 @@ function showRegionWorkbench(regionId) {
   loadRegionOrphanCandidates(regionId);
 }
 
+function nodeWorkbenchRegionFor(graphData) {
+  if (!graphData.region && !graphData.id && !graphData.kind) return null;
+  const regionId = graphData.region || atlasRegionForNode(graphData);
+  const region = state.atlasRegions.find(r => r.id === regionId);
+  if (region || !regionId) return region;
+  return {
+    id: regionId,
+    label: atlasLabel(regionId),
+    orphans: graphData.orphan ? 1 : 0,
+    count: 1,
+    edgeCount: 0,
+    coactivationCount: 0,
+    topKinds: graphData.kind ? [`${graphData.kind}:1`] : [],
+    healthScore: 0,
+    healthTier: "long-tail",
+    healthReason: "derived from selected node",
+  };
+}
+
 // ── Side panel ──────────────────────────────────────────────────
 async function showSidePanel(id) {
   const panel = document.getElementById("panel");
@@ -6264,7 +6317,7 @@ async function showSidePanel(id) {
       : "";
     const graphNode = state.cy ? state.cy.getElementById(m.key) : null;
     const graphData = graphNode && graphNode.length > 0 ? graphNode.data() : {};
-    const region = state.atlasRegions.find(r => r.id === graphData.region);
+    const region = nodeWorkbenchRegionFor(graphData);
     panel.innerHTML = `
       <div class="workbench-shell">
         <div class="workbench-header">
@@ -6287,6 +6340,7 @@ async function showSidePanel(id) {
           ${renderWorkbenchRelationSummary(m, graphNode)}
           ${descBlock}
           ${renderWorkbenchNeighborSection(m, graphNode)}
+          ${renderNodeEdgeRepair(m, graphNode, region)}
           <div class="workbench-section">
             <div class="workbench-section-title">Source stack</div>
             ${renderWorkbenchSourceStack(m, graphData, region)}
@@ -6318,7 +6372,9 @@ async function showSidePanel(id) {
     bindAnnotate(panel, m.key);
     bindCanvasExpand(panel, m);
     bindWorkbenchActions(panel, m);
+    bindNodeEdgeRepairActions(panel, region ? region.id : null);
     loadRelatedReports(m.key);
+    if (region && graphData.orphan) loadRegionOrphanCandidates(region.id);
   } catch (e) {
     panel.innerHTML = `<div class="placeholder">error: ${escapeHTML(String(e))}</div>`;
   }
@@ -6340,50 +6396,62 @@ function jumpToRegionNode(key) {
   saveViewState();
 }
 
+function handleOrphanRepairClick(e, regionId) {
+  const planBtn = e.target.closest("[data-orphan-approved-plan]");
+  if (planBtn) {
+    e.preventDefault();
+    loadRegionOrphanApprovedPlan(planBtn.dataset.orphanApprovedPlan || regionId);
+    return true;
+  }
+  const planBackBtn = e.target.closest("[data-orphan-plan-back]");
+  if (planBackBtn) {
+    e.preventDefault();
+    loadRegionOrphanCandidates(planBackBtn.dataset.orphanPlanBack || regionId);
+    return true;
+  }
+  const applyBtn = e.target.closest("[data-orphan-approved-apply]");
+  if (applyBtn) {
+    e.preventDefault();
+    const mode = applyBtn.dataset.orphanApprovedApply;
+    applyBtn.disabled = true;
+    runOrphanApprovedPlanApply(regionId, mode !== "live").finally(() => {
+      applyBtn.disabled = false;
+    });
+    return true;
+  }
+  const reviewBtn = e.target.closest("[data-orphan-review-decision]");
+  if (reviewBtn) {
+    e.preventDefault();
+    const decision = reviewBtn.dataset.orphanReviewDecision;
+    const orphanKey = reviewBtn.dataset.orphanReviewOrphan;
+    const candidateKey = reviewBtn.dataset.orphanReviewCandidate;
+    reviewBtn.disabled = true;
+    recordOrphanCandidateDecision(regionId, orphanKey, candidateKey, decision).catch(error => {
+      const slot = document.getElementById("region-orphan-candidates");
+      if (slot) {
+        slot.innerHTML = `${renderOrphanCandidateHead("candidate links", "review error", renderOrphanCandidatePlanButton(regionId))}
+        <div class="maintenance-empty">${escapeHTML(String(error))}</div>`;
+      }
+    });
+    return true;
+  }
+  const target = e.target.closest("[data-orphan-node-key], [data-orphan-candidate-key]");
+  if (!target) return false;
+  const key = target.dataset.orphanNodeKey || target.dataset.orphanCandidateKey;
+  jumpToRegionNode(key);
+  return true;
+}
+
+function bindNodeEdgeRepairActions(panel, regionId) {
+  if (!regionId) return;
+  panel.addEventListener("click", (e) => {
+    handleOrphanRepairClick(e, regionId);
+  });
+}
+
 function bindRegionWorkbenchActions(panel, regionId) {
   panel.addEventListener("click", (e) => {
-    const planBtn = e.target.closest("[data-orphan-approved-plan]");
-    if (planBtn) {
-      e.preventDefault();
-      loadRegionOrphanApprovedPlan(planBtn.dataset.orphanApprovedPlan || regionId);
-      return;
-    }
-    const planBackBtn = e.target.closest("[data-orphan-plan-back]");
-    if (planBackBtn) {
-      e.preventDefault();
-      loadRegionOrphanCandidates(planBackBtn.dataset.orphanPlanBack || regionId);
-      return;
-    }
-    const applyBtn = e.target.closest("[data-orphan-approved-apply]");
-    if (applyBtn) {
-      e.preventDefault();
-      const mode = applyBtn.dataset.orphanApprovedApply;
-      applyBtn.disabled = true;
-      runOrphanApprovedPlanApply(regionId, mode !== "live").finally(() => {
-        applyBtn.disabled = false;
-      });
-      return;
-    }
-    const reviewBtn = e.target.closest("[data-orphan-review-decision]");
-    if (reviewBtn) {
-      e.preventDefault();
-      const decision = reviewBtn.dataset.orphanReviewDecision;
-      const orphanKey = reviewBtn.dataset.orphanReviewOrphan;
-      const candidateKey = reviewBtn.dataset.orphanReviewCandidate;
-      reviewBtn.disabled = true;
-      recordOrphanCandidateDecision(regionId, orphanKey, candidateKey, decision).catch(error => {
-        const slot = document.getElementById("region-orphan-candidates");
-        if (slot) {
-          slot.innerHTML = `${renderOrphanCandidateHead("candidate links", "review error", renderOrphanCandidatePlanButton(regionId))}
-          <div class="maintenance-empty">${escapeHTML(String(error))}</div>`;
-        }
-      });
-      return;
-    }
-    const target = e.target.closest("[data-orphan-node-key], [data-orphan-candidate-key]");
-    if (!target) return;
-    const key = target.dataset.orphanNodeKey || target.dataset.orphanCandidateKey;
-    jumpToRegionNode(key);
+    if (handleOrphanRepairClick(e, regionId)) return;
   });
   panel.querySelectorAll("[data-region-node-filter]").forEach(btn => {
     btn.addEventListener("click", () => {
