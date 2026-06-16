@@ -51432,25 +51432,30 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
 
     #[test]
     fn dispatch_audit_expected_detail_payloads_are_not_actionable() {
-        let s = ab_store::McpToolCallStats {
-            tool_name: "forum_read".to_string(),
-            call_count: 6,
-            error_count: 0,
-            avg_duration_ms: 0.0,
-            p95_duration_ms: 0,
-            max_duration_ms: 0,
-            avg_result_size: 29_160.0,
-            client_name: None,
-            profile: None,
-            source: None,
-            model: None,
-            model_reasoning_effort: None,
-            codex_host: None,
-        };
+        for tool_name in ["forum_read", "event_spine_snapshot"] {
+            let s = ab_store::McpToolCallStats {
+                tool_name: tool_name.to_string(),
+                call_count: 6,
+                error_count: 0,
+                avg_duration_ms: 6.0,
+                p95_duration_ms: 13,
+                max_duration_ms: 13,
+                avg_result_size: 36_000.0,
+                client_name: None,
+                profile: None,
+                source: None,
+                model: None,
+                model_reasoning_effort: None,
+                codex_host: None,
+            };
 
-        let reasons = dispatch_optimization_reasons(&s, &HashMap::new());
+            let reasons = dispatch_optimization_reasons(&s, &HashMap::new());
 
-        assert!(!reasons.contains(&"large_average_result"));
+            assert!(
+                !reasons.contains(&"large_average_result"),
+                "{tool_name} should be treated as an expected detail payload"
+            );
+        }
     }
 
     #[test]
