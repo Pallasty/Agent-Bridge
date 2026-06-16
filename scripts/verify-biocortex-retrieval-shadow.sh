@@ -221,6 +221,195 @@ jq -e '
     and .mcp_tool_registered == false
 ' "$tmp_lswr_feedback_semantic_patch_draft" >/dev/null
 
+tmp_lswr_feedback_patch_execution_preflight_blocked="$tmpdir/lswr-interaction-feedback-patch-execution-preflight-blocked.json"
+run cargo run -q -p ab-bridge --example lswr_interaction_feedback_patch_execution_preflight_smoke -- \
+    --format json \
+    --assert-blocked-without-context \
+    --assert-read-only > "$tmp_lswr_feedback_patch_execution_preflight_blocked"
+jq -e '
+    .schema == "agent_bridge.lswr.interaction_feedback_patch_execution_preflight.v0"
+    and .source_schema == "agent_bridge.lswr.interaction_feedback_semantic_patch_draft.v0"
+    and .source_draft_verdict == "drafted"
+    and .source_world_verdict == "not_verified"
+    and .preflight_verdict == "blocked"
+    and .status == "blocked"
+    and .reason == "explicit_argument_context_required"
+    and (.failure_reasons | index("explicit_argument_context_required")) != null
+    and (.failure_reasons | index("patch_args_cell_unresolved")) != null
+    and .argument_context == null
+    and .argument_context_status.accepted == false
+    and .argument_context_status.reason == "explicit_argument_context_required"
+    and .argument_context_status.live_runtime_queried_by_preflight == false
+    and .resolved_patch.patch_id == "patch_arrival_bath_move_002"
+    and .resolved_patch.op == "semantic_revision"
+    and .resolved_patch.operation_hint == "increase_walkway_clearance_by_repositioning_entity"
+    and .resolved_patch.target_entities == ["bath"]
+    and .resolved_patch.args == null
+    and .resolved_patch.resolved_arguments == null
+    and .resolved_patch.required_citations == ["verify_patch_arrival_bath_move_001", "fb_arrival_crowded_001"]
+    and .resolved_patch.ready_for_execution_request == false
+    and .resolved_patch.execution_performed == false
+    and .resolved_patch.apply_allowed_by_this_tool == false
+    and .resolved_patch.ingest_allowed_by_this_tool == false
+    and .agent_action_contract.may_request_separate_apply_after_preflight == false
+    and .agent_action_contract.do_not_apply_patch == true
+    and .agent_action_contract.do_not_ingest_outcome == true
+    and .agent_action_contract.do_not_write_memory == true
+    and .agent_action_contract.do_not_query_live_runtime == true
+    and .agent_action_contract.do_not_rewrite_world_verdict == true
+    and .guardrails.read_only == true
+    and .guardrails.applies_patch == false
+    and .guardrails.queries_live_runtime == false
+    and .implicit_live_runtime_lookup_attempted == false
+    and .writes_state == false
+    and .store_access_required == false
+    and .mcp_tool_registered == false
+' "$tmp_lswr_feedback_patch_execution_preflight_blocked" >/dev/null
+
+tmp_lswr_feedback_patch_execution_preflight_ready="$tmpdir/lswr-interaction-feedback-patch-execution-preflight-ready.json"
+run cargo run -q -p ab-bridge --example lswr_interaction_feedback_patch_execution_preflight_smoke -- \
+    --with-fixture-context \
+    --format json \
+    --assert-ready-with-context \
+    --assert-read-only > "$tmp_lswr_feedback_patch_execution_preflight_ready"
+jq -e '
+    .schema == "agent_bridge.lswr.interaction_feedback_patch_execution_preflight.v0"
+    and .source_schema == "agent_bridge.lswr.interaction_feedback_semantic_patch_draft.v0"
+    and .source_draft_verdict == "drafted"
+    and .source_world_verdict == "not_verified"
+    and .preflight_verdict == "ready_for_execution_request"
+    and .status == "ready"
+    and .reason == "explicit_argument_context_execution_preflight_ready"
+    and (.failure_reasons | length) == 0
+    and .argument_context.schema == "agent_bridge.lswr.interaction_feedback_argument_context.v0"
+    and .argument_context.source == "explicit_fixture_context"
+    and .argument_context.live_runtime_queried_by_preflight == false
+    and .argument_context.candidate_arguments[0].argument_path == "patch.args.cell"
+    and .argument_context.candidate_arguments[0].value == [5, 2]
+    and .argument_context.candidate_arguments[0].satisfies_expected_effect == true
+    and .argument_context_status.accepted == true
+    and .argument_context_status.reason == "explicit_argument_context_accepted"
+    and .argument_context_status.live_runtime_queried_by_preflight == false
+    and .resolved_patch.patch_id == "patch_arrival_bath_move_002"
+    and .resolved_patch.op == "semantic_revision"
+    and .resolved_patch.operation_hint == "increase_walkway_clearance_by_repositioning_entity"
+    and .resolved_patch.target_entities == ["bath"]
+    and .resolved_patch.args.cell == [5, 2]
+    and .resolved_patch.resolved_arguments["patch.args.cell"] == [5, 2]
+    and .resolved_patch.required_citations == ["verify_patch_arrival_bath_move_001", "fb_arrival_crowded_001"]
+    and .resolved_patch.ready_for_execution_request == true
+    and .resolved_patch.execution_performed == false
+    and .resolved_patch.apply_allowed_by_this_tool == false
+    and .resolved_patch.ingest_allowed_by_this_tool == false
+    and .agent_action_contract.may_request_separate_apply_after_preflight == true
+    and .agent_action_contract.do_not_apply_patch == true
+    and .agent_action_contract.do_not_ingest_outcome == true
+    and .agent_action_contract.do_not_write_memory == true
+    and .agent_action_contract.do_not_query_live_runtime == true
+    and .agent_action_contract.do_not_rewrite_world_verdict == true
+    and .guardrails.read_only == true
+    and .guardrails.applies_patch == false
+    and .guardrails.queries_live_runtime == false
+    and .implicit_live_runtime_lookup_attempted == false
+    and .writes_state == false
+    and .store_access_required == false
+    and .mcp_tool_registered == false
+' "$tmp_lswr_feedback_patch_execution_preflight_ready" >/dev/null
+
+tmp_lswr_feedback_patch_apply_request_blocked="$tmpdir/lswr-interaction-feedback-patch-apply-request-blocked.json"
+run cargo run -q -p ab-bridge --example lswr_interaction_feedback_patch_apply_request_smoke -- \
+    --format json \
+    --assert-blocked-without-ready-preflight \
+    --assert-read-only > "$tmp_lswr_feedback_patch_apply_request_blocked"
+jq -e '
+    .schema == "agent_bridge.lswr.interaction_feedback_patch_apply_request.v0"
+    and .source_schema == "agent_bridge.lswr.interaction_feedback_patch_execution_preflight.v0"
+    and .source_preflight_verdict == "blocked"
+    and .source_world_verdict == "not_verified"
+    and .apply_request_verdict == "blocked"
+    and .status == "blocked"
+    and .reason == "source_preflight_not_ready"
+    and (.failure_reasons | index("source_preflight_not_ready")) != null
+    and (.failure_reasons | index("resolved_patch_not_ready")) != null
+    and (.failure_reasons | index("resolved_patch_args_required")) != null
+    and .apply_request.request_id == null
+    and .apply_request.target_runtime == null
+    and .apply_request.patch == null
+    and .apply_request.ready_for_external_submission == false
+    and .apply_request.requires_operator_gate == true
+    and .apply_request.requires_external_executor == true
+    and .apply_request.apply_performed == false
+    and .apply_request.submitted_by_this_tool == false
+    and .apply_request.outcome_ingestion_allowed_by_this_tool == false
+    and .agent_action_contract.may_submit_to_separate_executor_after_operator_gate == false
+    and .agent_action_contract.do_not_apply_patch == true
+    and .agent_action_contract.do_not_submit_patch_from_this_tool == true
+    and .agent_action_contract.do_not_ingest_outcome == true
+    and .agent_action_contract.do_not_write_memory == true
+    and .agent_action_contract.do_not_query_live_runtime == true
+    and .agent_action_contract.do_not_rewrite_world_verdict == true
+    and .agent_action_contract.external_executor_required == true
+    and .guardrails.read_only == true
+    and .guardrails.submits_apply_request == false
+    and .guardrails.applies_patch == false
+    and .guardrails.queries_live_runtime == false
+    and .implicit_live_runtime_lookup_attempted == false
+    and .writes_state == false
+    and .store_access_required == false
+    and .mcp_tool_registered == false
+' "$tmp_lswr_feedback_patch_apply_request_blocked" >/dev/null
+
+tmp_lswr_feedback_patch_apply_request_ready="$tmpdir/lswr-interaction-feedback-patch-apply-request-ready.json"
+run cargo run -q -p ab-bridge --example lswr_interaction_feedback_patch_apply_request_smoke -- \
+    --with-fixture-context \
+    --format json \
+    --assert-ready-with-context \
+    --assert-read-only > "$tmp_lswr_feedback_patch_apply_request_ready"
+jq -e '
+    .schema == "agent_bridge.lswr.interaction_feedback_patch_apply_request.v0"
+    and .source_schema == "agent_bridge.lswr.interaction_feedback_patch_execution_preflight.v0"
+    and .source_preflight_verdict == "ready_for_execution_request"
+    and .source_world_verdict == "not_verified"
+    and .apply_request_verdict == "ready_for_external_executor"
+    and .status == "ready"
+    and .reason == "external_apply_request_ready"
+    and (.failure_reasons | length) == 0
+    and .apply_request.request_id == "apply_request_arrival_bath_move_002"
+    and .apply_request.target_runtime.runtime_family == "lswr"
+    and .apply_request.target_runtime.world_id == "onsen_live_session"
+    and .apply_request.target_runtime.branch_id == "main"
+    and .apply_request.target_runtime.executor == "separate_lswr_patch_executor"
+    and .apply_request.patch.patch_id == "patch_arrival_bath_move_002"
+    and .apply_request.patch.op == "semantic_revision"
+    and .apply_request.patch.operation_hint == "increase_walkway_clearance_by_repositioning_entity"
+    and .apply_request.patch.target_entities == ["bath"]
+    and .apply_request.patch.args.cell == [5, 2]
+    and .apply_request.patch.required_citations == ["verify_patch_arrival_bath_move_001", "fb_arrival_crowded_001"]
+    and .apply_request.ready_for_external_submission == true
+    and .apply_request.requires_operator_gate == true
+    and .apply_request.requires_external_executor == true
+    and .apply_request.apply_performed == false
+    and .apply_request.submitted_by_this_tool == false
+    and .apply_request.outcome_ingestion_allowed_by_this_tool == false
+    and .agent_action_contract.may_submit_to_separate_executor_after_operator_gate == true
+    and .agent_action_contract.do_not_apply_patch == true
+    and .agent_action_contract.do_not_submit_patch_from_this_tool == true
+    and .agent_action_contract.do_not_ingest_outcome == true
+    and .agent_action_contract.do_not_write_memory == true
+    and .agent_action_contract.do_not_query_live_runtime == true
+    and .agent_action_contract.do_not_rewrite_world_verdict == true
+    and .agent_action_contract.external_executor_required == true
+    and .agent_action_contract.require_post_apply_verification == true
+    and .guardrails.read_only == true
+    and .guardrails.submits_apply_request == false
+    and .guardrails.applies_patch == false
+    and .guardrails.queries_live_runtime == false
+    and .implicit_live_runtime_lookup_attempted == false
+    and .writes_state == false
+    and .store_access_required == false
+    and .mcp_tool_registered == false
+' "$tmp_lswr_feedback_patch_apply_request_ready" >/dev/null
+
 tmp_missing_lswr_feedback_input="$tmpdir/missing-lswr-interaction-feedback-input.json"
 printf '{}\n' > "$tmp_missing_lswr_feedback_input"
 tmp_missing_lswr_feedback_consumption_preflight="$tmpdir/missing-lswr-interaction-feedback-consumption-preflight.json"

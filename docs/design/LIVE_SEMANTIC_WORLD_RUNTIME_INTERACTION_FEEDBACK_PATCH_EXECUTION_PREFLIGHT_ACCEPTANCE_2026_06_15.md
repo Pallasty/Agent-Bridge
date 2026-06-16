@@ -92,6 +92,13 @@ git diff --check
 
 Passed with pre-existing warnings only.
 
+```text
+AB_BIOCORTEX_RS=/Data/CascadeProjects/biocortex-rs scripts/verify-biocortex-retrieval-shadow.sh
+```
+
+Passed after wiring the blocked-without-context and ready-with-explicit-context
+smoke paths into the full verifier.
+
 ## 3. Boundary Review
 
 Accepted behavior:
@@ -156,7 +163,10 @@ Still not accepted:
 
 ## 6. Next Slice
 
-The next safe slice is to design a separate apply-request boundary. That slice
-must treat execution as a different authority level from preflight, and must
-review live runtime, patch application, outcome verification, and #94 ingestion
-as independent gates.
+The next safe slice has started as a separate apply-request boundary:
+
+- [Interaction feedback patch apply request boundary](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_PATCH_APPLY_REQUEST_BOUNDARY_2026_06_15.md)
+
+That slice still treats execution as a different authority level from preflight.
+It may package an external executor request, but live runtime lookup, patch
+application, outcome verification, and #94 ingestion remain independent gates.
