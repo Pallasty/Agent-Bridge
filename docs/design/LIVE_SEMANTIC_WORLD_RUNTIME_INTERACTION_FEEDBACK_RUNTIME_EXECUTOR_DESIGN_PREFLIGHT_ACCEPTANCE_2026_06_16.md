@@ -206,13 +206,18 @@ Still not accepted:
 
 ## 6. Next Slice
 
-The next safe slice is a separate runtime executor authority-gate design. It
-should keep live runtime lookup, operator submission, patch application,
-post-apply verification, and outcome ingestion independently reviewable.
+The authority-gate framework is recorded separately:
+
+- [Interaction feedback runtime executor authority gates](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_AUTHORITY_GATES_2026_06_16.md)
+
+The next concrete safe slice is a separate live runtime lookup design preflight:
+
+- [Interaction feedback live runtime lookup design preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_LIVE_RUNTIME_LOOKUP_DESIGN_PREFLIGHT_2026_06_16.md)
+
+It should keep host identity, operator visibility, timeout behavior,
+post-lookup redaction, and no-execution guarantees independently reviewable.
+Later slices should keep operator submission, patch application, post-apply
+verification, and outcome ingestion separately gated.
 
 No future slice should treat this acceptance as permission to execute or mutate
 a live LSWR runtime.
-
-Follow-up authority-gate design:
-
-- [Interaction feedback runtime executor authority gates](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_AUTHORITY_GATES_2026_06_16.md)

@@ -165,11 +165,14 @@ This slice does not approve:
 Acceptance is recorded in
 [runtime executor design preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DESIGN_PREFLIGHT_ACCEPTANCE_2026_06_16.md).
 
-The next safe slice is runtime executor authority-gate design. Runtime executor
-work should still split each authority gate into an independently reviewable
-design: live runtime lookup, operator submission, patch application,
-post-apply verification, and outcome ingestion.
-
-Follow-up authority-gate design:
+The follow-up authority-gate framework is recorded separately:
 
 - [Interaction feedback runtime executor authority gates](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_AUTHORITY_GATES_2026_06_16.md)
+
+The next concrete safe slice is a separate live runtime lookup design preflight:
+
+- [Interaction feedback live runtime lookup design preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_LIVE_RUNTIME_LOOKUP_DESIGN_PREFLIGHT_2026_06_16.md)
+
+Runtime executor work should still split each authority gate into an
+independently reviewable design: live runtime lookup, operator submission,
+patch application, post-apply verification, and outcome ingestion.

@@ -511,6 +511,120 @@ jq -e '
     and .mcp_tool_registered == false
 ' "$tmp_lswr_feedback_runtime_executor_design_preflight_ready" >/dev/null
 
+tmp_lswr_feedback_live_runtime_lookup_design_preflight_blocked="$tmpdir/lswr-interaction-feedback-live-runtime-lookup-design-preflight-blocked.json"
+run cargo run -q -p ab-bridge --example lswr_interaction_feedback_live_runtime_lookup_design_preflight_smoke -- \
+    --format json \
+    --assert-blocked-without-ready-design \
+    --assert-read-only > "$tmp_lswr_feedback_live_runtime_lookup_design_preflight_blocked"
+jq -e '
+    .schema == "agent_bridge.lswr.interaction_feedback_live_runtime_lookup_design_preflight.v0"
+    and .source_schema == "agent_bridge.lswr.interaction_feedback_runtime_executor_design_preflight.v0"
+    and .source_design_preflight_verdict == "blocked"
+    and .source_world_verdict == "not_verified"
+    and .lookup_design_preflight_verdict == "blocked"
+    and .status == "blocked"
+    and .reason == "source_design_preflight_not_ready"
+    and (.failure_reasons | index("source_design_preflight_not_ready")) != null
+    and .lookup_design_request.lookup_design_request_id == null
+    and .lookup_design_request.ready_for_lookup_design_review == false
+    and .lookup_design_request.ready_for_live_runtime_lookup == false
+    and .lookup_design_request.live_runtime_lookup_performed == false
+    and .lookup_design_request.host_contact_attempted == false
+    and .lookup_design_request.ready_for_submission == false
+    and .lookup_design_request.ready_for_patch_application == false
+    and .lookup_design_request.execution_performed == false
+    and .lookup_design_request.outcome_ingestion_allowed_by_this_tool == false
+    and .agent_action_contract.may_design_live_runtime_lookup_after_review == false
+    and .agent_action_contract.do_not_contact_live_runtime == true
+    and .agent_action_contract.do_not_open_socket == true
+    and .agent_action_contract.do_not_query_live_runtime == true
+    and .agent_action_contract.do_not_submit_apply_request == true
+    and .agent_action_contract.do_not_apply_patch == true
+    and .agent_action_contract.do_not_ingest_outcome == true
+    and .agent_action_contract.do_not_write_memory == true
+    and .agent_action_contract.do_not_rewrite_world_verdict == true
+    and .agent_action_contract.require_operator_supplied_host == true
+    and .agent_action_contract.require_timeout_budget_design == true
+    and .agent_action_contract.require_post_lookup_redaction_design == true
+    and .agent_action_contract.require_no_execution_design == true
+    and .guardrails.read_only == true
+    and .guardrails.live_runtime_lookup_design_only == true
+    and .guardrails.contacts_live_runtime == false
+    and .guardrails.opens_socket == false
+    and .guardrails.submits_apply_request == false
+    and .guardrails.applies_patch == false
+    and .guardrails.queries_live_runtime == false
+    and .implicit_live_runtime_lookup_attempted == false
+    and .live_runtime_contact_attempted == false
+    and .writes_state == false
+    and .store_access_required == false
+    and .mcp_tool_registered == false
+' "$tmp_lswr_feedback_live_runtime_lookup_design_preflight_blocked" >/dev/null
+
+tmp_lswr_feedback_live_runtime_lookup_design_preflight_ready="$tmpdir/lswr-interaction-feedback-live-runtime-lookup-design-preflight-ready.json"
+run cargo run -q -p ab-bridge --example lswr_interaction_feedback_live_runtime_lookup_design_preflight_smoke -- \
+    --with-fixture-context \
+    --format json \
+    --assert-ready-for-lookup-design \
+    --assert-read-only > "$tmp_lswr_feedback_live_runtime_lookup_design_preflight_ready"
+jq -e '
+    .schema == "agent_bridge.lswr.interaction_feedback_live_runtime_lookup_design_preflight.v0"
+    and .source_schema == "agent_bridge.lswr.interaction_feedback_runtime_executor_design_preflight.v0"
+    and .source_design_preflight_verdict == "ready_for_runtime_executor_design"
+    and .source_world_verdict == "not_verified"
+    and .lookup_design_preflight_verdict == "ready_for_live_runtime_lookup_design"
+    and .status == "ready"
+    and .reason == "live_runtime_lookup_design_preflight_ready"
+    and (.failure_reasons | length) == 0
+    and .lookup_design_request.lookup_design_request_id == "live_runtime_lookup_design_arrival_bath_move_002"
+    and .lookup_design_request.source_design_request_id == "runtime_executor_design_arrival_bath_move_002"
+    and .lookup_design_request.target_runtime.executor == "separate_lswr_patch_executor"
+    and .lookup_design_request.patch.patch_id == "patch_arrival_bath_move_002"
+    and .lookup_design_request.patch.op == "semantic_revision"
+    and .lookup_design_request.patch.args.cell == [5, 2]
+    and .lookup_design_request.patch.required_citations == ["verify_patch_arrival_bath_move_001", "fb_arrival_crowded_001"]
+    and .lookup_design_request.required_lookup_gates == ["operator_supplied_host_gate", "host_identity_gate", "timeout_budget_gate", "post_lookup_redaction_gate", "no_execution_gate"]
+    and .lookup_design_request.host_binding_requirements.host_endpoint_required_from_operator == true
+    and .lookup_design_request.host_binding_requirements.host_endpoint_provided == false
+    and .lookup_design_request.host_binding_requirements.default_endpoint == null
+    and .lookup_design_request.host_binding_requirements.network_contact_allowed_by_this_tool == false
+    and .lookup_design_request.host_binding_requirements.socket_open_allowed_by_this_tool == false
+    and .lookup_design_request.ready_for_lookup_design_review == true
+    and .lookup_design_request.ready_for_live_runtime_lookup == false
+    and .lookup_design_request.live_runtime_lookup_performed == false
+    and .lookup_design_request.host_contact_attempted == false
+    and .lookup_design_request.ready_for_submission == false
+    and .lookup_design_request.ready_for_patch_application == false
+    and .lookup_design_request.execution_performed == false
+    and .lookup_design_request.outcome_ingestion_allowed_by_this_tool == false
+    and .lookup_design_request.requires_separate_runtime_lookup_approval == true
+    and .agent_action_contract.may_design_live_runtime_lookup_after_review == true
+    and .agent_action_contract.do_not_contact_live_runtime == true
+    and .agent_action_contract.do_not_open_socket == true
+    and .agent_action_contract.do_not_query_live_runtime == true
+    and .agent_action_contract.do_not_submit_apply_request == true
+    and .agent_action_contract.do_not_apply_patch == true
+    and .agent_action_contract.do_not_ingest_outcome == true
+    and .agent_action_contract.do_not_write_memory == true
+    and .agent_action_contract.do_not_rewrite_world_verdict == true
+    and .agent_action_contract.require_operator_supplied_host == true
+    and .agent_action_contract.require_timeout_budget_design == true
+    and .agent_action_contract.require_post_lookup_redaction_design == true
+    and .agent_action_contract.require_no_execution_design == true
+    and .guardrails.read_only == true
+    and .guardrails.live_runtime_lookup_design_only == true
+    and .guardrails.contacts_live_runtime == false
+    and .guardrails.opens_socket == false
+    and .guardrails.submits_apply_request == false
+    and .guardrails.applies_patch == false
+    and .guardrails.queries_live_runtime == false
+    and .implicit_live_runtime_lookup_attempted == false
+    and .live_runtime_contact_attempted == false
+    and .writes_state == false
+    and .store_access_required == false
+    and .mcp_tool_registered == false
+' "$tmp_lswr_feedback_live_runtime_lookup_design_preflight_ready" >/dev/null
+
 tmp_lswr_feedback_runtime_executor_live_lookup_preflight_blocked="$tmpdir/lswr-interaction-feedback-runtime-executor-live-lookup-preflight-blocked.json"
 run cargo run -q -p ab-bridge --example lswr_interaction_feedback_runtime_executor_live_lookup_preflight_smoke -- \
     --format json \

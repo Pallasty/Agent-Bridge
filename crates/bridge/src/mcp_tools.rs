@@ -23995,6 +23995,41 @@ fn mcp_lifecycle_runtime_status_ready(runtime_status: &str) -> bool {
     matches!(runtime_status, "ok" | "ready")
 }
 
+fn mcp_lifecycle_tool_atlas_input(
+    generated_at: i64,
+    window_secs: i64,
+    current_tools: Vec<String>,
+    stats: Vec<ab_store::McpToolCallStats>,
+    recent_errors: Vec<ab_store::McpToolErrorRecord>,
+) -> crate::tool_atlas::ToolAtlasInput {
+    let current_tool_set: HashSet<String> = current_tools
+        .iter()
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
+        .collect();
+    let stats: Vec<ab_store::McpToolCallStats> = stats
+        .into_iter()
+        .filter(|stat| current_tool_set.contains(stat.tool_name.trim()))
+        .collect();
+    let failing_tool_set: HashSet<String> = stats
+        .iter()
+        .filter(|stat| stat.error_count > 0)
+        .map(|stat| stat.tool_name.trim().to_string())
+        .collect();
+    let recent_errors: Vec<ab_store::McpToolErrorRecord> = recent_errors
+        .into_iter()
+        .filter(|error| failing_tool_set.contains(error.tool_name.trim()))
+        .collect();
+
+    crate::tool_atlas::ToolAtlasInput {
+        generated_at,
+        window_secs,
+        current_tools,
+        stats,
+        recent_errors,
+    }
+}
+
 async fn mcp_lifecycle_tool_telemetry(hub: &Hub, window_secs: i64) -> Value {
     let Some(store) = hub.store.as_ref() else {
         return json!({
@@ -24015,8 +24050,9 @@ async fn mcp_lifecycle_tool_telemetry(hub: &Hub, window_secs: i64) -> Value {
         .map(|schema| schema.name)
         .collect();
     let stats_limit = current_tools.len().max(1).min(200) as u32;
+    let filter = mcp_lifecycle_telemetry_filter_from_env();
     let stats = match store
-        .mcp_tool_call_stats_filtered(window_secs, stats_limit, McpToolCallFilter::default())
+        .mcp_tool_call_stats_filtered(window_secs, stats_limit, filter.clone())
         .await
     {
         Ok(rows) => rows,
@@ -24039,14 +24075,13 @@ async fn mcp_lifecycle_tool_telemetry(hub: &Hub, window_secs: i64) -> Value {
             })
         }
     };
-    let snapshot =
-        crate::tool_atlas::build_tool_atlas_snapshot(crate::tool_atlas::ToolAtlasInput {
-            generated_at: dispatch_now_secs(),
-            window_secs,
-            current_tools,
-            stats,
-            recent_errors,
-        });
+    let snapshot = crate::tool_atlas::build_tool_atlas_snapshot(mcp_lifecycle_tool_atlas_input(
+        dispatch_now_secs(),
+        window_secs,
+        current_tools,
+        stats,
+        recent_errors,
+    ));
     let mut payload = crate::tool_atlas::project_tool_atlas_snapshot(
         &snapshot,
         crate::tool_atlas::ToolAtlasViewOptions {
@@ -24056,8 +24091,86 @@ async fn mcp_lifecycle_tool_telemetry(hub: &Hub, window_secs: i64) -> Value {
     );
     if let Some(obj) = payload.as_object_mut() {
         obj.insert("status".to_string(), json!("ok"));
+        obj.insert("filter".to_string(), dispatch_filter_json(&filter));
+        obj.insert(
+            "scope_note".to_string(),
+            json!("Lifecycle telemetry is scoped to the current MCP surface and attribution where available. The recent error ring has no attribution columns, so it is used only for tools with current scoped error stats."),
+        );
     }
     payload
+}
+
+fn mcp_lifecycle_telemetry_filter_from_env() -> McpToolCallFilter {
+    let policy = ToolPolicy::from_env();
+    McpToolCallFilter {
+        source: mcp_lifecycle_source_from_env(),
+        client_name: std::env::var("AGENT_BRIDGE_CLIENT_NAME")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()),
+        profile: Some(policy.profile().label().to_string()),
+        model: std::env::var("AGENT_BRIDGE_MODEL")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()),
+        model_reasoning_effort: std::env::var("AGENT_BRIDGE_MODEL_REASONING_EFFORT")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()),
+        codex_host: std::env::var("AGENT_BRIDGE_CODEX_HOST")
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()),
+    }
+}
+
+fn mcp_lifecycle_source_from_env() -> Option<String> {
+    if let Ok(source) = std::env::var("AGENT_BRIDGE_MCP_SOURCE") {
+        if let Some(source) = dispatch_normalize_source(&source) {
+            return Some(source.to_string());
+        }
+    }
+    if let Ok(client_name) = std::env::var("AGENT_BRIDGE_CLIENT_NAME") {
+        if let Some(source) = dispatch_normalize_source(&client_name) {
+            return Some(source.to_string());
+        }
+    }
+    if mcp_schema_codex_context() {
+        return Some("codex".to_string());
+    }
+    let client = std::env::var("AGENT_BRIDGE_CLIENT").ok()?;
+    dispatch_normalize_source(&client).map(ToString::to_string)
+}
+
+fn dispatch_normalize_source(value: &str) -> Option<&'static str> {
+    let normalized = normalize_tool_policy_value(value);
+    if normalized.contains("hook")
+        || normalized.contains("precompact")
+        || normalized.contains("pre-compact")
+        || normalized.contains("session-end")
+        || normalized.contains("sessionend")
+        || normalized.contains("stop")
+    {
+        return Some("hook");
+    }
+    if normalized.contains("codex") || normalized.contains("openai") {
+        return Some("codex");
+    }
+    if normalized.contains("claude") {
+        return Some("claude");
+    }
+    if normalized.contains("gemini") {
+        return Some("gemini");
+    }
+    if normalized.contains("audit") || normalized.contains("smoke") || normalized.contains("test") {
+        return Some("manual");
+    }
+    match normalized.as_str() {
+        "manual" => Some("manual"),
+        "legacy" => Some("legacy"),
+        "other" => Some("other"),
+        _ => None,
+    }
 }
 
 fn mcp_lifecycle_recommendations(
@@ -47045,12 +47158,90 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(recommendations
             .iter()
             .any(|s| s.contains("MCP lifecycle axes look ready")));
-        assert!(!recommendations
-            .iter()
-            .any(|s| s.contains("runtime health")));
+        assert!(!recommendations.iter().any(|s| s.contains("runtime health")));
 
         assert!(mcp_lifecycle_runtime_status_ready("ok"));
         assert!(!mcp_lifecycle_runtime_status_ready("unknown"));
+    }
+
+    #[test]
+    fn mcp_lifecycle_tool_telemetry_ignores_non_current_tool_errors() {
+        let input = mcp_lifecycle_tool_atlas_input(
+            1_781_612_800,
+            3_600,
+            vec!["mcp_lifecycle_digest".to_string()],
+            vec![ab_store::McpToolCallStats {
+                tool_name: "lswr_interaction_feedback_consumption_report".to_string(),
+                call_count: 2,
+                error_count: 1,
+                avg_duration_ms: 0.0,
+                p95_duration_ms: 0,
+                max_duration_ms: 0,
+                avg_result_size: 9_984.0,
+                client_name: None,
+                profile: Some("essential".to_string()),
+                source: Some("codex".to_string()),
+                model: Some("gpt-5.5".to_string()),
+                model_reasoning_effort: Some("xhigh".to_string()),
+                codex_host: Some("desktop".to_string()),
+            }],
+            vec![ab_store::McpToolErrorRecord {
+                ts: 1_781_612_755,
+                tool_name: "lswr_interaction_feedback_consumption_report".to_string(),
+                message: "accepts only an explicit report_input payload".to_string(),
+            }],
+        );
+
+        let snapshot = crate::tool_atlas::build_tool_atlas_snapshot(input);
+
+        assert_eq!(snapshot.summary.failing_tool_count, 0);
+        assert!(snapshot
+            .tools
+            .iter()
+            .all(|tool| tool.tool_name != "lswr_interaction_feedback_consumption_report"));
+    }
+
+    #[test]
+    fn mcp_lifecycle_tool_telemetry_retains_current_tool_errors() {
+        let input = mcp_lifecycle_tool_atlas_input(
+            1_781_612_800,
+            3_600,
+            vec!["mcp_lifecycle_digest".to_string()],
+            vec![ab_store::McpToolCallStats {
+                tool_name: "mcp_lifecycle_digest".to_string(),
+                call_count: 2,
+                error_count: 1,
+                avg_duration_ms: 120.0,
+                p95_duration_ms: 240,
+                max_duration_ms: 240,
+                avg_result_size: 1_024.0,
+                client_name: None,
+                profile: Some("essential".to_string()),
+                source: Some("codex".to_string()),
+                model: Some("gpt-5.5".to_string()),
+                model_reasoning_effort: Some("xhigh".to_string()),
+                codex_host: Some("desktop".to_string()),
+            }],
+            vec![ab_store::McpToolErrorRecord {
+                ts: 1_781_612_755,
+                tool_name: "mcp_lifecycle_digest".to_string(),
+                message: "current scoped failure".to_string(),
+            }],
+        );
+
+        let snapshot = crate::tool_atlas::build_tool_atlas_snapshot(input);
+        let lifecycle = snapshot
+            .tools
+            .iter()
+            .find(|tool| tool.tool_name == "mcp_lifecycle_digest")
+            .expect("current lifecycle tool");
+
+        assert_eq!(snapshot.summary.failing_tool_count, 1);
+        assert_eq!(lifecycle.health, "failing");
+        assert_eq!(
+            lifecycle.failure_samples[0].message,
+            "current scoped failure"
+        );
     }
 
     #[test]
