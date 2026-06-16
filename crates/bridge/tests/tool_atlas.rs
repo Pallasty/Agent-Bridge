@@ -216,6 +216,32 @@ fn tool_atlas_treats_event_spine_explicit_events_as_expected_detail_payload() {
 }
 
 #[test]
+fn tool_atlas_treats_forum_read_long_deep_dive_as_expected_detail_payload() {
+    let snapshot = build_tool_atlas_snapshot(ToolAtlasInput {
+        generated_at: 1_779_910_000,
+        window_secs: 600,
+        current_tools: vec!["forum_read".to_string()],
+        stats: vec![stat("forum_read", 3, 0, 2, 29_160.0)],
+        recent_errors: Vec::new(),
+    });
+
+    let forum_read = snapshot
+        .tools
+        .iter()
+        .find(|tool| tool.tool_name == "forum_read")
+        .expect("forum_read");
+
+    assert_eq!(forum_read.health, "healthy");
+    assert_eq!(forum_read.recommendation, "keep");
+    assert!(forum_read
+        .risk_flags
+        .contains(&"expected_detail_payload".to_string()));
+    assert!(!forum_read
+        .risk_flags
+        .contains(&"large_average_result".to_string()));
+}
+
+#[test]
 fn tool_atlas_treats_session_reconcile_confirmation_gate_as_expected() {
     let snapshot = build_tool_atlas_snapshot(ToolAtlasInput {
         generated_at: 1_779_910_000,

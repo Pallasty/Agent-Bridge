@@ -293,7 +293,7 @@ fn is_expected_wait_tool(tool_name: &str) -> bool {
 }
 
 fn is_expected_detail_payload_tool(tool_name: &str) -> bool {
-    matches!(tool_name, "event_spine_snapshot")
+    matches!(tool_name, "event_spine_snapshot" | "forum_read")
 }
 
 fn expected_gate_flag(
