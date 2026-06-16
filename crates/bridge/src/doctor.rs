@@ -603,6 +603,15 @@ fn format_mcp_process_summary(rows: &[McpProcessObservation]) -> String {
         direct_binary,
         unknown
     );
+    if current_real.is_empty() {
+        summary.push_str(
+            "; no current .real MCP server detected for this install path, so an active client may still be stale",
+        );
+    } else if !stale_real.is_empty() || !direct_binary.is_empty() || !unknown.is_empty() {
+        summary.push_str(
+            "; at least one current .real MCP server is active; stale/direct/unknown rows are other clients or old sessions that still need refresh",
+        );
+    }
     let detail_blocks = [
         mcp_detail_for_kind(rows, McpProcessKind::StaleReal, "stale"),
         mcp_detail_for_kind(rows, McpProcessKind::DirectBinary, "direct"),
@@ -616,6 +625,16 @@ fn format_mcp_process_summary(rows: &[McpProcessObservation]) -> String {
         summary.push_str(&detail_blocks.join(" | "));
     }
     summary
+}
+
+fn mcp_process_reconnect_hint(rows: &[McpProcessObservation]) -> &'static str {
+    if mcp_pids_by_kind(rows, McpProcessKind::CurrentReal).is_empty() {
+        "restart the MCP client(s) so they respawn from the current wrapper \
+         and re-read tools/list; this refreshes newly added tool manifests"
+    } else {
+        "current .real MCP server(s) are already active; restart only stale/direct/unknown \
+         MCP client(s) that still need refreshed tool manifests"
+    }
 }
 
 /// Check 5: running daemon has the SVD env (catches the silent regression at
@@ -684,8 +703,7 @@ fn check_mcp_servers(dir: &Path) -> Check {
         Check::warn(
             "mcp_servers",
             format_mcp_process_summary(&rows),
-            "restart the MCP client(s) so they respawn from the current wrapper \
-             and re-read tools/list; this refreshes newly added tool manifests",
+            mcp_process_reconnect_hint(&rows),
         )
     }
 }
@@ -1391,6 +1409,67 @@ agent_bridge.system_control.audit.v0
         assert!(detail.contains("parent=claude --continue"));
         assert!(detail.contains("elapsed=01:17:30"));
         assert!(detail.contains("exe=/home/me/.local/bin/agent-bridge.real (deleted)"));
+    }
+
+    #[test]
+    fn mcp_process_summary_distinguishes_current_active_from_other_stale_clients() {
+        let rows = vec![
+            McpProcessObservation {
+                pid: 101,
+                kind: McpProcessKind::CurrentReal,
+                text_file: Some(ProcessTextFile {
+                    path: "/home/me/.local/bin/agent-bridge.real".into(),
+                    inode: Some(42),
+                }),
+                command: Some("/home/me/.local/bin/agent-bridge.real mcp".into()),
+                ppid: Some(90),
+                parent_command: Some("codex app-server".into()),
+                elapsed: Some("00:00:18".into()),
+            },
+            McpProcessObservation {
+                pid: 202,
+                kind: McpProcessKind::StaleReal,
+                text_file: Some(ProcessTextFile {
+                    path: "/home/me/.local/bin/agent-bridge.real (deleted)".into(),
+                    inode: Some(41),
+                }),
+                command: Some("/home/me/.local/bin/agent-bridge.real mcp".into()),
+                ppid: Some(77),
+                parent_command: Some("warp".into()),
+                elapsed: Some("02:00:00".into()),
+            },
+        ];
+
+        let detail = format_mcp_process_summary(&rows);
+        let hint = mcp_process_reconnect_hint(&rows);
+
+        assert!(detail.contains("at least one current .real MCP server is active"));
+        assert!(detail.contains("stale/direct/unknown rows are other clients or old sessions"));
+        assert!(hint.contains("current .real MCP server(s) are already active"));
+        assert!(hint.contains("restart only stale/direct/unknown"));
+    }
+
+    #[test]
+    fn mcp_process_summary_warns_when_no_current_real_process_exists() {
+        let rows = vec![McpProcessObservation {
+            pid: 202,
+            kind: McpProcessKind::StaleReal,
+            text_file: Some(ProcessTextFile {
+                path: "/home/me/.local/bin/agent-bridge.real (deleted)".into(),
+                inode: Some(41),
+            }),
+            command: Some("/home/me/.local/bin/agent-bridge.real mcp".into()),
+            ppid: Some(77),
+            parent_command: Some("claude --continue".into()),
+            elapsed: Some("01:17:30".into()),
+        }];
+
+        let detail = format_mcp_process_summary(&rows);
+        let hint = mcp_process_reconnect_hint(&rows);
+
+        assert!(detail.contains("no current .real MCP server detected"));
+        assert!(detail.contains("active client may still be stale"));
+        assert!(hint.contains("restart the MCP client(s) so they respawn"));
     }
 
     #[test]
