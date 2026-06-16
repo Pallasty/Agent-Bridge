@@ -239,6 +239,19 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("evidenceRows.map", html)
         self.assertIn("renderNodeDossier(m, graphNode, region)", html)
 
+    def test_node_detail_lens_surfaces_signal_lane(self):
+        html = palace_html()
+
+        self.assertIn("function renderNodeSignalLane(memory, graphNode, region)", html)
+        self.assertIn('id="workbench-node-signal-lane"', html)
+        self.assertIn("node-signal-lane", html)
+        self.assertIn("node-signal-card", html)
+        self.assertIn("node-signal-hop", html)
+        self.assertIn("data-node-signal-hop", html)
+        self.assertIn("function inspectWorkbenchRelation(panel, memory, key)", html)
+        self.assertIn("inspectWorkbenchRelation(panel, memory, key);", html)
+        self.assertIn("renderNodeSignalLane(m, graphNode, region)", html)
+
     def test_node_detail_lens_body_state_is_scoped_to_node_workbench(self):
         html = palace_html()
 

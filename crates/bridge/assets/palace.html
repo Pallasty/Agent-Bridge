@@ -976,6 +976,65 @@
     #panel .relation-chip.structural .value { color: #c8c8d2; }
     #panel .relation-chip.coactivation .value { color: #5cc8c8; }
     #panel .relation-chip.strongest .value { color: #a87cff; }
+    #panel .node-signal-lane {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 7px;
+      margin: 0 0 12px;
+    }
+    #panel .node-signal-card {
+      min-width: 0;
+      padding: 9px;
+      background: #101018;
+      border: 1px solid #252532;
+      border-left: 2px solid #5cc8c8;
+      border-radius: 4px;
+    }
+    #panel .node-signal-card.graph { border-left-color: #ffe070; }
+    #panel .node-signal-card.next { border-left-color: #a87cff; }
+    #panel .node-signal-label {
+      display: block;
+      color: #5a5a68;
+      font-size: 8px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    #panel .node-signal-value {
+      display: block;
+      min-width: 0;
+      color: #e8e8ee;
+      font-size: 11px;
+      font-weight: 650;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #panel .node-signal-detail {
+      display: block;
+      min-width: 0;
+      margin-top: 3px;
+      color: #6a6a78;
+      font-size: 10px;
+      letter-spacing: 0.04em;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #panel .node-signal-hop {
+      width: 100%;
+      min-width: 0;
+      padding: 0;
+      background: transparent;
+      border: none;
+      color: inherit;
+      text-align: left;
+      cursor: pointer;
+      font: inherit;
+    }
+    #panel .node-signal-hop:hover .node-signal-value {
+      color: #ffffff;
+    }
     #panel .node-dossier {
       margin: 0 0 14px;
       padding: 11px 12px;
@@ -5137,6 +5196,40 @@ function renderNodeDossier(memory, graphNode, region) {
   </div>`;
 }
 
+function renderNodeSignalLane(memory, graphNode, region) {
+  const graphData = graphNode && graphNode.length > 0 ? graphNode.data() : {};
+  const summary = summarizeWorkbenchRelations(memory, graphNode);
+  const role = nodeRoleLabel(graphData);
+  const degree = graphData.degree || 0;
+  const kind = memory.kind || graphData.kind || "memory";
+  const regionLabel = region ? region.label : "unmapped";
+  const source = memory.source === "markdown" ? "markdown" : "sqlite";
+  const strongest = summary.strongest;
+  const next = strongest
+    ? `<button type="button" class="node-signal-hop" data-node-signal-hop="${escapeHTML(strongest.key)}">
+        <span class="node-signal-value" title="${escapeHTML(strongest.key)}">${escapeHTML(strongest.label || strongest.key)}</span>
+        <span class="node-signal-detail">${escapeHTML(strongest.weight > 0 ? strongest.weight.toFixed(2) : "linked")} · inspect relation</span>
+      </button>`
+    : `<span class="node-signal-value">none</span>
+      <span class="node-signal-detail">no visible neighbor</span>`;
+  return `<div id="workbench-node-signal-lane" class="node-signal-lane">
+    <div class="node-signal-card position">
+      <span class="node-signal-label">position</span>
+      <span class="node-signal-value" title="${escapeHTML(regionLabel)}">${escapeHTML(regionLabel)}</span>
+      <span class="node-signal-detail">${escapeHTML(kind)} · ${escapeHTML(source)}</span>
+    </div>
+    <div class="node-signal-card graph">
+      <span class="node-signal-label">graph</span>
+      <span class="node-signal-value">${escapeHTML(role)} · ${degree}°</span>
+      <span class="node-signal-detail">${summary.structuralCount} structural · ${summary.coactivationCount} cofire</span>
+    </div>
+    <div class="node-signal-card next">
+      <span class="node-signal-label">next hop</span>
+      ${next}
+    </div>
+  </div>`;
+}
+
 function renderWorkbenchRelationSummary(memory, graphNode) {
   const summary = summarizeWorkbenchRelations(memory, graphNode);
   const strongestLabel = summary.strongest
@@ -6189,6 +6282,7 @@ async function showSidePanel(id) {
           <button class="tombstone-btn" type="button">🪦 tombstone</button>
         </div>
         <div class="workbench-body">
+          ${renderNodeSignalLane(m, graphNode, region)}
           ${renderNodeDossier(m, graphNode, region)}
           ${renderWorkbenchRelationSummary(m, graphNode)}
           ${descBlock}
@@ -6344,6 +6438,25 @@ function bindRegionWorkbenchActions(panel, regionId) {
   }
 }
 
+function inspectWorkbenchRelation(panel, memory, key) {
+  if (!key) return;
+  state.relationDetailKey = key;
+  applyRelationFocus(memory.key, key);
+  refreshWorkbenchNeighborSection(panel, memory);
+  const detail = panel.querySelector("#workbench-relation-detail");
+  if (detail) detail.scrollIntoView({ block: "nearest", inline: "nearest" });
+  saveViewState();
+}
+
+function bindNodeSignalLaneActions(panel, memory) {
+  panel.querySelectorAll("[data-node-signal-hop]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const key = btn.dataset.nodeSignalHop;
+      inspectWorkbenchRelation(panel, memory, key);
+    });
+  });
+}
+
 function bindWorkbenchNeighborActions(panel, memory) {
   panel.querySelectorAll("[data-neighbor-filter]").forEach(btn => {
     btn.addEventListener("click", () => {
@@ -6368,13 +6481,7 @@ function bindWorkbenchNeighborActions(panel, memory) {
   panel.querySelectorAll(".neighbor-link").forEach(btn => {
     btn.addEventListener("click", () => {
       const key = btn.dataset.relationDetailKey || btn.dataset.neighborKey;
-      if (!key) return;
-      state.relationDetailKey = key;
-      applyRelationFocus(memory.key, key);
-      refreshWorkbenchNeighborSection(panel, memory);
-      const detail = panel.querySelector("#workbench-relation-detail");
-      if (detail) detail.scrollIntoView({ block: "nearest", inline: "nearest" });
-      saveViewState();
+      inspectWorkbenchRelation(panel, memory, key);
     });
   });
   panel.querySelectorAll("[data-open-neighbor-key]").forEach(btn => {
@@ -6398,6 +6505,7 @@ function bindWorkbenchContentActions(panel, memory) {
 }
 
 function bindWorkbenchActions(panel, memory) {
+  bindNodeSignalLaneActions(panel, memory);
   bindWorkbenchNeighborActions(panel, memory);
   bindWorkbenchContentActions(panel, memory);
   const copyBtn = panel.querySelector(".copy-key-btn");
