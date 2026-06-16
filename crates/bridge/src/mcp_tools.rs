@@ -21106,6 +21106,73 @@ fn session_lifecycle_hint() -> String {
 //                              session_curate
 // ===========================================================================
 
+/// SSB lifecycle producer (roadmap §2 "hooks → bus events"): emit a
+/// `session_curate` as a typed semantic event on the unified Object/Affordance
+/// contract, completing the session-lifecycle trio on the bus alongside
+/// session_bootstrap (start) and session_finalize (end). Curate HAS readback —
+/// the count of memories actually persisted — so a run that saved ≥1 memory is
+/// Verified; a dry-run or a run that saved nothing (all duplicates / no
+/// candidates) made no effect and is honestly Unknown; a run where every
+/// candidate save errored failed to persist and is NotVerified (anti-laundering).
+/// Best-effort; the emit never affects the curate result.
+async fn record_session_curate_event(
+    store: &Arc<dyn StateStore>,
+    dry_run: bool,
+    saved_count: usize,
+    skipped_dupes: usize,
+    error_count: usize,
+    candidate_count: usize,
+) {
+    let verdict = if dry_run {
+        // Dry-run previews candidates but persists nothing → no effect → Unknown.
+        crate::semantic_event::classify_lifecycle(true, false, "")
+    } else {
+        // A real run that saved nothing AND hit errors failed to persist (the
+        // step's core work did not succeed) → NotVerified. Otherwise it ran:
+        // saved ≥1 → Verified (readback), saved 0 with no errors → Unknown.
+        let total_failure = saved_count == 0 && error_count > 0;
+        crate::semantic_event::classify_lifecycle(
+            !total_failure,
+            saved_count > 0,
+            if total_failure {
+                "curate: all candidate saves failed"
+            } else {
+                ""
+            },
+        )
+    };
+    let ev = crate::semantic_event::SemanticEvent {
+        ts: dispatch_now_secs(),
+        actor: "mcp".to_string(),
+        source: "session".to_string(),
+        action: "curate".to_string(),
+        target: None,
+        object: crate::semantic_event::SemanticObject {
+            object_type: "session".to_string(),
+            source_adapter: "session".to_string(),
+            label: None,
+            object_id: None,
+        },
+        affordance: crate::semantic_event::Affordance {
+            action_type: "curate".to_string(),
+            risk_level: "low".to_string(),
+            requires_gate: false,
+            expected_effect: Some("extract + persist memories from conversation".to_string()),
+        },
+        verdict,
+        facts: json!({
+            "dry_run": dry_run,
+            "saved_count": saved_count,
+            "skipped_duplicates": skipped_dupes,
+            "error_count": error_count,
+            "candidate_count": candidate_count,
+        }),
+    };
+    if let Err(e) = store.record_semantic_event(ev.to_record()).await {
+        tracing::debug!(error = %e, "record_semantic_event (session_curate) failed");
+    }
+}
+
 pub struct SessionCurateTool {
     hub: Hub,
 }
@@ -21206,6 +21273,12 @@ impl McpTool for SessionCurateTool {
         );
 
         if dry_run || store_opt.is_none() {
+            // SSB lifecycle producer: a dry-run previews but persists nothing →
+            // Unknown (no effect). Only emit when a store exists; a no-store call
+            // has nowhere to record (and is not a real curate).
+            if let Some(store) = &store_opt {
+                record_session_curate_event(store, true, 0, 0, 0, candidates.len()).await;
+            }
             return Ok(ToolResult::json_text(&json!({
                 "dry_run": true,
                 "options": {
@@ -21244,11 +21317,25 @@ impl McpTool for SessionCurateTool {
             .find(|m| m.kind == "session_handoff")
             .map(|m| m.key.clone());
 
+        // SSB lifecycle producer: a real curate HAS readback (the persisted
+        // count), so a run that saved ≥1 memory is Verified; saved nothing with
+        // no errors → Unknown; saved nothing but every save errored → NotVerified.
+        let skipped = candidates.len() - saved.len() - errors.len();
+        record_session_curate_event(
+            &store,
+            false,
+            saved.len(),
+            skipped,
+            errors.len(),
+            candidates.len(),
+        )
+        .await;
+
         Ok(ToolResult::json_text(&json!({
             "dry_run": false,
             "saved_count": saved.len(),
             "new_memories": saved,
-            "skipped_duplicates": candidates.len() - saved.len() - errors.len(),
+            "skipped_duplicates": skipped,
             "errors": errors,
             "session_handoff_key": session_handoff_key
         })))
