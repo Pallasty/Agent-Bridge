@@ -47045,9 +47045,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(recommendations
             .iter()
             .any(|s| s.contains("MCP lifecycle axes look ready")));
-        assert!(!recommendations
-            .iter()
-            .any(|s| s.contains("runtime health")));
+        assert!(!recommendations.iter().any(|s| s.contains("runtime health")));
 
         assert!(mcp_lifecycle_runtime_status_ready("ok"));
         assert!(!mcp_lifecycle_runtime_status_ready("unknown"));
