@@ -17113,6 +17113,12 @@ impl McpTool for AgentSessionWaitTool {
 //                       agent self-memory (v0.4)
 // ===========================================================================
 
+const MEMORY_SAVE_SYNC_ADVISORY_CONTENT_MAX_BYTES: usize = 2_048;
+
+fn memory_save_sync_advisory_enabled(content: &str) -> bool {
+    content.len() <= MEMORY_SAVE_SYNC_ADVISORY_CONTENT_MAX_BYTES
+}
+
 /// Build a proactive hint for an agent memory key.
 ///
 /// Heuristic:
@@ -17595,7 +17601,8 @@ impl McpTool for MemorySaveTool {
             use ab_store::CATALOG_KINDS_C3;
             !CATALOG_KINDS_C3.contains(&mem.kind.as_str())
         };
-        let (b3_warnings, b3_hints) = if !b3_disabled && b3_eligible_kind {
+        let sync_advisory_enabled = memory_save_sync_advisory_enabled(&mem.content);
+        let (b3_warnings, b3_hints) = if sync_advisory_enabled && !b3_disabled && b3_eligible_kind {
             b3_preflight(&store, &mem.key, &mem.content, &mem.kind).await
         } else {
             (Vec::new(), Vec::new())
@@ -17768,7 +17775,11 @@ impl McpTool for MemorySaveTool {
                         }
                     });
                 }
-                let hint = build_proactive_hint(&store, &key, &mem.content, &mem.tags).await;
+                let hint = if sync_advisory_enabled {
+                    build_proactive_hint(&store, &key, &mem.content, &mem.tags).await
+                } else {
+                    None
+                };
                 let resp = json!({
                     "status": "saved",
                     "key": key,
@@ -55534,6 +55545,59 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
                 cos
             );
         }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn memory_save_long_content_skips_sync_advisory_searches() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        let long_content = "FTS5 column-scoped parser warning ".repeat(96);
+
+        store
+            .memory_save(&b3_mem("decision_prior_long", "decision", &long_content))
+            .await
+            .expect("save prior");
+
+        let tool = MemorySaveTool::new(hub);
+        let res = tool
+            .execute(
+                json!({
+                    "key": "decision_new_long",
+                    "kind": "decision",
+                    "content": long_content,
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let text = match res.content.first() {
+            Some(ab_mcp::ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        let payload: Value = serde_json::from_str(&text).expect("json payload");
+
+        assert_eq!(payload["status"], json!("saved"));
+        assert!(
+            payload["prior_decision_warnings"]
+                .as_array()
+                .expect("warnings array")
+                .is_empty(),
+            "long content should skip synchronous B3 warnings"
+        );
+        assert!(
+            payload["prior_decision_hints"]
+                .as_array()
+                .expect("hints array")
+                .is_empty(),
+            "long content should skip synchronous B3 hints"
+        );
+        assert_eq!(
+            payload["proactive_hint"],
+            Value::Null,
+            "long content should skip synchronous proactive hint search"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
     /// Regression: `MemorySearchHit.cosine` is the raw geometric distance;
