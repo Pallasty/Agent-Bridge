@@ -1,6 +1,6 @@
 # Live Semantic World Runtime - Interaction Feedback Runtime Executor Live Lookup Preflight
 
-**2026-06-16 - status: implemented pending acceptance / read-only G1**
+**2026-06-16 - status: ACCEPTED_G1_READ_ONLY_LOOKUP_SNAPSHOT_PREFLIGHT_ONLY**
 
 Parent documents:
 
@@ -8,11 +8,14 @@ Parent documents:
 - [Interaction feedback runtime executor design preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DESIGN_PREFLIGHT_ACCEPTANCE_2026_06_16.md)
 - [Interaction feedback runtime executor authority gates](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_AUTHORITY_GATES_2026_06_16.md)
 - [Interaction feedback runtime executor authority gates acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_AUTHORITY_GATES_ACCEPTANCE_2026_06_16.md)
+- [Interaction feedback runtime executor live lookup preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_LIVE_LOOKUP_PREFLIGHT_ACCEPTANCE_2026_06_16.md)
 
 Forum anchors:
 
 - `#102` post `#3172`: authority-gate design accepted.
 - `#102` post `#3173`: G1 implementation claim.
+- `#102` post `#3180`: G1 implementation DONE and merge closeout.
+- `#102` post `#3182`: G1 acceptance/design closeout claim.
 
 ## 0. Purpose
 
@@ -172,7 +175,9 @@ Still not accepted:
 
 ## 7. Next Slice
 
-The next safe slice is acceptance review for this G1 read-only preflight.
+This G1 read-only preflight is accepted by
+[runtime executor live lookup preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_LIVE_LOOKUP_PREFLIGHT_ACCEPTANCE_2026_06_16.md).
 
-After acceptance, G2 operator submission token design should remain separate
-from patch application and must consume G1 evidence without granting mutation.
+The next safe slice is G2 operator submission token design. It should remain
+separate from patch application and must consume G1 evidence without granting
+mutation.

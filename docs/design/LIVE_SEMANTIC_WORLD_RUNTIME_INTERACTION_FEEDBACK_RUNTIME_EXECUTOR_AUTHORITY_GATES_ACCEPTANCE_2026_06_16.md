@@ -129,6 +129,7 @@ That slice should prove only that a target runtime can be queried and compared
 against the accepted design request without submission, mutation, verification,
 ingestion, store writes, memory writes, #94 writes, or MCP exposure.
 
-Follow-up G1 preflight:
+Accepted G1 preflight:
 
 - [Interaction feedback runtime executor live lookup preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_LIVE_LOOKUP_PREFLIGHT_2026_06_16.md)
+- [Interaction feedback runtime executor live lookup preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_LIVE_LOOKUP_PREFLIGHT_ACCEPTANCE_2026_06_16.md)

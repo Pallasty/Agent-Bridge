@@ -232,12 +232,12 @@ Still not accepted:
 - #94 ingestion;
 - verification verdict rewrite.
 
-## 6. Next Slice
+## 6. Follow-Up Slice
 
-The next safe slice is a separate G1 live runtime lookup boundary design. It
-should turn the design request into a reviewed host-binding and lookup contract
-without contacting a host from the design surface.
+The follow-up G1 read-only lookup snapshot preflight is now implemented and
+accepted separately:
 
-That follow-up should keep host identity, operator visibility, timeout budget,
-response redaction, lookup result schema, stale-runtime handling, and
-no-execution guarantees independently reviewable.
+- [Interaction feedback runtime executor live lookup preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_LIVE_LOOKUP_PREFLIGHT_2026_06_16.md)
+- [Interaction feedback runtime executor live lookup preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_LIVE_LOOKUP_PREFLIGHT_ACCEPTANCE_2026_06_16.md)
+
+The next safe slice after G1 is G2 operator submission token design.
