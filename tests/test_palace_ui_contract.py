@@ -494,6 +494,17 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("review history is read-only", html)
         self.assertIn("handleSelfReviewHistoryAction", html)
 
+    def test_atlas_self_review_history_records_focus_candidate_pairs(self):
+        html = palace_html()
+
+        self.assertIn("selfReviewFocusedPairId", html)
+        self.assertIn("data-self-review-history-pair-id", html)
+        self.assertIn("function focusSelfReviewHistoryPair(row)", html)
+        self.assertIn("data-orphan-candidate-pair-id", html)
+        self.assertIn("focused_from_history", html)
+        self.assertIn("state.selfReviewFocusedPairId === pairId", html)
+        self.assertIn("scrollIntoView", html)
+
     def test_approved_plan_surfaces_human_confirmed_write_gate(self):
         html = palace_html()
 

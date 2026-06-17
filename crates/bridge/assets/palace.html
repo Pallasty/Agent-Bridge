@@ -1837,6 +1837,11 @@
     #panel .orphan-candidate-row.no_candidates { border-left-color: #d88080; }
     #panel .orphan-candidate-row.global_or_unscoped { border-left-color: #5cc8c8; }
     #panel .orphan-candidate-row.cross_project { border-left-color: #c8a96a; }
+    #panel .orphan-candidate-row.focused_from_history {
+      border-color: #5cc8c8;
+      box-shadow: 0 0 0 1px rgba(92, 200, 200, 0.35) inset;
+      background: #111821;
+    }
     #panel .orphan-candidate-pair {
       display: grid;
       grid-template-columns: minmax(0, 1fr);
@@ -3840,6 +3845,7 @@ function renderSelfReviewHistoryPanel(board) {
           <button type="button"
               data-self-review-history-action="orphans"
               data-self-review-history-index="${escapeHTML(String(idx))}"
+              data-self-review-history-pair-id="${escapeHTML(pair)}"
               title="open orphan review lane">open</button>
         </div>`;
       }).join("")
@@ -3864,6 +3870,28 @@ function handleSelfReviewHistoryAction(action) {
   }
   state.selfReviewHistoryOpen = true;
   renderStoredSelfReviewBoard();
+}
+
+function selfReviewHistoryRowAt(index) {
+  const rows = state.selfReviewPacket && state.selfReviewPacket.history && Array.isArray(state.selfReviewPacket.history.recent)
+    ? state.selfReviewPacket.history.recent
+    : [];
+  return rows[index] || null;
+}
+
+function focusSelfReviewHistoryPair(row) {
+  const pairId = row && row.pair_id ? String(row.pair_id) : "";
+  state.selfReviewFocusedPairId = pairId;
+  state.orphanCandidateLaneFilter = "all";
+  state.selfReviewHistoryOpen = true;
+  handleSelfReviewBoardAction("orphans");
+}
+
+function scrollFocusedOrphanCandidatePairIntoView() {
+  if (!state.selfReviewFocusedPairId) return;
+  const rows = Array.from(document.querySelectorAll("[data-orphan-candidate-pair-id]"));
+  const focused = rows.find(row => row.dataset.orphanCandidatePairId === state.selfReviewFocusedPairId);
+  if (focused) focused.scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
 async function loadSelfReviewPacket(data) {
@@ -4198,6 +4226,7 @@ const state = {
   regionNodeFilter: "all",
   selfReviewHistoryOpen: false,
   selfReviewPacket: null,
+  selfReviewFocusedPairId: null,
   regionNodeSort: "rank",
   maintenancePreviewFilter: "all",
   orphanCandidateLaneFilter: "all",
@@ -6792,6 +6821,8 @@ function renderOrphanCandidateRows(result) {
     const status = orphanCandidateStatusClass(row.status);
     const lane = orphanCandidateReviewLane(row);
     const candidate = Array.isArray(row.candidates) && row.candidates.length > 0 ? row.candidates[0] : null;
+    const pairId = candidate ? `${row.orphan} -> ${candidate.key}` : "";
+    const focusedFromHistory = pairId && state.selfReviewFocusedPairId === pairId ? " focused_from_history" : "";
     const confidence = candidate && Number.isFinite(candidate.confidence)
       ? candidate.confidence.toFixed(2)
       : "n/a";
@@ -6806,7 +6837,8 @@ function renderOrphanCandidateRows(result) {
           <span class="orphan-candidate-label">no candidate</span>
           <span class="orphan-candidate-meta">${escapeHTML(status.replace("_", " "))}</span>
         </div>`;
-    return `<div class="orphan-candidate-row ${escapeHTML(lane)} ${status}">
+    return `<div class="orphan-candidate-row ${escapeHTML(lane)} ${status}${focusedFromHistory}"
+      data-orphan-candidate-pair-id="${escapeHTML(pairId)}">
       <div class="orphan-candidate-pair">
         <button type="button" class="orphan-candidate-node" data-orphan-node-key="${escapeHTML(row.orphan)}">
           <span class="orphan-candidate-label" title="${escapeHTML(row.orphan)}">${escapeHTML(row.orphan)}</span>
@@ -6841,6 +6873,7 @@ function setOrphanCandidateLaneFilter(lane) {
   const slot = document.getElementById("region-orphan-candidates");
   if (slot && slot._orphanCandidateResult) {
     slot.innerHTML = renderRegionOrphanCandidateResult(slot._orphanCandidateResult);
+    scrollFocusedOrphanCandidatePairIntoView();
   }
   saveViewState();
 }
@@ -6944,6 +6977,7 @@ async function loadRegionOrphanCandidates(regionId) {
     if (!document.body.contains(slot) || slot.dataset.region !== regionId) return;
     slot._orphanCandidateResult = result;
     slot.innerHTML = renderRegionOrphanCandidateResult(result);
+    scrollFocusedOrphanCandidatePairIntoView();
   } catch (error) {
     if (!document.body.contains(slot) || slot.dataset.region !== regionId) return;
     slot._orphanCandidateResult = null;
@@ -7615,7 +7649,13 @@ document.getElementById("atlas-panel").addEventListener("click", (e) => {
   const historyAction = e.target.closest("[data-self-review-history-action]");
   if (historyAction) {
     e.preventDefault();
-    handleSelfReviewHistoryAction(historyAction.dataset.selfReviewHistoryAction || "orphans");
+    const historyIndex = Number.parseInt(historyAction.dataset.selfReviewHistoryIndex || "", 10);
+    const historyRow = Number.isFinite(historyIndex) ? selfReviewHistoryRowAt(historyIndex) : null;
+    if (historyRow && historyRow.pair_id) {
+      focusSelfReviewHistoryPair(historyRow);
+    } else {
+      handleSelfReviewHistoryAction(historyAction.dataset.selfReviewHistoryAction || "orphans");
+    }
     return;
   }
   const selfReview = e.target.closest("[data-self-review-action]");
