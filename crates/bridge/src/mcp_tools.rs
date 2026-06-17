@@ -20895,6 +20895,23 @@ fn cap_block_lines(lines: Vec<String>, budget: usize) -> Vec<String> {
     if lines.is_empty() || budget == 0 {
         return lines;
     }
+    // A caller may pass a multi-line string as a SINGLE element (e.g. an
+    // AGENT.md profile body or a soul/seed block). Normalize to real lines so
+    // the budget loop can keep a useful PREFIX of an oversized block instead of
+    // dropping the whole body atomically — which would emit a hollow header
+    // (a header with no content, the "green-but-inert" presentation we forbid).
+    // When the block fits, splitting then re-joining on "\n" reproduces the
+    // identical text, so this is a no-op for under-budget blocks.
+    let lines: Vec<String> = lines
+        .into_iter()
+        .flat_map(|s| {
+            if s.contains('\n') {
+                s.split('\n').map(str::to_string).collect::<Vec<_>>()
+            } else {
+                vec![s]
+            }
+        })
+        .collect();
     // Fast path: pessimistic bound says we're under.
     let total_chars: usize = lines.iter().map(|s| s.chars().count()).sum();
     if total_chars / 3 <= budget {
@@ -56506,6 +56523,53 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             "exact trim marker shape, got {:?}",
             last
         );
+    }
+
+    #[test]
+    fn cap_block_lines_oversized_multiline_body_keeps_prefix_not_hollow_header() {
+        // The AGENT.md profile failure mode: a header followed by a SINGLE
+        // multi-line body element that alone exceeds budget. Before the split
+        // fix this dropped the whole body (header + bare trim marker = hollow);
+        // now the body is split so a useful PREFIX survives.
+        let body = (0..30)
+            .map(|i| format!("discipline line {i} with some descriptive text"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let block = vec![
+            "=== Agent Self-Profile ===".to_string(),
+            body,
+            "=== End ===".to_string(),
+        ];
+        let got = cap_block_lines(block, 40);
+        assert_eq!(got[0], "=== Agent Self-Profile ===", "header kept");
+        // At least one real body line survived — not a hollow header+marker.
+        assert!(
+            got.iter().any(|l| l.contains("discipline line 0")),
+            "a body prefix must survive, got {:?}",
+            got
+        );
+        assert!(
+            got.last().unwrap().contains("trimmed"),
+            "trim marker present when truncated"
+        );
+    }
+
+    #[test]
+    fn cap_block_lines_multiline_under_budget_roundtrips_text() {
+        // A multi-line single element under budget must reproduce identical
+        // text after the split normalization (zero-regression invariant).
+        let block = vec![
+            "=== Header ===".to_string(),
+            "alpha\nbeta\ngamma".to_string(),
+            "=== End ===".to_string(),
+        ];
+        let got = cap_block_lines(block.clone(), 500);
+        assert_eq!(
+            got.join("\n"),
+            block.join("\n"),
+            "under-budget multiline must round-trip identically"
+        );
+        assert!(!got.iter().any(|l| l.contains("trimmed")));
     }
 
     // ── forum_digest (read-efficiency at scale, 2026-05-23) ─────────────
