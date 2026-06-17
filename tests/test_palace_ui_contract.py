@@ -448,14 +448,26 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("agent self-review", html)
         self.assertIn("release board", html)
         self.assertIn("function computeSelfReviewBoard(data)", html)
-        self.assertIn("function renderSelfReviewBoard(data)", html)
+        self.assertIn("function renderSelfReviewBoard(packet, data)", html)
         self.assertIn("function handleSelfReviewBoardAction(action)", html)
         self.assertIn("data-self-review-action", html)
         self.assertIn("formation", html)
         self.assertIn("connect", html)
         self.assertIn("retrieval", html)
         self.assertIn("consolidate", html)
-        self.assertIn("renderSelfReviewBoard(data);", html)
+        self.assertIn("renderSelfReviewBoard(packet, data);", html)
+
+    def test_atlas_self_review_board_uses_backend_packet_with_local_fallback(self):
+        html = palace_html()
+
+        self.assertIn("/api/self-review-packet", html)
+        self.assertIn("function computeFallbackSelfReviewBoard(data)", html)
+        self.assertIn("async function loadSelfReviewPacket(data)", html)
+        self.assertIn("function normalizeSelfReviewPacket(packet, data)", html)
+        self.assertIn("renderSelfReviewBoard(packet, data);", html)
+        self.assertIn("self-review-source", html)
+        self.assertIn("backend packet", html)
+        self.assertIn("local fallback", html)
 
     def test_approved_plan_surfaces_human_confirmed_write_gate(self):
         html = palace_html()

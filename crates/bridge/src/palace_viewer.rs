@@ -117,6 +117,7 @@ pub async fn run(
         .route("/", get(index))
         .route("/healthz", get(healthz))
         .route("/api/graph", get(api_graph))
+        .route("/api/self-review-packet", get(api_self_review_packet))
         .route("/api/orphan-candidates", get(api_orphan_candidates))
         .route(
             "/api/orphan-approved-link-plan",
@@ -191,6 +192,14 @@ async fn healthz() -> impl IntoResponse {
 #[derive(Deserialize, Default)]
 struct GraphQuery {
     /// `?all=1` includes `kind=skill` records (indexed third-party skills).
+    #[serde(default)]
+    #[serde(deserialize_with = "deserialize_boolish")]
+    all: bool,
+}
+
+#[derive(Deserialize, Default)]
+struct SelfReviewPacketQuery {
+    /// `?all=1` mirrors `/api/graph?all=1`.
     #[serde(default)]
     #[serde(deserialize_with = "deserialize_boolish")]
     all: bool,
@@ -2043,6 +2052,14 @@ async fn api_semantic_events(
     Ok(Json(build_palace_semantic_events(&graph, &q)))
 }
 
+async fn api_self_review_packet(
+    State(s): State<AppState>,
+    Query(q): Query<SelfReviewPacketQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let graph = build_graph_snapshot(&s, q.all).await?;
+    Ok(Json(build_palace_self_review_packet(&graph)))
+}
+
 fn vi64(v: &Value) -> Option<i64> {
     v.as_i64()
         .or_else(|| v.as_u64().and_then(|n| i64::try_from(n).ok()))
@@ -2153,6 +2170,178 @@ fn palace_graph_stats(graph: &Value) -> Value {
         "hub_threshold": hub_threshold,
         "connected_ratio": (connected_ratio * 1000.0).round() / 1000.0,
         "explicit_density": (explicit_density * 1000.0).round() / 1000.0,
+    })
+}
+
+fn palace_self_review_lane(
+    id: &str,
+    action: &str,
+    count: i64,
+    priority: i64,
+    risk: &str,
+    tone: &str,
+    detail: &str,
+    next_step: &str,
+    href: &str,
+) -> Value {
+    json!({
+        "id": id,
+        "action": action,
+        "count": count.max(0),
+        "priority": priority,
+        "risk": risk,
+        "tone": tone,
+        "detail": detail,
+        "next_step": next_step,
+        "href": href,
+    })
+}
+
+fn build_palace_self_review_packet(graph: &Value) -> Value {
+    let now_secs = vi64(graph.get("now").unwrap_or(&Value::Null)).unwrap_or(0);
+    let stats = palace_graph_stats(graph);
+    let orphan_nodes = vi64(stats.get("orphan_nodes").unwrap_or(&Value::Null)).unwrap_or(0);
+    let stale_nodes = vi64(stats.get("stale_nodes").unwrap_or(&Value::Null)).unwrap_or(0);
+    let hub_nodes = vi64(stats.get("hub_nodes").unwrap_or(&Value::Null)).unwrap_or(0);
+    let fresh_nodes = vi64(stats.get("fresh_nodes").unwrap_or(&Value::Null)).unwrap_or(0);
+    let connected_ratio = stats
+        .get("connected_ratio")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0);
+    let health_score = ((connected_ratio * 100.0).round() as i64).clamp(0, 100);
+    let readiness = if orphan_nodes > 0 || stale_nodes > 0 {
+        "needs-review"
+    } else if hub_nodes > 0 {
+        "watch"
+    } else {
+        "steady"
+    };
+
+    let mut lanes = vec![
+        palace_self_review_lane(
+            "formation",
+            "fresh",
+            fresh_nodes,
+            if fresh_nodes > 0 { 30 } else { 0 },
+            if fresh_nodes > 0 { "low" } else { "none" },
+            if fresh_nodes > 0 { "good" } else { "quiet" },
+            "recent memories to classify",
+            "Scan fresh entries for missing kind, scope, and tags.",
+            "/?preset=fresh",
+        ),
+        palace_self_review_lane(
+            "connect",
+            "orphans",
+            orphan_nodes,
+            if orphan_nodes > 0 { 100 } else { 0 },
+            if orphan_nodes > 0 { "high" } else { "none" },
+            if orphan_nodes > 0 { "fragile" } else { "good" },
+            "unlinked memories need edges",
+            "Open orphan candidates and approve only evidence-backed links.",
+            "/?preset=orphans",
+        ),
+        palace_self_review_lane(
+            "retrieval",
+            "stale",
+            stale_nodes,
+            if stale_nodes > 0 { 80 } else { 0 },
+            if stale_nodes > 0 { "medium" } else { "none" },
+            if stale_nodes > 0 { "watch" } else { "good" },
+            "cold memories need judgment",
+            "Review stale memories for keep, tombstone, or consolidation.",
+            "/?preset=stale",
+        ),
+        palace_self_review_lane(
+            "consolidate",
+            "hubs",
+            hub_nodes,
+            if hub_nodes > 0 { 60 } else { 0 },
+            if hub_nodes > 0 { "medium" } else { "none" },
+            if hub_nodes > 0 { "watch" } else { "quiet" },
+            "anchors need duplicate scan",
+            "Inspect high-degree anchors for duplicates, summaries, and conflicts.",
+            "/?preset=hubs",
+        ),
+    ];
+    lanes.sort_by(|a, b| {
+        let ap = vi64(a.get("priority").unwrap_or(&Value::Null)).unwrap_or(0);
+        let bp = vi64(b.get("priority").unwrap_or(&Value::Null)).unwrap_or(0);
+        bp.cmp(&ap).then_with(|| {
+            let aid = a.get("id").and_then(Value::as_str).unwrap_or("");
+            let bid = b.get("id").and_then(Value::as_str).unwrap_or("");
+            aid.cmp(bid)
+        })
+    });
+
+    let primary_lane = lanes
+        .iter()
+        .find(|lane| vi64(lane.get("count").unwrap_or(&Value::Null)).unwrap_or(0) > 0)
+        .and_then(|lane| lane.get("id"))
+        .and_then(Value::as_str)
+        .unwrap_or("formation")
+        .to_string();
+    let summary = if readiness == "steady" {
+        "Memory graph is steady; no urgent self-review lane is active.".to_string()
+    } else {
+        format!("Memory graph needs self-review: {primary_lane} is the highest-priority lane.")
+    };
+    let recommendations: Vec<Value> = lanes
+        .iter()
+        .filter(|lane| vi64(lane.get("count").unwrap_or(&Value::Null)).unwrap_or(0) > 0)
+        .map(|lane| {
+            json!({
+                "lane": lane.get("id").cloned().unwrap_or(Value::Null),
+                "action": lane.get("action").cloned().unwrap_or(Value::Null),
+                "next_step": lane.get("next_step").cloned().unwrap_or(Value::Null),
+            })
+        })
+        .collect();
+
+    json!({
+        "schema": "agent_bridge.palace.self_review_packet.v0",
+        "source_adapter": "palace.self_review",
+        "observed_at": now_secs,
+        "read_only": true,
+        "writes_memory": false,
+        "writes_edges": false,
+        "auto_apply_allowed": false,
+        "readiness": readiness,
+        "primary_lane": primary_lane.clone(),
+        "health_score": health_score,
+        "graph": stats.clone(),
+        "lanes": lanes,
+        "recommendations": recommendations,
+        "guardrails": {
+            "write_policy": "read_only_no_auto_memory_write",
+            "human_gate_required_for_writes": true,
+            "source_of_truth": "server_side_graph_snapshot"
+        },
+        "provenance": {
+            "endpoint": "/api/self-review-packet",
+            "graph_endpoint": "/api/graph",
+            "hash": semantic_hash(&json!({
+                "stats": stats.clone(),
+                "readiness": readiness,
+                "primary_lane": primary_lane.clone(),
+            }))
+        },
+        "presentation": {
+            "human_summary": summary,
+            "machine_payload": {
+                "readiness": readiness,
+                "primary_lane": primary_lane.clone(),
+                "health_score": health_score
+            },
+            "ingestion": {
+                "suggested_kind": "observation",
+                "write_policy": "read_only_no_auto_memory_write"
+            },
+            "artifact": {
+                "type": "http_json",
+                "href": "/api/self-review-packet"
+            },
+            "created_at": now_secs
+        }
     })
 }
 
@@ -4680,6 +4869,82 @@ mod tests {
             report["presentation"]["ingestion"]["write_policy"],
             "read_only_no_auto_memory_write"
         );
+    }
+
+    #[test]
+    fn self_review_packet_prioritizes_memory_governance_lanes_without_writes() {
+        let graph = json!({
+            "now": 700000,
+            "nodes": [
+                { "id": "fresh_note", "kind": "lesson", "source": "sqlite", "last_accessed": 699990, "tags": [] },
+                { "id": "stale_note", "kind": "decision", "source": "sqlite", "last_accessed": 1, "tags": [] },
+                { "id": "orphan_note", "kind": "todo", "source": "sqlite", "last_accessed": 600000, "tags": [] },
+                { "id": "hub_a", "kind": "lesson", "source": "sqlite", "last_accessed": 600000, "tags": [] },
+                { "id": "hub_b", "kind": "lesson", "source": "sqlite", "last_accessed": 600000, "tags": [] },
+                { "id": "hub_c", "kind": "lesson", "source": "sqlite", "last_accessed": 600000, "tags": [] },
+                { "id": "hub_d", "kind": "lesson", "source": "sqlite", "last_accessed": 600000, "tags": [] },
+                { "id": "hub_e", "kind": "lesson", "source": "sqlite", "last_accessed": 600000, "tags": [] },
+                { "id": "hub_f", "kind": "lesson", "source": "sqlite", "last_accessed": 600000, "tags": [] },
+                { "id": "hub_g", "kind": "lesson", "source": "sqlite", "last_accessed": 600000, "tags": [] },
+                { "id": "hub_h", "kind": "lesson", "source": "sqlite", "last_accessed": 600000, "tags": [] },
+                { "id": "hub_i", "kind": "lesson", "source": "sqlite", "last_accessed": 600000, "tags": [] },
+                { "id": "hub_j", "kind": "lesson", "source": "sqlite", "last_accessed": 600000, "tags": [] },
+                { "id": "hub_k", "kind": "lesson", "source": "sqlite", "last_accessed": 600000, "tags": [] },
+                { "id": "hub_l", "kind": "lesson", "source": "sqlite", "last_accessed": 600000, "tags": [] },
+                { "id": "hub_m", "kind": "lesson", "source": "sqlite", "last_accessed": 600000, "tags": [] },
+                { "id": "hub_n", "kind": "lesson", "source": "sqlite", "last_accessed": 600000, "tags": [] },
+                { "id": "hub_o", "kind": "lesson", "source": "sqlite", "last_accessed": 600000, "tags": [] },
+                { "id": "hub_p", "kind": "lesson", "source": "sqlite", "last_accessed": 600000, "tags": [] },
+                { "id": "hub_q", "kind": "lesson", "source": "sqlite", "last_accessed": 600000, "tags": [] },
+                { "id": "hub_r", "kind": "lesson", "source": "sqlite", "last_accessed": 600000, "tags": [] },
+                { "id": "hub_s", "kind": "lesson", "source": "sqlite", "last_accessed": 600000, "tags": [] },
+                { "id": "hub_t", "kind": "lesson", "source": "sqlite", "last_accessed": 600000, "tags": [] }
+            ],
+            "edges": [
+                { "source": "fresh_note", "target": "stale_note", "type": "relates", "weight": 1.0 },
+                { "source": "hub_a", "target": "hub_b", "type": "relates", "weight": 1.0 },
+                { "source": "hub_a", "target": "hub_c", "type": "relates", "weight": 1.0 },
+                { "source": "hub_a", "target": "hub_d", "type": "relates", "weight": 1.0 },
+                { "source": "hub_a", "target": "hub_e", "type": "relates", "weight": 1.0 },
+                { "source": "hub_a", "target": "hub_f", "type": "relates", "weight": 1.0 },
+                { "source": "hub_g", "target": "hub_h", "type": "relates", "weight": 1.0 },
+                { "source": "hub_i", "target": "hub_j", "type": "relates", "weight": 1.0 },
+                { "source": "hub_k", "target": "hub_l", "type": "relates", "weight": 1.0 },
+                { "source": "hub_m", "target": "hub_n", "type": "relates", "weight": 1.0 },
+                { "source": "hub_o", "target": "hub_p", "type": "relates", "weight": 1.0 },
+                { "source": "hub_q", "target": "hub_r", "type": "relates", "weight": 1.0 },
+                { "source": "hub_s", "target": "hub_t", "type": "relates", "weight": 1.0 }
+            ],
+            "stats": {}
+        });
+
+        let packet = build_palace_self_review_packet(&graph);
+
+        assert_eq!(
+            packet["schema"],
+            "agent_bridge.palace.self_review_packet.v0"
+        );
+        assert_eq!(packet["read_only"], json!(true));
+        assert_eq!(packet["writes_memory"], json!(false));
+        assert_eq!(packet["writes_edges"], json!(false));
+        assert_eq!(packet["auto_apply_allowed"], json!(false));
+        assert_eq!(packet["readiness"], json!("needs-review"));
+        assert_eq!(packet["primary_lane"], json!("connect"));
+        assert_eq!(
+            packet["presentation"]["human_summary"],
+            json!("Memory graph needs self-review: connect is the highest-priority lane.")
+        );
+        assert_eq!(packet["lanes"][0]["id"], json!("connect"));
+        assert_eq!(packet["lanes"][0]["count"], json!(1));
+        assert_eq!(packet["lanes"][0]["risk"], json!("high"));
+        assert_eq!(packet["lanes"][1]["id"], json!("retrieval"));
+        assert_eq!(packet["lanes"][1]["count"], json!(1));
+        assert_eq!(packet["lanes"][2]["id"], json!("consolidate"));
+        assert_eq!(packet["lanes"][2]["count"], json!(1));
+        assert_eq!(packet["lanes"][3]["id"], json!("formation"));
+        assert_eq!(packet["lanes"][3]["count"], json!(1));
+        assert_eq!(packet["graph"]["orphan_nodes"], json!(1));
+        assert_eq!(packet["provenance"]["graph_endpoint"], json!("/api/graph"));
     }
 
     #[test]

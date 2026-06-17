@@ -591,7 +591,8 @@
       margin-bottom: 7px;
     }
     #atlas-panel .self-review-title,
-    #atlas-panel .self-review-state {
+    #atlas-panel .self-review-state,
+    #atlas-panel .self-review-source {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -603,6 +604,10 @@
     #atlas-panel .self-review-state {
       color: #8a8a9c;
       font-variant-numeric: tabular-nums;
+    }
+    #atlas-panel .self-review-source {
+      color: #5a5a68;
+      font-size: 8px;
     }
     #atlas-panel .self-review-lanes {
       display: grid;
@@ -3546,7 +3551,7 @@ function computeAtlasRegions(data) {
     .slice(0, 18);
 }
 
-function computeSelfReviewBoard(data) {
+function computeFallbackSelfReviewBoard(data) {
   const nodes = data && Array.isArray(data.nodes) ? data.nodes : [];
   const nowSecs = data && data.now ? data.now : Math.floor(Date.now() / 1000);
   const freshCount = nodes.filter(n => {
@@ -3570,6 +3575,9 @@ function computeSelfReviewBoard(data) {
       ? "watch"
       : "steady";
   return {
+    schema: "agent_bridge.palace.self_review_packet.local_fallback.v0",
+    readOnly: true,
+    sourceLabel: "local fallback",
     readiness,
     avgHealth,
     lanes: [
@@ -3605,16 +3613,69 @@ function computeSelfReviewBoard(data) {
   };
 }
 
-function renderSelfReviewBoard(data) {
+function computeSelfReviewBoard(data) {
+  return computeFallbackSelfReviewBoard(data);
+}
+
+function normalizeSelfReviewPacket(packet, data) {
+  const fallback = computeFallbackSelfReviewBoard(data || {});
+  const isBackendPacket = !!(packet &&
+    packet.schema === "agent_bridge.palace.self_review_packet.v0" &&
+    Array.isArray(packet.lanes));
+  const source = isBackendPacket ? packet : fallback;
+  const lanes = Array.isArray(source.lanes) ? source.lanes : fallback.lanes;
+  return {
+    schema: source.schema || fallback.schema,
+    sourceLabel: isBackendPacket ? "backend packet" : "local fallback",
+    readiness: source.readiness || fallback.readiness,
+    avgHealth: Number.isFinite(source.health_score)
+      ? source.health_score
+      : Number.isFinite(source.avgHealth)
+        ? source.avgHealth
+        : fallback.avgHealth,
+    primaryLane: source.primary_lane || fallback.primaryLane || null,
+    lanes: lanes.map((lane, idx) => ({
+      id: lane.id || fallback.lanes[idx]?.id || "lane",
+      action: lane.action || fallback.lanes[idx]?.action || "overview",
+      count: Number.isFinite(lane.count) ? lane.count : 0,
+      detail: lane.detail || fallback.lanes[idx]?.detail || "review lane",
+      tone: lane.tone || fallback.lanes[idx]?.tone || "quiet",
+      risk: lane.risk || "none",
+      nextStep: lane.next_step || "",
+    })),
+  };
+}
+
+async function loadSelfReviewPacket(data) {
+  const params = new URLSearchParams();
+  if (state.includeSkills) params.set("all", "1");
+  const url = `/api/self-review-packet${params.toString() ? "?" + params.toString() : ""}`;
+  try {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return normalizeSelfReviewPacket(await r.json(), data);
+  } catch (e) {
+    return normalizeSelfReviewPacket(null, data);
+  }
+}
+
+function renderSelfReviewBoard(packet, data) {
   const el = document.getElementById("self-review-board");
   if (!el) return;
-  const board = computeSelfReviewBoard(data || {});
+  if (!data && packet && Array.isArray(packet.nodes)) {
+    data = packet;
+    packet = null;
+  }
+  const board = normalizeSelfReviewPacket(packet, data || {});
   const lanes = board.lanes.map(lane => {
     const tone = ["good", "watch", "fragile", "quiet"].includes(lane.tone) ? lane.tone : "quiet";
+    const title = [lane.id, lane.detail, lane.risk && lane.risk !== "none" ? `risk:${lane.risk}` : ""]
+      .filter(Boolean)
+      .join(" · ");
     return `<button type="button"
       class="self-review-lane ${escapeHTML(tone)}"
       data-self-review-action="${escapeHTML(lane.action)}"
-      title="${escapeHTML(lane.id + " · " + lane.detail)}">
+      title="${escapeHTML(title)}">
       <span class="lane-label">${escapeHTML(lane.id)}</span>
       <span class="lane-count">${escapeHTML(String(lane.count))}</span>
       <span class="lane-detail">${escapeHTML(lane.detail)}</span>
@@ -3624,6 +3685,7 @@ function renderSelfReviewBoard(data) {
     <span class="self-review-title">agent self-review</span>
     <span class="self-review-state">release board · ${escapeHTML(board.readiness)} · H${escapeHTML(String(board.avgHealth))}</span>
   </div>
+  <div class="self-review-source">${escapeHTML(board.sourceLabel)}</div>
   <div class="self-review-lanes">${lanes}</div>`;
 }
 
@@ -4217,7 +4279,8 @@ async function loadGraph() {
   if (state.activeRegion && !state.atlasRegions.some(r => r.id === state.activeRegion)) {
     state.activeRegion = null;
   }
-  renderSelfReviewBoard(data);
+  const packet = await loadSelfReviewPacket(data);
+  renderSelfReviewBoard(packet, data);
   const hubBadge = state.degrees.hubCount > 0
     ? ` · <span style="color:#c8a96a" title="degree ≥ ${state.degrees.hubThreshold} (P95)">${state.degrees.hubCount} hubs</span>`
     : "";
