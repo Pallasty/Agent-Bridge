@@ -38819,9 +38819,6 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // SSB peer conformance query: read-only multi-node pull over daemon-http
     // runtime-conformance exports. No service restart or graph mutation.
     "semantic_bus_peer_conformance",
-    // External browser-lite discovery: read-only probe only. This is not the
-    // mutating browser_* automation surface and does not change browser routing.
-    "browser_lite_probe",
     // Local system control API: allowlisted wrapper over ab-system-control.
     // It is audited locally and never accepts arbitrary shell commands.
     "system_control",
@@ -41852,7 +41849,7 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Essential,
         Arc::new(GitTopologyPreflightTool::new(hub.clone())),
     );
-    // Plans + worktrees + codebase search.
+    // Plans + worktrees.
     reg_if(
         &mut reg,
         policy,
@@ -41883,34 +41880,36 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Essential,
         Arc::new(WorktreeCreateTool::new(hub.clone())),
     );
+    // Indexed codebase graph queries overlap Codex native search surfaces and
+    // are kept behind the broader Standard profile for explicit diagnostics.
     reg_if(
         &mut reg,
         policy,
-        Tier::Essential,
+        Tier::Standard,
         Arc::new(CodebaseSearchTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Essential,
+        Tier::Standard,
         Arc::new(CodebaseImportsTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Essential,
+        Tier::Standard,
         Arc::new(CodebaseCallsTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Essential,
+        Tier::Standard,
         Arc::new(CodebaseCallersTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Essential,
+        Tier::Standard,
         Arc::new(CodebaseImpactTool::new(hub.clone())),
     );
 
@@ -47683,7 +47682,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(p.includes(Tier::Standard, "semantic_bus_runtime_health"));
         assert!(p.includes(Tier::Standard, "semantic_bus_runtime_conformance"));
         assert!(p.includes(Tier::Standard, "semantic_bus_peer_conformance"));
-        assert!(p.includes(Tier::Standard, "browser_lite_probe"));
+        assert!(!p.includes(Tier::Standard, "browser_lite_probe"));
         assert!(p.includes(Tier::Standard, "system_control"));
         assert!(p.includes(Tier::Standard, "biocortex_retrieval_shadow"));
         assert!(!p.includes(Tier::Standard, "embed_text"));
@@ -47691,12 +47690,55 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     }
 
     #[test]
+    fn tool_policy_codex_essential_excludes_cold_native_overlap_tools() {
+        let codex = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+        let standard = ToolPolicy::from_values(None, None, None, Some("standard"));
+        let codex_names: Vec<String> = build_registry_with_policy(Hub::builder().build(), codex)
+            .list()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        let standard_names: Vec<String> =
+            build_registry_with_policy(Hub::builder().build(), standard)
+                .list()
+                .into_iter()
+                .map(|s| s.name)
+                .collect();
+
+        for tool_name in [
+            "browser_lite_probe",
+            "codebase_search",
+            "codebase_imports",
+            "codebase_calls",
+            "codebase_callers",
+            "codebase_impact",
+        ] {
+            assert!(
+                !codex.includes(Tier::Standard, tool_name),
+                "{tool_name} should stay out of codex-essential"
+            );
+            assert!(
+                !codex_names.iter().any(|n| n == tool_name),
+                "{tool_name} schema should stay out of codex-essential"
+            );
+            assert!(
+                standard.includes(Tier::Standard, tool_name),
+                "{tool_name} should remain available in the broader standard profile"
+            );
+            assert!(
+                standard_names.iter().any(|n| n == tool_name),
+                "{tool_name} schema should remain available in the broader standard profile"
+            );
+        }
+    }
+
+    #[test]
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 53 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 52 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-        //      + DIRECT(41: 6 avatar observation/sync/renderer tools
+        //      + DIRECT(40: 6 avatar observation/sync/renderer tools
         //      + xiao_shu_action_request + 14 mobile bridge tools
         //      + memory_graph_topology + biocortex_retrieval_shadow
         //      + memory_related_keys_preflight
@@ -47706,24 +47748,13 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         //      + semantic_bus_runtime_health
         //      + semantic_bus_runtime_conformance
         //      + semantic_bus_peer_conformance
-        //      + browser_lite_probe
         //      + system_control
         //      + 6 remote-steering tools: agent_steer_launch/drive/capture/list/kill
         //      + agent_orchestrate_scan, added by d4fd74d).
         // forum_digest joined via the FORUM_READ capability group (2026-05-23).
-        // +6 steering DIRECT extras (d4fd74d) brought DIRECT 24→30, total 36→42.
-        // +desktop_verify (read-only postflight verifier) brought DIRECT 30→31, 42→43.
-        // +browser_lite_probe brought DIRECT 31→32, total 43→44.
-        // +memory_related_keys_preflight brought DIRECT 32→33, total 44→45.
-        // +macos_ax_probe brought DIRECT 33→34, total 45→46.
-        // +macos_ax_verify brought DIRECT 34→35, total 46→47.
-        // +semantic_bus_adapter_report brought DIRECT 35→36, total 47→48.
-        // +semantic_bus_runtime_health brought DIRECT 36→37, total 48→49.
-        // +semantic_bus_runtime_conformance brought DIRECT 37→38, total 49→50.
-        // +semantic_bus_peer_conformance brought DIRECT 38→39, total 50→51.
-        // +biocortex_retrieval_shadow brought DIRECT 39→40, total 51→52.
-        // +system_control brought DIRECT 40→41, total 52→53.
-        assert_eq!(extras.len(), 53);
+        // Native-overlap probes such as browser_lite_probe stay in broader
+        // profiles, not codex-essential direct extras.
+        assert_eq!(extras.len(), 52);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -47765,7 +47796,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(extras.contains(&"semantic_bus_runtime_health"));
         assert!(extras.contains(&"semantic_bus_runtime_conformance"));
         assert!(extras.contains(&"semantic_bus_peer_conformance"));
-        assert!(extras.contains(&"browser_lite_probe"));
+        assert!(!extras.contains(&"browser_lite_probe"));
         assert!(extras.contains(&"system_control"));
         // Remote session steering (d4fd74d) — direct-exposed for Codex
         // orchestrators that already carry agent_spawn + agent_session_*.
@@ -48341,8 +48372,17 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     }
 
     #[test]
-    fn registry_exposes_browser_lite_probe_to_codex_essential() {
+    fn registry_keeps_browser_lite_probe_out_of_codex_essential() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+        assert!(!p.includes(Tier::Standard, "browser_lite_probe"));
+
+        let schemas = build_registry_with_policy(Hub::builder().build(), p).list();
+        assert!(schemas.iter().all(|s| s.name != "browser_lite_probe"));
+    }
+
+    #[test]
+    fn registry_exposes_browser_lite_probe_to_standard_profile() {
+        let p = ToolPolicy::from_values(None, None, None, Some("standard"));
         assert!(p.includes(Tier::Standard, "browser_lite_probe"));
 
         let schemas = build_registry_with_policy(Hub::builder().build(), p).list();
