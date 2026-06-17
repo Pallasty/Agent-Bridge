@@ -24821,7 +24821,7 @@ fn dispatch_stat_has_actionable_errors(
     let Some(classes) = diagnostics.get(&s.tool_name) else {
         return true;
     };
-    if classes.len() < s.error_count as usize {
+    if classes.is_empty() {
         return true;
     }
     !classes.iter().all(|class| class.is_expected())
@@ -51674,6 +51674,37 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             ts: now,
             tool_name: "work_memory".to_string(),
             message: "get requires key".to_string(),
+        }];
+        let diagnostics = dispatch_error_diagnostics_by_tool(rows, 900, std::slice::from_ref(&s));
+
+        assert!(!dispatch_stat_has_actionable_errors(&s, &diagnostics));
+        let reasons = dispatch_optimization_reasons(&s, &diagnostics);
+        assert!(!reasons.contains(&"has_errors"));
+        assert!(!reasons.contains(&"high_error_rate"));
+    }
+
+    #[test]
+    fn dispatch_audit_expected_validation_ring_tail_is_not_actionable() {
+        let now = dispatch_now_secs();
+        let s = ab_store::McpToolCallStats {
+            tool_name: "changes_digest".to_string(),
+            call_count: 121,
+            error_count: 120,
+            avg_duration_ms: 109.0,
+            p95_duration_ms: 183,
+            max_duration_ms: 190,
+            avg_result_size: 258.0,
+            client_name: None,
+            profile: None,
+            source: None,
+            model: None,
+            model_reasoning_effort: None,
+            codex_host: None,
+        };
+        let rows = vec![ab_store::McpToolErrorRecord {
+            ts: now,
+            tool_name: "changes_digest".to_string(),
+            message: "invalid argument: unknown scope 'working'; expected working_tree|staged|last_commit|branch_vs_main".to_string(),
         }];
         let diagnostics = dispatch_error_diagnostics_by_tool(rows, 900, std::slice::from_ref(&s));
 
