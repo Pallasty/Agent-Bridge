@@ -408,6 +408,17 @@ pub fn build_consolidation_prompt(members: &[MemoryRecord]) -> String {
     p
 }
 
+/// Allowed `kind` values for a consolidation summary — mirrors the enum
+/// stated in [`build_consolidation_prompt`]. Any other kind is an
+/// instruction violation (or hallucination) and is rejected, not saved.
+const SUMMARY_KINDS: [&str; 4] = ["lesson", "decision", "architecture", "context"];
+/// Body length bounds (chars), mirroring the prompt's stated `200–600`.
+const SUMMARY_BODY_MIN: usize = 200;
+const SUMMARY_BODY_MAX: usize = 600;
+/// Tag-count bounds, mirroring the prompt's stated `2–5`.
+const SUMMARY_TAGS_MIN: usize = 2;
+const SUMMARY_TAGS_MAX: usize = 5;
+
 /// Strip optional ```json fences, extract the first {...} object, parse
 /// the four required fields. Lenient about leading prose.
 pub fn parse_summary_response(text: &str) -> std::result::Result<ClusterSummary, &'static str> {
@@ -456,12 +467,64 @@ pub fn parse_summary_response(text: &str) -> std::result::Result<ClusterSummary,
         })
         .unwrap_or_default();
 
+    // G2 — enforce the prompt's OWN stated constraints
+    // (`build_consolidation_prompt`). Previously these were advisory: parse
+    // checked only non-empty presence, so a hallucinated kind, a one-sentence
+    // body, or a tagless summary saved identically to a faithful one. Reject
+    // (don't save) on violation; the caller logs the reason and skips the
+    // cluster — graceful, no panic, no write, retried next run. The raw text
+    // is echoed in the caller's wrap so the specific value stays visible.
+    if !SUMMARY_KINDS.contains(&kind.as_str()) {
+        return Err("kind not one of lesson|decision|architecture|context");
+    }
+    let body_len = body.chars().count();
+    if body_len < SUMMARY_BODY_MIN || body_len > SUMMARY_BODY_MAX {
+        return Err("body length outside 200..=600 chars");
+    }
+    if tags.len() < SUMMARY_TAGS_MIN || tags.len() > SUMMARY_TAGS_MAX {
+        return Err("tag count outside 2..=5");
+    }
+
     Ok(ClusterSummary {
         key,
         kind,
         tags,
         body,
     })
+}
+
+/// **G1 — build the superseded backup record** that preserves a prior summary
+/// before an in-place canonical-key overwrite. Pure (no store) so it is unit
+/// testable. The canonical key is deterministic (same cluster → same key), so a
+/// re-run upserts in place; the store's own dedupe-supersession only retires
+/// *other* keys sharing a `dedupe_key`, so an in-place overwrite of THIS key
+/// would silently drop the prior body. We snapshot it to a recoverable
+/// `<canonical>_superseded_<contenthash>` row (status=`superseded` → auto-
+/// dropped from search) pointing back via `superseded_by`, mirroring the
+/// store's reconsolidation vocabulary. CRUCIAL: strip `dedupe:*` tags so that
+/// saving this backup can't trigger the store's dedupe-supersession against the
+/// still-active canonical row (which shares the same `dedupe:cluster:` tag).
+fn build_clobber_backup(prior: &MemoryRecord, canonical_key: &str, today_tag: &str) -> MemoryRecord {
+    let backup_key = format!(
+        "{canonical_key}_superseded_{}",
+        member_keys_hash(&[prior.content.clone()])
+    );
+    let mut tags: Vec<String> = prior
+        .tags
+        .iter()
+        .filter(|t| !t.starts_with("dedupe:"))
+        .cloned()
+        .collect();
+    if !tags.iter().any(|t| t == today_tag) {
+        tags.push(today_tag.to_string());
+    }
+    MemoryRecord {
+        key: backup_key,
+        status: "superseded".to_string(),
+        superseded_by: Some(canonical_key.to_string()),
+        tags,
+        ..prior.clone()
+    }
 }
 
 /// Idempotent apply: save the summary, link sources via `summarizes`, tag
@@ -519,6 +582,25 @@ async fn apply_summary(
         trigger_pattern: None,
         superseded_by: None,
     };
+
+    // G1 — backup-before-clobber. If a different-bodied summary already lives
+    // at this canonical key, snapshot it before the upsert overwrites it so a
+    // worse re-run can never silently destroy a better prior summary. Best-
+    // effort: a backup failure must not block the (idempotent) main write.
+    if let Ok(Some(prior)) = store.memory_get(&canonical_key).await {
+        if prior.content != mem.content {
+            let backup = build_clobber_backup(&prior, &canonical_key, today_tag);
+            let backup_key = backup.key.clone();
+            if let Err(e) = store.memory_save(&backup).await {
+                eprintln!("  backup-before-clobber {backup_key}: {e}");
+            } else if let Err(e) = store
+                .memory_link(&canonical_key, &backup_key, "supersedes", 1.5)
+                .await
+            {
+                eprintln!("  supersedes edge {canonical_key}→{backup_key}: {e}");
+            }
+        }
+    }
 
     store
         .memory_save(&mem)
@@ -682,6 +764,76 @@ mod tests {
     }
 
     #[test]
+    fn clobber_backup_strips_dedupe_tags_and_marks_superseded() {
+        let mut prior = mem_with_tags(
+            "summary_p5_cluster_abc",
+            &[
+                "p5_replay",
+                "dedupe:cluster:abc",
+                "llm_topic:foo",
+                "summarized_at:2026-01-01",
+            ],
+        );
+        prior.content = "the prior, better summary body".into();
+        prior.kind = "lesson".into();
+        let backup =
+            build_clobber_backup(&prior, "summary_p5_cluster_abc", "summarized_at:2026-06-16");
+        // dedupe tag stripped → saving the backup cannot dedupe-supersede the
+        // still-active canonical row (the corruption trap).
+        assert!(!backup.tags.iter().any(|t| t.starts_with("dedupe:")));
+        // provenance tags kept.
+        assert!(backup.tags.iter().any(|t| t == "p5_replay"));
+        assert!(backup.tags.iter().any(|t| t == "llm_topic:foo"));
+        // supersession vocabulary mirrors the store's reconsolidation path.
+        assert_eq!(backup.status, "superseded");
+        assert_eq!(
+            backup.superseded_by.as_deref(),
+            Some("summary_p5_cluster_abc")
+        );
+        // today tag appended.
+        assert!(backup.tags.iter().any(|t| t == "summarized_at:2026-06-16"));
+        // prior body + kind preserved (recoverable).
+        assert_eq!(backup.content, "the prior, better summary body");
+        assert_eq!(backup.kind, "lesson");
+        // distinct, content-addressed key under the canonical namespace.
+        assert!(backup.key.starts_with("summary_p5_cluster_abc_superseded_"));
+        assert_ne!(backup.key, "summary_p5_cluster_abc");
+    }
+
+    #[test]
+    fn clobber_backup_key_is_deterministic_by_content() {
+        let mut a = mem_with_tags("k", &[]);
+        a.content = "same body".into();
+        let mut b = mem_with_tags("k", &["unrelated"]);
+        b.content = "same body".into();
+        // same content → same backup key (idempotent re-backup), regardless of
+        // other fields differing.
+        assert_eq!(
+            build_clobber_backup(&a, "k", "t").key,
+            build_clobber_backup(&b, "k", "t").key
+        );
+        let mut c = mem_with_tags("k", &[]);
+        c.content = "different body".into();
+        assert_ne!(
+            build_clobber_backup(&a, "k", "t").key,
+            build_clobber_backup(&c, "k", "t").key
+        );
+    }
+
+    #[test]
+    fn clobber_backup_does_not_duplicate_today_tag() {
+        let mut prior = mem_with_tags("k", &["summarized_at:2026-06-16"]);
+        prior.content = "body".into();
+        let backup = build_clobber_backup(&prior, "k", "summarized_at:2026-06-16");
+        let n = backup
+            .tags
+            .iter()
+            .filter(|t| *t == "summarized_at:2026-06-16")
+            .count();
+        assert_eq!(n, 1);
+    }
+
+    #[test]
     fn cluster_already_summarized_majority_rule() {
         let members = vec![
             mem_with_tags("a", &["summarized_at:2026-05-09"]),
@@ -702,9 +854,15 @@ mod tests {
 
     #[test]
     fn parse_summary_response_strips_fences_and_extracts_fields() {
+        // Body must clear the 200-char floor (G2); keep the "fall back"
+        // substring the assertion checks.
         let raw = "```json\n{\n  \"key\": \"summary_p4_evolve_cache_20260509\",\n  \
                    \"kind\": \"lesson\",\n  \"tags\": [\"p4\", \"cache\"],\n  \
-                   \"body\": \"P4 evolve must fall back to store when cache is None.\"\n}\n```";
+                   \"body\": \"P4 evolve must fall back to the store when the in-memory \
+                   cache is None, because a cold start or a cache eviction otherwise drops \
+                   the write silently and the next read sees stale data; the shared lesson \
+                   across these members is to treat the cache as an optimization, never the \
+                   source of truth.\"\n}\n```";
         let s = parse_summary_response(raw).expect("parse ok");
         assert_eq!(s.key, "summary_p4_evolve_cache_20260509");
         assert_eq!(s.kind, "lesson");
@@ -714,9 +872,13 @@ mod tests {
 
     #[test]
     fn parse_summary_response_tolerates_leading_prose() {
-        let raw = "Sure, here you go:\n{\"key\":\"summary_x_20260509\",\"kind\":\"context\",\
-                   \"tags\":[\"a\"],\"body\":\"hello\"}";
-        let s = parse_summary_response(raw).expect("parse ok");
+        // Constraint-compliant fixture (G2): 2 tags + 200+ char body.
+        let body = "y".repeat(250);
+        let raw = format!(
+            "Sure, here you go:\n{{\"key\":\"summary_x_20260509\",\"kind\":\"context\",\
+             \"tags\":[\"a\",\"b\"],\"body\":\"{body}\"}}"
+        );
+        let s = parse_summary_response(&raw).expect("parse ok");
         assert_eq!(s.key, "summary_x_20260509");
     }
 
@@ -725,6 +887,64 @@ mod tests {
         let raw = "{\"key\":\"x\",\"kind\":\"\",\"tags\":[],\"body\":\"y\"}";
         let err = parse_summary_response(raw).expect_err("should reject empty kind");
         assert!(err.contains("kind"));
+    }
+
+    #[test]
+    fn parse_summary_response_rejects_non_enum_kind() {
+        // G2: a hallucinated kind no longer saves identically to a valid one.
+        let body = "z".repeat(250);
+        let raw = format!(
+            "{{\"key\":\"summary_x_20260509\",\"kind\":\"banana\",\
+             \"tags\":[\"a\",\"b\"],\"body\":\"{body}\"}}"
+        );
+        let err = parse_summary_response(&raw).expect_err("should reject non-enum kind");
+        assert!(err.contains("kind"));
+    }
+
+    #[test]
+    fn parse_summary_response_rejects_short_body() {
+        // G2: a one-sentence body (LLM ignored the 200-char floor) is rejected.
+        let raw = "{\"key\":\"summary_x_20260509\",\"kind\":\"lesson\",\
+                   \"tags\":[\"a\",\"b\"],\"body\":\"too short to be a real summary\"}";
+        let err = parse_summary_response(raw).expect_err("should reject short body");
+        assert!(err.contains("body"));
+    }
+
+    #[test]
+    fn parse_summary_response_rejects_overlong_body() {
+        // G2: a 700-char body (likely "lists every member" — the exact failure
+        // the prompt warns against) is rejected at the 600-char ceiling.
+        let body = "w".repeat(700);
+        let raw = format!(
+            "{{\"key\":\"summary_x_20260509\",\"kind\":\"lesson\",\
+             \"tags\":[\"a\",\"b\"],\"body\":\"{body}\"}}"
+        );
+        let err = parse_summary_response(&raw).expect_err("should reject overlong body");
+        assert!(err.contains("body"));
+    }
+
+    #[test]
+    fn parse_summary_response_rejects_too_few_tags() {
+        // G2: a single-tag summary (LLM ignored the 2–5 instruction) is rejected.
+        let body = "q".repeat(250);
+        let raw = format!(
+            "{{\"key\":\"summary_x_20260509\",\"kind\":\"lesson\",\
+             \"tags\":[\"only_one\"],\"body\":\"{body}\"}}"
+        );
+        let err = parse_summary_response(&raw).expect_err("should reject <2 tags");
+        assert!(err.contains("tag"));
+    }
+
+    #[test]
+    fn parse_summary_response_rejects_too_many_tags() {
+        // G2: a 6-tag summary exceeds the 5-tag ceiling.
+        let body = "r".repeat(250);
+        let raw = format!(
+            "{{\"key\":\"summary_x_20260509\",\"kind\":\"lesson\",\
+             \"tags\":[\"a\",\"b\",\"c\",\"d\",\"e\",\"f\"],\"body\":\"{body}\"}}"
+        );
+        let err = parse_summary_response(&raw).expect_err("should reject >5 tags");
+        assert!(err.contains("tag"));
     }
 
     #[test]
