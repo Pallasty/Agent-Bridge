@@ -819,23 +819,36 @@ pub async fn biocortex_replay_comparison(
     fixture: &ShadowCortexReplayFixture,
     opts: BioCortexReplayComparisonOptions,
 ) -> Value {
-    let projection = biocortex_replay_fixture_projection(fixture, opts.include_events);
+    // The external BioCortex adapter APPLIES the plan's pulse list to demonstrate
+    // (`adapter_demonstrated`/`event_pulses_applied`). The compact
+    // `event_pulse_preview` (first 12 of N) STARVES it into a false
+    // `command_failed` → `biocortex_unavailable` verdict — a healthy integration
+    // misreported as broken (the first-run footgun). So always feed the adapter
+    // the FULL plan; the echoed `ab_fixture_projection` still honors the caller's
+    // `include_events` for response token budget. (`include_events` conflated two
+    // concerns: response verbosity vs adapter-input completeness — split here.)
+    let adapter_projection = biocortex_replay_fixture_projection(fixture, true);
+    let echo_projection = if opts.include_events {
+        adapter_projection.clone()
+    } else {
+        biocortex_replay_fixture_projection(fixture, false)
+    };
     let digest = biocortex_shadow_digest(BioCortexShadowOptions {
         checkout: opts.checkout,
         benchmark: opts.benchmark,
         timeout_ms: opts.timeout_ms,
         include_raw: opts.include_raw,
-        fixture_projection: Some(projection.clone()),
+        fixture_projection: Some(adapter_projection),
     })
     .await;
-    let comparison = replay_comparison_summary(&projection, &digest);
+    let comparison = replay_comparison_summary(&echo_projection, &digest);
 
     json!({
         "schema": BIOCORTEX_REPLAY_COMPARISON_SCHEMA,
         "generated_at": now_secs(),
         "read_only": true,
         "status": comparison.get("status").cloned().unwrap_or_else(|| json!("unknown")),
-        "ab_fixture_projection": projection,
+        "ab_fixture_projection": echo_projection,
         "biocortex_shadow_digest": digest,
         "comparison": comparison,
         "boundary": replay_boundary_payload(),
@@ -12385,6 +12398,66 @@ mod tests {
         assert_eq!(summary["demonstrated"], json!(true));
         assert_eq!(summary["failed_predicates"], json!(["executor_clean"]));
         assert_eq!(summary["open_limitations"], json!(["outcomes_injected"]));
+    }
+
+    #[test]
+    fn replay_projection_full_carries_all_pulses_preview_caps_at_12() {
+        // Regression for the adapter-starve footgun: the external BioCortex adapter
+        // applies the plan's pulse list to demonstrate; if it only receives the
+        // 12-pulse preview it reports command_failed → a healthy integration
+        // misread as `biocortex_unavailable`. biocortex_replay_comparison therefore
+        // always feeds the adapter the FULL plan. This pins the two projection
+        // shapes that guarantee lets it rely on.
+        let events: Vec<_> = (0..15)
+            .map(|i| crate::shadow_cortex::ShadowCortexEvent {
+                agent_shadow_cortex: 1,
+                event_id: format!("mcp_dispatch:tool{i}:errors"),
+                at: 1_780_000_000,
+                source: "mcp_dispatch".to_string(),
+                scope: SignalScope::Tool,
+                subject_id: format!("tool{i}"),
+                features: json!({"error_count": 1, "call_count": 2}),
+            })
+            .collect();
+        let fixture = ShadowCortexReplayFixture {
+            agent_shadow_cortex: 1,
+            mode: crate::shadow_cortex::ShadowCortexMode::Heuristic,
+            captured_at: 1_780_000_000,
+            window_days: 7,
+            window_secs: 604_800,
+            requested_source: "all".to_string(),
+            sources: vec!["mcp_dispatch".to_string()],
+            mcp_dispatch: None,
+            memory_query_log: None,
+            forum_window: None,
+            events,
+        };
+
+        // Full plan (what the adapter is now always fed): every pulse present.
+        let full = biocortex_replay_fixture_projection(&fixture, true);
+        let plan_full = &full["substrate_replay_plan"];
+        assert_eq!(plan_full["pulse_count"], json!(15));
+        assert_eq!(plan_full["event_pulses"].as_array().unwrap().len(), 15);
+        assert!(
+            plan_full.get("event_pulse_preview").is_none(),
+            "full plan must not truncate to a preview"
+        );
+
+        // Preview plan (echoed by default for token budget): capped at 12, and
+        // crucially carries NO full `event_pulses` — feeding THIS to the adapter is
+        // exactly what starved it before the fix.
+        let preview = biocortex_replay_fixture_projection(&fixture, false);
+        let plan_prev = &preview["substrate_replay_plan"];
+        assert_eq!(plan_prev["pulse_count"], json!(15));
+        assert_eq!(
+            plan_prev["event_pulse_preview"].as_array().unwrap().len(),
+            12
+        );
+        assert_eq!(plan_prev["event_pulses_omitted"], json!(3));
+        assert!(
+            plan_prev.get("event_pulses").is_none(),
+            "preview plan must not carry the full pulse list"
+        );
     }
 
     #[test]
