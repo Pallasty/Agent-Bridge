@@ -329,6 +329,39 @@ fn tool_atlas_marks_errors_without_recent_samples_as_observability_gap() {
 }
 
 #[test]
+fn tool_atlas_isolates_external_batch_failures() {
+    let mut s = stat("shell_exec", 89, 41, 2_040, 233.0);
+    s.source = Some("other".to_string());
+
+    let snapshot = build_tool_atlas_snapshot(ToolAtlasInput {
+        generated_at: 1_779_910_000,
+        window_secs: 600,
+        current_tools: vec!["shell_exec".to_string()],
+        stats: vec![s],
+        recent_errors: Vec::new(),
+    });
+
+    let shell = snapshot
+        .tools
+        .iter()
+        .find(|tool| tool.tool_name == "shell_exec")
+        .expect("shell_exec");
+
+    assert_eq!(shell.health, "failing");
+    assert_eq!(shell.recommendation, "isolate_external_batch");
+    assert!(shell.risk_flags.contains(&"has_errors".to_string()));
+    assert!(shell
+        .risk_flags
+        .contains(&"missing_error_samples".to_string()));
+    assert!(shell
+        .risk_flags
+        .contains(&"external_batch_load".to_string()));
+    assert!(shell
+        .risk_flags
+        .contains(&"external_batch_failure".to_string()));
+}
+
+#[test]
 fn tool_atlas_marks_external_bulk_latency() {
     let mut s = stat("memory_search", 120, 0, 4_412, 13_972.0);
     s.client_name = Some("p".to_string());

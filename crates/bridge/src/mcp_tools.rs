@@ -24976,6 +24976,9 @@ fn dispatch_optimization_reasons(
         reasons.push("slow_p95");
         if dispatch_external_batch_load(s) {
             reasons.push("external_batch_load");
+            if has_actionable_errors {
+                reasons.push("external_batch_failure");
+            }
         }
     }
     if s.call_count >= 3
@@ -51863,6 +51866,8 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
 
         assert!(reasons.contains(&"has_errors"));
         assert!(reasons.contains(&"missing_error_samples"));
+        assert!(reasons.contains(&"external_batch_load"));
+        assert!(reasons.contains(&"external_batch_failure"));
         assert!(reasons.contains(&"high_error_rate"));
     }
 

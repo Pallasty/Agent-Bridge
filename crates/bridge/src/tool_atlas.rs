@@ -292,6 +292,9 @@ fn risk_flags(
             flags.push("slow_p95".to_string());
             if is_external_batch_load(call_count, p95_duration_ms, source, profile) {
                 flags.push("external_batch_load".to_string());
+                if error_count > 0 {
+                    flags.push("external_batch_failure".to_string());
+                }
             }
         }
     }
@@ -403,7 +406,12 @@ fn health(
 }
 
 fn recommendation(usage_class: &str, health: &str, risk_flags: &[String]) -> &'static str {
-    if health == "failing" {
+    if risk_flags
+        .iter()
+        .any(|flag| flag == "external_batch_failure")
+    {
+        "isolate_external_batch"
+    } else if health == "failing" {
         "fix_failure_mode"
     } else if risk_flags.iter().any(|flag| flag == "slow_p95") {
         "optimize_latency"
