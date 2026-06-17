@@ -420,6 +420,80 @@ pub fn classify_lifecycle(ran: bool, made_effect: bool, err_msg: &str) -> Verdic
     }
 }
 
+/// A distilled recurring-failure pattern over the persisted semantic-event log
+/// — the SSB "memory" arm of the canonical loop (`… → Verification → Memory`).
+///
+/// Where the recent-inert consumer surfaces the *last few* NotVerified events
+/// (recency), this groups the whole retained log by failure MODE
+/// `(source, action, verdict_method)` and keeps the modes that recur — turning a
+/// stream of one-off inert events into a learned, durable lesson ("this
+/// affordance keeps going inert this way; here is the fix").
+///
+/// The event log itself IS the cross-session memory substrate (append-only,
+/// ring-capped, node-local), so the pattern is *computed from live evidence*
+/// each time rather than written as a separate (launder-able) memory record:
+/// the `count` is always the real recurrence, never a stale or faked claim.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct InertPattern {
+    pub source: String,
+    pub action: String,
+    pub verdict_method: String,
+    /// How many NotVerified events share this `(source, action, method)` signature.
+    pub count: usize,
+    /// Newest occurrence `ts` (for age display / sort tiebreak).
+    pub last_ts: i64,
+    /// A few distinct non-empty example targets (evidence the pattern is real).
+    pub examples: Vec<String>,
+}
+
+/// Distill recurring inert/failed patterns from a slice of semantic-event
+/// records. Considers ONLY `verdict_status == "not_verified"` (the verify-first
+/// anti-laundering signal — never the green/unknown rows), groups by
+/// `(source, action, verdict_method)`, and returns the groups whose recurrence
+/// reaches `min_count`, most-recurring first (tiebreak: most-recent first).
+///
+/// Pure + total so the distillation is unit-testable without a store.
+/// `min_count` is floored at 1; at most 3 distinct example targets are kept per
+/// pattern.
+pub fn cluster_inert_patterns(events: &[SemanticEventRecord], min_count: usize) -> Vec<InertPattern> {
+    use std::collections::HashMap;
+    let min_count = min_count.max(1);
+    type Sig = (String, String, String);
+    // Preserve first-seen signature order so output is deterministic before sort.
+    let mut order: Vec<Sig> = Vec::new();
+    let mut agg: HashMap<Sig, (usize, i64, Vec<String>)> = HashMap::new();
+    for e in events.iter().filter(|e| e.verdict_status == "not_verified") {
+        let key: Sig = (e.source.clone(), e.action.clone(), e.verdict_method.clone());
+        if !agg.contains_key(&key) {
+            order.push(key.clone());
+        }
+        let entry = agg.entry(key).or_insert((0usize, i64::MIN, Vec::new()));
+        entry.0 += 1;
+        entry.1 = entry.1.max(e.ts);
+        if let Some(t) = e.target.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+            if entry.2.len() < 3 && !entry.2.iter().any(|x| x == t) {
+                entry.2.push(t.to_string());
+            }
+        }
+    }
+    let mut out: Vec<InertPattern> = order
+        .into_iter()
+        .filter_map(|key| {
+            let (count, last_ts, examples) = agg.remove(&key)?;
+            (count >= min_count).then_some(InertPattern {
+                source: key.0,
+                action: key.1,
+                verdict_method: key.2,
+                count,
+                last_ts,
+                examples,
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| b.count.cmp(&a.count).then(b.last_ts.cmp(&a.last_ts)));
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -768,5 +842,93 @@ mod tests {
         assert!(contract_violations(&rec)
             .iter()
             .any(|s| s.contains("!= descriptor.object.source_adapter")));
+    }
+
+    // ---- SSB "memory" arm: recurring inert-pattern distillation ----
+
+    fn rec(source: &str, action: &str, status: &str, method: &str, target: Option<&str>, ts: i64) -> SemanticEventRecord {
+        SemanticEventRecord {
+            ts,
+            actor: "mcp".to_string(),
+            source: source.to_string(),
+            action: action.to_string(),
+            target: target.map(str::to_string),
+            verdict_status: status.to_string(),
+            verdict_method: method.to_string(),
+            evidence: None,
+            facts: "{}".to_string(),
+            descriptor: None,
+        }
+    }
+
+    #[test]
+    fn cluster_groups_by_mode_and_applies_threshold() {
+        // 3× the same failure MODE + 1 one-off. With min_count=3 only the
+        // recurring mode survives — a single failure is not yet a "pattern".
+        let evs = vec![
+            rec("browser", "click", "not_verified", "cdp_actionability_probe", Some("@e5"), 300),
+            rec("browser", "click", "not_verified", "cdp_actionability_probe", Some("@e9"), 200),
+            rec("browser", "click", "not_verified", "cdp_actionability_probe", Some("@e5"), 100),
+            rec("mobile", "tap", "not_verified", "no_device", Some("@n1"), 50),
+        ];
+        let pats = cluster_inert_patterns(&evs, 3);
+        assert_eq!(pats.len(), 1, "only the ≥3 mode is a pattern: {pats:?}");
+        let p = &pats[0];
+        assert_eq!((p.source.as_str(), p.action.as_str(), p.verdict_method.as_str()), ("browser", "click", "cdp_actionability_probe"));
+        assert_eq!(p.count, 3);
+        assert_eq!(p.last_ts, 300, "last_ts is the newest occurrence");
+        // Distinct example targets only (@e5 appeared twice → once).
+        assert_eq!(p.examples, vec!["@e5".to_string(), "@e9".to_string()]);
+    }
+
+    #[test]
+    fn cluster_ignores_verified_and_unknown_rows() {
+        // The falsifier: only the verify-first NotVerified signal feeds the
+        // memory arm — a green/unknown row must never become a "failure pattern".
+        let evs = vec![
+            rec("browser", "click", "verified", "ref_ok", Some("@e1"), 300),
+            rec("browser", "click", "verified", "ref_ok", Some("@e2"), 200),
+            rec("browser", "click", "verified", "ref_ok", Some("@e3"), 100),
+            rec("desktop", "action", "unknown", "isolated_injected_no_readback", None, 90),
+            rec("desktop", "action", "unknown", "isolated_injected_no_readback", None, 80),
+            rec("desktop", "action", "unknown", "isolated_injected_no_readback", None, 70),
+        ];
+        assert!(cluster_inert_patterns(&evs, 3).is_empty(), "no NotVerified → no pattern");
+    }
+
+    #[test]
+    fn cluster_sorts_by_count_then_recency() {
+        let mut evs = Vec::new();
+        // mode A: 2 occurrences (older)
+        evs.push(rec("desktop", "action", "not_verified", "preflight_refusal", None, 10));
+        evs.push(rec("desktop", "action", "not_verified", "preflight_refusal", None, 20));
+        // mode B: 4 occurrences (clearly more recurrent → must sort first)
+        for ts in [100, 110, 120, 130] {
+            evs.push(rec("browser", "click", "not_verified", "css_selector_dispatch", Some("div.x"), ts));
+        }
+        let pats = cluster_inert_patterns(&evs, 2);
+        assert_eq!(pats.len(), 2);
+        assert_eq!(pats[0].verdict_method, "css_selector_dispatch", "higher count first");
+        assert_eq!(pats[0].count, 4);
+        assert_eq!(pats[1].count, 2);
+    }
+
+    #[test]
+    fn cluster_caps_examples_at_three_distinct() {
+        let evs: Vec<_> = (0..6)
+            .map(|i| rec("browser", "click", "not_verified", "cdp_actionability_probe", Some(&format!("@e{i}")), 100 + i as i64))
+            .collect();
+        let pats = cluster_inert_patterns(&evs, 1);
+        assert_eq!(pats[0].count, 6);
+        assert_eq!(pats[0].examples.len(), 3, "examples capped at 3: {:?}", pats[0].examples);
+    }
+
+    #[test]
+    fn cluster_empty_and_min_count_floor() {
+        assert!(cluster_inert_patterns(&[], 3).is_empty());
+        // min_count is floored at 1, so a single failure with min_count=0 still
+        // surfaces (caller never accidentally disables the threshold to nothing).
+        let evs = vec![rec("mobile", "tap", "not_verified", "no_device", None, 5)];
+        assert_eq!(cluster_inert_patterns(&evs, 0).len(), 1);
     }
 }

@@ -21401,6 +21401,19 @@ impl McpTool for SessionBootstrapTool {
                     lines.extend(cap_block_lines(block, BUDGET_INERT_ACTIONS));
                 }
             }
+
+            // SSB "memory" arm (`… → Verification → Memory`) — distill the whole
+            // retained verify-first log into failure MODES that *recur*, so a
+            // systematic inert pattern surfaces as a learned lesson rather than
+            // just the last few one-off failures the recency block above shows.
+            // Wider window (the retained ring IS the cross-session memory
+            // substrate) + a recurrence floor so one-offs never become noise.
+            // Best-effort; a read failure never blocks bootstrap.
+            if let Ok(evs) = store.recent_semantic_events(90 * 86400, 500).await {
+                if let Some(block) = format_recurring_inert_block(&evs, now_ts, 3, 3) {
+                    lines.extend(cap_block_lines(block, BUDGET_INERT_ACTIONS));
+                }
+            }
         }
 
         lines.extend(cap_block_lines(error_section, BUDGET_ERROR_PATTERNS));
@@ -43567,6 +43580,65 @@ fn format_inert_actions_block(
     Some(out)
 }
 
+/// Format a "Recurring Inert Patterns" block — the SSB *memory* arm
+/// (`… → Verification → Memory`). Distills the retained semantic-event log into
+/// failure MODES that recur (≥ `min_count`) so a *systematic* problem surfaces
+/// as a learned lesson, distinct from the per-event recency view in
+/// [`format_inert_actions_block`]. Each pattern shows its recurrence count, a
+/// few example targets, and the shared `recover:` next-step (roadmap §3.5).
+///
+/// Returns `None` when no mode recurs (clean session, or only one-off failures),
+/// so the block is hidden then — the same noise-free discipline as the recency
+/// block. Pure + total (no store): the count is computed from the live log, so
+/// it can never be a stale or laundered claim. `events` order does not matter
+/// ([`cluster_inert_patterns`] sorts by recurrence then recency).
+fn format_recurring_inert_block(
+    events: &[ab_store::SemanticEventRecord],
+    now_ts: i64,
+    min_count: usize,
+    max_items: usize,
+) -> Option<Vec<String>> {
+    let patterns = crate::semantic_event::cluster_inert_patterns(events, min_count);
+    if patterns.is_empty() {
+        return None;
+    }
+    let n = patterns.len();
+    let mut out = vec![
+        format!("=== ⟳ Recurring Inert Patterns ({n}) — distilled from the verify-first log ==="),
+        String::new(),
+    ];
+    for p in patterns.iter().take(max_items.max(1)) {
+        let age = (now_ts - p.last_ts).max(0);
+        let age_str = if age < 3600 {
+            format!("{}m", age / 60)
+        } else if age < 86400 {
+            format!("{}h", age / 3600)
+        } else {
+            format!("{}d", age / 86400)
+        };
+        let eg = if p.examples.is_empty() {
+            String::new()
+        } else {
+            format!(" [{}]", p.examples.join(", "))
+        };
+        out.push(format!(
+            "  • {}×  {}/{} — {}{eg} (last {age_str} ago)",
+            p.count, p.source, p.action, p.verdict_method
+        ));
+        if let Some(hint) = recover_hint(&p.verdict_method) {
+            out.push(format!("      ↳ recover: {hint}"));
+        }
+    }
+    if n > max_items.max(1) {
+        out.push(format!(
+            "  … {} more (semantic_bus_integrity for full)",
+            n - max_items.max(1)
+        ));
+    }
+    out.push(String::new());
+    Some(out)
+}
+
 /// Format a "Decisions Due for Review" block from a pool of decision records.
 /// Returns `None` if no record is due (no block will be injected).
 /// Sort order: most overdue first (largest `now - updated_at - interval`).
@@ -46883,6 +46955,71 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(text.contains("… 4 more"), "{text}");
         let bullets = text.matches("  • ").count();
         assert_eq!(bullets, 3, "should cap to max_items: {text}");
+    }
+
+    #[test]
+    fn recurring_inert_block_hidden_below_threshold() {
+        let now = 1_780_000_000_i64;
+        // Two distinct one-off failures: each mode count=1 < 3 → not yet a
+        // pattern, so the memory-arm block stays hidden (no noise from one-offs).
+        let evs = vec![
+            mk_sev("browser", "click", "not_verified", "cdp_actionability_probe", Some("@e5"), now - 60),
+            mk_sev("mobile", "tap", "not_verified", "no_device", None, now - 120),
+        ];
+        assert!(format_recurring_inert_block(&evs, now, 3, 3).is_none());
+        assert!(format_recurring_inert_block(&[], now, 3, 3).is_none());
+    }
+
+    #[test]
+    fn recurring_inert_block_surfaces_count_and_recover() {
+        let now = 1_780_000_000_i64;
+        // Same failure MODE 3× → a recurring pattern with its distilled recover.
+        let evs: Vec<_> = [0i64, 1, 2]
+            .iter()
+            .map(|i| mk_sev("browser", "click", "not_verified", "cdp_actionability_probe", Some("@e5"), now - i * 60))
+            .collect();
+        let block = format_recurring_inert_block(&evs, now, 3, 3).expect("a recurring pattern");
+        let text = block.join("\n");
+        assert!(text.contains("Recurring Inert Patterns (1)"), "{text}");
+        assert!(text.contains("3×"), "shows recurrence count: {text}");
+        assert!(text.contains("browser/click"), "{text}");
+        // The distilled lesson carries the shared §3.5 recover next-step.
+        assert!(text.contains("↳ recover:"), "{text}");
+        assert!(text.contains("browser_snapshot"), "{text}");
+    }
+
+    #[test]
+    fn recurring_inert_block_ignores_verified_rows() {
+        let now = 1_780_000_000_i64;
+        // 3 verified clicks must never be distilled into a "failure pattern".
+        let evs: Vec<_> = [0i64, 1, 2]
+            .iter()
+            .map(|i| mk_sev("browser", "click", "verified", "ref_ok", Some("@e1"), now - i * 60))
+            .collect();
+        assert!(format_recurring_inert_block(&evs, now, 3, 3).is_none());
+    }
+
+    #[test]
+    fn recurring_inert_block_caps_items_and_overflow() {
+        let now = 1_780_000_000_i64;
+        // 4 distinct recurring modes (each 3×); max_items=2 → 2 shown + overflow.
+        let mut evs = Vec::new();
+        for (src, act, method) in [
+            ("browser", "click", "cdp_actionability_probe"),
+            ("desktop", "action", "preflight_refusal"),
+            ("mobile", "tap", "no_device"),
+            ("browser", "click", "css_selector_dispatch"),
+        ] {
+            for i in 0..3i64 {
+                evs.push(mk_sev(src, act, "not_verified", method, None, now - i * 30));
+            }
+        }
+        let block = format_recurring_inert_block(&evs, now, 3, 2).expect("recurring patterns");
+        let text = block.join("\n");
+        assert!(text.contains("Recurring Inert Patterns (4)"), "{text}");
+        assert!(text.contains("… 2 more"), "overflow line: {text}");
+        let bullets = text.matches("  • ").count();
+        assert_eq!(bullets, 2, "capped to max_items: {text}");
     }
 
     #[test]
