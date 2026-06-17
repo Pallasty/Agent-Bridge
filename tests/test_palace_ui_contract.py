@@ -440,6 +440,23 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("state.maintenancePreviewFilter = filter;", html)
         self.assertIn("read-only", html)
 
+    def test_atlas_surfaces_agent_self_review_release_board(self):
+        html = palace_html()
+
+        self.assertIn('id="self-review-board"', html)
+        self.assertIn("self-review-board", html)
+        self.assertIn("agent self-review", html)
+        self.assertIn("release board", html)
+        self.assertIn("function computeSelfReviewBoard(data)", html)
+        self.assertIn("function renderSelfReviewBoard(data)", html)
+        self.assertIn("function handleSelfReviewBoardAction(action)", html)
+        self.assertIn("data-self-review-action", html)
+        self.assertIn("formation", html)
+        self.assertIn("connect", html)
+        self.assertIn("retrieval", html)
+        self.assertIn("consolidate", html)
+        self.assertIn("renderSelfReviewBoard(data);", html)
+
     def test_approved_plan_surfaces_human_confirmed_write_gate(self):
         html = palace_html()
 

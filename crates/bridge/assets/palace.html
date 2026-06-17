@@ -578,8 +578,89 @@
       font-size: 10px;
       line-height: 1.45;
     }
+    #atlas-panel .self-review-board {
+      padding: 9px 8px 8px;
+      border-bottom: 1px solid #1f1f2a;
+      background: rgba(10, 10, 16, 0.42);
+    }
+    #atlas-panel .self-review-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 7px;
+    }
+    #atlas-panel .self-review-title,
+    #atlas-panel .self-review-state {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 9px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    #atlas-panel .self-review-title { color: #5cc8c8; }
+    #atlas-panel .self-review-state {
+      color: #8a8a9c;
+      font-variant-numeric: tabular-nums;
+    }
+    #atlas-panel .self-review-lanes {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 5px;
+    }
+    #atlas-panel .self-review-lane {
+      min-width: 0;
+      padding: 7px;
+      background: #101018;
+      border: 1px solid #1f1f2a;
+      border-left: 2px solid #4a4a58;
+      border-radius: 4px;
+      color: inherit;
+      cursor: pointer;
+      font-family: inherit;
+      text-align: left;
+      transition: background 120ms, border-color 120ms, color 120ms;
+    }
+    #atlas-panel .self-review-lane:hover {
+      background: #151520;
+      border-color: #353545;
+    }
+    #atlas-panel .self-review-lane:focus-visible {
+      outline: 2px solid #5cc8c8;
+      outline-offset: 2px;
+    }
+    #atlas-panel .self-review-lane.good { border-left-color: #5cc89a; }
+    #atlas-panel .self-review-lane.watch { border-left-color: #c8a96a; }
+    #atlas-panel .self-review-lane.fragile { border-left-color: #d88080; }
+    #atlas-panel .self-review-lane.quiet { border-left-color: #6a6a78; }
+    #atlas-panel .self-review-lane .lane-label,
+    #atlas-panel .self-review-lane .lane-count,
+    #atlas-panel .self-review-lane .lane-detail {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #atlas-panel .self-review-lane .lane-label {
+      color: #e8e8ee;
+      font-size: 10px;
+      font-weight: 650;
+    }
+    #atlas-panel .self-review-lane .lane-count {
+      margin-top: 3px;
+      color: #5cc8c8;
+      font-size: 13px;
+      font-weight: 750;
+      font-variant-numeric: tabular-nums;
+    }
+    #atlas-panel .self-review-lane .lane-detail {
+      margin-top: 2px;
+      color: #6a6a78;
+      font-size: 9px;
+    }
     #atlas-panel .atlas-list {
-      max-height: calc(100vh - 210px);
+      max-height: calc(100vh - 374px);
       overflow-x: hidden;
       overflow-y: auto;
       padding: 8px;
@@ -3054,6 +3135,9 @@
       <div class="atlas-title">Memory regions</div>
       <div class="atlas-help">Click a district to enter its Observatory; node clicks open the Workbench.</div>
     </div>
+    <div id="self-review-board" class="self-review-board" aria-label="agent self-review release board">
+      <div class="atlas-empty">loading self-review board…</div>
+    </div>
     <div class="atlas-list" id="atlas-list">
       <div class="atlas-empty">loading regions…</div>
     </div>
@@ -3462,6 +3546,87 @@ function computeAtlasRegions(data) {
     .slice(0, 18);
 }
 
+function computeSelfReviewBoard(data) {
+  const nodes = data && Array.isArray(data.nodes) ? data.nodes : [];
+  const nowSecs = data && data.now ? data.now : Math.floor(Date.now() / 1000);
+  const freshCount = nodes.filter(n => {
+    const la = n.last_accessed || 0;
+    return la > 0 && (nowSecs - la) < FRESH_WINDOW_SECS;
+  }).length;
+  const staleCount = nodes.filter(n => {
+    const la = n.last_accessed || 0;
+    return la > 0 && (nowSecs - la) > STALE_WINDOW_SECS;
+  }).length;
+  const degInfo = state.degrees || computeDegrees(data || { nodes: [], edges: [] });
+  const orphanCount = degInfo.orphanCount || 0;
+  const hubCount = degInfo.hubCount || 0;
+  const regions = state.atlasRegions || [];
+  const avgHealth = regions.length
+    ? Math.round(regions.reduce((sum, r) => sum + (Number.isFinite(r.healthScore) ? r.healthScore : 0), 0) / regions.length)
+    : 0;
+  const readiness = orphanCount > 0 || staleCount > 0
+    ? "needs-review"
+    : hubCount > 0
+      ? "watch"
+      : "steady";
+  return {
+    readiness,
+    avgHealth,
+    lanes: [
+      {
+        id: "formation",
+        action: "fresh",
+        count: freshCount,
+        detail: "recent memories to classify",
+        tone: freshCount > 0 ? "good" : "quiet",
+      },
+      {
+        id: "connect",
+        action: "orphans",
+        count: orphanCount,
+        detail: "unlinked memories need edges",
+        tone: orphanCount > 0 ? "fragile" : "good",
+      },
+      {
+        id: "retrieval",
+        action: "stale",
+        count: staleCount,
+        detail: "cold memories need judgment",
+        tone: staleCount > 0 ? "watch" : "good",
+      },
+      {
+        id: "consolidate",
+        action: "hubs",
+        count: hubCount,
+        detail: "anchors need duplicate scan",
+        tone: hubCount > 0 ? "watch" : "quiet",
+      },
+    ],
+  };
+}
+
+function renderSelfReviewBoard(data) {
+  const el = document.getElementById("self-review-board");
+  if (!el) return;
+  const board = computeSelfReviewBoard(data || {});
+  const lanes = board.lanes.map(lane => {
+    const tone = ["good", "watch", "fragile", "quiet"].includes(lane.tone) ? lane.tone : "quiet";
+    return `<button type="button"
+      class="self-review-lane ${escapeHTML(tone)}"
+      data-self-review-action="${escapeHTML(lane.action)}"
+      title="${escapeHTML(lane.id + " · " + lane.detail)}">
+      <span class="lane-label">${escapeHTML(lane.id)}</span>
+      <span class="lane-count">${escapeHTML(String(lane.count))}</span>
+      <span class="lane-detail">${escapeHTML(lane.detail)}</span>
+    </button>`;
+  }).join("");
+  el.innerHTML = `<div class="self-review-head">
+    <span class="self-review-title">agent self-review</span>
+    <span class="self-review-state">release board · ${escapeHTML(board.readiness)} · H${escapeHTML(String(board.avgHealth))}</span>
+  </div>
+  <div class="self-review-lanes">${lanes}</div>`;
+}
+
 function computeAtlasDistrictAnchors(data, degInfo) {
   const anchors = new Map();
   const scores = new Map();
@@ -3687,6 +3852,31 @@ function setViewPreset(preset) {
   applyVisualState();
   zoomToVisibleGraph();
   saveViewState();
+}
+
+function handleSelfReviewBoardAction(action) {
+  if (action === "stale") {
+    setViewPreset("stale");
+    const staleBtn = document.getElementById("stale-btn");
+    const panel = document.getElementById("stale-panel");
+    if (staleBtn && panel && !staleBtn.disabled && !staleBtn.classList.contains("empty")) {
+      renderStalePanel();
+      panel.classList.remove("hidden");
+      staleBtn.classList.add("active");
+      document.getElementById("filter-panel").classList.add("hidden");
+      document.getElementById("filter-btn").classList.remove("active");
+    }
+    return;
+  }
+  document.getElementById("stale-panel").classList.add("hidden");
+  document.getElementById("stale-btn").classList.remove("active");
+  document.getElementById("filter-panel").classList.add("hidden");
+  document.getElementById("filter-btn").classList.remove("active");
+  if (VALID_VIEW_PRESETS.has(action)) {
+    setViewPreset(action);
+    return;
+  }
+  setViewPreset("overview");
 }
 
 // ── Global state ────────────────────────────────────────────────
@@ -4027,6 +4217,7 @@ async function loadGraph() {
   if (state.activeRegion && !state.atlasRegions.some(r => r.id === state.activeRegion)) {
     state.activeRegion = null;
   }
+  renderSelfReviewBoard(data);
   const hubBadge = state.degrees.hubCount > 0
     ? ` · <span style="color:#c8a96a" title="degree ≥ ${state.degrees.hubThreshold} (P95)">${state.degrees.hubCount} hubs</span>`
     : "";
@@ -7121,6 +7312,12 @@ document.getElementById("view-presets").addEventListener("click", (e) => {
 });
 
 document.getElementById("atlas-panel").addEventListener("click", (e) => {
+  const selfReview = e.target.closest("[data-self-review-action]");
+  if (selfReview) {
+    e.preventDefault();
+    handleSelfReviewBoardAction(selfReview.dataset.selfReviewAction || "overview");
+    return;
+  }
   const region = e.target.closest("[data-region-id]");
   if (!region) return;
   const id = region.dataset.regionId;
