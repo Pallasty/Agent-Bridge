@@ -1577,6 +1577,24 @@ impl SqliteStore {
 /// the input rather than splitting on it, so a query like `v0.7.1` collapsed
 /// to `v071*` and matched nothing (`lesson_fts5_search_dot_strip_bug`).
 fn sanitise_fts_query(q: &str) -> String {
+    sanitise_fts_query_joined(q, " ")
+}
+
+/// OR-joined variant of [`sanitise_fts_query`] for the recall-recovery
+/// fallback. When the default implicit-AND match returns nothing, `memory_search`
+/// retries with this: plain-text tokens joined by ` OR ` so a doc containing
+/// *some* of the terms still surfaces (ranked by bm25, so full-term matches stay
+/// on top). This recovers the dominant miss class — multi-term and CJK queries,
+/// where the unicode61 tokeniser fuses a space-free CJK run into a single token
+/// that only prefix-matches the leading term, so requiring every term to match
+/// (implicit AND) returns empty. Operator / phrase / column-prefix queries are
+/// returned identically (no implicit AND to relax), so the fallback is a no-op
+/// for them.
+fn sanitise_fts_query_any(q: &str) -> String {
+    sanitise_fts_query_joined(q, " OR ")
+}
+
+fn sanitise_fts_query_joined(q: &str, join: &str) -> String {
     let trimmed = q.trim();
 
     // FTS5 column-scoped tokens like `lens:cosine` parse as
@@ -1603,13 +1621,14 @@ fn sanitise_fts_query(q: &str) -> String {
         return trimmed.to_string();
     }
     // Plain-text path: split on the same separators FTS5's unicode61 uses,
-    // so a single tokenised user query maps 1:1 to indexed tokens.
+    // so a single tokenised user query maps 1:1 to indexed tokens. `join` is
+    // " " (implicit AND, the precise default) or " OR " (recall fallback).
     trimmed
         .split(|c: char| !c.is_alphanumeric() && c != '_')
         .filter(|s| !s.is_empty())
         .map(|s| format!("{s}*"))
         .collect::<Vec<_>>()
-        .join(" ")
+        .join(join)
 }
 
 /// True if the query contains any `col:` prefix where `col` is not `content`
@@ -3107,6 +3126,9 @@ impl StateStore for SqliteStore {
             return Ok(Vec::new());
         }
         let fts_query = sanitise_fts_query(&q);
+        // Recall-recovery fallback: if the precise implicit-AND match finds
+        // nothing, retry with this OR-joined variant (see sanitise_fts_query_any).
+        let fts_query_any = sanitise_fts_query_any(&q);
         let tags = tags_any.to_vec();
         let limit_i = limit as i64;
         let now = now_secs();
@@ -3118,44 +3140,56 @@ impl StateStore for SqliteStore {
                 // Then JOIN back to memories for the full record.
                 // Final ranking blends bm25 (lower=better → invert) with
                 // recency + frequency, applied in Rust.
-                let mut stmt = c.prepare(
-                    "SELECT m.key, m.kind, m.content, m.tags, m.related_keys, m.scope,
-                            m.created_at, m.updated_at, m.last_accessed_at, m.access_count,
-                            bm25(memories_fts) AS bm25_score,
-                            m.importance, m.status, m.trigger_pattern, m.superseded_by
-                     FROM memories_fts
-                     JOIN memories m ON m.rowid = memories_fts.rowid
-                     WHERE memories_fts MATCH ?1
-                       AND m.status = 'active'
-                     ORDER BY bm25_score
-                     LIMIT ?2",
-                )?;
-                let rows = stmt
-                    .query_map(params![fts_query, limit_i * 4], |row| {
-                        let tags_s: String = row.get(3)?;
-                        let related_s: String = row.get(4)?;
-                        let rec = MemoryRecord {
-                            key: row.get(0)?,
-                            kind: row.get(1)?,
-                            content: row.get(2)?,
-                            tags: parse_str_array(&tags_s),
-                            related_keys: parse_str_array(&related_s),
-                            scope: row.get(5)?,
-                            created_at: row.get(6)?,
-                            updated_at: row.get(7)?,
-                            last_accessed_at: row.get(8)?,
-                            access_count: row.get::<_, i64>(9)? as u64,
-                            importance: row.get::<_, f64>(11).unwrap_or(0.5),
-                            status: row
-                                .get::<_, String>(12)
-                                .unwrap_or_else(|_| "active".to_string()),
-                            trigger_pattern: row.get::<_, Option<String>>(13)?,
-                            superseded_by: row.get::<_, Option<String>>(14)?,
-                        };
-                        let bm25: f64 = row.get(10)?;
-                        Ok((rec, bm25))
-                    })?
-                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                let run_fts = |match_str: &str| -> RusqliteResult<Vec<(MemoryRecord, f64)>> {
+                    let mut stmt = c.prepare(
+                        "SELECT m.key, m.kind, m.content, m.tags, m.related_keys, m.scope,
+                                m.created_at, m.updated_at, m.last_accessed_at, m.access_count,
+                                bm25(memories_fts) AS bm25_score,
+                                m.importance, m.status, m.trigger_pattern, m.superseded_by
+                         FROM memories_fts
+                         JOIN memories m ON m.rowid = memories_fts.rowid
+                         WHERE memories_fts MATCH ?1
+                           AND m.status = 'active'
+                         ORDER BY bm25_score
+                         LIMIT ?2",
+                    )?;
+                    let rows = stmt
+                        .query_map(params![match_str, limit_i * 4], |row| {
+                            let tags_s: String = row.get(3)?;
+                            let related_s: String = row.get(4)?;
+                            let rec = MemoryRecord {
+                                key: row.get(0)?,
+                                kind: row.get(1)?,
+                                content: row.get(2)?,
+                                tags: parse_str_array(&tags_s),
+                                related_keys: parse_str_array(&related_s),
+                                scope: row.get(5)?,
+                                created_at: row.get(6)?,
+                                updated_at: row.get(7)?,
+                                last_accessed_at: row.get(8)?,
+                                access_count: row.get::<_, i64>(9)? as u64,
+                                importance: row.get::<_, f64>(11).unwrap_or(0.5),
+                                status: row
+                                    .get::<_, String>(12)
+                                    .unwrap_or_else(|_| "active".to_string()),
+                                trigger_pattern: row.get::<_, Option<String>>(13)?,
+                                superseded_by: row.get::<_, Option<String>>(14)?,
+                            };
+                            let bm25: f64 = row.get(10)?;
+                            Ok((rec, bm25))
+                        })?
+                        .collect::<std::result::Result<Vec<_>, _>>()?;
+                    Ok(rows)
+                };
+
+                // Precise implicit-AND first; broaden to OR only when it finds
+                // nothing. This recovers multi-term / CJK misses (the dominant
+                // miss class) without changing behaviour for any query that
+                // already matches under AND.
+                let mut rows = run_fts(&fts_query)?;
+                if rows.is_empty() && fts_query_any != fts_query {
+                    rows = run_fts(&fts_query_any)?;
+                }
 
                 let mut hits: Vec<MemorySearchHit> = rows
                     .into_iter()
@@ -9537,6 +9571,34 @@ mod tests {
         assert_eq!(out, "\"lens:\"\"foo\"\"\"");
     }
 
+    #[test]
+    fn sanitise_fts_any_joins_plain_tokens_with_or() {
+        // Recall-recovery variant: plain multi-token → OR-joined prefix tokens.
+        assert_eq!(sanitise_fts_query_any("warp ipc"), "warp* OR ipc*");
+        // Single token → identical to the AND default (nothing to OR).
+        assert_eq!(sanitise_fts_query_any("warp"), "warp*");
+        assert_eq!(sanitise_fts_query_any("warp"), sanitise_fts_query("warp"));
+    }
+
+    #[test]
+    fn sanitise_fts_any_is_noop_for_operators_and_phrases() {
+        // Operator / phrase / column-prefix queries have no implicit AND to
+        // relax → the OR variant is byte-identical to the default, so the
+        // memory_search fallback re-query is a true no-op for them.
+        for q in [
+            "\"signal exit\" OR sigterm",
+            "content:cosine",
+            "lens:cosine",
+            "foo*",
+        ] {
+            assert_eq!(
+                sanitise_fts_query_any(q),
+                sanitise_fts_query(q),
+                "OR variant must match default for operator query: {q}"
+            );
+        }
+    }
+
     // Track MS — test helpers for the version-vector-aware planner.
     type ExistingMetaT =
         std::collections::HashMap<String, (i64, crate::version_vector::VersionVector)>;
@@ -9748,6 +9810,69 @@ mod tests {
         assert_eq!(r2.inserted, 0);
         assert_eq!(r2.updated, 0);
         assert_eq!(r2.skipped, 1);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_search_or_fallback_recovers_partial_term_match() {
+        // LEVER 1: implicit-AND made multi-term queries miss when not EVERY
+        // term matched (the dominant prod miss class). The OR fallback must
+        // recover a doc that matches *some* terms, while leaving all-terms-match
+        // queries unaffected.
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-fts-orfallback-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+
+        let rec = MemoryRecord {
+            key: "k_fts_fallback".into(),
+            kind: "lesson".into(),
+            content: "alpha bravo charlie delta".into(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 1_700_000_000,
+            updated_at: 1_700_000_000,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".into(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store.memory_save(&rec).await.expect("save");
+
+        // "alpha bravo zulu" → AND requires alpha* AND bravo* AND zulu*; zulu
+        // is absent so implicit-AND returns nothing. The OR fallback recovers
+        // the doc on its alpha/bravo match. (Query != key, so the exact-key
+        // path does not fire — recovery is purely the OR fallback.)
+        let hits = store
+            .memory_search("alpha bravo zulu", &[], 10)
+            .await
+            .expect("search");
+        assert!(
+            hits.iter().any(|h| h.record.key == "k_fts_fallback"),
+            "OR fallback must recover a partial-term match; got {:?}",
+            hits.iter().map(|h| h.record.key.clone()).collect::<Vec<_>>()
+        );
+
+        // All-terms-match query still works via the precise AND path (unchanged).
+        let hits2 = store
+            .memory_search("alpha bravo", &[], 10)
+            .await
+            .expect("search");
+        assert!(
+            hits2.iter().any(|h| h.record.key == "k_fts_fallback"),
+            "all-terms-match query must still hit"
+        );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
