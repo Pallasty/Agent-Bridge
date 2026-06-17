@@ -615,9 +615,27 @@
       align-items: center;
       gap: 6px;
       margin: 5px 0 7px;
+      width: 100%;
+      background: transparent;
+      border: 1px solid #1f1f2a;
+      border-radius: 4px;
       color: #6f6f7d;
+      cursor: pointer;
+      font-family: inherit;
       font-size: 8px;
       letter-spacing: 0.08em;
+      padding: 5px 6px;
+      text-align: left;
+      transition: background 120ms, border-color 120ms, color 120ms;
+    }
+    #atlas-panel .self-review-history:hover {
+      background: #101018;
+      border-color: #353545;
+      color: #d8d8e2;
+    }
+    #atlas-panel .self-review-history:focus-visible {
+      outline: 2px solid #5cc8c8;
+      outline-offset: 2px;
     }
     #atlas-panel .self-review-history .history-label {
       color: #8a8a9c;
@@ -625,6 +643,75 @@
     #atlas-panel .self-review-history .history-stat {
       color: #5cc8c8;
       font-variant-numeric: tabular-nums;
+    }
+    #atlas-panel .self-review-history-panel {
+      margin: -2px 0 7px;
+      border: 1px solid #1f1f2a;
+      border-radius: 4px;
+      background: #0c0c12;
+      overflow: hidden;
+    }
+    #atlas-panel .self-review-history-panel.hidden { display: none; }
+    #atlas-panel .self-review-history-note {
+      padding: 6px 7px;
+      border-bottom: 1px solid #1f1f2a;
+      color: #5a5a68;
+      font-size: 9px;
+      line-height: 1.35;
+    }
+    #atlas-panel .self-review-history-row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 5px 8px;
+      padding: 7px;
+      border-bottom: 1px solid #1f1f2a;
+    }
+    #atlas-panel .self-review-history-row:last-child {
+      border-bottom: none;
+    }
+    #atlas-panel .self-review-history-main {
+      min-width: 0;
+    }
+    #atlas-panel .self-review-history-kind,
+    #atlas-panel .self-review-history-meta,
+    #atlas-panel .self-review-history-pair {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #atlas-panel .self-review-history-kind {
+      color: #d8d8e2;
+      font-size: 10px;
+      font-weight: 650;
+    }
+    #atlas-panel .self-review-history-meta {
+      margin-top: 2px;
+      color: #6f6f7d;
+      font-size: 9px;
+    }
+    #atlas-panel .self-review-history-pair {
+      margin-top: 2px;
+      color: #4f4f5b;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 8px;
+    }
+    #atlas-panel .self-review-history-row button {
+      align-self: center;
+      background: transparent;
+      border: 1px solid #2a2a35;
+      border-radius: 3px;
+      color: #8a8a9c;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 9px;
+      letter-spacing: 0.08em;
+      padding: 4px 7px;
+      text-transform: uppercase;
+    }
+    #atlas-panel .self-review-history-row button:hover {
+      border-color: #4a4a60;
+      color: #e4e4e8;
     }
     #atlas-panel .self-review-lanes {
       display: grid;
@@ -3693,13 +3780,90 @@ function renderSelfReviewHistoryPulse(board) {
     `applied_count:${appliedCount}`,
     failedCount > 0 ? `failed_count:${failedCount}` : "",
   ].filter(Boolean).join(" · ");
-  return `<div class="self-review-history" title="${escapeHTML(title)}">
+  return `<button type="button"
+      class="self-review-history self-review-history-toggle"
+      data-self-review-history-toggle="1"
+      aria-expanded="${state.selfReviewHistoryOpen ? "true" : "false"}"
+      title="${escapeHTML(title)} · review history is read-only">
     <span class="history-label">history pulse</span>
     <span class="history-stat">d${escapeHTML(String(decisionCount))}</span>
     <span class="history-stat">apply${escapeHTML(String(applyAuditCount))}</span>
     <span class="history-stat">ok${escapeHTML(String(appliedCount))}</span>
     ${failedCount > 0 ? `<span class="history-stat">fail${escapeHTML(String(failedCount))}</span>` : ""}
+  </button>`;
+}
+
+function selfReviewHistoryRowLabel(row) {
+  const kind = row && row.kind ? String(row.kind) : "record";
+  if (kind === "decision") {
+    return `${row.decision || "decision"} decision`;
+  }
+  if (kind === "apply") {
+    return `${row.status || "apply"} apply`;
+  }
+  return kind;
+}
+
+function selfReviewHistoryRowMeta(row) {
+  if (!row || typeof row !== "object") return "unknown audit record";
+  if (row.kind === "decision") {
+    return [
+      row.reviewer ? `reviewer:${row.reviewer}` : "",
+      row.generated_at_unix ? `t:${row.generated_at_unix}` : "",
+    ].filter(Boolean).join(" · ") || "decision audit";
+  }
+  if (row.kind === "apply") {
+    return [
+      row.dry_run ? "dry-run" : "live",
+      row.blocked ? "blocked" : "unblocked",
+      `applied:${Number.isFinite(row.applied_count) ? row.applied_count : 0}`,
+      `failed:${Number.isFinite(row.failed_count) ? row.failed_count : 0}`,
+    ].join(" · ");
+  }
+  return "audit record";
+}
+
+function renderSelfReviewHistoryPanel(board) {
+  const history = board.history || {};
+  const rows = Array.isArray(history.recent) ? history.recent : [];
+  const body = rows.length
+    ? rows.map((row, idx) => {
+        const label = selfReviewHistoryRowLabel(row);
+        const meta = selfReviewHistoryRowMeta(row);
+        const pair = row && row.pair_id ? String(row.pair_id) : "";
+        return `<div class="self-review-history-row">
+          <span class="self-review-history-main">
+            <span class="self-review-history-kind">${escapeHTML(label)}</span>
+            <span class="self-review-history-meta">${escapeHTML(meta)}</span>
+            ${pair ? `<span class="self-review-history-pair">${escapeHTML(pair)}</span>` : ""}
+          </span>
+          <button type="button"
+              data-self-review-history-action="orphans"
+              data-self-review-history-index="${escapeHTML(String(idx))}"
+              title="open orphan review lane">open</button>
+        </div>`;
+      }).join("")
+    : `<div class="self-review-history-note">no recent review history</div>`;
+  return `<div class="self-review-history-panel ${state.selfReviewHistoryOpen ? "" : "hidden"}"
+      title="review history is read-only">
+    <div class="self-review-history-note">review history is read-only</div>
+    ${body}
   </div>`;
+}
+
+function toggleSelfReviewHistoryPanel() {
+  state.selfReviewHistoryOpen = !state.selfReviewHistoryOpen;
+  renderStoredSelfReviewBoard();
+}
+
+function handleSelfReviewHistoryAction(action) {
+  if (action === "orphans") {
+    state.selfReviewHistoryOpen = true;
+    handleSelfReviewBoardAction("orphans");
+    return;
+  }
+  state.selfReviewHistoryOpen = true;
+  renderStoredSelfReviewBoard();
 }
 
 async function loadSelfReviewPacket(data) {
@@ -3724,6 +3888,7 @@ function renderSelfReviewBoard(packet, data) {
   }
   const board = normalizeSelfReviewPacket(packet, data || {});
   const historyPulse = renderSelfReviewHistoryPulse(board);
+  const historyPanel = renderSelfReviewHistoryPanel(board);
   const lanes = board.lanes.map(lane => {
     const tone = ["good", "watch", "fragile", "quiet"].includes(lane.tone) ? lane.tone : "quiet";
     const title = [lane.id, lane.detail, lane.risk && lane.risk !== "none" ? `risk:${lane.risk}` : ""]
@@ -3744,7 +3909,12 @@ function renderSelfReviewBoard(packet, data) {
   </div>
   <div class="self-review-source">${escapeHTML(board.sourceLabel)}</div>
   ${historyPulse}
+  ${historyPanel}
   <div class="self-review-lanes">${lanes}</div>`;
+}
+
+function renderStoredSelfReviewBoard() {
+  renderSelfReviewBoard(state.selfReviewPacket || null, state.data || {});
 }
 
 function computeAtlasDistrictAnchors(data, degInfo) {
@@ -4026,6 +4196,8 @@ const state = {
   focused: null,        // currently-focused node id (or null)
   staleKindFilter: null, // C10: null = show all kinds, string = restrict stale panel rows
   regionNodeFilter: "all",
+  selfReviewHistoryOpen: false,
+  selfReviewPacket: null,
   regionNodeSort: "rank",
   maintenancePreviewFilter: "all",
   orphanCandidateLaneFilter: "all",
@@ -4338,6 +4510,7 @@ async function loadGraph() {
     state.activeRegion = null;
   }
   const packet = await loadSelfReviewPacket(data);
+  state.selfReviewPacket = packet;
   renderSelfReviewBoard(packet, data);
   const hubBadge = state.degrees.hubCount > 0
     ? ` · <span style="color:#c8a96a" title="degree ≥ ${state.degrees.hubThreshold} (P95)">${state.degrees.hubCount} hubs</span>`
@@ -7433,6 +7606,18 @@ document.getElementById("view-presets").addEventListener("click", (e) => {
 });
 
 document.getElementById("atlas-panel").addEventListener("click", (e) => {
+  const historyToggle = e.target.closest("[data-self-review-history-toggle]");
+  if (historyToggle) {
+    e.preventDefault();
+    toggleSelfReviewHistoryPanel();
+    return;
+  }
+  const historyAction = e.target.closest("[data-self-review-history-action]");
+  if (historyAction) {
+    e.preventDefault();
+    handleSelfReviewHistoryAction(historyAction.dataset.selfReviewHistoryAction || "orphans");
+    return;
+  }
   const selfReview = e.target.closest("[data-self-review-action]");
   if (selfReview) {
     e.preventDefault();

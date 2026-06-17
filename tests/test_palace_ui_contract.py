@@ -479,6 +479,21 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("decision_count", html)
         self.assertIn("apply_audit_count", html)
 
+    def test_atlas_self_review_history_pulse_expands_recent_audit_records(self):
+        html = palace_html()
+
+        self.assertIn("self-review-history-toggle", html)
+        self.assertIn("self-review-history-panel", html)
+        self.assertIn("function renderSelfReviewHistoryPanel(board)", html)
+        self.assertIn("function renderStoredSelfReviewBoard()", html)
+        self.assertIn("function toggleSelfReviewHistoryPanel()", html)
+        self.assertIn("data-self-review-history-toggle", html)
+        self.assertIn("data-self-review-history-action", html)
+        self.assertIn("state.selfReviewPacket = packet;", html)
+        self.assertIn("history.recent", html)
+        self.assertIn("review history is read-only", html)
+        self.assertIn("handleSelfReviewHistoryAction", html)
+
     def test_approved_plan_surfaces_human_confirmed_write_gate(self):
         html = palace_html()
 
