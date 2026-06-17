@@ -23970,6 +23970,157 @@ impl McpTool for ToolAtlasSnapshotTool {
     }
 }
 
+/// A `verified` verdict that rests on no readback evidence is green-laundering —
+/// the exact failure the verify-first invariant forbids. Pure + total so the
+/// integrity monitor's core check is unit-testable without a store. (The
+/// structural [`crate::semantic_event::contract_violations`] validator does not
+/// require the evidence field, so this is an additional, orthogonal check.)
+fn is_green_laundering(verdict_status: &str, evidence: Option<&str>) -> bool {
+    verdict_status == "verified" && evidence.map(|s| s.trim().is_empty()).unwrap_or(true)
+}
+
+/// Read-only Semantic System Bus INTEGRITY monitor — the release-build safety
+/// net for the verify-first contract. Gate E's `to_record()` debug_assert
+/// (which runs [`crate::semantic_event::contract_violations`]) is a no-op in
+/// release, so a deployed build has no automatic conformance check on the events
+/// producers emit. This tool scans recent `semantic_events` and re-runs the SAME
+/// validator, plus a green-laundering check (a `verified` verdict resting on no
+/// readback evidence — the exact thing the verify-first invariant forbids), and
+/// reports the verdict distribution + producer coverage. It never writes,
+/// restarts, mutates Palace, or captures screenshots.
+pub struct SemanticBusIntegrityTool {
+    hub: Hub,
+}
+impl SemanticBusIntegrityTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for SemanticBusIntegrityTool {
+    fn name(&self) -> &'static str {
+        "semantic_bus_integrity"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only Semantic System Bus integrity monitor: scans recent \
+                 semantic_events and re-runs the unified-contract validator (the same \
+                 contract_violations behind Gate E, which is debug-only / a no-op in release) \
+                 plus a green-laundering check (a verified verdict with no readback evidence). \
+                 Reports verdict distribution, producer coverage, and any offending rows. \
+                 Release-build safety net; never writes or mutates anything."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "window_secs": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 31536000,
+                        "default": 604800,
+                        "description": "Look-back window in seconds (default 7 days)."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 5000,
+                        "default": 500,
+                        "description": "Max recent events to scan."
+                    },
+                    "violations_only": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "When true, omit the verdict/producer breakdown and return only offending rows."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let window_secs = args
+            .get("window_secs")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(604_800)
+            .clamp(60, 31_536_000);
+        let limit = args
+            .get("limit")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(500)
+            .clamp(1, 5000) as u32;
+        let violations_only = args
+            .get("violations_only")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let events = match store.recent_semantic_events(window_secs, limit).await {
+            Ok(e) => e,
+            Err(e) => return Ok(ToolResult::error(format!("recent_semantic_events: {e}"))),
+        };
+
+        let mut verdict_counts: std::collections::BTreeMap<String, u64> = Default::default();
+        let mut producer_counts: std::collections::BTreeMap<String, u64> = Default::default();
+        let mut offenders: Vec<Value> = Vec::new();
+        let mut contract_violation_rows = 0u64;
+        let mut laundering_rows = 0u64;
+
+        for ev in &events {
+            *verdict_counts.entry(ev.verdict_status.clone()).or_default() += 1;
+            *producer_counts
+                .entry(format!("{}/{}", ev.source, ev.action))
+                .or_default() += 1;
+
+            // Re-run the canonical structural validator (the same one Gate E uses).
+            let mut row_issues = crate::semantic_event::contract_violations(ev);
+            if !row_issues.is_empty() {
+                contract_violation_rows += 1;
+            }
+            // Green-laundering: a verified verdict must rest on concrete readback
+            // evidence. A verified row with empty/absent evidence is the exact
+            // failure the verify-first invariant forbids — flag it even though the
+            // structural validator does not require the evidence field.
+            let laundered = is_green_laundering(&ev.verdict_status, ev.evidence.as_deref());
+            if laundered {
+                laundering_rows += 1;
+                row_issues.push(
+                    "verified verdict has no readback evidence (green-laundering)".to_string(),
+                );
+            }
+            if !row_issues.is_empty() {
+                offenders.push(json!({
+                    "source": ev.source,
+                    "action": ev.action,
+                    "verdict": ev.verdict_status,
+                    "method": ev.verdict_method,
+                    "ts": ev.ts,
+                    "issues": row_issues,
+                }));
+            }
+        }
+
+        let clean = offenders.is_empty();
+        let mut out = json!({
+            "integrity": if clean { "ok" } else { "violations" },
+            "scanned": events.len(),
+            "window_secs": window_secs,
+            "contract_violation_rows": contract_violation_rows,
+            "laundering_rows": laundering_rows,
+            "offenders": offenders,
+        });
+        if !violations_only {
+            out["verdict_distribution"] = json!(verdict_counts);
+            out["producer_coverage"] = json!(producer_counts);
+        }
+        Ok(ToolResult::json_text(&out))
+    }
+}
+
 pub struct GosLiteSnapshotTool {
     hub: Hub,
 }
@@ -41228,6 +41379,15 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Niche,
         Arc::new(GosLiteSnapshotTool::new(hub.clone())),
     );
+    // SSB integrity monitor: release-build safety net re-running the unified
+    // contract validator + a green-laundering check over emitted events. Niche
+    // read-only diagnostic, reachable via AGENT_BRIDGE_TOOL_PROFILE=all.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(SemanticBusIntegrityTool::new(hub.clone())),
+    );
     reg_if(
         &mut reg,
         policy,
@@ -47418,6 +47578,40 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             .map(|s| s.name)
             .collect();
         assert!(!lean_names.iter().any(|n| n == "gos_lite_snapshot"));
+    }
+
+    #[test]
+    fn registry_exposes_semantic_bus_integrity_tool_in_all_profile() {
+        // Niche read-only diagnostic: reachable through `all`, absent from lean.
+        let all = ToolPolicy::from_values(None, None, None, Some("all"));
+        let all_names: Vec<String> = build_registry_with_policy(Hub::builder().build(), all)
+            .list()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        assert!(all_names.iter().any(|n| n == "semantic_bus_integrity"));
+
+        let lean = ToolPolicy::from_values(Some("codex-lean"), None, None, None);
+        let lean_names: Vec<String> = build_registry_with_policy(Hub::builder().build(), lean)
+            .list()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        assert!(!lean_names.iter().any(|n| n == "semantic_bus_integrity"));
+    }
+
+    #[test]
+    fn green_laundering_only_flags_verified_without_evidence() {
+        // The falsifier: a verified verdict with no/empty readback evidence is
+        // green-laundering and MUST be flagged.
+        assert!(is_green_laundering("verified", None));
+        assert!(is_green_laundering("verified", Some("")));
+        assert!(is_green_laundering("verified", Some("   ")));
+        // A verified verdict WITH evidence is honest — not flagged.
+        assert!(!is_green_laundering("verified", Some("{\"readback\":true}")));
+        // NotVerified / Unknown are never laundering regardless of evidence.
+        assert!(!is_green_laundering("not_verified", None));
+        assert!(!is_green_laundering("unknown", None));
     }
 
     #[test]
