@@ -473,18 +473,17 @@ pub(crate) fn push_curated(
     idx: usize,
     now: i64,
 ) {
+    // First 20 chars of the content for a human-readable key slug: alphanumerics
+    // kept (incl. CJK — `char::is_alphanumeric` is true for it), everything else
+    // → '_'. Char-based `take(20)` is the fix: the old `&slug[..20]` BYTE slice
+    // panicked when the slug kept multi-byte CJK (e.g. slicing inside '们'),
+    // which is hit in production via Pass-1 markers on Chinese transcripts.
     let slug: String = content
         .chars()
-        .take(40)
+        .take(20)
         .map(|c| if c.is_alphanumeric() { c } else { '_' })
         .collect();
-    let key = format!(
-        "curated_{}{}_{}{}",
-        kind,
-        sid_suffix,
-        idx,
-        &slug[..slug.len().min(20)]
-    );
+    let key = format!("curated_{}{}_{}{}", kind, sid_suffix, idx, slug);
     let mut tags = vec!["auto_curated".to_string()];
     if contains_unverified_identifier(content) {
         tags.push(UNVERIFIED_IDENTIFIER_TAG.to_string());
@@ -723,6 +722,24 @@ mod tests {
 
     fn thresh() -> f32 {
         DEFAULT_IMPLICIT_SCORE_THRESHOLD
+    }
+
+    #[test]
+    fn curate_does_not_panic_on_cjk_content() {
+        // Regression: make_record's key slug used a `&slug[..20]` BYTE slice that
+        // panicked when the content kept multi-byte CJK chars (is_alphanumeric is
+        // true for them), e.g. slicing inside '们'. Hit in production via Pass-1
+        // markers on Chinese transcripts (this user converses in 中文). The CJK
+        // body is >20 chars so it exercises the truncation boundary.
+        let text = "lesson: 我们来检查看板压缩完成之后的状态是否正确并记录以便复盘";
+        let out = curate_conversation(text, Some("sess"), 10);
+        assert!(!out.is_empty(), "explicit CJK lesson should extract");
+        assert!(
+            out[0].key.starts_with("curated_lesson"),
+            "key was {:?}",
+            out[0].key
+        );
+        // No panic reaching here is the core assertion; the key is valid UTF-8.
     }
 
     #[test]
