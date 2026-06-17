@@ -1529,13 +1529,40 @@
       margin: -1px 0 8px;
     }
     #panel .orphan-candidate-quality-card {
+      appearance: none;
       min-width: 0;
       padding: 7px 8px;
       background: #101018;
       border: 1px solid #1f1f2a;
       border-left: 2px solid #4a4a58;
       border-radius: 4px;
+      color: inherit;
+      cursor: pointer;
+      font-family: inherit;
+      text-align: left;
+      transition: background 120ms, border-color 120ms, color 120ms;
     }
+    #panel .orphan-candidate-quality-card:hover {
+      background: #151520;
+      border-color: #353545;
+    }
+    #panel .orphan-candidate-quality-card.active {
+      background: #17242a;
+      border-color: #5cc8c8;
+    }
+    #panel .orphan-candidate-quality-card:focus-visible {
+      outline: 2px solid #5cc8c8;
+      outline-offset: 2px;
+    }
+    #panel .orphan-candidate-quality-card:disabled {
+      cursor: default;
+      opacity: 0.54;
+    }
+    #panel .orphan-candidate-quality-card:disabled:hover {
+      background: #101018;
+      border-color: #1f1f2a;
+    }
+    #panel .orphan-candidate-quality-card.all { border-left-color: #8a8a9c; }
     #panel .orphan-candidate-quality-card.same_scope { border-left-color: #5cc89a; }
     #panel .orphan-candidate-quality-card.global_or_unscoped { border-left-color: #5cc8c8; }
     #panel .orphan-candidate-quality-card.cross_project { border-left-color: #c8a96a; }
@@ -1566,6 +1593,12 @@
       color: #6a6a78;
       font-size: 9px;
       letter-spacing: 0;
+    }
+    #panel .orphan-candidate-filter-status {
+      margin: -2px 0 8px;
+      color: #6a6a78;
+      font-size: 10px;
+      line-height: 1.35;
     }
     #panel .orphan-candidate-stat {
       min-width: 0;
@@ -3665,6 +3698,7 @@ const VALID_REGION_NODE_SORTS = new Set(["rank", "degree", "recent", "key"]);
 const VALID_NEIGHBOR_FILTERS = new Set(["all", "structural", "coactivation"]);
 const VALID_NEIGHBOR_SORTS = new Set(["weight", "type", "key"]);
 const VALID_CONTENT_READER_MODES = new Set(["scan", "full"]);
+const VALID_ORPHAN_CANDIDATE_LANES = new Set(["all", "same_scope", "global_or_unscoped", "cross_project", "low_score", "no_candidates"]);
 const state = {
   cy: null,
   data: null,
@@ -3684,6 +3718,7 @@ const state = {
   regionNodeFilter: "all",
   regionNodeSort: "rank",
   maintenancePreviewFilter: "all",
+  orphanCandidateLaneFilter: "all",
   neighborFilter: "all",
   neighborSort: "weight",
   relationDetailKey: null,
@@ -3712,6 +3747,7 @@ function serializeViewState() {
     regionNodeFilter: state.regionNodeFilter,
     regionNodeSort: state.regionNodeSort,
     maintenancePreviewFilter: state.maintenancePreviewFilter,
+    orphanCandidateLaneFilter: state.orphanCandidateLaneFilter,
     neighborFilter: state.neighborFilter,
     neighborSort: state.neighborSort,
     contentReaderMode: state.contentReaderMode,
@@ -3780,6 +3816,7 @@ function restoreViewStateFromUrlOrStorage() {
   if (VALID_REGION_NODE_FILTERS.has(restored.regionNodeFilter)) state.regionNodeFilter = restored.regionNodeFilter;
   if (VALID_REGION_NODE_FILTERS.has(restored.maintenancePreviewFilter)) state.maintenancePreviewFilter = restored.maintenancePreviewFilter;
   if (VALID_REGION_NODE_SORTS.has(restored.regionNodeSort)) state.regionNodeSort = restored.regionNodeSort;
+  if (VALID_ORPHAN_CANDIDATE_LANES.has(restored.orphanCandidateLaneFilter)) state.orphanCandidateLaneFilter = restored.orphanCandidateLaneFilter;
   if (VALID_NEIGHBOR_FILTERS.has(restored.neighborFilter)) state.neighborFilter = restored.neighborFilter;
   if (VALID_NEIGHBOR_SORTS.has(restored.neighborSort)) state.neighborSort = restored.neighborSort;
   if (VALID_CONTENT_READER_MODES.has(restored.contentReaderMode)) state.contentReaderMode = restored.contentReaderMode;
@@ -6138,6 +6175,7 @@ function orphanCandidateReviewLane(row) {
 function orphanCandidateQualityBuckets(result) {
   const rows = Array.isArray(result && result.rows) ? result.rows : [];
   const buckets = {
+    all: rows.length,
     same_scope: 0,
     global_or_unscoped: 0,
     cross_project: 0,
@@ -6151,6 +6189,27 @@ function orphanCandidateQualityBuckets(result) {
   return buckets;
 }
 
+function orphanCandidateLaneLabel(lane) {
+  const labels = {
+    all: "all lanes",
+    same_scope: "safe to review",
+    global_or_unscoped: "manual only",
+    cross_project: "defer by default",
+    low_score: "low score",
+    no_candidates: "no candidates",
+  };
+  return labels[lane] || labels.all;
+}
+
+function filteredOrphanCandidateRows(result) {
+  const rows = Array.isArray(result && result.rows) ? result.rows : [];
+  const filter = VALID_ORPHAN_CANDIDATE_LANES.has(state.orphanCandidateLaneFilter)
+    ? state.orphanCandidateLaneFilter
+    : "all";
+  if (filter === "all") return rows;
+  return rows.filter(row => orphanCandidateReviewLane(row) === filter);
+}
+
 function renderOrphanCandidateQualitySummary(result) {
   const buckets = orphanCandidateQualityBuckets(result || {});
   const rows = [
@@ -6160,13 +6219,36 @@ function renderOrphanCandidateQualitySummary(result) {
     ["low_score", "low score", "below threshold"],
     ["no_candidates", "no candidates", "no scoped target"],
   ];
-  return `<div class="orphan-candidate-quality-summary">` + rows.map(([lane, label, detail]) =>
-    `<div class="orphan-candidate-quality-card ${escapeHTML(lane)}">
+  const allActive = state.orphanCandidateLaneFilter === "all" ? " active" : "";
+  const allButton = `<button type="button"
+      class="orphan-candidate-quality-card all${allActive}"
+      data-orphan-candidate-lane-filter="all">
+      <span class="lane">all lanes</span>
+      <span class="count">${escapeHTML(String(buckets.all || 0))}</span>
+      <span class="detail">showing all review lanes</span>
+    </button>`;
+  return `<div class="orphan-candidate-quality-summary">${allButton}` + rows.map(([lane, label, detail]) =>
+    `<button type="button"
+      class="orphan-candidate-quality-card ${escapeHTML(lane)}${state.orphanCandidateLaneFilter === lane ? " active" : ""}"
+      data-orphan-candidate-lane-filter="${escapeHTML(lane)}"
+      ${lane !== "all" && !buckets[lane] ? "disabled" : ""}>
       <span class="lane">${escapeHTML(label)}</span>
       <span class="count">${escapeHTML(String(buckets[lane] || 0))}</span>
       <span class="detail">${escapeHTML(detail)}</span>
-    </div>`
+    </button>`
   ).join("") + `</div>`;
+}
+
+function renderOrphanCandidateFilterStatus(result) {
+  const allRows = Array.isArray(result && result.rows) ? result.rows : [];
+  const rows = filteredOrphanCandidateRows(result || {});
+  const filter = VALID_ORPHAN_CANDIDATE_LANES.has(state.orphanCandidateLaneFilter)
+    ? state.orphanCandidateLaneFilter
+    : "all";
+  if (filter === "all") {
+    return `<div class="orphan-candidate-filter-status">showing all review lanes</div>`;
+  }
+  return `<div class="orphan-candidate-filter-status">showing ${escapeHTML(String(rows.length))} of ${escapeHTML(String(allRows.length))} · ${escapeHTML(orphanCandidateLaneLabel(filter))}</div>`;
 }
 
 function compactCandidatePreview(text) {
@@ -6210,8 +6292,15 @@ function renderOrphanCandidateActions(row, candidate) {
 }
 
 function renderOrphanCandidateRows(result) {
-  const rows = Array.isArray(result.rows) ? result.rows : [];
+  const allRows = Array.isArray(result.rows) ? result.rows : [];
+  const rows = filteredOrphanCandidateRows(result);
+  const filter = VALID_ORPHAN_CANDIDATE_LANES.has(state.orphanCandidateLaneFilter)
+    ? state.orphanCandidateLaneFilter
+    : "all";
   if (rows.length === 0) {
+    if (allRows.length > 0 && filter !== "all") {
+      return `<div class="maintenance-empty">no ${escapeHTML(orphanCandidateLaneLabel(filter))} candidates in this region</div>`;
+    }
     return `<div class="maintenance-empty">no eligible orphan candidates under current guardrails</div>`;
   }
   return `<div class="orphan-candidate-rows">` + rows.slice(0, 6).map(row => {
@@ -6257,7 +6346,18 @@ function renderRegionOrphanCandidateResult(result) {
   ${renderOrphanCandidateStats(result || {})}
   ${renderOrphanCandidateDiagnostics(result || {})}
   ${renderOrphanCandidateQualitySummary(result || {})}
+  ${renderOrphanCandidateFilterStatus(result || {})}
   ${renderOrphanCandidateRows(result || {})}`;
+}
+
+function setOrphanCandidateLaneFilter(lane) {
+  if (!VALID_ORPHAN_CANDIDATE_LANES.has(lane)) lane = "all";
+  state.orphanCandidateLaneFilter = lane;
+  const slot = document.getElementById("region-orphan-candidates");
+  if (slot && slot._orphanCandidateResult) {
+    slot.innerHTML = renderRegionOrphanCandidateResult(slot._orphanCandidateResult);
+  }
+  saveViewState();
 }
 
 function renderOrphanApprovedPlanStats(plan) {
@@ -6357,9 +6457,11 @@ async function loadRegionOrphanCandidates(regionId) {
     if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
     const result = await r.json();
     if (!document.body.contains(slot) || slot.dataset.region !== regionId) return;
+    slot._orphanCandidateResult = result;
     slot.innerHTML = renderRegionOrphanCandidateResult(result);
   } catch (error) {
     if (!document.body.contains(slot) || slot.dataset.region !== regionId) return;
+    slot._orphanCandidateResult = null;
     slot.innerHTML = `${renderOrphanCandidateHead("candidate links", "unavailable", renderOrphanCandidatePlanButton(regionId))}
     <div class="maintenance-empty">${escapeHTML(String(error))}</div>`;
   }
@@ -6698,6 +6800,12 @@ function jumpToRegionNode(key) {
 }
 
 function handleOrphanRepairClick(e, regionId) {
+  const laneBtn = e.target.closest("[data-orphan-candidate-lane-filter]");
+  if (laneBtn) {
+    e.preventDefault();
+    setOrphanCandidateLaneFilter(laneBtn.dataset.orphanCandidateLaneFilter || "all");
+    return true;
+  }
   const planBtn = e.target.closest("[data-orphan-approved-plan]");
   if (planBtn) {
     e.preventDefault();

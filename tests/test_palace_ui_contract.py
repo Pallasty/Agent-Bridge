@@ -325,6 +325,20 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("defer by default", html)
         self.assertIn("renderOrphanCandidateQualitySummary(result || {})", html)
 
+    def test_orphan_candidate_quality_summary_filters_rows_by_lane(self):
+        html = palace_html()
+
+        self.assertIn("orphanCandidateLaneFilter: \"all\"", html)
+        self.assertIn("function filteredOrphanCandidateRows(result)", html)
+        self.assertIn("function setOrphanCandidateLaneFilter(lane)", html)
+        self.assertIn("data-orphan-candidate-lane-filter", html)
+        self.assertIn('state.orphanCandidateLaneFilter = lane;', html)
+        self.assertIn('state.orphanCandidateLaneFilter === lane ? " active" : ""', html)
+        self.assertIn('data-orphan-candidate-lane-filter="all"', html)
+        self.assertIn("filteredOrphanCandidateRows(result)", html)
+        self.assertIn("orphan-candidate-filter-status", html)
+        self.assertIn("showing all review lanes", html)
+
     def test_node_workbench_derives_region_for_deep_linked_orphans(self):
         html = palace_html()
 
