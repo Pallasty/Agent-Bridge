@@ -468,7 +468,6 @@ fn palace_orphan_approved_link_apply_record_for_time(
     })
 }
 
-#[cfg(test)]
 fn load_palace_orphan_approved_link_apply_records(path: &FsPath) -> std::io::Result<Vec<Value>> {
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
@@ -2057,7 +2056,26 @@ async fn api_self_review_packet(
     Query(q): Query<SelfReviewPacketQuery>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
     let graph = build_graph_snapshot(&s, q.all).await?;
-    Ok(Json(build_palace_self_review_packet(&graph)))
+    let decisions_path = default_palace_orphan_candidate_decisions_path();
+    let decisions = load_palace_orphan_candidate_decisions(&decisions_path).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("load orphan candidate review decisions: {e}"),
+        )
+    })?;
+    let apply_audit_path = default_palace_orphan_approved_link_apply_path();
+    let apply_records =
+        load_palace_orphan_approved_link_apply_records(&apply_audit_path).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("load orphan approved link apply audit: {e}"),
+            )
+        })?;
+    Ok(Json(build_palace_self_review_packet_with_history(
+        &graph,
+        &decisions,
+        &apply_records,
+    )))
 }
 
 fn vi64(v: &Value) -> Option<i64> {
@@ -2197,7 +2215,105 @@ fn palace_self_review_lane(
     })
 }
 
+#[cfg(test)]
 fn build_palace_self_review_packet(graph: &Value) -> Value {
+    build_palace_self_review_packet_with_history(graph, &[], &[])
+}
+
+fn build_palace_self_review_history(decisions: &[Value], apply_records: &[Value]) -> Value {
+    let mut approved_count = 0_i64;
+    let mut deferred_count = 0_i64;
+    let mut rejected_count = 0_i64;
+    let mut last_decision_at_unix = 0_i64;
+    let mut recent = Vec::new();
+
+    for decision in decisions {
+        let generated_at = vi64(decision.get("generated_at_unix").unwrap_or(&Value::Null))
+            .unwrap_or(0)
+            .max(0);
+        last_decision_at_unix = last_decision_at_unix.max(generated_at);
+        match decision
+            .get("decision")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+        {
+            "approve" => approved_count += 1,
+            "defer" => deferred_count += 1,
+            "reject" => rejected_count += 1,
+            _ => {}
+        }
+        recent.push(json!({
+            "kind": "decision",
+            "generated_at_unix": generated_at,
+            "decision": decision.get("decision").cloned().unwrap_or(Value::Null),
+            "pair_id": decision.get("pair_id").cloned().unwrap_or(Value::Null),
+            "reviewer": decision.get("reviewer").cloned().unwrap_or(Value::Null),
+        }));
+    }
+
+    let mut applied_count = 0_i64;
+    let mut failed_count = 0_i64;
+    let mut last_apply_at_unix = 0_i64;
+    for record in apply_records {
+        let generated_at = vi64(record.get("generated_at_unix").unwrap_or(&Value::Null))
+            .unwrap_or(0)
+            .max(0);
+        last_apply_at_unix = last_apply_at_unix.max(generated_at);
+        applied_count += vi64(record.get("applied_count").unwrap_or(&Value::Null))
+            .unwrap_or(0)
+            .max(0);
+        failed_count += vi64(record.get("failed_count").unwrap_or(&Value::Null))
+            .unwrap_or(0)
+            .max(0);
+        recent.push(json!({
+            "kind": "apply",
+            "generated_at_unix": generated_at,
+            "status": record.get("status").cloned().unwrap_or(Value::Null),
+            "applied_count": record.get("applied_count").cloned().unwrap_or(json!(0)),
+            "failed_count": record.get("failed_count").cloned().unwrap_or(json!(0)),
+            "dry_run": record.get("dry_run").cloned().unwrap_or(json!(true)),
+            "blocked": record.get("blocked").cloned().unwrap_or(json!(true)),
+            "actor": record.get("actor").cloned().unwrap_or(Value::Null),
+        }));
+    }
+
+    recent.sort_by(|a, b| {
+        let at = vi64(a.get("generated_at_unix").unwrap_or(&Value::Null)).unwrap_or(0);
+        let bt = vi64(b.get("generated_at_unix").unwrap_or(&Value::Null)).unwrap_or(0);
+        bt.cmp(&at).then_with(|| {
+            let ak = a.get("kind").and_then(Value::as_str).unwrap_or("");
+            let bk = b.get("kind").and_then(Value::as_str).unwrap_or("");
+            ak.cmp(bk)
+        })
+    });
+    recent.truncate(6);
+
+    json!({
+        "schema": "agent_bridge.palace.self_review_history.v0",
+        "read_only": true,
+        "writes_memory": false,
+        "writes_edges": false,
+        "auto_apply_allowed": false,
+        "decision_count": decisions.len(),
+        "approved_count": approved_count,
+        "deferred_count": deferred_count,
+        "rejected_count": rejected_count,
+        "apply_audit_count": apply_records.len(),
+        "applied_count": applied_count,
+        "failed_count": failed_count,
+        "last_decision_at_unix": last_decision_at_unix,
+        "last_apply_at_unix": last_apply_at_unix,
+        "recent_limit": 6,
+        "recent": recent,
+    })
+}
+
+fn build_palace_self_review_packet_with_history(
+    graph: &Value,
+    decisions: &[Value],
+    apply_records: &[Value],
+) -> Value {
+    let history = build_palace_self_review_history(decisions, apply_records);
     let now_secs = vi64(graph.get("now").unwrap_or(&Value::Null)).unwrap_or(0);
     let stats = palace_graph_stats(graph);
     let orphan_nodes = vi64(stats.get("orphan_nodes").unwrap_or(&Value::Null)).unwrap_or(0);
@@ -2309,6 +2425,7 @@ fn build_palace_self_review_packet(graph: &Value) -> Value {
         "primary_lane": primary_lane.clone(),
         "health_score": health_score,
         "graph": stats.clone(),
+        "history": history.clone(),
         "lanes": lanes,
         "recommendations": recommendations,
         "guardrails": {
@@ -2319,10 +2436,15 @@ fn build_palace_self_review_packet(graph: &Value) -> Value {
         "provenance": {
             "endpoint": "/api/self-review-packet",
             "graph_endpoint": "/api/graph",
+            "history_sources": [
+                "palace_orphan_candidate_decisions",
+                "palace_orphan_approved_link_apply_audit"
+            ],
             "hash": semantic_hash(&json!({
                 "stats": stats.clone(),
                 "readiness": readiness,
                 "primary_lane": primary_lane.clone(),
+                "history": history.clone(),
             }))
         },
         "presentation": {
@@ -2330,7 +2452,8 @@ fn build_palace_self_review_packet(graph: &Value) -> Value {
             "machine_payload": {
                 "readiness": readiness,
                 "primary_lane": primary_lane.clone(),
-                "health_score": health_score
+                "health_score": health_score,
+                "history": history.clone()
             },
             "ingestion": {
                 "suggested_kind": "observation",
@@ -4945,6 +5068,121 @@ mod tests {
         assert_eq!(packet["lanes"][3]["count"], json!(1));
         assert_eq!(packet["graph"]["orphan_nodes"], json!(1));
         assert_eq!(packet["provenance"]["graph_endpoint"], json!("/api/graph"));
+    }
+
+    #[test]
+    fn self_review_packet_includes_read_only_history_from_review_audits() {
+        let graph = json!({
+            "now": 700000,
+            "nodes": [
+                { "id": "memory_orphan", "kind": "lesson", "source": "sqlite", "last_accessed": 600000, "tags": [] },
+                { "id": "memory_anchor", "kind": "lesson", "source": "sqlite", "last_accessed": 600000, "tags": [] }
+            ],
+            "edges": [],
+            "stats": {}
+        });
+        let pairs = [
+            PalaceOrphanCandidatePair {
+                orphan_key: "memory_orphan_a".to_string(),
+                candidate_key: "memory_anchor_a".to_string(),
+            },
+            PalaceOrphanCandidatePair {
+                orphan_key: "memory_orphan_b".to_string(),
+                candidate_key: "memory_anchor_b".to_string(),
+            },
+            PalaceOrphanCandidatePair {
+                orphan_key: "memory_orphan_c".to_string(),
+                candidate_key: "memory_anchor_c".to_string(),
+            },
+        ];
+        let decisions = vec![
+            palace_orphan_candidate_decision_record_for_time(
+                &pairs[0],
+                "approve",
+                Some("codex"),
+                Some("explicit evidence"),
+                10,
+            )
+            .expect("approve record"),
+            palace_orphan_candidate_decision_record_for_time(
+                &pairs[1],
+                "defer",
+                Some("codex"),
+                Some("needs review"),
+                20,
+            )
+            .expect("defer record"),
+            palace_orphan_candidate_decision_record_for_time(
+                &pairs[2],
+                "reject",
+                Some("codex"),
+                Some("wrong relation"),
+                30,
+            )
+            .expect("reject record"),
+        ];
+        let apply_records = vec![
+            palace_orphan_approved_link_apply_record_for_time(
+                &json!({
+                    "schema": "agent_bridge.palace.orphan_approved_link_apply.v0",
+                    "status": "applied",
+                    "blocked": false,
+                    "dry_run": false,
+                    "applied_count": 2,
+                    "failed_count": 0,
+                    "writes_memory": false,
+                    "writes_edges": true
+                }),
+                Some("codex"),
+                40,
+            ),
+            palace_orphan_approved_link_apply_record_for_time(
+                &json!({
+                    "schema": "agent_bridge.palace.orphan_approved_link_apply.v0",
+                    "status": "blocked",
+                    "blocked": true,
+                    "dry_run": true,
+                    "applied_count": 0,
+                    "failed_count": 1,
+                    "writes_memory": false,
+                    "writes_edges": false
+                }),
+                Some("codex"),
+                50,
+            ),
+        ];
+
+        let packet =
+            build_palace_self_review_packet_with_history(&graph, &decisions, &apply_records);
+
+        assert_eq!(
+            packet["history"]["schema"],
+            json!("agent_bridge.palace.self_review_history.v0")
+        );
+        assert_eq!(packet["history"]["read_only"], json!(true));
+        assert_eq!(packet["history"]["writes_memory"], json!(false));
+        assert_eq!(packet["history"]["writes_edges"], json!(false));
+        assert_eq!(packet["history"]["decision_count"], json!(3));
+        assert_eq!(packet["history"]["approved_count"], json!(1));
+        assert_eq!(packet["history"]["deferred_count"], json!(1));
+        assert_eq!(packet["history"]["rejected_count"], json!(1));
+        assert_eq!(packet["history"]["apply_audit_count"], json!(2));
+        assert_eq!(packet["history"]["applied_count"], json!(2));
+        assert_eq!(packet["history"]["failed_count"], json!(1));
+        assert_eq!(packet["history"]["last_decision_at_unix"], json!(30));
+        assert_eq!(packet["history"]["last_apply_at_unix"], json!(50));
+        assert_eq!(packet["history"]["recent"][0]["kind"], json!("apply"));
+        assert_eq!(
+            packet["presentation"]["machine_payload"]["history"]["decision_count"],
+            json!(3)
+        );
+        assert_eq!(
+            packet["provenance"]["history_sources"],
+            json!([
+                "palace_orphan_candidate_decisions",
+                "palace_orphan_approved_link_apply_audit"
+            ])
+        );
     }
 
     #[test]

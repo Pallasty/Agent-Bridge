@@ -469,6 +469,16 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("backend packet", html)
         self.assertIn("local fallback", html)
 
+    def test_atlas_self_review_board_surfaces_history_pulse(self):
+        html = palace_html()
+
+        self.assertIn("self-review-history", html)
+        self.assertIn("history pulse", html)
+        self.assertIn("function renderSelfReviewHistoryPulse(board)", html)
+        self.assertIn("board.history", html)
+        self.assertIn("decision_count", html)
+        self.assertIn("apply_audit_count", html)
+
     def test_approved_plan_surfaces_human_confirmed_write_gate(self):
         html = palace_html()
 

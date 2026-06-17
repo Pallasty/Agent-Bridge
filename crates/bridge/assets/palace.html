@@ -592,7 +592,8 @@
     }
     #atlas-panel .self-review-title,
     #atlas-panel .self-review-state,
-    #atlas-panel .self-review-source {
+    #atlas-panel .self-review-source,
+    #atlas-panel .self-review-history {
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -608,6 +609,22 @@
     #atlas-panel .self-review-source {
       color: #5a5a68;
       font-size: 8px;
+    }
+    #atlas-panel .self-review-history {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin: 5px 0 7px;
+      color: #6f6f7d;
+      font-size: 8px;
+      letter-spacing: 0.08em;
+    }
+    #atlas-panel .self-review-history .history-label {
+      color: #8a8a9c;
+    }
+    #atlas-panel .self-review-history .history-stat {
+      color: #5cc8c8;
+      font-variant-numeric: tabular-nums;
     }
     #atlas-panel .self-review-lanes {
       display: grid;
@@ -3580,6 +3597,20 @@ function computeFallbackSelfReviewBoard(data) {
     sourceLabel: "local fallback",
     readiness,
     avgHealth,
+    history: {
+      schema: "agent_bridge.palace.self_review_history.local_fallback.v0",
+      read_only: true,
+      writes_memory: false,
+      writes_edges: false,
+      decision_count: 0,
+      approved_count: 0,
+      deferred_count: 0,
+      rejected_count: 0,
+      apply_audit_count: 0,
+      applied_count: 0,
+      failed_count: 0,
+      recent: [],
+    },
     lanes: [
       {
         id: "formation",
@@ -3624,6 +3655,9 @@ function normalizeSelfReviewPacket(packet, data) {
     Array.isArray(packet.lanes));
   const source = isBackendPacket ? packet : fallback;
   const lanes = Array.isArray(source.lanes) ? source.lanes : fallback.lanes;
+  const history = source.history && typeof source.history === "object"
+    ? source.history
+    : fallback.history;
   return {
     schema: source.schema || fallback.schema,
     sourceLabel: isBackendPacket ? "backend packet" : "local fallback",
@@ -3634,6 +3668,7 @@ function normalizeSelfReviewPacket(packet, data) {
         ? source.avgHealth
         : fallback.avgHealth,
     primaryLane: source.primary_lane || fallback.primaryLane || null,
+    history,
     lanes: lanes.map((lane, idx) => ({
       id: lane.id || fallback.lanes[idx]?.id || "lane",
       action: lane.action || fallback.lanes[idx]?.action || "overview",
@@ -3644,6 +3679,27 @@ function normalizeSelfReviewPacket(packet, data) {
       nextStep: lane.next_step || "",
     })),
   };
+}
+
+function renderSelfReviewHistoryPulse(board) {
+  const history = board.history || {};
+  const decisionCount = Number.isFinite(history.decision_count) ? history.decision_count : 0;
+  const applyAuditCount = Number.isFinite(history.apply_audit_count) ? history.apply_audit_count : 0;
+  const appliedCount = Number.isFinite(history.applied_count) ? history.applied_count : 0;
+  const failedCount = Number.isFinite(history.failed_count) ? history.failed_count : 0;
+  const title = [
+    `decision_count:${decisionCount}`,
+    `apply_audit_count:${applyAuditCount}`,
+    `applied_count:${appliedCount}`,
+    failedCount > 0 ? `failed_count:${failedCount}` : "",
+  ].filter(Boolean).join(" · ");
+  return `<div class="self-review-history" title="${escapeHTML(title)}">
+    <span class="history-label">history pulse</span>
+    <span class="history-stat">d${escapeHTML(String(decisionCount))}</span>
+    <span class="history-stat">apply${escapeHTML(String(applyAuditCount))}</span>
+    <span class="history-stat">ok${escapeHTML(String(appliedCount))}</span>
+    ${failedCount > 0 ? `<span class="history-stat">fail${escapeHTML(String(failedCount))}</span>` : ""}
+  </div>`;
 }
 
 async function loadSelfReviewPacket(data) {
@@ -3667,6 +3723,7 @@ function renderSelfReviewBoard(packet, data) {
     packet = null;
   }
   const board = normalizeSelfReviewPacket(packet, data || {});
+  const historyPulse = renderSelfReviewHistoryPulse(board);
   const lanes = board.lanes.map(lane => {
     const tone = ["good", "watch", "fragile", "quiet"].includes(lane.tone) ? lane.tone : "quiet";
     const title = [lane.id, lane.detail, lane.risk && lane.risk !== "none" ? `risk:${lane.risk}` : ""]
@@ -3686,6 +3743,7 @@ function renderSelfReviewBoard(packet, data) {
     <span class="self-review-state">release board · ${escapeHTML(board.readiness)} · H${escapeHTML(String(board.avgHealth))}</span>
   </div>
   <div class="self-review-source">${escapeHTML(board.sourceLabel)}</div>
+  ${historyPulse}
   <div class="self-review-lanes">${lanes}</div>`;
 }
 
