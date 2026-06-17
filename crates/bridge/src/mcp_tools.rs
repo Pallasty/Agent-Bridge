@@ -23619,6 +23619,22 @@ impl McpTool for McpDispatchAuditTool {
             Ok(rows) => rows.iter().map(dispatch_stat_json).collect::<Vec<_>>(),
             Err(e) => return Ok(ToolResult::error(format!("store: {e}"))),
         };
+        let external_batch_context: HashMap<String, ab_store::McpToolCallStats> =
+            if dispatch_filter_is_empty(&filter) {
+                match store
+                    .mcp_tool_call_stats_filtered(
+                        window_secs,
+                        stats_limit,
+                        dispatch_source_only_filter("other"),
+                    )
+                    .await
+                {
+                    Ok(rows) => rows.into_iter().map(|s| (s.tool_name.clone(), s)).collect(),
+                    Err(e) => return Ok(ToolResult::error(format!("store: {e}"))),
+                }
+            } else {
+                HashMap::new()
+            };
 
         let total_calls: u64 = stats.iter().map(|s| s.call_count).sum();
         let total_errors: u64 = stats.iter().map(|s| s.error_count).sum();
@@ -23655,7 +23671,11 @@ impl McpTool for McpDispatchAuditTool {
         let optimization_candidates: Vec<Value> = stats
             .iter()
             .filter_map(|s| {
-                let reasons = dispatch_optimization_reasons(s, &error_diagnostics);
+                let reasons = dispatch_optimization_reasons_with_source_context(
+                    s,
+                    &error_diagnostics,
+                    &external_batch_context,
+                );
                 if reasons.is_empty() {
                     None
                 } else {
@@ -23701,8 +23721,12 @@ impl McpTool for McpDispatchAuditTool {
             )
         };
 
-        let profile_suggestions =
-            dispatch_profile_suggestions(&stats, &cold_tools, &error_diagnostics);
+        let profile_suggestions = dispatch_profile_suggestions_with_source_context(
+            &stats,
+            &cold_tools,
+            &error_diagnostics,
+            &external_batch_context,
+        );
 
         Ok(ToolResult::json_text(&json!({
             "profile": policy.profile().label(),
@@ -24960,9 +24984,18 @@ fn dispatch_error_rate(errors: u64, calls: u64) -> f64 {
     }
 }
 
+#[cfg(test)]
 fn dispatch_optimization_reasons(
     s: &ab_store::McpToolCallStats,
     diagnostics: &HashMap<String, Vec<ToolErrorDiagnosticClass>>,
+) -> Vec<&'static str> {
+    dispatch_optimization_reasons_with_source_context(s, diagnostics, &HashMap::new())
+}
+
+fn dispatch_optimization_reasons_with_source_context(
+    s: &ab_store::McpToolCallStats,
+    diagnostics: &HashMap<String, Vec<ToolErrorDiagnosticClass>>,
+    external_batch_context: &HashMap<String, ab_store::McpToolCallStats>,
 ) -> Vec<&'static str> {
     if dispatch_expected_hook_lifecycle_latency(s) {
         return Vec::new();
@@ -24978,7 +25011,9 @@ fn dispatch_optimization_reasons(
     }
     if s.call_count >= 3 && s.p95_duration_ms >= 1_000 {
         reasons.push("slow_p95");
-        if dispatch_external_batch_load(s) {
+        if dispatch_external_batch_load(s)
+            || dispatch_aggregate_external_batch_load(s, external_batch_context)
+        {
             reasons.push("external_batch_load");
             if has_actionable_errors {
                 reasons.push("external_batch_failure");
@@ -25006,6 +25041,20 @@ fn dispatch_expected_detail_payload_tool(tool_name: &str) -> bool {
 
 fn dispatch_external_batch_load(s: &ab_store::McpToolCallStats) -> bool {
     s.call_count >= 50 && s.p95_duration_ms >= 1_000 && s.source.as_deref() == Some("other")
+}
+
+fn dispatch_aggregate_external_batch_load(
+    s: &ab_store::McpToolCallStats,
+    external_batch_context: &HashMap<String, ab_store::McpToolCallStats>,
+) -> bool {
+    if s.source.is_some() || s.call_count == 0 {
+        return false;
+    }
+    let Some(source_stat) = external_batch_context.get(&s.tool_name) else {
+        return false;
+    };
+    dispatch_external_batch_load(source_stat)
+        && source_stat.call_count.saturating_mul(2) >= s.call_count
 }
 
 fn dispatch_expected_hook_lifecycle_latency(s: &ab_store::McpToolCallStats) -> bool {
@@ -25044,10 +25093,25 @@ fn dispatch_cold_tool_suggestion(tool_name: &str) -> &'static str {
     }
 }
 
+#[cfg(test)]
 fn dispatch_profile_suggestions(
     stats: &[ab_store::McpToolCallStats],
     cold_tools: &[Value],
     diagnostics: &HashMap<String, Vec<ToolErrorDiagnosticClass>>,
+) -> Vec<String> {
+    dispatch_profile_suggestions_with_source_context(
+        stats,
+        cold_tools,
+        diagnostics,
+        &HashMap::new(),
+    )
+}
+
+fn dispatch_profile_suggestions_with_source_context(
+    stats: &[ab_store::McpToolCallStats],
+    cold_tools: &[Value],
+    diagnostics: &HashMap<String, Vec<ToolErrorDiagnosticClass>>,
+    external_batch_context: &HashMap<String, ab_store::McpToolCallStats>,
 ) -> Vec<String> {
     let mut suggestions = Vec::new();
     if stats.is_empty() {
@@ -25097,10 +25161,10 @@ fn dispatch_profile_suggestions(
         ));
     }
 
-    if stats
-        .iter()
-        .any(|s| !dispatch_optimization_reasons(s, diagnostics).is_empty())
-    {
+    if stats.iter().any(|s| {
+        !dispatch_optimization_reasons_with_source_context(s, diagnostics, external_batch_context)
+            .is_empty()
+    }) {
         suggestions.push(
             "At least one observed tool has errors, slow p95 latency, or large results; inspect optimization_candidates before changing profile exposure."
                 .to_string(),
@@ -51851,6 +51915,91 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
 
         assert!(reasons.contains(&"slow_p95"));
         assert!(reasons.contains(&"external_batch_load"));
+    }
+
+    #[test]
+    fn dispatch_audit_carries_external_batch_context_into_aggregate_rows() {
+        let aggregate = ab_store::McpToolCallStats {
+            tool_name: "memory_search".to_string(),
+            call_count: 123,
+            error_count: 0,
+            avg_duration_ms: 4_048.6,
+            p95_duration_ms: 4_412,
+            max_duration_ms: 4_761,
+            avg_result_size: 13_749.9,
+            client_name: None,
+            profile: None,
+            source: None,
+            model: None,
+            model_reasoning_effort: None,
+            codex_host: None,
+        };
+        let source_other = ab_store::McpToolCallStats {
+            tool_name: "memory_search".to_string(),
+            call_count: 120,
+            error_count: 0,
+            avg_duration_ms: 4_148.5,
+            p95_duration_ms: 4_412,
+            max_duration_ms: 4_761,
+            avg_result_size: 13_972.0,
+            client_name: None,
+            profile: None,
+            source: Some("other".to_string()),
+            model: None,
+            model_reasoning_effort: None,
+            codex_host: None,
+        };
+        let source_context = HashMap::from([(source_other.tool_name.clone(), source_other)]);
+
+        let reasons = dispatch_optimization_reasons_with_source_context(
+            &aggregate,
+            &HashMap::new(),
+            &source_context,
+        );
+
+        assert!(reasons.contains(&"slow_p95"));
+        assert!(reasons.contains(&"external_batch_load"));
+
+        let aggregate_failure = ab_store::McpToolCallStats {
+            tool_name: "shell_exec".to_string(),
+            call_count: 89,
+            error_count: 41,
+            avg_duration_ms: 1_101.0,
+            p95_duration_ms: 2_040,
+            max_duration_ms: 2_042,
+            avg_result_size: 233.0,
+            client_name: None,
+            profile: None,
+            source: None,
+            model: None,
+            model_reasoning_effort: None,
+            codex_host: None,
+        };
+        let source_other_failure = ab_store::McpToolCallStats {
+            tool_name: "shell_exec".to_string(),
+            call_count: 89,
+            error_count: 41,
+            avg_duration_ms: 1_101.0,
+            p95_duration_ms: 2_040,
+            max_duration_ms: 2_042,
+            avg_result_size: 233.0,
+            client_name: None,
+            profile: None,
+            source: Some("other".to_string()),
+            model: None,
+            model_reasoning_effort: None,
+            codex_host: None,
+        };
+        let source_context =
+            HashMap::from([(source_other_failure.tool_name.clone(), source_other_failure)]);
+        let reasons = dispatch_optimization_reasons_with_source_context(
+            &aggregate_failure,
+            &HashMap::new(),
+            &source_context,
+        );
+
+        assert!(reasons.contains(&"external_batch_load"));
+        assert!(reasons.contains(&"external_batch_failure"));
     }
 
     #[test]
