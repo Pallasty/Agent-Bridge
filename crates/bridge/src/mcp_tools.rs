@@ -25011,7 +25011,7 @@ fn dispatch_external_batch_load(s: &ab_store::McpToolCallStats) -> bool {
 fn dispatch_expected_hook_lifecycle_latency(s: &ab_store::McpToolCallStats) -> bool {
     s.error_count == 0
         && s.p95_duration_ms >= 1_000
-        && s.source.as_deref() == Some("hook")
+        && matches!(s.source.as_deref(), Some("hook") | None)
         && hook_lifecycle_tool(&s.tool_name)
 }
 
@@ -51878,6 +51878,28 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(!suggestions
             .iter()
             .any(|s| s.contains("inspect optimization_candidates")));
+    }
+
+    #[test]
+    fn dispatch_audit_treats_aggregate_hook_lifecycle_latency_as_expected() {
+        let s = ab_store::McpToolCallStats {
+            tool_name: "session_lifecycle_step".to_string(),
+            call_count: 12,
+            error_count: 0,
+            avg_duration_ms: 1_532.25,
+            p95_duration_ms: 2_448,
+            max_duration_ms: 2_448,
+            avg_result_size: 1_821.3,
+            client_name: None,
+            profile: None,
+            source: None,
+            model: None,
+            model_reasoning_effort: None,
+            codex_host: None,
+        };
+
+        let reasons = dispatch_optimization_reasons(&s, &HashMap::new());
+        assert!(reasons.is_empty());
     }
 
     #[test]
