@@ -1790,6 +1790,51 @@
       font-size: 10px;
       line-height: 1.35;
     }
+    #panel .self-review-focused-pair-context {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      margin: -2px 0 8px;
+      padding: 7px 8px;
+      background: #101820;
+      border: 1px solid #26464c;
+      border-left: 2px solid #5cc8c8;
+      border-radius: 4px;
+      color: #c8d8dc;
+      font-size: 10px;
+      line-height: 1.35;
+    }
+    #panel .self-review-focused-pair-context .focus-label {
+      color: #5cc8c8;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    #panel .self-review-focused-pair-context .focus-pair {
+      display: block;
+      margin-top: 2px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      color: #e8e8ee;
+    }
+    #panel .self-review-focused-pair-context button {
+      background: transparent;
+      border: 1px solid #31565e;
+      color: #9fcfd4;
+      border-radius: 3px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 9px;
+      letter-spacing: 0.08em;
+      padding: 4px 7px;
+      text-transform: uppercase;
+    }
+    #panel .self-review-focused-pair-context button:hover {
+      border-color: #5cc8c8;
+      color: #e8ffff;
+    }
     #panel .orphan-candidate-stat {
       min-width: 0;
       padding: 6px 7px;
@@ -3892,6 +3937,15 @@ function scrollFocusedOrphanCandidatePairIntoView() {
   const rows = Array.from(document.querySelectorAll("[data-orphan-candidate-pair-id]"));
   const focused = rows.find(row => row.dataset.orphanCandidatePairId === state.selfReviewFocusedPairId);
   if (focused) focused.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
+function clearSelfReviewFocusedPair() {
+  state.selfReviewFocusedPairId = null;
+  const slot = document.getElementById("region-orphan-candidates");
+  if (slot && slot._orphanCandidateResult) {
+    slot.innerHTML = renderRegionOrphanCandidateResult(slot._orphanCandidateResult);
+  }
+  saveViewState();
 }
 
 async function loadSelfReviewPacket(data) {
@@ -6765,6 +6819,17 @@ function renderOrphanCandidateFilterStatus(result) {
   return `<div class="orphan-candidate-filter-status">showing ${escapeHTML(String(rows.length))} of ${escapeHTML(String(allRows.length))} · ${escapeHTML(orphanCandidateLaneLabel(filter))}</div>`;
 }
 
+function renderSelfReviewFocusedPairContext() {
+  if (!state.selfReviewFocusedPairId) return "";
+  return `<div class="self-review-focused-pair-context" title="focused from history · read-only">
+    <span>
+      <span class="focus-label">focused from history</span>
+      <span class="focus-pair">${escapeHTML(state.selfReviewFocusedPairId)}</span>
+    </span>
+    <button type="button" data-self-review-clear-focused-pair="1">clear</button>
+  </div>`;
+}
+
 function compactCandidatePreview(text) {
   return String(text || "")
     .replace(/\s+/g, " ")
@@ -6864,6 +6929,7 @@ function renderRegionOrphanCandidateResult(result) {
   ${renderOrphanCandidateDiagnostics(result || {})}
   ${renderOrphanCandidateQualitySummary(result || {})}
   ${renderOrphanCandidateFilterStatus(result || {})}
+  ${renderSelfReviewFocusedPairContext()}
   ${renderOrphanCandidateRows(result || {})}`;
 }
 
@@ -7319,6 +7385,12 @@ function jumpToRegionNode(key) {
 }
 
 function handleOrphanRepairClick(e, regionId) {
+  const clearFocusBtn = e.target.closest("[data-self-review-clear-focused-pair]");
+  if (clearFocusBtn) {
+    e.preventDefault();
+    clearSelfReviewFocusedPair();
+    return true;
+  }
   const laneBtn = e.target.closest("[data-orphan-candidate-lane-filter]");
   if (laneBtn) {
     e.preventDefault();

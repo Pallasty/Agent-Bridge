@@ -505,6 +505,17 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("state.selfReviewFocusedPairId === pairId", html)
         self.assertIn("scrollIntoView", html)
 
+    def test_atlas_self_review_focus_context_can_be_cleared(self):
+        html = palace_html()
+
+        self.assertIn("function renderSelfReviewFocusedPairContext()", html)
+        self.assertIn("self-review-focused-pair-context", html)
+        self.assertIn("focused from history", html)
+        self.assertIn("data-self-review-clear-focused-pair", html)
+        self.assertIn("function clearSelfReviewFocusedPair()", html)
+        self.assertIn("state.selfReviewFocusedPairId = null;", html)
+        self.assertIn("renderSelfReviewFocusedPairContext()", html)
+
     def test_approved_plan_surfaces_human_confirmed_write_gate(self):
         html = palace_html()
 
