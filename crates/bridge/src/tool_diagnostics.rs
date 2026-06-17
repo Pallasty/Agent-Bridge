@@ -55,6 +55,10 @@ fn is_expected_input_validation(tool_name: &str, message: &str) -> bool {
             "missing or empty 'key'" | "missing or empty 'kind'"
         ),
         "work_memory" => message == "get requires key",
+        "changes_digest" => {
+            message
+                == "invalid argument: unknown scope 'working'; expected working_tree|staged|last_commit|branch_vs_main"
+        }
         _ => false,
     }
 }
@@ -65,4 +69,27 @@ fn is_expected_runtime_unavailable(tool_name: &str, message: &str) -> bool {
             || message.contains("adb not on PATH")
             || message.contains("No Android devices")
             || message.contains("no Android devices"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn classifies_changes_digest_working_alias_tail_as_expected_validation() {
+        assert_eq!(
+            classify_tool_error(
+                "changes_digest",
+                "invalid argument: unknown scope 'working'; expected working_tree|staged|last_commit|branch_vs_main",
+            ),
+            ToolErrorDiagnosticClass::ExpectedInputValidation
+        );
+        assert_eq!(
+            classify_tool_error(
+                "changes_digest",
+                "invalid argument: unknown scope 'banana'; expected working_tree|staged|last_commit|branch_vs_main",
+            ),
+            ToolErrorDiagnosticClass::UnclassifiedError
+        );
+    }
 }
