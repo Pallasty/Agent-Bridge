@@ -493,6 +493,88 @@ pub fn parse_summary_response(text: &str) -> std::result::Result<ClusterSummary,
     })
 }
 
+/// Reject a summary only when it sits dramatically further from the member
+/// centroid than the loosest member itself. `0.5` ⇒ the summary may be up to
+/// ~2× as far as the worst member before rejection — conservative on purpose so
+/// that off-topic/hallucinated summaries are caught with near-zero false
+/// rejects on faithful ones. Tunable later by autotune-v0 (G4).
+const FAITHFULNESS_SAFETY_FRACTION: f32 = 0.5;
+
+/// Verdict of the G3 faithfulness check (see [`faithfulness_verdict`]).
+struct FaithfulnessVerdict {
+    /// cosine(summary, member-centroid); meaningful only when `evaluated`.
+    score: f32,
+    /// self-calibrated accept floor (min member→centroid cosine × safety frac).
+    floor: f32,
+    /// the summary is faithful enough to keep.
+    accept: bool,
+    /// the check actually ran (false ⇒ degenerate input, fail-open accept).
+    evaluated: bool,
+}
+
+/// **G3 — self-calibrating faithfulness check** in embedding space. A faithful
+/// consolidation summary should sit inside the semantic neighbourhood of the
+/// members it claims to summarize. The accept floor is derived from the
+/// cluster's OWN cohesion (the loosest member's cosine to the centroid, scaled
+/// by [`FAITHFULNESS_SAFETY_FRACTION`]), NOT a hand-set absolute threshold — so
+/// it is robust to whichever embedding backend is active (ONNX vs hash) and
+/// needs no calibration sign-off. Fail-OPEN on degenerate input (can't
+/// calibrate ⇒ never block a write): empty summary vector, fewer than two
+/// usable members, ragged dims, or a non-finite floor all accept. Pure ⇒
+/// unit-testable without an embedder; the impure embed calls live in the caller.
+fn faithfulness_verdict(summary: &[f32], members: &[Vec<f32>]) -> FaithfulnessVerdict {
+    let pass = FaithfulnessVerdict {
+        score: 0.0,
+        floor: 0.0,
+        accept: true,
+        evaluated: false,
+    };
+    if summary.is_empty() {
+        return pass;
+    }
+    // Fail-open on a degenerate (zero-norm) summary vector too — not just a
+    // truly-empty one. `cosine_similarity` returns 0.0 for a zero vector, which
+    // would otherwise read as "maximally off-topic" and REJECT a faithful
+    // summary whose body merely happens to embed to zero (e.g. the hash backend
+    // on punctuation-only text, or an unavailable backend returning zeros).
+    // Mirrors the empty-vector guard above so the fail-open contract holds for
+    // every degenerate input, not only the empty-slice case.
+    let summary_norm: f32 = summary.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if summary_norm == 0.0 {
+        return pass;
+    }
+    let dim = summary.len();
+    let usable: Vec<&Vec<f32>> = members.iter().filter(|m| m.len() == dim).collect();
+    if usable.len() < 2 {
+        return pass;
+    }
+    let mut centroid = vec![0.0f32; dim];
+    for m in &usable {
+        for (c, x) in centroid.iter_mut().zip(m.iter()) {
+            *c += *x;
+        }
+    }
+    let n = usable.len() as f32;
+    for c in centroid.iter_mut() {
+        *c /= n;
+    }
+    let member_floor = usable
+        .iter()
+        .map(|m| ab_store::cosine_similarity(m, &centroid))
+        .fold(f32::INFINITY, f32::min);
+    if !member_floor.is_finite() {
+        return pass;
+    }
+    let floor = member_floor * FAITHFULNESS_SAFETY_FRACTION;
+    let score = ab_store::cosine_similarity(summary, &centroid);
+    FaithfulnessVerdict {
+        score,
+        floor,
+        accept: score >= floor,
+        evaluated: true,
+    }
+}
+
 /// **G1 — build the superseded backup record** that preserves a prior summary
 /// before an in-place canonical-key overwrite. Pure (no store) so it is unit
 /// testable. The canonical key is deterministic (same cluster → same key), so a
@@ -564,6 +646,29 @@ async fn apply_summary(
         && !summary_tags.iter().any(|t| t.starts_with("llm_topic:"))
     {
         summary_tags.push(format!("llm_topic:{}", summary.key));
+    }
+
+    // G3 — faithfulness gate. A fact-summary can't be replayed like a skill, but
+    // it CAN be checked for groundedness: a faithful summary sits in the same
+    // embedding neighbourhood as the members it consolidates. Score it (always
+    // tagged for observability + future autotune) and skip the write when the
+    // summary is an egregious outlier (off-topic / hallucinated). Self-
+    // calibrating + fail-open, so a faithful summary is essentially never lost.
+    let summary_vec = ab_store::embed_text(&summary.body);
+    let member_vecs: Vec<Vec<f32>> = members
+        .iter()
+        .map(|m| ab_store::embed_text(&m.content))
+        .collect();
+    let verdict = faithfulness_verdict(&summary_vec, &member_vecs);
+    if verdict.evaluated {
+        summary_tags.push(format!("faithfulness:{:.2}", verdict.score));
+        if !verdict.accept {
+            return Err(anyhow::anyhow!(
+                "faithfulness gate rejected (score {:.2} < floor {:.2}; off-topic vs cluster) — summary skipped",
+                verdict.score,
+                verdict.floor
+            ));
+        }
     }
 
     let mem = MemoryRecord {
@@ -761,6 +866,69 @@ mod tests {
             trigger_pattern: None,
             superseded_by: None,
         }
+    }
+
+    #[test]
+    fn faithfulness_accepts_summary_near_centroid() {
+        let members = vec![
+            vec![1.0, 0.0, 0.0],
+            vec![0.9, 0.1, 0.0],
+            vec![1.0, 0.1, 0.0],
+        ];
+        let summary = vec![0.95, 0.05, 0.0]; // sits among the members
+        let v = faithfulness_verdict(&summary, &members);
+        assert!(v.evaluated);
+        assert!(v.accept, "faithful summary; score={} floor={}", v.score, v.floor);
+    }
+
+    #[test]
+    fn faithfulness_rejects_orthogonal_summary() {
+        // Proves the reject path actually fires (autotune-v0 §6 discipline).
+        let members = vec![
+            vec![1.0, 0.0, 0.0],
+            vec![0.9, 0.1, 0.0],
+            vec![1.0, 0.1, 0.0],
+        ];
+        let summary = vec![0.0, 0.0, 1.0]; // orthogonal → off-topic / hallucinated
+        let v = faithfulness_verdict(&summary, &members);
+        assert!(v.evaluated);
+        assert!(
+            !v.accept,
+            "orthogonal summary must be rejected; score={} floor={}",
+            v.score, v.floor
+        );
+    }
+
+    #[test]
+    fn faithfulness_fails_open_on_too_few_members() {
+        // <2 usable members → can't establish cohesion → never block.
+        let members = vec![vec![1.0, 0.0, 0.0]];
+        let summary = vec![0.0, 0.0, 1.0];
+        let v = faithfulness_verdict(&summary, &members);
+        assert!(!v.evaluated);
+        assert!(v.accept);
+    }
+
+    #[test]
+    fn faithfulness_fails_open_on_empty_summary_embedding() {
+        // Embedding unavailable → don't lose the summary.
+        let members = vec![vec![1.0, 0.0, 0.0], vec![0.9, 0.1, 0.0]];
+        let v = faithfulness_verdict(&[], &members);
+        assert!(!v.evaluated);
+        assert!(v.accept);
+    }
+
+    #[test]
+    fn faithfulness_fails_open_on_zero_norm_summary() {
+        // A NON-empty but all-zero summary vector (e.g. hash backend on
+        // punctuation-only text, or a backend returning zeros) must NOT be read
+        // as "maximally off-topic" and rejected — cosine() is 0.0 for it. The
+        // fail-open contract has to cover zero-norm, not only the empty slice.
+        let members = vec![vec![1.0, 0.0, 0.0], vec![0.9, 0.1, 0.0], vec![1.0, 0.1, 0.0]];
+        let summary = vec![0.0, 0.0, 0.0]; // non-empty, zero norm
+        let v = faithfulness_verdict(&summary, &members);
+        assert!(!v.evaluated, "degenerate zero-norm summary must short-circuit");
+        assert!(v.accept, "must fail-open, never reject a summary we can't score");
     }
 
     #[test]
