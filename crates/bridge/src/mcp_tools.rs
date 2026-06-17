@@ -18496,7 +18496,22 @@ impl McpTool for MemorySearchTool {
         // demoted analogy candidates instead of letting them dominate top-k.
         let mut hits = hits;
         if let Some(scope) = scope_filter.as_deref() {
-            hits = memory_search_apply_scope_mode(hits, scope, scope_mode);
+            // Whether the caller *explicitly* chose a scope_mode. A deliberate
+            // `scope_mode:"local_only"` is honored strictly (no silent widening);
+            // only the DEFAULT (local_only via omission) gets the recall-recovery
+            // fallback inside the helper.
+            let scope_mode_explicit = args
+                .get("scope_mode")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .map(|s| !s.is_empty())
+                .unwrap_or(false);
+            hits = memory_search_apply_scope_mode_with_fallback(
+                hits,
+                scope,
+                scope_mode,
+                scope_mode_explicit,
+            );
         }
 
         // Path C actuator: rerank using perception_filter hub_clusters.
@@ -31450,6 +31465,47 @@ fn memory_search_apply_scope_mode(
             .partial_cmp(&a.score)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
+    scoped
+}
+
+/// Apply scope-mode filtering with a recall-recovery fallback for *bare-default*
+/// scoped searches (mirrors the FTS AND→OR fallback in the store layer).
+///
+/// A scoped search under the requested mode is tried first. The fallback widens
+/// the scope (local_only → local_plus_global → exploratory) only when ALL of:
+///   • the first pass returned nothing, AND
+///   • the caller expressed no widening preference at all — no `scope_mode`, no
+///     `include_global` (so the effective `mode` is the bare default local_only).
+/// This surfaces global / cross-project knowledge for a scoped query that would
+/// otherwise return empty, while:
+///   • leaving scoped queries that already matched locally completely untouched
+///     (precise default preserved — the fallback fires only on total emptiness);
+///   • honoring an *expressed* preference as a ceiling — explicit local_only stays
+///     strict, and include_global / explicit local_plus_global never widens into
+///     cross-project rows the caller did not ask for;
+///   • performing no extra SQL — the caller's `hits` were overfetched and already
+///     contain the wider rows, so each stage only re-filters the in-memory set.
+fn memory_search_apply_scope_mode_with_fallback(
+    hits: Vec<MemorySearchHit>,
+    requested_scope: &str,
+    mode: MemorySearchScopeMode,
+    scope_mode_explicit: bool,
+) -> Vec<MemorySearchHit> {
+    let prefilter = hits;
+    let scoped = memory_search_apply_scope_mode(prefilter.clone(), requested_scope, mode);
+    if !scoped.is_empty() || scope_mode_explicit || mode != MemorySearchScopeMode::LocalOnly {
+        return scoped;
+    }
+    // Reaching here, `mode` is provably the bare default local_only; widen.
+    for wider in [
+        MemorySearchScopeMode::LocalPlusGlobal,
+        MemorySearchScopeMode::Exploratory,
+    ] {
+        let widened = memory_search_apply_scope_mode(prefilter.clone(), requested_scope, wider);
+        if !widened.is_empty() {
+            return widened;
+        }
+    }
     scoped
 }
 
@@ -45871,6 +45927,99 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert_eq!(out[0].score, 1.0);
         assert_eq!(out[1].score, 0.85);
         assert_eq!(out[2].score, 0.65);
+    }
+
+    // LEVER 2: staged recall-recovery fallback for defaulted scoped searches.
+
+    #[test]
+    fn scope_fallback_defaulted_local_only_recovers_global_when_local_empty() {
+        // No local row for the requested scope; only a global lesson exists.
+        // Defaulted local_only would return empty → fallback widens to
+        // local_plus_global and recovers the global row (demoted 0.85).
+        let hits = vec![
+            mk_search_hit_scoped("global", Some("global"), 1.0),
+            mk_search_hit_scoped("cross", Some("project:/repo/b"), 1.0),
+        ];
+        let out = memory_search_apply_scope_mode_with_fallback(
+            hits,
+            "project:/repo/a",
+            MemorySearchScopeMode::LocalOnly,
+            false, // defaulted
+        );
+        let keys: Vec<&str> = out.iter().map(|h| h.record.key.as_str()).collect();
+        assert_eq!(keys, vec!["global"]);
+        assert_eq!(out[0].score, 0.85);
+    }
+
+    #[test]
+    fn scope_fallback_defaulted_widens_to_exploratory_when_only_cross_scope() {
+        // Only a cross-project row exists. local_only AND local_plus_global both
+        // return empty → fallback continues to exploratory and recovers it (0.65).
+        let hits = vec![mk_search_hit_scoped("cross", Some("project:/repo/b"), 1.0)];
+        let out = memory_search_apply_scope_mode_with_fallback(
+            hits,
+            "project:/repo/a",
+            MemorySearchScopeMode::LocalOnly,
+            false,
+        );
+        let keys: Vec<&str> = out.iter().map(|h| h.record.key.as_str()).collect();
+        assert_eq!(keys, vec!["cross"]);
+        assert_eq!(out[0].score, 0.65);
+    }
+
+    #[test]
+    fn scope_fallback_does_not_widen_when_local_match_present() {
+        // A local row exists → defaulted local_only already returns it →
+        // fallback must NOT fire (no global/cross-scope leakage). Precise
+        // default preserved.
+        let hits = vec![
+            mk_search_hit_scoped("local", Some("project:/repo/a"), 1.0),
+            mk_search_hit_scoped("global", Some("global"), 1.0),
+            mk_search_hit_scoped("cross", Some("project:/repo/b"), 1.0),
+        ];
+        let out = memory_search_apply_scope_mode_with_fallback(
+            hits,
+            "project:/repo/a",
+            MemorySearchScopeMode::LocalOnly,
+            false,
+        );
+        let keys: Vec<&str> = out.iter().map(|h| h.record.key.as_str()).collect();
+        assert_eq!(keys, vec!["local"]);
+        assert_eq!(out[0].score, 1.0);
+    }
+
+    #[test]
+    fn scope_fallback_honors_explicit_local_only_strictly() {
+        // Caller explicitly chose local_only and there is no local row. Their
+        // deliberate scoping intent is honored: stays empty, NO silent widening.
+        let hits = vec![
+            mk_search_hit_scoped("global", Some("global"), 1.0),
+            mk_search_hit_scoped("cross", Some("project:/repo/b"), 1.0),
+        ];
+        let out = memory_search_apply_scope_mode_with_fallback(
+            hits,
+            "project:/repo/a",
+            MemorySearchScopeMode::LocalOnly,
+            true, // explicit
+        );
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn scope_fallback_local_plus_global_does_not_leak_cross_scope() {
+        // include_global=true (or explicit local_plus_global) resolves `mode`
+        // to LocalPlusGlobal. That is an *expressed* local+global preference and
+        // acts as a ceiling: with only a cross-project row present, the result
+        // is empty and the fallback must NOT widen into exploratory cross-scope
+        // rows the caller never asked for.
+        let hits = vec![mk_search_hit_scoped("cross", Some("project:/repo/b"), 1.0)];
+        let out = memory_search_apply_scope_mode_with_fallback(
+            hits,
+            "project:/repo/a",
+            MemorySearchScopeMode::LocalPlusGlobal,
+            false,
+        );
+        assert!(out.is_empty());
     }
 
     #[test]
