@@ -24964,6 +24964,10 @@ fn dispatch_optimization_reasons(
     s: &ab_store::McpToolCallStats,
     diagnostics: &HashMap<String, Vec<ToolErrorDiagnosticClass>>,
 ) -> Vec<&'static str> {
+    if dispatch_expected_hook_lifecycle_latency(s) {
+        return Vec::new();
+    }
+
     let mut reasons = Vec::new();
     let has_actionable_errors = dispatch_stat_has_actionable_errors(s, diagnostics);
     if has_actionable_errors {
@@ -25002,6 +25006,13 @@ fn dispatch_expected_detail_payload_tool(tool_name: &str) -> bool {
 
 fn dispatch_external_batch_load(s: &ab_store::McpToolCallStats) -> bool {
     s.call_count >= 50 && s.p95_duration_ms >= 1_000 && s.source.as_deref() == Some("other")
+}
+
+fn dispatch_expected_hook_lifecycle_latency(s: &ab_store::McpToolCallStats) -> bool {
+    s.error_count == 0
+        && s.p95_duration_ms >= 1_000
+        && s.source.as_deref() == Some("hook")
+        && hook_lifecycle_tool(&s.tool_name)
 }
 
 fn dispatch_codex_native_overlap(tool_name: &str) -> bool {
@@ -51840,6 +51851,33 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
 
         assert!(reasons.contains(&"slow_p95"));
         assert!(reasons.contains(&"external_batch_load"));
+    }
+
+    #[test]
+    fn dispatch_audit_treats_hook_lifecycle_latency_as_expected() {
+        let s = ab_store::McpToolCallStats {
+            tool_name: "session_lifecycle_step".to_string(),
+            call_count: 9,
+            error_count: 0,
+            avg_duration_ms: 1_520.3,
+            p95_duration_ms: 2_448,
+            max_duration_ms: 2_448,
+            avg_result_size: 1_792.8,
+            client_name: None,
+            profile: None,
+            source: Some("hook".to_string()),
+            model: None,
+            model_reasoning_effort: None,
+            codex_host: None,
+        };
+
+        let reasons = dispatch_optimization_reasons(&s, &HashMap::new());
+        assert!(reasons.is_empty());
+
+        let suggestions = dispatch_profile_suggestions(&[s], &[], &HashMap::new());
+        assert!(!suggestions
+            .iter()
+            .any(|s| s.contains("inspect optimization_candidates")));
     }
 
     #[test]
