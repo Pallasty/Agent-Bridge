@@ -210,10 +210,12 @@ fn atlas_entry(
     let expected_gate = expected_gate_flag(tool_name, exposed, &failure_samples);
     let has_expected_gate = expected_gate.is_some();
     let actionable_error_count = if has_expected_gate { 0 } else { error_count };
+    let missing_error_samples = error_count > 0 && failure_samples.is_empty();
     let risk_flags = risk_flags(
         tool_name,
         exposed,
         actionable_error_count,
+        missing_error_samples,
         p95_duration_ms,
         avg_result_size,
         expected_gate,
@@ -260,6 +262,7 @@ fn risk_flags(
     tool_name: &str,
     exposed: bool,
     error_count: u64,
+    missing_error_samples: bool,
     p95_duration_ms: u32,
     avg_result_size: f64,
     expected_gate: Option<&'static str>,
@@ -270,6 +273,9 @@ fn risk_flags(
     }
     if let Some(flag) = expected_gate {
         flags.push(flag.to_string());
+    }
+    if missing_error_samples {
+        flags.push("missing_error_samples".to_string());
     }
     if p95_duration_ms >= SLOW_P95_MS {
         if is_expected_wait_tool(tool_name) {

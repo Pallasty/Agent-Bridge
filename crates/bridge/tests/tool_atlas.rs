@@ -306,6 +306,29 @@ fn tool_atlas_treats_desktop_host_mutation_refusal_as_expected_safety_gate() {
 }
 
 #[test]
+fn tool_atlas_marks_errors_without_recent_samples_as_observability_gap() {
+    let snapshot = build_tool_atlas_snapshot(ToolAtlasInput {
+        generated_at: 1_779_910_000,
+        window_secs: 600,
+        current_tools: vec!["shell_exec".to_string()],
+        stats: vec![stat("shell_exec", 89, 41, 2_040, 233.0)],
+        recent_errors: Vec::new(),
+    });
+
+    let shell = snapshot
+        .tools
+        .iter()
+        .find(|tool| tool.tool_name == "shell_exec")
+        .expect("shell_exec");
+
+    assert_eq!(shell.health, "failing");
+    assert!(shell.risk_flags.contains(&"has_errors".to_string()));
+    assert!(shell
+        .risk_flags
+        .contains(&"missing_error_samples".to_string()));
+}
+
+#[test]
 fn tool_atlas_treats_memory_save_missing_required_key_as_expected_input_validation() {
     let snapshot = build_tool_atlas_snapshot(ToolAtlasInput {
         generated_at: 1_779_910_000,

@@ -24955,6 +24955,9 @@ fn dispatch_optimization_reasons(
     let has_actionable_errors = dispatch_stat_has_actionable_errors(s, diagnostics);
     if has_actionable_errors {
         reasons.push("has_errors");
+        if !diagnostics.contains_key(&s.tool_name) {
+            reasons.push("missing_error_samples");
+        }
     }
     if s.call_count >= 3 && s.p95_duration_ms >= 1_000 {
         reasons.push("slow_p95");
@@ -51638,6 +51641,33 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(reasons.contains(&"has_errors"));
         assert!(reasons.contains(&"slow_p95"));
         assert!(reasons.contains(&"large_average_result"));
+        assert!(reasons.contains(&"high_error_rate"));
+    }
+
+    #[test]
+    fn dispatch_audit_flags_actionable_errors_without_recent_samples() {
+        let s = ab_store::McpToolCallStats {
+            tool_name: "shell_exec".to_string(),
+            call_count: 89,
+            error_count: 41,
+            avg_duration_ms: 1_101.0,
+            p95_duration_ms: 2_040,
+            max_duration_ms: 2_042,
+            avg_result_size: 233.0,
+            client_name: Some("p".to_string()),
+            profile: Some("all".to_string()),
+            source: Some("other".to_string()),
+            model: None,
+            model_reasoning_effort: None,
+            codex_host: None,
+        };
+
+        let diagnostics = HashMap::new();
+        assert!(dispatch_stat_has_actionable_errors(&s, &diagnostics));
+        let reasons = dispatch_optimization_reasons(&s, &diagnostics);
+
+        assert!(reasons.contains(&"has_errors"));
+        assert!(reasons.contains(&"missing_error_samples"));
         assert!(reasons.contains(&"high_error_rate"));
     }
 
