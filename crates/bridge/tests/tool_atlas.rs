@@ -242,6 +242,66 @@ fn tool_atlas_treats_forum_read_long_deep_dive_as_expected_detail_payload() {
 }
 
 #[test]
+fn tool_atlas_treats_biocortex_replay_compare_as_expected_eval_payload() {
+    let snapshot = build_tool_atlas_snapshot(ToolAtlasInput {
+        generated_at: 1_779_910_000,
+        window_secs: 600,
+        current_tools: vec!["biocortex_replay_compare".to_string()],
+        stats: vec![stat("biocortex_replay_compare", 4, 0, 8_104, 25_297.75)],
+        recent_errors: Vec::new(),
+    });
+
+    let replay = snapshot
+        .tools
+        .iter()
+        .find(|tool| tool.tool_name == "biocortex_replay_compare")
+        .expect("biocortex_replay_compare");
+
+    assert_eq!(replay.health, "healthy");
+    assert_eq!(replay.recommendation, "keep");
+    assert!(replay
+        .risk_flags
+        .contains(&"expected_eval_workload".to_string()));
+    assert!(replay
+        .risk_flags
+        .contains(&"expected_detail_payload".to_string()));
+    assert!(!replay.risk_flags.contains(&"slow_p95".to_string()));
+    assert!(!replay
+        .risk_flags
+        .contains(&"large_average_result".to_string()));
+}
+
+#[test]
+fn tool_atlas_treats_biocortex_relevance_lift_as_expected_eval_latency() {
+    let snapshot = build_tool_atlas_snapshot(ToolAtlasInput {
+        generated_at: 1_779_910_000,
+        window_secs: 600,
+        current_tools: vec!["biocortex_retrieval_relevance_lift_eval".to_string()],
+        stats: vec![stat(
+            "biocortex_retrieval_relevance_lift_eval",
+            3,
+            0,
+            5_984,
+            4_096.0,
+        )],
+        recent_errors: Vec::new(),
+    });
+
+    let relevance = snapshot
+        .tools
+        .iter()
+        .find(|tool| tool.tool_name == "biocortex_retrieval_relevance_lift_eval")
+        .expect("biocortex_retrieval_relevance_lift_eval");
+
+    assert_eq!(relevance.health, "healthy");
+    assert_eq!(relevance.recommendation, "keep");
+    assert!(relevance
+        .risk_flags
+        .contains(&"expected_eval_workload".to_string()));
+    assert!(!relevance.risk_flags.contains(&"slow_p95".to_string()));
+}
+
+#[test]
 fn tool_atlas_treats_session_reconcile_confirmation_gate_as_expected() {
     let snapshot = build_tool_atlas_snapshot(ToolAtlasInput {
         generated_at: 1_779_910_000,

@@ -24998,7 +24998,7 @@ fn dispatch_optimization_reasons_with_source_context(
     diagnostics: &HashMap<String, Vec<ToolErrorDiagnosticClass>>,
     external_batch_context: &HashMap<String, ab_store::McpToolCallStats>,
 ) -> Vec<&'static str> {
-    if dispatch_expected_hook_lifecycle_latency(s) {
+    if dispatch_expected_hook_lifecycle_latency(s) || dispatch_expected_biocortex_eval_workload(s) {
         return Vec::new();
     }
 
@@ -25037,7 +25037,10 @@ fn dispatch_optimization_reasons_with_source_context(
 }
 
 fn dispatch_expected_detail_payload_tool(tool_name: &str) -> bool {
-    matches!(tool_name, "event_spine_snapshot" | "forum_read")
+    matches!(
+        tool_name,
+        "event_spine_snapshot" | "forum_read" | "biocortex_replay_compare"
+    )
 }
 
 fn dispatch_external_batch_load(s: &ab_store::McpToolCallStats) -> bool {
@@ -25063,6 +25066,15 @@ fn dispatch_expected_hook_lifecycle_latency(s: &ab_store::McpToolCallStats) -> b
         && s.p95_duration_ms >= 1_000
         && matches!(s.source.as_deref(), Some("hook") | None)
         && hook_lifecycle_tool(&s.tool_name)
+}
+
+fn dispatch_expected_biocortex_eval_workload(s: &ab_store::McpToolCallStats) -> bool {
+    s.error_count == 0
+        && (s.p95_duration_ms >= 1_000 || s.avg_result_size >= 24_000.0)
+        && matches!(
+            s.tool_name.as_str(),
+            "biocortex_replay_compare" | "biocortex_retrieval_relevance_lift_eval"
+        )
 }
 
 fn dispatch_codex_native_overlap(tool_name: &str) -> bool {
@@ -52253,6 +52265,36 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
 
         let reasons = dispatch_optimization_reasons(&s, &HashMap::new());
         assert!(reasons.is_empty());
+    }
+
+    #[test]
+    fn dispatch_audit_treats_biocortex_eval_latency_as_expected() {
+        for (tool_name, avg_result_size) in [
+            ("biocortex_replay_compare", 25_297.75),
+            ("biocortex_retrieval_relevance_lift_eval", 4_096.0),
+        ] {
+            let s = ab_store::McpToolCallStats {
+                tool_name: tool_name.to_string(),
+                call_count: 4,
+                error_count: 0,
+                avg_duration_ms: 4_052.0,
+                p95_duration_ms: 8_104,
+                max_duration_ms: 8_104,
+                avg_result_size,
+                client_name: None,
+                profile: None,
+                source: None,
+                model: None,
+                model_reasoning_effort: None,
+                codex_host: None,
+            };
+
+            let reasons = dispatch_optimization_reasons(&s, &HashMap::new());
+            assert!(
+                reasons.is_empty(),
+                "{tool_name} should be treated as expected read-only Biocortex eval/replay workload, got {reasons:?}"
+            );
+        }
     }
 
     #[test]

@@ -286,6 +286,8 @@ fn risk_flags(
     if p95_duration_ms >= SLOW_P95_MS {
         if is_expected_wait_tool(tool_name) {
             flags.push("expected_wait".to_string());
+        } else if is_expected_eval_workload_tool(tool_name) {
+            flags.push("expected_eval_workload".to_string());
         } else if !exposed {
             flags.push("historical_unexposed_latency".to_string());
         } else {
@@ -311,7 +313,17 @@ fn is_expected_wait_tool(tool_name: &str) -> bool {
 }
 
 fn is_expected_detail_payload_tool(tool_name: &str) -> bool {
-    matches!(tool_name, "event_spine_snapshot" | "forum_read")
+    matches!(
+        tool_name,
+        "event_spine_snapshot" | "forum_read" | "biocortex_replay_compare"
+    )
+}
+
+fn is_expected_eval_workload_tool(tool_name: &str) -> bool {
+    matches!(
+        tool_name,
+        "biocortex_replay_compare" | "biocortex_retrieval_relevance_lift_eval"
+    )
 }
 
 fn is_external_batch_load(
@@ -382,6 +394,7 @@ fn has_actionable_risk_flags(risk_flags: &[String]) -> bool {
                 | "expected_input_validation"
                 | "expected_runtime_unavailable"
                 | "expected_detail_payload"
+                | "expected_eval_workload"
                 | "historical_unexposed_latency"
                 | "historical_unexposed_failure"
         )
