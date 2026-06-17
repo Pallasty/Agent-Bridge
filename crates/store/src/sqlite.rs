@@ -5071,7 +5071,7 @@ impl StateStore for SqliteStore {
                                 THEN CAST(strftime('%s', updated_at) AS INTEGER)
                                 ELSE updated_at
                             END >= ?2)
-                     ORDER BY created_at ASC",
+                     ORDER BY created_at ASC, key ASC",
                 )?;
                 let rows = stmt
                     .query_map(params![kind, since], |row| {
@@ -10600,6 +10600,81 @@ mod tests {
         let observed = keyed.clone();
         keyed.sort();
         assert_eq!(observed, keyed, "edges must be exported in sorted order");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    /// Cross-node sync determinism for the MEMORY rows themselves (sibling to
+    /// `memory_export_edges_are_deterministically_sorted`). Rows sharing a
+    /// `created_at` — common, since it's epoch-SECOND granularity and a single
+    /// session saves many rows in the same second — used to fall back to
+    /// rowid/insertion order under a bare `ORDER BY created_at`. Two nodes with
+    /// different insertion histories then serialised the same memories in
+    /// different orders, so cross-node sync (sync.rs) rewrites + pushes
+    /// `memory.jsonl` as pure reorder noise even when nothing changed. A `key`
+    /// tiebreaker (key is the unique PK) makes row order a TOTAL order, hence
+    /// identical across nodes. Mirrors the edge-export determinism fix.
+    #[tokio::test]
+    async fn memory_export_rows_are_deterministically_sorted_within_created_at() {
+        use crate::{MemoryExportFilter, MemoryRecord};
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-mem-row-sort-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+
+        let mk = |k: &str| MemoryRecord {
+            key: k.to_string(),
+            kind: "fact".to_string(),
+            content: format!("content {k}"),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 1_700_000_002, // identical across rows → forces the tiebreaker
+            updated_at: 1_700_000_002,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".to_string(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        // Insert in scrambled order so rowid/insertion order != key order.
+        for k in ["m_c", "m_a", "m_b"] {
+            store.memory_save(&mk(k)).await.expect("save");
+        }
+
+        let out = temp_dir.join("mem.jsonl");
+        store
+            .memory_export(&MemoryExportFilter::default(), &out)
+            .await
+            .expect("export");
+        let dump = tokio::fs::read_to_string(&out).await.expect("read");
+
+        let keys: Vec<String> = dump
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(|l| {
+                serde_json::from_str::<serde_json::Value>(l).expect("parse row")["key"]
+                    .as_str()
+                    .expect("key field")
+                    .to_string()
+            })
+            .collect();
+        // Without the `key` tiebreaker SQLite returns insertion order
+        // [m_c, m_a, m_b]; the total order must yield [m_a, m_b, m_c].
+        assert_eq!(
+            keys,
+            vec!["m_a", "m_b", "m_c"],
+            "rows sharing created_at must export in key order, not insertion order"
+        );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
