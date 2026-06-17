@@ -49,7 +49,8 @@ use crate::biocortex_shadow::{
     biocortex_replay_comparison, biocortex_retrieval_opt_in_audit_report,
     biocortex_retrieval_opt_in_authorization_decision_packet,
     biocortex_retrieval_opt_in_batch_diagnostics, biocortex_retrieval_opt_in_dry_run_plan,
-    biocortex_retrieval_opt_in_execution_packet,
+    biocortex_retrieval_opt_in_execution_packet, biocortex_retrieval_relevance_lift_eval,
+    RelevanceLiftEvalOptions,
     biocortex_retrieval_opt_in_gated_batch_diagnostics,
     biocortex_retrieval_opt_in_gated_store_trial, biocortex_retrieval_opt_in_order_diff_packet,
     biocortex_retrieval_opt_in_post_implementation_review_gate,
@@ -29491,6 +29492,203 @@ impl McpTool for BioCortexRetrievalOptInBatchDiagnosticsTool {
 }
 
 // ===========================================================================
+//  biocortex_retrieval_relevance_lift_eval — the read-only relevance yardstick
+// ===========================================================================
+
+/// Read-only relevance-lift eval. Samples memories, derives a self-retrieval
+/// query per sample, runs baseline FTS memory_search, computes the BioCortex
+/// side-signal, applies the production reorder blend (eval-local only), and
+/// measures whether the reorder lifts the rank of the true source memory.
+pub struct BioCortexRetrievalRelevanceLiftEvalTool {
+    hub: Hub,
+}
+
+impl BioCortexRetrievalRelevanceLiftEvalTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for BioCortexRetrievalRelevanceLiftEvalTool {
+    fn name(&self) -> &'static str {
+        "biocortex_retrieval_relevance_lift_eval"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only relevance-lift yardstick for the BioCortex \
+                 retrieval side-signal. Samples memories, derives a \
+                 self-retrieval query from each, runs baseline FTS \
+                 memory_search, computes the biomimetic side-signal, applies \
+                 the production reorder blend (EVAL-LOCAL — never returned as \
+                 live recall), and measures whether the reorder lifts the rank \
+                 of the true source via MRR / recall@k / rank-of-source. Answers \
+                 the question the hashed-movement diagnostics omit: did the \
+                 right memory rise? Self-retrieval labels are a PROXY and \
+                 regressions are reported as regressions. Does not mutate \
+                 memory, change default memory_search order, or write state."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "sample_size": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 30,
+                        "default": 8,
+                        "description": "How many memories to sample (head of the chosen sort)."
+                    },
+                    "kind": {
+                        "type": "string",
+                        "description": "Optional memory kind filter (e.g. 'lesson', 'decision')."
+                    },
+                    "sort": {
+                        "type": "string",
+                        "enum": ["recent", "frequent", "newest", "by_importance"],
+                        "default": "by_importance",
+                        "description": "Sort used to pick the head sample."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 5,
+                        "maximum": 100,
+                        "default": 20,
+                        "description": "memory_search candidate limit per derived query."
+                    },
+                    "query_chars": {
+                        "type": "integer",
+                        "minimum": 16,
+                        "maximum": 400,
+                        "default": 120,
+                        "description": "Chars of frontmatter-stripped content used as the AND-style query when or_terms=0 (char-safe)."
+                    },
+                    "or_terms": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 24,
+                        "default": 10,
+                        "description": "When >0, build a BROAD query from the first N distinct tokens joined with OR (multi-candidate sets give the reorder rank headroom). 0 = precise AND-style char query (often returns just the source on distinctive memories)."
+                    },
+                    "include_related": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "Fold each memory's related_keys into its relevant set (graph labels)."
+                    },
+                    "blend_alpha": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "default": 0.8,
+                        "description": "Blend weight for the side-signal reorder (mirrors production)."
+                    },
+                    "coverage_threshold": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "default": 0.8,
+                        "description": "Minimum side-signal coverage before the reorder gate engages (mirrors production)."
+                    },
+                    "checkout_path": {
+                        "type": "string",
+                        "description": "Optional local biocortex-rs checkout. Defaults to AB_BIOCORTEX_RS, sibling paths, then /tmp/biocortex-rs-ab-eval."
+                    },
+                    "timeout_ms": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 600000,
+                        "default": 180000,
+                        "description": "Per side-signal adapter call timeout in milliseconds (shells out to cargo; the first call may compile the example)."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = self
+            .hub
+            .store
+            .as_ref()
+            .ok_or_else(|| ab_core::Error::Backend("store unavailable".into()))?;
+        let sample_size = args
+            .get("sample_size")
+            .and_then(Value::as_u64)
+            .unwrap_or(8)
+            .clamp(1, 30) as usize;
+        let kind = args
+            .get("kind")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        let sort = match args.get("sort").and_then(Value::as_str).unwrap_or("by_importance") {
+            "recent" => MemoryListSort::Recent,
+            "frequent" => MemoryListSort::Frequent,
+            "newest" => MemoryListSort::Newest,
+            _ => MemoryListSort::ByImportance,
+        };
+        let limit = args
+            .get("limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(20)
+            .clamp(5, 100) as u32;
+        let query_chars = args
+            .get("query_chars")
+            .and_then(Value::as_u64)
+            .unwrap_or(120)
+            .clamp(16, 400) as usize;
+        let or_terms = args
+            .get("or_terms")
+            .and_then(Value::as_u64)
+            .unwrap_or(10)
+            .min(24) as usize;
+        let include_related = args
+            .get("include_related")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let blend_alpha = args
+            .get("blend_alpha")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.8) as f32;
+        let coverage_threshold = args
+            .get("coverage_threshold")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.8);
+        let checkout = args
+            .get("checkout_path")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from);
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(180_000);
+
+        let payload = biocortex_retrieval_relevance_lift_eval(
+            store.as_ref(),
+            RelevanceLiftEvalOptions {
+                sample_size,
+                kind,
+                sort,
+                limit,
+                query_chars,
+                or_terms,
+                blend_alpha,
+                coverage_threshold,
+                include_related,
+                checkout,
+                timeout_ms,
+            },
+        )
+        .await;
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
 //  biocortex_retrieval_opt_in_gated_batch_diagnostics — transition-gated batch
 // ===========================================================================
 
@@ -42015,6 +42213,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Arc::new(BioCortexRetrievalOptInBatchDiagnosticsTool::new(
             hub.clone(),
         )),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(BioCortexRetrievalRelevanceLiftEvalTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,

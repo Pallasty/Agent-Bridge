@@ -13,6 +13,7 @@ pub mod avatar_native;
 pub mod avatar_renderer;
 pub mod avatar_seed;
 pub mod avatar_surface;
+pub mod biocortex_relevance_eval;
 pub mod biocortex_shadow;
 pub mod bootstrap_bfs;
 pub mod bootstrap_transitions;

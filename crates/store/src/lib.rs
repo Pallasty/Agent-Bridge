@@ -615,7 +615,7 @@ fn default_biocortex_side_signal_coverage_threshold() -> f64 {
     0.8
 }
 
-fn biocortex_opt_in_apply_side_signal(
+pub fn biocortex_opt_in_apply_side_signal(
     baseline_hits: &[MemorySearchHit],
     side_signal_scores: &[BioCortexRetrievalOptInSideSignal],
     side_signal_alpha: f32,
