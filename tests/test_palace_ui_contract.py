@@ -307,6 +307,24 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("renderOrphanCandidateDiagnostics(result || {})", html)
         self.assertIn("no eligible orphan candidates under current guardrails", html)
 
+    def test_orphan_candidate_quality_summary_tiers_scope_risk(self):
+        html = palace_html()
+
+        self.assertIn("function orphanCandidateQualityBuckets(result)", html)
+        self.assertIn("function orphanCandidateReviewLane(row)", html)
+        self.assertIn("function renderOrphanCandidateQualitySummary(result)", html)
+        self.assertIn("orphan-candidate-quality-summary", html)
+        self.assertIn("orphan-candidate-quality-card", html)
+        self.assertIn("same_scope", html)
+        self.assertIn("global_or_unscoped", html)
+        self.assertIn("cross_project", html)
+        self.assertIn("low_score", html)
+        self.assertIn("no_candidates", html)
+        self.assertIn("safe to review", html)
+        self.assertIn("manual only", html)
+        self.assertIn("defer by default", html)
+        self.assertIn("renderOrphanCandidateQualitySummary(result || {})", html)
+
     def test_node_workbench_derives_region_for_deep_linked_orphans(self):
         html = palace_html()
 

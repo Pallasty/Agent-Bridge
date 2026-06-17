@@ -1522,6 +1522,51 @@
       min-width: 0;
       text-align: right;
     }
+    #panel .orphan-candidate-quality-summary {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 5px;
+      margin: -1px 0 8px;
+    }
+    #panel .orphan-candidate-quality-card {
+      min-width: 0;
+      padding: 7px 8px;
+      background: #101018;
+      border: 1px solid #1f1f2a;
+      border-left: 2px solid #4a4a58;
+      border-radius: 4px;
+    }
+    #panel .orphan-candidate-quality-card.same_scope { border-left-color: #5cc89a; }
+    #panel .orphan-candidate-quality-card.global_or_unscoped { border-left-color: #5cc8c8; }
+    #panel .orphan-candidate-quality-card.cross_project { border-left-color: #c8a96a; }
+    #panel .orphan-candidate-quality-card.low_score,
+    #panel .orphan-candidate-quality-card.no_candidates { border-left-color: #d88080; }
+    #panel .orphan-candidate-quality-card .lane,
+    #panel .orphan-candidate-quality-card .count,
+    #panel .orphan-candidate-quality-card .detail {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #panel .orphan-candidate-quality-card .lane {
+      color: #e8e8ee;
+      font-size: 10px;
+      font-weight: 650;
+    }
+    #panel .orphan-candidate-quality-card .count {
+      margin-top: 3px;
+      color: #5cc8c8;
+      font-size: 12px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    #panel .orphan-candidate-quality-card .detail {
+      margin-top: 2px;
+      color: #6a6a78;
+      font-size: 9px;
+      letter-spacing: 0;
+    }
     #panel .orphan-candidate-stat {
       min-width: 0;
       padding: 6px 7px;
@@ -1567,6 +1612,8 @@
     #panel .orphan-candidate-row.would_link { border-left-color: #5cc89a; }
     #panel .orphan-candidate-row.low_score { border-left-color: #c8a96a; }
     #panel .orphan-candidate-row.no_candidates { border-left-color: #d88080; }
+    #panel .orphan-candidate-row.global_or_unscoped { border-left-color: #5cc8c8; }
+    #panel .orphan-candidate-row.cross_project { border-left-color: #c8a96a; }
     #panel .orphan-candidate-pair {
       display: grid;
       grid-template-columns: minmax(0, 1fr);
@@ -6075,6 +6122,53 @@ function renderOrphanCandidateDiagnostics(result) {
   ).join("") + `</div>`;
 }
 
+function orphanCandidateReviewLane(row) {
+  const status = orphanCandidateStatusClass(row && row.status);
+  const candidate = row && Array.isArray(row.candidates) && row.candidates.length > 0
+    ? row.candidates[0]
+    : null;
+  if (status === "no_candidates" || !candidate) return "no_candidates";
+  if (status === "low_score") return "low_score";
+  const relation = candidate.scope_relation || "unknown_scope";
+  if (relation === "same_scope") return "same_scope";
+  if (relation === "global_or_unscoped") return "global_or_unscoped";
+  return "cross_project";
+}
+
+function orphanCandidateQualityBuckets(result) {
+  const rows = Array.isArray(result && result.rows) ? result.rows : [];
+  const buckets = {
+    same_scope: 0,
+    global_or_unscoped: 0,
+    cross_project: 0,
+    low_score: 0,
+    no_candidates: 0,
+  };
+  rows.forEach(row => {
+    const lane = orphanCandidateReviewLane(row);
+    buckets[lane] = (buckets[lane] || 0) + 1;
+  });
+  return buckets;
+}
+
+function renderOrphanCandidateQualitySummary(result) {
+  const buckets = orphanCandidateQualityBuckets(result || {});
+  const rows = [
+    ["same_scope", "safe to review", "same scope high-confidence"],
+    ["global_or_unscoped", "manual only", "global or unscoped"],
+    ["cross_project", "defer by default", "cross project/scope"],
+    ["low_score", "low score", "below threshold"],
+    ["no_candidates", "no candidates", "no scoped target"],
+  ];
+  return `<div class="orphan-candidate-quality-summary">` + rows.map(([lane, label, detail]) =>
+    `<div class="orphan-candidate-quality-card ${escapeHTML(lane)}">
+      <span class="lane">${escapeHTML(label)}</span>
+      <span class="count">${escapeHTML(String(buckets[lane] || 0))}</span>
+      <span class="detail">${escapeHTML(detail)}</span>
+    </div>`
+  ).join("") + `</div>`;
+}
+
 function compactCandidatePreview(text) {
   return String(text || "")
     .replace(/\s+/g, " ")
@@ -6122,6 +6216,7 @@ function renderOrphanCandidateRows(result) {
   }
   return `<div class="orphan-candidate-rows">` + rows.slice(0, 6).map(row => {
     const status = orphanCandidateStatusClass(row.status);
+    const lane = orphanCandidateReviewLane(row);
     const candidate = Array.isArray(row.candidates) && row.candidates.length > 0 ? row.candidates[0] : null;
     const confidence = candidate && Number.isFinite(candidate.confidence)
       ? candidate.confidence.toFixed(2)
@@ -6137,7 +6232,7 @@ function renderOrphanCandidateRows(result) {
           <span class="orphan-candidate-label">no candidate</span>
           <span class="orphan-candidate-meta">${escapeHTML(status.replace("_", " "))}</span>
         </div>`;
-    return `<div class="orphan-candidate-row ${status}">
+    return `<div class="orphan-candidate-row ${escapeHTML(lane)} ${status}">
       <div class="orphan-candidate-pair">
         <button type="button" class="orphan-candidate-node" data-orphan-node-key="${escapeHTML(row.orphan)}">
           <span class="orphan-candidate-label" title="${escapeHTML(row.orphan)}">${escapeHTML(row.orphan)}</span>
@@ -6161,6 +6256,7 @@ function renderRegionOrphanCandidateResult(result) {
   return `${renderOrphanCandidateHead("candidate links", readOnly, renderOrphanCandidatePlanButton(regionId))}
   ${renderOrphanCandidateStats(result || {})}
   ${renderOrphanCandidateDiagnostics(result || {})}
+  ${renderOrphanCandidateQualitySummary(result || {})}
   ${renderOrphanCandidateRows(result || {})}`;
 }
 
