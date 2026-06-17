@@ -24998,10 +24998,7 @@ fn dispatch_expected_detail_payload_tool(tool_name: &str) -> bool {
 }
 
 fn dispatch_external_batch_load(s: &ab_store::McpToolCallStats) -> bool {
-    s.call_count >= 50
-        && s.p95_duration_ms >= 1_000
-        && s.source.as_deref() == Some("other")
-        && s.profile.as_deref() == Some("all")
+    s.call_count >= 50 && s.p95_duration_ms >= 1_000 && s.source.as_deref() == Some("other")
 }
 
 fn dispatch_codex_native_overlap(tool_name: &str) -> bool {
@@ -51803,6 +51800,30 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             avg_result_size: 13_972.0,
             client_name: Some("p".to_string()),
             profile: Some("all".to_string()),
+            source: Some("other".to_string()),
+            model: None,
+            model_reasoning_effort: None,
+            codex_host: None,
+        };
+
+        let reasons = dispatch_optimization_reasons(&s, &HashMap::new());
+
+        assert!(reasons.contains(&"slow_p95"));
+        assert!(reasons.contains(&"external_batch_load"));
+    }
+
+    #[test]
+    fn dispatch_audit_marks_external_bulk_latency_without_profile_filter() {
+        let s = ab_store::McpToolCallStats {
+            tool_name: "memory_search".to_string(),
+            call_count: 120,
+            error_count: 0,
+            avg_duration_ms: 4_148.5,
+            p95_duration_ms: 4_412,
+            max_duration_ms: 4_761,
+            avg_result_size: 13_972.0,
+            client_name: None,
+            profile: None,
             source: Some("other".to_string()),
             model: None,
             model_reasoning_effort: None,

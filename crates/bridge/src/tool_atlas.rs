@@ -315,12 +315,9 @@ fn is_external_batch_load(
     call_count: u64,
     p95_duration_ms: u32,
     source: Option<&str>,
-    profile: Option<&str>,
+    _profile: Option<&str>,
 ) -> bool {
-    call_count >= 50
-        && p95_duration_ms >= SLOW_P95_MS
-        && source == Some("other")
-        && profile == Some("all")
+    call_count >= 50 && p95_duration_ms >= SLOW_P95_MS && source == Some("other")
 }
 
 fn expected_gate_flag(
