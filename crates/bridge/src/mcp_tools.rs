@@ -30750,43 +30750,25 @@ impl McpTool for IntrospectRecallTool {
             (1.0 - max_cosine).clamp(0.0, 1.0)
         };
 
-        // Stage-2 Option E LLM relevance probe.
-        let mut option_e_result: Option<OptionEResult> = None;
-        let mut degraded = false;
-        let mut degraded_reason: Option<String> = None;
-        if !skip_llm_probe && !hits.is_empty() {
-            if !option_e_rate_check_and_bump() {
-                degraded = true;
-                degraded_reason = Some("rate_limit".to_string());
-            } else {
-                match crate::llm_client::LlmClient::from_env() {
-                    Err(e) => {
-                        degraded = true;
-                        degraded_reason = Some(format!("llm_client_from_env: {e}"));
-                    }
-                    Ok(client) => match option_e_run(&query, &hits, &client).await {
-                        Ok(r) => {
-                            option_e_result = Some(r);
-                        }
-                        Err(e) => {
-                            degraded = true;
-                            degraded_reason = Some(format!("option_e_run: {e}"));
-                            tracing::warn!(
-                                target: "introspect_recall",
-                                error = %e,
-                                "Option E probe failed; falling back to v0 novelty signal"
-                            );
-                        }
-                    },
-                }
-            }
-        } else if skip_llm_probe {
-            degraded = true;
-            degraded_reason = Some("skip_llm_probe".to_string());
-        } else if hits.is_empty() {
-            degraded = true;
-            degraded_reason = Some("no_hits".to_string());
-        }
+        // Stage-2 Option E LLM relevance probe was FALSIFIED + SHELVED
+        // 2026-05-16 (commit 0ced487, §6.5 rule 3). Stage-1 cosine novelty is
+        // the only path. We intentionally do NOT invoke the LLM probe: leaving
+        // it wired reintroduced a live degradation — `LlmClient::from_env()`
+        // routed the introspect model id to an OpenAI-compatible endpoint that
+        // rejected it (HTTP 400 "Invalid model id"), so every call returned
+        // `degraded: true`. `skip_llm_probe` is accepted for API back-compat
+        // but is a no-op (it never gated a real LLM call after this change).
+        let option_e_result: Option<OptionEResult> = None;
+        let _ = skip_llm_probe; // accepted for back-compat; never runs an LLM probe
+        // `no_hits` (empty store / no embeddings) is the only honest degradation
+        // signal left: novelty is forced to the 1.0 ceiling, so flag it so
+        // callers don't read max-novelty as a confident "unsupported" verdict.
+        let degraded = hits.is_empty();
+        let degraded_reason: Option<String> = if hits.is_empty() {
+            Some("no_hits".to_string())
+        } else {
+            None
+        };
 
         // Compose `likely_unsupported` from whichever signal is available.
         let (probability_grounded_v, likely_unsupported) = match &option_e_result {
@@ -56698,6 +56680,46 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         let req_strs: Vec<&str> = required.iter().filter_map(|v| v.as_str()).collect();
         assert!(req_strs.contains(&"query"), "query must be required");
         assert_eq!(req_strs.len(), 1, "only query should be required");
+    }
+
+    #[tokio::test]
+    async fn introspect_recall_does_not_invoke_shelved_option_e_llm() {
+        // Regression guard for the shelved Option-E live bug: the execute path
+        // must NOT call an LLM (Option E was falsified+shelved 2026-05-16). The
+        // bug left it wired, so every populated-store query came back
+        // `degraded:true` with an `option_e_run`/`llm_client_from_env` reason.
+        // A normal query against a populated store must now be NOT degraded.
+        let (hub, _tmp) = mk_test_hub_with_store().await;
+        save_store_trial_memory(
+            &hub,
+            "k_probe",
+            0.7,
+            "hebbian coactivation wire together fire together plasticity",
+        )
+        .await;
+        let tool = IntrospectRecallTool::new(hub);
+        let out = tool
+            .execute(
+                json!({ "query": "hebbian coactivation plasticity", "k": 5 }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let text = match out.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        let v: serde_json::Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["degraded"],
+            serde_json::json!(false),
+            "shelved Option E must not run → not degraded; got {text}"
+        );
+        assert!(
+            v.get("degraded_reason").map(|r| r.is_null()).unwrap_or(true),
+            "no degradation reason expected; got {:?}",
+            v.get("degraded_reason")
+        );
     }
 
     async fn l6_test_store() -> std::sync::Arc<dyn ab_store::StateStore> {
