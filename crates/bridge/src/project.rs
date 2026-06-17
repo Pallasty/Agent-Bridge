@@ -297,8 +297,9 @@ fn git_output(cwd: &Path, args: &[&str]) -> Option<String> {
 
 // --- changes_digest ---
 
-/// `scope`: `working_tree` | `staged` | `last_commit` | `branch_vs_main`
+/// `scope`: `working_tree` | `working` | `staged` | `last_commit` | `branch_vs_main`
 pub fn changes_digest(cwd: &Path, scope: &str) -> Result<Value> {
+    let scope = normalize_changes_digest_scope(scope);
     let inside = git_output(cwd, &["rev-parse", "--is-inside-work-tree"])
         .map(|s| s.trim() == "true")
         .unwrap_or(false);
@@ -382,6 +383,13 @@ pub fn changes_digest(cwd: &Path, scope: &str) -> Result<Value> {
         "summary": summary,
         "name_status": name_status,
     }))
+}
+
+fn normalize_changes_digest_scope(scope: &str) -> &str {
+    match scope {
+        "working" => "working_tree",
+        other => other,
+    }
 }
 
 /// Read-only preflight before creating a PR/MR review artifact.
@@ -651,6 +659,21 @@ mod tests {
             .to_path_buf();
         let v = changes_digest(&repo_root, "last_commit").expect("digest");
         assert_eq!(v["scope"], "last_commit");
+        assert!(v["files_changed"].as_u64().is_some());
+    }
+
+    #[test]
+    fn changes_digest_accepts_working_alias() {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let repo_root = manifest_dir
+            .ancestors()
+            .find(|p| p.join("Cargo.toml").is_file() && p.join("crates").is_dir())
+            .expect("workspace root")
+            .to_path_buf();
+
+        let v = changes_digest(&repo_root, "working").expect("digest");
+
+        assert_eq!(v["scope"], "working_tree");
         assert!(v["files_changed"].as_u64().is_some());
     }
 
