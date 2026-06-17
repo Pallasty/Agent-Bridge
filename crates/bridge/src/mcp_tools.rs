@@ -24961,6 +24961,9 @@ fn dispatch_optimization_reasons(
     }
     if s.call_count >= 3 && s.p95_duration_ms >= 1_000 {
         reasons.push("slow_p95");
+        if dispatch_external_batch_load(s) {
+            reasons.push("external_batch_load");
+        }
     }
     if s.call_count >= 3
         && s.avg_result_size >= 24_000.0
@@ -24979,6 +24982,13 @@ fn dispatch_optimization_reasons(
 
 fn dispatch_expected_detail_payload_tool(tool_name: &str) -> bool {
     matches!(tool_name, "event_spine_snapshot" | "forum_read")
+}
+
+fn dispatch_external_batch_load(s: &ab_store::McpToolCallStats) -> bool {
+    s.call_count >= 50
+        && s.p95_duration_ms >= 1_000
+        && s.source.as_deref() == Some("other")
+        && s.profile.as_deref() == Some("all")
 }
 
 fn dispatch_codex_native_overlap(tool_name: &str) -> bool {
@@ -51642,6 +51652,30 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(reasons.contains(&"slow_p95"));
         assert!(reasons.contains(&"large_average_result"));
         assert!(reasons.contains(&"high_error_rate"));
+    }
+
+    #[test]
+    fn dispatch_audit_marks_external_bulk_latency() {
+        let s = ab_store::McpToolCallStats {
+            tool_name: "memory_search".to_string(),
+            call_count: 120,
+            error_count: 0,
+            avg_duration_ms: 4_148.5,
+            p95_duration_ms: 4_412,
+            max_duration_ms: 4_761,
+            avg_result_size: 13_972.0,
+            client_name: Some("p".to_string()),
+            profile: Some("all".to_string()),
+            source: Some("other".to_string()),
+            model: None,
+            model_reasoning_effort: None,
+            codex_host: None,
+        };
+
+        let reasons = dispatch_optimization_reasons(&s, &HashMap::new());
+
+        assert!(reasons.contains(&"slow_p95"));
+        assert!(reasons.contains(&"external_batch_load"));
     }
 
     #[test]

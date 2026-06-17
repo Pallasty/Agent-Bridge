@@ -214,11 +214,14 @@ fn atlas_entry(
     let risk_flags = risk_flags(
         tool_name,
         exposed,
+        call_count,
         actionable_error_count,
         missing_error_samples,
         p95_duration_ms,
         avg_result_size,
         expected_gate,
+        stat.and_then(|s| s.source.as_deref()),
+        stat.and_then(|s| s.profile.as_deref()),
     );
     let health = health(
         observed,
@@ -261,11 +264,14 @@ fn usage_class(call_count: u64) -> &'static str {
 fn risk_flags(
     tool_name: &str,
     exposed: bool,
+    call_count: u64,
     error_count: u64,
     missing_error_samples: bool,
     p95_duration_ms: u32,
     avg_result_size: f64,
     expected_gate: Option<&'static str>,
+    source: Option<&str>,
+    profile: Option<&str>,
 ) -> Vec<String> {
     let mut flags = Vec::new();
     if error_count > 0 {
@@ -284,6 +290,9 @@ fn risk_flags(
             flags.push("historical_unexposed_latency".to_string());
         } else {
             flags.push("slow_p95".to_string());
+            if is_external_batch_load(call_count, p95_duration_ms, source, profile) {
+                flags.push("external_batch_load".to_string());
+            }
         }
     }
     if avg_result_size >= LARGE_AVG_RESULT_SIZE && is_expected_detail_payload_tool(tool_name) {
@@ -300,6 +309,18 @@ fn is_expected_wait_tool(tool_name: &str) -> bool {
 
 fn is_expected_detail_payload_tool(tool_name: &str) -> bool {
     matches!(tool_name, "event_spine_snapshot" | "forum_read")
+}
+
+fn is_external_batch_load(
+    call_count: u64,
+    p95_duration_ms: u32,
+    source: Option<&str>,
+    profile: Option<&str>,
+) -> bool {
+    call_count >= 50
+        && p95_duration_ms >= SLOW_P95_MS
+        && source == Some("other")
+        && profile == Some("all")
 }
 
 fn expected_gate_flag(
