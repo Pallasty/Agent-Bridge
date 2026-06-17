@@ -1634,17 +1634,40 @@ fn sanitise_fts_query_joined(q: &str, join: &str) -> String {
 /// True if the query contains any `col:` prefix where `col` is not `content`
 /// (the only column we can MATCH against — `key` is UNINDEXED).
 fn has_invalid_fts_column_prefix(s: &str) -> bool {
-    s.split_whitespace().any(|tok| {
-        let t = tok.trim_start_matches(|c: char| c == '+' || c == '-');
-        match t.split_once(':') {
-            Some((col, _)) => {
-                !col.is_empty()
-                    && col != "content"
-                    && col.chars().all(|c| c.is_alphanumeric() || c == '_')
-            }
-            None => false,
+    let mut in_quote = false;
+    for (idx, ch) in s.char_indices() {
+        if ch == '"' {
+            in_quote = !in_quote;
+            continue;
         }
-    })
+        if ch != ':' || in_quote {
+            continue;
+        }
+        if !has_valid_fts_column_prefix_before_colon(&s[..idx]) {
+            return true;
+        }
+    }
+    false
+}
+
+fn has_valid_fts_column_prefix_before_colon(before_colon: &str) -> bool {
+    let before = before_colon.trim_end();
+    if before.is_empty() {
+        return false;
+    }
+
+    if let Some(stripped) = before.strip_suffix('}') {
+        if let Some(open_idx) = stripped.rfind('{') {
+            let inner = stripped[open_idx + 1..].trim();
+            return !inner.is_empty() && inner.split_whitespace().all(|col| col == "content");
+        }
+    }
+
+    let col = before
+        .rsplit(|c: char| !c.is_alphanumeric() && c != '_')
+        .next()
+        .unwrap_or("");
+    col == "content"
 }
 
 fn now_secs() -> i64 {
@@ -9550,6 +9573,18 @@ mod tests {
     }
 
     #[test]
+    fn sanitise_fts_spaced_unknown_column_prefix_falls_back_to_phrase() {
+        // FTS5 permits whitespace around the column-filter colon. A query like
+        // `assembly : code` still means "MATCH column assembly", and must not
+        // reach SQLite as raw FTS syntax because memories_fts has no such column.
+        let out = sanitise_fts_query("assembly : code");
+        assert_eq!(out, "\"assembly : code\"");
+
+        let out2 = sanitise_fts_query("{assembly} : code");
+        assert_eq!(out2, "\"{assembly} : code\"");
+    }
+
+    #[test]
     fn sanitise_fts_content_prefix_is_valid_passthrough() {
         // `content:` is the only MATCHable column — must pass through as-is.
         let out = sanitise_fts_query("content:cosine");
@@ -9861,7 +9896,9 @@ mod tests {
         assert!(
             hits.iter().any(|h| h.record.key == "k_fts_fallback"),
             "OR fallback must recover a partial-term match; got {:?}",
-            hits.iter().map(|h| h.record.key.clone()).collect::<Vec<_>>()
+            hits.iter()
+                .map(|h| h.record.key.clone())
+                .collect::<Vec<_>>()
         );
 
         // All-terms-match query still works via the precise AND path (unchanged).
