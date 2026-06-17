@@ -57199,17 +57199,22 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
 
     // ── Phase 2.1 — embed_text MCP (raw encoder pass-through) ─────────
 
+    // `AGENT_BRIDGE_EMBED_BACKEND` is process-global; as two separate tests these
+    // raced under the parallel runner (one set "hash", the other "weirdvalue",
+    // and `select_raw_encoder_kind` read whichever won), flaking `honors_hash_env`.
+    // Merged into one sequential test so the env mutations can't race each other —
+    // these are the only tests that touch this var, and the embed_text tests are
+    // already backend-agnostic.
     #[test]
-    fn select_raw_encoder_kind_honors_hash_env() {
+    fn select_raw_encoder_kind_honors_backend_env() {
         std::env::set_var("AGENT_BRIDGE_EMBED_BACKEND", "hash");
         assert_eq!(select_raw_encoder_kind(), "hash");
-        std::env::remove_var("AGENT_BRIDGE_EMBED_BACKEND");
-    }
-
-    #[test]
-    fn select_raw_encoder_kind_unknown_falls_back_to_onnx() {
         std::env::set_var("AGENT_BRIDGE_EMBED_BACKEND", "weirdvalue");
-        assert_eq!(select_raw_encoder_kind(), "onnx");
+        assert_eq!(
+            select_raw_encoder_kind(),
+            "onnx",
+            "unknown backend value falls back to onnx"
+        );
         std::env::remove_var("AGENT_BRIDGE_EMBED_BACKEND");
     }
 
