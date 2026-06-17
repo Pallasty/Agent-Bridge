@@ -35248,7 +35248,10 @@ impl McpTool for MemoryGraphExportTool {
                     // Escape key for DOT id (replace hyphens/spaces with underscores)
                     let id = m.key.replace(['-', ' ', '.', '/'], "_");
                     let label = if m.key.len() > 30 {
-                        format!("{}\\n[{}]", &m.key[..28], m.kind)
+                        // Char-safe head: a byte slice `&m.key[..28]` panics when
+                        // the key holds multi-byte CJK (curated_<CJK> keys do).
+                        let head: String = m.key.chars().take(28).collect();
+                        format!("{}\\n[{}]", head, m.kind)
                     } else {
                         format!("{} [{}]", m.key, m.kind)
                     };
