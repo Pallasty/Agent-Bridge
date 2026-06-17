@@ -311,6 +311,14 @@ struct PalaceOrphanApprovedLink {
     edge_type: String,
 }
 
+#[derive(Debug, Default)]
+struct PalaceOrphanApprovedLinkApplyOutcome {
+    results: Vec<Value>,
+    applied_count: u64,
+    failed_count: u64,
+    skipped_count: u64,
+}
+
 fn normalize_palace_orphan_decision(decision: &str) -> std::io::Result<&'static str> {
     match decision {
         "approve" => Ok("approve"),
@@ -755,6 +763,75 @@ fn palace_orphan_approved_link_apply_gate_for_plan(
         "auto_apply_allowed": false,
         "blocking_reasons": blocking_reasons,
     })
+}
+
+async fn palace_orphan_approved_link_apply_links(
+    store: &dyn StateStore,
+    links: Vec<PalaceOrphanApprovedLink>,
+    dry_run: bool,
+) -> PalaceOrphanApprovedLinkApplyOutcome {
+    let mut outcome = PalaceOrphanApprovedLinkApplyOutcome::default();
+    for link in links {
+        if link.edge_type != "relates" {
+            outcome.skipped_count += 1;
+            outcome.results.push(json!({
+                "pair_id": link.pair_id,
+                "orphan_key": link.orphan_key,
+                "candidate_key": link.candidate_key,
+                "edge_type": link.edge_type,
+                "status": "skipped_unsupported_edge_type",
+            }));
+            continue;
+        }
+        if link.orphan_key == link.candidate_key {
+            outcome.skipped_count += 1;
+            outcome.results.push(json!({
+                "pair_id": link.pair_id,
+                "orphan_key": link.orphan_key,
+                "candidate_key": link.candidate_key,
+                "edge_type": link.edge_type,
+                "status": "skipped_self_edge",
+            }));
+            continue;
+        }
+        if dry_run {
+            outcome.results.push(json!({
+                "pair_id": link.pair_id,
+                "orphan_key": link.orphan_key,
+                "candidate_key": link.candidate_key,
+                "edge_type": link.edge_type,
+                "status": "would_write",
+            }));
+            continue;
+        }
+        match store
+            .memory_link(&link.orphan_key, &link.candidate_key, &link.edge_type, 1.0)
+            .await
+        {
+            Ok(()) => {
+                outcome.applied_count += 1;
+                outcome.results.push(json!({
+                    "pair_id": link.pair_id,
+                    "orphan_key": link.orphan_key,
+                    "candidate_key": link.candidate_key,
+                    "edge_type": link.edge_type,
+                    "status": "applied",
+                }));
+            }
+            Err(e) => {
+                outcome.failed_count += 1;
+                outcome.results.push(json!({
+                    "pair_id": link.pair_id,
+                    "orphan_key": link.orphan_key,
+                    "candidate_key": link.candidate_key,
+                    "edge_type": link.edge_type,
+                    "status": "failed",
+                    "error": e.to_string(),
+                }));
+            }
+        }
+    }
+    outcome
 }
 
 fn palace_orphan_approved_link_plan_for_preview(
@@ -1661,92 +1738,28 @@ async fn api_orphan_approved_link_apply(
         return Ok(Json(response));
     }
 
-    let mut results = Vec::new();
-    let mut applied_count = 0_u64;
-    let mut failed_count = 0_u64;
-    let mut skipped_count = 0_u64;
-    for link in links {
-        if link.edge_type != "relates" {
-            skipped_count += 1;
-            results.push(json!({
-                "pair_id": link.pair_id,
-                "orphan_key": link.orphan_key,
-                "candidate_key": link.candidate_key,
-                "edge_type": link.edge_type,
-                "status": "skipped_unsupported_edge_type",
-            }));
-            continue;
-        }
-        if link.orphan_key == link.candidate_key {
-            skipped_count += 1;
-            results.push(json!({
-                "pair_id": link.pair_id,
-                "orphan_key": link.orphan_key,
-                "candidate_key": link.candidate_key,
-                "edge_type": link.edge_type,
-                "status": "skipped_self_edge",
-            }));
-            continue;
-        }
-        if dry_run {
-            results.push(json!({
-                "pair_id": link.pair_id,
-                "orphan_key": link.orphan_key,
-                "candidate_key": link.candidate_key,
-                "edge_type": link.edge_type,
-                "status": "would_write",
-            }));
-            continue;
-        }
-        match s
-            .store
-            .memory_link(&link.orphan_key, &link.candidate_key, &link.edge_type, 1.0)
-            .await
-        {
-            Ok(()) => {
-                applied_count += 1;
-                results.push(json!({
-                    "pair_id": link.pair_id,
-                    "orphan_key": link.orphan_key,
-                    "candidate_key": link.candidate_key,
-                    "edge_type": link.edge_type,
-                    "status": "applied",
-                }));
-            }
-            Err(e) => {
-                failed_count += 1;
-                results.push(json!({
-                    "pair_id": link.pair_id,
-                    "orphan_key": link.orphan_key,
-                    "candidate_key": link.candidate_key,
-                    "edge_type": link.edge_type,
-                    "status": "failed",
-                    "error": e.to_string(),
-                }));
-            }
-        }
-    }
+    let outcome = palace_orphan_approved_link_apply_links(s.store.as_ref(), links, dry_run).await;
 
     if let Some(obj) = response.as_object_mut() {
         obj.insert(
             "status".to_string(),
             json!(if dry_run {
                 "dry_run"
-            } else if failed_count > 0 {
+            } else if outcome.failed_count > 0 {
                 "partial"
-            } else if applied_count > 0 {
+            } else if outcome.applied_count > 0 {
                 "applied"
             } else {
                 "noop"
             }),
         );
-        obj.insert("applied_count".to_string(), json!(applied_count));
-        obj.insert("failed_count".to_string(), json!(failed_count));
-        obj.insert("skipped_count".to_string(), json!(skipped_count));
-        obj.insert("results".to_string(), json!(results));
+        obj.insert("applied_count".to_string(), json!(outcome.applied_count));
+        obj.insert("failed_count".to_string(), json!(outcome.failed_count));
+        obj.insert("skipped_count".to_string(), json!(outcome.skipped_count));
+        obj.insert("results".to_string(), json!(outcome.results));
         obj.insert(
             "writes_edges".to_string(),
-            json!(!dry_run && applied_count > 0),
+            json!(!dry_run && outcome.applied_count > 0),
         );
         obj.insert("plan".to_string(), plan);
     }
@@ -4113,6 +4126,244 @@ mod tests {
         assert_eq!(gate["blocked"], json!(true));
         assert_eq!(gate["writes_edges"], json!(false));
         assert_eq!(gate["blocking_reasons"][0], json!("confirmation_required"));
+    }
+
+    #[tokio::test]
+    async fn palace_orphan_approved_link_apply_links_dry_run_then_live_writes_store_edges() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db_path = dir.path().join("state.db");
+        let store = ab_store::SqliteStore::open(&db_path)
+            .await
+            .expect("open sqlite store");
+        store
+            .memory_save(&test_mem(
+                "memory_orphan",
+                "lesson",
+                "shared memory graph review content alpha beta gamma",
+                &["memory"],
+            ))
+            .await
+            .expect("save orphan");
+        store
+            .memory_save(&test_mem(
+                "memory_anchor",
+                "lesson",
+                "shared memory graph review content alpha beta delta",
+                &["memory"],
+            ))
+            .await
+            .expect("save anchor");
+
+        let plan = json!({
+            "schema": "agent_bridge.palace.orphan_approved_link_plan.v0",
+            "links": [{
+                "pair_id": "memory_orphan -> memory_anchor",
+                "orphan_key": "memory_orphan",
+                "candidate_key": "memory_anchor",
+                "edge_type": "relates",
+            }],
+        });
+        let links = palace_orphan_approved_links_from_plan(&plan);
+
+        let dry_run = palace_orphan_approved_link_apply_links(&store, links.clone(), true).await;
+
+        assert_eq!(dry_run.applied_count, 0);
+        assert_eq!(dry_run.failed_count, 0);
+        assert_eq!(dry_run.skipped_count, 0);
+        assert_eq!(dry_run.results[0]["status"], json!("would_write"));
+        let dry_run_neighbors = store
+            .memory_neighbors("memory_orphan")
+            .await
+            .expect("dry-run neighbors");
+        assert!(
+            !dry_run_neighbors.iter().any(|edge| {
+                edge.from_key == "memory_orphan"
+                    && edge.to_key == "memory_anchor"
+                    && edge.edge_type == "relates"
+            }),
+            "dry-run must not write the approved relates edge; got {dry_run_neighbors:?}"
+        );
+
+        let live = palace_orphan_approved_link_apply_links(&store, links, false).await;
+
+        assert_eq!(live.applied_count, 1);
+        assert_eq!(live.failed_count, 0);
+        assert_eq!(live.skipped_count, 0);
+        assert_eq!(live.results[0]["status"], json!("applied"));
+        let neighbors = store
+            .memory_neighbors("memory_orphan")
+            .await
+            .expect("live neighbors");
+        assert!(
+            neighbors.iter().any(|edge| {
+                edge.from_key == "memory_orphan"
+                    && edge.to_key == "memory_anchor"
+                    && edge.edge_type == "relates"
+            }),
+            "expected live apply to write a relates edge; got {neighbors:?}"
+        );
+    }
+
+    #[test]
+    fn palace_orphan_approved_link_apply_routes_use_recorded_approvals_and_write_edges() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let old_decisions = std::env::var_os("AB_PALACE_ORPHAN_CANDIDATE_DECISIONS");
+        let old_apply_audit = std::env::var_os("AB_PALACE_ORPHAN_APPROVED_LINK_APPLY_AUDIT");
+
+        std::env::set_var(
+            "AB_PALACE_ORPHAN_CANDIDATE_DECISIONS",
+            dir.path().join("decisions.jsonl"),
+        );
+        std::env::set_var(
+            "AB_PALACE_ORPHAN_APPROVED_LINK_APPLY_AUDIT",
+            dir.path().join("apply.jsonl"),
+        );
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(async {
+            let db_path = dir.path().join("state.db");
+            let store = Arc::new(
+                ab_store::SqliteStore::open(&db_path)
+                    .await
+                    .expect("open sqlite store"),
+            );
+            store
+                .memory_save(&test_mem(
+                    "route_orphan",
+                    "lesson",
+                    "orchid basalt comet lantern",
+                    &["memory"],
+                ))
+                .await
+                .expect("save orphan");
+            store
+                .memory_save(&test_mem(
+                    "route_anchor",
+                    "lesson",
+                    "river marble copper horizon",
+                    &["memory"],
+                ))
+                .await
+                .expect("save anchor");
+
+            let state = AppState {
+                store: store.clone(),
+                markdown_root: None,
+                reports_dir: None,
+                recent_clicks: Arc::new(Mutex::new(VecDeque::with_capacity(CLICK_WINDOW))),
+            };
+            let query = || OrphanCandidatesQuery {
+                region: None,
+                threshold: Some(0.1),
+                min_content_len: Some(0),
+                max_orphans: Some(4),
+                candidate_limit: Some(2),
+            };
+
+            let Json(decision) =
+                api_orphan_candidate_decision(Json(OrphanCandidateDecisionRequest {
+                    orphan_key: "route_orphan".to_string(),
+                    candidate_key: "route_anchor".to_string(),
+                    decision: "approve".to_string(),
+                    reviewer: Some("codex-test".to_string()),
+                    note: Some("route-level approval".to_string()),
+                }))
+                .await
+                .expect("record approval");
+            assert_eq!(
+                decision["schema"],
+                json!("agent_bridge.palace.orphan_candidate_decision_response.v0")
+            );
+            assert_eq!(decision["written"], json!(true));
+            assert_eq!(decision["writes_edges"], json!(false));
+            assert_eq!(decision["record"]["decision"], json!("approve"));
+
+            let Json(plan) = api_orphan_approved_link_plan(State(state.clone()), Query(query()))
+                .await
+                .expect("approved plan");
+            assert_eq!(plan["approved_pair_count"], json!(1));
+            assert_eq!(plan["links"][0]["orphan_key"], json!("route_orphan"));
+            assert_eq!(plan["links"][0]["candidate_key"], json!("route_anchor"));
+            assert_eq!(plan["links"][0]["reviewer"], json!("codex-test"));
+
+            let Json(dry_run) = api_orphan_approved_link_apply(
+                State(state.clone()),
+                Json(OrphanApprovedLinkApplyRequest {
+                    region: None,
+                    threshold: Some(0.1),
+                    min_content_len: Some(0),
+                    max_orphans: Some(4),
+                    candidate_limit: Some(2),
+                    dry_run: Some(true),
+                    confirm: None,
+                    actor: Some("codex-test".to_string()),
+                }),
+            )
+            .await
+            .expect("dry-run apply");
+            assert_eq!(dry_run["status"], json!("dry_run"));
+            assert_eq!(dry_run["would_write_edges"], json!(1));
+            assert_eq!(dry_run["writes_edges"], json!(false));
+            assert_eq!(dry_run["results"][0]["status"], json!("would_write"));
+            let dry_run_neighbors = store
+                .memory_neighbors("route_orphan")
+                .await
+                .expect("dry-run neighbors");
+            assert!(
+                !dry_run_neighbors.iter().any(|edge| {
+                    edge.from_key == "route_orphan"
+                        && edge.to_key == "route_anchor"
+                        && edge.edge_type == "relates"
+                }),
+                "dry-run must not write the approved relates edge; got {dry_run_neighbors:?}"
+            );
+
+            let Json(live) = api_orphan_approved_link_apply(
+                State(state),
+                Json(OrphanApprovedLinkApplyRequest {
+                    region: None,
+                    threshold: Some(0.1),
+                    min_content_len: Some(0),
+                    max_orphans: Some(4),
+                    candidate_limit: Some(2),
+                    dry_run: Some(false),
+                    confirm: Some(PALACE_ORPHAN_APPROVED_LINK_APPLY_CONFIRM.to_string()),
+                    actor: Some("codex-test".to_string()),
+                }),
+            )
+            .await
+            .expect("live apply");
+            assert_eq!(live["status"], json!("applied"));
+            assert_eq!(live["applied_count"], json!(1));
+            assert_eq!(live["writes_edges"], json!(true));
+            assert_eq!(live["results"][0]["status"], json!("applied"));
+
+            let neighbors = store
+                .memory_neighbors("route_orphan")
+                .await
+                .expect("live neighbors");
+            assert!(
+                neighbors.iter().any(|edge| {
+                    edge.from_key == "route_orphan"
+                        && edge.to_key == "route_anchor"
+                        && edge.edge_type == "relates"
+                }),
+                "expected confirmed route apply to write a relates edge; got {neighbors:?}"
+            );
+        });
+
+        match old_decisions {
+            Some(value) => std::env::set_var("AB_PALACE_ORPHAN_CANDIDATE_DECISIONS", value),
+            None => std::env::remove_var("AB_PALACE_ORPHAN_CANDIDATE_DECISIONS"),
+        }
+        match old_apply_audit {
+            Some(value) => std::env::set_var("AB_PALACE_ORPHAN_APPROVED_LINK_APPLY_AUDIT", value),
+            None => std::env::remove_var("AB_PALACE_ORPHAN_APPROVED_LINK_APPLY_AUDIT"),
+        }
     }
 
     #[test]
