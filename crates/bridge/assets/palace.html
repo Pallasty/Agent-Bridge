@@ -1954,6 +1954,43 @@
       border-color: #5cc8c8;
       background: #5cc8c8;
     }
+    #panel .orphan-candidate-focused-evidence {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 6px;
+      padding-top: 7px;
+      border-top: 1px solid #23424a;
+    }
+    #panel .orphan-candidate-focused-evidence .evidence-title,
+    #panel .orphan-candidate-focused-evidence .evidence-cell,
+    #panel .orphan-candidate-focused-evidence .orphan-candidate-snippet {
+      min-width: 0;
+    }
+    #panel .orphan-candidate-focused-evidence .evidence-title {
+      grid-column: 1 / -1;
+      color: #5cc8c8;
+      font-size: 9px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+    #panel .orphan-candidate-focused-evidence .evidence-cell {
+      color: #c8d8dc;
+      font-size: 10px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #panel .orphan-candidate-focused-evidence .evidence-cell b {
+      color: #7a8a90;
+      font-weight: 600;
+      margin-right: 4px;
+    }
+    #panel .orphan-candidate-focused-evidence .orphan-candidate-snippet {
+      grid-column: span 3;
+      margin: 0;
+      background: #0d151a;
+    }
     #panel .self-review-focused-pair-context {
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
@@ -4459,6 +4496,7 @@ const VALID_NEIGHBOR_SORTS = new Set(["weight", "type", "key"]);
 const VALID_CONTENT_READER_MODES = new Set(["scan", "full"]);
 const VALID_ORPHAN_CANDIDATE_LANES = new Set(["all", "same_scope", "global_or_unscoped", "cross_project", "low_score", "no_candidates"]);
 const VALID_ORPHAN_CANDIDATE_DECISIONS = new Set(["all", "approve", "defer", "reject", "pending"]);
+const ORPHAN_REVIEW_HOTKEYS = { a: "approve", d: "defer", r: "reject", n: "next" };
 const state = {
   cy: null,
   data: null,
@@ -7112,6 +7150,22 @@ function focusedOrphanCandidateReviewItem(result) {
   return { item: index >= 0 ? rows[index] : null, index, count: rows.length };
 }
 
+function renderFocusedOrphanCandidateEvidenceSummary(item) {
+  if (!item || !item.candidate) return "";
+  const { row, candidate } = item;
+  const score = Number.isFinite(candidate.confidence) ? candidate.confidence.toFixed(2) : "n/a";
+  const scope = candidate.scope_relation || "unknown_scope";
+  const reason = candidate.reason || "candidate";
+  return `<div class="orphan-candidate-focused-evidence">
+    <div class="evidence-title">review evidence</div>
+    <div class="evidence-cell"><b>score</b>${escapeHTML(score)}</div>
+    <div class="evidence-cell" title="${escapeHTML(scope)}"><b>scope</b>${escapeHTML(scope)}</div>
+    <div class="evidence-cell" title="${escapeHTML(reason)}"><b>reason</b>${escapeHTML(reason)}</div>
+    ${renderOrphanCandidateSnippet("orphan", row.preview)}
+    ${renderOrphanCandidateSnippet("candidate", candidate.preview)}
+  </div>`;
+}
+
 function renderFocusedOrphanCandidateReviewBar(result) {
   const focused = focusedOrphanCandidateReviewItem(result || {});
   if (!focused.item) return "";
@@ -7137,6 +7191,7 @@ function renderFocusedOrphanCandidateReviewBar(result) {
       ${actions}
       <button type="button" data-orphan-review-next="1">next</button>
     </div>
+    ${renderFocusedOrphanCandidateEvidenceSummary(focused.item)}
   </div>`;
 }
 
@@ -7505,6 +7560,12 @@ async function runOrphanApprovedPlanApply(regionId, dryRun) {
   }
 }
 
+function isEditableEventTarget(target) {
+  if (!target) return false;
+  const el = target.closest && target.closest("input, textarea, select, [contenteditable='true']");
+  return !!el;
+}
+
 async function recordOrphanCandidateDecision(regionId, orphanKey, candidateKey, decision) {
   const slot = document.getElementById("region-orphan-candidates");
   const r = await fetch("/api/orphan-candidate-decision", {
@@ -7531,6 +7592,38 @@ async function recordOrphanCandidateDecision(regionId, orphanKey, candidateKey, 
   }
   await loadRegionOrphanCandidates(regionId);
   focusNextOrphanCandidateReviewFromSlot();
+}
+
+function recordFocusedOrphanCandidateDecision(regionId, decision) {
+  const slot = document.getElementById("region-orphan-candidates");
+  if (!slot || !slot._orphanCandidateResult || !["approve", "defer", "reject"].includes(decision)) return false;
+  const focused = focusedOrphanCandidateReviewItem(slot._orphanCandidateResult);
+  if (!focused.item) return false;
+  const { row, candidate } = focused.item;
+  recordOrphanCandidateDecision(regionId, row.orphan, candidate.key, decision).catch(error => {
+    const currentSlot = document.getElementById("region-orphan-candidates");
+    if (currentSlot) {
+      currentSlot.innerHTML = `${renderOrphanCandidateHead("candidate links", "review error", renderOrphanCandidatePlanButton(regionId))}
+      <div class="maintenance-empty">${escapeHTML(String(error))}</div>`;
+    }
+  });
+  return true;
+}
+
+function handleOrphanReviewKeydown(e, regionId) {
+  if (!regionId || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || isEditableEventTarget(e.target)) return false;
+  const key = String(e.key || "").toLowerCase();
+  const decision = ORPHAN_REVIEW_HOTKEYS[key];
+  if (!decision) return false;
+  if (decision === "next") {
+    e.preventDefault();
+    return focusNextOrphanCandidateReviewFromSlot();
+  }
+  if (recordFocusedOrphanCandidateDecision(regionId, decision)) {
+    e.preventDefault();
+    return true;
+  }
+  return false;
 }
 
 function renderRegionNodeList(regionId) {
@@ -7860,11 +7953,17 @@ function bindNodeEdgeRepairActions(panel, regionId) {
   panel.addEventListener("click", (e) => {
     handleOrphanRepairClick(e, regionId);
   });
+  panel.addEventListener("keydown", (e) => {
+    handleOrphanReviewKeydown(e, regionId);
+  });
 }
 
 function bindRegionWorkbenchActions(panel, regionId) {
   panel.addEventListener("click", (e) => {
     if (handleOrphanRepairClick(e, regionId)) return;
+  });
+  panel.addEventListener("keydown", (e) => {
+    handleOrphanReviewKeydown(e, regionId);
   });
   panel.querySelectorAll("[data-region-node-filter]").forEach(btn => {
     btn.addEventListener("click", () => {

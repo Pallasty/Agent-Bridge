@@ -565,6 +565,32 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("recordOrphanCandidateDecision(regionId, orphanKey, candidateKey, decision)", html)
         self.assertIn("focusedReviewBtn.dataset.orphanFocusedReviewDecision", html)
 
+    def test_focused_orphan_candidate_surfaces_compact_evidence_summary(self):
+        html = palace_html()
+
+        self.assertIn("function renderFocusedOrphanCandidateEvidenceSummary(item)", html)
+        self.assertIn("orphan-candidate-focused-evidence", html)
+        self.assertIn("review evidence", html)
+        self.assertIn("score", html)
+        self.assertIn("scope", html)
+        self.assertIn("reason", html)
+        self.assertIn("renderOrphanCandidateSnippet(\"orphan\", row.preview)", html)
+        self.assertIn("renderOrphanCandidateSnippet(\"candidate\", candidate.preview)", html)
+        self.assertIn("${renderFocusedOrphanCandidateEvidenceSummary(focused.item)}", html)
+
+    def test_focused_orphan_candidate_review_supports_keyboard_shortcuts(self):
+        html = palace_html()
+
+        self.assertIn("function handleOrphanReviewKeydown(e, regionId)", html)
+        self.assertIn("ORPHAN_REVIEW_HOTKEYS", html)
+        self.assertIn("a: \"approve\"", html)
+        self.assertIn("d: \"defer\"", html)
+        self.assertIn("r: \"reject\"", html)
+        self.assertIn("n: \"next\"", html)
+        self.assertIn("isEditableEventTarget(e.target)", html)
+        self.assertIn("recordFocusedOrphanCandidateDecision(regionId, decision)", html)
+        self.assertIn("panel.addEventListener(\"keydown\", (e) =>", html)
+
     def test_approved_plan_surfaces_human_confirmed_write_gate(self):
         html = palace_html()
 
