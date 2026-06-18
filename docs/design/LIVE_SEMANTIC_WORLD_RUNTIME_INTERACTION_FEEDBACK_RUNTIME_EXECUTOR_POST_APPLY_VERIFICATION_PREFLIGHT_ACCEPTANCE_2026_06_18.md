@@ -94,6 +94,9 @@ The critical distinction is:
 
 ## 4. Next Slice
 
-The next safe slice is outcome-ingestion review.
+The next safe slice is now captured by:
 
-That slice must keep durable writes and verdict rewrite behind explicit gates.
+- [Runtime executor outcome-ingestion review preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_OUTCOME_INGESTION_REVIEW_PREFLIGHT_2026_06_18.md)
+- [Runtime executor outcome-ingestion review preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_OUTCOME_INGESTION_REVIEW_PREFLIGHT_ACCEPTANCE_2026_06_18.md)
+
+That slice keeps durable writes and verdict rewrite behind explicit gates.

@@ -8,6 +8,7 @@ use ab_bridge::lswr_interaction_feedback::{
     build_interaction_feedback_runtime_executor_design_preflight,
     build_interaction_feedback_runtime_executor_live_lookup_preflight,
     build_interaction_feedback_runtime_executor_operator_submission_token_preflight,
+    build_interaction_feedback_runtime_executor_outcome_ingestion_review_preflight,
     build_interaction_feedback_runtime_executor_patch_application_gate_preflight,
     build_interaction_feedback_runtime_executor_patch_executor_invocation_preflight,
     build_interaction_feedback_runtime_executor_patch_runtime_application_evidence_preflight,
@@ -22,6 +23,7 @@ use ab_bridge::lswr_interaction_feedback::{
     render_interaction_feedback_runtime_executor_design_preflight,
     render_interaction_feedback_runtime_executor_live_lookup_preflight,
     render_interaction_feedback_runtime_executor_operator_submission_token_preflight,
+    render_interaction_feedback_runtime_executor_outcome_ingestion_review_preflight,
     render_interaction_feedback_runtime_executor_patch_application_gate_preflight,
     render_interaction_feedback_runtime_executor_patch_executor_invocation_preflight,
     render_interaction_feedback_runtime_executor_patch_runtime_application_evidence_preflight,
@@ -40,6 +42,7 @@ use ab_bridge::lswr_interaction_feedback::{
     LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DESIGN_PREFLIGHT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_LIVE_LOOKUP_PREFLIGHT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_OPERATOR_SUBMISSION_TOKEN_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_OUTCOME_INGESTION_REVIEW_PREFLIGHT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_APPLICATION_GATE_PREFLIGHT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_EXECUTOR_INVOCATION_PREFLIGHT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_RUNTIME_APPLICATION_EVIDENCE_PREFLIGHT_SCHEMA,
@@ -48,6 +51,7 @@ use ab_bridge::lswr_interaction_feedback::{
     LSWR_INTERACTION_FEEDBACK_VALIDATION_ENVELOPE_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_VALIDATION_SCHEMA, LSWR_RUNTIME_EXECUTOR_LIVE_LOOKUP_SNAPSHOT_SCHEMA,
     LSWR_RUNTIME_EXECUTOR_OPERATOR_SUBMISSION_DECISION_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_OUTCOME_INGESTION_REVIEW_DECISION_SCHEMA,
     LSWR_RUNTIME_EXECUTOR_PATCH_APPLICATION_GATE_DECISION_SCHEMA,
     LSWR_RUNTIME_EXECUTOR_PATCH_EXECUTOR_INVOCATION_DECISION_SCHEMA,
     LSWR_RUNTIME_EXECUTOR_PATCH_RUNTIME_APPLICATION_EVIDENCE_SCHEMA,
@@ -2739,6 +2743,208 @@ fn interaction_feedback_runtime_executor_post_apply_verification_preflight_requi
 }
 
 #[test]
+fn interaction_feedback_runtime_executor_outcome_ingestion_review_preflight_blocks_without_decision(
+) {
+    let verification_preflight = ready_runtime_executor_post_apply_verification_preflight();
+    let ingestion_preflight =
+        build_interaction_feedback_runtime_executor_outcome_ingestion_review_preflight(
+            &verification_preflight,
+        );
+    let markdown = render_interaction_feedback_runtime_executor_outcome_ingestion_review_preflight(
+        &ingestion_preflight,
+    );
+
+    assert_eq!(
+        ingestion_preflight["schema"],
+        LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_OUTCOME_INGESTION_REVIEW_PREFLIGHT_SCHEMA
+    );
+    assert_eq!(
+        ingestion_preflight["input_kind"],
+        "runtime_executor_post_apply_verification_preflight"
+    );
+    assert_eq!(
+        ingestion_preflight["source_post_apply_verification_preflight_verdict"],
+        "ready_for_outcome_ingestion_review"
+    );
+    assert_eq!(
+        ingestion_preflight["outcome_ingestion_review_decision_schema"],
+        Value::Null
+    );
+    assert_eq!(
+        ingestion_preflight["outcome_ingestion_review_preflight_verdict"],
+        "blocked"
+    );
+    assert_eq!(ingestion_preflight["status"], "blocked");
+    assert_eq!(
+        ingestion_preflight["reason"],
+        "explicit_outcome_ingestion_review_decision_required"
+    );
+    assert_runtime_executor_outcome_ingestion_review_preflight_read_only(&ingestion_preflight);
+
+    assert!(markdown.contains("- outcome_ingestion_review_preflight_verdict: `blocked`"));
+    assert!(markdown.contains("- ready_for_durable_ingestion_gate: `false`"));
+}
+
+#[test]
+fn interaction_feedback_runtime_executor_outcome_ingestion_review_preflight_accepts_explicit_decision(
+) {
+    let verification_preflight = ready_runtime_executor_post_apply_verification_preflight();
+    let ingestion_preflight =
+        build_interaction_feedback_runtime_executor_outcome_ingestion_review_preflight(&json!({
+            "post_apply_verification_preflight": verification_preflight,
+            "outcome_ingestion_review_decision": explicit_outcome_ingestion_review_decision()
+        }));
+    let markdown = render_interaction_feedback_runtime_executor_outcome_ingestion_review_preflight(
+        &ingestion_preflight,
+    );
+
+    assert_eq!(
+        ingestion_preflight["schema"],
+        LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_OUTCOME_INGESTION_REVIEW_PREFLIGHT_SCHEMA
+    );
+    assert_eq!(
+        ingestion_preflight["outcome_ingestion_review_decision_schema"],
+        LSWR_RUNTIME_EXECUTOR_OUTCOME_INGESTION_REVIEW_DECISION_SCHEMA
+    );
+    assert_eq!(
+        ingestion_preflight["outcome_ingestion_review_preflight_verdict"],
+        "ready_for_durable_ingestion_gate"
+    );
+    assert_eq!(ingestion_preflight["status"], "ready");
+    assert_eq!(
+        ingestion_preflight["reason"],
+        "outcome_ingestion_review_preflight_ready_for_durable_ingestion_gate"
+    );
+    assert_eq!(ingestion_preflight["failure_reasons"], json!([]));
+    assert_eq!(
+        ingestion_preflight["outcome_ingestion_review"]["review_id"],
+        "outcome_ingestion_review_arrival_bath_move_002"
+    );
+    assert_eq!(
+        ingestion_preflight["outcome_ingestion_review"]["verification_id"],
+        "post_apply_verification_arrival_bath_move_002"
+    );
+    assert_eq!(
+        ingestion_preflight["outcome_ingestion_review"]["decision"],
+        "approved_for_durable_ingestion_gate"
+    );
+    assert_eq!(
+        ingestion_preflight["outcome_ingestion_review"]["ready_for_durable_ingestion_gate"],
+        true
+    );
+    assert_eq!(
+        ingestion_preflight["outcome_ingestion_review"]["durable_ingestion_allowed"],
+        false
+    );
+    assert_eq!(
+        ingestion_preflight["outcome_ingestion_review"]["world_verdict_rewrite_allowed"],
+        false
+    );
+    assert_eq!(
+        ingestion_preflight["next_allowed_gate"],
+        "durable_outcome_ingestion_gate"
+    );
+    assert_runtime_executor_outcome_ingestion_review_preflight_read_only(&ingestion_preflight);
+
+    assert!(markdown.contains(
+        "- outcome_ingestion_review_preflight_verdict: `ready_for_durable_ingestion_gate`"
+    ));
+    assert!(markdown.contains("- decision: `approved_for_durable_ingestion_gate`"));
+    assert!(markdown.contains("- durable_ingestion_allowed: `false`"));
+    assert!(markdown.contains("- world_verdict_rewrite_allowed: `false`"));
+}
+
+#[test]
+fn interaction_feedback_runtime_executor_outcome_ingestion_review_preflight_blocks_bad_decision() {
+    let verification_preflight = ready_runtime_executor_post_apply_verification_preflight();
+    let mut decision = explicit_outcome_ingestion_review_decision();
+    decision["review_kind"] = json!("operator_note");
+    decision["decision"] = json!("approved_and_ingest_now");
+    decision["source_post_apply_verification_scope"]["verification_id"] =
+        json!("post_apply_verification_other");
+    decision["source_post_apply_verification_scope"]["patch_id"] = json!("patch_other");
+    decision["source_world_verdict"] = json!("verified");
+    decision["reviewed_verification_verdict"] = json!("not_verified");
+    decision["expected_effect_confirmed_for_ingestion"] = json!(false);
+    decision["presentation_readback_confirmed_for_ingestion"] = json!(false);
+    decision["durable_ingestion_allowed"] = json!(true);
+    decision["world_verdict_rewrite_allowed"] = json!(true);
+    decision["outcome_record_persisted"] = json!(true);
+
+    let ingestion_preflight =
+        build_interaction_feedback_runtime_executor_outcome_ingestion_review_preflight(&json!({
+            "post_apply_verification_preflight": verification_preflight,
+            "outcome_ingestion_review_decision": decision
+        }));
+
+    assert_eq!(
+        ingestion_preflight["outcome_ingestion_review_preflight_verdict"],
+        "blocked"
+    );
+    let failure_reasons = ingestion_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons");
+    assert!(failure_reasons.contains(&json!("outcome_ingestion_review_kind_required")));
+    assert!(failure_reasons.contains(&json!("outcome_ingestion_review_decision_not_approved")));
+    assert!(failure_reasons.contains(&json!(
+        "outcome_ingestion_review_must_preserve_not_verified_source"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "outcome_ingestion_review_must_review_verified_evidence"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "outcome_ingestion_review_must_confirm_expected_effect"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "outcome_ingestion_review_must_confirm_presentation_readback"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "outcome_ingestion_review_must_not_allow_durable_ingestion"
+    )));
+    assert!(failure_reasons.contains(&json!("outcome_ingestion_review_must_not_rewrite_verdict")));
+    assert!(failure_reasons.contains(&json!("outcome_ingestion_review_must_not_persist_record")));
+    assert!(failure_reasons.contains(&json!(
+        "outcome_ingestion_review_verification_scope_mismatch"
+    )));
+    assert!(failure_reasons.contains(&json!("outcome_ingestion_review_patch_scope_mismatch")));
+    assert_runtime_executor_outcome_ingestion_review_preflight_read_only(&ingestion_preflight);
+}
+
+#[test]
+fn interaction_feedback_runtime_executor_outcome_ingestion_review_preflight_requires_verification_input(
+) {
+    let application_preflight =
+        ready_runtime_executor_patch_runtime_application_evidence_preflight();
+    let ingestion_preflight =
+        build_interaction_feedback_runtime_executor_outcome_ingestion_review_preflight(&json!({
+            "post_apply_verification_preflight": application_preflight,
+            "outcome_ingestion_review_decision": explicit_outcome_ingestion_review_decision()
+        }));
+
+    assert_eq!(
+        ingestion_preflight["input_kind"],
+        "post_apply_verification_preflight_with_outcome_ingestion_review_decision_wrapper"
+    );
+    assert_eq!(
+        ingestion_preflight["source_schema"],
+        LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_RUNTIME_APPLICATION_EVIDENCE_PREFLIGHT_SCHEMA
+    );
+    assert_eq!(
+        ingestion_preflight["outcome_ingestion_review_preflight_verdict"],
+        "blocked"
+    );
+    assert_eq!(
+        ingestion_preflight["reason"],
+        "runtime_executor_post_apply_verification_preflight_required"
+    );
+    assert_eq!(
+        ingestion_preflight["source_post_apply_verification_preflight"],
+        Value::Null
+    );
+    assert_runtime_executor_outcome_ingestion_review_preflight_read_only(&ingestion_preflight);
+}
+
+#[test]
 fn interaction_feedback_validator_reports_tampered_fixture() {
     let mut fixture = fixture();
     fixture["events"][5]["refs"]["cause_event_id"] = json!("missing_event");
@@ -3040,6 +3246,40 @@ fn explicit_post_apply_verification_evidence() -> Value {
         "outcome_ingestion_allowed": false,
         "world_verdict_rewrite_allowed": false,
         "verification_record_persisted": false
+    })
+}
+
+fn ready_runtime_executor_post_apply_verification_preflight() -> Value {
+    build_interaction_feedback_runtime_executor_post_apply_verification_preflight(&json!({
+        "patch_runtime_application_evidence_preflight": ready_runtime_executor_patch_runtime_application_evidence_preflight(),
+        "post_apply_verification_evidence": explicit_post_apply_verification_evidence()
+    }))
+}
+
+fn explicit_outcome_ingestion_review_decision() -> Value {
+    json!({
+        "schema": LSWR_RUNTIME_EXECUTOR_OUTCOME_INGESTION_REVIEW_DECISION_SCHEMA,
+        "review_id": "outcome_ingestion_review_arrival_bath_move_002",
+        "review_kind": "outcome_ingestion_review",
+        "reviewed_at": "2026-06-16T07:33:00Z",
+        "source_post_apply_verification_scope": {
+            "verification_id": "post_apply_verification_arrival_bath_move_002",
+            "runtime_application_evidence_id": "runtime_application_evidence_arrival_bath_move_002",
+            "source_invocation_request_id": "patch_executor_invocation_arrival_bath_move_002",
+            "world_id": "onsen_live_session",
+            "branch_id": "main",
+            "runtime_generation": "runtime_gen_1284",
+            "patch_id": "patch_arrival_bath_move_002"
+        },
+        "decision": "approved_for_durable_ingestion_gate",
+        "review_reason": "verified_effect_and_presentation_evidence_ready_for_durable_gate",
+        "source_world_verdict": "not_verified",
+        "reviewed_verification_verdict": "verified",
+        "expected_effect_confirmed_for_ingestion": true,
+        "presentation_readback_confirmed_for_ingestion": true,
+        "durable_ingestion_allowed": false,
+        "world_verdict_rewrite_allowed": false,
+        "outcome_record_persisted": false
     })
 }
 
@@ -3794,6 +4034,79 @@ fn assert_runtime_executor_post_apply_verification_preflight_read_only(preflight
     );
     assert_eq!(
         preflight["agent_action_contract"]["do_not_persist_verification_record"],
+        true
+    );
+}
+
+fn assert_runtime_executor_outcome_ingestion_review_preflight_read_only(preflight: &Value) {
+    assert_eq!(preflight["writes_state"], false);
+    assert_eq!(preflight["store_access_required"], false);
+    assert_eq!(preflight["mcp_tool_registered"], false);
+    assert_eq!(
+        preflight["outcome_ingestion_review_performed_by_this_tool"],
+        false
+    );
+    assert_eq!(
+        preflight["durable_outcome_ingestion_performed_by_this_tool"],
+        false
+    );
+    assert_eq!(
+        preflight["world_verdict_rewrite_performed_by_this_tool"],
+        false
+    );
+    assert_eq!(preflight["guardrails"]["read_only"], true);
+    assert_eq!(preflight["guardrails"]["mutation_surface"], "none");
+    assert_eq!(preflight["guardrails"]["writes_state"], false);
+    assert_eq!(preflight["guardrails"]["store_access_required"], false);
+    assert_eq!(preflight["guardrails"]["mcp_tool_registered"], false);
+    assert_eq!(
+        preflight["guardrails"]["requires_ready_post_apply_verification_preflight"],
+        true
+    );
+    assert_eq!(
+        preflight["guardrails"]["requires_explicit_outcome_ingestion_review_decision"],
+        true
+    );
+    assert_eq!(
+        preflight["guardrails"]["performs_outcome_ingestion_review"],
+        false
+    );
+    assert_eq!(preflight["guardrails"]["durable_ingestion_allowed"], false);
+    assert_eq!(preflight["guardrails"]["persists_outcome_record"], false);
+    assert_eq!(
+        preflight["guardrails"]["feedback_changes_world_verdict_allowed"],
+        false
+    );
+    assert_eq!(
+        preflight["outcome_ingestion_review"]["outcome_ingestion_review_performed_by_this_tool"],
+        false
+    );
+    assert_eq!(
+        preflight["outcome_ingestion_review"]["durable_ingestion_allowed"],
+        false
+    );
+    assert_eq!(
+        preflight["outcome_ingestion_review"]["world_verdict_rewrite_allowed"],
+        false
+    );
+    assert_eq!(
+        preflight["outcome_ingestion_review"]["outcome_record_persisted_by_this_tool"],
+        false
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_ingest_outcome"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_write_memory"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_rewrite_world_verdict"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_persist_outcome_record"],
         true
     );
 }

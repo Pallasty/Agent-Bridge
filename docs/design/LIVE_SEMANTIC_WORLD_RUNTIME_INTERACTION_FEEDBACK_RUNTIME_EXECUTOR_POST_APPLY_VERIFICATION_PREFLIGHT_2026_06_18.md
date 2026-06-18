@@ -129,6 +129,11 @@ Still not accepted:
 
 ## 6. Next Slice
 
-The next safe slice is outcome-ingestion review. It must consume G6 verification
-preflight output without writing durable state or changing the world verdict
-unless a separate ingestion and verdict-rewrite gate is accepted.
+The next safe slice is now captured by:
+
+- [Runtime executor outcome-ingestion review preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_OUTCOME_INGESTION_REVIEW_PREFLIGHT_2026_06_18.md)
+- [Runtime executor outcome-ingestion review preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_OUTCOME_INGESTION_REVIEW_PREFLIGHT_ACCEPTANCE_2026_06_18.md)
+
+It consumes G6 verification preflight output without writing durable state or
+changing the world verdict unless a separate ingestion and verdict-rewrite gate
+is accepted.
