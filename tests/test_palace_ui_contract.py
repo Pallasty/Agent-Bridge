@@ -628,6 +628,21 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("reason", html)
         self.assertIn("renderOrphanCandidateSnippet(\"note\", link.note)", html)
 
+    def test_approved_apply_result_surfaces_audit_details(self):
+        html = palace_html()
+
+        self.assertIn("function renderOrphanApprovedApplyDetails(result)", html)
+        self.assertIn("function renderOrphanApprovedApplyResultRows(result)", html)
+        self.assertIn("orphan-approved-apply-detail", html)
+        self.assertIn("orphan-approved-apply-row", html)
+        self.assertIn("would_write_edges", html)
+        self.assertIn("applied_count", html)
+        self.assertIn("failed_count", html)
+        self.assertIn("blocking_reasons", html)
+        self.assertIn("result.results", html)
+        self.assertIn("data-orphan-approved-apply-detail", html)
+        self.assertIn("detailEl.innerHTML = renderOrphanApprovedApplyDetails(result)", html)
+
     def test_search_surfaces_result_navigation(self):
         html = palace_html()
 

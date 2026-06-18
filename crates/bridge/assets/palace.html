@@ -2417,6 +2417,43 @@
     #panel .orphan-approved-apply-result.blocked,
     #panel .orphan-approved-apply-result.partial { color: #c8a96a; }
     #panel .orphan-approved-apply-result.error { color: #d88080; }
+    #panel .orphan-approved-apply-detail {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 6px;
+      color: #858594;
+      font-size: 10px;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+    #panel .orphan-approved-apply-detail:empty { display: none; }
+    #panel .orphan-approved-apply-summary {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 5px;
+    }
+    #panel .orphan-approved-apply-stat,
+    #panel .orphan-approved-apply-row {
+      min-width: 0;
+      padding: 6px;
+      background: #0f0f16;
+      border: 1px solid #252532;
+      border-radius: 4px;
+    }
+    #panel .orphan-approved-apply-stat strong,
+    #panel .orphan-approved-apply-row strong {
+      display: block;
+      color: #e8e8ee;
+      font-weight: 600;
+    }
+    #panel .orphan-approved-apply-row.applied { border-left: 2px solid #5cc89a; }
+    #panel .orphan-approved-apply-row.would_write { border-left: 2px solid #7aa9d8; }
+    #panel .orphan-approved-apply-row.failed,
+    #panel .orphan-approved-apply-row.blocked { border-left: 2px solid #d88080; }
+    #panel .orphan-approved-apply-blockers {
+      color: #c8a96a;
+      font-size: 10px;
+    }
     #panel .node-edge-repair {
       padding: 9px;
       background: #0c0c12;
@@ -7546,6 +7583,7 @@ function renderOrphanApprovedPlanApplyGate(plan, regionId) {
       <button type="button" class="orphan-approved-apply-button live" data-orphan-approved-apply="live"${disabled}>apply</button>
     </div>
     <div class="orphan-approved-apply-result" data-orphan-approved-apply-result="${escapeHTML(regionId || "")}">${approved > 0 ? "ready" : "no approved links"}</div>
+    <div class="orphan-approved-apply-detail" data-orphan-approved-apply-detail="${escapeHTML(regionId || "")}"></div>
   </div>`;
 }
 
@@ -7561,6 +7599,37 @@ function renderOrphanApprovedApplyResult(result) {
   if (result && result.dry_run) return `dry run · ${wouldWrite} edge${wouldWrite === 1 ? "" : "s"}${reasons}`;
   if (result && result.blocked) return `blocked · ${wouldWrite} edge${wouldWrite === 1 ? "" : "s"}${reasons}`;
   return `${blocked} · applied ${applied} · failed ${failed}${reasons}`;
+}
+
+function renderOrphanApprovedApplyResultRows(result) {
+  const rows = Array.isArray(result && result.results) ? result.results : [];
+  if (rows.length === 0) return "";
+  return rows.slice(0, 8).map(row => {
+    const status = row && row.status ? String(row.status) : "unknown";
+    const from = row && (row.orphan_key || row.from_key) ? String(row.orphan_key || row.from_key) : "";
+    const to = row && (row.candidate_key || row.to_key) ? String(row.candidate_key || row.to_key) : "";
+    const reason = row && row.reason ? ` · ${row.reason}` : "";
+    const cls = status.replace(/[^a-z0-9_-]/gi, "_");
+    return `<div class="orphan-approved-apply-row ${escapeHTML(cls)}">
+      <strong>${escapeHTML(status)}</strong>
+      <span>${escapeHTML(from)} → ${escapeHTML(to)}${escapeHTML(reason)}</span>
+    </div>`;
+  }).join("");
+}
+
+function renderOrphanApprovedApplyDetails(result) {
+  if (!result) return "";
+  const blockers = Array.isArray(result.blocking_reasons) && result.blocking_reasons.length
+    ? `<div class="orphan-approved-apply-blockers">blocking_reasons · ${escapeHTML(result.blocking_reasons.join(", "))}</div>`
+    : "";
+  const stats = [
+    ["would_write_edges", result.would_write_edges || 0],
+    ["applied_count", result.applied_count || 0],
+    ["failed_count", result.failed_count || 0],
+  ].map(([label, value]) => `<div class="orphan-approved-apply-stat"><span>${escapeHTML(label)}</span><strong>${escapeHTML(String(value))}</strong></div>`).join("");
+  return `<div class="orphan-approved-apply-summary">${stats}</div>
+    ${blockers}
+    ${renderOrphanApprovedApplyResultRows(result)}`;
 }
 
 function renderOrphanApprovedPlanLinks(plan) {
@@ -7653,10 +7722,12 @@ async function runOrphanApprovedPlanApply(regionId, dryRun) {
   const slot = document.getElementById("region-orphan-candidates");
   const gate = slot && slot.querySelector("[data-orphan-approved-apply-gate]");
   const resultEl = gate && gate.querySelector("[data-orphan-approved-apply-result]");
+  const detailEl = gate && gate.querySelector("[data-orphan-approved-apply-detail]");
   const confirmEl = gate && gate.querySelector("[data-orphan-approved-confirm]");
   if (!regionId || !resultEl) return;
   resultEl.className = "orphan-approved-apply-result";
   resultEl.textContent = dryRun ? "dry run..." : "applying...";
+  if (detailEl) detailEl.innerHTML = "";
   try {
     const r = await fetch("/api/orphan-approved-link-apply", {
       method: "POST",
@@ -7680,6 +7751,7 @@ async function runOrphanApprovedPlanApply(regionId, dryRun) {
       await loadGraph();
     }
     resultEl.textContent = renderOrphanApprovedApplyResult(result);
+    if (detailEl) detailEl.innerHTML = renderOrphanApprovedApplyDetails(result);
     resultEl.className = `orphan-approved-apply-result ${escapeHTML(result.blocked ? "blocked" : (result.status || ""))}`;
     if (!result.dry_run && result.writes_edges && !result.blocked) {
       await loadRegionOrphanApprovedPlan(regionId);
@@ -7687,6 +7759,7 @@ async function runOrphanApprovedPlanApply(regionId, dryRun) {
   } catch (error) {
     resultEl.textContent = String(error);
     resultEl.className = "orphan-approved-apply-result error";
+    if (detailEl) detailEl.innerHTML = "";
   }
 }
 
