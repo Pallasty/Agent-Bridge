@@ -7015,6 +7015,13 @@ async fn real_main() -> Result<()> {
             });
             let store = hub.store.clone();
             let registry = build_registry(hub);
+            // Eagerly warm the embedding model on a bg thread so the first
+            // semantic query after (re)connect doesn't fall to the hash backend
+            // and return garbage cosines against the real-model store. Only when
+            // memory is enabled (otherwise the encoder is never used).
+            if store.is_some() {
+                ab_store::vector::warmup();
+            }
             tracing::info!(tools = registry.list().len(), "starting MCP stdio server");
             serve_stdio(
                 registry,

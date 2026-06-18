@@ -275,6 +275,18 @@ pub fn embed_text(text: &str) -> Vec<f32> {
     crate::embedding::default_backend().embed(text)
 }
 
+/// Eagerly kick off embedding-model initialization (non-blocking). The ONNX
+/// init runs on a background thread that takes seconds for large models
+/// (~7.5s for para-ml's 470 MB L12). Calling this at process startup lets the
+/// model load DURING startup so the first real query neither pays the cold
+/// latency NOR falls back to the hash backend — which, against a real-model
+/// store, returns near-orthogonal garbage cosines (the cold-first-query bug).
+/// One throwaway embed triggers the lazy init; the result is discarded.
+/// No-op cost for the hash backend.
+pub fn warmup() {
+    let _ = embed_text("warmup");
+}
+
 /// Cosine similarity between two equal-length vectors.
 /// Returns 0.0 for zero vectors or mismatched lengths.
 ///
