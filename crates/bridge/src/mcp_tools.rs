@@ -41974,85 +41974,85 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(MobileListDevicesTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(MobileCurrentFocusTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(MobileScreenshotTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(MobileHealthTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(MobileUiSnapshotTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(MobileLogcatTailTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(MobileInstallApkTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(MobileLaunchAppTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(MobileClickTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(MobileInputTextTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(MobileAppleStatusTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(MobileIosListDevicesTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(MobileIosAppsTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(MobileIosSyslogTailTool::new(hub.clone())),
     );
 
@@ -47822,9 +47822,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(p.includes(Tier::Standard, "avatar_cortex_renderer_snapshot"));
         assert!(p.includes(Tier::Standard, "pet_presence_sync"));
         assert!(p.includes(Tier::Standard, "xiao_shu_action_request"));
-        assert!(p.includes(Tier::Standard, "mobile_ios_list_devices"));
-        assert!(p.includes(Tier::Standard, "mobile_ios_apps"));
-        assert!(p.includes(Tier::Standard, "mobile_ios_syslog_tail"));
+        assert!(p.includes(Tier::Niche, "mobile_ios_list_devices"));
+        assert!(p.includes(Tier::Niche, "mobile_ios_apps"));
+        assert!(p.includes(Tier::Niche, "mobile_ios_syslog_tail"));
         assert!(p.includes(Tier::Standard, "macos_ax_probe"));
         assert!(p.includes(Tier::Standard, "macos_ax_verify"));
         assert!(p.includes(Tier::Standard, "semantic_bus_adapter_report"));
