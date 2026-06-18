@@ -9,6 +9,8 @@ Parent documents:
 - [Runtime executor durable outcome-ingestion gate preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_INGESTION_GATE_PREFLIGHT_2026_06_18.md)
 - [Runtime executor durable outcome-ingestion gate preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_INGESTION_GATE_PREFLIGHT_ACCEPTANCE_2026_06_18.md)
 - [Runtime executor durable outcome-ingestion execution preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_INGESTION_EXECUTION_PREFLIGHT_ACCEPTANCE_2026_06_18.md)
+- [Runtime executor durable outcome write-implementation preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_WRITE_IMPLEMENTATION_PREFLIGHT_2026_06_18.md)
+- [Runtime executor durable outcome write-implementation preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_WRITE_IMPLEMENTATION_PREFLIGHT_ACCEPTANCE_2026_06_18.md)
 
 Forum anchors:
 
@@ -132,7 +134,7 @@ Still not accepted:
 
 ## 6. Next Slice
 
-The next safe slice is a durable outcome write implementation preflight. It must
-consume G9 output without writing durable state unless a separate write
-implementation is accepted, and it must keep world-verdict rewrite behind a
-later explicit gate.
+The next safe slice is now captured by:
+
+- [Runtime executor durable outcome write-implementation preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_WRITE_IMPLEMENTATION_PREFLIGHT_2026_06_18.md)
+- [Runtime executor durable outcome write-implementation preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_WRITE_IMPLEMENTATION_PREFLIGHT_ACCEPTANCE_2026_06_18.md)

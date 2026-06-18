@@ -96,7 +96,7 @@ The critical distinction is:
 
 ## 4. Next Slice
 
-The next safe slice is durable outcome write implementation preflight.
+The next safe slice is now captured by:
 
-That slice must keep actual writes and world verdict rewrite behind explicit
-separate gates.
+- [Runtime executor durable outcome write-implementation preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_WRITE_IMPLEMENTATION_PREFLIGHT_2026_06_18.md)
+- [Runtime executor durable outcome write-implementation preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_WRITE_IMPLEMENTATION_PREFLIGHT_ACCEPTANCE_2026_06_18.md)
