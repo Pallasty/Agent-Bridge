@@ -126,7 +126,11 @@ Still not accepted:
 
 ## 6. Next Slice
 
-The next safe slice is durable outcome-ingestion gate preflight. It must consume
-G7 review output without writing durable state or changing the world verdict
-unless a separate durable-ingestion gate and later verdict-rewrite gate are
-accepted.
+The next safe slice is now captured by:
+
+- [Runtime executor durable outcome-ingestion gate preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_INGESTION_GATE_PREFLIGHT_2026_06_18.md)
+- [Runtime executor durable outcome-ingestion gate preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_INGESTION_GATE_PREFLIGHT_ACCEPTANCE_2026_06_18.md)
+
+It consumes G7 review output without writing durable state or changing the world
+verdict unless a separate durable-ingestion gate and later verdict-rewrite gate
+are accepted.

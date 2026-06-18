@@ -60,6 +60,11 @@ pub const LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_OUTCOME_INGESTION_REVIEW_PR
     "agent_bridge.lswr.interaction_feedback_runtime_executor_outcome_ingestion_review_preflight.v0";
 pub const LSWR_RUNTIME_EXECUTOR_OUTCOME_INGESTION_REVIEW_DECISION_SCHEMA: &str =
     "agent_bridge.lswr.runtime_executor.outcome_ingestion_review_decision.v0";
+pub const LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_INGESTION_GATE_PREFLIGHT_SCHEMA:
+    &str =
+    "agent_bridge.lswr.interaction_feedback_runtime_executor_durable_outcome_ingestion_gate_preflight.v0";
+pub const LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_INGESTION_GATE_DECISION_SCHEMA: &str =
+    "agent_bridge.lswr.runtime_executor.durable_outcome_ingestion_gate_decision.v0";
 
 const EXPECTED_EVENT_TYPES: [&str; 8] = [
     "human.select",
@@ -4440,6 +4445,306 @@ pub fn render_interaction_feedback_runtime_executor_outcome_ingestion_review_pre
     lines.join("\n")
 }
 
+pub fn build_interaction_feedback_runtime_executor_durable_outcome_ingestion_gate_preflight(
+    input: &Value,
+) -> Value {
+    let (input_kind, review_preflight, gate_decision) =
+        extract_runtime_executor_durable_outcome_ingestion_gate_preflight_input(input);
+    let review_schema_ok = review_preflight.get("schema").and_then(Value::as_str)
+        == Some(
+            LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_OUTCOME_INGESTION_REVIEW_PREFLIGHT_SCHEMA,
+        );
+    let gate_schema_ok = gate_decision.get("schema").and_then(Value::as_str)
+        == Some(LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_INGESTION_GATE_DECISION_SCHEMA);
+    let review = &review_preflight["outcome_ingestion_review"];
+    let review_guardrails = &review_preflight["guardrails"];
+    let review_contract = &review_preflight["agent_action_contract"];
+    let gate_scope = &gate_decision["source_outcome_ingestion_review_scope"];
+
+    let mut failure_reasons = Vec::new();
+    if !review_schema_ok {
+        failure_reasons
+            .push("runtime_executor_outcome_ingestion_review_preflight_required".to_string());
+    }
+    if review_schema_ok
+        && review_preflight["outcome_ingestion_review_preflight_verdict"]
+            != "ready_for_durable_ingestion_gate"
+    {
+        failure_reasons.push("source_outcome_ingestion_review_preflight_not_ready".to_string());
+    }
+    if review_schema_ok && review_preflight["source_world_verdict"] != "not_verified" {
+        failure_reasons.push("source_world_verdict_must_remain_not_verified".to_string());
+    }
+    if review_schema_ok && review["decision"] != "approved_for_durable_ingestion_gate" {
+        failure_reasons.push("source_outcome_ingestion_review_decision_not_approved".to_string());
+    }
+    if review_schema_ok && review["ready_for_durable_ingestion_gate"] != true {
+        failure_reasons.push("source_outcome_ingestion_review_not_ready_for_gate".to_string());
+    }
+    if review_schema_ok && review["durable_ingestion_allowed"] != false {
+        failure_reasons
+            .push("source_outcome_ingestion_review_must_not_allow_ingestion".to_string());
+    }
+    if review_schema_ok && review["world_verdict_rewrite_allowed"] != false {
+        failure_reasons
+            .push("source_outcome_ingestion_review_must_not_rewrite_verdict".to_string());
+    }
+    if review_schema_ok
+        && (review_guardrails["read_only"] != true
+            || review_guardrails["writes_state"] != false
+            || review_guardrails["durable_ingestion_allowed"] != false
+            || review_guardrails["persists_outcome_record"] != false)
+    {
+        failure_reasons
+            .push("source_outcome_ingestion_review_guardrails_not_read_only".to_string());
+    }
+    if review_schema_ok
+        && (review_contract["may_review_durable_outcome_ingestion_after_review"] != true
+            || review_contract["require_separate_durable_ingestion_gate"] != true
+            || review_contract["require_world_verdict_rewrite_gate_after_ingestion"] != true
+            || review_contract["do_not_ingest_outcome"] != true
+            || review_contract["do_not_write_memory"] != true
+            || review_contract["do_not_rewrite_world_verdict"] != true
+            || review_contract["do_not_persist_outcome_record"] != true)
+    {
+        failure_reasons.push("source_outcome_ingestion_review_contract_not_protective".to_string());
+    }
+    if !gate_schema_ok {
+        failure_reasons
+            .push("explicit_durable_outcome_ingestion_gate_decision_required".to_string());
+    }
+    if gate_schema_ok && gate_decision["gate_id"].as_str().is_none() {
+        failure_reasons.push("durable_outcome_ingestion_gate_id_required".to_string());
+    }
+    if gate_schema_ok && gate_decision["gate_kind"] != "durable_outcome_ingestion_gate" {
+        failure_reasons.push("durable_outcome_ingestion_gate_kind_required".to_string());
+    }
+    if gate_schema_ok && gate_decision["decision"] != "approved_for_durable_ingestion_execution" {
+        failure_reasons.push("durable_outcome_ingestion_gate_decision_not_approved".to_string());
+    }
+    if gate_schema_ok && gate_decision["source_world_verdict"] != "not_verified" {
+        failure_reasons
+            .push("durable_outcome_ingestion_gate_must_preserve_not_verified_source".to_string());
+    }
+    if gate_schema_ok
+        && gate_decision["reviewed_ingestion_review_decision"]
+            != "approved_for_durable_ingestion_gate"
+    {
+        failure_reasons
+            .push("durable_outcome_ingestion_gate_must_review_approved_review".to_string());
+    }
+    if gate_schema_ok && gate_decision["outcome_payload_complete"] != true {
+        failure_reasons
+            .push("durable_outcome_ingestion_gate_requires_complete_payload".to_string());
+    }
+    if gate_schema_ok && gate_decision["idempotency_key"].as_str().is_none() {
+        failure_reasons.push("durable_outcome_ingestion_gate_idempotency_key_required".to_string());
+    }
+    if gate_schema_ok && gate_decision["durable_ingestion_execution_allowed"] != false {
+        failure_reasons.push("durable_outcome_ingestion_gate_must_not_allow_execution".to_string());
+    }
+    if gate_schema_ok && gate_decision["world_verdict_rewrite_allowed"] != false {
+        failure_reasons.push("durable_outcome_ingestion_gate_must_not_rewrite_verdict".to_string());
+    }
+    if gate_schema_ok && gate_decision["outcome_record_persisted"] != false {
+        failure_reasons.push("durable_outcome_ingestion_gate_must_not_persist_record".to_string());
+    }
+    if review_schema_ok && gate_schema_ok && gate_scope["review_id"] != review["review_id"] {
+        failure_reasons.push("durable_outcome_ingestion_gate_review_scope_mismatch".to_string());
+    }
+    if review_schema_ok
+        && gate_schema_ok
+        && gate_scope["verification_id"] != review["verification_id"]
+    {
+        failure_reasons
+            .push("durable_outcome_ingestion_gate_verification_scope_mismatch".to_string());
+    }
+    if review_schema_ok
+        && gate_schema_ok
+        && gate_scope["runtime_application_evidence_id"]
+            != review["runtime_application_evidence_id"]
+    {
+        failure_reasons
+            .push("durable_outcome_ingestion_gate_application_evidence_scope_mismatch".to_string());
+    }
+    if review_schema_ok
+        && gate_schema_ok
+        && gate_scope["source_invocation_request_id"] != review["source_invocation_request_id"]
+    {
+        failure_reasons
+            .push("durable_outcome_ingestion_gate_invocation_scope_mismatch".to_string());
+    }
+    if review_schema_ok && gate_schema_ok && gate_scope["world_id"] != review["world_id"] {
+        failure_reasons.push("durable_outcome_ingestion_gate_world_scope_mismatch".to_string());
+    }
+    if review_schema_ok && gate_schema_ok && gate_scope["branch_id"] != review["branch_id"] {
+        failure_reasons.push("durable_outcome_ingestion_gate_branch_scope_mismatch".to_string());
+    }
+    if review_schema_ok
+        && gate_schema_ok
+        && gate_scope["runtime_generation"] != review["runtime_generation"]
+    {
+        failure_reasons
+            .push("durable_outcome_ingestion_gate_generation_scope_mismatch".to_string());
+    }
+    if review_schema_ok && gate_schema_ok && gate_scope["patch_id"] != review["patch_id"] {
+        failure_reasons.push("durable_outcome_ingestion_gate_patch_scope_mismatch".to_string());
+    }
+
+    let ready = failure_reasons.is_empty();
+    let reason = if ready {
+        "durable_outcome_ingestion_gate_preflight_ready_for_execution".to_string()
+    } else {
+        failure_reasons
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "durable_outcome_ingestion_gate_preflight_blocked".to_string())
+    };
+
+    json!({
+        "schema": LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_INGESTION_GATE_PREFLIGHT_SCHEMA,
+        "input_kind": input_kind,
+        "source_schema": review_preflight.get("schema").cloned().unwrap_or(Value::Null),
+        "source_outcome_ingestion_review_preflight_verdict": review_preflight
+            .get("outcome_ingestion_review_preflight_verdict")
+            .cloned()
+            .unwrap_or(Value::Null),
+        "source_world_verdict": review_preflight
+            .get("source_world_verdict")
+            .cloned()
+            .unwrap_or(Value::Null),
+        "durable_outcome_ingestion_gate_decision_schema": gate_decision.get("schema").cloned().unwrap_or(Value::Null),
+        "durable_outcome_ingestion_gate_preflight_verdict": if ready { "ready_for_durable_outcome_ingestion_execution" } else { "blocked" },
+        "status": if ready { "ready" } else { "blocked" },
+        "reason": reason,
+        "failure_reasons": unique_strings(failure_reasons),
+        "guardrails": runtime_executor_durable_outcome_ingestion_gate_preflight_guardrails(),
+        "durable_outcome_ingestion_gate": {
+            "gate_id": if ready { gate_decision.get("gate_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "review_id": if ready { gate_scope.get("review_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "verification_id": if ready { gate_scope.get("verification_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "runtime_application_evidence_id": if ready { gate_scope.get("runtime_application_evidence_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "source_invocation_request_id": if ready { gate_scope.get("source_invocation_request_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "world_id": if ready { gate_scope.get("world_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "branch_id": if ready { gate_scope.get("branch_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "runtime_generation": if ready { gate_scope.get("runtime_generation").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "patch_id": if ready { gate_scope.get("patch_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "decision": if ready { gate_decision.get("decision").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "gate_reason": if ready { gate_decision.get("gate_reason").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "outcome_record_candidate_id": if ready { gate_decision.get("outcome_record_candidate_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "outcome_record_schema": if ready { gate_decision.get("outcome_record_schema").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "idempotency_key": if ready { gate_decision.get("idempotency_key").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "outcome_payload_complete": if ready { gate_decision.get("outcome_payload_complete").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "ready_for_durable_outcome_ingestion_execution": ready,
+            "durable_outcome_ingestion_gate_performed_by_this_tool": false,
+            "durable_ingestion_execution_allowed": false,
+            "world_verdict_rewrite_allowed": false,
+            "outcome_record_persisted_by_this_tool": false
+        },
+        "next_allowed_gate": if ready { "durable_outcome_ingestion_execution" } else { "repair_durable_outcome_ingestion_gate_input" },
+        "agent_action_contract": {
+            "mode": "runtime_executor_durable_outcome_ingestion_gate_preflight_only",
+            "may_execute_durable_outcome_ingestion_after_gate": ready,
+            "do_not_ingest_outcome": true,
+            "do_not_write_memory": true,
+            "do_not_rewrite_world_verdict": true,
+            "do_not_persist_outcome_record": true,
+            "require_separate_durable_ingestion_execution": true,
+            "require_world_verdict_rewrite_gate_after_ingestion": true
+        },
+        "source_outcome_ingestion_review_preflight": if review_schema_ok { review_preflight } else { Value::Null },
+        "durable_outcome_ingestion_gate_decision": if gate_schema_ok { gate_decision } else { Value::Null },
+        "durable_outcome_ingestion_gate_performed_by_this_tool": false,
+        "durable_outcome_ingestion_performed_by_this_tool": false,
+        "world_verdict_rewrite_performed_by_this_tool": false,
+        "writes_state": false,
+        "store_access_required": false,
+        "mcp_tool_registered": false,
+        "note": "pure durable outcome-ingestion gate preflight: validates explicit gate decision without durable ingestion, writing state, or rewriting world verdict"
+    })
+}
+
+pub fn render_interaction_feedback_runtime_executor_durable_outcome_ingestion_gate_preflight(
+    preflight: &Value,
+) -> String {
+    let mut lines = Vec::new();
+    lines.push(
+        "# LSWR Interaction Feedback Runtime Executor Durable Outcome-Ingestion Gate Preflight"
+            .to_string(),
+    );
+    lines.push(String::new());
+    push_markdown_kv(&mut lines, "schema", &preflight["schema"]);
+    push_markdown_kv(
+        &mut lines,
+        "durable_outcome_ingestion_gate_preflight_verdict",
+        &preflight["durable_outcome_ingestion_gate_preflight_verdict"],
+    );
+    push_markdown_kv(&mut lines, "status", &preflight["status"]);
+    push_markdown_kv(&mut lines, "reason", &preflight["reason"]);
+    push_markdown_kv(
+        &mut lines,
+        "source_outcome_ingestion_review_preflight_verdict",
+        &preflight["source_outcome_ingestion_review_preflight_verdict"],
+    );
+    push_markdown_kv(
+        &mut lines,
+        "durable_outcome_ingestion_gate_decision_schema",
+        &preflight["durable_outcome_ingestion_gate_decision_schema"],
+    );
+    push_markdown_kv(&mut lines, "failure_reasons", &preflight["failure_reasons"]);
+
+    lines.push(String::new());
+    lines.push("## Durable Outcome-Ingestion Gate".to_string());
+    lines.push(String::new());
+    for key in [
+        "gate_id",
+        "review_id",
+        "verification_id",
+        "runtime_application_evidence_id",
+        "source_invocation_request_id",
+        "world_id",
+        "branch_id",
+        "runtime_generation",
+        "patch_id",
+        "decision",
+        "gate_reason",
+        "outcome_record_candidate_id",
+        "outcome_record_schema",
+        "idempotency_key",
+        "outcome_payload_complete",
+        "ready_for_durable_outcome_ingestion_execution",
+        "durable_outcome_ingestion_gate_performed_by_this_tool",
+        "durable_ingestion_execution_allowed",
+        "world_verdict_rewrite_allowed",
+        "outcome_record_persisted_by_this_tool",
+    ] {
+        push_markdown_kv(
+            &mut lines,
+            key,
+            &preflight["durable_outcome_ingestion_gate"][key],
+        );
+    }
+
+    lines.push(String::new());
+    lines.push("## Agent Action Contract".to_string());
+    lines.push(String::new());
+    for key in [
+        "mode",
+        "may_execute_durable_outcome_ingestion_after_gate",
+        "do_not_ingest_outcome",
+        "do_not_write_memory",
+        "do_not_rewrite_world_verdict",
+        "do_not_persist_outcome_record",
+        "require_separate_durable_ingestion_execution",
+        "require_world_verdict_rewrite_gate_after_ingestion",
+    ] {
+        push_markdown_kv(&mut lines, key, &preflight["agent_action_contract"][key]);
+    }
+
+    lines.push(String::new());
+    lines.join("\n")
+}
+
 pub fn build_interaction_feedback_readback(fixture: &Value) -> Value {
     let selected_entities =
         fixture["interaction_state_after"]["active_view"]["selected_entities"].clone();
@@ -5204,6 +5509,57 @@ fn extract_runtime_executor_outcome_ingestion_review_preflight_input(
     }
 }
 
+fn extract_runtime_executor_durable_outcome_ingestion_gate_preflight_input(
+    input: &Value,
+) -> (&'static str, Value, Value) {
+    if input.get("schema").and_then(Value::as_str)
+        == Some(
+            LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_OUTCOME_INGESTION_REVIEW_PREFLIGHT_SCHEMA,
+        )
+    {
+        return (
+            "runtime_executor_outcome_ingestion_review_preflight",
+            input.clone(),
+            Value::Null,
+        );
+    }
+
+    let review_preflight = input
+        .get("outcome_ingestion_review_preflight")
+        .or_else(|| input.get("runtime_executor_outcome_ingestion_review_preflight"))
+        .or_else(|| input.get("ingestion_review_preflight"))
+        .or_else(|| input.get("preflight"))
+        .cloned()
+        .unwrap_or_else(|| input.clone());
+    let gate_decision = input
+        .get("durable_outcome_ingestion_gate_decision")
+        .or_else(|| input.get("outcome_ingestion_gate_decision"))
+        .or_else(|| input.get("gate_decision"))
+        .cloned()
+        .unwrap_or(Value::Null);
+
+    if input.get("outcome_ingestion_review_preflight").is_some()
+        || input
+            .get("runtime_executor_outcome_ingestion_review_preflight")
+            .is_some()
+        || input.get("ingestion_review_preflight").is_some()
+        || input.get("preflight").is_some()
+        || input
+            .get("durable_outcome_ingestion_gate_decision")
+            .is_some()
+        || input.get("outcome_ingestion_gate_decision").is_some()
+        || input.get("gate_decision").is_some()
+    {
+        (
+            "outcome_ingestion_review_preflight_with_durable_outcome_ingestion_gate_decision_wrapper",
+            review_preflight,
+            gate_decision,
+        )
+    } else {
+        ("invalid_input", review_preflight, gate_decision)
+    }
+}
+
 fn validate_argument_context(argument_context: Option<&Value>) -> Value {
     let Some(context) = argument_context else {
         return json!({
@@ -5497,6 +5853,25 @@ fn runtime_executor_outcome_ingestion_review_preflight_guardrails() -> Value {
         "persists_outcome_record": false,
         "feedback_changes_world_verdict_allowed": false,
         "runtime_executor_outcome_ingestion_review_preflight_only": true
+    })
+}
+
+fn runtime_executor_durable_outcome_ingestion_gate_preflight_guardrails() -> Value {
+    json!({
+        "read_only": true,
+        "mutation_surface": "none",
+        "writes_state": false,
+        "store_access_required": false,
+        "mcp_tool_registered": false,
+        "queries_live_runtime": false,
+        "requires_ready_outcome_ingestion_review_preflight": true,
+        "requires_explicit_durable_outcome_ingestion_gate_decision": true,
+        "gate_kind": "durable_outcome_ingestion_gate",
+        "performs_durable_outcome_ingestion_gate": false,
+        "durable_ingestion_execution_allowed": false,
+        "persists_outcome_record": false,
+        "feedback_changes_world_verdict_allowed": false,
+        "runtime_executor_durable_outcome_ingestion_gate_preflight_only": true
     })
 }
 
