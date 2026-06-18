@@ -2278,6 +2278,72 @@
       gap: 5px;
       margin-bottom: 6px;
     }
+    #panel .orphan-approved-preview {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 7px;
+      margin-bottom: 8px;
+      padding: 8px;
+      background: #0c0c12;
+      border: 1px solid #252532;
+      border-left: 2px solid #5cc89a;
+      border-radius: 4px;
+    }
+    #panel .orphan-approved-preview-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      color: #858594;
+      font-size: 10px;
+      line-height: 1.35;
+    }
+    #panel .orphan-approved-preview-head strong {
+      color: #e8e8ee;
+      font-weight: 600;
+    }
+    #panel .orphan-approved-preview-risk-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 5px;
+    }
+    #panel .orphan-approved-preview-risk {
+      min-width: 0;
+      padding: 6px;
+      background: #111118;
+      border: 1px solid #252532;
+      border-radius: 4px;
+      color: #858594;
+      font-size: 10px;
+      line-height: 1.25;
+    }
+    #panel .orphan-approved-preview-risk strong {
+      display: block;
+      margin-top: 2px;
+      color: #e8e8ee;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    #panel .orphan-approved-preview-risk.same_scope { border-color: rgba(92,200,154,0.42); }
+    #panel .orphan-approved-preview-risk.global_or_unscoped { border-color: rgba(122,169,216,0.42); }
+    #panel .orphan-approved-preview-risk.cross_project { border-color: rgba(200,169,106,0.5); }
+    #panel .orphan-approved-preview-links {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    #panel .orphan-approved-preview-link {
+      min-width: 0;
+      padding: 7px;
+      background: #0f0f16;
+      border: 1px solid #252532;
+      border-radius: 4px;
+    }
+    #panel .orphan-approved-preview-meta {
+      color: #858594;
+      font-size: 10px;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
     #panel .orphan-approved-apply-gate {
       display: grid;
       grid-template-columns: minmax(0, 1fr);
@@ -7397,6 +7463,69 @@ function renderOrphanApprovedPlanStats(plan) {
   ).join("") + `</div>`;
 }
 
+function orphanApprovedPlanRisk(link) {
+  const relation = String((link && link.scope_relation) || "").toLowerCase();
+  if (relation.includes("same")) return "same_scope";
+  if (relation.includes("cross")) return "cross_project";
+  if (relation.includes("global") || relation.includes("unscoped")) return "global_or_unscoped";
+  return "unknown";
+}
+
+function orphanApprovedPlanRiskBuckets(plan) {
+  const links = Array.isArray(plan && plan.links) ? plan.links : [];
+  const buckets = { same_scope: 0, global_or_unscoped: 0, cross_project: 0, unknown: 0, all: links.length };
+  links.forEach(link => {
+    const risk = orphanApprovedPlanRisk(link);
+    buckets[risk] = (buckets[risk] || 0) + 1;
+  });
+  return buckets;
+}
+
+function renderOrphanApprovedPlanPreviewLinks(plan) {
+  const links = Array.isArray(plan && plan.links) ? plan.links : [];
+  if (links.length === 0) {
+    return `<div class="maintenance-empty">no approved edges to preview</div>`;
+  }
+  return `<div class="orphan-approved-preview-links">` + links.slice(0, 8).map(link => {
+    const note = link.note ? renderOrphanCandidateSnippet("note", link.note) : "";
+    const meta = [
+      `confidence ${link.confidence != null ? link.confidence : "n/a"}`,
+      `scope_relation ${link.scope_relation || "unknown"}`,
+      `reason ${link.reason || "approved review"}`,
+    ].join(" · ");
+    return `<div class="orphan-approved-preview-link">
+      <div class="orphan-approved-plan-pair">
+        <button type="button" class="orphan-candidate-node" data-orphan-node-key="${escapeHTML(link.orphan_key || "")}">
+          <span class="orphan-candidate-label" title="${escapeHTML(link.orphan_key || "")}">${escapeHTML(link.orphan_key || "")}</span>
+          <span class="orphan-candidate-meta">orphan_key · preview</span>
+        </button>
+        <button type="button" class="orphan-candidate-target" data-orphan-candidate-key="${escapeHTML(link.candidate_key || "")}">
+          <span class="orphan-candidate-label" title="${escapeHTML(link.candidate_key || "")}">${escapeHTML(link.candidate_key || "")}</span>
+          <span class="orphan-candidate-meta">candidate_key · ${escapeHTML(link.edge_type || "relates")}</span>
+        </button>
+      </div>
+      <div class="orphan-approved-preview-meta">${escapeHTML(meta)}</div>
+      ${note}
+    </div>`;
+  }).join("") + `</div>`;
+}
+
+function renderOrphanApprovedPlanPreview(plan) {
+  const buckets = orphanApprovedPlanRiskBuckets(plan || {});
+  return `<div class="orphan-approved-preview">
+    <div class="orphan-approved-preview-head">
+      <span>apply preview</span>
+      <strong>guardrail: read-only preview · requires APPLY APPROVED LINKS</strong>
+    </div>
+    <div class="orphan-approved-preview-risk-grid">
+      <div class="orphan-approved-preview-risk same_scope">same scope<strong>${escapeHTML(String(buckets.same_scope || 0))}</strong></div>
+      <div class="orphan-approved-preview-risk global_or_unscoped">global/unscoped<strong>${escapeHTML(String(buckets.global_or_unscoped || 0))}</strong></div>
+      <div class="orphan-approved-preview-risk cross_project">cross project<strong>${escapeHTML(String(buckets.cross_project || 0))}</strong></div>
+    </div>
+    ${renderOrphanApprovedPlanPreviewLinks(plan || {})}
+  </div>`;
+}
+
 function renderOrphanApprovedPlanApplyGate(plan, regionId) {
   const approved = plan && Number.isFinite(plan.approved_pair_count) ? plan.approved_pair_count : 0;
   const disabled = approved > 0 ? "" : " disabled";
@@ -7461,6 +7590,7 @@ function renderOrphanApprovedPlanLinks(plan) {
 function renderRegionOrphanApprovedPlan(plan, regionId) {
   return `${renderOrphanCandidateHead("approved plan", "read-only", renderOrphanCandidateBackButton(regionId))}
   ${renderOrphanApprovedPlanStats(plan || {})}
+  ${renderOrphanApprovedPlanPreview(plan || {})}
   ${renderOrphanApprovedPlanApplyGate(plan || {}, regionId)}
   ${renderOrphanApprovedPlanLinks(plan || {})}`;
 }

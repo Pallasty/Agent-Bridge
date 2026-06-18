@@ -601,6 +601,33 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("data-orphan-approved-confirm", html)
         self.assertIn("APPLY APPROVED LINKS", html)
 
+    def test_approved_plan_surfaces_apply_preview_risk_summary(self):
+        html = palace_html()
+
+        self.assertIn("function orphanApprovedPlanRiskBuckets(plan)", html)
+        self.assertIn("function renderOrphanApprovedPlanPreview(plan)", html)
+        self.assertIn("orphan-approved-preview", html)
+        self.assertIn("apply preview", html)
+        self.assertIn("same scope", html)
+        self.assertIn("global/unscoped", html)
+        self.assertIn("cross project", html)
+        self.assertIn("guardrail: read-only preview", html)
+        self.assertIn("requires APPLY APPROVED LINKS", html)
+        self.assertIn("renderOrphanApprovedPlanPreview(plan || {})", html)
+
+    def test_approved_plan_preview_lists_edge_evidence_before_apply(self):
+        html = palace_html()
+
+        self.assertIn("function renderOrphanApprovedPlanPreviewLinks(plan)", html)
+        self.assertIn("orphan-approved-preview-link", html)
+        self.assertIn("orphan-approved-preview-risk", html)
+        self.assertIn("orphan_key", html)
+        self.assertIn("candidate_key", html)
+        self.assertIn("confidence", html)
+        self.assertIn("scope_relation", html)
+        self.assertIn("reason", html)
+        self.assertIn("renderOrphanCandidateSnippet(\"note\", link.note)", html)
+
     def test_search_surfaces_result_navigation(self):
         html = palace_html()
 
