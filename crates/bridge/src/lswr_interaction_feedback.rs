@@ -95,6 +95,11 @@ pub const LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_STOR
     "agent_bridge.lswr.interaction_feedback_runtime_executor_durable_outcome_record_store_write_execution_preflight.v0";
 pub const LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_STORE_WRITE_EXECUTION_DECISION_SCHEMA: &str =
     "agent_bridge.lswr.runtime_executor.durable_outcome_record_store_write_execution_decision.v0";
+pub const LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_EVIDENCE_PREFLIGHT_SCHEMA:
+    &str =
+    "agent_bridge.lswr.interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_preflight.v0";
+pub const LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_EVIDENCE_SCHEMA: &str =
+    "agent_bridge.lswr.runtime_executor.durable_outcome_record_write_evidence.v0";
 const EXPECTED_EVENT_TYPES: [&str; 8] = [
     "human.select",
     "ai.patch_proposed",
@@ -7453,6 +7458,516 @@ pub fn render_interaction_feedback_runtime_executor_durable_outcome_record_store
     lines.join("\n")
 }
 
+pub fn build_interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_preflight(
+    input: &Value,
+) -> Value {
+    let (input_kind, store_write_preflight, write_evidence) =
+        extract_runtime_executor_durable_outcome_record_write_evidence_preflight_input(input);
+    let store_write_preflight_schema_ok = store_write_preflight
+        .get("schema")
+        .and_then(Value::as_str)
+        == Some(
+            LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_STORE_WRITE_EXECUTION_PREFLIGHT_SCHEMA,
+        );
+    let write_evidence_schema_ok = write_evidence.get("schema").and_then(Value::as_str)
+        == Some(LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_EVIDENCE_SCHEMA);
+    let store_write = &store_write_preflight["durable_outcome_record_store_write_execution"];
+    let store_write_guardrails = &store_write_preflight["guardrails"];
+    let store_write_contract = &store_write_preflight["agent_action_contract"];
+    let evidence_scope =
+        &write_evidence["source_durable_outcome_record_store_write_execution_scope"];
+
+    let mut failure_reasons = Vec::new();
+    if !store_write_preflight_schema_ok {
+        failure_reasons.push(
+            "runtime_executor_durable_outcome_record_store_write_execution_preflight_required"
+                .to_string(),
+        );
+    }
+    if store_write_preflight_schema_ok
+        && store_write_preflight["durable_outcome_record_store_write_execution_preflight_verdict"]
+            != "ready_for_durable_outcome_record_write_evidence"
+    {
+        failure_reasons.push(
+            "source_durable_outcome_record_store_write_execution_preflight_not_ready".to_string(),
+        );
+    }
+    if store_write_preflight_schema_ok
+        && store_write_preflight["source_world_verdict"] != "not_verified"
+    {
+        failure_reasons.push("source_world_verdict_must_remain_not_verified".to_string());
+    }
+    if store_write_preflight_schema_ok
+        && store_write["decision"] != "approved_for_durable_outcome_record_write_evidence"
+    {
+        failure_reasons.push(
+            "source_durable_outcome_record_store_write_execution_decision_not_approved".to_string(),
+        );
+    }
+    if store_write_preflight_schema_ok
+        && store_write["ready_for_durable_outcome_record_write_evidence"] != true
+    {
+        failure_reasons.push(
+            "source_durable_outcome_record_store_write_execution_not_ready_for_evidence"
+                .to_string(),
+        );
+    }
+    if store_write_preflight_schema_ok
+        && store_write["durable_store_write_execution_allowed"] != false
+    {
+        failure_reasons.push(
+            "source_durable_outcome_record_store_write_execution_must_not_allow_execution"
+                .to_string(),
+        );
+    }
+    if store_write_preflight_schema_ok
+        && store_write["durable_outcome_record_written_by_this_tool"] != false
+    {
+        failure_reasons.push(
+            "source_durable_outcome_record_store_write_execution_must_not_write_record".to_string(),
+        );
+    }
+    if store_write_preflight_schema_ok && store_write["memory_write_allowed"] != false {
+        failure_reasons.push(
+            "source_durable_outcome_record_store_write_execution_must_not_allow_memory_write"
+                .to_string(),
+        );
+    }
+    if store_write_preflight_schema_ok && store_write["world_verdict_rewrite_allowed"] != false {
+        failure_reasons.push(
+            "source_durable_outcome_record_store_write_execution_must_not_rewrite_verdict"
+                .to_string(),
+        );
+    }
+    if store_write_preflight_schema_ok
+        && (store_write_guardrails["read_only"] != true
+            || store_write_guardrails["writes_state"] != false
+            || store_write_guardrails["durable_store_write_execution_allowed"] != false
+            || store_write_guardrails["persists_outcome_record"] != false)
+    {
+        failure_reasons.push(
+            "source_durable_outcome_record_store_write_execution_guardrails_not_read_only"
+                .to_string(),
+        );
+    }
+    if store_write_preflight_schema_ok
+        && (store_write_contract["may_execute_durable_outcome_record_store_write_after_preflight"]
+            != true
+            || store_write_contract
+                ["require_separate_durable_outcome_record_store_write_execution"]
+                != true
+            || store_write_contract["require_world_verdict_rewrite_gate_after_ingestion"] != true
+            || store_write_contract["do_not_ingest_outcome"] != true
+            || store_write_contract["do_not_write_memory"] != true
+            || store_write_contract["do_not_rewrite_world_verdict"] != true
+            || store_write_contract["do_not_persist_outcome_record"] != true)
+    {
+        failure_reasons.push(
+            "source_durable_outcome_record_store_write_execution_contract_not_protective"
+                .to_string(),
+        );
+    }
+    if !write_evidence_schema_ok {
+        failure_reasons.push("explicit_durable_outcome_record_write_evidence_required".to_string());
+    }
+    if write_evidence_schema_ok && write_evidence["write_evidence_id"].as_str().is_none() {
+        failure_reasons.push("durable_outcome_record_write_evidence_id_required".to_string());
+    }
+    if write_evidence_schema_ok
+        && write_evidence["evidence_kind"] != "durable_outcome_record_write_evidence"
+    {
+        failure_reasons.push("durable_outcome_record_write_evidence_kind_required".to_string());
+    }
+    if write_evidence_schema_ok && write_evidence["source_world_verdict"] != "not_verified" {
+        failure_reasons.push(
+            "durable_outcome_record_write_evidence_must_preserve_not_verified_source".to_string(),
+        );
+    }
+    if write_evidence_schema_ok
+        && write_evidence["reviewed_store_write_execution_decision"]
+            != "approved_for_durable_outcome_record_write_evidence"
+    {
+        failure_reasons.push(
+            "durable_outcome_record_write_evidence_must_review_approved_store_write_execution"
+                .to_string(),
+        );
+    }
+    if write_evidence_schema_ok && write_evidence["durable_outcome_record_write_observed"] != true {
+        failure_reasons
+            .push("durable_outcome_record_write_evidence_requires_write_observed".to_string());
+    }
+    if write_evidence_schema_ok && write_evidence["store_write_acknowledged"] != true {
+        failure_reasons
+            .push("durable_outcome_record_write_evidence_requires_store_ack".to_string());
+    }
+    if write_evidence_schema_ok && write_evidence["record_readback_verified"] != true {
+        failure_reasons.push("durable_outcome_record_write_evidence_requires_readback".to_string());
+    }
+    if write_evidence_schema_ok && write_evidence["outcome_record_digest_verified"] != true {
+        failure_reasons
+            .push("durable_outcome_record_write_evidence_requires_digest_verification".to_string());
+    }
+    if write_evidence_schema_ok && write_evidence["idempotency_key_confirmed"] != true {
+        failure_reasons
+            .push("durable_outcome_record_write_evidence_requires_idempotency".to_string());
+    }
+    if write_evidence_schema_ok && write_evidence["write_destination"].as_str().is_none() {
+        failure_reasons
+            .push("durable_outcome_record_write_evidence_destination_required".to_string());
+    }
+    if write_evidence_schema_ok && write_evidence["outcome_record_key"].as_str().is_none() {
+        failure_reasons.push("durable_outcome_record_write_evidence_key_required".to_string());
+    }
+    if write_evidence_schema_ok && write_evidence["outcome_record_digest"].as_str().is_none() {
+        failure_reasons.push("durable_outcome_record_write_evidence_digest_required".to_string());
+    }
+    if write_evidence_schema_ok
+        && write_evidence["persisted_outcome_record_key"] != write_evidence["outcome_record_key"]
+    {
+        failure_reasons
+            .push("durable_outcome_record_write_evidence_persisted_key_mismatch".to_string());
+    }
+    if write_evidence_schema_ok
+        && write_evidence["persisted_outcome_record_digest"]
+            != write_evidence["outcome_record_digest"]
+    {
+        failure_reasons
+            .push("durable_outcome_record_write_evidence_persisted_digest_mismatch".to_string());
+    }
+    if write_evidence_schema_ok
+        && write_evidence["durable_outcome_record_written_by_this_tool"] != false
+    {
+        failure_reasons
+            .push("durable_outcome_record_write_evidence_must_not_write_by_this_tool".to_string());
+    }
+    if write_evidence_schema_ok && write_evidence["memory_write_allowed"] != false {
+        failure_reasons
+            .push("durable_outcome_record_write_evidence_must_not_allow_memory_write".to_string());
+    }
+    if write_evidence_schema_ok && write_evidence["outcome_ingestion_allowed"] != false {
+        failure_reasons
+            .push("durable_outcome_record_write_evidence_must_not_allow_ingestion".to_string());
+    }
+    if write_evidence_schema_ok && write_evidence["world_verdict_rewrite_allowed"] != false {
+        failure_reasons
+            .push("durable_outcome_record_write_evidence_must_not_rewrite_verdict".to_string());
+    }
+
+    for (scope_key, source_key, reason) in [
+        (
+            "store_write_execution_id",
+            "store_write_execution_id",
+            "durable_outcome_record_write_evidence_store_write_execution_scope_mismatch",
+        ),
+        (
+            "persistence_id",
+            "persistence_id",
+            "durable_outcome_record_write_evidence_persistence_scope_mismatch",
+        ),
+        (
+            "record_write_execution_id",
+            "record_write_execution_id",
+            "durable_outcome_record_write_evidence_record_execution_scope_mismatch",
+        ),
+        (
+            "record_write_id",
+            "record_write_id",
+            "durable_outcome_record_write_evidence_record_write_scope_mismatch",
+        ),
+        (
+            "write_implementation_id",
+            "write_implementation_id",
+            "durable_outcome_record_write_evidence_implementation_scope_mismatch",
+        ),
+        (
+            "execution_id",
+            "execution_id",
+            "durable_outcome_record_write_evidence_ingestion_execution_scope_mismatch",
+        ),
+        (
+            "gate_id",
+            "gate_id",
+            "durable_outcome_record_write_evidence_gate_scope_mismatch",
+        ),
+        (
+            "review_id",
+            "review_id",
+            "durable_outcome_record_write_evidence_review_scope_mismatch",
+        ),
+        (
+            "verification_id",
+            "verification_id",
+            "durable_outcome_record_write_evidence_verification_scope_mismatch",
+        ),
+        (
+            "runtime_application_evidence_id",
+            "runtime_application_evidence_id",
+            "durable_outcome_record_write_evidence_application_evidence_scope_mismatch",
+        ),
+        (
+            "source_invocation_request_id",
+            "source_invocation_request_id",
+            "durable_outcome_record_write_evidence_invocation_scope_mismatch",
+        ),
+        (
+            "world_id",
+            "world_id",
+            "durable_outcome_record_write_evidence_world_scope_mismatch",
+        ),
+        (
+            "branch_id",
+            "branch_id",
+            "durable_outcome_record_write_evidence_branch_scope_mismatch",
+        ),
+        (
+            "runtime_generation",
+            "runtime_generation",
+            "durable_outcome_record_write_evidence_generation_scope_mismatch",
+        ),
+        (
+            "patch_id",
+            "patch_id",
+            "durable_outcome_record_write_evidence_patch_scope_mismatch",
+        ),
+        (
+            "outcome_record_candidate_id",
+            "outcome_record_candidate_id",
+            "durable_outcome_record_write_evidence_outcome_candidate_scope_mismatch",
+        ),
+        (
+            "outcome_record_schema",
+            "outcome_record_schema",
+            "durable_outcome_record_write_evidence_outcome_schema_scope_mismatch",
+        ),
+        (
+            "idempotency_key",
+            "idempotency_key",
+            "durable_outcome_record_write_evidence_idempotency_scope_mismatch",
+        ),
+        (
+            "outcome_payload_digest",
+            "outcome_payload_digest",
+            "durable_outcome_record_write_evidence_payload_digest_scope_mismatch",
+        ),
+        (
+            "write_plan_id",
+            "write_plan_id",
+            "durable_outcome_record_write_evidence_write_plan_scope_mismatch",
+        ),
+        (
+            "write_destination",
+            "write_destination",
+            "durable_outcome_record_write_evidence_destination_scope_mismatch",
+        ),
+        (
+            "outcome_record_key",
+            "outcome_record_key",
+            "durable_outcome_record_write_evidence_key_scope_mismatch",
+        ),
+        (
+            "outcome_record_digest",
+            "outcome_record_digest",
+            "durable_outcome_record_write_evidence_digest_scope_mismatch",
+        ),
+    ] {
+        if store_write_preflight_schema_ok
+            && write_evidence_schema_ok
+            && evidence_scope[scope_key] != store_write[source_key]
+        {
+            failure_reasons.push(reason.to_string());
+        }
+    }
+
+    let ready = failure_reasons.is_empty();
+    let reason = if ready {
+        "durable_outcome_record_write_evidence_preflight_ready_for_evidence_review".to_string()
+    } else {
+        failure_reasons.first().cloned().unwrap_or_else(|| {
+            "durable_outcome_record_write_evidence_preflight_blocked".to_string()
+        })
+    };
+
+    json!({
+        "schema": LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_EVIDENCE_PREFLIGHT_SCHEMA,
+        "input_kind": input_kind,
+        "source_schema": store_write_preflight.get("schema").cloned().unwrap_or(Value::Null),
+        "source_durable_outcome_record_store_write_execution_preflight_verdict": store_write_preflight
+            .get("durable_outcome_record_store_write_execution_preflight_verdict")
+            .cloned()
+            .unwrap_or(Value::Null),
+        "source_world_verdict": store_write_preflight
+            .get("source_world_verdict")
+            .cloned()
+            .unwrap_or(Value::Null),
+        "durable_outcome_record_write_evidence_schema": write_evidence.get("schema").cloned().unwrap_or(Value::Null),
+        "durable_outcome_record_write_evidence_preflight_verdict": if ready { "ready_for_durable_outcome_record_write_evidence_review" } else { "blocked" },
+        "status": if ready { "ready" } else { "blocked" },
+        "reason": reason,
+        "failure_reasons": unique_strings(failure_reasons),
+        "guardrails": runtime_executor_durable_outcome_record_write_evidence_preflight_guardrails(),
+        "durable_outcome_record_write_evidence": {
+            "write_evidence_id": if ready { write_evidence.get("write_evidence_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "store_write_execution_id": if ready { evidence_scope.get("store_write_execution_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "persistence_id": if ready { evidence_scope.get("persistence_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "record_write_execution_id": if ready { evidence_scope.get("record_write_execution_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "record_write_id": if ready { evidence_scope.get("record_write_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "write_implementation_id": if ready { evidence_scope.get("write_implementation_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "execution_id": if ready { evidence_scope.get("execution_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "gate_id": if ready { evidence_scope.get("gate_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "review_id": if ready { evidence_scope.get("review_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "verification_id": if ready { evidence_scope.get("verification_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "runtime_application_evidence_id": if ready { evidence_scope.get("runtime_application_evidence_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "source_invocation_request_id": if ready { evidence_scope.get("source_invocation_request_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "world_id": if ready { evidence_scope.get("world_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "branch_id": if ready { evidence_scope.get("branch_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "runtime_generation": if ready { evidence_scope.get("runtime_generation").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "patch_id": if ready { evidence_scope.get("patch_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "evidence_kind": if ready { write_evidence.get("evidence_kind").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "write_evidence_reason": if ready { write_evidence.get("write_evidence_reason").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "outcome_record_candidate_id": if ready { evidence_scope.get("outcome_record_candidate_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "outcome_record_schema": if ready { evidence_scope.get("outcome_record_schema").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "idempotency_key": if ready { evidence_scope.get("idempotency_key").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "outcome_payload_digest": if ready { evidence_scope.get("outcome_payload_digest").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "write_plan_id": if ready { evidence_scope.get("write_plan_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "write_destination": if ready { write_evidence.get("write_destination").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "outcome_record_key": if ready { write_evidence.get("outcome_record_key").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "outcome_record_digest": if ready { write_evidence.get("outcome_record_digest").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "persisted_outcome_record_key": if ready { write_evidence.get("persisted_outcome_record_key").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "persisted_outcome_record_digest": if ready { write_evidence.get("persisted_outcome_record_digest").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "durable_outcome_record_write_observed": if ready { write_evidence.get("durable_outcome_record_write_observed").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "store_write_acknowledged": if ready { write_evidence.get("store_write_acknowledged").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "record_readback_verified": if ready { write_evidence.get("record_readback_verified").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "outcome_record_digest_verified": if ready { write_evidence.get("outcome_record_digest_verified").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "idempotency_key_confirmed": if ready { write_evidence.get("idempotency_key_confirmed").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "ready_for_durable_outcome_record_write_evidence_review": ready,
+            "durable_outcome_record_written_by_this_tool": false,
+            "memory_write_allowed": false,
+            "outcome_ingestion_allowed": false,
+            "world_verdict_rewrite_allowed": false
+        },
+        "next_allowed_gate": if ready { "durable_outcome_record_write_evidence_review" } else { "repair_durable_outcome_record_write_evidence_input" },
+        "agent_action_contract": {
+            "mode": "runtime_executor_durable_outcome_record_write_evidence_preflight_only",
+            "may_review_durable_outcome_record_write_evidence_after_preflight": ready,
+            "do_not_ingest_outcome": true,
+            "do_not_write_memory": true,
+            "do_not_rewrite_world_verdict": true,
+            "do_not_persist_outcome_record": true,
+            "require_separate_durable_outcome_record_write_evidence_review": true,
+            "require_world_verdict_rewrite_gate_after_evidence_review": true
+        },
+        "source_durable_outcome_record_store_write_execution_preflight": if store_write_preflight_schema_ok { store_write_preflight } else { Value::Null },
+        "durable_outcome_record_write_evidence_input": if write_evidence_schema_ok { write_evidence } else { Value::Null },
+        "durable_outcome_record_write_evidence_preflight_performed_by_this_tool": true,
+        "durable_outcome_record_written_by_this_tool": false,
+        "durable_outcome_ingestion_performed_by_this_tool": false,
+        "world_verdict_rewrite_performed_by_this_tool": false,
+        "writes_state": false,
+        "store_access_required": false,
+        "mcp_tool_registered": false,
+        "note": "pure durable outcome record write-evidence preflight: validates supplied external write evidence without durable writes, memory/store access, ingestion, or world verdict rewrite"
+    })
+}
+
+pub fn render_interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_preflight(
+    preflight: &Value,
+) -> String {
+    let mut lines = Vec::new();
+    lines.push(
+        "# LSWR Interaction Feedback Runtime Executor Durable Outcome Record Write Evidence Preflight"
+            .to_string(),
+    );
+    lines.push(String::new());
+    push_markdown_kv(&mut lines, "schema", &preflight["schema"]);
+    push_markdown_kv(
+        &mut lines,
+        "durable_outcome_record_write_evidence_preflight_verdict",
+        &preflight["durable_outcome_record_write_evidence_preflight_verdict"],
+    );
+    push_markdown_kv(&mut lines, "status", &preflight["status"]);
+    push_markdown_kv(&mut lines, "reason", &preflight["reason"]);
+    push_markdown_kv(
+        &mut lines,
+        "source_durable_outcome_record_store_write_execution_preflight_verdict",
+        &preflight["source_durable_outcome_record_store_write_execution_preflight_verdict"],
+    );
+    push_markdown_kv(
+        &mut lines,
+        "durable_outcome_record_write_evidence_schema",
+        &preflight["durable_outcome_record_write_evidence_schema"],
+    );
+    push_markdown_kv(&mut lines, "failure_reasons", &preflight["failure_reasons"]);
+
+    lines.push(String::new());
+    lines.push("## Durable Outcome Record Write Evidence".to_string());
+    lines.push(String::new());
+    for key in [
+        "write_evidence_id",
+        "store_write_execution_id",
+        "persistence_id",
+        "record_write_execution_id",
+        "record_write_id",
+        "write_implementation_id",
+        "execution_id",
+        "gate_id",
+        "review_id",
+        "verification_id",
+        "runtime_application_evidence_id",
+        "source_invocation_request_id",
+        "world_id",
+        "branch_id",
+        "runtime_generation",
+        "patch_id",
+        "evidence_kind",
+        "write_evidence_reason",
+        "outcome_record_candidate_id",
+        "outcome_record_schema",
+        "idempotency_key",
+        "outcome_payload_digest",
+        "write_plan_id",
+        "write_destination",
+        "outcome_record_key",
+        "outcome_record_digest",
+        "persisted_outcome_record_key",
+        "persisted_outcome_record_digest",
+        "durable_outcome_record_write_observed",
+        "store_write_acknowledged",
+        "record_readback_verified",
+        "outcome_record_digest_verified",
+        "idempotency_key_confirmed",
+        "ready_for_durable_outcome_record_write_evidence_review",
+        "durable_outcome_record_written_by_this_tool",
+        "memory_write_allowed",
+        "outcome_ingestion_allowed",
+        "world_verdict_rewrite_allowed",
+    ] {
+        push_markdown_kv(
+            &mut lines,
+            key,
+            &preflight["durable_outcome_record_write_evidence"][key],
+        );
+    }
+
+    lines.push(String::new());
+    lines.push("## Agent Action Contract".to_string());
+    lines.push(String::new());
+    for key in [
+        "mode",
+        "may_review_durable_outcome_record_write_evidence_after_preflight",
+        "do_not_ingest_outcome",
+        "do_not_write_memory",
+        "do_not_rewrite_world_verdict",
+        "do_not_persist_outcome_record",
+        "require_separate_durable_outcome_record_write_evidence_review",
+        "require_world_verdict_rewrite_gate_after_evidence_review",
+    ] {
+        push_markdown_kv(&mut lines, key, &preflight["agent_action_contract"][key]);
+    }
+
+    lines.push(String::new());
+    lines.join("\n")
+}
+
 pub fn build_interaction_feedback_readback(fixture: &Value) -> Value {
     let selected_entities =
         fixture["interaction_state_after"]["active_view"]["selected_entities"].clone();
@@ -8614,6 +9129,69 @@ fn extract_runtime_executor_durable_outcome_record_store_write_execution_preflig
     }
 }
 
+fn extract_runtime_executor_durable_outcome_record_write_evidence_preflight_input(
+    input: &Value,
+) -> (&'static str, Value, Value) {
+    if input.get("schema").and_then(Value::as_str)
+        == Some(
+            LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_STORE_WRITE_EXECUTION_PREFLIGHT_SCHEMA,
+        )
+    {
+        return (
+            "runtime_executor_durable_outcome_record_store_write_execution_preflight",
+            input.clone(),
+            Value::Null,
+        );
+    }
+
+    let store_write_preflight = input
+        .get("durable_outcome_record_store_write_execution_preflight")
+        .or_else(|| {
+            input.get("runtime_executor_durable_outcome_record_store_write_execution_preflight")
+        })
+        .or_else(|| input.get("outcome_record_store_write_execution_preflight"))
+        .or_else(|| input.get("record_store_write_execution_preflight"))
+        .or_else(|| input.get("store_write_execution_preflight"))
+        .or_else(|| input.get("preflight"))
+        .cloned()
+        .unwrap_or_else(|| input.clone());
+    let write_evidence = input
+        .get("durable_outcome_record_write_evidence")
+        .or_else(|| input.get("outcome_record_write_evidence"))
+        .or_else(|| input.get("record_write_evidence"))
+        .or_else(|| input.get("write_evidence"))
+        .cloned()
+        .unwrap_or(Value::Null);
+
+    if input
+        .get("durable_outcome_record_store_write_execution_preflight")
+        .is_some()
+        || input
+            .get("runtime_executor_durable_outcome_record_store_write_execution_preflight")
+            .is_some()
+        || input
+            .get("outcome_record_store_write_execution_preflight")
+            .is_some()
+        || input
+            .get("record_store_write_execution_preflight")
+            .is_some()
+        || input.get("store_write_execution_preflight").is_some()
+        || input.get("preflight").is_some()
+        || input.get("durable_outcome_record_write_evidence").is_some()
+        || input.get("outcome_record_write_evidence").is_some()
+        || input.get("record_write_evidence").is_some()
+        || input.get("write_evidence").is_some()
+    {
+        (
+            "durable_outcome_record_store_write_execution_preflight_with_durable_outcome_record_write_evidence_wrapper",
+            store_write_preflight,
+            write_evidence,
+        )
+    } else {
+        ("invalid_input", store_write_preflight, write_evidence)
+    }
+}
+
 fn validate_argument_context(argument_context: Option<&Value>) -> Value {
     let Some(context) = argument_context else {
         return json!({
@@ -9051,6 +9629,27 @@ fn runtime_executor_durable_outcome_record_store_write_execution_preflight_guard
         "persists_outcome_record": false,
         "feedback_changes_world_verdict_allowed": false,
         "runtime_executor_durable_outcome_record_store_write_execution_preflight_only": true
+    })
+}
+
+fn runtime_executor_durable_outcome_record_write_evidence_preflight_guardrails() -> Value {
+    json!({
+        "read_only": true,
+        "mutation_surface": "none",
+        "writes_state": false,
+        "store_access_required": false,
+        "mcp_tool_registered": false,
+        "queries_live_runtime": false,
+        "requires_ready_durable_outcome_record_store_write_execution_preflight": true,
+        "requires_explicit_durable_outcome_record_write_evidence": true,
+        "evidence_kind": "durable_outcome_record_write_evidence",
+        "performs_durable_outcome_record_write_evidence_preflight": true,
+        "durable_outcome_record_written": false,
+        "memory_write_allowed": false,
+        "outcome_ingestion_allowed": false,
+        "persists_outcome_record": false,
+        "feedback_changes_world_verdict_allowed": false,
+        "runtime_executor_durable_outcome_record_write_evidence_preflight_only": true
     })
 }
 

@@ -73,3 +73,8 @@ The next safe slice is durable outcome record write-evidence preflight.
 
 That slice must prove any durable write without allowing implicit memory writes,
 #94 ingestion, or world verdict rewrite.
+
+Implemented as:
+
+- `docs/design/LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_EVIDENCE_PREFLIGHT_2026_06_18.md`;
+- `docs/design/LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_EVIDENCE_PREFLIGHT_ACCEPTANCE_2026_06_18.md`.

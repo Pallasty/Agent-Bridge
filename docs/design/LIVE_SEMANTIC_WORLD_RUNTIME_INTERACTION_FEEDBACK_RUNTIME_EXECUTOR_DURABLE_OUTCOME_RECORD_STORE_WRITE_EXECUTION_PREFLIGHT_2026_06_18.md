@@ -115,6 +115,7 @@ Still not accepted:
 
 ## 6. Next Slice
 
-The next safe slice is durable outcome record write-evidence preflight. It must
-prove the durable record write happened without rewriting the world verdict, and
-it must leave any verdict rewrite behind a later explicit gate.
+The next safe slice is now captured by:
+
+- [Runtime executor durable outcome record write-evidence preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_EVIDENCE_PREFLIGHT_2026_06_18.md)
+- [Runtime executor durable outcome record write-evidence preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_EVIDENCE_PREFLIGHT_ACCEPTANCE_2026_06_18.md)
