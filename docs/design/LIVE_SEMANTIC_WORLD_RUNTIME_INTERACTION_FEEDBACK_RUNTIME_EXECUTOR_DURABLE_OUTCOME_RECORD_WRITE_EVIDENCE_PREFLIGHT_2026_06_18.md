@@ -121,6 +121,11 @@ Still not accepted:
 
 ## 6. Next Slice
 
-The next safe slice is durable outcome record write-evidence review or a
-separate world-verdict rewrite gate. It must consume the accepted G15 output and
-still require explicit authorization before any verdict changes.
+The next safe slice is G16 durable outcome record write-evidence review
+preflight. It must consume the accepted G15 output, require an explicit external
+review decision, and still leave any verdict changes to a later explicit gate.
+
+## 7. Related
+
+- [Runtime executor durable outcome record write-evidence review preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_EVIDENCE_REVIEW_PREFLIGHT_2026_06_18.md)
+- [Runtime executor durable outcome record write-evidence review preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_EVIDENCE_REVIEW_PREFLIGHT_ACCEPTANCE_2026_06_18.md)

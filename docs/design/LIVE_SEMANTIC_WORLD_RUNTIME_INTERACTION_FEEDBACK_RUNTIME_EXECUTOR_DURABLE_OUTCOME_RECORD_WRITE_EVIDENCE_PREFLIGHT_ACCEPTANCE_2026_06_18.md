@@ -70,6 +70,11 @@ The critical distinction is:
 
 ## 3. Next Slice
 
-The next safe slice is durable outcome record write-evidence review or a
-separate world-verdict rewrite gate. It must require explicit authorization and
-must not infer verdict rewrite permission solely from write evidence.
+The next safe slice is G16 durable outcome record write-evidence review
+preflight. It must require an explicit external review decision and must not
+infer verdict rewrite permission solely from write evidence.
+
+## 4. Related
+
+- [Runtime executor durable outcome record write-evidence review preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_EVIDENCE_REVIEW_PREFLIGHT_2026_06_18.md)
+- [Runtime executor durable outcome record write-evidence review preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_EVIDENCE_REVIEW_PREFLIGHT_ACCEPTANCE_2026_06_18.md)
