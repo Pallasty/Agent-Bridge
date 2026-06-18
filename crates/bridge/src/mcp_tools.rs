@@ -41737,12 +41737,17 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Arc::new(ToolAtlasSnapshotTool::new(hub.clone())),
     );
     // GoS-lite belief-graph projection over the same Tool Atlas telemetry.
-    // Niche on purpose: specialty read-only diagnostic, reachable via
-    // AGENT_BRIDGE_TOOL_PROFILE=all; promote later if usage warrants it.
+    // Standard: it is the SSB belief-graph synthesis layer over Essential-tier
+    // telemetry (tool_atlas_snapshot + event_spine_snapshot) and sits in the
+    // same read-only SSB diagnostic family as the Standard semantic_bus_*
+    // adapter/health/conformance reports. Read-only, human-gated, and
+    // no-laundering (promotion_allowed=false), so it is safe to expose on the
+    // default surface. Still absent from the lean/codex name-allowlist
+    // surfaces, which gate by name rather than tier.
     reg_if(
         &mut reg,
         policy,
-        Tier::Niche,
+        Tier::Standard,
         Arc::new(GosLiteSnapshotTool::new(hub.clone())),
     );
     // SSB integrity monitor: release-build safety net re-running the unified
@@ -48183,9 +48188,21 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     }
 
     #[test]
-    fn registry_exposes_gos_lite_snapshot_tool_in_all_profile() {
-        // gos_lite_snapshot is registered at Tier::Niche, so it is reachable
-        // through the `all` profile but intentionally absent from lean profiles.
+    fn registry_exposes_gos_lite_snapshot_tool_in_standard_profile() {
+        // gos_lite_snapshot is registered at Tier::Standard (promoted from
+        // Niche): the SSB belief-graph synthesis over Essential-tier telemetry,
+        // so it is reachable through the default `standard` profile (and `all`),
+        // but still absent from the lean/codex name-allowlist surfaces, which
+        // gate by name rather than tier.
+        let standard = ToolPolicy::from_values(None, None, None, Some("standard"));
+        let standard_names: Vec<String> =
+            build_registry_with_policy(Hub::builder().build(), standard)
+                .list()
+                .into_iter()
+                .map(|s| s.name)
+                .collect();
+        assert!(standard_names.iter().any(|n| n == "gos_lite_snapshot"));
+
         let all = ToolPolicy::from_values(None, None, None, Some("all"));
         let all_names: Vec<String> = build_registry_with_policy(Hub::builder().build(), all)
             .list()
