@@ -643,6 +643,19 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("data-orphan-approved-apply-detail", html)
         self.assertIn("detailEl.innerHTML = renderOrphanApprovedApplyDetails(result)", html)
 
+    def test_approved_plan_surfaces_recent_apply_audit_history(self):
+        html = palace_html()
+
+        self.assertIn("function renderOrphanApprovedApplyAuditHistory(history)", html)
+        self.assertIn("orphan-approved-apply-history", html)
+        self.assertIn("recent apply audit", html)
+        self.assertIn("history.recent", html)
+        self.assertIn("row.kind === \"apply\"", html)
+        self.assertIn("apply_audit_count", html)
+        self.assertIn("last_apply_at_unix", html)
+        self.assertIn("renderOrphanApprovedApplyAuditHistory(state.selfReviewPacket && state.selfReviewPacket.history)", html)
+        self.assertIn("await loadSelfReviewPacket(graphData)", html)
+
     def test_search_surfaces_result_navigation(self):
         html = palace_html()
 

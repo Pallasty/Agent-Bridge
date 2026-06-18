@@ -2454,6 +2454,42 @@
       color: #c8a96a;
       font-size: 10px;
     }
+    #panel .orphan-approved-apply-history {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 6px;
+      margin-bottom: 8px;
+      padding: 8px;
+      background: #0c0c12;
+      border: 1px solid #252532;
+      border-left: 2px solid #7aa9d8;
+      border-radius: 4px;
+      color: #858594;
+      font-size: 10px;
+      line-height: 1.35;
+    }
+    #panel .orphan-approved-apply-history-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      color: #858594;
+    }
+    #panel .orphan-approved-apply-history-head strong {
+      color: #e8e8ee;
+      font-weight: 600;
+    }
+    #panel .orphan-approved-apply-history-row {
+      min-width: 0;
+      padding: 6px;
+      background: #0f0f16;
+      border: 1px solid #252532;
+      border-radius: 4px;
+      overflow-wrap: anywhere;
+    }
+    #panel .orphan-approved-apply-history-row.applied { border-left: 2px solid #5cc89a; }
+    #panel .orphan-approved-apply-history-row.dry_run { border-left: 2px solid #7aa9d8; }
+    #panel .orphan-approved-apply-history-row.blocked,
+    #panel .orphan-approved-apply-history-row.failed { border-left: 2px solid #d88080; }
     #panel .node-edge-repair {
       padding: 9px;
       background: #0c0c12;
@@ -7632,6 +7668,40 @@ function renderOrphanApprovedApplyDetails(result) {
     ${renderOrphanApprovedApplyResultRows(result)}`;
 }
 
+function renderOrphanApprovedApplyAuditHistory(history) {
+  const source = history && typeof history === "object" ? history : {};
+  const rows = Array.isArray(source.recent) ? source.recent.filter(row => row && row.kind === "apply") : [];
+  const applyAuditCount = Number.isFinite(source.apply_audit_count) ? source.apply_audit_count : 0;
+  const lastApply = Number.isFinite(source.last_apply_at_unix) && source.last_apply_at_unix > 0
+    ? `last_apply_at_unix:${source.last_apply_at_unix}`
+    : "last_apply_at_unix:none";
+  const body = rows.length
+    ? rows.slice(0, 3).map(row => {
+        const status = row.status || (row.blocked ? "blocked" : "apply");
+        const mode = row.dry_run ? "dry_run" : "live";
+        const cls = row.blocked ? "blocked" : String(status).replace(/[^a-z0-9_-]/gi, "_");
+        const meta = [
+          mode,
+          row.blocked ? "blocked" : "unblocked",
+          `applied:${Number.isFinite(row.applied_count) ? row.applied_count : 0}`,
+          `failed:${Number.isFinite(row.failed_count) ? row.failed_count : 0}`,
+          row.actor ? `actor:${row.actor}` : "",
+        ].filter(Boolean).join(" · ");
+        return `<div class="orphan-approved-apply-history-row ${escapeHTML(cls)}">
+          <strong>${escapeHTML(status)}</strong>
+          <span>${escapeHTML(meta)}</span>
+        </div>`;
+      }).join("")
+    : `<div class="maintenance-empty">no recent apply audit</div>`;
+  return `<div class="orphan-approved-apply-history" title="recent apply audit is read-only">
+    <div class="orphan-approved-apply-history-head">
+      <span>recent apply audit</span>
+      <strong>apply_audit_count:${escapeHTML(String(applyAuditCount))} · ${escapeHTML(lastApply)}</strong>
+    </div>
+    ${body}
+  </div>`;
+}
+
 function renderOrphanApprovedPlanLinks(plan) {
   const links = Array.isArray(plan.links) ? plan.links : [];
   if (links.length === 0) {
@@ -7661,6 +7731,7 @@ function renderRegionOrphanApprovedPlan(plan, regionId) {
   ${renderOrphanApprovedPlanStats(plan || {})}
   ${renderOrphanApprovedPlanPreview(plan || {})}
   ${renderOrphanApprovedPlanApplyGate(plan || {}, regionId)}
+  ${renderOrphanApprovedApplyAuditHistory(state.selfReviewPacket && state.selfReviewPacket.history)}
   ${renderOrphanApprovedPlanLinks(plan || {})}`;
 }
 
@@ -7753,6 +7824,9 @@ async function runOrphanApprovedPlanApply(regionId, dryRun) {
     resultEl.textContent = renderOrphanApprovedApplyResult(result);
     if (detailEl) detailEl.innerHTML = renderOrphanApprovedApplyDetails(result);
     resultEl.className = `orphan-approved-apply-result ${escapeHTML(result.blocked ? "blocked" : (result.status || ""))}`;
+    const graphData = state.data || {};
+    state.selfReviewPacket = await loadSelfReviewPacket(graphData);
+    renderStoredSelfReviewBoard();
     if (!result.dry_run && result.writes_edges && !result.blocked) {
       await loadRegionOrphanApprovedPlan(regionId);
     }
