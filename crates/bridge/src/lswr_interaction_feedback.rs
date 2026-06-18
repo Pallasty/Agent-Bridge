@@ -50,6 +50,11 @@ pub const LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_RUNTIME_APPLICATION_E
     &str = "agent_bridge.lswr.interaction_feedback_runtime_executor_patch_runtime_application_evidence_preflight.v0";
 pub const LSWR_RUNTIME_EXECUTOR_PATCH_RUNTIME_APPLICATION_EVIDENCE_SCHEMA: &str =
     "agent_bridge.lswr.runtime_executor.patch_runtime_application_evidence.v0";
+pub const LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_POST_APPLY_VERIFICATION_PREFLIGHT_SCHEMA:
+    &str =
+    "agent_bridge.lswr.interaction_feedback_runtime_executor_post_apply_verification_preflight.v0";
+pub const LSWR_RUNTIME_EXECUTOR_POST_APPLY_VERIFICATION_EVIDENCE_SCHEMA: &str =
+    "agent_bridge.lswr.runtime_executor.post_apply_verification_evidence.v0";
 
 const EXPECTED_EVENT_TYPES: [&str; 8] = [
     "human.select",
@@ -3826,6 +3831,318 @@ pub fn render_interaction_feedback_runtime_executor_patch_runtime_application_ev
     lines.join("\n")
 }
 
+pub fn build_interaction_feedback_runtime_executor_post_apply_verification_preflight(
+    input: &Value,
+) -> Value {
+    let (input_kind, application_preflight, verification_evidence) =
+        extract_runtime_executor_post_apply_verification_preflight_input(input);
+    let application_schema_ok = application_preflight.get("schema").and_then(Value::as_str)
+        == Some(
+            LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_RUNTIME_APPLICATION_EVIDENCE_PREFLIGHT_SCHEMA,
+        );
+    let evidence_schema_ok = verification_evidence.get("schema").and_then(Value::as_str)
+        == Some(LSWR_RUNTIME_EXECUTOR_POST_APPLY_VERIFICATION_EVIDENCE_SCHEMA);
+    let application = &application_preflight["runtime_application_evidence"];
+    let application_guardrails = &application_preflight["guardrails"];
+    let application_contract = &application_preflight["agent_action_contract"];
+    let evidence_scope = &verification_evidence["source_runtime_application_evidence_scope"];
+
+    let mut failure_reasons = Vec::new();
+    if !application_schema_ok {
+        failure_reasons.push(
+            "runtime_executor_patch_runtime_application_evidence_preflight_required".to_string(),
+        );
+    }
+    if application_schema_ok
+        && application_preflight["patch_runtime_application_evidence_preflight_verdict"]
+            != "ready_for_post_apply_verification_review"
+    {
+        failure_reasons.push("source_runtime_application_evidence_preflight_not_ready".to_string());
+    }
+    if application_schema_ok && application_preflight["source_world_verdict"] != "not_verified" {
+        failure_reasons.push("source_world_verdict_must_remain_not_verified".to_string());
+    }
+    if application_schema_ok && application["external_patch_application_claimed"] != true {
+        failure_reasons
+            .push("source_runtime_application_evidence_missing_application_claim".to_string());
+    }
+    if application_schema_ok
+        && application["post_apply_verification_performed_by_this_tool"] != false
+    {
+        failure_reasons
+            .push("source_runtime_application_evidence_must_not_have_verified".to_string());
+    }
+    if application_schema_ok && application["outcome_ingestion_allowed"] != false {
+        failure_reasons
+            .push("source_runtime_application_evidence_must_not_allow_ingestion".to_string());
+    }
+    if application_schema_ok && application["world_verdict_rewrite_allowed"] != false {
+        failure_reasons
+            .push("source_runtime_application_evidence_must_not_rewrite_verdict".to_string());
+    }
+    if application_schema_ok
+        && (application_guardrails["read_only"] != true
+            || application_guardrails["writes_state"] != false
+            || application_guardrails["verifies_post_apply_result"] != false
+            || application_guardrails["outcome_ingestion_allowed"] != false
+            || application_guardrails["persists_evidence_record"] != false)
+    {
+        failure_reasons.push("source_runtime_application_guardrails_not_read_only".to_string());
+    }
+    if application_schema_ok
+        && (application_contract["may_review_post_apply_verification_after_evidence"] != true
+            || application_contract["require_post_apply_verification_after_application"] != true
+            || application_contract["require_separate_outcome_ingestion_review"] != true
+            || application_contract["do_not_verify_post_apply_result"] != true
+            || application_contract["do_not_ingest_outcome"] != true
+            || application_contract["do_not_rewrite_world_verdict"] != true)
+    {
+        failure_reasons.push("source_runtime_application_contract_not_protective".to_string());
+    }
+    if !evidence_schema_ok {
+        failure_reasons.push("explicit_post_apply_verification_evidence_required".to_string());
+    }
+    if evidence_schema_ok && verification_evidence["verification_id"].as_str().is_none() {
+        failure_reasons.push("post_apply_verification_id_required".to_string());
+    }
+    if evidence_schema_ok && verification_evidence["evidence_kind"] != "post_apply_verification" {
+        failure_reasons.push("post_apply_verification_evidence_kind_required".to_string());
+    }
+    if evidence_schema_ok
+        && !matches!(
+            verification_evidence["verification_verdict"].as_str(),
+            Some("verified" | "not_verified")
+        )
+    {
+        failure_reasons.push("post_apply_verification_verdict_invalid".to_string());
+    }
+    if evidence_schema_ok && verification_evidence["expected_effect_checked"] != true {
+        failure_reasons.push("post_apply_verification_must_check_expected_effect".to_string());
+    }
+    if evidence_schema_ok && verification_evidence["presentation_readback_checked"] != true {
+        failure_reasons
+            .push("post_apply_verification_must_check_presentation_readback".to_string());
+    }
+    if evidence_schema_ok
+        && verification_evidence["verification_verdict"] == "verified"
+        && verification_evidence["expected_effect_passed"] != true
+    {
+        failure_reasons
+            .push("verified_post_apply_result_requires_expected_effect_passed".to_string());
+    }
+    if evidence_schema_ok
+        && verification_evidence["verification_verdict"] == "verified"
+        && verification_evidence["presentation_readback_consistent"] != true
+    {
+        failure_reasons.push(
+            "verified_post_apply_result_requires_presentation_readback_consistent".to_string(),
+        );
+    }
+    if evidence_schema_ok && verification_evidence["outcome_ingestion_allowed"] != false {
+        failure_reasons.push("post_apply_verification_must_not_allow_ingestion".to_string());
+    }
+    if evidence_schema_ok && verification_evidence["world_verdict_rewrite_allowed"] != false {
+        failure_reasons.push("post_apply_verification_must_not_rewrite_verdict".to_string());
+    }
+    if evidence_schema_ok && verification_evidence["verification_record_persisted"] != false {
+        failure_reasons.push("post_apply_verification_must_not_persist_record".to_string());
+    }
+    if application_schema_ok
+        && evidence_schema_ok
+        && evidence_scope["runtime_application_evidence_id"] != application["evidence_id"]
+    {
+        failure_reasons
+            .push("post_apply_verification_application_evidence_scope_mismatch".to_string());
+    }
+    if application_schema_ok
+        && evidence_schema_ok
+        && evidence_scope["source_invocation_request_id"]
+            != application["source_invocation_request_id"]
+    {
+        failure_reasons
+            .push("post_apply_verification_invocation_request_scope_mismatch".to_string());
+    }
+    if application_schema_ok
+        && evidence_schema_ok
+        && evidence_scope["world_id"] != application["world_id"]
+    {
+        failure_reasons.push("post_apply_verification_world_scope_mismatch".to_string());
+    }
+    if application_schema_ok
+        && evidence_schema_ok
+        && evidence_scope["branch_id"] != application["branch_id"]
+    {
+        failure_reasons.push("post_apply_verification_branch_scope_mismatch".to_string());
+    }
+    if application_schema_ok
+        && evidence_schema_ok
+        && evidence_scope["runtime_generation"] != application["runtime_generation"]
+    {
+        failure_reasons.push("post_apply_verification_generation_scope_mismatch".to_string());
+    }
+    if application_schema_ok
+        && evidence_schema_ok
+        && evidence_scope["patch_id"] != application["patch_id"]
+    {
+        failure_reasons.push("post_apply_verification_patch_scope_mismatch".to_string());
+    }
+
+    let ready = failure_reasons.is_empty();
+    let verification_verdict = if ready {
+        verification_evidence
+            .get("verification_verdict")
+            .cloned()
+            .unwrap_or(Value::Null)
+    } else {
+        Value::Null
+    };
+    let reason = if ready {
+        "post_apply_verification_preflight_ready_for_outcome_ingestion_review".to_string()
+    } else {
+        failure_reasons
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "post_apply_verification_preflight_blocked".to_string())
+    };
+
+    json!({
+        "schema": LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_POST_APPLY_VERIFICATION_PREFLIGHT_SCHEMA,
+        "input_kind": input_kind,
+        "source_schema": application_preflight.get("schema").cloned().unwrap_or(Value::Null),
+        "source_runtime_application_evidence_preflight_verdict": application_preflight
+            .get("patch_runtime_application_evidence_preflight_verdict")
+            .cloned()
+            .unwrap_or(Value::Null),
+        "source_world_verdict": application_preflight
+            .get("source_world_verdict")
+            .cloned()
+            .unwrap_or(Value::Null),
+        "post_apply_verification_evidence_schema": verification_evidence.get("schema").cloned().unwrap_or(Value::Null),
+        "post_apply_verification_preflight_verdict": if ready { "ready_for_outcome_ingestion_review" } else { "blocked" },
+        "status": if ready { "ready" } else { "blocked" },
+        "reason": reason,
+        "failure_reasons": unique_strings(failure_reasons),
+        "guardrails": runtime_executor_post_apply_verification_preflight_guardrails(),
+        "post_apply_verification": {
+            "verification_id": if ready { verification_evidence.get("verification_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "runtime_application_evidence_id": if ready { evidence_scope.get("runtime_application_evidence_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "source_invocation_request_id": if ready { evidence_scope.get("source_invocation_request_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "world_id": if ready { evidence_scope.get("world_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "branch_id": if ready { evidence_scope.get("branch_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "runtime_generation": if ready { evidence_scope.get("runtime_generation").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "patch_id": if ready { evidence_scope.get("patch_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "verification_verdict": verification_verdict,
+            "verification_reason": if ready { verification_evidence.get("verification_reason").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "expected_effect_checked": ready,
+            "expected_effect_passed": if ready { verification_evidence.get("expected_effect_passed").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "presentation_readback_checked": ready,
+            "presentation_readback_consistent": if ready { verification_evidence.get("presentation_readback_consistent").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "failed_clause_ids": if ready { verification_evidence.get("failed_clause_ids").cloned().unwrap_or(json!([])) } else { Value::Null },
+            "ready_for_outcome_ingestion_review": ready,
+            "post_apply_verification_performed_by_this_tool": false,
+            "outcome_ingestion_allowed": false,
+            "world_verdict_rewrite_allowed": false,
+            "verification_record_persisted_by_this_tool": false
+        },
+        "next_allowed_gate": if ready { "outcome_ingestion_review" } else { "repair_post_apply_verification_input" },
+        "agent_action_contract": {
+            "mode": "runtime_executor_post_apply_verification_preflight_only",
+            "may_review_outcome_ingestion_after_verification": ready,
+            "do_not_ingest_outcome": true,
+            "do_not_write_memory": true,
+            "do_not_rewrite_world_verdict": true,
+            "do_not_persist_verification_record": true,
+            "require_separate_outcome_ingestion_review": true,
+            "require_world_verdict_rewrite_gate_after_ingestion": true
+        },
+        "source_runtime_application_evidence_preflight": if application_schema_ok { application_preflight } else { Value::Null },
+        "post_apply_verification_evidence": if evidence_schema_ok { verification_evidence } else { Value::Null },
+        "post_apply_verification_performed_by_this_tool": false,
+        "outcome_ingestion_performed_by_this_tool": false,
+        "world_verdict_rewrite_performed_by_this_tool": false,
+        "writes_state": false,
+        "store_access_required": false,
+        "mcp_tool_registered": false,
+        "note": "pure post-apply verification preflight: validates explicit verification evidence without ingesting outcomes, writing state, or rewriting world verdict"
+    })
+}
+
+pub fn render_interaction_feedback_runtime_executor_post_apply_verification_preflight(
+    preflight: &Value,
+) -> String {
+    let mut lines = Vec::new();
+    lines.push(
+        "# LSWR Interaction Feedback Runtime Executor Post-Apply Verification Preflight"
+            .to_string(),
+    );
+    lines.push(String::new());
+    push_markdown_kv(&mut lines, "schema", &preflight["schema"]);
+    push_markdown_kv(
+        &mut lines,
+        "post_apply_verification_preflight_verdict",
+        &preflight["post_apply_verification_preflight_verdict"],
+    );
+    push_markdown_kv(&mut lines, "status", &preflight["status"]);
+    push_markdown_kv(&mut lines, "reason", &preflight["reason"]);
+    push_markdown_kv(
+        &mut lines,
+        "source_runtime_application_evidence_preflight_verdict",
+        &preflight["source_runtime_application_evidence_preflight_verdict"],
+    );
+    push_markdown_kv(
+        &mut lines,
+        "post_apply_verification_evidence_schema",
+        &preflight["post_apply_verification_evidence_schema"],
+    );
+    push_markdown_kv(&mut lines, "failure_reasons", &preflight["failure_reasons"]);
+
+    lines.push(String::new());
+    lines.push("## Post-Apply Verification".to_string());
+    lines.push(String::new());
+    for key in [
+        "verification_id",
+        "runtime_application_evidence_id",
+        "source_invocation_request_id",
+        "world_id",
+        "branch_id",
+        "runtime_generation",
+        "patch_id",
+        "verification_verdict",
+        "verification_reason",
+        "expected_effect_checked",
+        "expected_effect_passed",
+        "presentation_readback_checked",
+        "presentation_readback_consistent",
+        "failed_clause_ids",
+        "ready_for_outcome_ingestion_review",
+        "post_apply_verification_performed_by_this_tool",
+        "outcome_ingestion_allowed",
+        "world_verdict_rewrite_allowed",
+        "verification_record_persisted_by_this_tool",
+    ] {
+        push_markdown_kv(&mut lines, key, &preflight["post_apply_verification"][key]);
+    }
+
+    lines.push(String::new());
+    lines.push("## Agent Action Contract".to_string());
+    lines.push(String::new());
+    for key in [
+        "mode",
+        "may_review_outcome_ingestion_after_verification",
+        "do_not_ingest_outcome",
+        "do_not_write_memory",
+        "do_not_rewrite_world_verdict",
+        "do_not_persist_verification_record",
+        "require_separate_outcome_ingestion_review",
+        "require_world_verdict_rewrite_gate_after_ingestion",
+    ] {
+        push_markdown_kv(&mut lines, key, &preflight["agent_action_contract"][key]);
+    }
+
+    lines.push(String::new());
+    lines.join("\n")
+}
+
 pub fn build_interaction_feedback_readback(fixture: &Value) -> Value {
     let selected_entities =
         fixture["interaction_state_after"]["active_view"]["selected_entities"].clone();
@@ -4490,6 +4807,59 @@ fn extract_runtime_executor_patch_runtime_application_evidence_preflight_input(
     }
 }
 
+fn extract_runtime_executor_post_apply_verification_preflight_input(
+    input: &Value,
+) -> (&'static str, Value, Value) {
+    if input.get("schema").and_then(Value::as_str)
+        == Some(
+            LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_RUNTIME_APPLICATION_EVIDENCE_PREFLIGHT_SCHEMA,
+        )
+    {
+        return (
+            "runtime_executor_patch_runtime_application_evidence_preflight",
+            input.clone(),
+            Value::Null,
+        );
+    }
+
+    let application_preflight = input
+        .get("patch_runtime_application_evidence_preflight")
+        .or_else(|| input.get("runtime_application_evidence_preflight"))
+        .or_else(|| input.get("application_evidence_preflight"))
+        .or_else(|| input.get("preflight"))
+        .cloned()
+        .unwrap_or_else(|| input.clone());
+    let verification_evidence = input
+        .get("post_apply_verification_evidence")
+        .or_else(|| input.get("verification_evidence"))
+        .cloned()
+        .unwrap_or(Value::Null);
+
+    if input
+        .get("patch_runtime_application_evidence_preflight")
+        .is_some()
+        || input
+            .get("runtime_application_evidence_preflight")
+            .is_some()
+        || input.get("application_evidence_preflight").is_some()
+        || input.get("preflight").is_some()
+        || input.get("post_apply_verification_evidence").is_some()
+        || input.get("verification_evidence").is_some()
+    {
+        (
+            "runtime_application_evidence_preflight_with_post_apply_verification_evidence_wrapper",
+            application_preflight,
+            verification_evidence,
+        )
+    } else {
+        (
+            "invalid_input",
+            application_preflight,
+            verification_evidence,
+        )
+    }
+}
+
 fn validate_argument_context(argument_context: Option<&Value>) -> Value {
     let Some(context) = argument_context else {
         return json!({
@@ -4745,6 +5115,25 @@ fn runtime_executor_patch_runtime_application_evidence_preflight_guardrails() ->
         "persists_evidence_record": false,
         "feedback_changes_world_verdict_allowed": false,
         "runtime_executor_patch_runtime_application_evidence_preflight_only": true
+    })
+}
+
+fn runtime_executor_post_apply_verification_preflight_guardrails() -> Value {
+    json!({
+        "read_only": true,
+        "mutation_surface": "none",
+        "writes_state": false,
+        "store_access_required": false,
+        "mcp_tool_registered": false,
+        "queries_live_runtime": false,
+        "requires_ready_runtime_application_evidence_preflight": true,
+        "requires_explicit_post_apply_verification_evidence": true,
+        "evidence_kind": "post_apply_verification",
+        "performs_post_apply_verification": false,
+        "outcome_ingestion_allowed": false,
+        "persists_verification_record": false,
+        "feedback_changes_world_verdict_allowed": false,
+        "runtime_executor_post_apply_verification_preflight_only": true
     })
 }
 

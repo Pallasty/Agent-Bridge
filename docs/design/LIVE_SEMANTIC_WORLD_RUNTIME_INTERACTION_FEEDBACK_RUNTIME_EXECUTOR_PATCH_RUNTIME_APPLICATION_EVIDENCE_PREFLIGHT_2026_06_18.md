@@ -136,5 +136,10 @@ Still not accepted:
 
 ## 6. Next Slice
 
-The next safe slice is post-apply verification preflight. It must consume this
-external runtime application evidence without treating it as verified truth.
+The next safe slice is now captured by:
+
+- [Runtime executor post-apply verification preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_POST_APPLY_VERIFICATION_PREFLIGHT_2026_06_18.md)
+- [Runtime executor post-apply verification preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_POST_APPLY_VERIFICATION_PREFLIGHT_ACCEPTANCE_2026_06_18.md)
+
+It consumes this external runtime application evidence without treating it as
+verified truth and stops before outcome ingestion or verdict rewrite.

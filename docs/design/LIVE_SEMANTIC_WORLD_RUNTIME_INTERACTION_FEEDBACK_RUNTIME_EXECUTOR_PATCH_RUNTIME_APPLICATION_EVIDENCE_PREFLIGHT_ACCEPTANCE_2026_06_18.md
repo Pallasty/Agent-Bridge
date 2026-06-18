@@ -101,8 +101,11 @@ The critical distinction is:
 
 ## 4. Next Slice
 
-The next safe slice is post-apply verification preflight.
+The next safe slice is now captured by:
 
-That slice must consume the G5 evidence packet without treating it as already
-verified. It should compare expected effect and presentation/readback evidence
-before any outcome ingestion or verdict rewrite is allowed.
+- [Runtime executor post-apply verification preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_POST_APPLY_VERIFICATION_PREFLIGHT_2026_06_18.md)
+- [Runtime executor post-apply verification preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_POST_APPLY_VERIFICATION_PREFLIGHT_ACCEPTANCE_2026_06_18.md)
+
+That slice consumes the G5 evidence packet without treating it as already
+verified. It compares expected effect and presentation/readback evidence before
+any outcome ingestion or verdict rewrite is allowed.
