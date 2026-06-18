@@ -62,6 +62,19 @@ pub(crate) mod onnx {
                 "multilingual-e5-small",
                 true,
             ),
+            // LEVER 3: paraphrase-multilingual-MiniLM-L12-v2 — 384-dim multilingual,
+            // a TRUE drop-in (no VECTOR_DIM migration). Unlike e5 it does NOT collapse
+            // Chinese query↔doc cosines into a narrow ~0.86 band — it keeps a wide
+            // 0.2–0.7 spread, so ranking margins survive corpus-scale dilution AND the
+            // absolute-cosine consumers (e.g. introspect novelty) stay meaningful. No
+            // task prefix. The #1485/LEVER-3 retrieval-quality model for the
+            // Chinese-dominant corpus.
+            Some("para-ml") | Some("paraphrase-ml-l12")
+            | Some("paraphrase-multilingual-MiniLM-L12-v2") => (
+                EmbeddingModel::ParaphraseMLMiniLML12V2,
+                "paraphrase-multilingual-MiniLM-L12-v2",
+                false,
+            ),
             _ => (EmbeddingModel::AllMiniLML6V2, "all-MiniLM-L6-v2", false),
         }
     }
