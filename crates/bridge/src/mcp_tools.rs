@@ -42192,73 +42192,73 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(BioCortexRetrievalOptInReviewPacketTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(BioCortexRetrievalOptInExecutionPacketTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(BioCortexRetrievalOptInRuntimeTrialTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(BioCortexRetrievalOptInRuntimeTrialReviewPacketTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(BioCortexRetrievalOptInOrderDiffPacketTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(BioCortexRetrievalOptInRedactedOrderArtifactTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(BioCortexRetrievalOptInAuthorizationDecisionPacketTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(BioCortexRetrievalOptInPostImplementationReviewGateTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(BioCortexRetrievalOptInRuntimeInfluenceReviewRequestTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(BioCortexRetrievalOptInStoreTrialTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(BioCortexRetrievalOptInBatchDiagnosticsTool::new(
             hub.clone(),
         )),
@@ -42266,31 +42266,31 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(BioCortexRetrievalRelevanceLiftEvalTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(BioCortexRetrievalOptInRuntimeReadinessPacketTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(BioCortexRetrievalOptInRuntimeTransitionGateTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(BioCortexRetrievalOptInGatedStoreTrialTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(BioCortexRetrievalOptInGatedBatchDiagnosticsTool::new(
             hub.clone(),
         )),
@@ -56071,7 +56071,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             Hub::builder().build(),
             ToolPolicy {
                 set: ToolSet::Profile,
-                profile: ToolProfile::Standard,
+                profile: ToolProfile::All,
             },
         )
         .list()
@@ -56240,7 +56240,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             Hub::builder().build(),
             ToolPolicy {
                 set: ToolSet::Profile,
-                profile: ToolProfile::Standard,
+                profile: ToolProfile::All,
             },
         )
         .list()
@@ -56404,7 +56404,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             Hub::builder().build(),
             ToolPolicy {
                 set: ToolSet::Profile,
-                profile: ToolProfile::Standard,
+                profile: ToolProfile::All,
             },
         )
         .list()
@@ -56594,7 +56594,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             Hub::builder().build(),
             ToolPolicy {
                 set: ToolSet::Profile,
-                profile: ToolProfile::Standard,
+                profile: ToolProfile::All,
             },
         )
         .list()
