@@ -128,7 +128,10 @@ Still not accepted:
 
 ## 6. Next Slice
 
-The next safe slice is durable outcome-ingestion execution preflight. It must
-consume G8 gate output without writing durable state unless a separate execution
-implementation is accepted, and it must keep world-verdict rewrite behind a
-later explicit gate.
+The next safe slice is now captured by:
+
+- [Runtime executor durable outcome-ingestion execution preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_INGESTION_EXECUTION_PREFLIGHT_2026_06_18.md)
+- [Runtime executor durable outcome-ingestion execution preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_INGESTION_EXECUTION_PREFLIGHT_ACCEPTANCE_2026_06_18.md)
+
+That slice keeps actual writes and world verdict rewrite behind explicit
+separate gates.

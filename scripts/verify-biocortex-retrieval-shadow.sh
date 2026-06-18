@@ -6797,6 +6797,23 @@ fi
 test -s "$opt_in_auth_request/forum-post-template.md"
 test -s "$opt_in_auth_request/memory-note-template.md"
 
+run cargo test -p ab-bridge --test lswr_interaction_feedback_fixture \
+    interaction_feedback_runtime_executor_durable_outcome_ingestion_execution_preflight \
+    -- --nocapture
+run cargo run -q -p ab-bridge \
+    --example lswr_interaction_feedback_runtime_executor_durable_outcome_ingestion_execution_preflight_smoke \
+    -- \
+    --format json \
+    --assert-blocked-without-durable-outcome-ingestion-execution-decision \
+    --assert-read-only >/dev/null
+run cargo run -q -p ab-bridge \
+    --example lswr_interaction_feedback_runtime_executor_durable_outcome_ingestion_execution_preflight_smoke \
+    -- \
+    --with-durable-outcome-ingestion-execution-decision \
+    --format json \
+    --assert-ready-for-durable-outcome-ingestion-write-implementation \
+    --assert-read-only >/dev/null
+
 current_corpus="crates/bridge/tests/fixtures/biocortex_retrieval_gate_corpus.jsonl"
 hard_corpus="crates/bridge/tests/fixtures/biocortex_retrieval_gate_hard_holdout_corpus.jsonl"
 current_side="$tmpdir/current-side-signal.jsonl"
