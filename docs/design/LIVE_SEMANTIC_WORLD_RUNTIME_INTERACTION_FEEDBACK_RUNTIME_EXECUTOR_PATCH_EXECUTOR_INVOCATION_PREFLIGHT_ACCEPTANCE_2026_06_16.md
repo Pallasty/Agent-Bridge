@@ -131,7 +131,8 @@ The critical distinction is:
 
 ## 4. Next Slice
 
-The next safe slice is separate patch executor runtime application evidence.
+The next safe slice is
+[separate patch executor runtime application evidence preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_RUNTIME_APPLICATION_EVIDENCE_PREFLIGHT_2026_06_18.md).
 
 That slice must consume a G4 invocation request envelope without assuming
 executor invocation or patch application occurred. It should introduce a

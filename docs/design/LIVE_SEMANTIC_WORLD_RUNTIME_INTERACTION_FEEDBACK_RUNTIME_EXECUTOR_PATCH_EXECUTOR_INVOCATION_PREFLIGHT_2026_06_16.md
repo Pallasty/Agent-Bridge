@@ -184,6 +184,7 @@ Still not accepted:
 
 ## 8. Next Slice
 
-The next safe slice is separate patch executor runtime application evidence.
+The next safe slice is
+[separate patch executor runtime application evidence preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_RUNTIME_APPLICATION_EVIDENCE_PREFLIGHT_2026_06_18.md).
 It must consume an invocation request envelope without assuming the executor
 was invoked, the patch was applied, or postconditions were verified.

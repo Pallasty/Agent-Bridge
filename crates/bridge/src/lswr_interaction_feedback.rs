@@ -46,6 +46,10 @@ pub const LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_EXECUTOR_INVOCATION_P
     &str = "agent_bridge.lswr.interaction_feedback_runtime_executor_patch_executor_invocation_preflight.v0";
 pub const LSWR_RUNTIME_EXECUTOR_PATCH_EXECUTOR_INVOCATION_DECISION_SCHEMA: &str =
     "agent_bridge.lswr.runtime_executor.patch_executor_invocation_decision.v0";
+pub const LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_RUNTIME_APPLICATION_EVIDENCE_PREFLIGHT_SCHEMA:
+    &str = "agent_bridge.lswr.interaction_feedback_runtime_executor_patch_runtime_application_evidence_preflight.v0";
+pub const LSWR_RUNTIME_EXECUTOR_PATCH_RUNTIME_APPLICATION_EVIDENCE_SCHEMA: &str =
+    "agent_bridge.lswr.runtime_executor.patch_runtime_application_evidence.v0";
 
 const EXPECTED_EVENT_TYPES: [&str; 8] = [
     "human.select",
@@ -3489,6 +3493,339 @@ pub fn render_interaction_feedback_runtime_executor_patch_executor_invocation_pr
     lines.join("\n")
 }
 
+pub fn build_interaction_feedback_runtime_executor_patch_runtime_application_evidence_preflight(
+    input: &Value,
+) -> Value {
+    let (input_kind, invocation_preflight, application_evidence) =
+        extract_runtime_executor_patch_runtime_application_evidence_preflight_input(input);
+    let invocation_schema_ok = invocation_preflight.get("schema").and_then(Value::as_str)
+        == Some(
+            LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_EXECUTOR_INVOCATION_PREFLIGHT_SCHEMA,
+        );
+    let evidence_schema_ok = application_evidence.get("schema").and_then(Value::as_str)
+        == Some(LSWR_RUNTIME_EXECUTOR_PATCH_RUNTIME_APPLICATION_EVIDENCE_SCHEMA);
+    let request = &invocation_preflight["patch_executor_invocation_request"];
+    let invocation_guardrails = &invocation_preflight["guardrails"];
+    let invocation_contract = &invocation_preflight["agent_action_contract"];
+    let evidence_scope = &application_evidence["source_invocation_request_scope"];
+
+    let mut failure_reasons = Vec::new();
+    if !invocation_schema_ok {
+        failure_reasons
+            .push("runtime_executor_patch_executor_invocation_preflight_required".to_string());
+    }
+    if invocation_schema_ok
+        && invocation_preflight["patch_executor_invocation_preflight_verdict"]
+            != "ready_for_separate_patch_executor_invocation_request"
+    {
+        failure_reasons.push("source_patch_executor_invocation_preflight_not_ready".to_string());
+    }
+    if invocation_schema_ok && invocation_preflight["source_world_verdict"] != "not_verified" {
+        failure_reasons.push("source_world_verdict_must_remain_not_verified".to_string());
+    }
+    if invocation_schema_ok
+        && request["ready_for_separate_patch_executor_invocation_request"] != true
+    {
+        failure_reasons.push("source_invocation_request_not_ready".to_string());
+    }
+    if invocation_schema_ok && request["invocation_request_emitted_by_this_tool"] != true {
+        failure_reasons.push("source_invocation_request_not_emitted".to_string());
+    }
+    if invocation_schema_ok && request["executor_invocation_performed_by_this_tool"] != false {
+        failure_reasons.push("source_invocation_preflight_must_not_invoke_executor".to_string());
+    }
+    if invocation_schema_ok && request["executor_queue_submission_performed"] != false {
+        failure_reasons.push("source_invocation_preflight_must_not_submit_queue".to_string());
+    }
+    if invocation_schema_ok && request["patch_application_performed"] != false {
+        failure_reasons.push("source_invocation_preflight_must_not_apply_patch".to_string());
+    }
+    if invocation_schema_ok
+        && (invocation_guardrails["read_only"] != true
+            || invocation_guardrails["writes_state"] != false
+            || invocation_guardrails["invokes_patch_executor"] != false
+            || invocation_guardrails["submits_executor_queue"] != false
+            || invocation_guardrails["submits_apply_request"] != false
+            || invocation_guardrails["applies_patch"] != false
+            || invocation_guardrails["verifies_post_apply_result"] != false
+            || invocation_guardrails["outcome_ingestion_allowed"] != false)
+    {
+        failure_reasons.push("source_invocation_guardrails_not_read_only".to_string());
+    }
+    if invocation_schema_ok
+        && (invocation_contract["require_runtime_application_evidence_after_invocation"] != true
+            || invocation_contract["require_post_apply_verification_after_application"] != true
+            || invocation_contract["require_separate_outcome_ingestion_review"] != true
+            || invocation_contract["do_not_invoke_patch_executor"] != true
+            || invocation_contract["do_not_submit_executor_queue"] != true
+            || invocation_contract["do_not_apply_patch"] != true
+            || invocation_contract["do_not_ingest_outcome"] != true)
+    {
+        failure_reasons.push("source_invocation_contract_not_protective".to_string());
+    }
+    if !evidence_schema_ok {
+        failure_reasons.push("explicit_patch_runtime_application_evidence_required".to_string());
+    }
+    if evidence_schema_ok && application_evidence["evidence_id"].as_str().is_none() {
+        failure_reasons.push("patch_runtime_application_evidence_id_required".to_string());
+    }
+    if evidence_schema_ok && application_evidence["evidence_kind"] != "external_executor_claim" {
+        failure_reasons
+            .push("patch_runtime_application_evidence_must_be_external_claim".to_string());
+    }
+    if evidence_schema_ok && application_evidence["target_executor"] != request["target_executor"] {
+        failure_reasons
+            .push("patch_runtime_application_evidence_executor_scope_mismatch".to_string());
+    }
+    if invocation_schema_ok
+        && evidence_schema_ok
+        && evidence_scope["request_id"] != request["request_id"]
+    {
+        failure_reasons
+            .push("patch_runtime_application_evidence_request_scope_mismatch".to_string());
+    }
+    if invocation_schema_ok
+        && evidence_schema_ok
+        && evidence_scope["idempotency_key"] != request["idempotency_key"]
+    {
+        failure_reasons
+            .push("patch_runtime_application_evidence_idempotency_scope_mismatch".to_string());
+    }
+    if invocation_schema_ok
+        && evidence_schema_ok
+        && evidence_scope["invocation_decision_id"] != request["invocation_decision_id"]
+    {
+        failure_reasons
+            .push("patch_runtime_application_evidence_decision_scope_mismatch".to_string());
+    }
+    if invocation_schema_ok
+        && evidence_schema_ok
+        && evidence_scope["world_id"] != request["world_id"]
+    {
+        failure_reasons.push("patch_runtime_application_evidence_world_scope_mismatch".to_string());
+    }
+    if invocation_schema_ok
+        && evidence_schema_ok
+        && evidence_scope["branch_id"] != request["branch_id"]
+    {
+        failure_reasons
+            .push("patch_runtime_application_evidence_branch_scope_mismatch".to_string());
+    }
+    if invocation_schema_ok
+        && evidence_schema_ok
+        && evidence_scope["runtime_generation"] != request["runtime_generation"]
+    {
+        failure_reasons
+            .push("patch_runtime_application_evidence_generation_scope_mismatch".to_string());
+    }
+    if invocation_schema_ok
+        && evidence_schema_ok
+        && evidence_scope["patch_id"] != request["patch_id"]
+    {
+        failure_reasons.push("patch_runtime_application_evidence_patch_scope_mismatch".to_string());
+    }
+    if invocation_schema_ok
+        && evidence_schema_ok
+        && evidence_scope["source_apply_request_id"] != request["source_apply_request_id"]
+    {
+        failure_reasons
+            .push("patch_runtime_application_evidence_apply_request_scope_mismatch".to_string());
+    }
+    if evidence_schema_ok && application_evidence["executor_invocation_observed"] != true {
+        failure_reasons.push(
+            "patch_runtime_application_evidence_must_observe_executor_invocation".to_string(),
+        );
+    }
+    if evidence_schema_ok && application_evidence["patch_application_claimed"] != true {
+        failure_reasons
+            .push("patch_runtime_application_evidence_must_claim_patch_application".to_string());
+    }
+    if evidence_schema_ok && application_evidence["runtime_mutation_claimed"] != true {
+        failure_reasons
+            .push("patch_runtime_application_evidence_must_claim_runtime_mutation".to_string());
+    }
+    if evidence_schema_ok && application_evidence["post_apply_verification_performed"] != false {
+        failure_reasons.push("patch_runtime_application_evidence_must_not_verify".to_string());
+    }
+    if evidence_schema_ok && application_evidence["outcome_ingestion_allowed"] != false {
+        failure_reasons
+            .push("patch_runtime_application_evidence_must_not_allow_ingestion".to_string());
+    }
+    if evidence_schema_ok && application_evidence["world_verdict_rewrite_allowed"] != false {
+        failure_reasons
+            .push("patch_runtime_application_evidence_must_not_rewrite_verdict".to_string());
+    }
+    if evidence_schema_ok && application_evidence["evidence_record_persisted"] != false {
+        failure_reasons
+            .push("patch_runtime_application_evidence_must_not_persist_record".to_string());
+    }
+
+    let ready = failure_reasons.is_empty();
+    let reason = if ready {
+        "patch_runtime_application_evidence_preflight_ready_for_post_apply_verification_review"
+            .to_string()
+    } else {
+        failure_reasons
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "patch_runtime_application_evidence_preflight_blocked".to_string())
+    };
+
+    json!({
+        "schema": LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_RUNTIME_APPLICATION_EVIDENCE_PREFLIGHT_SCHEMA,
+        "input_kind": input_kind,
+        "source_schema": invocation_preflight.get("schema").cloned().unwrap_or(Value::Null),
+        "source_patch_executor_invocation_preflight_verdict": invocation_preflight
+            .get("patch_executor_invocation_preflight_verdict")
+            .cloned()
+            .unwrap_or(Value::Null),
+        "source_world_verdict": invocation_preflight
+            .get("source_world_verdict")
+            .cloned()
+            .unwrap_or(Value::Null),
+        "patch_runtime_application_evidence_schema": application_evidence.get("schema").cloned().unwrap_or(Value::Null),
+        "patch_runtime_application_evidence_preflight_verdict": if ready { "ready_for_post_apply_verification_review" } else { "blocked" },
+        "status": if ready { "ready" } else { "blocked" },
+        "reason": reason,
+        "failure_reasons": unique_strings(failure_reasons),
+        "guardrails": runtime_executor_patch_runtime_application_evidence_preflight_guardrails(),
+        "runtime_application_evidence": {
+            "evidence_id": if ready { application_evidence.get("evidence_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "source_invocation_request_id": if ready { evidence_scope.get("request_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "source_invocation_idempotency_key": if ready { evidence_scope.get("idempotency_key").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "target_executor": if ready { application_evidence.get("target_executor").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "executor_id": if ready { application_evidence.get("executor_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "executor_invoked_at": if ready { application_evidence.get("executor_invoked_at").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "patch_applied_at": if ready { application_evidence.get("patch_applied_at").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "world_id": if ready { evidence_scope.get("world_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "branch_id": if ready { evidence_scope.get("branch_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "runtime_generation": if ready { evidence_scope.get("runtime_generation").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "patch_id": if ready { evidence_scope.get("patch_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "source_apply_request_id": if ready { evidence_scope.get("source_apply_request_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "external_executor_invocation_observed": ready,
+            "external_patch_application_claimed": ready,
+            "external_runtime_mutation_claimed": ready,
+            "application_status": if ready { "applied_claimed_not_verified" } else { "blocked" },
+            "post_apply_verification_performed_by_this_tool": false,
+            "post_apply_verification_performed_by_evidence": false,
+            "outcome_ingestion_allowed": false,
+            "world_verdict_rewrite_allowed": false,
+            "evidence_record_persisted_by_this_tool": false
+        },
+        "next_allowed_gate": if ready { "post_apply_verification_preflight" } else { "repair_patch_runtime_application_evidence_input" },
+        "agent_action_contract": {
+            "mode": "runtime_executor_patch_runtime_application_evidence_preflight_only",
+            "may_review_post_apply_verification_after_evidence": ready,
+            "do_not_invoke_patch_executor": true,
+            "do_not_submit_executor_queue": true,
+            "do_not_submit_apply_request": true,
+            "do_not_apply_patch": true,
+            "do_not_verify_post_apply_result": true,
+            "do_not_ingest_outcome": true,
+            "do_not_write_memory": true,
+            "do_not_rewrite_world_verdict": true,
+            "require_post_apply_verification_after_application": true,
+            "require_separate_outcome_ingestion_review": true
+        },
+        "source_patch_executor_invocation_preflight": if invocation_schema_ok { invocation_preflight } else { Value::Null },
+        "patch_runtime_application_evidence": if evidence_schema_ok { application_evidence } else { Value::Null },
+        "executor_invocation_performed_by_this_tool": false,
+        "executor_queue_submission_performed_by_this_tool": false,
+        "apply_request_submitted_by_this_tool": false,
+        "patch_application_performed_by_this_tool": false,
+        "post_apply_verification_performed_by_this_tool": false,
+        "outcome_ingestion_performed_by_this_tool": false,
+        "writes_state": false,
+        "store_access_required": false,
+        "mcp_tool_registered": false,
+        "note": "pure runtime application evidence preflight: validates an external executor application claim without invoking, submitting, applying, verifying, ingesting, or mutating by this tool"
+    })
+}
+
+pub fn render_interaction_feedback_runtime_executor_patch_runtime_application_evidence_preflight(
+    preflight: &Value,
+) -> String {
+    let mut lines = Vec::new();
+    lines.push(
+        "# LSWR Interaction Feedback Runtime Executor Patch Runtime Application Evidence Preflight"
+            .to_string(),
+    );
+    lines.push(String::new());
+    push_markdown_kv(&mut lines, "schema", &preflight["schema"]);
+    push_markdown_kv(
+        &mut lines,
+        "patch_runtime_application_evidence_preflight_verdict",
+        &preflight["patch_runtime_application_evidence_preflight_verdict"],
+    );
+    push_markdown_kv(&mut lines, "status", &preflight["status"]);
+    push_markdown_kv(&mut lines, "reason", &preflight["reason"]);
+    push_markdown_kv(
+        &mut lines,
+        "source_patch_executor_invocation_preflight_verdict",
+        &preflight["source_patch_executor_invocation_preflight_verdict"],
+    );
+    push_markdown_kv(
+        &mut lines,
+        "patch_runtime_application_evidence_schema",
+        &preflight["patch_runtime_application_evidence_schema"],
+    );
+    push_markdown_kv(&mut lines, "failure_reasons", &preflight["failure_reasons"]);
+
+    lines.push(String::new());
+    lines.push("## Runtime Application Evidence".to_string());
+    lines.push(String::new());
+    for key in [
+        "evidence_id",
+        "source_invocation_request_id",
+        "target_executor",
+        "executor_id",
+        "executor_invoked_at",
+        "patch_applied_at",
+        "world_id",
+        "branch_id",
+        "runtime_generation",
+        "patch_id",
+        "source_apply_request_id",
+        "external_executor_invocation_observed",
+        "external_patch_application_claimed",
+        "external_runtime_mutation_claimed",
+        "application_status",
+        "post_apply_verification_performed_by_this_tool",
+        "post_apply_verification_performed_by_evidence",
+        "outcome_ingestion_allowed",
+        "world_verdict_rewrite_allowed",
+        "evidence_record_persisted_by_this_tool",
+    ] {
+        push_markdown_kv(
+            &mut lines,
+            key,
+            &preflight["runtime_application_evidence"][key],
+        );
+    }
+
+    lines.push(String::new());
+    lines.push("## Agent Action Contract".to_string());
+    lines.push(String::new());
+    for key in [
+        "mode",
+        "may_review_post_apply_verification_after_evidence",
+        "do_not_invoke_patch_executor",
+        "do_not_submit_executor_queue",
+        "do_not_apply_patch",
+        "do_not_verify_post_apply_result",
+        "do_not_ingest_outcome",
+        "do_not_write_memory",
+        "do_not_rewrite_world_verdict",
+        "require_post_apply_verification_after_application",
+        "require_separate_outcome_ingestion_review",
+    ] {
+        push_markdown_kv(&mut lines, key, &preflight["agent_action_contract"][key]);
+    }
+
+    lines.push(String::new());
+    lines.join("\n")
+}
+
 pub fn build_interaction_feedback_readback(fixture: &Value) -> Value {
     let selected_entities =
         fixture["interaction_state_after"]["active_view"]["selected_entities"].clone();
@@ -4104,6 +4441,55 @@ fn extract_runtime_executor_patch_executor_invocation_preflight_input(
     }
 }
 
+fn extract_runtime_executor_patch_runtime_application_evidence_preflight_input(
+    input: &Value,
+) -> (&'static str, Value, Value) {
+    if input.get("schema").and_then(Value::as_str)
+        == Some(
+            LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_EXECUTOR_INVOCATION_PREFLIGHT_SCHEMA,
+        )
+    {
+        return (
+            "runtime_executor_patch_executor_invocation_preflight",
+            input.clone(),
+            Value::Null,
+        );
+    }
+
+    let invocation_preflight = input
+        .get("patch_executor_invocation_preflight")
+        .or_else(|| input.get("runtime_executor_patch_executor_invocation_preflight"))
+        .or_else(|| input.get("invocation_preflight"))
+        .or_else(|| input.get("preflight"))
+        .cloned()
+        .unwrap_or_else(|| input.clone());
+    let application_evidence = input
+        .get("patch_runtime_application_evidence")
+        .or_else(|| input.get("runtime_application_evidence"))
+        .or_else(|| input.get("application_evidence"))
+        .cloned()
+        .unwrap_or(Value::Null);
+
+    if input.get("patch_executor_invocation_preflight").is_some()
+        || input
+            .get("runtime_executor_patch_executor_invocation_preflight")
+            .is_some()
+        || input.get("invocation_preflight").is_some()
+        || input.get("preflight").is_some()
+        || input.get("patch_runtime_application_evidence").is_some()
+        || input.get("runtime_application_evidence").is_some()
+        || input.get("application_evidence").is_some()
+    {
+        (
+            "patch_executor_invocation_preflight_with_runtime_application_evidence_wrapper",
+            invocation_preflight,
+            application_evidence,
+        )
+    } else {
+        ("invalid_input", invocation_preflight, application_evidence)
+    }
+}
+
 fn validate_argument_context(argument_context: Option<&Value>) -> Value {
     let Some(context) = argument_context else {
         return json!({
@@ -4336,6 +4722,29 @@ fn runtime_executor_patch_executor_invocation_preflight_guardrails() -> Value {
         "persists_submission_token": false,
         "feedback_changes_world_verdict_allowed": false,
         "runtime_executor_patch_executor_invocation_preflight_only": true
+    })
+}
+
+fn runtime_executor_patch_runtime_application_evidence_preflight_guardrails() -> Value {
+    json!({
+        "read_only": true,
+        "mutation_surface": "none",
+        "writes_state": false,
+        "store_access_required": false,
+        "mcp_tool_registered": false,
+        "queries_live_runtime": false,
+        "requires_ready_patch_executor_invocation_preflight": true,
+        "requires_explicit_patch_runtime_application_evidence": true,
+        "evidence_kind": "external_executor_claim",
+        "invokes_patch_executor": false,
+        "submits_executor_queue": false,
+        "submits_apply_request": false,
+        "applies_patch": false,
+        "verifies_post_apply_result": false,
+        "outcome_ingestion_allowed": false,
+        "persists_evidence_record": false,
+        "feedback_changes_world_verdict_allowed": false,
+        "runtime_executor_patch_runtime_application_evidence_preflight_only": true
     })
 }
 
