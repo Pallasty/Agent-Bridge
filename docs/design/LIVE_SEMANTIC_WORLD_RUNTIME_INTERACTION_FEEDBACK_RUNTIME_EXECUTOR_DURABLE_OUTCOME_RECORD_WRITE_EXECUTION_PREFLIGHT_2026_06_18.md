@@ -20,10 +20,10 @@ G12 consumes the accepted G11 durable outcome record-write preflight and an
 explicit durable outcome record-write execution decision. It answers one narrow
 question:
 
-> Is the scoped, serialized, digest-backed outcome record ready to proceed to a
-> later durable outcome record write commit gate?
+> Is the scoped, digest-verified, destination-verified, idempotent record ready
+> to proceed to a later durable outcome record persistence gate?
 
-It does not write the record, touch memory/store rows, expose MCP, ingest an
+It does not persist the record, touch memory/store rows, expose MCP, ingest an
 outcome, or rewrite the world verdict.
 
 ## 2. Input Contract
@@ -47,22 +47,22 @@ The source G11 preflight must be:
 
 The execution decision must:
 
-- use `execution_kind=durable_outcome_record_write_execution`;
-- set `decision=approved_for_durable_outcome_record_write_commit`;
-- scope to the exact G11 record write id, write implementation id, execution
-  id, gate id, review id, verification id, runtime application evidence id,
+- use `record_write_execution_kind=durable_outcome_record_write_execution`;
+- set `decision=approved_for_durable_outcome_record_persistence`;
+- scope to the exact G11 record write id, write implementation id, execution id,
+  gate id, review id, verification id, runtime application evidence id,
   invocation request id, world, branch, runtime generation, patch id, outcome
   candidate id, outcome schema, idempotency key, payload digest, write plan id,
-  destination, outcome record key, and outcome record digest;
+  destination, record key, and record digest;
 - preserve `source_world_verdict=not_verified`;
 - confirm
   `reviewed_record_write_decision=approved_for_durable_outcome_record_write_execution`;
-- set `record_write_preflight_ready=true`;
-- set `outcome_record_payload_complete=true`;
-- set `outcome_record_serialization_verified=true`;
-- set `write_idempotency_confirmed=true`;
+- set `write_destination_verified=true`;
+- set `outcome_record_digest_verified=true`;
+- set `idempotent_upsert_confirmed=true`;
+- set `store_transaction_plan_complete=true`;
 - keep later surfaces disabled:
-  - `durable_record_write_allowed=false`;
+  - `durable_record_persistence_allowed=false`;
   - `durable_outcome_record_written=false`;
   - `memory_write_allowed=false`;
   - `world_verdict_rewrite_allowed=false`.
@@ -74,21 +74,21 @@ Ready output:
 ```json
 {
   "schema": "agent_bridge.lswr.interaction_feedback_runtime_executor_durable_outcome_record_write_execution_preflight.v0",
-  "durable_outcome_record_write_execution_preflight_verdict": "ready_for_durable_outcome_record_write_commit",
-  "reason": "durable_outcome_record_write_execution_preflight_ready_for_commit",
+  "durable_outcome_record_write_execution_preflight_verdict": "ready_for_durable_outcome_record_persistence",
+  "reason": "durable_outcome_record_write_execution_preflight_ready_for_persistence",
   "durable_outcome_record_write_execution": {
     "record_write_execution_id": "durable_outcome_record_write_execution_arrival_bath_move_002",
     "record_write_id": "durable_outcome_record_write_arrival_bath_move_002",
-    "decision": "approved_for_durable_outcome_record_write_commit",
+    "decision": "approved_for_durable_outcome_record_persistence",
     "outcome_record_key": "onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_record_candidate_arrival_bath_move_002",
     "outcome_record_digest": "sha256:arrival-bath-move-002-outcome-record",
-    "ready_for_durable_outcome_record_write_commit": true,
-    "durable_record_write_allowed": false,
+    "ready_for_durable_outcome_record_persistence": true,
+    "durable_record_persistence_allowed": false,
     "durable_outcome_record_written_by_this_tool": false,
     "memory_write_allowed": false,
     "world_verdict_rewrite_allowed": false
   },
-  "next_allowed_gate": "durable_outcome_record_write_commit"
+  "next_allowed_gate": "durable_outcome_record_persistence"
 }
 ```
 
@@ -110,8 +110,8 @@ The implementation keeps:
 - `mutation_surface=none`;
 - `requires_ready_durable_outcome_record_write_preflight=true`;
 - `requires_explicit_durable_outcome_record_write_execution_decision=true`;
-- `execution_kind=durable_outcome_record_write_execution`;
-- `durable_record_write_allowed=false`;
+- `record_write_execution_kind=durable_outcome_record_write_execution`;
+- `durable_record_persistence_allowed=false`;
 - `durable_outcome_record_written=false`;
 - `memory_write_allowed=false`;
 - `persists_outcome_record=false`;
@@ -124,15 +124,16 @@ The implementation keeps:
 
 Still not accepted:
 
-- durable outcome record write commit;
+- durable outcome record persistence;
 - store or memory writes;
 - #94 ingestion;
 - MCP registration or profile exposure;
 - world verdict rewrite;
-- treating execution readiness as a persisted record.
+- treating persistence readiness as a persisted record.
 
 ## 6. Next Slice
 
-The next safe slice is durable outcome record write commit preflight. It must
-keep the actual write behind a separate explicit gate and keep world-verdict
-rewrite behind a later explicit gate after durable write evidence exists.
+The next safe slice is durable outcome record persistence preflight. It must
+keep the actual store write behind a separate explicit gate and keep
+world-verdict rewrite behind a later explicit gate after durable write evidence
+exists.

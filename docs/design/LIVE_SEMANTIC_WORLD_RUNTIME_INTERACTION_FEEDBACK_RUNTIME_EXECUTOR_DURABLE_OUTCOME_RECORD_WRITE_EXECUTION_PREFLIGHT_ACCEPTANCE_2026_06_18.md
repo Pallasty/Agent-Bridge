@@ -28,7 +28,7 @@ Accepted:
 
 Still not accepted:
 
-- durable outcome record write commit;
+- durable outcome record persistence;
 - store or memory writes;
 - #94 ingestion;
 - MCP registration;
@@ -56,47 +56,46 @@ Observed:
 
 - `durable_outcome_record_write_execution_preflight_verdict=blocked`;
 - `reason=explicit_durable_outcome_record_write_execution_decision_required`;
-- no durable record write, durable ingestion, store, memory, MCP, or verdict
-  rewrite.
+- no durable record persistence, durable ingestion, store, memory, MCP, or
+  verdict rewrite.
 
 Ready smoke:
 
 ```text
-cargo run -q -p ab-bridge --example lswr_interaction_feedback_runtime_executor_durable_outcome_record_write_execution_preflight_smoke -- --with-durable-outcome-record-write-execution-decision --format json --assert-ready-for-durable-outcome-record-write-commit --assert-read-only
+cargo run -q -p ab-bridge --example lswr_interaction_feedback_runtime_executor_durable_outcome_record_write_execution_preflight_smoke -- --with-durable-outcome-record-write-execution-decision --format json --assert-ready-for-durable-outcome-record-persistence --assert-read-only
 ```
 
 Observed:
 
-- `durable_outcome_record_write_execution_preflight_verdict=ready_for_durable_outcome_record_write_commit`;
+- `durable_outcome_record_write_execution_preflight_verdict=ready_for_durable_outcome_record_persistence`;
 - `record_write_execution_id=durable_outcome_record_write_execution_arrival_bath_move_002`;
-- `record_write_id=durable_outcome_record_write_arrival_bath_move_002`;
-- `decision=approved_for_durable_outcome_record_write_commit`;
+- `decision=approved_for_durable_outcome_record_persistence`;
 - `outcome_record_key=onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_record_candidate_arrival_bath_move_002`;
 - `outcome_record_digest=sha256:arrival-bath-move-002-outcome-record`;
-- `durable_record_write_allowed=false`;
+- `durable_record_persistence_allowed=false`;
 - `durable_outcome_record_written_by_this_tool=false`;
 - `world_verdict_rewrite_allowed=false`.
 
 ## 3. Boundary
 
-This accepted G12 preflight can recognize explicit durable outcome record-write
-commit readiness. It cannot execute durable writes and cannot rewrite the source
-world verdict.
+This accepted G12 preflight can recognize explicit durable outcome record
+persistence readiness. It cannot execute durable writes and cannot rewrite the
+source world verdict.
 
 The critical distinction is:
 
-- `decision=approved_for_durable_outcome_record_write_commit`: the supplied
-  execution decision says the scoped record is ready for a later commit/write
+- `decision=approved_for_durable_outcome_record_persistence`: the supplied
+  execution decision says the scoped record is ready for a later persistence
   gate;
-- `ready_for_durable_outcome_record_write_commit=true`: a later commit slice can
-  decide whether and how to persist;
+- `ready_for_durable_outcome_record_persistence=true`: a later persistence slice
+  can decide whether and how to write;
 - `durable_outcome_record_written_by_this_tool=false`: this tool did not write;
 - `world_verdict_rewrite_performed_by_this_tool=false`: this tool did not
   rewrite any verdict.
 
 ## 4. Next Slice
 
-The next safe slice is durable outcome record write commit preflight.
+The next safe slice is durable outcome record persistence preflight.
 
 That slice must keep actual writes and world verdict rewrite behind explicit
 separate gates.

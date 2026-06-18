@@ -6859,7 +6859,7 @@ run cargo run -q -p ab-bridge \
     -- \
     --with-durable-outcome-record-write-execution-decision \
     --format json \
-    --assert-ready-for-durable-outcome-record-write-commit \
+    --assert-ready-for-durable-outcome-record-persistence \
     --assert-read-only >/dev/null
 
 current_corpus="crates/bridge/tests/fixtures/biocortex_retrieval_gate_corpus.jsonl"
