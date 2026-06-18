@@ -6,11 +6,18 @@
 //! rows, registers MCP tools, or rewrites world verdicts.
 
 use ab_bridge::lswr_interaction_feedback::{
+    build_interaction_feedback_runtime_executor_durable_outcome_ingestion_execution_preflight,
     build_interaction_feedback_runtime_executor_durable_outcome_record_persistence_preflight,
+    build_interaction_feedback_runtime_executor_durable_outcome_record_write_execution_preflight,
+    build_interaction_feedback_runtime_executor_durable_outcome_record_write_preflight,
+    build_interaction_feedback_runtime_executor_durable_outcome_write_implementation_preflight,
     render_interaction_feedback_runtime_executor_durable_outcome_record_persistence_preflight,
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_EXECUTION_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_INGESTION_GATE_PREFLIGHT_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_INGESTION_EXECUTION_DECISION_SCHEMA,
     LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_PERSISTENCE_DECISION_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_DECISION_SCHEMA,
     LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_EXECUTION_DECISION_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_WRITE_IMPLEMENTATION_DECISION_SCHEMA,
 };
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
@@ -38,8 +45,8 @@ fn main() -> Result<()> {
     if args.assert_blocked_without_durable_outcome_record_persistence_decision {
         assert_blocked_without_durable_outcome_record_persistence_decision(&persistence_preflight)?;
     }
-    if args.assert_ready_for_durable_outcome_record_persistence_execution {
-        assert_ready_for_durable_outcome_record_persistence_execution(&persistence_preflight)?;
+    if args.assert_ready_for_durable_outcome_record_store_write {
+        assert_ready_for_durable_outcome_record_store_write(&persistence_preflight)?;
     }
     if args.assert_read_only {
         assert_read_only_contract(&persistence_preflight)?;
@@ -57,13 +64,47 @@ fn main() -> Result<()> {
     Ok(())
 }
 
+fn fixture_durable_outcome_record_write_preflight() -> Value {
+    build_interaction_feedback_runtime_executor_durable_outcome_record_write_preflight(&json!({
+        "durable_outcome_write_implementation_preflight": fixture_durable_outcome_write_implementation_preflight(),
+        "durable_outcome_record_write_decision": fixture_durable_outcome_record_write_decision()
+    }))
+}
+
 fn fixture_durable_outcome_record_write_execution_preflight() -> Value {
+    build_interaction_feedback_runtime_executor_durable_outcome_record_write_execution_preflight(
+        &json!({
+            "durable_outcome_record_write_preflight": fixture_durable_outcome_record_write_preflight(),
+            "durable_outcome_record_write_execution_decision": fixture_durable_outcome_record_write_execution_decision()
+        }),
+    )
+}
+
+fn fixture_durable_outcome_write_implementation_preflight() -> Value {
+    build_interaction_feedback_runtime_executor_durable_outcome_write_implementation_preflight(
+        &json!({
+            "durable_outcome_ingestion_execution_preflight": fixture_durable_outcome_ingestion_execution_preflight(),
+            "durable_outcome_write_implementation_decision": fixture_durable_outcome_write_implementation_decision()
+        }),
+    )
+}
+
+fn fixture_durable_outcome_ingestion_execution_preflight() -> Value {
+    build_interaction_feedback_runtime_executor_durable_outcome_ingestion_execution_preflight(
+        &json!({
+            "durable_outcome_ingestion_gate_preflight": fixture_durable_outcome_ingestion_gate_preflight(),
+            "durable_outcome_ingestion_execution_decision": fixture_durable_outcome_ingestion_execution_decision()
+        }),
+    )
+}
+
+fn fixture_durable_outcome_ingestion_gate_preflight() -> Value {
     json!({
-        "schema": LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_EXECUTION_PREFLIGHT_SCHEMA,
-        "source_world_verdict": "not_verified",
-        "durable_outcome_record_write_execution_preflight_verdict": "ready_for_durable_outcome_record_persistence",
+        "schema": LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_INGESTION_GATE_PREFLIGHT_SCHEMA,
+        "durable_outcome_ingestion_gate_preflight_verdict": "ready_for_durable_outcome_ingestion_execution",
         "status": "ready",
-        "reason": "durable_outcome_record_write_execution_preflight_ready_for_persistence",
+        "reason": "durable_outcome_ingestion_gate_preflight_ready_for_execution",
+        "source_world_verdict": "not_verified",
         "failure_reasons": [],
         "guardrails": {
             "read_only": true,
@@ -72,32 +113,26 @@ fn fixture_durable_outcome_record_write_execution_preflight() -> Value {
             "store_access_required": false,
             "mcp_tool_registered": false,
             "queries_live_runtime": false,
-            "requires_ready_durable_outcome_record_write_preflight": true,
-            "requires_explicit_durable_outcome_record_write_execution_decision": true,
-            "record_write_execution_kind": "durable_outcome_record_write_execution",
-            "performs_durable_outcome_record_write_execution_preflight": true,
-            "durable_record_persistence_allowed": false,
-            "durable_outcome_record_written": false,
-            "memory_write_allowed": false,
+            "requires_ready_outcome_ingestion_review_preflight": true,
+            "requires_explicit_durable_outcome_ingestion_gate_decision": true,
+            "gate_kind": "durable_outcome_ingestion_gate",
+            "performs_durable_outcome_ingestion_gate": false,
+            "durable_ingestion_execution_allowed": false,
             "persists_outcome_record": false,
             "feedback_changes_world_verdict_allowed": false,
-            "runtime_executor_durable_outcome_record_write_execution_preflight_only": true
+            "runtime_executor_durable_outcome_ingestion_gate_preflight_only": true
         },
         "agent_action_contract": {
-            "mode": "runtime_executor_durable_outcome_record_write_execution_preflight_only",
-            "may_persist_durable_outcome_record_after_preflight": true,
+            "mode": "runtime_executor_durable_outcome_ingestion_gate_preflight_only",
+            "may_execute_durable_outcome_ingestion_after_gate": true,
             "do_not_ingest_outcome": true,
             "do_not_write_memory": true,
             "do_not_rewrite_world_verdict": true,
             "do_not_persist_outcome_record": true,
-            "require_separate_durable_outcome_record_persistence": true,
+            "require_separate_durable_ingestion_execution": true,
             "require_world_verdict_rewrite_gate_after_ingestion": true
         },
-        "durable_outcome_record_write_execution": {
-            "record_write_execution_id": "durable_outcome_record_write_execution_arrival_bath_move_002",
-            "record_write_id": "durable_outcome_record_write_arrival_bath_move_002",
-            "write_implementation_id": "durable_outcome_write_impl_arrival_bath_move_002",
-            "execution_id": "durable_outcome_ingestion_execution_arrival_bath_move_002",
+        "durable_outcome_ingestion_gate": {
             "gate_id": "durable_outcome_ingestion_gate_arrival_bath_move_002",
             "review_id": "outcome_ingestion_review_arrival_bath_move_002",
             "verification_id": "post_apply_verification_arrival_bath_move_002",
@@ -107,38 +142,119 @@ fn fixture_durable_outcome_record_write_execution_preflight() -> Value {
             "branch_id": "main",
             "runtime_generation": "runtime_gen_1284",
             "patch_id": "patch_arrival_bath_move_002",
-            "decision": "approved_for_durable_outcome_record_persistence",
-            "record_write_execution_reason": "record_write_preflight_ready_for_later_durable_persistence",
+            "decision": "approved_for_durable_ingestion_execution",
+            "gate_reason": "reviewed_outcome_ready_for_separate_durable_execution",
             "outcome_record_candidate_id": "outcome_record_candidate_arrival_bath_move_002",
             "outcome_record_schema": "agent_bridge.lswr.outcome_record_candidate.v0",
             "idempotency_key": "onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_ingestion_review_arrival_bath_move_002",
-            "outcome_payload_digest": "sha256:arrival-bath-move-002-outcome-payload",
-            "write_plan_id": "durable_outcome_write_plan_arrival_bath_move_002",
-            "write_destination": "agent_bridge_store_outcome_records",
-            "outcome_record_key": "onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_record_candidate_arrival_bath_move_002",
-            "outcome_record_digest": "sha256:arrival-bath-move-002-outcome-record",
-            "write_destination_verified": true,
-            "outcome_record_digest_verified": true,
-            "idempotent_upsert_confirmed": true,
-            "store_transaction_plan_complete": true,
-            "ready_for_durable_outcome_record_persistence": true,
-            "durable_record_persistence_allowed": false,
-            "durable_outcome_record_written_by_this_tool": false,
-            "memory_write_allowed": false,
-            "world_verdict_rewrite_allowed": false
-        },
-        "durable_outcome_record_write_execution_decision": {
-            "schema": LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_EXECUTION_DECISION_SCHEMA
+            "outcome_payload_complete": true,
+            "ready_for_durable_outcome_ingestion_execution": true,
+            "durable_outcome_ingestion_gate_performed_by_this_tool": false,
+            "durable_ingestion_execution_allowed": false,
+            "world_verdict_rewrite_allowed": false,
+            "outcome_record_persisted_by_this_tool": false
         }
+    })
+}
+
+fn fixture_durable_outcome_ingestion_execution_decision() -> Value {
+    json!({
+        "schema": LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_INGESTION_EXECUTION_DECISION_SCHEMA,
+        "execution_id": "durable_outcome_ingestion_execution_arrival_bath_move_002",
+        "execution_kind": "durable_outcome_ingestion_execution",
+        "execution_preflighted_at": "2026-06-16T07:35:00Z",
+        "source_durable_outcome_ingestion_gate_scope": fixture_execution_scope_without_digest(),
+        "decision": "approved_for_durable_outcome_ingestion_write_implementation",
+        "execution_reason": "gate_ready_and_payload_scoped_for_later_durable_write_implementation",
+        "source_world_verdict": "not_verified",
+        "reviewed_gate_decision": "approved_for_durable_ingestion_execution",
+        "outcome_payload_digest": "sha256:arrival-bath-move-002-outcome-payload",
+        "write_plan_id": "durable_outcome_write_plan_arrival_bath_move_002",
+        "outcome_payload_complete": true,
+        "write_plan_complete": true,
+        "durable_write_implementation_allowed": false,
+        "durable_outcome_ingestion_performed": false,
+        "world_verdict_rewrite_allowed": false,
+        "outcome_record_persisted": false
+    })
+}
+
+fn fixture_durable_outcome_write_implementation_decision() -> Value {
+    json!({
+        "schema": LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_WRITE_IMPLEMENTATION_DECISION_SCHEMA,
+        "write_implementation_id": "durable_outcome_write_impl_arrival_bath_move_002",
+        "write_implementation_kind": "durable_outcome_write_implementation",
+        "write_preflighted_at": "2026-06-16T07:40:00Z",
+        "source_durable_outcome_ingestion_execution_scope": fixture_scope_with_digest(),
+        "decision": "approved_for_durable_outcome_record_write",
+        "write_reason": "execution_preflight_ready_for_later_record_write",
+        "source_world_verdict": "not_verified",
+        "reviewed_execution_decision": "approved_for_durable_outcome_ingestion_write_implementation",
+        "outcome_record_write_plan_complete": true,
+        "write_idempotency_confirmed": true,
+        "write_destination": "agent_bridge_store_outcome_records",
+        "durable_record_write_allowed": false,
+        "durable_outcome_record_written": false,
+        "memory_write_allowed": false,
+        "world_verdict_rewrite_allowed": false
+    })
+}
+
+fn fixture_durable_outcome_record_write_decision() -> Value {
+    json!({
+        "schema": LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_DECISION_SCHEMA,
+        "record_write_id": "durable_outcome_record_write_arrival_bath_move_002",
+        "record_write_kind": "durable_outcome_record_write",
+        "record_write_preflighted_at": "2026-06-16T07:45:00Z",
+        "source_durable_outcome_write_implementation_scope": fixture_record_write_scope(),
+        "decision": "approved_for_durable_outcome_record_write_execution",
+        "record_write_reason": "write_implementation_preflight_ready_for_later_record_write_execution",
+        "source_world_verdict": "not_verified",
+        "reviewed_write_implementation_decision": "approved_for_durable_outcome_record_write",
+        "outcome_record_payload_complete": true,
+        "outcome_record_serialization_verified": true,
+        "write_idempotency_confirmed": true,
+        "write_destination": "agent_bridge_store_outcome_records",
+        "outcome_record_key": "onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_record_candidate_arrival_bath_move_002",
+        "outcome_record_digest": "sha256:arrival-bath-move-002-outcome-record",
+        "durable_record_write_execution_allowed": false,
+        "durable_outcome_record_written": false,
+        "memory_write_allowed": false,
+        "world_verdict_rewrite_allowed": false
+    })
+}
+
+fn fixture_durable_outcome_record_write_execution_decision() -> Value {
+    json!({
+        "schema": LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_EXECUTION_DECISION_SCHEMA,
+        "record_write_execution_id": "durable_outcome_record_write_execution_arrival_bath_move_002",
+        "record_write_execution_kind": "durable_outcome_record_write_execution",
+        "record_write_execution_preflighted_at": "2026-06-16T07:50:00Z",
+        "source_durable_outcome_record_write_scope": fixture_record_write_scope(),
+        "decision": "approved_for_durable_outcome_record_persistence",
+        "record_write_execution_reason": "record_write_preflight_ready_for_later_durable_persistence",
+        "source_world_verdict": "not_verified",
+        "reviewed_record_write_decision": "approved_for_durable_outcome_record_write_execution",
+        "write_destination_verified": true,
+        "outcome_record_digest_verified": true,
+        "idempotent_upsert_confirmed": true,
+        "store_transaction_plan_complete": true,
+        "write_destination": "agent_bridge_store_outcome_records",
+        "outcome_record_key": "onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_record_candidate_arrival_bath_move_002",
+        "outcome_record_digest": "sha256:arrival-bath-move-002-outcome-record",
+        "durable_record_persistence_allowed": false,
+        "durable_outcome_record_written": false,
+        "memory_write_allowed": false,
+        "world_verdict_rewrite_allowed": false
     })
 }
 
 fn fixture_durable_outcome_record_persistence_decision() -> Value {
     json!({
         "schema": LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_PERSISTENCE_DECISION_SCHEMA,
-        "record_persistence_id": "durable_outcome_record_persistence_arrival_bath_move_002",
-        "record_persistence_kind": "durable_outcome_record_persistence",
-        "record_persistence_preflighted_at": "2026-06-16T07:55:00Z",
+        "persistence_id": "durable_outcome_record_persistence_arrival_bath_move_002",
+        "persistence_kind": "durable_outcome_record_persistence",
+        "persistence_preflighted_at": "2026-06-16T07:55:00Z",
         "source_durable_outcome_record_write_execution_scope": {
             "record_write_execution_id": "durable_outcome_record_write_execution_arrival_bath_move_002",
             "record_write_id": "durable_outcome_record_write_arrival_bath_move_002",
@@ -162,22 +278,59 @@ fn fixture_durable_outcome_record_persistence_decision() -> Value {
             "outcome_record_key": "onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_record_candidate_arrival_bath_move_002",
             "outcome_record_digest": "sha256:arrival-bath-move-002-outcome-record"
         },
-        "decision": "approved_for_durable_outcome_record_persistence_execution",
-        "record_persistence_reason": "record_write_execution_preflight_ready_for_later_persistence_execution",
+        "decision": "approved_for_durable_outcome_record_store_write",
+        "persistence_reason": "record_write_execution_preflight_ready_for_later_store_write",
         "source_world_verdict": "not_verified",
         "reviewed_record_write_execution_decision": "approved_for_durable_outcome_record_persistence",
-        "write_destination_verified": true,
+        "persistence_target_verified": true,
         "outcome_record_digest_verified": true,
         "idempotent_upsert_confirmed": true,
         "store_transaction_plan_complete": true,
         "write_destination": "agent_bridge_store_outcome_records",
         "outcome_record_key": "onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_record_candidate_arrival_bath_move_002",
         "outcome_record_digest": "sha256:arrival-bath-move-002-outcome-record",
-        "durable_record_persistence_execution_allowed": false,
+        "durable_store_write_allowed": false,
         "durable_outcome_record_written": false,
         "memory_write_allowed": false,
         "world_verdict_rewrite_allowed": false
     })
+}
+
+fn fixture_execution_scope_without_digest() -> Value {
+    json!({
+        "gate_id": "durable_outcome_ingestion_gate_arrival_bath_move_002",
+        "review_id": "outcome_ingestion_review_arrival_bath_move_002",
+        "verification_id": "post_apply_verification_arrival_bath_move_002",
+        "runtime_application_evidence_id": "runtime_application_evidence_arrival_bath_move_002",
+        "source_invocation_request_id": "patch_executor_invocation_arrival_bath_move_002",
+        "world_id": "onsen_live_session",
+        "branch_id": "main",
+        "runtime_generation": "runtime_gen_1284",
+        "patch_id": "patch_arrival_bath_move_002",
+        "outcome_record_candidate_id": "outcome_record_candidate_arrival_bath_move_002",
+        "outcome_record_schema": "agent_bridge.lswr.outcome_record_candidate.v0",
+        "idempotency_key": "onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_ingestion_review_arrival_bath_move_002"
+    })
+}
+
+fn fixture_scope_with_digest() -> Value {
+    let mut scope = fixture_execution_scope_without_digest();
+    scope["execution_id"] = json!("durable_outcome_ingestion_execution_arrival_bath_move_002");
+    scope["outcome_payload_digest"] = json!("sha256:arrival-bath-move-002-outcome-payload");
+    scope["write_plan_id"] = json!("durable_outcome_write_plan_arrival_bath_move_002");
+    scope
+}
+
+fn fixture_record_write_scope() -> Value {
+    let mut scope = fixture_scope_with_digest();
+    scope["record_write_id"] = json!("durable_outcome_record_write_arrival_bath_move_002");
+    scope["write_implementation_id"] = json!("durable_outcome_write_impl_arrival_bath_move_002");
+    scope["write_destination"] = json!("agent_bridge_store_outcome_records");
+    scope["outcome_record_key"] = json!(
+        "onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_record_candidate_arrival_bath_move_002"
+    );
+    scope["outcome_record_digest"] = json!("sha256:arrival-bath-move-002-outcome-record");
+    scope
 }
 
 fn assert_blocked_without_durable_outcome_record_persistence_decision(
@@ -200,25 +353,23 @@ fn assert_blocked_without_durable_outcome_record_persistence_decision(
     Ok(())
 }
 
-fn assert_ready_for_durable_outcome_record_persistence_execution(preflight: &Value) -> Result<()> {
+fn assert_ready_for_durable_outcome_record_store_write(preflight: &Value) -> Result<()> {
     if preflight
         .get("durable_outcome_record_persistence_preflight_verdict")
         .and_then(Value::as_str)
-        != Some("ready_for_durable_outcome_record_persistence_execution")
+        != Some("ready_for_durable_outcome_record_store_write")
     {
-        bail!("durable outcome record persistence preflight must be ready for execution");
+        bail!("durable outcome record persistence preflight must be ready for store write");
     }
     if preflight["durable_outcome_record_persistence"]["decision"].as_str()
-        != Some("approved_for_durable_outcome_record_persistence_execution")
+        != Some("approved_for_durable_outcome_record_store_write")
     {
-        bail!("ready preflight must carry explicit record persistence execution decision");
+        bail!("ready preflight must carry explicit record store-write decision");
     }
-    if preflight["durable_outcome_record_persistence"]
-        ["durable_record_persistence_execution_allowed"]
-        .as_bool()
+    if preflight["durable_outcome_record_persistence"]["durable_store_write_allowed"].as_bool()
         != Some(false)
     {
-        bail!("durable outcome record persistence preflight must not allow execution");
+        bail!("durable outcome record persistence preflight must not allow store write");
     }
     if preflight["durable_outcome_record_persistence"]
         ["durable_outcome_record_written_by_this_tool"]
@@ -257,7 +408,7 @@ enum OutputFormat {
 struct Args {
     with_durable_outcome_record_persistence_decision: bool,
     assert_blocked_without_durable_outcome_record_persistence_decision: bool,
-    assert_ready_for_durable_outcome_record_persistence_execution: bool,
+    assert_ready_for_durable_outcome_record_store_write: bool,
     assert_read_only: bool,
     format: OutputFormat,
 }
@@ -266,7 +417,7 @@ impl Args {
     fn parse(args: impl IntoIterator<Item = String>) -> Result<Self> {
         let mut with_durable_outcome_record_persistence_decision = false;
         let mut assert_blocked_without_durable_outcome_record_persistence_decision = false;
-        let mut assert_ready_for_durable_outcome_record_persistence_execution = false;
+        let mut assert_ready_for_durable_outcome_record_store_write = false;
         let mut assert_read_only = false;
         let mut format = OutputFormat::Markdown;
         let mut iter = args.into_iter();
@@ -279,8 +430,8 @@ impl Args {
                 "--assert-blocked-without-durable-outcome-record-persistence-decision" => {
                     assert_blocked_without_durable_outcome_record_persistence_decision = true
                 }
-                "--assert-ready-for-durable-outcome-record-persistence-execution" => {
-                    assert_ready_for_durable_outcome_record_persistence_execution = true
+                "--assert-ready-for-durable-outcome-record-store-write" => {
+                    assert_ready_for_durable_outcome_record_store_write = true
                 }
                 "--assert-read-only" => assert_read_only = true,
                 "--format" => {
@@ -305,7 +456,7 @@ impl Args {
         Ok(Self {
             with_durable_outcome_record_persistence_decision,
             assert_blocked_without_durable_outcome_record_persistence_decision,
-            assert_ready_for_durable_outcome_record_persistence_execution,
+            assert_ready_for_durable_outcome_record_store_write,
             assert_read_only,
             format,
         })
@@ -319,7 +470,7 @@ fn print_help() {
 Flags:\n\
   --with-durable-outcome-record-persistence-decision\n\
   --assert-blocked-without-durable-outcome-record-persistence-decision\n\
-  --assert-ready-for-durable-outcome-record-persistence-execution\n\
+  --assert-ready-for-durable-outcome-record-store-write\n\
   --assert-read-only\n\
   --format markdown|json|both\n"
     );

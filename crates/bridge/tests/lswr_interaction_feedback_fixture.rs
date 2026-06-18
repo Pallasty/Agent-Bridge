@@ -4208,7 +4208,7 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_persistence_pref
     );
 
     assert!(markdown.contains("- durable_outcome_record_persistence_preflight_verdict: `blocked`"));
-    assert!(markdown.contains("- ready_for_durable_outcome_record_persistence_execution: `false`"));
+    assert!(markdown.contains("- ready_for_durable_outcome_record_store_write: `false`"));
 }
 
 #[test]
@@ -4238,16 +4238,16 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_persistence_pref
     );
     assert_eq!(
         persistence_preflight["durable_outcome_record_persistence_preflight_verdict"],
-        "ready_for_durable_outcome_record_persistence_execution"
+        "ready_for_durable_outcome_record_store_write"
     );
     assert_eq!(persistence_preflight["status"], "ready");
     assert_eq!(
         persistence_preflight["reason"],
-        "durable_outcome_record_persistence_preflight_ready_for_execution"
+        "durable_outcome_record_persistence_preflight_ready_for_store_write"
     );
     assert_eq!(persistence_preflight["failure_reasons"], json!([]));
     assert_eq!(
-        persistence_preflight["durable_outcome_record_persistence"]["record_persistence_id"],
+        persistence_preflight["durable_outcome_record_persistence"]["persistence_id"],
         "durable_outcome_record_persistence_arrival_bath_move_002"
     );
     assert_eq!(
@@ -4256,32 +4256,35 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_persistence_pref
     );
     assert_eq!(
         persistence_preflight["durable_outcome_record_persistence"]["decision"],
-        "approved_for_durable_outcome_record_persistence_execution"
+        "approved_for_durable_outcome_record_store_write"
     );
     assert_eq!(
         persistence_preflight["durable_outcome_record_persistence"]
-            ["ready_for_durable_outcome_record_persistence_execution"],
+            ["ready_for_durable_outcome_record_store_write"],
         true
     );
     assert_eq!(
+        persistence_preflight["durable_outcome_record_persistence"]["durable_store_write_allowed"],
+        false
+    );
+    assert_eq!(
         persistence_preflight["durable_outcome_record_persistence"]
-            ["durable_record_persistence_execution_allowed"],
+            ["durable_outcome_record_written_by_this_tool"],
         false
     );
     assert_eq!(
         persistence_preflight["next_allowed_gate"],
-        "durable_outcome_record_persistence_execution"
+        "durable_outcome_record_store_write"
     );
     assert_runtime_executor_durable_outcome_record_persistence_preflight_read_only(
         &persistence_preflight,
     );
 
     assert!(markdown.contains(
-        "- durable_outcome_record_persistence_preflight_verdict: `ready_for_durable_outcome_record_persistence_execution`"
+        "- durable_outcome_record_persistence_preflight_verdict: `ready_for_durable_outcome_record_store_write`"
     ));
-    assert!(markdown
-        .contains("- decision: `approved_for_durable_outcome_record_persistence_execution`"));
-    assert!(markdown.contains("- durable_record_persistence_execution_allowed: `false`"));
+    assert!(markdown.contains("- decision: `approved_for_durable_outcome_record_store_write`"));
+    assert!(markdown.contains("- durable_store_write_allowed: `false`"));
     assert!(markdown.contains("- world_verdict_rewrite_allowed: `false`"));
 }
 
@@ -4291,7 +4294,7 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_persistence_pref
     let execution_preflight =
         ready_runtime_executor_durable_outcome_record_write_execution_preflight();
     let mut decision = explicit_durable_outcome_record_persistence_decision();
-    decision["record_persistence_kind"] = json!("operator_note");
+    decision["persistence_kind"] = json!("operator_note");
     decision["decision"] = json!("approved_and_write_now");
     decision["source_durable_outcome_record_write_execution_scope"]["record_write_execution_id"] =
         json!("durable_outcome_record_write_execution_other");
@@ -4299,14 +4302,14 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_persistence_pref
         json!("sha256:other");
     decision["source_world_verdict"] = json!("verified");
     decision["reviewed_record_write_execution_decision"] = json!("blocked");
-    decision["write_destination_verified"] = json!(false);
+    decision["persistence_target_verified"] = json!(false);
     decision["outcome_record_digest_verified"] = json!(false);
     decision["idempotent_upsert_confirmed"] = json!(false);
     decision["store_transaction_plan_complete"] = json!(false);
     decision["write_destination"] = Value::Null;
     decision["outcome_record_key"] = Value::Null;
     decision["outcome_record_digest"] = Value::Null;
-    decision["durable_record_persistence_execution_allowed"] = json!(true);
+    decision["durable_store_write_allowed"] = json!(true);
     decision["durable_outcome_record_written"] = json!(true);
     decision["memory_write_allowed"] = json!(true);
     decision["world_verdict_rewrite_allowed"] = json!(true);
@@ -4334,10 +4337,10 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_persistence_pref
         "durable_outcome_record_persistence_must_preserve_not_verified_source"
     )));
     assert!(failure_reasons.contains(&json!(
-        "durable_outcome_record_persistence_must_review_approved_execution"
+        "durable_outcome_record_persistence_must_review_approved_record_write_execution"
     )));
     assert!(failure_reasons.contains(&json!(
-        "durable_outcome_record_persistence_requires_destination_verification"
+        "durable_outcome_record_persistence_requires_target_verification"
     )));
     assert!(failure_reasons.contains(&json!(
         "durable_outcome_record_persistence_requires_digest_verification"
@@ -4354,7 +4357,7 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_persistence_pref
     assert!(failure_reasons.contains(&json!("durable_outcome_record_persistence_key_required")));
     assert!(failure_reasons.contains(&json!("durable_outcome_record_persistence_digest_required")));
     assert!(failure_reasons.contains(&json!(
-        "durable_outcome_record_persistence_must_not_allow_persistence_execution"
+        "durable_outcome_record_persistence_must_not_allow_store_write"
     )));
     assert!(failure_reasons.contains(&json!(
         "durable_outcome_record_persistence_must_not_write_record"
@@ -4377,7 +4380,7 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_persistence_pref
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_record_persistence_preflight_requires_record_write_execution_input(
+fn interaction_feedback_runtime_executor_durable_outcome_record_persistence_preflight_requires_execution_input(
 ) {
     let record_preflight = ready_runtime_executor_durable_outcome_record_write_preflight();
     let persistence_preflight =
@@ -4992,9 +4995,9 @@ fn ready_runtime_executor_durable_outcome_record_write_execution_preflight() -> 
 fn explicit_durable_outcome_record_persistence_decision() -> Value {
     json!({
         "schema": LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_PERSISTENCE_DECISION_SCHEMA,
-        "record_persistence_id": "durable_outcome_record_persistence_arrival_bath_move_002",
-        "record_persistence_kind": "durable_outcome_record_persistence",
-        "record_persistence_preflighted_at": "2026-06-16T07:55:00Z",
+        "persistence_id": "durable_outcome_record_persistence_arrival_bath_move_002",
+        "persistence_kind": "durable_outcome_record_persistence",
+        "persistence_preflighted_at": "2026-06-16T07:55:00Z",
         "source_durable_outcome_record_write_execution_scope": {
             "record_write_execution_id": "durable_outcome_record_write_execution_arrival_bath_move_002",
             "record_write_id": "durable_outcome_record_write_arrival_bath_move_002",
@@ -5018,18 +5021,18 @@ fn explicit_durable_outcome_record_persistence_decision() -> Value {
             "outcome_record_key": "onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_record_candidate_arrival_bath_move_002",
             "outcome_record_digest": "sha256:arrival-bath-move-002-outcome-record"
         },
-        "decision": "approved_for_durable_outcome_record_persistence_execution",
-        "record_persistence_reason": "record_write_execution_preflight_ready_for_later_persistence_execution",
+        "decision": "approved_for_durable_outcome_record_store_write",
+        "persistence_reason": "record_write_execution_preflight_ready_for_later_store_write",
         "source_world_verdict": "not_verified",
         "reviewed_record_write_execution_decision": "approved_for_durable_outcome_record_persistence",
-        "write_destination_verified": true,
+        "persistence_target_verified": true,
         "outcome_record_digest_verified": true,
         "idempotent_upsert_confirmed": true,
         "store_transaction_plan_complete": true,
         "write_destination": "agent_bridge_store_outcome_records",
         "outcome_record_key": "onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_record_candidate_arrival_bath_move_002",
         "outcome_record_digest": "sha256:arrival-bath-move-002-outcome-record",
-        "durable_record_persistence_execution_allowed": false,
+        "durable_store_write_allowed": false,
         "durable_outcome_record_written": false,
         "memory_write_allowed": false,
         "world_verdict_rewrite_allowed": false
@@ -6318,7 +6321,7 @@ fn assert_runtime_executor_durable_outcome_record_persistence_preflight_read_onl
         true
     );
     assert_eq!(
-        preflight["guardrails"]["durable_record_persistence_execution_allowed"],
+        preflight["guardrails"]["durable_store_write_allowed"],
         false
     );
     assert_eq!(
@@ -6332,8 +6335,7 @@ fn assert_runtime_executor_durable_outcome_record_persistence_preflight_read_onl
         false
     );
     assert_eq!(
-        preflight["durable_outcome_record_persistence"]
-            ["durable_record_persistence_execution_allowed"],
+        preflight["durable_outcome_record_persistence"]["durable_store_write_allowed"],
         false
     );
     assert_eq!(
@@ -6363,6 +6365,10 @@ fn assert_runtime_executor_durable_outcome_record_persistence_preflight_read_onl
     );
     assert_eq!(
         preflight["agent_action_contract"]["do_not_persist_outcome_record"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["require_separate_durable_outcome_record_store_write"],
         true
     );
 }
