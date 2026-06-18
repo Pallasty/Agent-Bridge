@@ -540,6 +540,19 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("setOrphanCandidateDecisionFilter", html)
         self.assertIn("orphanCandidateDecision(candidate) === decisionFilter", html)
 
+    def test_orphan_candidate_review_workflow_can_focus_next_candidate(self):
+        html = palace_html()
+
+        self.assertIn("function orphanCandidatePairId(row, candidate)", html)
+        self.assertIn("function orphanCandidateReviewableRows(result)", html)
+        self.assertIn("function renderOrphanCandidateWorkflowActions(result)", html)
+        self.assertIn("orphan-candidate-workflow", html)
+        self.assertIn("data-orphan-review-next", html)
+        self.assertIn("function focusNextOrphanCandidateReview(result)", html)
+        self.assertIn("function focusNextOrphanCandidateReviewFromSlot()", html)
+        self.assertIn("state.selfReviewFocusedPairId = orphanCandidatePairId(next.row, next.candidate);", html)
+        self.assertIn("focusNextOrphanCandidateReviewFromSlot();", html)
+
     def test_approved_plan_surfaces_human_confirmed_write_gate(self):
         html = palace_html()
 

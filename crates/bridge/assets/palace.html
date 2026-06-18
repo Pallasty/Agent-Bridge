@@ -1833,6 +1833,63 @@
       font-size: 10px;
       font-variant-numeric: tabular-nums;
     }
+    #panel .orphan-candidate-workflow {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+      margin: 0 0 8px;
+      padding: 8px 10px;
+      background: #111119;
+      border: 1px solid #252532;
+      border-radius: 5px;
+    }
+    #panel .orphan-candidate-workflow .workflow-label,
+    #panel .orphan-candidate-workflow .workflow-count {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #panel .orphan-candidate-workflow .workflow-label {
+      color: #7a7a88;
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    #panel .orphan-candidate-workflow .workflow-count {
+      color: #d8d8e2;
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+    }
+    #panel .orphan-candidate-workflow-actions {
+      display: flex;
+      gap: 5px;
+      justify-content: flex-end;
+      min-width: 0;
+    }
+    #panel .orphan-candidate-workflow button {
+      background: transparent;
+      border: 1px solid #333344;
+      color: #b8b8c2;
+      padding: 4px 8px;
+      border-radius: 3px;
+      font-size: 10px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    #panel .orphan-candidate-workflow button:hover {
+      color: #ffffff;
+      border-color: #5cc8c8;
+      background: #151522;
+    }
+    #panel .orphan-candidate-workflow button:disabled {
+      color: #4a4a55;
+      border-color: #252532;
+      cursor: default;
+      background: transparent;
+    }
     #panel .self-review-focused-pair-context {
       display: grid;
       grid-template-columns: minmax(0, 1fr) auto;
@@ -6951,6 +7008,39 @@ function renderOrphanCandidateDecisionQueue(result) {
   }).join("") + `</div>`;
 }
 
+function orphanCandidatePairId(row, candidate) {
+  if (!row || !candidate || !row.orphan || !candidate.key) return "";
+  return `${row.orphan} -> ${candidate.key}`;
+}
+
+function orphanCandidateReviewableRows(result) {
+  return filteredOrphanCandidateRows(result || {})
+    .map(row => {
+      const candidate = Array.isArray(row.candidates) && row.candidates.length > 0 ? row.candidates[0] : null;
+      return { row, candidate, pairId: orphanCandidatePairId(row, candidate) };
+    })
+    .filter(item => item.candidate && item.pairId);
+}
+
+function renderOrphanCandidateWorkflowActions(result) {
+  const rows = orphanCandidateReviewableRows(result || {});
+  const count = rows.length;
+  const focused = state.selfReviewFocusedPairId
+    ? rows.findIndex(item => item.pairId === state.selfReviewFocusedPairId)
+    : -1;
+  const position = focused >= 0 ? `${focused + 1}/${count}` : `0/${count}`;
+  return `<div class="orphan-candidate-workflow">
+    <div>
+      <div class="workflow-label">review workflow</div>
+      <div class="workflow-count">${escapeHTML(position)} candidate${count === 1 ? "" : "s"} in current filters</div>
+    </div>
+    <div class="orphan-candidate-workflow-actions">
+      <button type="button" data-orphan-review-next="1"${count ? "" : " disabled"}>next</button>
+      <button type="button" data-self-review-clear-focused-pair="1"${state.selfReviewFocusedPairId ? "" : " disabled"}>clear</button>
+    </div>
+  </div>`;
+}
+
 function renderSelfReviewFocusedPairContext() {
   if (!state.selfReviewFocusedPairId) return "";
   return `<div class="self-review-focused-pair-context" title="focused from history · read-only">
@@ -7042,7 +7132,7 @@ function renderOrphanCandidateRows(result) {
     const status = orphanCandidateStatusClass(row.status);
     const lane = orphanCandidateReviewLane(row);
     const candidate = Array.isArray(row.candidates) && row.candidates.length > 0 ? row.candidates[0] : null;
-    const pairId = candidate ? `${row.orphan} -> ${candidate.key}` : "";
+    const pairId = orphanCandidatePairId(row, candidate);
     const focusedFromHistory = pairId && state.selfReviewFocusedPairId === pairId ? " focused_from_history" : "";
     const confidence = candidate && Number.isFinite(candidate.confidence)
       ? candidate.confidence.toFixed(2)
@@ -7086,6 +7176,7 @@ function renderRegionOrphanCandidateResult(result) {
   ${renderOrphanCandidateDiagnostics(result || {})}
   ${renderOrphanCandidateQualitySummary(result || {})}
   ${renderOrphanCandidateDecisionQueue(result || {})}
+  ${renderOrphanCandidateWorkflowActions(result || {})}
   ${renderOrphanCandidateFilterStatus(result || {})}
   ${renderSelfReviewFocusedPairContext()}
   ${renderOrphanCandidateRows(result || {})}`;
@@ -7111,6 +7202,29 @@ function setOrphanCandidateDecisionFilter(decision) {
     scrollFocusedOrphanCandidatePairIntoView();
   }
   saveViewState();
+}
+
+function focusNextOrphanCandidateReview(result) {
+  const rows = orphanCandidateReviewableRows(result || {});
+  if (rows.length === 0) return false;
+  const currentIndex = state.selfReviewFocusedPairId
+    ? rows.findIndex(item => item.pairId === state.selfReviewFocusedPairId)
+    : -1;
+  const next = rows[(currentIndex + 1) % rows.length];
+  state.selfReviewFocusedPairId = orphanCandidatePairId(next.row, next.candidate);
+  const slot = document.getElementById("region-orphan-candidates");
+  if (slot && slot._orphanCandidateResult) {
+    slot.innerHTML = renderRegionOrphanCandidateResult(slot._orphanCandidateResult);
+    scrollFocusedOrphanCandidatePairIntoView();
+  }
+  saveViewState();
+  return true;
+}
+
+function focusNextOrphanCandidateReviewFromSlot() {
+  const slot = document.getElementById("region-orphan-candidates");
+  if (!slot || !slot._orphanCandidateResult) return false;
+  return focusNextOrphanCandidateReview(slot._orphanCandidateResult);
 }
 
 function renderOrphanApprovedPlanStats(plan) {
@@ -7315,6 +7429,7 @@ async function recordOrphanCandidateDecision(regionId, orphanKey, candidateKey, 
     <div class="maintenance-empty">recorded ${escapeHTML(decision)} · refreshing candidates...</div>`;
   }
   await loadRegionOrphanCandidates(regionId);
+  focusNextOrphanCandidateReviewFromSlot();
 }
 
 function renderRegionNodeList(regionId) {
@@ -7554,6 +7669,12 @@ function jumpToRegionNode(key) {
 }
 
 function handleOrphanRepairClick(e, regionId) {
+  const nextReviewBtn = e.target.closest("[data-orphan-review-next]");
+  if (nextReviewBtn) {
+    e.preventDefault();
+    focusNextOrphanCandidateReviewFromSlot();
+    return true;
+  }
   const clearFocusBtn = e.target.closest("[data-self-review-clear-focused-pair]");
   if (clearFocusBtn) {
     e.preventDefault();
