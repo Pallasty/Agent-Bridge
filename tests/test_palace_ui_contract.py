@@ -528,6 +528,18 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("reason:", html)
         self.assertIn("focusedFromHistory ? renderFocusedOrphanCandidateEvidence(row, candidate) : \"\"", html)
 
+    def test_orphan_candidate_review_decision_queue_filters_rows(self):
+        html = palace_html()
+
+        self.assertIn("VALID_ORPHAN_CANDIDATE_DECISIONS", html)
+        self.assertIn("orphanCandidateDecisionFilter", html)
+        self.assertIn("function orphanCandidateDecisionBuckets(result)", html)
+        self.assertIn("function renderOrphanCandidateDecisionQueue(result)", html)
+        self.assertIn("data-orphan-candidate-decision-filter", html)
+        self.assertIn("review queue", html)
+        self.assertIn("setOrphanCandidateDecisionFilter", html)
+        self.assertIn("orphanCandidateDecision(candidate) === decisionFilter", html)
+
     def test_approved_plan_surfaces_human_confirmed_write_gate(self):
         html = palace_html()
 
