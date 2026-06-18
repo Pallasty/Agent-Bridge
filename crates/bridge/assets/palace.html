@@ -2344,6 +2344,50 @@
       line-height: 1.35;
       overflow-wrap: anywhere;
     }
+    #panel .orphan-approved-safe-batch {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 6px;
+      margin-bottom: 8px;
+      padding: 8px;
+      background: #0c0c12;
+      border: 1px solid #252532;
+      border-left: 2px solid #5cc89a;
+      border-radius: 4px;
+      color: #858594;
+      font-size: 10px;
+      line-height: 1.35;
+    }
+    #panel .orphan-approved-safe-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    #panel .orphan-approved-safe-head strong {
+      color: #e8e8ee;
+      font-weight: 600;
+    }
+    #panel .orphan-approved-safe-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 5px;
+    }
+    #panel .orphan-approved-safe-stat {
+      min-width: 0;
+      padding: 6px;
+      background: #111118;
+      border: 1px solid #252532;
+      border-radius: 4px;
+    }
+    #panel .orphan-approved-safe-stat strong {
+      display: block;
+      color: #e8e8ee;
+      font-weight: 600;
+    }
+    #panel .orphan-approved-safe-note {
+      color: #858594;
+      overflow-wrap: anywhere;
+    }
     #panel .orphan-approved-apply-gate {
       display: grid;
       grid-template-columns: minmax(0, 1fr);
@@ -7599,6 +7643,33 @@ function renderOrphanApprovedPlanPreview(plan) {
   </div>`;
 }
 
+function renderOrphanApprovedSafeBatch(plan) {
+  const safe = plan && plan.safe_batch && typeof plan.safe_batch === "object" ? plan.safe_batch : {};
+  const eligible = Number.isFinite(safe.eligible_count) ? safe.eligible_count : 0;
+  const blocked = Number.isFinite(safe.blocked_count) ? safe.blocked_count : 0;
+  const limit = Number.isFinite(safe.limit) ? safe.limit : 0;
+  const minConfidence = Number.isFinite(safe.min_confidence) ? safe.min_confidence : "n/a";
+  const requiredScope = safe.required_scope_relation || "same_scope";
+  const knownBlockedReasons = ["scope_relation_not_safe", "confidence_below_safe_threshold", "safe_batch_limit_reached"];
+  const blockedRows = Array.isArray(safe.blocked) ? safe.blocked : [];
+  const blockedReasons = Array.from(new Set(blockedRows.map(row => row && row.reason).filter(reason => knownBlockedReasons.includes(reason))));
+  const note = blockedReasons.length
+    ? blockedReasons.slice(0, 3).join(" · ")
+    : "safe batch is ready for dry-run";
+  return `<div class="orphan-approved-safe-batch" title="safe batch is read-only; apply still requires confirmation; blocked reasons: ${escapeHTML(knownBlockedReasons.join(", "))}">
+    <div class="orphan-approved-safe-head">
+      <span>safe batch</span>
+      <strong>eligible_count:${escapeHTML(String(eligible))} · blocked_count:${escapeHTML(String(blocked))}</strong>
+    </div>
+    <div class="orphan-approved-safe-grid">
+      <div class="orphan-approved-safe-stat">limit<strong>${escapeHTML(String(limit))}</strong></div>
+      <div class="orphan-approved-safe-stat">min_confidence<strong>${escapeHTML(String(minConfidence))}</strong></div>
+      <div class="orphan-approved-safe-stat">required_scope_relation<strong>${escapeHTML(String(requiredScope))}</strong></div>
+    </div>
+    <div class="orphan-approved-safe-note">${escapeHTML(note)}</div>
+  </div>`;
+}
+
 function renderOrphanApprovedPlanApplyGate(plan, regionId) {
   const approved = plan && Number.isFinite(plan.approved_pair_count) ? plan.approved_pair_count : 0;
   const disabled = approved > 0 ? "" : " disabled";
@@ -7730,6 +7801,7 @@ function renderRegionOrphanApprovedPlan(plan, regionId) {
   return `${renderOrphanCandidateHead("approved plan", "read-only", renderOrphanCandidateBackButton(regionId))}
   ${renderOrphanApprovedPlanStats(plan || {})}
   ${renderOrphanApprovedPlanPreview(plan || {})}
+  ${renderOrphanApprovedSafeBatch(plan || {})}
   ${renderOrphanApprovedPlanApplyGate(plan || {}, regionId)}
   ${renderOrphanApprovedApplyAuditHistory(state.selfReviewPacket && state.selfReviewPacket.history)}
   ${renderOrphanApprovedPlanLinks(plan || {})}`;

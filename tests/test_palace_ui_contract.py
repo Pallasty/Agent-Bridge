@@ -628,6 +628,20 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("reason", html)
         self.assertIn("renderOrphanCandidateSnippet(\"note\", link.note)", html)
 
+    def test_approved_plan_surfaces_safe_batch_policy(self):
+        html = palace_html()
+
+        self.assertIn("function renderOrphanApprovedSafeBatch(plan)", html)
+        self.assertIn("orphan-approved-safe-batch", html)
+        self.assertIn("safe batch", html)
+        self.assertIn("eligible_count", html)
+        self.assertIn("blocked_count", html)
+        self.assertIn("min_confidence", html)
+        self.assertIn("required_scope_relation", html)
+        self.assertIn("scope_relation_not_safe", html)
+        self.assertIn("confidence_below_safe_threshold", html)
+        self.assertIn("renderOrphanApprovedSafeBatch(plan || {})", html)
+
     def test_approved_apply_result_surfaces_audit_details(self):
         html = palace_html()
 

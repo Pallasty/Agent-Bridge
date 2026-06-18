@@ -275,6 +275,9 @@ where
 const PALACE_ORPHAN_SKIP_TAGS: &[&str] = &["auto_curated", "alert", "ttl:7d"];
 const PALACE_ORPHAN_SKIP_KINDS: &[&str] = &["alert", "work_memory", "session_handoff", "snapshot"];
 const PALACE_ORPHAN_APPROVED_LINK_APPLY_CONFIRM: &str = "APPLY APPROVED LINKS";
+const PALACE_ORPHAN_SAFE_BATCH_LIMIT: usize = 3;
+const PALACE_ORPHAN_SAFE_BATCH_MIN_CONFIDENCE: f64 = 0.85;
+const PALACE_ORPHAN_SAFE_BATCH_SCOPE_RELATION: &str = "same_scope";
 
 #[derive(Debug, Clone)]
 struct PalaceLinkSuggestion {
@@ -848,7 +851,96 @@ fn palace_orphan_approved_link_plan_for_preview(
 ) -> Value {
     let pairs = palace_orphan_candidate_pairs_for_preview(preview);
     let inbox = palace_orphan_candidate_decision_inbox_for_pairs(&pairs, decisions);
-    palace_orphan_approved_link_plan_for_inbox(&inbox)
+    let mut plan = palace_orphan_approved_link_plan_for_inbox(&inbox);
+    let mut evidence_by_pair: BTreeMap<(String, String), &PalaceLinkSuggestion> = BTreeMap::new();
+    for row in &preview.rows {
+        for suggestion in &row.suggestions {
+            evidence_by_pair.insert((row.orphan.key.clone(), suggestion.key.clone()), suggestion);
+        }
+    }
+
+    let mut safe_links = Vec::new();
+    let mut blocked = Vec::new();
+    if let Some(links) = plan.get_mut("links").and_then(Value::as_array_mut) {
+        for link in links.iter_mut() {
+            let orphan_key = link
+                .get("orphan_key")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let candidate_key = link
+                .get("candidate_key")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            let evidence = evidence_by_pair.get(&(orphan_key.clone(), candidate_key.clone()));
+            if let Some(evidence) = evidence {
+                if let Some(obj) = link.as_object_mut() {
+                    obj.insert("confidence".to_string(), json!(evidence.confidence));
+                    obj.insert("reason".to_string(), json!(evidence.reason));
+                    obj.insert("scope".to_string(), json!(evidence.scope));
+                    obj.insert("scope_relation".to_string(), json!(evidence.scope_relation));
+                    obj.insert("preview".to_string(), json!(evidence.preview));
+                }
+            }
+
+            let confidence = evidence.map(|e| e.confidence).unwrap_or(0.0);
+            let scope_relation = evidence
+                .map(|e| e.scope_relation)
+                .unwrap_or("unknown_scope_relation");
+            let blocked_reason = if scope_relation != PALACE_ORPHAN_SAFE_BATCH_SCOPE_RELATION {
+                Some("scope_relation_not_safe")
+            } else if confidence < PALACE_ORPHAN_SAFE_BATCH_MIN_CONFIDENCE {
+                Some("confidence_below_safe_threshold")
+            } else {
+                None
+            };
+
+            if let Some(reason) = blocked_reason {
+                blocked.push(json!({
+                    "pair_id": link.get("pair_id").cloned().unwrap_or(Value::Null),
+                    "orphan_key": orphan_key,
+                    "candidate_key": candidate_key,
+                    "confidence": confidence,
+                    "scope_relation": scope_relation,
+                    "reason": reason,
+                }));
+            } else if safe_links.len() < PALACE_ORPHAN_SAFE_BATCH_LIMIT {
+                safe_links.push(link.clone());
+            } else {
+                blocked.push(json!({
+                    "pair_id": link.get("pair_id").cloned().unwrap_or(Value::Null),
+                    "orphan_key": orphan_key,
+                    "candidate_key": candidate_key,
+                    "confidence": confidence,
+                    "scope_relation": scope_relation,
+                    "reason": "safe_batch_limit_reached",
+                }));
+            }
+        }
+    }
+
+    if let Some(obj) = plan.as_object_mut() {
+        obj.insert(
+            "safe_batch".to_string(),
+            json!({
+                "schema": "agent_bridge.palace.orphan_safe_batch.v0",
+                "read_only": true,
+                "writes_memory": false,
+                "writes_edges": false,
+                "auto_apply_allowed": false,
+                "limit": PALACE_ORPHAN_SAFE_BATCH_LIMIT,
+                "min_confidence": PALACE_ORPHAN_SAFE_BATCH_MIN_CONFIDENCE,
+                "required_scope_relation": PALACE_ORPHAN_SAFE_BATCH_SCOPE_RELATION,
+                "eligible_count": safe_links.len(),
+                "blocked_count": blocked.len(),
+                "links": safe_links,
+                "blocked": blocked,
+                "next_step": "Dry-run the safe batch first, then apply only after human confirmation.",
+            }),
+        );
+    }
+    plan
 }
 
 fn palace_slug(raw: &str) -> String {
@@ -4410,6 +4502,111 @@ mod tests {
         assert_eq!(plan["links"][0]["orphan_key"], json!("memory_orphan"));
         assert_eq!(plan["links"][0]["candidate_key"], json!("memory_anchor"));
         assert_eq!(plan["links"][0]["reviewer"], json!("alice"));
+    }
+
+    #[test]
+    fn palace_orphan_approved_plan_marks_small_same_scope_safe_batch() {
+        let preview = PalaceOrphanCandidatePreview {
+            rows: vec![
+                PalaceOrphanCandidatePreviewRow {
+                    orphan: test_mem("safe_orphan", "lesson", "body", &[]),
+                    suggestions: vec![PalaceLinkSuggestion {
+                        key: "safe_anchor".to_string(),
+                        kind: "lesson".to_string(),
+                        confidence: 0.95,
+                        reason: "tag_overlap+content_overlap".to_string(),
+                        scope: Some("project:/Data/CascadeProjects/agent-bridge".to_string()),
+                        scope_relation: "same_scope",
+                        preview: "safe anchor".to_string(),
+                    }],
+                },
+                PalaceOrphanCandidatePreviewRow {
+                    orphan: test_mem("cross_orphan", "lesson", "body", &[]),
+                    suggestions: vec![PalaceLinkSuggestion {
+                        key: "cross_anchor".to_string(),
+                        kind: "lesson".to_string(),
+                        confidence: 0.99,
+                        reason: "content_overlap".to_string(),
+                        scope: Some("project:/tmp/other".to_string()),
+                        scope_relation: "cross_scope",
+                        preview: "cross anchor".to_string(),
+                    }],
+                },
+                PalaceOrphanCandidatePreviewRow {
+                    orphan: test_mem("low_orphan", "lesson", "body", &[]),
+                    suggestions: vec![PalaceLinkSuggestion {
+                        key: "low_anchor".to_string(),
+                        kind: "lesson".to_string(),
+                        confidence: 0.70,
+                        reason: "tag_overlap".to_string(),
+                        scope: Some("project:/Data/CascadeProjects/agent-bridge".to_string()),
+                        scope_relation: "same_scope",
+                        preview: "low anchor".to_string(),
+                    }],
+                },
+            ],
+            ..PalaceOrphanCandidatePreview::default()
+        };
+        let pairs = [
+            PalaceOrphanCandidatePair {
+                orphan_key: "safe_orphan".to_string(),
+                candidate_key: "safe_anchor".to_string(),
+            },
+            PalaceOrphanCandidatePair {
+                orphan_key: "cross_orphan".to_string(),
+                candidate_key: "cross_anchor".to_string(),
+            },
+            PalaceOrphanCandidatePair {
+                orphan_key: "low_orphan".to_string(),
+                candidate_key: "low_anchor".to_string(),
+            },
+        ];
+        let decisions = pairs
+            .iter()
+            .enumerate()
+            .map(|(idx, pair)| {
+                palace_orphan_candidate_decision_record_for_time(
+                    pair,
+                    "approve",
+                    Some("codex-test"),
+                    Some("reviewed"),
+                    100 + idx as u64,
+                )
+                .expect("approve")
+            })
+            .collect::<Vec<_>>();
+
+        let plan = palace_orphan_approved_link_plan_for_preview(&preview, &decisions);
+
+        assert_eq!(plan["approved_pair_count"], json!(3));
+        assert_eq!(
+            plan["safe_batch"]["schema"],
+            json!("agent_bridge.palace.orphan_safe_batch.v0")
+        );
+        assert_eq!(plan["safe_batch"]["read_only"], json!(true));
+        assert_eq!(plan["safe_batch"]["writes_edges"], json!(false));
+        assert_eq!(plan["safe_batch"]["auto_apply_allowed"], json!(false));
+        assert_eq!(plan["safe_batch"]["limit"], json!(3));
+        assert_eq!(plan["safe_batch"]["eligible_count"], json!(1));
+        assert_eq!(plan["safe_batch"]["blocked_count"], json!(2));
+        assert_eq!(plan["safe_batch"]["min_confidence"], json!(0.85));
+        assert_eq!(
+            plan["safe_batch"]["required_scope_relation"],
+            json!("same_scope")
+        );
+        assert_eq!(
+            plan["safe_batch"]["links"][0]["orphan_key"],
+            json!("safe_orphan")
+        );
+        assert_eq!(plan["safe_batch"]["links"][0]["confidence"], json!(0.95));
+        assert_eq!(
+            plan["safe_batch"]["blocked"][0]["reason"],
+            json!("scope_relation_not_safe")
+        );
+        assert_eq!(
+            plan["safe_batch"]["blocked"][1]["reason"],
+            json!("confidence_below_safe_threshold")
+        );
     }
 
     #[test]
