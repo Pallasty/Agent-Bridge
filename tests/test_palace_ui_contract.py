@@ -516,6 +516,18 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("state.selfReviewFocusedPairId = null;", html)
         self.assertIn("renderSelfReviewFocusedPairContext()", html)
 
+    def test_focused_self_review_pair_surfaces_evidence_summary(self):
+        html = palace_html()
+
+        self.assertIn("function renderFocusedOrphanCandidateEvidence(row, candidate)", html)
+        self.assertIn("self-review-focused-pair-evidence", html)
+        self.assertIn("focused evidence", html)
+        self.assertIn("decision:", html)
+        self.assertIn("confidence:", html)
+        self.assertIn("scope:", html)
+        self.assertIn("reason:", html)
+        self.assertIn("focusedFromHistory ? renderFocusedOrphanCandidateEvidence(row, candidate) : \"\"", html)
+
     def test_approved_plan_surfaces_human_confirmed_write_gate(self):
         html = palace_html()
 

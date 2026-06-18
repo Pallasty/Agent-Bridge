@@ -1994,6 +1994,38 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    #panel .self-review-focused-pair-evidence {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 5px;
+      padding: 7px;
+      background: #101820;
+      border: 1px solid #26464c;
+      border-radius: 4px;
+      color: #a8c8cc;
+      font-size: 10px;
+      line-height: 1.35;
+    }
+    #panel .self-review-focused-pair-evidence .evidence-label {
+      color: #5cc8c8;
+      font-size: 8px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    #panel .self-review-focused-pair-evidence .evidence-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 4px 8px;
+    }
+    #panel .self-review-focused-pair-evidence .evidence-item {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #panel .self-review-focused-pair-evidence .evidence-item b {
+      color: #6a6a78;
+      font-weight: 600;
+    }
     #panel .orphan-candidate-actions {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -6870,6 +6902,23 @@ function renderOrphanCandidateActions(row, candidate) {
   ).join("") + `</div>`;
 }
 
+function renderFocusedOrphanCandidateEvidence(row, candidate) {
+  if (!candidate) return "";
+  const confidence = Number.isFinite(candidate.confidence) ? candidate.confidence.toFixed(2) : "n/a";
+  const decision = orphanCandidateDecision(candidate);
+  const scopeRelation = candidate.scope_relation || "unknown_scope";
+  const reason = candidate.reason || "candidate";
+  return `<div class="self-review-focused-pair-evidence" title="focused evidence · read-only">
+    <span class="evidence-label">focused evidence</span>
+    <span class="evidence-grid">
+      <span class="evidence-item"><b>decision:</b> ${escapeHTML(decision)}</span>
+      <span class="evidence-item"><b>confidence:</b> ${escapeHTML(confidence)}</span>
+      <span class="evidence-item"><b>scope:</b> ${escapeHTML(scopeRelation)}</span>
+      <span class="evidence-item" title="${escapeHTML(reason)}"><b>reason:</b> ${escapeHTML(reason)}</span>
+    </span>
+  </div>`;
+}
+
 function renderOrphanCandidateRows(result) {
   const allRows = Array.isArray(result.rows) ? result.rows : [];
   const rows = filteredOrphanCandidateRows(result);
@@ -6915,6 +6964,7 @@ function renderOrphanCandidateRows(result) {
         ${renderOrphanCandidateSnippet("orphan", row.preview)}
         ${renderOrphanCandidateSnippet("candidate", candidate && candidate.preview)}
       </div>
+      ${focusedFromHistory ? renderFocusedOrphanCandidateEvidence(row, candidate) : ""}
       <div class="orphan-candidate-reasons" title="${escapeHTML(`${scopeRelation} · ${reason}`)}">${escapeHTML(scopeRelation)} · ${escapeHTML(reason)}</div>
       ${renderOrphanCandidateActions(row, candidate)}
     </div>`;
