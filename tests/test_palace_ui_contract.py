@@ -553,6 +553,18 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("state.selfReviewFocusedPairId = orphanCandidatePairId(next.row, next.candidate);", html)
         self.assertIn("focusNextOrphanCandidateReviewFromSlot();", html)
 
+    def test_orphan_candidate_focused_review_bar_can_record_current_pair(self):
+        html = palace_html()
+
+        self.assertIn("function focusedOrphanCandidateReviewItem(result)", html)
+        self.assertIn("function renderFocusedOrphanCandidateReviewBar(result)", html)
+        self.assertIn("orphan-candidate-focused-review", html)
+        self.assertIn("current candidate", html)
+        self.assertIn("data-orphan-focused-review-decision", html)
+        self.assertIn("focused.item ? renderFocusedOrphanCandidateReviewBar(result || {}) : \"\"", html)
+        self.assertIn("recordOrphanCandidateDecision(regionId, orphanKey, candidateKey, decision)", html)
+        self.assertIn("focusedReviewBtn.dataset.orphanFocusedReviewDecision", html)
+
     def test_approved_plan_surfaces_human_confirmed_write_gate(self):
         html = palace_html()
 
