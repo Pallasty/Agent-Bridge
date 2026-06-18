@@ -99,3 +99,8 @@ The next safe slice is durable outcome record write execution preflight.
 
 That slice must keep actual writes and world verdict rewrite behind explicit
 separate gates.
+
+It is now captured by:
+
+- [Runtime executor durable outcome record-write execution preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_EXECUTION_PREFLIGHT_2026_06_18.md)
+- [Runtime executor durable outcome record-write execution preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_EXECUTION_PREFLIGHT_ACCEPTANCE_2026_06_18.md)
