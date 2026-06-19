@@ -1,0 +1,449 @@
+//! T0 increment-2 — DRIFT-FREE recall quality eval over a FIXED held-out corpus.
+//!
+//! Part of the memory-continuity architecture (`docs/design/
+//! MEMORY_CONTINUITY_COGNITIVE_ARCHITECTURE_2026_06_19.md`, forum #115,
+//! Open-Q #5). Companion to `examples/recall_baseline.rs`.
+//!
+//! WHY a second baseline producer. `recall_baseline.rs` reports the per-mode
+//! hit_rate the system *logged* over a time window. That number is a true
+//! description of telemetry, but it is NOT "current recall quality": a long
+//! window aggregates queries issued across multiple binary versions and corpus
+//! states. (The 30d `search_hybrid` hit_rate of 0.254 was live-falsified as a
+//! stale-binary artifact — old binaries lacked the FTS OR-fallback and logged
+//! misses the current binary hits; see memory
+//! `t0_recall_baseline_per_mode_20260619`.) To measure the CURRENT binary
+//! without that drift, you need a FIXED query set with KNOWN ground truth, run
+//! against the live store right now — reproducible before/after any T1-T7
+//! ranking change, and the ground truth a BioCortex shadow-trial needs to
+//! measure lift against.
+//!
+//! WHAT it does. For a hand-curated corpus of `(query, expected_keys)` cases it
+//! runs each of the three real retrieval modes (`fts` / `hybrid` / `semantic`)
+//! against the live store and reports, per mode: R@1 / R@5 / R@10 (success@k =
+//! is any expected key within the top k) and MRR (mean reciprocal rank of the
+//! first expected key). It then prints a per-case rank matrix so the queries
+//! each mode misses are visible, not hidden behind an average.
+//!
+//! Queries are intentionally PARAPHRASED (and mostly Chinese over a mixed
+//! ZH/EN corpus) — they do not echo the memory's key tokens — so the eval
+//! tests genuine query→memory vocabulary bridging, the LEVER-3 pain point, not
+//! lexical echo.
+//!
+//! Surface-free + read-only: only SELECT-side store calls (`memory_search`,
+//! `memory_search_hybrid`, `memory_search_semantic`). NO new MCP tool, NO
+//! ranking change, NO writes.
+//!
+//! HONESTY CONTRACT. This is a v1 hand-curated corpus (small N, single curator,
+//! mostly one designated key per query). It measures recall on THESE cases on
+//! the CURRENT binary — it is not a comprehensive IR collection, and a low R@k
+//! on a case can mean "a near-duplicate also-correct memory outranked the
+//! designated key", not strictly "miss". Read the per-case matrix, not just the
+//! aggregate. No green-laundering: misses are printed.
+//!
+//! ## Running (semantic needs the SAME model the prod store was indexed with)
+//! The live store's embeddings were produced by `para-ml`
+//! (`paraphrase-multilingual-MiniLM-L12-v2`); query embeddings must match or
+//! cosines are meaningless. The daemon sets `AGENT_BRIDGE_ONNX_MODEL=para-ml`,
+//! so this example must too:
+//!
+//!   AGENT_BRIDGE_ONNX_MODEL=para-ml \
+//!     cargo run -p ab-bridge --example recall_eval
+//!   # custom (e.g. copied) db:
+//!   AB_BASELINE_DB=/tmp/state.copy.db AGENT_BRIDGE_ONNX_MODEL=para-ml \
+//!     cargo run -p ab-bridge --example recall_eval
+//!
+//! If built `--no-default-features` (onnx-embed off) or the model dir is
+//! absent, the embedding backend silently degrades to a hash backend whose
+//! cosines are near-orthogonal garbage. The harness DETECTS this (backend name
+//! + a paraphrase-cosine readiness probe) and SKIPS semantic with a clear note
+//! rather than reporting a false R@k=0.
+
+use ab_store::{default_db_path, SqliteStore, StateStore};
+use std::path::PathBuf;
+
+/// One held-out recall case. `expect` is the set of memory keys that genuinely
+/// answer `query`; a hit at rank `r` means the first expected key appeared at
+/// position `r` (1-based) in the top-k result.
+struct Case {
+    query: &'static str,
+    expect: &'static [&'static str],
+}
+
+/// v1 corpus — 17 keys verified present in the live store on 2026-06-19.
+/// Queries are paraphrased (no key-token echo) and mostly Chinese over the
+/// mixed ZH/EN corpus, to test real cross-vocabulary bridging.
+const CORPUS: &[Case] = &[
+    Case {
+        query: "记忆系统应该追求记住更多,还是用更少上下文恢复正确状态",
+        expect: &[
+            "ab_memory_continuity_cognitive_architecture_20260619",
+            "curated_implicit_lessondc26f323",
+        ],
+    },
+    Case {
+        query: "工具面太多了应该按什么维度归类收口,是直接删还是重新分级",
+        expect: &["reference_ab_tool_surface_taxonomy_8class_retier_over_delete_20260618"],
+    },
+    Case {
+        query: "某个工具 p95 延迟看着很高但调用样本很少要不要当成异常",
+        expect: &["tool_atlas_low_sample_p95_classification_20260619"],
+    },
+    Case {
+        query: "codex 的核心工具集和原生能力重叠,该不该因为很少用就降级",
+        expect: &["codex_essential_native_overlap_demotion_superseded_20260618"],
+    },
+    Case {
+        query: "怎么查看 sibling 推到远端的文件内容又不影响我的工作树",
+        expect: &["lesson_git_show_origin_master_read_without_pull_20260518"],
+    },
+    Case {
+        query: "memory_search 突然报数据库列不存在的错误是什么原因",
+        expect: &["lesson_memory_search_fts5_lens_column_drift_20260518"],
+    },
+    Case {
+        query: "多个 agent 在同一个 git 仓库一起干活 HEAD 争用怎么预防",
+        expect: &["lesson_multi_agent_shared_git_worktree_head_contention"],
+    },
+    Case {
+        query: "怎么远程给一个正在运行的长驻 agent 会话注入指令",
+        expect: &["agentbridge_remote_session_steer_gap_20260529"],
+    },
+    Case {
+        query: "agent-bridge 这个项目的核心愿景定位是什么",
+        expect: &["agent_bridge_northstar_bidirectional_bridge_20260529"],
+    },
+    Case {
+        query: "EdgeRazor 那篇论文有什么值得我们借鉴的地方",
+        expect: &["aiot_edgerazor_borrow_eval_20260526"],
+    },
+    Case {
+        query: "kilo 和 codex 两个远程执行器一起用实测验证过吗",
+        expect: &["kilo_codex_dual_executor_live_verified_20260531"],
+    },
+    Case {
+        query: "skills lint 有没有规则检查严格度但缺少 preflight 的情况",
+        expect: &["skills_lint_rigor_preflight_rule_impl_20260528"],
+    },
+    Case {
+        query: "有没有一个全局通用的 TELLS 基线技能",
+        expect: &["global_tells_baseline_skill_20260529"],
+    },
+    Case {
+        query: "biocortex 影子试验是只读的吗,会不会改默认检索顺序",
+        expect: &["ab_memory_continuity_t5_biocortex_shadow_trial_20260619"],
+    },
+    Case {
+        query: "palace 评审 artifact 从外部工具借鉴了哪些设计模式",
+        expect: &["palace_review_artifact_external_patterns_20260618"],
+    },
+    Case {
+        query: "自检告警把 catalog 类记忆也算进计数导致误报",
+        expect: &["lesson_c3_s2_self_check_counts_catalog_false_positive_20260518"],
+    },
+];
+
+const TOP_K: usize = 10;
+const HASH_BACKEND_NAME: &str = "fnv1a-hash-384";
+
+/// Per-mode tallies accumulated across the corpus.
+#[derive(Default)]
+struct ModeAgg {
+    r_at_1: u32,
+    r_at_5: u32,
+    r_at_10: u32,
+    rr_sum: f64,
+    /// rank (1-based) of the first expected key per case, or None on miss.
+    ranks: Vec<Option<usize>>,
+}
+
+impl ModeAgg {
+    fn record(&mut self, rank: Option<usize>) {
+        if let Some(r) = rank {
+            if r <= 1 {
+                self.r_at_1 += 1;
+            }
+            if r <= 5 {
+                self.r_at_5 += 1;
+            }
+            if r <= 10 {
+                self.r_at_10 += 1;
+            }
+            self.rr_sum += 1.0 / r as f64;
+        }
+        self.ranks.push(rank);
+    }
+}
+
+/// First 1-based rank at which any expected key appears in `keys`.
+fn first_hit_rank(keys: &[String], expect: &[&str]) -> Option<usize> {
+    keys.iter()
+        .position(|k| expect.iter().any(|e| e == k))
+        .map(|i| i + 1)
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let db_path: PathBuf = std::env::var("AB_BASELINE_DB")
+        .ok()
+        .map(PathBuf::from)
+        .unwrap_or_else(default_db_path);
+
+    let store = SqliteStore::open(&db_path).await?;
+    let n = CORPUS.len();
+
+    // ── Debug dump: `recall_eval <case#>` prints the top-k of each mode (key,
+    // score, cosine) for one case, so a surprising R@k can be falsified —
+    // is the expected key absent (cosine), present-but-buried (blend), or is
+    // every cosine garbage (hash fallback)?
+    if let Some(arg) = std::env::args().nth(1) {
+        if let Ok(idx1) = arg.parse::<usize>() {
+            return debug_case(&store, idx1).await;
+        }
+    }
+
+    // ── Embedding backend gate (semantic only) ──────────────────────────────
+    // The live store was indexed with para-ml; query embeddings MUST match. If
+    // the active backend is hash (onnx-embed off, or model dir missing), report
+    // that and skip semantic rather than emit a false R@k=0.
+    let backend = ab_store::embedding::default_backend();
+    let backend_name = backend.name().to_string();
+    let semantic_ready = if backend_name == HASH_BACKEND_NAME {
+        false
+    } else {
+        confirm_real_embedder().await
+    };
+
+    println!("# T0 recall eval — drift-free, fixed held-out corpus");
+    println!("db:              {}", db_path.display());
+    println!("corpus:          {n} cases (v1, hand-curated)");
+    println!("top_k:           {TOP_K}");
+    println!("embed backend:   {backend_name}");
+    println!(
+        "semantic:        {}",
+        if semantic_ready {
+            "ENABLED (real model confirmed)"
+        } else if backend_name == HASH_BACKEND_NAME {
+            "SKIPPED (hash backend — rebuild with default features + AGENT_BRIDGE_ONNX_MODEL=para-ml)"
+        } else {
+            "SKIPPED (model not confirmed loaded within timeout — cosines would be hash garbage)"
+        }
+    );
+    println!();
+
+    // ── Run each mode over the corpus ───────────────────────────────────────
+    let mut fts = ModeAgg::default();
+    let mut hybrid = ModeAgg::default();
+    let mut semantic = ModeAgg::default();
+
+    for case in CORPUS {
+        let fts_keys = keys_of(store.memory_search(case.query, &[], TOP_K as u32).await?);
+        fts.record(first_hit_rank(&fts_keys, case.expect));
+
+        let hyb_keys = keys_of(
+            store
+                .memory_search_hybrid(case.query, &[], TOP_K as u32, 60.0, 10)
+                .await?,
+        );
+        hybrid.record(first_hit_rank(&hyb_keys, case.expect));
+
+        if semantic_ready {
+            let sem_keys = keys_of(
+                store
+                    .memory_search_semantic(case.query, TOP_K as u32, 0.0)
+                    .await?,
+            );
+            semantic.record(first_hit_rank(&sem_keys, case.expect));
+        } else {
+            semantic.record(None);
+        }
+    }
+
+    // ── Aggregate table ─────────────────────────────────────────────────────
+    println!("## Per-mode recall (success@k over {n} cases)");
+    println!(
+        "  {:<10} {:>7} {:>7} {:>7} {:>7}",
+        "mode", "R@1", "R@5", "R@10", "MRR"
+    );
+    print_mode_row("fts", &fts, n);
+    print_mode_row("hybrid", &hybrid, n);
+    if semantic_ready {
+        print_mode_row("semantic", &semantic, n);
+    } else {
+        println!("  {:<10} {:>7} {:>7} {:>7} {:>7}", "semantic", "—", "—", "—", "—");
+    }
+    println!();
+
+    // ── Per-case rank matrix (the detail the aggregate hides) ────────────────
+    println!("## Per-case first-hit rank (— = not in top {TOP_K})");
+    println!(
+        "  {:<4} {:>5} {:>7} {:>9}  {}",
+        "#", "fts", "hybrid", "semantic", "query"
+    );
+    for (i, case) in CORPUS.iter().enumerate() {
+        let q: String = case.query.chars().take(34).collect();
+        println!(
+            "  {:<4} {:>5} {:>7} {:>9}  {}",
+            i + 1,
+            rank_cell(fts.ranks[i]),
+            rank_cell(hybrid.ranks[i]),
+            if semantic_ready {
+                rank_cell(semantic.ranks[i])
+            } else {
+                "n/a".to_string()
+            },
+            q
+        );
+    }
+    println!();
+
+    // ── Honest read ─────────────────────────────────────────────────────────
+    let fts_miss: Vec<usize> = miss_indices(&fts);
+    let hyb_miss: Vec<usize> = miss_indices(&hybrid);
+    println!("## Honest read");
+    println!(
+        "  fts misses (not in top {TOP_K}): {} case(s){}",
+        fts_miss.len(),
+        fmt_idx(&fts_miss)
+    );
+    println!(
+        "  hybrid misses (not in top {TOP_K}): {} case(s){}",
+        hyb_miss.len(),
+        fmt_idx(&hyb_miss)
+    );
+    if semantic_ready {
+        let sem_miss = miss_indices(&semantic);
+        println!(
+            "  semantic misses (not in top {TOP_K}): {} case(s){}",
+            sem_miss.len(),
+            fmt_idx(&sem_miss)
+        );
+    }
+    println!(
+        "  caveat: v1 corpus, N={n}; a miss can be a near-duplicate also-correct \
+         memory outranking the designated key. Read cases, not just the mean."
+    );
+
+    Ok(())
+}
+
+fn keys_of(hits: Vec<ab_store::MemorySearchHit>) -> Vec<String> {
+    hits.into_iter().map(|h| h.record.key).collect()
+}
+
+/// Falsification dump for one case (1-based): show the top-k of each mode with
+/// score + cosine, and mark the expected key(s).
+async fn debug_case(
+    store: &SqliteStore,
+    idx1: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let case = CORPUS.get(idx1.saturating_sub(1)).ok_or("case index out of range")?;
+    println!("# debug case #{idx1}");
+    println!("query:  {}", case.query);
+    println!("expect: {:?}\n", case.expect);
+
+    let dump = |label: &str, hits: &[ab_store::MemorySearchHit]| {
+        println!("## {label} (top {})", hits.len());
+        for (i, h) in hits.iter().enumerate() {
+            let star = if case.expect.iter().any(|e| *e == h.record.key) {
+                " <== EXPECTED"
+            } else {
+                ""
+            };
+            let cos = h
+                .cosine
+                .map(|c| format!("{c:.3}"))
+                .unwrap_or_else(|| "  -  ".to_string());
+            println!(
+                "  {:>2}. score={:>7.3} cos={} {}{}",
+                i + 1,
+                h.score,
+                cos,
+                h.record.key,
+                star
+            );
+        }
+        println!();
+    };
+
+    dump("fts", &store.memory_search(case.query, &[], TOP_K as u32).await?);
+    dump(
+        "hybrid",
+        &store
+            .memory_search_hybrid(case.query, &[], TOP_K as u32, 60.0, 10)
+            .await?,
+    );
+    let backend = ab_store::embedding::default_backend();
+    if backend.name() != HASH_BACKEND_NAME && confirm_real_embedder().await {
+        dump(
+            "semantic",
+            &store
+                .memory_search_semantic(case.query, TOP_K as u32, 0.0)
+                .await?,
+        );
+    } else {
+        println!("## semantic — skipped (backend {} not a confirmed real model)", backend.name());
+    }
+    Ok(())
+}
+
+fn print_mode_row(label: &str, agg: &ModeAgg, n: usize) {
+    let nf = n as f64;
+    println!(
+        "  {:<10} {:>7.3} {:>7.3} {:>7.3} {:>7.3}",
+        label,
+        agg.r_at_1 as f64 / nf,
+        agg.r_at_5 as f64 / nf,
+        agg.r_at_10 as f64 / nf,
+        agg.rr_sum / nf,
+    );
+}
+
+fn rank_cell(rank: Option<usize>) -> String {
+    match rank {
+        Some(r) => r.to_string(),
+        None => "—".to_string(),
+    }
+}
+
+fn miss_indices(agg: &ModeAgg) -> Vec<usize> {
+    agg.ranks
+        .iter()
+        .enumerate()
+        .filter_map(|(i, r)| if r.is_none() { Some(i + 1) } else { None })
+        .collect()
+}
+
+fn fmt_idx(idx: &[usize]) -> String {
+    if idx.is_empty() {
+        String::new()
+    } else {
+        format!(" → #{}", idx.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(", #"))
+    }
+}
+
+/// Kick off model init and poll a paraphrase-cosine probe until the REAL
+/// multilingual model is confirmed loaded (a strong paraphrase pair separates
+/// clearly from an unrelated pair) or a timeout elapses. The hash fallback
+/// gives both pairs a near-zero cosine, so the gap — not an absolute threshold —
+/// is the signal. Returns true only when the real model is confirmed.
+async fn confirm_real_embedder() -> bool {
+    use ab_store::vector::{cosine_similarity, embed_text, warmup};
+    warmup();
+    // Strong same-language paraphrase vs. an unrelated sentence.
+    let a = "an old stale build overwrote the deployed binary file";
+    let b = "a previous outdated compile clobbered the binary that was shipped";
+    let c = "cats enjoy napping in a warm patch of afternoon sunlight";
+    for _ in 0..30 {
+        let va = embed_text(a);
+        let vb = embed_text(b);
+        let vc = embed_text(c);
+        let para = cosine_similarity(&va, &vb);
+        let unrel = cosine_similarity(&va, &vc);
+        // Real model: paraphrase cosine high AND clearly above unrelated.
+        if para > 0.45 && (para - unrel) > 0.15 {
+            return true;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+    }
+    false
+}
