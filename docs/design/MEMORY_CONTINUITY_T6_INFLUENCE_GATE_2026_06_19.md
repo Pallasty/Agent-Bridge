@@ -30,8 +30,8 @@ It returns `ready_for_opt_in_experiment=true` only when all gates pass:
 
 - Enough T5 shadow packets are provided.
 - T5 packets are read-only, redacted, and do not claim discovered selection.
-- Relevance-lift evidence is completed, read-only, and does not change production
-  retrieval order.
+- Relevance-lift evidence is completed, read-only, has an explicit positive lift
+  verdict, and does not change production retrieval order.
 - Evaluated count, MRR lift, and regression thresholds pass.
 - A redacted evidence aggregate is present and ready.
 
@@ -43,6 +43,11 @@ Even when this readiness is true, the tool still returns:
 - `changes_memory_search_order=false`
 
 The next gate is human review before any runtime-influence decision.
+
+`min_shadow_trials` counts submitted T5 packets only. It is a volume sanity check,
+not proof that the packets are independent trials. If independence becomes
+load-bearing, a later gate should require distinct query/order hashes or a
+dedicated aggregate-evidence field.
 
 ## Boundary
 
@@ -60,6 +65,7 @@ This tool is read-only. It does not:
 Focused tests cover:
 
 - Missing relevance evidence and unsafe T5 frontier/raw flags block readiness.
+- Missing or unknown relevance-lift verdicts block readiness.
 - Passing shadow, lift, and redacted aggregate evidence enables only
   `ready_for_opt_in_experiment`, not runtime influence.
 - Raw keys/content supplied in input are not echoed.

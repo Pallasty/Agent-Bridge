@@ -21041,8 +21041,9 @@ impl McpTool for MemoryRetrievalFeedbackTool {
                  Writes a kind=feedback memory tagged with retrieval_feedback and, \
                  when memory_key exists, links feedback -> memory_key with an \
                  outcome-specific edge such as retrieval_used or retrieval_stale. \
-                 outcome=missing may be recorded without a target. This is telemetry \
-                 only; it does not change retrieval ranking by itself."
+                 outcome=missing may be recorded without a target. This does not \
+                 reorder default FTS results, but graph-aware hybrid retrieval may \
+                 observe the new feedback rows and edges."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -21255,7 +21256,7 @@ impl McpTool for MemoryRetrievalFeedbackTool {
             "edge": edge,
             "linked_related_keys": linked_related_keys,
             "importance": importance,
-            "hint": "telemetry recorded only; retrieval ranking is unchanged until a later ranking/consolidation step consumes these feedback memories and edges",
+            "hint": "telemetry recorded; default FTS order is unchanged, but graph-aware hybrid retrieval may observe the new feedback memory and edges",
         })))
     }
 }
@@ -35369,9 +35370,9 @@ fn memory_biocortex_t6_check_relevance_lift(
     {
         memory_biocortex_t6_push_reason(reasons, "relevance_lift_safety_contract_invalid");
     }
-    if matches!(
+    if !matches!(
         memory_biocortex_t6_string_at(value, "/verdict"),
-        Some("regression" | "blocked" | "error")
+        Some("lift_demonstrated" | "lift")
     ) {
         memory_biocortex_t6_push_reason(reasons, "relevance_lift_verdict_not_positive");
     }
@@ -60005,6 +60006,9 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert_eq!(payload["outcome"], json!("stale"));
         assert_eq!(payload["target_key"], json!("tests:retrieved_stale_target"));
         assert_eq!(payload["edge"]["edge_type"], json!("retrieval_stale"));
+        let hint = payload["hint"].as_str().expect("hint");
+        assert!(hint.contains("default FTS order is unchanged"));
+        assert!(hint.contains("hybrid retrieval may observe"));
 
         let feedback_key = payload["feedback_key"].as_str().expect("feedback_key");
         let saved = store
@@ -60518,6 +60522,91 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         let serialized = serde_json::to_string(&payload).expect("serialize");
         assert!(!serialized.contains("secret_lift_key"));
         assert!(!serialized.contains("secret aggregate query"));
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_t6_influence_gate_requires_positive_lift_verdict() {
+        let tool = MemoryBioCortexT6InfluenceGateTool::new();
+        let safe_shadow = json!({
+            "schema": "agent_bridge.memory_biocortex_shadow_trial.v0",
+            "read_only": true,
+            "runs_biocortex": false,
+            "writes_memory": false,
+            "changes_memory_search_order": false,
+            "default_search_order_change_allowed": false,
+            "input_contract": {
+                "raw_query_included": false,
+                "raw_keys_included": false,
+                "content_included": false
+            },
+            "baseline": {
+                "raw_keys_included": false,
+                "content_included": false
+            },
+            "current_biocortex_frontier": {
+                "discovered_selection_claimed": false
+            }
+        });
+        let missing_verdict_lift_eval = json!({
+            "schema": "agent_bridge.biocortex_retrieval.relevance_lift_eval.v0",
+            "status": "completed",
+            "sampling": {
+                "evaluated_count": 8,
+                "side_signal_unavailable": 0
+            },
+            "metrics": {
+                "mrr_lift": 0.04,
+                "improved": 3,
+                "worsened": 0,
+                "unchanged": 5
+            },
+            "safety": {
+                "read_only": true,
+                "mutates_ab_memory": false,
+                "changes_prod_retrieval_order": false,
+                "writes_state": false
+            }
+        });
+        let redacted_evidence_aggregate = json!({
+            "schema": "agent_bridge.biocortex_retrieval.opt_in_redacted_evidence_aggregate.v0",
+            "read_only": true,
+            "redacted_evidence_aggregate": true,
+            "input_contract": {
+                "raw_queries_included": false,
+                "raw_keys_included": false,
+                "content_included": false,
+                "side_signal_raw_included": false
+            },
+            "interpretation": {
+                "aggregate_evidence_ready": true,
+                "default_influence_ready": false,
+                "human_review_required": true
+            }
+        });
+
+        let out = tool.execute(
+            json!({
+                "shadow_trials": [safe_shadow.clone(), safe_shadow],
+                "relevance_lift_eval": missing_verdict_lift_eval,
+                "redacted_evidence_aggregate": redacted_evidence_aggregate,
+                "min_shadow_trials": 2,
+                "min_evaluated_count": 5,
+                "min_mrr_lift": 0.01,
+                "max_worsened": 0
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(payload["ready_for_opt_in_experiment"], json!(false));
+        assert!(
+            payload["block_reasons"]
+                .as_array()
+                .expect("block reasons")
+                .contains(&json!("relevance_lift_verdict_not_positive"))
+        );
     }
 
     #[tokio::test]

@@ -63,7 +63,9 @@ T3, retrieval feedback:
 - Records targeted feedback for useful, stale, missing, too-large, noisy,
   duplicate, and harmful retrieval outcomes.
 - Writes compact feedback memory rows and graph edges to support later
-  consolidation without changing search behavior immediately.
+  consolidation. Default FTS order is unchanged, but graph-aware hybrid
+  retrieval may observe the new feedback rows and edges before a later calibrated
+  ranking policy exists.
 
 T4, consolidation queue:
 
@@ -85,6 +87,10 @@ T6, BioCortex influence gate:
 
 - Adds `memory_biocortex_t6_influence_gate`.
 - Reviews T5-style redacted lift evidence for readiness.
+- Requires an explicit positive relevance-lift verdict; missing or unknown
+  verdicts block readiness.
+- Treats `min_shadow_trials` as a packet-count sanity check, not proof of
+  independent evidence.
 - Can mark an experiment ready for opt-in review, but always keeps
   `runtime_influence_approved=false`, `ready_for_influence=false`, and
   `may_change_search_order_now=false`.
@@ -210,6 +216,9 @@ by this work.
 - The T1 metadata approach uses tags for backward compatibility. That is a good
   first merge, but a future migration may still be warranted if continuity
   metadata becomes a high-volume query axis.
+- T3 feedback writes active memories and graph edges. That is safe for default
+  FTS order, but not invisible to hybrid graph expansion. Review should treat
+  this as telemetry visibility, not a calibrated ranking signal.
 - Independent review found that `memories_fts` does not index tags. This is a
   safety positive because T1 tags cannot perturb current FTS ranking, but it also
   means `retrieval_trigger` is descriptive metadata only. If we want it to improve
@@ -221,6 +230,9 @@ by this work.
   telemetry as a follow-up.
 - T5/T6/T7 are intentionally advisory. Any later runtime influence path needs a
   separate opt-in experiment, review packet, and human gate.
+- T6's `min_shadow_trials` threshold is not an independence proof. If repeated
+  evidence becomes load-bearing, require distinct query/order hashes or a
+  dedicated aggregate-evidence field.
 
 ## Review Questions
 

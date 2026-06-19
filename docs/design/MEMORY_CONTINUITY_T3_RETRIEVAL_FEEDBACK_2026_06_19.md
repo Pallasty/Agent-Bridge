@@ -4,7 +4,7 @@ Date: 2026-06-19
 
 T3 adds a low-friction feedback surface for retrieved memories. The goal is to
 record whether a retrieved or bootstrapped memory row was useful, stale, harmful,
-missing, or too large without changing retrieval ranking yet.
+missing, or too large without changing default FTS ordering.
 
 ## Interface
 
@@ -52,15 +52,19 @@ Existing related keys can be linked with `retrieval_context`.
 
 ## Boundary
 
-This is telemetry only. It does not change:
+This is telemetry, but not completely invisible to every retrieval mode. It does
+not change:
 
-- `memory_search` ranking
+- default FTS result order
 - `session_bootstrap` selection
 - continuity-kernel ordering
 - BioCortex side-signal behavior
 
-That boundary keeps T3 safe to deploy before ranking math is calibrated. The
-feedback data becomes evidence for T4 consolidation and later ranking experiments.
+Because the tool writes active feedback memories and graph edges, graph-aware
+hybrid retrieval may observe those rows or edges when a query reaches the same
+neighborhood. That is intentional telemetry visibility, not a calibrated ranking
+policy. T4 should treat the signal conservatively, and any deliberate ranking
+use needs a later measured experiment.
 
 ## Verification
 
@@ -71,6 +75,7 @@ Focused tests cover:
 - `missing` feedback works without a target and returns no edge.
 - Non-missing feedback rejects missing target memories.
 - Codex-essential policy exposes `memory_retrieval_feedback`.
+- Tool copy states the default-FTS boundary without claiming hybrid invisibility.
 
 Commands:
 
