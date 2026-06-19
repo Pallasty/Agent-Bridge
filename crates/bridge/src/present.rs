@@ -627,6 +627,117 @@ pub fn build_html_interactive(
     build_html_impl(kind, artifact, title, payload, provenance, true)
 }
 
+/// Schema tag for the session-walkthrough artifact payload. Injected into the
+/// embedded `#ab-payload` so a consumer can distinguish a walkthrough doc from
+/// a generic `present` table payload.
+pub const PRESENT_WALKTHROUGH_SCHEMA: &str = "present_walkthrough/v0";
+
+/// Render a **session walkthrough** — an ordered, evidence-anchored narrative of
+/// work done — as a self-contained, shareable HTML artifact.
+///
+/// This borrows the *structure* of austeane/walkthrough (a summary plus ordered
+/// steps, each step carrying evidence) but anchors each step to Agent-Bridge's
+/// own verify-first evidence (commit / event-spine id / memory key / file /
+/// verification verdict) instead of free narrative — the AB differentiator over
+/// generic artifact tools (Anthropic Artifacts, tdoc): the doc is *grounded*,
+/// not just pretty. It is **surface-free**: it reuses [`build_html`] (inheriting
+/// the dual-encoding + self-verify honesty invariants) and adds NO new MCP tool.
+///
+/// `doc` is the walkthrough as JSON:
+/// ```json
+/// { "summary": "...",
+///   "steps": [ { "heading": "...", "narrative": "...",
+///                "evidence": [ { "kind": "commit|event|memory|file|verdict",
+///                                "reference": "...", "label": "..." } ] } ] }
+/// ```
+/// Missing/unknown fields render empty. A content-less walkthrough renders blank
+/// inside `#ab-render` (we do NOT fabricate content), so the browser self-verify
+/// falsifier still fires. The full `doc` is embedded verbatim as `#ab-payload`
+/// (with a `schema` tag injected when absent) for machine extraction.
+pub fn build_walkthrough_html(
+    doc: &Value,
+    title: Option<&str>,
+    provenance: Option<&Value>,
+) -> String {
+    let body = render_walkthrough_body(doc);
+    // Embed the doc as #ab-payload with a schema tag; clone so we never mutate
+    // the caller's Value.
+    let mut payload = doc.clone();
+    if let Some(obj) = payload.as_object_mut() {
+        if !obj.contains_key("schema") {
+            obj.insert(
+                "schema".to_string(),
+                Value::String(PRESENT_WALKTHROUGH_SCHEMA.to_string()),
+            );
+        }
+    }
+    build_html(PresentKind::Html, &body, title, Some(&payload), provenance)
+}
+
+/// Render the `<main id="ab-render">` body for [`build_walkthrough_html`]. ALL
+/// caller text is `html_escape`d (narrative/evidence are untrusted), so a step
+/// narrative of `<script>…` is inert.
+fn render_walkthrough_body(doc: &Value) -> String {
+    let mut out = String::from("<section class=\"ab-walkthrough\">");
+    if let Some(summary) = doc.get("summary").and_then(Value::as_str) {
+        if !summary.trim().is_empty() {
+            out.push_str(&format!("<p class=\"wt-summary\">{}</p>", html_escape(summary)));
+        }
+    }
+    if let Some(steps) = doc.get("steps").and_then(Value::as_array) {
+        if !steps.is_empty() {
+            out.push_str("<ol class=\"wt-steps\">");
+            for step in steps {
+                out.push_str("<li class=\"wt-step\">");
+                if let Some(h) = step.get("heading").and_then(Value::as_str) {
+                    if !h.trim().is_empty() {
+                        out.push_str(&format!("<h2 class=\"wt-heading\">{}</h2>", html_escape(h)));
+                    }
+                }
+                if let Some(n) = step.get("narrative").and_then(Value::as_str) {
+                    if !n.trim().is_empty() {
+                        out.push_str(&format!("<p class=\"wt-narrative\">{}</p>", html_escape(n)));
+                    }
+                }
+                if let Some(ev) = step.get("evidence").and_then(Value::as_array) {
+                    if !ev.is_empty() {
+                        out.push_str("<ul class=\"wt-evidence\">");
+                        for e in ev {
+                            out.push_str(&render_walkthrough_evidence(e));
+                        }
+                        out.push_str("</ul>");
+                    }
+                }
+                out.push_str("</li>");
+            }
+            out.push_str("</ol>");
+        }
+    }
+    out.push_str("</section>");
+    out
+}
+
+/// Render one evidence anchor. `kind` becomes both a CSS class and a visible
+/// badge so a reader can see at a glance whether a claim is backed by a commit,
+/// an event-spine id, a memory key, a file, or a verification verdict.
+fn render_walkthrough_evidence(e: &Value) -> String {
+    let kind = e.get("kind").and_then(Value::as_str).unwrap_or("ref");
+    let reference = e.get("reference").and_then(Value::as_str).unwrap_or("");
+    let label = e.get("label").and_then(Value::as_str).unwrap_or("");
+    let kind_class: String = kind
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect();
+    format!(
+        "<li class=\"wt-ev wt-ev-{cls}\"><span class=\"wt-ev-kind\">{kind}</span> \
+         <code class=\"wt-ev-ref\">{reference}</code> <span class=\"wt-ev-label\">{label}</span></li>",
+        cls = html_escape(&kind_class),
+        kind = html_escape(kind),
+        reference = html_escape(reference),
+        label = html_escape(label),
+    )
+}
+
 /// Parse a markdown pipe-table into an array-of-objects keyed by the header row,
 /// so the E2 runtime can filter/sort it exactly like a `kind=table` payload.
 /// Returns `None` unless there is a header row PLUS at least one data row (nothing
@@ -1682,6 +1793,64 @@ mod tests {
             assert_eq!(PresentKind::parse(k.as_str()), Some(k));
         }
         assert_eq!(PresentKind::parse("nope"), None);
+    }
+
+    // Walkthrough — an evidence-anchored session narrative renders its steps +
+    // evidence inside #ab-render, and embeds the doc as an extractable
+    // #ab-payload (with the schema tag injected) outside the verified region.
+    #[test]
+    fn build_walkthrough_html_renders_steps_evidence_and_embeds_payload() {
+        let doc = json!({
+            "summary": "Promoted gos_lite to Standard, verified live.",
+            "steps": [{
+                "heading": "Promote tier",
+                "narrative": "Flip Niche to Standard in the registry.",
+                "evidence": [
+                    {"kind": "commit", "reference": "eeddcf2", "label": "tier flip"},
+                    {"kind": "verdict", "reference": "verified", "label": "1040 lib tests"}
+                ]
+            }]
+        });
+        let html = build_walkthrough_html(&doc, Some("Session Walkthrough"), None);
+        assert!(html.contains("<!doctype html>"));
+        let region = render_region(&html).expect("render region");
+        // human render: heading, narrative, evidence ref + kind class all present
+        assert!(region.contains("Promote tier"));
+        assert!(region.contains("Flip Niche to Standard"));
+        assert!(region.contains("eeddcf2"));
+        assert!(region.contains("wt-ev-commit"));
+        assert!(region.contains("wt-ev-verdict"));
+        // dual-encoding: full doc extractable, with schema tag injected
+        let payload = extract_ab_payload(&html).expect("ab-payload");
+        assert_eq!(payload["schema"], "present_walkthrough/v0");
+        assert_eq!(payload["steps"][0]["heading"], "Promote tier");
+        // honesty: the payload script lives OUTSIDE the verified render region
+        assert!(!region.contains("ab-payload"));
+    }
+
+    // Walkthrough escapes untrusted narrative — a <script> in a step is inert.
+    #[test]
+    fn build_walkthrough_html_escapes_untrusted_narrative() {
+        let doc = json!({
+            "summary": "",
+            "steps": [{"heading": "x", "narrative": "<script>alert(1)</script>", "evidence": []}]
+        });
+        let html = build_walkthrough_html(&doc, None, None);
+        let region = render_region(&html).expect("render region");
+        assert!(!region.contains("<script>alert(1)</script>"));
+        assert!(region.contains("&lt;script&gt;"));
+    }
+
+    // Walkthrough does NOT fabricate content: an empty doc renders no step /
+    // summary text inside #ab-render, so the browser self-verify can still
+    // report `blank` (the falsifier stays real).
+    #[test]
+    fn build_walkthrough_html_empty_doc_renders_blank_region() {
+        let doc = json!({"summary": "", "steps": []});
+        let html = build_walkthrough_html(&doc, None, None);
+        let region = render_region(&html).expect("render region");
+        assert!(!region.contains("wt-step"));
+        assert!(!region.contains("wt-summary"));
     }
 
     // A1 — a table payload renders a real HTML <table> with the cell values,
