@@ -66,7 +66,8 @@ use crate::{
     ImportConflictPolicy, ImportReport, McpToolCallFilter, McpToolCallRow, McpToolCallStats,
     McpToolErrorRecord, McpToolSourceStats, MemoryCosineHit, MemoryEdge, MemoryEdgeExport,
     MemoryExportFilter, MemoryExportResult, MemoryListSort, MemoryQueryRecord, MemoryQueryStats,
-    MemoryRecord, MemorySearchHit, MemoryStats, MisrankRow, NotificationRecord, OverlapPair,
+    MemoryRecord, MemorySearchHit, MemoryStats, MisrankRow, ModeStats, NotificationRecord,
+    OverlapPair,
     PlanRecord, PlanStep, ReinforceActiveStats, ReplayAuditRow, ReplayAuditStats, S234Counts,
     SessionFilter, SignalFidelityStats, StateStore, StoredSession, WaypointRow, WaypointStats,
     MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP, MEMORY_QUERY_LOG_RING_CAP, STDIO_CAP,
@@ -6148,6 +6149,60 @@ impl StateStore for SqliteStore {
                     })?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
 
+                // Per-mode breakdown (T0 recall baseline): the aggregate p50/p95
+                // and hit_rate above blend all kinds together. Group the
+                // already-fetched in-window rows by `kind` in memory (bounded by
+                // the ring cap) and compute hit_rate / p50 / p95 / avg age per
+                // mode, so a slow tail or miss can be attributed to one mode.
+                // (total, hits, durations, age_sum, age_n) per kind.
+                let mut mode_acc: std::collections::BTreeMap<
+                    String,
+                    (u64, u64, Vec<i64>, i64, u64),
+                > = std::collections::BTreeMap::new();
+                for (hit_count, duration_us, top_hit_age_secs, kind) in &rows {
+                    let e = mode_acc
+                        .entry(kind.clone())
+                        .or_insert((0, 0, Vec::new(), 0, 0));
+                    e.0 += 1;
+                    if *hit_count > 0 {
+                        e.1 += 1;
+                    }
+                    e.2.push(*duration_us);
+                    if let Some(a) = top_hit_age_secs {
+                        e.3 += *a;
+                        e.4 += 1;
+                    }
+                }
+                let mut by_mode: Vec<ModeStats> = mode_acc
+                    .into_iter()
+                    .map(|(kind, (total, hits, mut durs, age_sum, age_n))| {
+                        durs.sort_unstable();
+                        ModeStats {
+                            kind,
+                            total,
+                            hits,
+                            hit_rate: if total > 0 {
+                                hits as f64 / total as f64
+                            } else {
+                                0.0
+                            },
+                            p50_duration_us: pct_idx(&durs, 0.50)
+                                .try_into()
+                                .unwrap_or(u32::MAX),
+                            p95_duration_us: pct_idx(&durs, 0.95)
+                                .try_into()
+                                .unwrap_or(u32::MAX),
+                            avg_top_hit_age_secs: if age_n > 0 {
+                                age_sum as f64 / age_n as f64
+                            } else {
+                                0.0
+                            },
+                        }
+                    })
+                    .collect();
+                // Most-used mode first; stable tie-break by kind for determinism.
+                by_mode.sort_by(|a, b| b.total.cmp(&a.total).then(a.kind.cmp(&b.kind)));
+
                 Ok(MemoryQueryStats {
                     window_start,
                     window_end: now,
@@ -6159,6 +6214,7 @@ impl StateStore for SqliteStore {
                     p50_duration_us: p50.try_into().unwrap_or(u32::MAX),
                     p95_duration_us: p95.try_into().unwrap_or(u32::MAX),
                     by_kind,
+                    by_mode,
                     top_miss_queries,
                 })
             })
@@ -16675,6 +16731,92 @@ mod tests {
             .await
             .expect("count");
         assert_eq!(count, cap);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_query_stats_breaks_down_by_mode() {
+        // T0 recall baseline: the per-mode breakdown must separate fast-hitting
+        // and slow-missing modes that the blended aggregate hides.
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-mem-query-bymode-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path).await.expect("open");
+        let now = now_secs();
+
+        // fts: 4 rows, all hits, fast (100..400µs).
+        for d in [100i64, 200, 300, 400] {
+            store
+                .record_memory_query(&mk_query_record(
+                    "search_fts",
+                    "q",
+                    1,
+                    Some(10),
+                    d as u32,
+                    now,
+                ))
+                .await
+                .expect("rec fts");
+        }
+        // semantic: 2 rows, all misses, slow (1000/2000µs).
+        for d in [1000i64, 2000] {
+            store
+                .record_memory_query(&mk_query_record(
+                    "search_semantic",
+                    "q",
+                    0,
+                    None,
+                    d as u32,
+                    now,
+                ))
+                .await
+                .expect("rec sem");
+        }
+        // get: 1 hit row.
+        store
+            .record_memory_query(&mk_query_record("get", "k", 1, Some(5), 50, now))
+            .await
+            .expect("rec get");
+
+        let stats = store.memory_query_stats(86_400).await.expect("stats");
+
+        // 3 modes, ordered by total DESC (fts=4, semantic=2, get=1).
+        assert_eq!(stats.by_mode.len(), 3, "one ModeStats per kind");
+        let kinds: Vec<&str> = stats.by_mode.iter().map(|m| m.kind.as_str()).collect();
+        assert_eq!(kinds, vec!["search_fts", "search_semantic", "get"]);
+
+        let fts = &stats.by_mode[0];
+        assert_eq!((fts.total, fts.hits), (4, 4));
+        assert_eq!(fts.hit_rate, 1.0);
+        // Key separation: fts p95 must NOT leak the semantic 1000/2000µs tail.
+        assert!(
+            fts.p95_duration_us <= 400,
+            "fts p95 leaked slow mode: {}",
+            fts.p95_duration_us
+        );
+
+        let sem = &stats.by_mode[1];
+        assert_eq!((sem.total, sem.hits), (2, 0));
+        assert_eq!(sem.hit_rate, 0.0);
+        assert!(
+            sem.p50_duration_us >= 1000,
+            "semantic is the slow mode: {}",
+            sem.p50_duration_us
+        );
+
+        assert_eq!(stats.by_mode[2].kind, "get");
+        assert_eq!(stats.by_mode[2].total, 1);
+
+        // Aggregate still reports the blended view (sanity: 7 rows, 5 hits).
+        assert_eq!(stats.total_queries, 7);
+        assert_eq!(stats.hits, 5);
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

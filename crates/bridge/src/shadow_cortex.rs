@@ -2049,6 +2049,7 @@ mod tests {
             p50_duration_us: 1_000,
             p95_duration_us: 2_000,
             by_kind: vec![("search_fts".to_string(), 10)],
+            by_mode: Vec::new(),
             top_miss_queries: vec![("shadow cortex".to_string(), 3)],
         };
         let mut signals = Vec::new();
@@ -2584,6 +2585,7 @@ mod tests {
                 p50_duration_us: 1_000,
                 p95_duration_us: 2_000,
                 by_kind: vec![("search_fts".to_string(), 10)],
+                by_mode: Vec::new(),
                 top_miss_queries: vec![("shadow cortex".to_string(), 3)],
             }),
             forum_window: Some(IdentityWindow {

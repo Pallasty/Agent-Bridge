@@ -945,8 +945,35 @@ pub struct MemoryQueryStats {
     pub p95_duration_us: u32,
     /// Per-kind counts (`search_fts`, `search_hybrid`, `search_semantic`, `get`).
     pub by_kind: Vec<(String, u64)>,
+    /// Per-mode breakdown (hit_rate + latency + age within each `kind`),
+    /// ordered by `total` DESC. The aggregate `hit_rate` / `p50` / `p95` above
+    /// blend all modes together; this separates them so a T0 recall baseline
+    /// can attribute a miss or a slow tail to a specific retrieval mode
+    /// (`search_fts` vs `search_semantic` behave very differently — confirmed
+    /// by the recall LEVER work). Empty when there are no rows in the window.
+    pub by_mode: Vec<ModeStats>,
     /// Top miss queries (hit_count = 0), most-recurring first, capped to 10.
     pub top_miss_queries: Vec<(String, u64)>,
+}
+
+/// Per-mode (per-`kind`) slice of [`MemoryQueryStats`]. Surfaces where recall
+/// is slow or missing for one retrieval mode — detail the blended aggregate
+/// hides. Read-only baseline telemetry; carries no authority over ranking.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct ModeStats {
+    /// Query kind: `search_fts`, `search_hybrid`, `search_semantic`, `get`.
+    pub kind: String,
+    /// Rows of this kind in the window.
+    pub total: u64,
+    /// Rows of this kind that returned at least one hit.
+    pub hits: u64,
+    /// `hits / total` (0.0 if total=0).
+    pub hit_rate: f64,
+    /// p50 / p95 latency within this mode (microseconds).
+    pub p50_duration_us: u32,
+    pub p95_duration_us: u32,
+    /// Mean top-hit age (secs) across the hit rows of this mode.
+    pub avg_top_hit_age_secs: f64,
 }
 
 /// Sort order for `list_memories`.
