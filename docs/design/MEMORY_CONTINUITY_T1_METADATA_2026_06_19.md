@@ -44,12 +44,22 @@ in the first implementation slice. The tradeoff is that retrieval cannot yet fil
 these dimensions through indexed columns. That is acceptable for T1 because the goal
 is to validate the taxonomy and response contract before committing to a migration.
 
+Independent review also confirmed that `memories_fts` indexes memory content, not
+tags. That strengthens the safety claim: continuity tags, including
+`retrieval_trigger`, do not change FTS scores or existing search order. The same
+fact limits T1's retrieval impact: `retrieval_trigger` is currently a projected
+hint for humans/tools, not a recall feature. Improving hard-tier cross-vocabulary
+recall with this field requires a later explicit index/content projection and a
+before/after run against the `recall_eval` hard tier.
+
 ## Migration Criteria
 
 Move from tag-backed metadata to first-class storage only if one of these becomes true:
 
 - Bootstrap budgeting needs fast indexed filters over actionability, role, or blast radius.
 - Query telemetry shows continuity-tag filtering is frequent enough to justify indexes.
+- `retrieval_trigger` is promoted from descriptive metadata to an indexed recall
+  feature, with measured hard-tier recall improvement.
 - Supersession needs transactional graph updates rather than related-key mirroring.
 - Tag noise begins to degrade generic tag analytics or operator readability.
 
