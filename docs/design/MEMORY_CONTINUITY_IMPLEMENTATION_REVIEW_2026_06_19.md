@@ -9,12 +9,16 @@ Review reconciliation note: the branch was transplanted onto `origin/master`
 The earlier `memory_continuity_baseline` MCP tool surface was removed because
 T0 is now covered by the drift-free `recall_eval` harness already on master and
 historical query telemetry is not a trustworthy current recall-quality metric.
+After the Palace atlas spacing polish and the T0 recall-eval corpus increment
+landed, this review branch merged latest `origin/master` (`f43b2c8`) before
+final review.
 
 ## Scope
 
 Working tree:
 
 - `crates/bridge/src/mcp_tools.rs`
+- `docs/design/MEMORY_CONTINUITY_IMPLEMENTATION_REVIEW_2026_06_19.md`
 - `docs/design/MEMORY_CONTINUITY_T0_BASELINE_2026_06_19.md`
 - `docs/design/MEMORY_CONTINUITY_T1_METADATA_2026_06_19.md`
 - `docs/design/MEMORY_CONTINUITY_T2_BOOTSTRAP_KERNEL_2026_06_19.md`
@@ -24,8 +28,10 @@ Working tree:
 - `docs/design/MEMORY_CONTINUITY_T6_INFLUENCE_GATE_2026_06_19.md`
 - `docs/design/MEMORY_CONTINUITY_T7_NEURAL_CRITIC_SHADOW_EVAL_2026_06_19.md`
 
-Topology preflight against `origin/master` found a merge base and no committed
-diff yet; all implementation is currently uncommitted working-tree state.
+Topology preflight against `origin/master` found a merge base. The active review
+branch is `codex/memory-continuity-review-20260619`; after merging latest
+master, the branch contains the T1-T7 review commit plus a no-conflict merge of
+the latest Palace/T0 work.
 
 ## Implemented Stages
 
@@ -114,27 +120,27 @@ Primary implementation anchors in `crates/bridge/src/mcp_tools.rs`:
 
 - T1 continuity metadata: constants near line 17883, parser near line 18023,
   tag encoding near line 18082, read projection near line 18162, `memory_save`
-  schema near line 18217, `memory_get` projection near line 18628,
-  `memory_search` projection near line 18969, and `memory_list` projection near
-  line 19044.
+  schema near line 18194, `memory_get` projection near line 18570,
+  `memory_search` projection near line 18650, and `memory_list` projection near
+  line 18984.
 - T3 retrieval feedback: source/content helpers near lines 20974 and 21004,
-  tool schema near line 21035, tests near line 60343.
+  tool schema near line 21035, tests near line 59965.
 - T2 Continuity Kernel: bootstrap reason/tier helpers near line 21437, formatter
   near line 21508, session bootstrap insertion near line 22298, tests near lines
-  46973 and 47012.
+  46640 and 46679.
 - T0 baseline: documented in
   `docs/design/MEMORY_CONTINUITY_T0_BASELINE_2026_06_19.md`; no new MCP tool
   surface is added for T0.
-- T4 consolidation queue: queue builder near line 34862, tool section near line
-  35010, tests near line 60495.
-- T5 BioCortex shadow trial: tool section near line 35285, tests near line
-  60638.
-- T6 influence gate: schemas/helpers near line 35588, tool section near line
-  35886, tests near line 60730.
-- T7 neural critic shadow eval: schemas/helpers near line 35962, tool section
-  near line 36194, tests near line 60902.
-- Tool exposure/policy: Codex essential extras near line 41579, policy assertions
-  near lines 50827 and 50936.
+- T4 consolidation queue: queue builder near line 34538, tool section near line
+  34700, tests near line 60117.
+- T5 BioCortex shadow trial: tool section near line 34975, tests near line
+  60260.
+- T6 influence gate: schemas/helpers near line 35264, tool section near line
+  35574, tests near line 60352.
+- T7 neural critic shadow eval: schemas/helpers near line 35638, tool section
+  near line 35882, tests near line 60524.
+- Tool exposure/policy: Codex essential extras near line 41223, policy assertions
+  near lines 50430 and 50538.
 
 Reviewer checklist:
 
@@ -150,9 +156,9 @@ Reviewer checklist:
 Thread #115 received a new BioCortex S93 anti-vacuity audit after T7 landed in
 the working tree. The audit says S93 still has de-risk value, but its
 candidate-set result can collapse to weight selection, so it is not enough to
-prove outcome credit is irreducible to weight. S94 is planned in an isolated
-BioCortex worktree with a stricter candidate-set DIVERGE condition and new
-substrate API work around `Synapse.consolidation_credit`.
+prove outcome credit is irreducible to weight. S94 subsequently landed in the
+BioCortex lane at `426245b` with a stricter candidate-set DIVERGE condition and
+new substrate API work around `Synapse.consolidation_credit`.
 
 Thread #89 records that S93 was landed and verified on BioCortex main, while
 keeping non-claims explicit: supplied candidate set, controlled outcome replay,
