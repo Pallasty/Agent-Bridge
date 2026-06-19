@@ -26603,17 +26603,27 @@ fn detect_frontend() -> &'static str {
             _ => {}
         }
     }
-    // Cursor sets VSCODE_GIT_IPC_HANDLE or similar VS Code env vars
-    if std::env::var("VSCODE_GIT_IPC_HANDLE").is_ok()
-        || std::env::var("VSCODE_IPC_HOOK_CLI").is_ok()
-        || std::env::var("CURSOR_TRACE_ID").is_ok()
-    {
-        return "cursor";
-    }
-    // Claude Code sets CLAUDE_SESSION_ID or ANTHROPIC_CLAUDE_*
+    // Harness markers take precedence over editor-host env hints. A Claude
+    // Code or Codex session launched inside Cursor / VS Code's integrated
+    // terminal INHERITS VSCODE_IPC_HOOK_CLI / VSCODE_GIT_IPC_HANDLE, so the
+    // editor-host check (below) must run AFTER the harness checks; otherwise
+    // those sessions are mislabelled as `cursor` and stripped of their
+    // lifecycle hooks / downgraded toolset.
+
+    // Claude Code sets CLAUDE_SESSION_ID or CLAUDE_CODE_ENTRYPOINT.
     if std::env::var("CLAUDE_SESSION_ID").is_ok() || std::env::var("CLAUDE_CODE_ENTRYPOINT").is_ok()
     {
         return "claude-code";
+    }
+    // Codex MCP clients can outlive their hosting IDE shell and lose VS Code
+    // env hints, so the explicit client marker is authoritative. Checked
+    // before the editor-host and installed-tool (`~/.augment`) heuristics,
+    // which had mislabelled Cursor/Codex sessions on Linux as cursor / Auggie.
+    if std::env::var("AGENT_BRIDGE_CLIENT")
+        .map(|v| normalize_tool_policy_value(&v) == "codex")
+        .unwrap_or(false)
+    {
+        return "codex";
     }
     // Warp injects TERM_PROGRAM=WarpTerminal + WARP_IS_LOCAL_SHELL_SESSION=1
     // on every shell it spawns (see app/src/terminal/local_tty/unix.rs in
@@ -26631,15 +26641,14 @@ fn detect_frontend() -> &'static str {
     {
         return "warp";
     }
-    // MCP clients can outlive their hosting IDE shell and lose VS Code env
-    // hints. Prefer the active Codex client marker over installed-tool
-    // heuristics such as `~/.augment`, which caused Cursor/Codex sessions on
-    // Linux to be mislabelled as Auggie simply because Augment was installed.
-    if std::env::var("AGENT_BRIDGE_CLIENT")
-        .map(|v| normalize_tool_policy_value(&v) == "codex")
-        .unwrap_or(false)
+    // Editor-host inference, last among positive signals: only reached when no
+    // harness/terminal marker is present, i.e. Cursor / VS Code's own agent.
+    // Cursor sets VSCODE_GIT_IPC_HANDLE / VSCODE_IPC_HOOK_CLI / CURSOR_TRACE_ID.
+    if std::env::var("VSCODE_GIT_IPC_HANDLE").is_ok()
+        || std::env::var("VSCODE_IPC_HOOK_CLI").is_ok()
+        || std::env::var("CURSOR_TRACE_ID").is_ok()
     {
-        return "codex";
+        return "cursor";
     }
     // Augment Code: session auth env or ~/.augment config directory.
     if std::env::var("AUGMENT_SESSION_AUTH").is_ok()
@@ -44277,6 +44286,53 @@ mod tests {
         std::env::set_var("AGENT_BRIDGE_CLIENT", "codex");
 
         assert_eq!(detect_frontend(), "codex");
+
+        for (key, value) in saved {
+            restore_env_var(key, value);
+        }
+    }
+
+    #[test]
+    fn detect_frontend_harness_markers_beat_inherited_vscode_env() {
+        let _guard = frontend_env_test_setup();
+        let keys = [
+            "AGENT_BRIDGE_FRONTEND",
+            "AGENT_BRIDGE_CLIENT",
+            "VSCODE_GIT_IPC_HANDLE",
+            "VSCODE_IPC_HOOK_CLI",
+            "CURSOR_TRACE_ID",
+            "CLAUDE_SESSION_ID",
+            "CLAUDE_CODE_ENTRYPOINT",
+            "TERM_PROGRAM",
+            "WARP_IS_LOCAL_SHELL_SESSION",
+            "WARP_HONOR_PS1",
+            "AUGMENT_SESSION_AUTH",
+            "AUGMENT_CLIENT_VERSION",
+            "HOME",
+        ];
+        let saved: Vec<_> = keys
+            .iter()
+            .map(|key| (*key, std::env::var(key).ok()))
+            .collect();
+        for key in keys {
+            std::env::remove_var(key);
+        }
+
+        // A Claude Code session launched inside Cursor's integrated terminal
+        // inherits the editor IPC handle, but the harness marker must win so
+        // it keeps its lifecycle hooks instead of being labelled `cursor`.
+        std::env::set_var("VSCODE_IPC_HOOK_CLI", "/run/user/1000/vscode-x.sock");
+        std::env::set_var("CLAUDE_CODE_ENTRYPOINT", "claude-vscode");
+        assert_eq!(detect_frontend(), "claude-code");
+
+        // Same inherited editor env, but a Codex client marker.
+        std::env::remove_var("CLAUDE_CODE_ENTRYPOINT");
+        std::env::set_var("AGENT_BRIDGE_CLIENT", "codex");
+        assert_eq!(detect_frontend(), "codex");
+
+        // No harness marker: editor-host inference still yields `cursor`.
+        std::env::remove_var("AGENT_BRIDGE_CLIENT");
+        assert_eq!(detect_frontend(), "cursor");
 
         for (key, value) in saved {
             restore_env_var(key, value);
