@@ -738,6 +738,41 @@ fn render_walkthrough_evidence(e: &Value) -> String {
     )
 }
 
+/// Render a walkthrough `doc` and write it into the present artifact store as a
+/// content-addressed `<id>.html`, so it is listed by [`list_artifacts`] and
+/// viewable through the same present gallery / `present_replay` surface as any
+/// other artifact — NO new MCP tool, NO new storage. Mirrors `PresentTool`'s
+/// flow: the id hashes the canonical `doc` (not the rendered HTML, so identical
+/// content dedupes and the id is stable across provenance-ts churn). Returns
+/// `(id, path)`.
+pub fn write_walkthrough_artifact(
+    dir: &Path,
+    doc: &Value,
+    title: Option<&str>,
+    provenance: Option<&Value>,
+) -> std::io::Result<(String, PathBuf)> {
+    // Stamp the gallery-baseline provenance keys [`list_artifacts`] reads back
+    // from `#ab-provenance` (kind / generated_by / ts), so a walkthrough shows
+    // full metadata in present_list instead of nulls. Caller keys win. The id
+    // hashes the DOC (not provenance), so the per-write `ts` never breaks dedup.
+    let mut prov = provenance
+        .cloned()
+        .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
+    if let Some(obj) = prov.as_object_mut() {
+        obj.entry("kind")
+            .or_insert_with(|| Value::from("walkthrough"));
+        obj.entry("generated_by")
+            .or_insert_with(|| Value::from("present::walkthrough"));
+        obj.entry("ts").or_insert_with(|| Value::from(now_unix()));
+    }
+    let canonical = serde_json::to_string(doc).unwrap_or_default();
+    let id = derive_id(&format!("walkthrough:{canonical}"));
+    let path = dir.join(format!("{id}.html"));
+    let html = build_walkthrough_html(doc, title, Some(&prov));
+    write_artifact_atomic(&path, &html)?;
+    Ok((id, path))
+}
+
 /// Parse a markdown pipe-table into an array-of-objects keyed by the header row,
 /// so the E2 runtime can filter/sort it exactly like a `kind=table` payload.
 /// Returns `None` unless there is a header row PLUS at least one data row (nothing
@@ -1851,6 +1886,29 @@ mod tests {
         let region = render_region(&html).expect("render region");
         assert!(!region.contains("wt-step"));
         assert!(!region.contains("wt-summary"));
+    }
+
+    // write_walkthrough_artifact writes a content-addressed <id>.html into the
+    // store, the file carries the render, and identical docs dedupe to one id.
+    #[test]
+    fn write_walkthrough_artifact_writes_and_dedupes() {
+        let doc = json!({
+            "summary": "WtWriteTestSummary",
+            "steps": [{"heading": "WtWriteTestHead", "narrative": "n", "evidence": []}]
+        });
+        let dir = std::env::temp_dir().join(format!("ab-wt-test-{}", std::process::id()));
+        let (id1, path1) =
+            write_walkthrough_artifact(&dir, &doc, Some("t"), None).expect("write1");
+        assert!(path1.exists());
+        assert!(path1.to_string_lossy().ends_with(&format!("{id1}.html")));
+        let html = std::fs::read_to_string(&path1).expect("read back");
+        assert!(html.contains("<!doctype html>"));
+        let region = render_region(&html).expect("render region");
+        assert!(region.contains("WtWriteTestHead"));
+        // content-addressed: same doc → same id (dedupe, not a second file)
+        let (id2, _) = write_walkthrough_artifact(&dir, &doc, Some("t"), None).expect("write2");
+        assert_eq!(id1, id2);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // A1 — a table payload renders a real HTML <table> with the cell values,
