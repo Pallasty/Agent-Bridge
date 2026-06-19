@@ -2,7 +2,7 @@
   "name": "agent-bridge-ide-snapshot",
   "displayName": "Agent Bridge IDE Snapshot",
   "description": "Writes a lightweight IDE state snapshot for the agent-bridge ide_snapshot MCP tool.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "agent-bridge",
   "engines": {
     "vscode": "^1.90.0"
@@ -48,6 +48,13 @@
           "minimum": 0,
           "maximum": 5000,
           "description": "Maximum diagnostics to include in the snapshot."
+        },
+        "agentBridge.refreshIntervalMs": {
+          "type": "number",
+          "default": 10000,
+          "minimum": 0,
+          "maximum": 600000,
+          "description": "Periodic snapshot refresh interval in milliseconds (keeps mtime fresh during agent-panel focus). 0 disables the timer."
         }
       }
     }
