@@ -210,6 +210,12 @@ by this work.
 - The T1 metadata approach uses tags for backward compatibility. That is a good
   first merge, but a future migration may still be warranted if continuity
   metadata becomes a high-volume query axis.
+- Independent review found that `memories_fts` does not index tags. This is a
+  safety positive because T1 tags cannot perturb current FTS ranking, but it also
+  means `retrieval_trigger` is descriptive metadata only. If we want it to improve
+  hard-tier cross-vocabulary recall, a later increment must index or project it
+  into the searchable content path and prove the lift with `recall_eval` hard-tier
+  before/after data.
 - The T2 Continuity Kernel uses estimated section budgets, not measured
   tokenizer telemetry. T0 explicitly calls out section-level bootstrap token
   telemetry as a follow-up.
@@ -223,6 +229,8 @@ by this work.
   BioCortex/neural gates (T5-T7)?
 - Is tag-based continuity metadata acceptable as the first persistence layer, or
   should a schema migration be required before merge?
+- Should `retrieval_trigger` stay projection-only for this merge, with indexed
+  recall behavior deferred to a measured hard-tier recall increment?
 - Should the Continuity Kernel section budget be tightened now, or only after
   bootstrap token telemetry exists?
 
@@ -233,5 +241,7 @@ Do not add runtime BioCortex influence in this branch. The next implementation
 lane should be either:
 
 - a measured bootstrap token telemetry increment for T0/T2, or
+- an indexed `retrieval_trigger` recall experiment evaluated on the `recall_eval`
+  hard tier, or
 - a held-out data producer for T7 critic labels, still with no write or ranking
   authority.
