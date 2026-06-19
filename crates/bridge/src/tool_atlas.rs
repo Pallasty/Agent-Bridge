@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 const HOT_CALL_THRESHOLD: u64 = 10;
 const SLOW_P95_MS: u32 = 1_000;
+const SAMPLE_SENSITIVE_P95_CALL_THRESHOLD: u64 = 20;
 const LARGE_AVG_RESULT_SIZE: f64 = 24_000.0;
 
 #[derive(Debug, Clone)]
@@ -218,6 +219,7 @@ fn atlas_entry(
         actionable_error_count,
         missing_error_samples,
         p95_duration_ms,
+        max_duration_ms,
         avg_result_size,
         expected_gate,
         stat.and_then(|s| s.source.as_deref()),
@@ -268,6 +270,7 @@ fn risk_flags(
     error_count: u64,
     missing_error_samples: bool,
     p95_duration_ms: u32,
+    max_duration_ms: u32,
     avg_result_size: f64,
     expected_gate: Option<&'static str>,
     source: Option<&str>,
@@ -290,6 +293,14 @@ fn risk_flags(
             flags.push("expected_eval_workload".to_string());
         } else if !exposed {
             flags.push("historical_unexposed_latency".to_string());
+        } else if is_sample_sensitive_p95(
+            call_count,
+            error_count,
+            expected_gate,
+            p95_duration_ms,
+            max_duration_ms,
+        ) {
+            flags.push("sample_sensitive_p95".to_string());
         } else {
             flags.push("slow_p95".to_string());
             if is_external_batch_load(call_count, p95_duration_ms, source, profile) {
@@ -306,6 +317,19 @@ fn risk_flags(
         flags.push("large_average_result".to_string());
     }
     flags
+}
+
+fn is_sample_sensitive_p95(
+    call_count: u64,
+    error_count: u64,
+    expected_gate: Option<&'static str>,
+    p95_duration_ms: u32,
+    max_duration_ms: u32,
+) -> bool {
+    call_count < SAMPLE_SENSITIVE_P95_CALL_THRESHOLD
+        && error_count == 0
+        && expected_gate.is_none()
+        && p95_duration_ms == max_duration_ms
 }
 
 fn is_expected_wait_tool(tool_name: &str) -> bool {
@@ -404,6 +428,7 @@ fn has_actionable_risk_flags(risk_flags: &[String]) -> bool {
                 | "expected_eval_workload"
                 | "historical_unexposed_latency"
                 | "historical_unexposed_failure"
+                | "sample_sensitive_p95"
         )
     })
 }

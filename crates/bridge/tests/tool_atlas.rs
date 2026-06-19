@@ -476,6 +476,35 @@ fn tool_atlas_marks_external_bulk_latency_without_profile_filter() {
 }
 
 #[test]
+fn tool_atlas_treats_low_sample_max_p95_latency_as_sample_sensitive() {
+    let mut s = stat("memory_search", 16, 0, 2_353, 16_386.0);
+    s.client_name = Some("claude-code".to_string());
+    s.profile = Some("all".to_string());
+    s.source = Some("claude".to_string());
+
+    let snapshot = build_tool_atlas_snapshot(ToolAtlasInput {
+        generated_at: 1_779_910_000,
+        window_secs: 86_400,
+        current_tools: vec!["memory_search".to_string()],
+        stats: vec![s],
+        recent_errors: Vec::new(),
+    });
+
+    let memory_search = snapshot
+        .tools
+        .iter()
+        .find(|tool| tool.tool_name == "memory_search")
+        .expect("memory_search");
+
+    assert_eq!(memory_search.health, "healthy");
+    assert_eq!(memory_search.recommendation, "keep");
+    assert!(memory_search
+        .risk_flags
+        .contains(&"sample_sensitive_p95".to_string()));
+    assert!(!memory_search.risk_flags.contains(&"slow_p95".to_string()));
+}
+
+#[test]
 fn tool_atlas_treats_memory_save_missing_required_key_as_expected_input_validation() {
     let snapshot = build_tool_atlas_snapshot(ToolAtlasInput {
         generated_at: 1_779_910_000,
