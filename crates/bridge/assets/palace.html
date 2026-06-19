@@ -775,6 +775,9 @@
       padding: 8px;
       scrollbar-color: #4a4a55 #101018;
     }
+    #atlas-panel .atlas-list.density-compact {
+      padding: 6px;
+    }
     #atlas-panel .atlas-region {
       width: 100%;
       text-align: left;
@@ -790,6 +793,11 @@
       cursor: pointer;
       font-family: inherit;
       transition: background 120ms, border-color 120ms, color 120ms;
+    }
+    #atlas-panel .atlas-list.density-compact .atlas-region {
+      grid-template-columns: 6px minmax(0, 1fr) auto;
+      gap: 6px;
+      padding: 6px;
     }
     #atlas-panel .atlas-region:hover {
       background: rgba(28, 28, 38, 0.74);
@@ -808,6 +816,10 @@
       margin-top: 2px;
       background: var(--region-color, #7a7d8a);
     }
+    #atlas-panel .atlas-list.density-compact .region-swatch {
+      width: 6px;
+      height: 26px;
+    }
     #atlas-panel .region-main {
       min-width: 0;
       display: flex;
@@ -821,6 +833,10 @@
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+    }
+    #atlas-panel .atlas-list.density-compact .region-meta {
+      font-size: 9px;
+      line-height: 1.25;
     }
     #atlas-panel .region-meta {
       display: block;
@@ -873,6 +889,10 @@
       gap: 4px;
       margin-top: 2px;
     }
+    #atlas-panel .atlas-list.density-compact .region-flags {
+      gap: 3px;
+      margin-top: 1px;
+    }
     #atlas-panel .region-flag {
       color: #7a7a88;
       background: #15151e;
@@ -881,6 +901,10 @@
       padding: 1px 5px;
       font-size: 9px;
       letter-spacing: 0.03em;
+    }
+    #atlas-panel .atlas-list.density-compact .region-flag {
+      font-size: 8px;
+      padding: 0 4px;
     }
     #atlas-panel .region-flag.fresh { color: #5cc8c8; border-color: #23464c; }
     #atlas-panel .region-flag.stale { color: #c8a96a; border-color: #4a3e25; }
@@ -4634,10 +4658,16 @@ function syncViewPresetButtons() {
   });
 }
 
+function atlasListDensityClass(regions) {
+  return Array.isArray(regions) && regions.length >= 12 ? "density-compact" : "";
+}
+
 function renderAtlasPanel() {
   const list = document.getElementById("atlas-list");
   if (!list) return;
   const regions = state.atlasRegions || [];
+  const densityClass = atlasListDensityClass(regions);
+  list.className = densityClass ? "atlas-list density-compact" : "atlas-list";
   if (regions.length === 0) {
     list.innerHTML = `<div class="atlas-empty">no regions yet</div>`;
     renderBreadcrumb();
@@ -4676,7 +4706,7 @@ function zoomToAtlasRegion(regionId) {
   const visibleRegionNodes = regionNodes.not(".faded");
   const target = visibleRegionNodes.length > 0 ? visibleRegionNodes : regionNodes;
   if (target.length > 0) {
-    state.cy.animate({ fit: { eles: target, padding: 86 }, duration: 420, easing: "ease-out" });
+    state.cy.animate({ fit: { eles: target, padding: REGION_FIT_PADDING }, duration: 420, easing: "ease-out" });
     scheduleCrowdSpread("region", 460);
   }
 }
@@ -4686,7 +4716,7 @@ function panAtlasOverviewAwayFromPanels() {
   const atlasPanel = document.getElementById("atlas-panel");
   const leftInset = atlasPanel ? atlasPanel.getBoundingClientRect().right : 0;
   if (!Number.isFinite(leftInset) || leftInset <= 0) return;
-  const shift = clampNumber(leftInset * 0.48, 120, 190);
+  const shift = clampNumber(leftInset * ATLAS_OVERVIEW_PANEL_PAN_RATIO, 150, 240);
   const pan = state.cy.pan();
   state.cy.animate({ pan: { x: pan.x + shift, y: pan.y }, duration: 180, easing: "ease-out" });
 }
@@ -4696,7 +4726,7 @@ function zoomToVisibleGraph() {
   const visible = state.cy.nodes().filter(n => !n.hasClass("faded") && !n.hasClass("atlas-detail-muted"));
   if (visible.length > 0) {
     const atlasOverview = isAtlasDistrictOverview();
-    state.cy.animate({ fit: { eles: visible, padding: atlasOverview ? 110 : 70 }, duration: 360, easing: "ease-out" });
+    state.cy.animate({ fit: { eles: visible, padding: atlasOverview ? ATLAS_OVERVIEW_FIT_PADDING : 70 }, duration: 360, easing: "ease-out" });
     if (atlasOverview) window.setTimeout(panAtlasOverviewAwayFromPanels, 390);
     else scheduleCrowdSpread("fit", 400);
   }
@@ -5183,6 +5213,9 @@ const STALE_WINDOW_SECS = 7 * 24 * 3600;
 const GRAPH_LAYOUT_GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 const ATLAS_REGION_RADIUS_SCALE = 64;
 const ATLAS_REGION_Y_SCALE = 0.68;
+const ATLAS_OVERVIEW_FIT_PADDING = 140;
+const ATLAS_OVERVIEW_PANEL_PAN_RATIO = 0.58;
+const REGION_FIT_PADDING = 104;
 const REGION_SHELL_BASE_SPACING = 68;
 const REGION_SHELL_DENSITY_SPACING = 2.5;
 const REGION_SHELL_MAX_SPACING = 108;

@@ -157,6 +157,18 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn('if (isAtlasDistrictOverview() && evt.target.data("atlasDistrictAnchor"))', html)
         self.assertIn('selectAtlasRegion(evt.target.data("region"));', html)
 
+    def test_atlas_overview_has_compact_region_list_and_canvas_edge_padding(self):
+        html = palace_html()
+
+        self.assertIn("function atlasListDensityClass(regions)", html)
+        self.assertIn("atlas-list density-compact", html)
+        self.assertIn("#atlas-panel .atlas-list.density-compact .atlas-region", html)
+        self.assertIn("const ATLAS_OVERVIEW_FIT_PADDING", html)
+        self.assertIn("const ATLAS_OVERVIEW_PANEL_PAN_RATIO", html)
+        self.assertIn("const REGION_FIT_PADDING", html)
+        self.assertIn("padding: atlasOverview ? ATLAS_OVERVIEW_FIT_PADDING : 70", html)
+        self.assertIn("padding: REGION_FIT_PADDING", html)
+
     def test_region_drilldown_restores_node_detail_from_atlas_overview(self):
         html = palace_html()
 
