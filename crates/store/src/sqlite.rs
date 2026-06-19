@@ -2905,10 +2905,23 @@ impl StateStore for SqliteStore {
                 // HashBackend/OnnxBackend default impl ignores the key
                 // and behaves identically to pre-P-γ `embed()`.
                 let vec = backend.perceive(&content, &key);
-                (
-                    crate::vector::encode_embedding(&vec),
-                    Some(backend.name().to_string()),
-                )
+                // Stamp the backend that ACTUALLY produced this vector, not the
+                // configured name. A cold/short-lived embed context (e.g. the
+                // precompact / curate hook subprocess) silently falls back to
+                // hash while `name()` still reports the model — mislabeling hash
+                // vectors as para-ml. That makes them invisible to semantic
+                // search AND skips them in the `embedding_backend != current`
+                // reindex sweep, so they are never repaired. Reusing the same
+                // detector the reindex path uses keeps the labels honest, so the
+                // sweep can find and fix these rows later.
+                let backend_name = backend.name().to_string();
+                let actual_name =
+                    if embedding_result_is_hash_fallback(&backend_name, &content, &vec) {
+                        "fnv1a-hash-384".to_string()
+                    } else {
+                        backend_name
+                    };
+                (crate::vector::encode_embedding(&vec), Some(actual_name))
             }
         };
 
