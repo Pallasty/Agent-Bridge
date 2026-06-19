@@ -2534,6 +2534,76 @@
     #panel .orphan-approved-apply-history-row.dry_run { border-left: 2px solid #7aa9d8; }
     #panel .orphan-approved-apply-history-row.blocked,
     #panel .orphan-approved-apply-history-row.failed { border-left: 2px solid #d88080; }
+    #panel .palace-review-artifact {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 8px;
+    }
+    #panel .palace-review-artifact-summary {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 5px;
+    }
+    #panel .palace-review-artifact-stat,
+    #panel .palace-review-artifact-card,
+    #panel .palace-review-artifact-row {
+      min-width: 0;
+      padding: 7px;
+      background: #0f0f16;
+      border: 1px solid #252532;
+      border-radius: 4px;
+    }
+    #panel .palace-review-artifact-stat {
+      border-left: 2px solid #5cc8c8;
+    }
+    #panel .palace-review-artifact-stat .label,
+    #panel .palace-review-artifact-stat .value {
+      display: block;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    #panel .palace-review-artifact-stat .label {
+      color: #5a5a68;
+      font-size: 8px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      margin-bottom: 3px;
+    }
+    #panel .palace-review-artifact-stat .value {
+      color: #e8e8ee;
+      font-size: 11px;
+      font-weight: 650;
+      font-variant-numeric: tabular-nums;
+    }
+    #panel .palace-review-artifact-card {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 6px;
+      border-left: 2px solid #7aa9d8;
+      color: #858594;
+      font-size: 10px;
+      line-height: 1.35;
+    }
+    #panel .palace-review-artifact-card.verified { border-left-color: #5cc89a; }
+    #panel .palace-review-artifact-card.audit { border-left-color: #c8a96a; }
+    #panel .palace-review-artifact-card h4 {
+      margin: 0;
+      color: #d8d8e2;
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      font-weight: 650;
+    }
+    #panel .palace-review-artifact-row {
+      overflow-wrap: anywhere;
+    }
+    #panel .palace-review-artifact-row strong {
+      display: block;
+      color: #e8e8ee;
+      font-weight: 650;
+      margin-bottom: 2px;
+    }
     #panel .node-edge-repair {
       padding: 9px;
       background: #0c0c12;
@@ -7059,7 +7129,7 @@ function renderRegionOrphanCandidateShell(region) {
     ? `<div class="maintenance-empty">loading candidate links...</div>`
     : `<div class="maintenance-empty">no graph orphans in this region</div>`;
   return `<div id="region-orphan-candidates" class="orphan-candidate-panel" data-region="${escapeHTML(region.id)}">
-    ${renderOrphanCandidateHead("candidate links", "read-only", renderOrphanCandidatePlanButton(region.id))}
+    ${renderOrphanCandidateHead("candidate links", "read-only", renderOrphanReviewActions(region.id))}
     ${body}
   </div>`;
 }
@@ -7098,6 +7168,14 @@ function renderOrphanCandidateHead(title, status, actions = "") {
 
 function renderOrphanCandidatePlanButton(regionId) {
   return `<button type="button" class="orphan-candidate-mini-button" data-orphan-approved-plan="${escapeHTML(regionId || "")}">plan</button>`;
+}
+
+function renderOrphanReviewArtifactButton(regionId) {
+  return `<button type="button" class="orphan-candidate-mini-button" data-orphan-review-artifact="${escapeHTML(regionId || "")}">artifact</button>`;
+}
+
+function renderOrphanReviewActions(regionId) {
+  return `${renderOrphanCandidatePlanButton(regionId)}${renderOrphanReviewArtifactButton(regionId)}`;
 }
 
 function renderOrphanCandidateBackButton(regionId) {
@@ -7509,7 +7587,7 @@ function renderRegionOrphanCandidateResult(result) {
   const readOnly = result && result.read_only ? "read-only" : "preview";
   const regionId = result && result.region ? result.region : "";
   const focused = focusedOrphanCandidateReviewItem(result || {});
-  return `${renderOrphanCandidateHead("candidate links", readOnly, renderOrphanCandidatePlanButton(regionId))}
+  return `${renderOrphanCandidateHead("candidate links", readOnly, renderOrphanReviewActions(regionId))}
   ${renderOrphanCandidateStats(result || {})}
   ${renderOrphanCandidateDiagnostics(result || {})}
   ${renderOrphanCandidateQualitySummary(result || {})}
@@ -7807,6 +7885,95 @@ function renderRegionOrphanApprovedPlan(plan, regionId) {
   ${renderOrphanApprovedPlanLinks(plan || {})}`;
 }
 
+function renderPalaceReviewArtifactStats(artifact) {
+  const summary = artifact && artifact.summary && typeof artifact.summary === "object" ? artifact.summary : {};
+  const stats = [
+    ["pending", summary.pending_candidate_count || 0],
+    ["approved", summary.approved_pair_count || 0],
+    ["safe", summary.safe_batch_eligible_count || 0],
+    ["audit", summary.recent_apply_audit_count || 0],
+    ["verified", summary.verified_edge_count || 0],
+  ];
+  return `<div class="palace-review-artifact-summary">` + stats.map(([label, value]) =>
+    `<div class="palace-review-artifact-stat">
+      <span class="label">${escapeHTML(label)}</span>
+      <span class="value">${escapeHTML(String(value))}</span>
+    </div>`
+  ).join("") + `</div>`;
+}
+
+function renderPalaceReviewArtifactApplyRows(artifact) {
+  const records = artifact && artifact.sections && artifact.sections.apply_audit && Array.isArray(artifact.sections.apply_audit.records)
+    ? artifact.sections.apply_audit.records
+    : [];
+  if (records.length === 0) return `<div class="maintenance-empty">no apply audit records</div>`;
+  return records.slice(0, 4).map(record => {
+    const status = record && record.status ? String(record.status) : "unknown";
+    const mode = record && record.dry_run ? "dry_run" : "live";
+    const actor = record && record.actor ? ` · actor:${record.actor}` : "";
+    const meta = [
+      mode,
+      `applied:${record && Number.isFinite(record.applied_count) ? record.applied_count : 0}`,
+      `failed:${record && Number.isFinite(record.failed_count) ? record.failed_count : 0}`,
+      `skipped:${record && Number.isFinite(record.skipped_count) ? record.skipped_count : 0}`,
+    ].join(" · ");
+    return `<div class="palace-review-artifact-row">
+      <strong>${escapeHTML(status)}</strong>
+      <span>${escapeHTML(meta)}${escapeHTML(actor)}</span>
+    </div>`;
+  }).join("");
+}
+
+function renderPalaceReviewArtifactVerifiedRows(artifact) {
+  const rows = artifact && artifact.sections && artifact.sections.verification_evidence && Array.isArray(artifact.sections.verification_evidence.rows)
+    ? artifact.sections.verification_evidence.rows
+    : [];
+  if (rows.length === 0) return `<div class="maintenance-empty">no verified applied edges</div>`;
+  return rows.slice(0, 6).map(row => {
+    const from = row && row.from_key ? String(row.from_key) : "";
+    const to = row && row.to_key ? String(row.to_key) : "";
+    const edgeType = row && row.edge_type ? String(row.edge_type) : "relates";
+    const weight = row && Number.isFinite(row.weight) ? row.weight : "n/a";
+    return `<div class="palace-review-artifact-row">
+      <strong>${escapeHTML(edgeType)} · weight ${escapeHTML(String(weight))}</strong>
+      <span>${escapeHTML(from)} → ${escapeHTML(to)}</span>
+    </div>`;
+  }).join("");
+}
+
+function renderPalaceReviewArtifactSafeBatch(artifact) {
+  const safe = artifact && artifact.sections && artifact.sections.safe_batch && typeof artifact.sections.safe_batch === "object"
+    ? artifact.sections.safe_batch
+    : {};
+  const eligible = Number.isFinite(safe.eligible_count) ? safe.eligible_count : 0;
+  const blocked = Number.isFinite(safe.blocked_count) ? safe.blocked_count : 0;
+  const next = artifact && artifact.next_step ? String(artifact.next_step) : "review artifact evidence";
+  return `<div class="palace-review-artifact-card">
+    <h4>safe batch</h4>
+    <div>eligible_count:${escapeHTML(String(eligible))} · blocked_count:${escapeHTML(String(blocked))}</div>
+    <div>${escapeHTML(next)}</div>
+  </div>`;
+}
+
+function renderRegionPalaceReviewArtifact(artifact, regionId) {
+  const readOnly = artifact && artifact.read_only && !artifact.writes_edges && !artifact.writes_memory
+    ? "read-only"
+    : "check";
+  return `${renderOrphanCandidateHead("review artifact", readOnly, renderOrphanCandidateBackButton(regionId))}
+  <div class="palace-review-artifact">
+    ${renderPalaceReviewArtifactStats(artifact || {})}
+    ${renderPalaceReviewArtifactSafeBatch(artifact || {})}
+    <div class="palace-review-artifact-card audit">
+      <h4>apply audit</h4>
+      ${renderPalaceReviewArtifactApplyRows(artifact || {})}
+    </div>
+    <div class="palace-review-artifact-card verified">
+      <h4>verification evidence</h4>
+      ${renderPalaceReviewArtifactVerifiedRows(artifact || {})}
+    </div>
+  </div>`;
+}
+
 async function loadRegionOrphanCandidates(regionId) {
   const slot = document.getElementById("region-orphan-candidates");
   if (!slot || !regionId) return;
@@ -7828,7 +7995,35 @@ async function loadRegionOrphanCandidates(regionId) {
   } catch (error) {
     if (!document.body.contains(slot) || slot.dataset.region !== regionId) return;
     slot._orphanCandidateResult = null;
-    slot.innerHTML = `${renderOrphanCandidateHead("candidate links", "unavailable", renderOrphanCandidatePlanButton(regionId))}
+    slot.innerHTML = `${renderOrphanCandidateHead("candidate links", "unavailable", renderOrphanReviewActions(regionId))}
+    <div class="maintenance-empty">${escapeHTML(String(error))}</div>`;
+  }
+}
+
+async function loadRegionPalaceReviewArtifact(regionId) {
+  const slot = document.getElementById("region-orphan-candidates");
+  if (!slot || !regionId) return;
+  slot.dataset.region = regionId;
+  slot.innerHTML = `${renderOrphanCandidateHead("review artifact", "loading", renderOrphanCandidateBackButton(regionId))}
+    <div class="maintenance-empty">loading review artifact...</div>`;
+  const params = new URLSearchParams({
+    region: regionId,
+    threshold: "0.85",
+    max_orphans: "10",
+    candidate_limit: "2",
+  });
+  try {
+    const r = await fetch(`/api/palace-review-artifact?${params.toString()}`);
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    const artifact = await r.json();
+    if (artifact.writes_memory || artifact.writes_edges || artifact.auto_apply_allowed) {
+      throw new Error("unexpected write-capable review artifact response");
+    }
+    if (!document.body.contains(slot) || slot.dataset.region !== regionId) return;
+    slot.innerHTML = renderRegionPalaceReviewArtifact(artifact, regionId);
+  } catch (error) {
+    if (!document.body.contains(slot) || slot.dataset.region !== regionId) return;
+    slot.innerHTML = `${renderOrphanCandidateHead("review artifact", "unavailable", renderOrphanCandidateBackButton(regionId))}
     <div class="maintenance-empty">${escapeHTML(String(error))}</div>`;
   }
 }
@@ -7936,7 +8131,7 @@ async function recordOrphanCandidateDecision(regionId, orphanKey, candidateKey, 
     throw new Error("unexpected write-capable review response");
   }
   if (slot) {
-    slot.innerHTML = `${renderOrphanCandidateHead("candidate links", "refreshing", renderOrphanCandidatePlanButton(regionId))}
+    slot.innerHTML = `${renderOrphanCandidateHead("candidate links", "refreshing", renderOrphanReviewActions(regionId))}
     <div class="maintenance-empty">recorded ${escapeHTML(decision)} · refreshing candidates...</div>`;
   }
   await loadRegionOrphanCandidates(regionId);
@@ -7952,7 +8147,7 @@ function recordFocusedOrphanCandidateDecision(regionId, decision) {
   recordOrphanCandidateDecision(regionId, row.orphan, candidate.key, decision).catch(error => {
     const currentSlot = document.getElementById("region-orphan-candidates");
     if (currentSlot) {
-      currentSlot.innerHTML = `${renderOrphanCandidateHead("candidate links", "review error", renderOrphanCandidatePlanButton(regionId))}
+      currentSlot.innerHTML = `${renderOrphanCandidateHead("candidate links", "review error", renderOrphanReviewActions(regionId))}
       <div class="maintenance-empty">${escapeHTML(String(error))}</div>`;
     }
   });
@@ -8242,6 +8437,12 @@ function handleOrphanRepairClick(e, regionId) {
     loadRegionOrphanApprovedPlan(planBtn.dataset.orphanApprovedPlan || regionId);
     return true;
   }
+  const artifactBtn = e.target.closest("[data-orphan-review-artifact]");
+  if (artifactBtn) {
+    e.preventDefault();
+    loadRegionPalaceReviewArtifact(artifactBtn.dataset.orphanReviewArtifact || regionId);
+    return true;
+  }
   const planBackBtn = e.target.closest("[data-orphan-plan-back]");
   if (planBackBtn) {
     e.preventDefault();
@@ -8268,7 +8469,7 @@ function handleOrphanRepairClick(e, regionId) {
     recordOrphanCandidateDecision(regionId, orphanKey, candidateKey, decision).catch(error => {
       const slot = document.getElementById("region-orphan-candidates");
       if (slot) {
-        slot.innerHTML = `${renderOrphanCandidateHead("candidate links", "review error", renderOrphanCandidatePlanButton(regionId))}
+        slot.innerHTML = `${renderOrphanCandidateHead("candidate links", "review error", renderOrphanReviewActions(regionId))}
         <div class="maintenance-empty">${escapeHTML(String(error))}</div>`;
       }
     });
@@ -8284,7 +8485,7 @@ function handleOrphanRepairClick(e, regionId) {
     recordOrphanCandidateDecision(regionId, orphanKey, candidateKey, decision).catch(error => {
       const slot = document.getElementById("region-orphan-candidates");
       if (slot) {
-        slot.innerHTML = `${renderOrphanCandidateHead("candidate links", "review error", renderOrphanCandidatePlanButton(regionId))}
+        slot.innerHTML = `${renderOrphanCandidateHead("candidate links", "review error", renderOrphanReviewActions(regionId))}
         <div class="maintenance-empty">${escapeHTML(String(error))}</div>`;
       }
     });

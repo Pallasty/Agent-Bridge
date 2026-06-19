@@ -39,19 +39,19 @@
 use ab_store::{MemoryListSort, MemoryQueryRecord, MemoryRecord, StateStore};
 use anyhow::{Context, Result};
 use axum::{
+    Json, Router,
     extract::{Path, Query, State},
     http::StatusCode,
     response::{
-        sse::{Event as SseEvent, KeepAlive, Sse},
         Html, IntoResponse,
+        sse::{Event as SseEvent, KeepAlive, Sse},
     },
     routing::{get, post},
-    Json, Router,
 };
-use base64::{engine::general_purpose, Engine as _};
-use serde::{de, Deserialize};
-use serde_json::{json, Value};
-use std::collections::{hash_map::DefaultHasher, BTreeMap, HashSet, VecDeque};
+use base64::{Engine as _, engine::general_purpose};
+use serde::{Deserialize, de};
+use serde_json::{Value, json};
+use std::collections::{BTreeMap, HashSet, VecDeque, hash_map::DefaultHasher};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
@@ -118,6 +118,10 @@ pub async fn run(
         .route("/healthz", get(healthz))
         .route("/api/graph", get(api_graph))
         .route("/api/self-review-packet", get(api_self_review_packet))
+        .route(
+            "/api/palace-review-artifact",
+            get(api_palace_review_artifact),
+        )
         .route("/api/orphan-candidates", get(api_orphan_candidates))
         .route(
             "/api/orphan-approved-link-plan",
@@ -174,11 +178,7 @@ pub fn default_markdown_dir() -> Option<PathBuf> {
         .join("projects")
         .join(encoded)
         .join("memory");
-    if path.is_dir() {
-        Some(path)
-    } else {
-        None
-    }
+    if path.is_dir() { Some(path) } else { None }
 }
 
 async fn index() -> impl IntoResponse {
@@ -464,6 +464,7 @@ fn palace_orphan_approved_link_apply_record_for_time(
         "writes_memory": response.get("writes_memory").cloned().unwrap_or(json!(false)),
         "writes_edges": response.get("writes_edges").cloned().unwrap_or(json!(false)),
         "blocking_reasons": response.get("blocking_reasons").cloned().unwrap_or_else(|| json!([])),
+        "results": response.get("results").cloned().unwrap_or_else(|| json!([])),
         "region": response.get("region").cloned().unwrap_or(Value::Null),
         "threshold": response.get("threshold").cloned().unwrap_or(Value::Null),
         "max_orphans": response.get("max_orphans").cloned().unwrap_or(Value::Null),
@@ -479,12 +480,16 @@ fn load_palace_orphan_approved_link_apply_records(path: &FsPath) -> std::io::Res
     };
     let mut records = Vec::new();
     for line in text.lines().filter(|line| !line.trim().is_empty()) {
-        let value: Value = serde_json::from_str(line)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-        if value.get("schema").and_then(|v| v.as_str())
-            == Some("agent_bridge.palace.orphan_approved_link_apply_audit.v0")
-        {
-            records.push(value);
+        let stream = serde_json::Deserializer::from_str(line).into_iter::<Value>();
+        for parsed in stream {
+            let Ok(value) = parsed else {
+                continue;
+            };
+            if value.get("schema").and_then(|v| v.as_str())
+                == Some("agent_bridge.palace.orphan_approved_link_apply_audit.v0")
+            {
+                records.push(value);
+            }
         }
     }
     records.sort_by_key(|value| {
@@ -941,6 +946,102 @@ fn palace_orphan_approved_link_plan_for_preview(
         );
     }
     plan
+}
+
+fn palace_json_u64_at(value: &Value, path: &[&str]) -> u64 {
+    let mut current = value;
+    for key in path {
+        let Some(next) = current.get(*key) else {
+            return 0;
+        };
+        current = next;
+    }
+    if let Some(value) = current.as_u64() {
+        return value;
+    }
+    current.as_i64().filter(|value| *value > 0).unwrap_or(0) as u64
+}
+
+fn palace_review_artifact_for_sources(
+    region: Option<&str>,
+    threshold: f64,
+    min_content_len: usize,
+    max_orphans: usize,
+    candidate_limit: usize,
+    candidate_review: &Value,
+    approved_plan: &Value,
+    apply_records: &[Value],
+    verification_rows: &[Value],
+) -> Value {
+    let safe_batch = approved_plan.get("safe_batch").cloned().unwrap_or_else(|| {
+        json!({
+            "schema": "agent_bridge.palace.orphan_safe_batch.v0",
+            "read_only": true,
+            "writes_memory": false,
+            "writes_edges": false,
+            "auto_apply_allowed": false,
+            "eligible_count": 0,
+            "blocked_count": 0,
+            "links": [],
+            "blocked": [],
+        })
+    });
+    let mut recent_apply_records = apply_records.to_vec();
+    recent_apply_records.sort_by(|a, b| {
+        palace_json_u64_at(b, &["generated_at_unix"])
+            .cmp(&palace_json_u64_at(a, &["generated_at_unix"]))
+    });
+
+    let verification_rows = verification_rows.to_vec();
+    json!({
+        "schema": "agent_bridge.palace.review_artifact.v0",
+        "artifact_kind": "palace_review_packet",
+        "read_only": true,
+        "writes_memory": false,
+        "writes_edges": false,
+        "auto_apply_allowed": false,
+        "region": region,
+        "threshold": threshold,
+        "min_content_len": min_content_len,
+        "max_orphans": max_orphans,
+        "candidate_limit": candidate_limit,
+        "summary": {
+            "candidate_count": palace_json_u64_at(candidate_review, &["review", "candidate_count"]),
+            "pending_candidate_count": palace_json_u64_at(candidate_review, &["review", "pending_count"]),
+            "approved_candidate_count": palace_json_u64_at(candidate_review, &["review", "approved_count"]),
+            "rejected_candidate_count": palace_json_u64_at(candidate_review, &["review", "rejected_count"]),
+            "deferred_candidate_count": palace_json_u64_at(candidate_review, &["review", "deferred_count"]),
+            "approved_pair_count": palace_json_u64_at(approved_plan, &["approved_pair_count"]),
+            "safe_batch_eligible_count": palace_json_u64_at(&safe_batch, &["eligible_count"]),
+            "safe_batch_blocked_count": palace_json_u64_at(&safe_batch, &["blocked_count"]),
+            "recent_apply_audit_count": recent_apply_records.len(),
+            "verified_edge_count": verification_rows.len(),
+        },
+        "sections": {
+            "candidate_review": candidate_review,
+            "approved_plan": approved_plan,
+            "safe_batch": safe_batch,
+            "apply_audit": {
+                "schema": "agent_bridge.palace.apply_audit_summary.v0",
+                "read_only": true,
+                "writes_memory": false,
+                "writes_edges": false,
+                "auto_apply_allowed": false,
+                "recent_count": recent_apply_records.len(),
+                "records": recent_apply_records,
+            },
+            "verification_evidence": {
+                "schema": "agent_bridge.palace.verification_evidence.v0",
+                "read_only": true,
+                "writes_memory": false,
+                "writes_edges": false,
+                "auto_apply_allowed": false,
+                "edge_count": verification_rows.len(),
+                "rows": verification_rows,
+            },
+        },
+        "next_step": "Review the artifact evidence before publishing or invoking write-capable memory edge behavior.",
+    })
 }
 
 fn palace_slug(raw: &str) -> String {
@@ -1449,6 +1550,311 @@ async fn api_graph(
     Query(q): Query<GraphQuery>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
     build_graph_snapshot(&s, q.all).await.map(Json)
+}
+
+struct PalaceOrphanCandidateResult {
+    region: Option<String>,
+    threshold: f64,
+    min_content_len: usize,
+    max_orphans: usize,
+    candidate_limit: usize,
+    preview: PalaceOrphanCandidatePreview,
+    decisions: Vec<Value>,
+    result: Value,
+}
+
+async fn palace_orphan_candidate_result_for_query(
+    s: &AppState,
+    q: &OrphanCandidatesQuery,
+) -> Result<PalaceOrphanCandidateResult, (StatusCode, String)> {
+    let threshold = q.threshold.unwrap_or(0.85).clamp(0.0, 2.0);
+    let min_content_len = q.min_content_len.unwrap_or(50).min(1000) as usize;
+    let max_orphans = q.max_orphans.unwrap_or(12).clamp(1, 100) as usize;
+    let candidate_limit = q.candidate_limit.unwrap_or(3).clamp(1, 10) as usize;
+    let region = q
+        .region
+        .as_deref()
+        .map(str::trim)
+        .filter(|region| !region.is_empty())
+        .map(str::to_string);
+    let region_ref = region.as_deref();
+
+    let all = s
+        .store
+        .list_memories(None, MemoryListSort::Recent, STORE_FETCH_LIMIT)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("list_memories: {e}"),
+            )
+        })?;
+
+    let mut keys_with_edges: HashSet<String> = HashSet::new();
+    for mem in &all {
+        if !palace_memory_active(mem) || palace_memory_excluded_kind(mem) {
+            continue;
+        }
+        if let Ok(edges) = s.store.memory_neighbors(&mem.key).await {
+            if !edges.is_empty() {
+                keys_with_edges.insert(mem.key.clone());
+            }
+        }
+    }
+
+    let preview = preview_palace_orphan_candidates(
+        &all,
+        &keys_with_edges,
+        region_ref,
+        threshold,
+        min_content_len,
+        max_orphans,
+        candidate_limit,
+    );
+    let decisions_path = default_palace_orphan_candidate_decisions_path();
+    let decisions = load_palace_orphan_candidate_decisions(&decisions_path).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("load orphan candidate review decisions: {e}"),
+        )
+    })?;
+    let review_inbox = palace_orphan_candidate_decision_inbox_for_pairs(
+        &palace_orphan_candidate_pairs_for_preview(&preview),
+        &decisions,
+    );
+    let review_by_pair = palace_orphan_review_by_pair(&review_inbox);
+
+    let rows: Vec<Value> = preview
+        .rows
+        .iter()
+        .map(|row| {
+            let candidates: Vec<Value> = row
+                .suggestions
+                .iter()
+                .map(|candidate| {
+                    let pair = PalaceOrphanCandidatePair {
+                        orphan_key: row.orphan.key.clone(),
+                        candidate_key: candidate.key.clone(),
+                    };
+                    let review = review_by_pair
+                        .get(&(pair.orphan_key.clone(), pair.candidate_key.clone()))
+                        .cloned()
+                        .unwrap_or_else(|| {
+                            json!({
+                                "pair_id": palace_orphan_pair_id(&pair),
+                                "orphan_key": &pair.orphan_key,
+                                "candidate_key": &pair.candidate_key,
+                                "decision": "pending",
+                                "latest_decision_at_unix": Value::Null,
+                                "reviewer": Value::Null,
+                                "note": Value::Null,
+                            })
+                        });
+                    json!({
+                        "key": &candidate.key,
+                        "kind": &candidate.kind,
+                        "confidence": candidate.confidence,
+                        "reason": &candidate.reason,
+                        "scope": candidate.scope.as_deref(),
+                        "scope_relation": candidate.scope_relation,
+                        "preview": &candidate.preview,
+                        "review": review,
+                    })
+                })
+                .collect();
+            json!({
+                "orphan": &row.orphan.key,
+                "kind": &row.orphan.kind,
+                "region": palace_region_for_memory(&row.orphan),
+                "scope": row.orphan.scope.as_deref(),
+                "top_confidence": row.suggestions.first().map(|candidate| candidate.confidence),
+                "status": palace_orphan_row_status(row, threshold),
+                "preview": palace_content_preview(&row.orphan.content, 120),
+                "candidates": candidates,
+            })
+        })
+        .collect();
+
+    let result = json!({
+        "schema": "agent_bridge.palace.orphan_candidates.v0",
+        "read_only": true,
+        "region": region_ref,
+        "threshold": threshold,
+        "min_content_len": min_content_len,
+        "max_orphans": max_orphans,
+        "candidate_limit": candidate_limit,
+        "skip_tags": PALACE_ORPHAN_SKIP_TAGS,
+        "skip_kinds": PALACE_ORPHAN_SKIP_KINDS,
+        "loaded_records": all.len(),
+        "examined": preview.examined,
+        "eligible_orphans": preview.eligible_orphans,
+        "would_link": preview.would_link,
+        "skipped_low_score": preview.skipped_low_score,
+        "skipped_no_candidates": preview.skipped_no_candidates,
+        "skipped_existing_edges": preview.skipped_existing_edges,
+        "skipped_blacklisted_orphan": preview.skipped_blacklisted_orphan,
+        "skipped_blacklisted_kind": preview.skipped_blacklisted_kind,
+        "review": {
+            "read_only": true,
+            "decisions_path": decisions_path.display().to_string(),
+            "candidate_count": review_inbox.get("candidate_count").cloned().unwrap_or(Value::Null),
+            "pending_count": review_inbox.get("pending_count").cloned().unwrap_or(Value::Null),
+            "approved_count": review_inbox.get("approved_count").cloned().unwrap_or(Value::Null),
+            "rejected_count": review_inbox.get("rejected_count").cloned().unwrap_or(Value::Null),
+            "deferred_count": review_inbox.get("deferred_count").cloned().unwrap_or(Value::Null),
+            "writes_memory": false,
+            "writes_edges": false,
+            "auto_apply_allowed": false,
+        },
+        "rows": rows,
+        "next_step": "Inspect candidate quality before any write-capable hygiene run.",
+    });
+
+    Ok(PalaceOrphanCandidateResult {
+        region,
+        threshold,
+        min_content_len,
+        max_orphans,
+        candidate_limit,
+        preview,
+        decisions,
+        result,
+    })
+}
+
+fn palace_orphan_approved_links_from_apply_records(
+    records: &[Value],
+) -> Vec<PalaceOrphanApprovedLink> {
+    records
+        .iter()
+        .filter(|record| record.get("dry_run").and_then(Value::as_bool) == Some(false))
+        .flat_map(|record| {
+            record
+                .get("results")
+                .and_then(Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter(|result| result.get("status").and_then(Value::as_str) == Some("applied"))
+                .filter_map(|result| {
+                    let orphan_key = result.get("orphan_key").and_then(Value::as_str)?.trim();
+                    let candidate_key = result.get("candidate_key").and_then(Value::as_str)?.trim();
+                    if orphan_key.is_empty() || candidate_key.is_empty() {
+                        return None;
+                    }
+                    let edge_type = result
+                        .get("edge_type")
+                        .and_then(Value::as_str)
+                        .unwrap_or("relates")
+                        .trim();
+                    Some(PalaceOrphanApprovedLink {
+                        pair_id: result
+                            .get("pair_id")
+                            .and_then(Value::as_str)
+                            .map(str::to_string)
+                            .unwrap_or_else(|| format!("{orphan_key} -> {candidate_key}")),
+                        orphan_key: orphan_key.to_string(),
+                        candidate_key: candidate_key.to_string(),
+                        edge_type: if edge_type.is_empty() {
+                            "relates".to_string()
+                        } else {
+                            edge_type.to_string()
+                        },
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+async fn palace_verified_edge_rows_for_links(
+    store: &dyn StateStore,
+    links: &[PalaceOrphanApprovedLink],
+) -> Vec<Value> {
+    let mut rows = Vec::new();
+    let mut seen: HashSet<(String, String, String)> = HashSet::new();
+    for link in links {
+        if !seen.insert((
+            link.orphan_key.clone(),
+            link.candidate_key.clone(),
+            link.edge_type.clone(),
+        )) {
+            continue;
+        }
+        let Ok(edges) = store.memory_neighbors(&link.orphan_key).await else {
+            continue;
+        };
+        if let Some(edge) = edges.into_iter().find(|edge| {
+            edge.from_key == link.orphan_key
+                && edge.to_key == link.candidate_key
+                && edge.edge_type == link.edge_type
+        }) {
+            rows.push(json!({
+                "pair_id": link.pair_id,
+                "from_key": edge.from_key,
+                "to_key": edge.to_key,
+                "edge_type": edge.edge_type,
+                "weight": edge.weight,
+                "verified": true,
+            }));
+        }
+    }
+    rows
+}
+
+async fn api_palace_review_artifact(
+    State(s): State<AppState>,
+    Query(q): Query<OrphanCandidatesQuery>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let source = palace_orphan_candidate_result_for_query(&s, &q).await?;
+    let mut approved_plan =
+        palace_orphan_approved_link_plan_for_preview(&source.preview, &source.decisions);
+    if let Some(obj) = approved_plan.as_object_mut() {
+        obj.insert("region".to_string(), json!(source.region.as_deref()));
+        obj.insert("threshold".to_string(), json!(source.threshold));
+        obj.insert("min_content_len".to_string(), json!(source.min_content_len));
+        obj.insert("max_orphans".to_string(), json!(source.max_orphans));
+        obj.insert("candidate_limit".to_string(), json!(source.candidate_limit));
+        obj.insert(
+            "reviewed_candidate_count".to_string(),
+            json!(palace_orphan_candidate_pairs_for_preview(&source.preview).len()),
+        );
+    }
+
+    let apply_audit_path = default_palace_orphan_approved_link_apply_path();
+    let apply_records =
+        load_palace_orphan_approved_link_apply_records(&apply_audit_path).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("load orphan approved link apply audit: {e}"),
+            )
+        })?;
+    let mut verification_links = palace_orphan_approved_links_from_plan(&approved_plan);
+    verification_links.extend(palace_orphan_approved_links_from_apply_records(
+        &apply_records,
+    ));
+    let verification_rows =
+        palace_verified_edge_rows_for_links(s.store.as_ref(), &verification_links).await;
+    let mut artifact = palace_review_artifact_for_sources(
+        source.region.as_deref(),
+        source.threshold,
+        source.min_content_len,
+        source.max_orphans,
+        source.candidate_limit,
+        &source.result,
+        &approved_plan,
+        &apply_records,
+        &verification_rows,
+    );
+    if let Some(apply_obj) = artifact
+        .pointer_mut("/sections/apply_audit")
+        .and_then(Value::as_object_mut)
+    {
+        apply_obj.insert(
+            "path".to_string(),
+            json!(apply_audit_path.display().to_string()),
+        );
+    }
+    Ok(Json(artifact))
 }
 
 async fn api_orphan_candidates(
@@ -4150,10 +4556,11 @@ mod tests {
             .find(|row| row.orphan.key == "memory_orphan")
             .expect("memory_orphan row");
         assert!(row.suggestions.iter().any(|s| s.key == "memory_anchor"));
-        assert!(!row
-            .suggestions
-            .iter()
-            .any(|s| s.key == "memory_auto_target"));
+        assert!(
+            !row.suggestions
+                .iter()
+                .any(|s| s.key == "memory_auto_target")
+        );
     }
 
     #[test]
@@ -4610,6 +5017,128 @@ mod tests {
     }
 
     #[test]
+    fn palace_review_artifact_contract_is_read_only_and_evidence_backed() {
+        let candidate_review = json!({
+            "read_only": true,
+            "review": {
+                "candidate_count": 3,
+                "pending_count": 1,
+                "approved_count": 2,
+                "rejected_count": 0,
+                "deferred_count": 0,
+                "writes_memory": false,
+                "writes_edges": false,
+                "auto_apply_allowed": false
+            },
+            "rows": [{
+                "orphan": "memory_orphan",
+                "candidates": [{
+                    "key": "memory_anchor",
+                    "confidence": 0.93,
+                    "review": {
+                        "decision": "approve"
+                    }
+                }]
+            }]
+        });
+        let approved_plan = json!({
+            "schema": "agent_bridge.palace.orphan_approved_link_plan.v0",
+            "read_only": true,
+            "approved_pair_count": 2,
+            "writes_memory": false,
+            "writes_edges": false,
+            "auto_apply_allowed": false,
+            "safe_batch": {
+                "schema": "agent_bridge.palace.orphan_safe_batch.v0",
+                "read_only": true,
+                "eligible_count": 2,
+                "blocked_count": 0,
+                "writes_memory": false,
+                "writes_edges": false,
+                "auto_apply_allowed": false,
+                "links": [{
+                    "pair_id": "memory_orphan -> memory_anchor",
+                    "orphan_key": "memory_orphan",
+                    "candidate_key": "memory_anchor"
+                }],
+                "blocked": []
+            }
+        });
+        let apply_records = vec![
+            json!({
+                "schema": "agent_bridge.palace.orphan_approved_link_apply_audit.v0",
+                "generated_at_unix": 20,
+                "status": "applied",
+                "dry_run": false,
+                "applied_count": 2,
+                "failed_count": 0,
+                "skipped_count": 0
+            }),
+            json!({
+                "schema": "agent_bridge.palace.orphan_approved_link_apply_audit.v0",
+                "generated_at_unix": 10,
+                "status": "dry_run",
+                "dry_run": true,
+                "applied_count": 0,
+                "failed_count": 0,
+                "skipped_count": 0
+            }),
+        ];
+        let verification_rows = vec![json!({
+            "from_key": "memory_orphan",
+            "to_key": "memory_anchor",
+            "edge_type": "relates",
+            "weight": 1.0
+        })];
+
+        let artifact = palace_review_artifact_for_sources(
+            Some("memory-graph"),
+            0.85,
+            50,
+            12,
+            3,
+            &candidate_review,
+            &approved_plan,
+            &apply_records,
+            &verification_rows,
+        );
+
+        assert_eq!(
+            artifact["schema"],
+            json!("agent_bridge.palace.review_artifact.v0")
+        );
+        assert_eq!(artifact["artifact_kind"], json!("palace_review_packet"));
+        assert_eq!(artifact["read_only"], json!(true));
+        assert_eq!(artifact["writes_memory"], json!(false));
+        assert_eq!(artifact["writes_edges"], json!(false));
+        assert_eq!(artifact["auto_apply_allowed"], json!(false));
+        assert_eq!(artifact["region"], json!("memory-graph"));
+        assert_eq!(artifact["summary"]["candidate_count"], json!(3));
+        assert_eq!(artifact["summary"]["pending_candidate_count"], json!(1));
+        assert_eq!(artifact["summary"]["approved_pair_count"], json!(2));
+        assert_eq!(artifact["summary"]["safe_batch_eligible_count"], json!(2));
+        assert_eq!(artifact["summary"]["safe_batch_blocked_count"], json!(0));
+        assert_eq!(artifact["summary"]["recent_apply_audit_count"], json!(2));
+        assert_eq!(artifact["summary"]["verified_edge_count"], json!(1));
+        assert_eq!(
+            artifact["sections"]["candidate_review"]["review"]["approved_count"],
+            json!(2)
+        );
+        assert_eq!(
+            artifact["sections"]["safe_batch"]["links"][0]["pair_id"],
+            json!("memory_orphan -> memory_anchor")
+        );
+        assert_eq!(
+            artifact["sections"]["apply_audit"]["records"][0]["generated_at_unix"],
+            json!(20)
+        );
+        assert_eq!(
+            artifact["sections"]["verification_evidence"]["rows"][0]["from_key"],
+            json!("memory_orphan")
+        );
+    }
+
+    #[test]
     fn palace_orphan_approved_link_apply_gate_requires_confirmation_before_writes() {
         let plan = json!({
             "schema": "agent_bridge.palace.orphan_approved_link_plan.v0",
@@ -4876,6 +5405,153 @@ mod tests {
     }
 
     #[test]
+    fn palace_review_artifact_route_assembles_current_review_state_without_writes() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let old_decisions = std::env::var_os("AB_PALACE_ORPHAN_CANDIDATE_DECISIONS");
+        let old_apply_audit = std::env::var_os("AB_PALACE_ORPHAN_APPROVED_LINK_APPLY_AUDIT");
+
+        std::env::set_var(
+            "AB_PALACE_ORPHAN_CANDIDATE_DECISIONS",
+            dir.path().join("decisions.jsonl"),
+        );
+        std::env::set_var(
+            "AB_PALACE_ORPHAN_APPROVED_LINK_APPLY_AUDIT",
+            dir.path().join("apply.jsonl"),
+        );
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(async {
+            let db_path = dir.path().join("state.db");
+            let store = Arc::new(
+                ab_store::SqliteStore::open(&db_path)
+                    .await
+                    .expect("open sqlite store"),
+            );
+            store
+                .memory_save(&test_mem(
+                    "artifact_route_orphan",
+                    "lesson",
+                    "palace review artifact route alpha beta gamma",
+                    &["memory"],
+                ))
+                .await
+                .expect("save orphan");
+            store
+                .memory_save(&test_mem(
+                    "artifact_route_anchor",
+                    "lesson",
+                    "palace review artifact route alpha beta delta",
+                    &["memory"],
+                ))
+                .await
+                .expect("save anchor");
+
+            let state = AppState {
+                store: store.clone(),
+                markdown_root: None,
+                reports_dir: None,
+                recent_clicks: Arc::new(Mutex::new(VecDeque::with_capacity(CLICK_WINDOW))),
+            };
+            let query = OrphanCandidatesQuery {
+                region: None,
+                threshold: Some(0.1),
+                min_content_len: Some(0),
+                max_orphans: Some(4),
+                candidate_limit: Some(2),
+            };
+
+            let _ = api_orphan_candidate_decision(Json(OrphanCandidateDecisionRequest {
+                orphan_key: "artifact_route_orphan".to_string(),
+                candidate_key: "artifact_route_anchor".to_string(),
+                decision: "approve".to_string(),
+                reviewer: Some("codex-test".to_string()),
+                note: Some("artifact route approval".to_string()),
+            }))
+            .await
+            .expect("record approval");
+            store
+                .memory_link(
+                    "artifact_route_orphan",
+                    "artifact_route_anchor",
+                    "relates",
+                    1.0,
+                )
+                .await
+                .expect("pre-existing verified edge");
+            let apply_record = palace_orphan_approved_link_apply_record_for_time(
+                &json!({
+                    "schema": "agent_bridge.palace.orphan_approved_link_apply.v0",
+                    "status": "applied",
+                    "blocked": false,
+                    "dry_run": false,
+                    "approved_pair_count": 1,
+                    "would_write_edges": 1,
+                    "writes_memory": false,
+                    "writes_edges": true,
+                    "applied_count": 1,
+                    "failed_count": 0,
+                    "skipped_count": 0,
+                    "results": [{
+                        "pair_id": "artifact_route_orphan -> artifact_route_anchor",
+                        "orphan_key": "artifact_route_orphan",
+                        "candidate_key": "artifact_route_anchor",
+                        "edge_type": "relates",
+                        "status": "applied"
+                    }]
+                }),
+                Some("codex-test"),
+                30,
+            );
+            append_palace_orphan_approved_link_apply_record(
+                &default_palace_orphan_approved_link_apply_path(),
+                &apply_record,
+            )
+            .expect("append apply audit");
+
+            let Json(artifact) = api_palace_review_artifact(State(state), Query(query))
+                .await
+                .expect("review artifact");
+
+            assert_eq!(
+                artifact["schema"],
+                json!("agent_bridge.palace.review_artifact.v0")
+            );
+            assert_eq!(artifact["read_only"], json!(true));
+            assert_eq!(artifact["writes_memory"], json!(false));
+            assert_eq!(artifact["writes_edges"], json!(false));
+            assert_eq!(artifact["auto_apply_allowed"], json!(false));
+            assert_eq!(artifact["summary"]["approved_pair_count"], json!(0));
+            assert_eq!(artifact["summary"]["recent_apply_audit_count"], json!(1));
+            assert_eq!(artifact["summary"]["verified_edge_count"], json!(1));
+            assert_eq!(
+                artifact["sections"]["candidate_review"]["review"]["approved_count"],
+                json!(0)
+            );
+            assert_eq!(
+                artifact["sections"]["apply_audit"]["records"][0]["actor"],
+                json!("codex-test")
+            );
+            assert_eq!(
+                artifact["sections"]["verification_evidence"]["rows"][0]["from_key"],
+                json!("artifact_route_orphan")
+            );
+        });
+
+        match old_decisions {
+            Some(value) => std::env::set_var("AB_PALACE_ORPHAN_CANDIDATE_DECISIONS", value),
+            None => std::env::remove_var("AB_PALACE_ORPHAN_CANDIDATE_DECISIONS"),
+        }
+        match old_apply_audit {
+            Some(value) => std::env::set_var("AB_PALACE_ORPHAN_APPROVED_LINK_APPLY_AUDIT", value),
+            None => std::env::remove_var("AB_PALACE_ORPHAN_APPROVED_LINK_APPLY_AUDIT"),
+        }
+    }
+
+    #[test]
     fn palace_orphan_approved_link_apply_audit_is_private_append_only_and_schema_filtered() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("review").join("apply.jsonl");
@@ -4944,6 +5620,58 @@ mod tests {
             assert_eq!(file_mode, 0o600);
             assert_eq!(dir_mode, 0o700);
         }
+    }
+
+    #[test]
+    fn palace_orphan_approved_link_apply_audit_tolerates_concatenated_legacy_lines() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("apply.jsonl");
+        let first = palace_orphan_approved_link_apply_record_for_time(
+            &json!({
+                "schema": "agent_bridge.palace.orphan_approved_link_apply.v0",
+                "status": "dry_run",
+                "blocked": false,
+                "dry_run": true,
+                "approved_pair_count": 1,
+                "would_write_edges": 1,
+                "writes_edges": false,
+                "writes_memory": false,
+                "blocking_reasons": [],
+            }),
+            Some("palace"),
+            10,
+        );
+        let second = palace_orphan_approved_link_apply_record_for_time(
+            &json!({
+                "schema": "agent_bridge.palace.orphan_approved_link_apply.v0",
+                "status": "applied",
+                "blocked": false,
+                "dry_run": false,
+                "approved_pair_count": 1,
+                "would_write_edges": 1,
+                "applied_count": 1,
+                "writes_edges": true,
+                "writes_memory": false,
+                "blocking_reasons": [],
+            }),
+            Some("palace"),
+            20,
+        );
+        std::fs::write(
+            &path,
+            format!(
+                "{}{}\nnot-json\n",
+                serde_json::to_string(&first).expect("first json"),
+                serde_json::to_string(&second).expect("second json")
+            ),
+        )
+        .expect("write legacy audit");
+
+        let loaded = load_palace_orphan_approved_link_apply_records(&path).expect("load apply");
+
+        assert_eq!(loaded.len(), 2);
+        assert_eq!(loaded[0]["status"], json!("dry_run"));
+        assert_eq!(loaded[1]["status"], json!("applied"));
     }
 
     #[test]
