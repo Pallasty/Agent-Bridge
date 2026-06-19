@@ -443,9 +443,7 @@ fn tool_atlas_marks_external_bulk_latency() {
         .expect("memory_search");
 
     assert_eq!(memory_search.health, "degraded");
-    assert!(memory_search
-        .risk_flags
-        .contains(&"slow_p95".to_string()));
+    assert!(memory_search.risk_flags.contains(&"slow_p95".to_string()));
     assert!(memory_search
         .risk_flags
         .contains(&"external_batch_load".to_string()));
@@ -471,9 +469,7 @@ fn tool_atlas_marks_external_bulk_latency_without_profile_filter() {
         .expect("memory_search");
 
     assert_eq!(memory_search.health, "degraded");
-    assert!(memory_search
-        .risk_flags
-        .contains(&"slow_p95".to_string()));
+    assert!(memory_search.risk_flags.contains(&"slow_p95".to_string()));
     assert!(memory_search
         .risk_flags
         .contains(&"external_batch_load".to_string()));
@@ -539,6 +535,37 @@ fn tool_atlas_treats_work_memory_missing_key_as_expected_input_validation() {
         .risk_flags
         .contains(&"expected_input_validation".to_string()));
     assert!(!work_memory.risk_flags.contains(&"has_errors".to_string()));
+}
+
+#[test]
+fn tool_atlas_treats_plan_load_missing_plan_as_expected_lookup_miss() {
+    let snapshot = build_tool_atlas_snapshot(ToolAtlasInput {
+        generated_at: 1_779_910_000,
+        window_secs: 600,
+        current_tools: vec!["plan_load".to_string()],
+        stats: vec![stat("plan_load", 3, 1, 4, 1_979.0)],
+        recent_errors: vec![McpToolErrorRecord {
+            ts: 1_779_909_990,
+            tool_name: "plan_load".to_string(),
+            message: "plan not found: 'ab_tool_surface_cleanup_20260618'".to_string(),
+        }],
+    });
+
+    assert_eq!(snapshot.summary.failing_tool_count, 0);
+
+    let plan_load = snapshot
+        .tools
+        .iter()
+        .find(|tool| tool.tool_name == "plan_load")
+        .expect("plan_load");
+
+    assert_eq!(plan_load.error_count, 1);
+    assert_eq!(plan_load.health, "healthy");
+    assert_eq!(plan_load.recommendation, "keep");
+    assert!(plan_load
+        .risk_flags
+        .contains(&"expected_lookup_miss".to_string()));
+    assert!(!plan_load.risk_flags.contains(&"has_errors".to_string()));
 }
 
 #[test]
