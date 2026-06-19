@@ -25013,6 +25013,8 @@ fn dispatch_optimization_reasons_with_source_context(
     diagnostics: &HashMap<String, Vec<ToolErrorDiagnosticClass>>,
     external_batch_context: &HashMap<String, ab_store::McpToolCallStats>,
 ) -> Vec<&'static str> {
+    const SAMPLE_SENSITIVE_P95_CALL_THRESHOLD: u64 = 20;
+
     if dispatch_expected_hook_lifecycle_latency(s) || dispatch_expected_biocortex_eval_workload(s) {
         return Vec::new();
     }
@@ -25025,7 +25027,10 @@ fn dispatch_optimization_reasons_with_source_context(
             reasons.push("missing_error_samples");
         }
     }
-    if s.call_count >= 3 && s.p95_duration_ms >= 1_000 {
+    let sample_sensitive_p95 = s.call_count < SAMPLE_SENSITIVE_P95_CALL_THRESHOLD
+        && !has_actionable_errors
+        && s.p95_duration_ms == s.max_duration_ms;
+    if s.call_count >= 3 && s.p95_duration_ms >= 1_000 && !sample_sensitive_p95 {
         reasons.push("slow_p95");
         if dispatch_external_batch_load(s)
             || dispatch_aggregate_external_batch_load(s, external_batch_context)
@@ -52319,6 +52324,29 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
 
         assert!(reasons.contains(&"slow_p95"));
         assert!(reasons.contains(&"external_batch_load"));
+    }
+
+    #[test]
+    fn dispatch_audit_ignores_low_sample_max_p95_latency() {
+        let s = ab_store::McpToolCallStats {
+            tool_name: "memory_search".to_string(),
+            call_count: 17,
+            error_count: 0,
+            avg_duration_ms: 330.3,
+            p95_duration_ms: 2_353,
+            max_duration_ms: 2_353,
+            avg_result_size: 16_606.8,
+            client_name: Some("claude-code".to_string()),
+            profile: Some("all".to_string()),
+            source: Some("claude".to_string()),
+            model: None,
+            model_reasoning_effort: None,
+            codex_host: None,
+        };
+
+        let reasons = dispatch_optimization_reasons(&s, &HashMap::new());
+
+        assert!(reasons.is_empty());
     }
 
     #[test]
