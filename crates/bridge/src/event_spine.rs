@@ -597,6 +597,32 @@ mod tests {
     }
 
     #[test]
+    fn event_spine_classifies_expected_lookup_miss_without_marking_ok() {
+        let snapshot = mcp_event_spine_snapshot(
+            &[],
+            &[error(
+                101,
+                "plan_load",
+                "plan not found: 'ab_tool_surface_cleanup_20260618'",
+            )],
+            &[],
+            &[],
+            60,
+            10,
+            120,
+        );
+
+        assert_eq!(snapshot.event_count, 1);
+        let event = &snapshot.events[0];
+        assert_eq!(event.source, "mcp_tool_errors");
+        assert_eq!(event.kind, "tool_error");
+        assert_eq!(event.ok, Some(false));
+        assert_eq!(event.facts["diagnostic_class"], "expected_lookup_miss");
+        assert_eq!(event.facts["expected"], true);
+        assert!(snapshot.integrity.verified);
+    }
+
+    #[test]
     fn event_spine_limit_keeps_most_recent_events() {
         let snapshot = mcp_event_spine_snapshot(
             &[call(70, "old_tool", true), call(80, "middle_tool", true)],

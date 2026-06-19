@@ -370,6 +370,12 @@ fn expected_gate_flag(
     }
     if samples.iter().all(|sample| {
         classify_tool_error(tool_name, &sample.message)
+            == ToolErrorDiagnosticClass::ExpectedLookupMiss
+    }) {
+        return Some("expected_lookup_miss");
+    }
+    if samples.iter().all(|sample| {
+        classify_tool_error(tool_name, &sample.message)
             == ToolErrorDiagnosticClass::ExpectedRuntimeUnavailable
     }) {
         return Some("expected_runtime_unavailable");
@@ -392,6 +398,7 @@ fn has_actionable_risk_flags(risk_flags: &[String]) -> bool {
                 | "expected_confirmation"
                 | "expected_safety_gate"
                 | "expected_input_validation"
+                | "expected_lookup_miss"
                 | "expected_runtime_unavailable"
                 | "expected_detail_payload"
                 | "expected_eval_workload"

@@ -5,6 +5,7 @@ pub(crate) enum ToolErrorDiagnosticClass {
     ExpectedConfirmation,
     ExpectedSafetyGate,
     ExpectedInputValidation,
+    ExpectedLookupMiss,
     ExpectedRuntimeUnavailable,
     UnclassifiedError,
 }
@@ -15,6 +16,7 @@ impl ToolErrorDiagnosticClass {
             Self::ExpectedConfirmation => "expected_confirmation",
             Self::ExpectedSafetyGate => "expected_safety_gate",
             Self::ExpectedInputValidation => "expected_input_validation",
+            Self::ExpectedLookupMiss => "expected_lookup_miss",
             Self::ExpectedRuntimeUnavailable => "expected_runtime_unavailable",
             Self::UnclassifiedError => "unclassified_error",
         }
@@ -32,6 +34,8 @@ pub(crate) fn classify_tool_error(tool_name: &str, message: &str) -> ToolErrorDi
         ToolErrorDiagnosticClass::ExpectedSafetyGate
     } else if is_expected_input_validation(tool_name, message) {
         ToolErrorDiagnosticClass::ExpectedInputValidation
+    } else if is_expected_lookup_miss(tool_name, message) {
+        ToolErrorDiagnosticClass::ExpectedLookupMiss
     } else if is_expected_runtime_unavailable(tool_name, message) {
         ToolErrorDiagnosticClass::ExpectedRuntimeUnavailable
     } else {
@@ -61,6 +65,10 @@ fn is_expected_input_validation(tool_name: &str, message: &str) -> bool {
         }
         _ => false,
     }
+}
+
+fn is_expected_lookup_miss(tool_name: &str, message: &str) -> bool {
+    tool_name == "plan_load" && message.starts_with("plan not found: ")
 }
 
 fn is_expected_runtime_unavailable(tool_name: &str, message: &str) -> bool {
