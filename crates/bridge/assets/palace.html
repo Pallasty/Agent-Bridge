@@ -2587,6 +2587,14 @@
     }
     #panel .palace-review-artifact-card.verified { border-left-color: #5cc89a; }
     #panel .palace-review-artifact-card.audit { border-left-color: #c8a96a; }
+    #panel .palace-review-artifact-section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      min-width: 0;
+      scroll-margin-top: 12px;
+    }
     #panel .palace-review-artifact-card h4 {
       margin: 0;
       color: #d8d8e2;
@@ -2594,6 +2602,25 @@
       letter-spacing: 0.1em;
       text-transform: uppercase;
       font-weight: 650;
+    }
+    #panel .palace-review-artifact-anchor {
+      width: 20px;
+      height: 20px;
+      display: inline-grid;
+      place-items: center;
+      flex: 0 0 auto;
+      border: 1px solid #303040;
+      border-radius: 4px;
+      background: #14141d;
+      color: #858594;
+      font-size: 10px;
+      line-height: 1;
+      cursor: pointer;
+    }
+    #panel .palace-review-artifact-anchor:hover,
+    #panel .palace-review-artifact-anchor[data-copied="true"] {
+      border-color: #5cc8c8;
+      color: #d8d8e2;
     }
     #panel .palace-review-artifact-row {
       overflow-wrap: anywhere;
@@ -7902,6 +7929,52 @@ function renderPalaceReviewArtifactStats(artifact) {
   ).join("") + `</div>`;
 }
 
+function palaceReviewArtifactAnchorId(regionId, sectionId) {
+  const region = String(regionId || "all")
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "all";
+  const section = String(sectionId || "section")
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "section";
+  return `review-artifact-${region}-${section}`;
+}
+
+function renderPalaceReviewArtifactSectionHead(regionId, sectionId, label) {
+  const anchorId = palaceReviewArtifactAnchorId(regionId, sectionId);
+  const safeLabel = escapeHTML(label);
+  return `<div class="palace-review-artifact-section-head" id="${escapeHTML(anchorId)}" data-review-artifact-anchor="${escapeHTML(sectionId)}">
+    <h4>${safeLabel}</h4>
+    <button type="button" class="palace-review-artifact-anchor" data-review-artifact-copy="${escapeHTML(anchorId)}" title="Copy ${safeLabel} link" aria-label="Copy ${safeLabel} link">#</button>
+  </div>`;
+}
+
+function palaceReviewArtifactSectionUrl(anchorId) {
+  const url = new URL(window.location.href);
+  url.hash = anchorId;
+  return url.toString();
+}
+
+async function copyPalaceReviewArtifactLink(anchorId, button) {
+  if (!anchorId) return;
+  const url = palaceReviewArtifactSectionUrl(anchorId);
+  try {
+    if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error("clipboard unavailable");
+    await navigator.clipboard.writeText(url);
+    if (button) {
+      button.dataset.copied = "true";
+      button.setAttribute("aria-label", "Copied review artifact link");
+      window.setTimeout(() => {
+        button.dataset.copied = "false";
+        button.setAttribute("aria-label", "Copy review artifact link");
+      }, 1200);
+    }
+  } catch (_) {
+    window.location.hash = anchorId;
+  }
+}
+
 function renderPalaceReviewArtifactApplyRows(artifact) {
   const records = artifact && artifact.sections && artifact.sections.apply_audit && Array.isArray(artifact.sections.apply_audit.records)
     ? artifact.sections.apply_audit.records
@@ -7941,7 +8014,7 @@ function renderPalaceReviewArtifactVerifiedRows(artifact) {
   }).join("");
 }
 
-function renderPalaceReviewArtifactSafeBatch(artifact) {
+function renderPalaceReviewArtifactSafeBatch(artifact, regionId) {
   const safe = artifact && artifact.sections && artifact.sections.safe_batch && typeof artifact.sections.safe_batch === "object"
     ? artifact.sections.safe_batch
     : {};
@@ -7949,7 +8022,7 @@ function renderPalaceReviewArtifactSafeBatch(artifact) {
   const blocked = Number.isFinite(safe.blocked_count) ? safe.blocked_count : 0;
   const next = artifact && artifact.next_step ? String(artifact.next_step) : "review artifact evidence";
   return `<div class="palace-review-artifact-card">
-    <h4>safe batch</h4>
+    ${renderPalaceReviewArtifactSectionHead(regionId, "safe-batch", "safe batch")}
     <div>eligible_count:${escapeHTML(String(eligible))} · blocked_count:${escapeHTML(String(blocked))}</div>
     <div>${escapeHTML(next)}</div>
   </div>`;
@@ -7961,14 +8034,17 @@ function renderRegionPalaceReviewArtifact(artifact, regionId) {
     : "check";
   return `${renderOrphanCandidateHead("review artifact", readOnly, renderOrphanCandidateBackButton(regionId))}
   <div class="palace-review-artifact">
-    ${renderPalaceReviewArtifactStats(artifact || {})}
-    ${renderPalaceReviewArtifactSafeBatch(artifact || {})}
+    <div class="palace-review-artifact-card">
+      ${renderPalaceReviewArtifactSectionHead(regionId, "summary", "summary")}
+      ${renderPalaceReviewArtifactStats(artifact || {})}
+    </div>
+    ${renderPalaceReviewArtifactSafeBatch(artifact || {}, regionId)}
     <div class="palace-review-artifact-card audit">
-      <h4>apply audit</h4>
+      ${renderPalaceReviewArtifactSectionHead(regionId, "apply-audit", "apply audit")}
       ${renderPalaceReviewArtifactApplyRows(artifact || {})}
     </div>
     <div class="palace-review-artifact-card verified">
-      <h4>verification evidence</h4>
+      ${renderPalaceReviewArtifactSectionHead(regionId, "verification-evidence", "verification evidence")}
       ${renderPalaceReviewArtifactVerifiedRows(artifact || {})}
     </div>
   </div>`;
@@ -8441,6 +8517,12 @@ function handleOrphanRepairClick(e, regionId) {
   if (artifactBtn) {
     e.preventDefault();
     loadRegionPalaceReviewArtifact(artifactBtn.dataset.orphanReviewArtifact || regionId);
+    return true;
+  }
+  const artifactCopyBtn = e.target.closest("[data-review-artifact-copy]");
+  if (artifactCopyBtn) {
+    e.preventDefault();
+    copyPalaceReviewArtifactLink(artifactCopyBtn.dataset.reviewArtifactCopy || "", artifactCopyBtn);
     return true;
   }
   const planBackBtn = e.target.closest("[data-orphan-plan-back]");

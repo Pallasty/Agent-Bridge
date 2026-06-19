@@ -5139,6 +5139,22 @@ mod tests {
     }
 
     #[test]
+    fn palace_review_artifact_html_exposes_section_anchors_and_copy_links() {
+        assert!(
+            PALACE_HTML.contains("data-review-artifact-anchor"),
+            "review artifact sections should expose stable anchor markers"
+        );
+        assert!(
+            PALACE_HTML.contains("copyPalaceReviewArtifactLink"),
+            "review artifact section links should be copyable"
+        );
+        assert!(
+            PALACE_HTML.contains("palace-review-artifact-anchor"),
+            "review artifact section anchors should have a dedicated affordance style"
+        );
+    }
+
+    #[test]
     fn palace_orphan_approved_link_apply_gate_requires_confirmation_before_writes() {
         let plan = json!({
             "schema": "agent_bridge.palace.orphan_approved_link_plan.v0",
