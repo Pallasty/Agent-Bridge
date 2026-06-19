@@ -39,6 +39,7 @@ use ab_terminal::{OscEvent, OscParser, SpawnOptions, SplitDir, TerminalBlock};
 use async_trait::async_trait;
 use base64::{engine::general_purpose, Engine as _};
 use serde_json::{json, Map, Value};
+use sha2::{Digest as ShaDigest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -17879,6 +17880,308 @@ fn parse_llm_filter_response(
         .collect())
 }
 
+const CONTINUITY_ROLE_TAG_PREFIX: &str = "continuity_role:";
+const CONTINUITY_RETRIEVAL_TRIGGER_TAG_PREFIX: &str = "continuity_retrieval_trigger:";
+const CONTINUITY_CONFIDENCE_TAG_PREFIX: &str = "continuity_confidence:";
+const CONTINUITY_FRESHNESS_POLICY_TAG_PREFIX: &str = "continuity_freshness_policy:";
+const CONTINUITY_ACTIONABILITY_TAG_PREFIX: &str = "continuity_actionability:";
+const CONTINUITY_BLAST_RADIUS_TAG_PREFIX: &str = "continuity_blast_radius:";
+const CONTINUITY_SUPERSEDES_TAG_PREFIX: &str = "continuity_supersedes:";
+const CONTINUITY_RETRIEVAL_TRIGGER_MAX_CHARS: usize = 160;
+
+const CONTINUITY_TAG_PREFIXES: [&str; 7] = [
+    CONTINUITY_ROLE_TAG_PREFIX,
+    CONTINUITY_RETRIEVAL_TRIGGER_TAG_PREFIX,
+    CONTINUITY_CONFIDENCE_TAG_PREFIX,
+    CONTINUITY_FRESHNESS_POLICY_TAG_PREFIX,
+    CONTINUITY_ACTIONABILITY_TAG_PREFIX,
+    CONTINUITY_BLAST_RADIUS_TAG_PREFIX,
+    CONTINUITY_SUPERSEDES_TAG_PREFIX,
+];
+
+const CONTINUITY_ROLE_VALUES: [&str; 7] = [
+    "state",
+    "constraint",
+    "procedure",
+    "evidence",
+    "preference",
+    "warning",
+    "archive",
+];
+const CONTINUITY_CONFIDENCE_VALUES: [&str; 5] =
+    ["verified", "observed", "inferred", "user_stated", "stale"];
+const CONTINUITY_FRESHNESS_POLICY_VALUES: [&str; 4] = [
+    "never_expires",
+    "ttl",
+    "version_bound",
+    "project_phase_bound",
+];
+const CONTINUITY_ACTIONABILITY_VALUES: [&str; 4] = [
+    "background",
+    "plan_influence",
+    "must_block",
+    "needs_review",
+];
+const CONTINUITY_BLAST_RADIUS_VALUES: [&str; 4] =
+    ["current_task", "project", "cross_project", "global"];
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct MemoryContinuityMetadata {
+    continuity_role: Option<String>,
+    retrieval_trigger: Option<String>,
+    confidence: Option<String>,
+    freshness_policy: Option<String>,
+    actionability: Option<String>,
+    blast_radius: Option<String>,
+    supersedes: Vec<String>,
+    superseded_by: Option<String>,
+}
+
+impl MemoryContinuityMetadata {
+    fn is_empty(&self) -> bool {
+        self.continuity_role.is_none()
+            && self.retrieval_trigger.is_none()
+            && self.confidence.is_none()
+            && self.freshness_policy.is_none()
+            && self.actionability.is_none()
+            && self.blast_radius.is_none()
+            && self.supersedes.is_empty()
+            && self.superseded_by.is_none()
+    }
+
+    fn to_json_value(&self) -> Value {
+        let mut obj = Map::new();
+        if let Some(value) = &self.continuity_role {
+            obj.insert("continuity_role".to_string(), Value::String(value.clone()));
+        }
+        if let Some(value) = &self.retrieval_trigger {
+            obj.insert("retrieval_trigger".to_string(), Value::String(value.clone()));
+        }
+        if let Some(value) = &self.confidence {
+            obj.insert("confidence".to_string(), Value::String(value.clone()));
+        }
+        if let Some(value) = &self.freshness_policy {
+            obj.insert("freshness_policy".to_string(), Value::String(value.clone()));
+        }
+        if let Some(value) = &self.actionability {
+            obj.insert("actionability".to_string(), Value::String(value.clone()));
+        }
+        if let Some(value) = &self.blast_radius {
+            obj.insert("blast_radius".to_string(), Value::String(value.clone()));
+        }
+        if !self.supersedes.is_empty() {
+            obj.insert("supersedes".to_string(), json!(self.supersedes));
+        }
+        if let Some(value) = &self.superseded_by {
+            obj.insert("superseded_by".to_string(), Value::String(value.clone()));
+        }
+        Value::Object(obj)
+    }
+}
+
+fn memory_validate_continuity_enum(
+    field: &str,
+    value: &str,
+    allowed: &[&str],
+) -> std::result::Result<String, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Ok(String::new());
+    }
+    if allowed.contains(&trimmed) {
+        Ok(trimmed.to_string())
+    } else {
+        Err(format!(
+            "invalid continuity.{field}: '{trimmed}' (allowed: {})",
+            allowed.join(", ")
+        ))
+    }
+}
+
+fn memory_continuity_string_field(obj: &Map<String, Value>, field: &str) -> Option<String> {
+    obj.get(field)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.chars().take(CONTINUITY_RETRIEVAL_TRIGGER_MAX_CHARS).collect())
+}
+
+fn memory_continuity_enum_field(
+    obj: &Map<String, Value>,
+    field: &str,
+    allowed: &[&str],
+) -> std::result::Result<Option<String>, String> {
+    match obj.get(field).and_then(Value::as_str) {
+        Some(value) => {
+            let parsed = memory_validate_continuity_enum(field, value, allowed)?;
+            Ok((!parsed.is_empty()).then_some(parsed))
+        }
+        None => Ok(None),
+    }
+}
+
+fn memory_continuity_metadata_from_args(
+    args: &Value,
+) -> std::result::Result<Option<MemoryContinuityMetadata>, String> {
+    let Some(raw) = args.get("continuity") else {
+        return Ok(None);
+    };
+    let Some(obj) = raw.as_object() else {
+        return Err("continuity must be an object".to_string());
+    };
+
+    let supersedes = obj
+        .get("supersedes")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let metadata = MemoryContinuityMetadata {
+        continuity_role: memory_continuity_enum_field(
+            obj,
+            "continuity_role",
+            &CONTINUITY_ROLE_VALUES,
+        )?,
+        retrieval_trigger: memory_continuity_string_field(obj, "retrieval_trigger"),
+        confidence: memory_continuity_enum_field(obj, "confidence", &CONTINUITY_CONFIDENCE_VALUES)?,
+        freshness_policy: memory_continuity_enum_field(
+            obj,
+            "freshness_policy",
+            &CONTINUITY_FRESHNESS_POLICY_VALUES,
+        )?,
+        actionability: memory_continuity_enum_field(
+            obj,
+            "actionability",
+            &CONTINUITY_ACTIONABILITY_VALUES,
+        )?,
+        blast_radius: memory_continuity_enum_field(
+            obj,
+            "blast_radius",
+            &CONTINUITY_BLAST_RADIUS_VALUES,
+        )?,
+        supersedes,
+        superseded_by: None,
+    };
+
+    Ok((!metadata.is_empty()).then_some(metadata))
+}
+
+fn memory_push_unique_tag(tags: &mut Vec<String>, tag: String) {
+    if !tags.iter().any(|existing| existing == &tag) {
+        tags.push(tag);
+    }
+}
+
+fn memory_apply_continuity_metadata_tags(
+    tags: &mut Vec<String>,
+    metadata: &MemoryContinuityMetadata,
+) {
+    tags.retain(|tag| {
+        !CONTINUITY_TAG_PREFIXES
+            .iter()
+            .any(|prefix| tag.starts_with(prefix))
+    });
+
+    if let Some(value) = &metadata.continuity_role {
+        memory_push_unique_tag(tags, format!("{CONTINUITY_ROLE_TAG_PREFIX}{value}"));
+    }
+    if let Some(value) = &metadata.retrieval_trigger {
+        memory_push_unique_tag(
+            tags,
+            format!("{CONTINUITY_RETRIEVAL_TRIGGER_TAG_PREFIX}{value}"),
+        );
+    }
+    if let Some(value) = &metadata.confidence {
+        memory_push_unique_tag(tags, format!("{CONTINUITY_CONFIDENCE_TAG_PREFIX}{value}"));
+    }
+    if let Some(value) = &metadata.freshness_policy {
+        memory_push_unique_tag(
+            tags,
+            format!("{CONTINUITY_FRESHNESS_POLICY_TAG_PREFIX}{value}"),
+        );
+    }
+    if let Some(value) = &metadata.actionability {
+        memory_push_unique_tag(tags, format!("{CONTINUITY_ACTIONABILITY_TAG_PREFIX}{value}"));
+    }
+    if let Some(value) = &metadata.blast_radius {
+        memory_push_unique_tag(tags, format!("{CONTINUITY_BLAST_RADIUS_TAG_PREFIX}{value}"));
+    }
+    for key in &metadata.supersedes {
+        memory_push_unique_tag(tags, format!("{CONTINUITY_SUPERSEDES_TAG_PREFIX}{key}"));
+    }
+}
+
+fn memory_tag_suffix(tags: &[String], prefix: &str) -> Option<String> {
+    tags.iter()
+        .find_map(|tag| tag.strip_prefix(prefix))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+fn memory_tag_suffixes(tags: &[String], prefix: &str) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    tags.iter()
+        .filter_map(|tag| tag.strip_prefix(prefix))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| {
+            let value = s.to_string();
+            seen.insert(value.clone()).then_some(value)
+        })
+        .collect()
+}
+
+fn memory_continuity_metadata_from_tags(
+    tags: &[String],
+    superseded_by: Option<&str>,
+) -> Option<MemoryContinuityMetadata> {
+    let metadata = MemoryContinuityMetadata {
+        continuity_role: memory_tag_suffix(tags, CONTINUITY_ROLE_TAG_PREFIX),
+        retrieval_trigger: memory_tag_suffix(tags, CONTINUITY_RETRIEVAL_TRIGGER_TAG_PREFIX),
+        confidence: memory_tag_suffix(tags, CONTINUITY_CONFIDENCE_TAG_PREFIX),
+        freshness_policy: memory_tag_suffix(tags, CONTINUITY_FRESHNESS_POLICY_TAG_PREFIX),
+        actionability: memory_tag_suffix(tags, CONTINUITY_ACTIONABILITY_TAG_PREFIX),
+        blast_radius: memory_tag_suffix(tags, CONTINUITY_BLAST_RADIUS_TAG_PREFIX),
+        supersedes: memory_tag_suffixes(tags, CONTINUITY_SUPERSEDES_TAG_PREFIX),
+        superseded_by: superseded_by
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string),
+    };
+    (!metadata.is_empty()).then_some(metadata)
+}
+
+fn memory_record_value_with_continuity(rec: &MemoryRecord) -> Value {
+    let mut value = serde_json::to_value(rec).unwrap_or(Value::Null);
+    if let Some(obj) = value.as_object_mut() {
+        let metadata =
+            memory_continuity_metadata_from_tags(&rec.tags, rec.superseded_by.as_deref())
+                .map(|m| m.to_json_value())
+                .unwrap_or(Value::Null);
+        obj.insert("continuity_metadata".to_string(), metadata);
+    }
+    value
+}
+
+fn memory_search_hit_value_with_continuity(hit: &MemorySearchHit) -> Value {
+    let mut value = serde_json::to_value(hit).unwrap_or(Value::Null);
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert(
+            "record".to_string(),
+            memory_record_value_with_continuity(&hit.record),
+        );
+    }
+    value
+}
+
 pub struct MemorySaveTool {
     hub: Hub,
 }
@@ -17910,7 +18213,20 @@ impl McpTool for MemorySaveTool {
                     "related_keys": { "type": "array", "items": { "type": "string" }, "default": [] },
                     "scope":        { "type": "string", "description": "Visibility: omit/global=everywhere, project:/abs/path=cwd-scoped, domain:rust=tech-domain." },
                     "importance":   { "type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Override importance (0.0–1.0). Omit to auto-assign from kind: decision=0.8, lesson=0.7, todo=0.6, fact=0.5, observation=0.3." },
-                    "trigger_pattern": { "type": "string", "description": "For kind=error_pattern: surfacing when session_bootstrap `error_hint` contains this substring (case-insensitive)." }
+                    "trigger_pattern": { "type": "string", "description": "For kind=error_pattern: surfacing when session_bootstrap `error_hint` contains this substring (case-insensitive)." },
+                    "continuity": {
+                        "type": "object",
+                        "description": "Optional continuity metadata encoded in backward-compatible memory tags and surfaced as continuity_metadata on reads.",
+                        "properties": {
+                            "continuity_role": { "type": "string", "enum": ["state", "constraint", "procedure", "evidence", "preference", "warning", "archive"] },
+                            "retrieval_trigger": { "type": "string", "description": "Short condition under which this memory should be retrieved. Stored with a 160-character cap." },
+                            "confidence": { "type": "string", "enum": ["verified", "observed", "inferred", "user_stated", "stale"] },
+                            "freshness_policy": { "type": "string", "enum": ["never_expires", "ttl", "version_bound", "project_phase_bound"] },
+                            "actionability": { "type": "string", "enum": ["background", "plan_influence", "must_block", "needs_review"] },
+                            "blast_radius": { "type": "string", "enum": ["current_task", "project", "cross_project", "global"] },
+                            "supersedes": { "type": "array", "items": { "type": "string" }, "default": [] }
+                        }
+                    }
                 },
                 "required": ["key", "kind", "content"]
             }),
@@ -17934,7 +18250,7 @@ impl McpTool for MemorySaveTool {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        let tags = args
+        let mut tags: Vec<String> = args
             .get("tags")
             .and_then(|v| v.as_array())
             .map(|a| {
@@ -17943,7 +18259,7 @@ impl McpTool for MemorySaveTool {
                     .collect()
             })
             .unwrap_or_default();
-        let related_keys = args
+        let mut related_keys: Vec<String> = args
             .get("related_keys")
             .and_then(|v| v.as_array())
             .map(|a| {
@@ -17969,6 +18285,19 @@ impl McpTool for MemorySaveTool {
             .and_then(|v| v.as_str())
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
+
+        let continuity_metadata = match memory_continuity_metadata_from_args(&args) {
+            Ok(value) => value,
+            Err(message) => return Ok(ToolResult::error(message)),
+        };
+        if let Some(metadata) = &continuity_metadata {
+            memory_apply_continuity_metadata_tags(&mut tags, metadata);
+            for key in &metadata.supersedes {
+                if !related_keys.iter().any(|existing| existing == key) {
+                    related_keys.push(key.clone());
+                }
+            }
+        }
 
         let mem = MemoryRecord {
             key: key.clone(),
@@ -18179,6 +18508,10 @@ impl McpTool for MemorySaveTool {
                 let resp = json!({
                     "status": "saved",
                     "key": key,
+                    "continuity_metadata": continuity_metadata
+                        .as_ref()
+                        .map(MemoryContinuityMetadata::to_json_value)
+                        .unwrap_or(Value::Null),
                     "proactive_hint": hint,
                     "prior_decision_warnings": b3_warnings,
                     "prior_decision_hints": b3_hints,
@@ -18292,7 +18625,7 @@ impl McpTool for MemoryGetTool {
             None => Ok(ToolResult::json_text(&Value::Null)),
             Some(rec) => {
                 let hint = build_proactive_hint(&store, &key, &rec.content, &rec.tags).await;
-                let mut resp = serde_json::to_value(&rec).unwrap_or(Value::Null);
+                let mut resp = memory_record_value_with_continuity(&rec);
                 if let Some(obj) = resp.as_object_mut() {
                     obj.insert(
                         "proactive_hint".to_string(),
@@ -18631,9 +18964,11 @@ impl McpTool for MemorySearchTool {
             "mcp:memory_search",
         );
 
-        Ok(ToolResult::json_text(
-            &serde_json::to_value(hits).unwrap_or(Value::Null),
-        ))
+        Ok(ToolResult::json_text(&Value::Array(
+            hits.iter()
+                .map(memory_search_hit_value_with_continuity)
+                .collect(),
+        )))
     }
 }
 
@@ -18704,7 +19039,11 @@ impl McpTool for MemoryListTool {
             .map(|n| n as usize)
             .unwrap_or(280);
         let rows = store.list_memories(kind.as_deref(), sort, limit).await?;
-        let mut json_rows = serde_json::to_value(rows).unwrap_or(Value::Null);
+        let mut json_rows = Value::Array(
+            rows.iter()
+                .map(memory_record_value_with_continuity)
+                .collect(),
+        );
         if max_chars > 0 {
             if let Some(arr) = json_rows.as_array_mut() {
                 for item in arr {
@@ -20549,6 +20888,378 @@ impl McpTool for MemoryCorrectionTool {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MemoryRetrievalFeedbackOutcome {
+    Used,
+    Ignored,
+    Stale,
+    Duplicate,
+    Harmful,
+    Missing,
+    TooLarge,
+}
+
+impl MemoryRetrievalFeedbackOutcome {
+    fn parse(raw: &str) -> std::result::Result<Self, String> {
+        let normalized = raw.trim().to_ascii_lowercase().replace('-', "_");
+        match normalized.as_str() {
+            "used" => Ok(Self::Used),
+            "ignored" => Ok(Self::Ignored),
+            "stale" => Ok(Self::Stale),
+            "duplicate" => Ok(Self::Duplicate),
+            "harmful" => Ok(Self::Harmful),
+            "missing" => Ok(Self::Missing),
+            "too_large" => Ok(Self::TooLarge),
+            _ => Err(format!(
+                "invalid outcome '{raw}' (allowed: used, ignored, stale, duplicate, harmful, missing, too_large)"
+            )),
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Used => "used",
+            Self::Ignored => "ignored",
+            Self::Stale => "stale",
+            Self::Duplicate => "duplicate",
+            Self::Harmful => "harmful",
+            Self::Missing => "missing",
+            Self::TooLarge => "too_large",
+        }
+    }
+
+    fn edge_type(self) -> Option<&'static str> {
+        match self {
+            Self::Used => Some("retrieval_used"),
+            Self::Ignored => Some("retrieval_ignored"),
+            Self::Stale => Some("retrieval_stale"),
+            Self::Duplicate => Some("retrieval_duplicate"),
+            Self::Harmful => Some("retrieval_harmful"),
+            Self::Missing => None,
+            Self::TooLarge => Some("retrieval_too_large"),
+        }
+    }
+
+    fn edge_weight(self) -> Option<f64> {
+        match self {
+            Self::Used => Some(1.1),
+            Self::Ignored => Some(0.6),
+            Self::Stale => Some(0.5),
+            Self::Duplicate => Some(0.5),
+            Self::Harmful => Some(0.4),
+            Self::Missing => None,
+            Self::TooLarge => Some(0.6),
+        }
+    }
+
+    fn default_importance(self) -> f64 {
+        match self {
+            Self::Harmful | Self::Missing | Self::Stale => 0.75,
+            Self::Duplicate | Self::TooLarge => 0.65,
+            Self::Used => 0.55,
+            Self::Ignored => 0.45,
+        }
+    }
+}
+
+pub struct MemoryRetrievalFeedbackTool {
+    hub: Hub,
+}
+impl MemoryRetrievalFeedbackTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+fn memory_retrieval_feedback_source(args: &Value) -> std::result::Result<String, String> {
+    let source = args
+        .get("source")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("manual")
+        .replace('-', "_");
+    match source.as_str() {
+        "memory_search" | "memory_get" | "session_bootstrap" | "manual" => Ok(source),
+        _ => Err(format!(
+            "invalid source '{source}' (allowed: memory_search, memory_get, session_bootstrap, manual)"
+        )),
+    }
+}
+
+fn memory_optional_string_arg(args: &Value, key: &str) -> Option<String> {
+    args.get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+fn memory_push_unique_string(values: &mut Vec<String>, value: String) {
+    if !value.trim().is_empty() && !values.iter().any(|existing| existing == &value) {
+        values.push(value);
+    }
+}
+
+fn memory_retrieval_feedback_content(
+    outcome: MemoryRetrievalFeedbackOutcome,
+    source: &str,
+    target_key: Option<&str>,
+    query: Option<&str>,
+    note: Option<&str>,
+    retrieved_keys: &[String],
+) -> String {
+    let mut lines = vec![
+        "# Memory Retrieval Feedback".to_string(),
+        format!("outcome: {}", outcome.as_str()),
+        format!("source: {source}"),
+        format!("target_key: {}", target_key.unwrap_or("(missing)")),
+        format!("query: {}", query.unwrap_or("")),
+    ];
+    if let Some(note) = note {
+        lines.push(format!("note: {note}"));
+    }
+    if !retrieved_keys.is_empty() {
+        lines.push(String::new());
+        lines.push("## Retrieved Keys".to_string());
+        for key in retrieved_keys {
+            lines.push(format!("- {key}"));
+        }
+    }
+    lines.join("\n")
+}
+
+#[async_trait]
+impl McpTool for MemoryRetrievalFeedbackTool {
+    fn name(&self) -> &'static str {
+        "memory_retrieval_feedback"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Record low-friction feedback about retrieved memories. \
+                 Writes a kind=feedback memory tagged with retrieval_feedback and, \
+                 when memory_key exists, links feedback -> memory_key with an \
+                 outcome-specific edge such as retrieval_used or retrieval_stale. \
+                 outcome=missing may be recorded without a target. This is telemetry \
+                 only; it does not change retrieval ranking by itself."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "memory_key": { "type": "string", "description": "Retrieved memory being judged. Required unless outcome=missing. Must exist when provided." },
+                    "outcome": {
+                        "type": "string",
+                        "enum": ["used", "ignored", "stale", "duplicate", "harmful", "missing", "too_large"],
+                        "description": "Observed retrieval quality label. too-large is accepted as an alias for too_large."
+                    },
+                    "source": {
+                        "type": "string",
+                        "enum": ["memory_search", "memory_get", "session_bootstrap", "manual"],
+                        "default": "manual",
+                        "description": "Where the retrieval happened."
+                    },
+                    "query": { "type": "string", "description": "Optional retrieval query or task context." },
+                    "note": { "type": "string", "description": "Optional compact reason for the label." },
+                    "retrieved_keys": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "default": [],
+                        "description": "Optional selected/retrieved memory keys from the same retrieval event."
+                    },
+                    "related_keys": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "default": [],
+                        "description": "Optional extra context memories to relate to this feedback when they exist."
+                    },
+                    "importance": {
+                        "type": "number", "minimum": 0.0, "maximum": 1.0,
+                        "description": "Optional importance override. Defaults depend on outcome."
+                    }
+                },
+                "required": ["outcome"]
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let outcome_raw = match args.get("outcome").and_then(Value::as_str) {
+            Some(s) if !s.trim().is_empty() => s,
+            _ => return Ok(ToolResult::error("missing or empty 'outcome'")),
+        };
+        let outcome = match MemoryRetrievalFeedbackOutcome::parse(outcome_raw) {
+            Ok(outcome) => outcome,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let source = match memory_retrieval_feedback_source(&args) {
+            Ok(source) => source,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        let target_key = memory_optional_string_arg(&args, "memory_key");
+        if outcome != MemoryRetrievalFeedbackOutcome::Missing && target_key.is_none() {
+            return Ok(ToolResult::error(
+                "memory_key is required unless outcome=missing",
+            ));
+        }
+        if let Some(target_key) = &target_key {
+            match store.memory_get(target_key).await {
+                Ok(Some(_)) => {}
+                Ok(None) => {
+                    return Ok(ToolResult::error(format!(
+                        "memory_retrieval_feedback: target_key '{target_key}' not found"
+                    )));
+                }
+                Err(e) => {
+                    return Ok(ToolResult::error(format!(
+                        "memory_retrieval_feedback: lookup error for '{target_key}': {e}"
+                    )));
+                }
+            }
+        }
+
+        let query = memory_optional_string_arg(&args, "query");
+        let note = memory_optional_string_arg(&args, "note");
+        let retrieved_keys = memory_string_array_arg(&args, "retrieved_keys", &[]);
+        let explicit_related_keys = memory_string_array_arg(&args, "related_keys", &[]);
+        let mut related_keys = Vec::new();
+        if let Some(target_key) = &target_key {
+            memory_push_unique_string(&mut related_keys, target_key.clone());
+        }
+        for key in retrieved_keys.iter().chain(explicit_related_keys.iter()) {
+            memory_push_unique_string(&mut related_keys, key.clone());
+        }
+
+        let target_slug = target_key
+            .as_deref()
+            .map(sanitise_target_for_key)
+            .unwrap_or_else(|| "missing".to_string());
+        let seed = format!(
+            "{}\0{}\0{}\0{}\0{}\0{}\0{}",
+            outcome.as_str(),
+            source,
+            target_key.as_deref().unwrap_or(""),
+            query.as_deref().unwrap_or(""),
+            note.as_deref().unwrap_or(""),
+            retrieved_keys.join("\0"),
+            explicit_related_keys.join("\0")
+        );
+        let feedback_key = format!(
+            "retrieval_feedback:{target_slug}:{}:{}",
+            outcome.as_str(),
+            fnv1a_hex16(&seed)
+        );
+        let content = memory_retrieval_feedback_content(
+            outcome,
+            &source,
+            target_key.as_deref(),
+            query.as_deref(),
+            note.as_deref(),
+            &retrieved_keys,
+        );
+        let importance = args
+            .get("importance")
+            .and_then(Value::as_f64)
+            .unwrap_or_else(|| outcome.default_importance())
+            .clamp(0.0, 1.0);
+        let mut tags = vec![
+            "retrieval_feedback".to_string(),
+            format!("retrieval_feedback:{}", outcome.as_str()),
+            format!("retrieval_source:{source}"),
+        ];
+        if let Some(target_key) = &target_key {
+            memory_push_unique_tag(
+                &mut tags,
+                format!("target:{}", sanitise_target_for_key(target_key)),
+            );
+        }
+
+        let rec = MemoryRecord {
+            key: feedback_key.clone(),
+            kind: "feedback".to_string(),
+            content,
+            tags,
+            related_keys: related_keys.clone(),
+            scope: None,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance,
+            status: "active".to_string(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        if let Err(e) = store.memory_save(&rec).await {
+            return Ok(ToolResult::error(format!(
+                "memory_retrieval_feedback: save failed: {e}"
+            )));
+        }
+
+        let mut edge = Value::Null;
+        if let (Some(target_key), Some(edge_type), Some(weight)) =
+            (&target_key, outcome.edge_type(), outcome.edge_weight())
+        {
+            if let Err(e) = store
+                .memory_link(&feedback_key, target_key, edge_type, weight)
+                .await
+            {
+                return Ok(ToolResult::error(format!(
+                    "memory_retrieval_feedback: link failed (memory saved as {feedback_key}): {e}"
+                )));
+            }
+            edge = json!({
+                "from_key": feedback_key,
+                "to_key": target_key,
+                "edge_type": edge_type,
+                "weight": weight,
+            });
+        }
+
+        let mut linked_related_keys = Vec::new();
+        for related_key in related_keys.iter() {
+            if target_key.as_deref() == Some(related_key.as_str()) {
+                continue;
+            }
+            match store.memory_get(related_key).await {
+                Ok(Some(_)) => {
+                    if let Err(e) = store
+                        .memory_link(&feedback_key, related_key, "retrieval_context", 0.7)
+                        .await
+                    {
+                        return Ok(ToolResult::error(format!(
+                            "memory_retrieval_feedback: related link failed (memory saved as {feedback_key}): {e}"
+                        )));
+                    }
+                    linked_related_keys.push(related_key.clone());
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    return Ok(ToolResult::error(format!(
+                        "memory_retrieval_feedback: related lookup error for '{related_key}': {e}"
+                    )));
+                }
+            }
+        }
+
+        Ok(ToolResult::json_text(&json!({
+            "status": "ok",
+            "feedback_key": feedback_key,
+            "outcome": outcome.as_str(),
+            "source": source,
+            "target_key": target_key,
+            "edge": edge,
+            "linked_related_keys": linked_related_keys,
+            "importance": importance,
+            "hint": "telemetry recorded only; retrieval ranking is unchanged until a later ranking/consolidation step consumes these feedback memories and edges",
+        })))
+    }
+}
+
 pub struct MemoryNeighborsTool {
     hub: Hub,
 }
@@ -20717,14 +21428,157 @@ impl McpTool for MemoryCoactivationTopTool {
     }
 }
 
+fn is_continuity_tag(tag: &str) -> bool {
+    CONTINUITY_TAG_PREFIXES
+        .iter()
+        .any(|prefix| tag.starts_with(prefix))
+}
+
+fn memory_continuity_bootstrap_reason(r: &MemoryRecord) -> Option<String> {
+    let metadata = memory_continuity_metadata_from_tags(&r.tags, r.superseded_by.as_deref())?;
+    let why = metadata
+        .actionability
+        .as_deref()
+        .or_else(|| match metadata.continuity_role.as_deref() {
+            Some("constraint") | Some("warning") => Some("must_block"),
+            Some("state") | Some("procedure") | Some("preference") => Some("plan_influence"),
+            Some("evidence") | Some("archive") => Some("background"),
+            _ => None,
+        })
+        .unwrap_or("context");
+    let mut parts = vec![format!("why: {why}")];
+    if let Some(role) = metadata.continuity_role.as_deref() {
+        parts.push(format!("role={role}"));
+    }
+    if let Some(confidence) = metadata.confidence.as_deref() {
+        parts.push(format!("conf={confidence}"));
+    }
+    if let Some(radius) = metadata.blast_radius.as_deref() {
+        parts.push(format!("radius={radius}"));
+    }
+    if let Some(trigger) = metadata.retrieval_trigger.as_deref() {
+        parts.push(format!("trigger={trigger}"));
+    }
+    Some(format!(" {{{}}}", parts.join(", ")))
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ContinuityBootstrapTier {
+    MustBlock,
+    Active,
+    Evidence,
+}
+
+fn memory_continuity_bootstrap_tier(
+    metadata: &MemoryContinuityMetadata,
+) -> Option<ContinuityBootstrapTier> {
+    match metadata.actionability.as_deref() {
+        Some("must_block") => return Some(ContinuityBootstrapTier::MustBlock),
+        Some("plan_influence") | Some("needs_review") => {
+            return Some(ContinuityBootstrapTier::Active);
+        }
+        Some("background") => return Some(ContinuityBootstrapTier::Evidence),
+        _ => {}
+    }
+    match metadata.continuity_role.as_deref() {
+        Some("constraint") | Some("warning") => Some(ContinuityBootstrapTier::MustBlock),
+        Some("state") | Some("procedure") | Some("preference") => {
+            Some(ContinuityBootstrapTier::Active)
+        }
+        Some("evidence") | Some("archive") => Some(ContinuityBootstrapTier::Evidence),
+        _ => None,
+    }
+}
+
+fn format_continuity_kernel_row(r: &MemoryRecord, snippet_len: usize) -> String {
+    let snippet: String = r.content.chars().take(snippet_len).collect();
+    let ellipsis = if r.content.chars().count() > snippet_len {
+        "..."
+    } else {
+        ""
+    };
+    let imp_marker = if r.importance >= 0.7 { "*" } else { "" };
+    let reason = memory_continuity_bootstrap_reason(r).unwrap_or_default();
+    format!(
+        "- [{}] {}{}{}: {}{}",
+        r.kind, r.key, imp_marker, reason, snippet, ellipsis
+    )
+}
+
+fn format_continuity_kernel_block(
+    rows: &[MemoryRecord],
+    is_compact: bool,
+    snippet_len: usize,
+) -> Option<Vec<String>> {
+    let mut must_block: Vec<&MemoryRecord> = Vec::new();
+    let mut active: Vec<&MemoryRecord> = Vec::new();
+    let mut evidence: Vec<&MemoryRecord> = Vec::new();
+
+    for row in rows.iter().filter(|r| r.status == "active") {
+        let Some(metadata) =
+            memory_continuity_metadata_from_tags(&row.tags, row.superseded_by.as_deref())
+        else {
+            continue;
+        };
+        match memory_continuity_bootstrap_tier(&metadata) {
+            Some(ContinuityBootstrapTier::MustBlock) => must_block.push(row),
+            Some(ContinuityBootstrapTier::Active) => active.push(row),
+            Some(ContinuityBootstrapTier::Evidence) => evidence.push(row),
+            None => {}
+        }
+    }
+
+    if must_block.is_empty() && active.is_empty() && evidence.is_empty() {
+        return None;
+    }
+    for bucket in [&mut must_block, &mut active, &mut evidence] {
+        bucket.sort_by(|a, b| {
+            b.importance
+                .partial_cmp(&a.importance)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+    }
+
+    let total = must_block.len() + active.len() + evidence.len();
+    let mut out = vec![
+        if is_compact {
+            format!("=== Continuity Kernel ({total}) ===")
+        } else {
+            format!("=== Continuity Kernel ({total} selected rows, no extra retrieval) ===")
+        },
+        String::new(),
+    ];
+    let mut append_bucket = |title: &str, bucket: &[&MemoryRecord], cap: usize| {
+        if bucket.is_empty() {
+            return;
+        }
+        out.push(title.to_string());
+        for row in bucket.iter().take(cap) {
+            out.push(format_continuity_kernel_row(row, snippet_len));
+        }
+    };
+    append_bucket("-- must-block / constraints --", &must_block, 4);
+    append_bucket("-- active state / procedures --", &active, 4);
+    append_bucket("-- evidence / background --", &evidence, 3);
+    out.push(String::new());
+    Some(out)
+}
+
 fn format_bootstrap_memory_rows(rows: &[MemoryRecord], snippet_len: usize) -> Vec<String> {
     rows.iter()
         .map(|r| {
-            let tags = if r.tags.is_empty() {
+            let visible_tags: Vec<&str> = r
+                .tags
+                .iter()
+                .map(String::as_str)
+                .filter(|tag| !is_continuity_tag(tag))
+                .collect();
+            let tags = if visible_tags.is_empty() {
                 String::new()
             } else {
-                format!(" [{}]", r.tags.join(", "))
+                format!(" [{}]", visible_tags.join(", "))
             };
+            let continuity_reason = memory_continuity_bootstrap_reason(r).unwrap_or_default();
             let snippet: String = r.content.chars().take(snippet_len).collect();
             let ellipsis = if r.content.chars().count() > snippet_len {
                 "…"
@@ -20747,8 +21601,15 @@ fn format_bootstrap_memory_rows(rows: &[MemoryRecord], snippet_len: usize) -> Ve
                 ""
             };
             format!(
-                "[{}] {}{}{}{}: {}{}",
-                r.kind, r.key, imp_marker, ref_marker, tags, snippet, ellipsis
+                "[{}] {}{}{}{}{}: {}{}",
+                r.kind,
+                r.key,
+                imp_marker,
+                ref_marker,
+                tags,
+                continuity_reason,
+                snippet,
+                ellipsis
             )
         })
         .collect()
@@ -20885,6 +21746,7 @@ const BUDGET_FEEDBACK_PREAMBLE: usize = 300;
 const BUDGET_WORK_MEMORY: usize = 260;
 const BUDGET_DECISIONS_DUE: usize = 200;
 const BUDGET_ERROR_PATTERNS: usize = 200;
+const BUDGET_CONTINUITY_KERNEL: usize = 260;
 const BUDGET_BOOTSTRAP_ROWS: usize = 500;
 const BUDGET_GAMMA_BFS: usize = 200;
 const BUDGET_DELTA_TRANSITIONS: usize = 150;
@@ -21433,6 +22295,9 @@ impl McpTool for SessionBootstrapTool {
         }
 
         lines.extend(cap_block_lines(error_section, BUDGET_ERROR_PATTERNS));
+        if let Some(block) = format_continuity_kernel_block(&rows, is_compact, snippet_len) {
+            lines.extend(cap_block_lines(block, BUDGET_CONTINUITY_KERNEL));
+        }
         lines.extend(cap_block_lines(
             format_bootstrap_memory_rows(&rows, snippet_len),
             BUDGET_BOOTSTRAP_ROWS,
@@ -33537,6 +34402,1550 @@ impl McpTool for MemoryOrphanInventoryTool {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+struct MemoryConsolidationQueueOptions {
+    max_per_bucket: usize,
+    preview_chars: usize,
+    large_content_chars: usize,
+    low_use_max_access_count: u64,
+}
+
+impl Default for MemoryConsolidationQueueOptions {
+    fn default() -> Self {
+        Self {
+            max_per_bucket: 20,
+            preview_chars: 180,
+            large_content_chars: 2_400,
+            low_use_max_access_count: 1,
+        }
+    }
+}
+
+const MEMORY_CONSOLIDATION_BUCKETS: [&str; 7] = [
+    "handoff_to_decision",
+    "duplicate_lessons",
+    "stale_warnings",
+    "harmful_memories",
+    "too_large_memories",
+    "high_token_low_use",
+    "intentional_orphans",
+];
+
+fn memory_tag_exact_or_prefix(rec: &MemoryRecord, value: &str, prefix: &str) -> bool {
+    rec.tags
+        .iter()
+        .any(|tag| tag == value || tag.starts_with(prefix))
+}
+
+fn memory_record_active(rec: &MemoryRecord) -> bool {
+    rec.status.is_empty() || rec.status == "active"
+}
+
+fn memory_consolidation_feedback_target<'a>(
+    feedback: &MemoryRecord,
+    by_key: &'a HashMap<String, &MemoryRecord>,
+) -> Option<&'a MemoryRecord> {
+    feedback
+        .related_keys
+        .iter()
+        .find_map(|key| by_key.get(key).copied())
+}
+
+fn memory_consolidation_has_induced_edge(
+    key: &str,
+    edges_by_key: &HashMap<String, Vec<MemoryEdge>>,
+    visible_keys: &HashSet<String>,
+) -> bool {
+    if let Some(edges) = edges_by_key.get(key) {
+        if memory_record_has_induced_edge(key, edges, visible_keys) {
+            return true;
+        }
+    }
+    edges_by_key
+        .values()
+        .any(|edges| memory_record_has_induced_edge(key, edges, visible_keys))
+}
+
+fn memory_consolidation_item(
+    rec: &MemoryRecord,
+    reason: &str,
+    score: f64,
+    preview_chars: usize,
+) -> Value {
+    let (content_preview, content_truncated, content_total_chars) =
+        truncate_chars(&rec.content, preview_chars);
+    json!({
+        "key": rec.key,
+        "kind": rec.kind,
+        "reason": reason,
+        "score": (score * 100.0).round() / 100.0,
+        "importance": rec.importance,
+        "access_count": rec.access_count,
+        "updated_at": rec.updated_at,
+        "content_chars": content_total_chars,
+        "content_truncated": content_truncated,
+        "content_preview": content_preview,
+        "tags": rec.tags,
+        "related_keys": rec.related_keys,
+    })
+}
+
+fn memory_consolidation_push(
+    buckets: &mut BTreeMap<String, Vec<Value>>,
+    bucket: &str,
+    rec: &MemoryRecord,
+    reason: &str,
+    score: f64,
+    preview_chars: usize,
+) {
+    let rows = buckets.entry(bucket.to_string()).or_default();
+    if rows
+        .iter()
+        .any(|row| row.get("key").and_then(Value::as_str) == Some(rec.key.as_str()))
+    {
+        return;
+    }
+    rows.push(memory_consolidation_item(
+        rec,
+        reason,
+        score,
+        preview_chars,
+    ));
+}
+
+fn memory_consolidation_sort_and_truncate(
+    buckets: &mut BTreeMap<String, Vec<Value>>,
+    max_per_bucket: usize,
+) {
+    for rows in buckets.values_mut() {
+        rows.sort_by(|a, b| {
+            let score_a = a.get("score").and_then(Value::as_f64).unwrap_or(0.0);
+            let score_b = b.get("score").and_then(Value::as_f64).unwrap_or(0.0);
+            score_b
+                .partial_cmp(&score_a)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| {
+                    a.get("key")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .cmp(b.get("key").and_then(Value::as_str).unwrap_or(""))
+                })
+        });
+        rows.truncate(max_per_bucket);
+    }
+}
+
+fn memory_consolidation_queue_from_records(
+    records: &[MemoryRecord],
+    edges_by_key: &HashMap<String, Vec<MemoryEdge>>,
+    options: MemoryConsolidationQueueOptions,
+) -> Value {
+    let active: Vec<&MemoryRecord> = records.iter().filter(|rec| memory_record_active(rec)).collect();
+    let visible_keys: HashSet<String> = active.iter().map(|rec| rec.key.clone()).collect();
+    let by_key: HashMap<String, &MemoryRecord> =
+        active.iter().map(|rec| (rec.key.clone(), *rec)).collect();
+    let mut buckets: BTreeMap<String, Vec<Value>> = MEMORY_CONSOLIDATION_BUCKETS
+        .iter()
+        .map(|bucket| ((*bucket).to_string(), Vec::new()))
+        .collect();
+
+    for rec in &active {
+        if rec.kind == "session_handoff" {
+            memory_consolidation_push(
+                &mut buckets,
+                "handoff_to_decision",
+                rec,
+                "session_handoff should be reviewed for durable decision/lesson extraction",
+                rec.importance + 0.2,
+                options.preview_chars,
+            );
+        }
+
+        if memory_tag_exact_or_prefix(rec, "continuity_confidence:stale", "stale:") {
+            memory_consolidation_push(
+                &mut buckets,
+                "stale_warnings",
+                rec,
+                "continuity metadata marks this memory stale",
+                rec.importance + 0.3,
+                options.preview_chars,
+            );
+        }
+
+        if rec.content.chars().count() >= options.large_content_chars
+            && rec.access_count <= options.low_use_max_access_count
+        {
+            memory_consolidation_push(
+                &mut buckets,
+                "high_token_low_use",
+                rec,
+                "large content with low observed use",
+                rec.content.chars().count() as f64 / options.large_content_chars as f64,
+                options.preview_chars,
+            );
+        }
+
+        let intentional_orphan = rec.kind == "archive"
+            || rec
+                .tags
+                .iter()
+                .any(|tag| tag == "intentional_orphan" || tag == "continuity_role:archive");
+        if intentional_orphan
+            && !memory_consolidation_has_induced_edge(&rec.key, edges_by_key, &visible_keys)
+        {
+            memory_consolidation_push(
+                &mut buckets,
+                "intentional_orphans",
+                rec,
+                "edge-free archive or intentional orphan",
+                rec.importance,
+                options.preview_chars,
+            );
+        }
+
+        if rec.kind != "feedback" || !rec.tags.iter().any(|tag| tag == "retrieval_feedback") {
+            continue;
+        }
+        let Some(target) = memory_consolidation_feedback_target(rec, &by_key) else {
+            continue;
+        };
+        if rec.tags.iter().any(|tag| tag == "retrieval_feedback:duplicate") {
+            memory_consolidation_push(
+                &mut buckets,
+                "duplicate_lessons",
+                target,
+                &format!("duplicate retrieval feedback via {}", rec.key),
+                rec.importance + target.importance,
+                options.preview_chars,
+            );
+        }
+        if rec.tags.iter().any(|tag| tag == "retrieval_feedback:stale") {
+            memory_consolidation_push(
+                &mut buckets,
+                "stale_warnings",
+                target,
+                &format!("stale retrieval feedback via {}", rec.key),
+                rec.importance + target.importance,
+                options.preview_chars,
+            );
+        }
+        if rec.tags.iter().any(|tag| tag == "retrieval_feedback:harmful") {
+            memory_consolidation_push(
+                &mut buckets,
+                "harmful_memories",
+                target,
+                &format!("harmful retrieval feedback via {}", rec.key),
+                rec.importance + target.importance,
+                options.preview_chars,
+            );
+        }
+        if rec.tags.iter().any(|tag| tag == "retrieval_feedback:too_large") {
+            memory_consolidation_push(
+                &mut buckets,
+                "too_large_memories",
+                target,
+                &format!("too_large retrieval feedback via {}", rec.key),
+                rec.importance + target.importance,
+                options.preview_chars,
+            );
+        }
+    }
+
+    memory_consolidation_sort_and_truncate(&mut buckets, options.max_per_bucket);
+    let bucket_counts: BTreeMap<String, usize> = buckets
+        .iter()
+        .map(|(bucket, rows)| (bucket.clone(), rows.len()))
+        .collect();
+
+    json!({
+        "schema": "agent_bridge.memory_consolidation_queue.v0",
+        "read_only": true,
+        "summary": {
+            "scanned_records": records.len(),
+            "active_records": active.len(),
+            "bucket_counts": bucket_counts,
+            "max_per_bucket": options.max_per_bucket,
+            "large_content_chars": options.large_content_chars,
+            "low_use_max_access_count": options.low_use_max_access_count,
+        },
+        "buckets": buckets,
+        "next_actions": [
+            "Review stale/duplicate/harmful/too_large buckets before mutating memory state.",
+            "Promote useful handoff content into decision/lesson memories.",
+            "Leave intentional_orphans isolated unless their role changed."
+        ],
+        "non_goals": [
+            "No memory rows are archived or superseded by this report.",
+            "No graph edges are created by this report.",
+            "No retrieval ranking or bootstrap selection changes are applied."
+        ],
+    })
+}
+
+// ===========================================================================
+//          memory_consolidation_queue — T4 read-only consolidation candidates
+// ===========================================================================
+
+pub struct MemoryConsolidationQueueTool {
+    hub: Hub,
+}
+impl MemoryConsolidationQueueTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for MemoryConsolidationQueueTool {
+    fn name(&self) -> &'static str {
+        "memory_consolidation_queue"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only consolidation candidate queue for AB memory continuity. \
+                Buckets session handoffs, duplicate/stale/harmful/too_large retrieval feedback, \
+                high-token low-use rows, and intentional orphans. It never archives memories, \
+                writes graph edges, or changes retrieval ranking."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "scope": {
+                        "type": "string",
+                        "description": "Optional memory scope, e.g. project:/abs/path or domain:rust."
+                    },
+                    "scope_mode": {
+                        "type": "string",
+                        "enum": ["local_only", "local_plus_global", "exploratory"],
+                        "default": "local_plus_global",
+                        "description": "When scope is set: local_only keeps matching rows; local_plus_global also includes global/unscoped rows; exploratory scans all rows."
+                    },
+                    "skip_tags": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "default": ["auto_curated", "alert", "ttl:7d"],
+                        "description": "Rows with these tags are excluded from queue consideration."
+                    },
+                    "skip_kinds": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "default": ["skill", "work_memory", "snapshot"],
+                        "description": "Rows with these kinds are excluded from queue consideration. session_handoff and feedback are intentionally kept by default."
+                    },
+                    "max_records": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10000,
+                        "default": 1000,
+                        "description": "Maximum records to scan from the memory store."
+                    },
+                    "max_per_bucket": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100,
+                        "default": 20,
+                        "description": "Maximum candidate rows returned per bucket."
+                    },
+                    "preview_chars": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1000,
+                        "default": 180,
+                        "description": "Content preview length per row. 0 disables previews."
+                    },
+                    "large_content_chars": {
+                        "type": "integer",
+                        "minimum": 200,
+                        "maximum": 20000,
+                        "default": 2400,
+                        "description": "Content length threshold for high_token_low_use candidates."
+                    },
+                    "low_use_max_access_count": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100,
+                        "default": 1,
+                        "description": "Maximum access_count still considered low-use."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let requested_scope = args
+            .get("scope")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let scope_mode = MemorySearchScopeMode::parse(
+            args.get("scope_mode")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+            true,
+        );
+        let skip_tags =
+            memory_string_array_arg(&args, "skip_tags", &["auto_curated", "alert", "ttl:7d"]);
+        let skip_kinds =
+            memory_string_array_arg(&args, "skip_kinds", &["skill", "work_memory", "snapshot"]);
+        let max_records = args
+            .get("max_records")
+            .and_then(Value::as_u64)
+            .unwrap_or(1000)
+            .clamp(1, 10_000) as u32;
+        let options = MemoryConsolidationQueueOptions {
+            max_per_bucket: args
+                .get("max_per_bucket")
+                .and_then(Value::as_u64)
+                .unwrap_or(20)
+                .clamp(1, 100) as usize,
+            preview_chars: args
+                .get("preview_chars")
+                .and_then(Value::as_u64)
+                .unwrap_or(180)
+                .min(1000) as usize,
+            large_content_chars: args
+                .get("large_content_chars")
+                .and_then(Value::as_u64)
+                .unwrap_or(2_400)
+                .clamp(200, 20_000) as usize,
+            low_use_max_access_count: args
+                .get("low_use_max_access_count")
+                .and_then(Value::as_u64)
+                .unwrap_or(1)
+                .min(100),
+        };
+
+        let rows = store
+            .list_memories(None, MemoryListSort::Recent, max_records)
+            .await?;
+        let records: Vec<MemoryRecord> = rows
+            .into_iter()
+            .filter(|rec| {
+                memory_record_active(rec)
+                    && !memory_has_any_tag(rec, &skip_tags)
+                    && !memory_kind_is_any(rec, &skip_kinds)
+                    && requested_scope
+                        .map(|scope| memory_search_scope_mode_matches(rec, scope, scope_mode))
+                        .unwrap_or(true)
+            })
+            .collect();
+
+        let mut edges_by_key: HashMap<String, Vec<MemoryEdge>> = HashMap::new();
+        for rec in &records {
+            if let Ok(edges) = store.memory_neighbors(&rec.key).await {
+                edges_by_key.insert(rec.key.clone(), edges);
+            }
+        }
+
+        Ok(ToolResult::json_text(
+            &memory_consolidation_queue_from_records(&records, &edges_by_key, options),
+        ))
+    }
+}
+
+fn memory_biocortex_sha256_json(value: &Value) -> String {
+    let encoded = serde_json::to_vec(value).unwrap_or_default();
+    let mut hasher = Sha256::new();
+    ShaDigest::update(&mut hasher, encoded);
+    format!("sha256:{:x}", ShaDigest::finalize(hasher))
+}
+
+fn memory_biocortex_key_hash(key: &str) -> String {
+    memory_biocortex_sha256_json(&json!({ "memory_key": key }))
+}
+
+fn memory_biocortex_order_hash(label: &str, keys: &[String]) -> String {
+    memory_biocortex_sha256_json(&json!({
+        "label": label,
+        "keys": keys,
+    }))
+}
+
+fn memory_biocortex_redacted_rank_rows(keys: &[String], rank_field: &str) -> Value {
+    Value::Array(
+        keys.iter()
+            .enumerate()
+            .map(|(idx, key)| {
+                json!({
+                    "key_hash": memory_biocortex_key_hash(key),
+                    rank_field: idx + 1,
+                })
+            })
+            .collect(),
+    )
+}
+
+fn memory_biocortex_queue_bucket_keys(queue: &Value, bucket: &str) -> Vec<String> {
+    queue
+        .pointer(&format!("/buckets/{bucket}"))
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|row| row.get("key").and_then(Value::as_str))
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn memory_biocortex_bucket_counts(queue: &Value) -> BTreeMap<String, u64> {
+    MEMORY_CONSOLIDATION_BUCKETS
+        .iter()
+        .map(|bucket| {
+            (
+                (*bucket).to_string(),
+                queue
+                    .pointer(&format!("/buckets/{bucket}"))
+                    .and_then(Value::as_array)
+                    .map(|rows| rows.len() as u64)
+                    .unwrap_or(0),
+            )
+        })
+        .collect()
+}
+
+fn memory_biocortex_suppression_map(queue: &Value) -> BTreeMap<String, BTreeSet<String>> {
+    let mut by_key: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    for bucket in [
+        "duplicate_lessons",
+        "stale_warnings",
+        "harmful_memories",
+        "too_large_memories",
+    ] {
+        for key in memory_biocortex_queue_bucket_keys(queue, bucket) {
+            by_key.entry(key).or_default().insert(bucket.to_string());
+        }
+    }
+    by_key
+}
+
+fn memory_biocortex_redacted_suppression_rows(
+    suppression_map: &BTreeMap<String, BTreeSet<String>>,
+) -> Value {
+    Value::Array(
+        suppression_map
+            .iter()
+            .map(|(key, buckets)| {
+                json!({
+                    "key_hash": memory_biocortex_key_hash(key),
+                    "source_buckets": buckets.iter().cloned().collect::<Vec<_>>(),
+                })
+            })
+            .collect(),
+    )
+}
+
+fn memory_biocortex_alternate_order(
+    baseline_keys: &[String],
+    suppression_map: &BTreeMap<String, BTreeSet<String>>,
+) -> Vec<String> {
+    let mut retained = Vec::new();
+    let mut suppressed = Vec::new();
+    for key in baseline_keys {
+        if suppression_map.contains_key(key) {
+            suppressed.push(key.clone());
+        } else {
+            retained.push(key.clone());
+        }
+    }
+    retained.extend(suppressed);
+    retained
+}
+
+// ===========================================================================
+//          memory_biocortex_shadow_trial — T5 AB candidate shadow packet
+// ===========================================================================
+
+pub struct MemoryBioCortexShadowTrialTool {
+    hub: Hub,
+}
+impl MemoryBioCortexShadowTrialTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for MemoryBioCortexShadowTrialTool {
+    fn name(&self) -> &'static str {
+        "memory_biocortex_shadow_trial"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only T5 BioCortex shadow-trial packet for AB memory. \
+                Calls baseline memory_search, gathers graph-neighborhood slices and \
+                T4 consolidation feedback buckets, then emits redacted hashes/counts \
+                plus a deterministic suppression/advisory-order control. It does not \
+                run BioCortex, mutate memory, expose raw keys/content, or change \
+                default retrieval order."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["query"],
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Baseline memory_search query. Output includes only a hash."
+                    },
+                    "tags_any": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "default": [],
+                        "description": "Optional tag filter forwarded to baseline memory_search."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100,
+                        "default": 10,
+                        "description": "Baseline candidate limit."
+                    },
+                    "scope": {
+                        "type": "string",
+                        "description": "Optional memory scope for the T4 queue slice, e.g. project:/abs/path."
+                    },
+                    "scope_mode": {
+                        "type": "string",
+                        "enum": ["local_only", "local_plus_global", "exploratory"],
+                        "default": "local_plus_global",
+                        "description": "Scope matching mode for the T4 queue slice."
+                    },
+                    "neighbor_limit": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 50,
+                        "default": 8,
+                        "description": "Maximum graph-neighbor rows collected per baseline candidate."
+                    },
+                    "queue_max_records": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10000,
+                        "default": 1000,
+                        "description": "Maximum records scanned for the embedded T4 queue summary."
+                    },
+                    "queue_max_per_bucket": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100,
+                        "default": 20,
+                        "description": "Maximum candidates per T4 bucket before redaction/counting."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let query = match args
+            .get("query")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            Some(query) => query.to_string(),
+            None => return Ok(ToolResult::error("missing or empty 'query'")),
+        };
+        let tags_any = memory_string_array_arg(&args, "tags_any", &[]);
+        let limit = args
+            .get("limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(10)
+            .clamp(1, 100) as u32;
+        let neighbor_limit = args
+            .get("neighbor_limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(8)
+            .min(50) as usize;
+        let queue_max_records = args
+            .get("queue_max_records")
+            .and_then(Value::as_u64)
+            .unwrap_or(1000)
+            .clamp(1, 10_000) as u32;
+        let queue_max_per_bucket = args
+            .get("queue_max_per_bucket")
+            .and_then(Value::as_u64)
+            .unwrap_or(20)
+            .clamp(1, 100) as usize;
+        let requested_scope = args
+            .get("scope")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let scope_mode = MemorySearchScopeMode::parse(
+            args.get("scope_mode")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+            true,
+        );
+
+        let baseline_hits = store.memory_search(&query, &tags_any, limit).await?;
+        let baseline_keys: Vec<String> = baseline_hits
+            .iter()
+            .map(|hit| hit.record.key.clone())
+            .collect();
+
+        let mut neighborhood_rows = Vec::new();
+        for (idx, hit) in baseline_hits.iter().enumerate() {
+            let key = &hit.record.key;
+            let edges = store.memory_neighbors(key).await.unwrap_or_default();
+            for edge in edges.into_iter().take(neighbor_limit) {
+                let neighbor = if edge.from_key == *key {
+                    Some(edge.to_key.as_str())
+                } else if edge.to_key == *key {
+                    Some(edge.from_key.as_str())
+                } else {
+                    None
+                };
+                let Some(neighbor_key) = neighbor else {
+                    continue;
+                };
+                neighborhood_rows.push(json!({
+                    "source_rank": idx + 1,
+                    "source_key_hash": memory_biocortex_key_hash(key),
+                    "neighbor_key_hash": memory_biocortex_key_hash(neighbor_key),
+                    "edge_type": edge.edge_type,
+                    "weight": edge.weight,
+                }));
+            }
+        }
+
+        let queue_rows = store
+            .list_memories(None, MemoryListSort::Recent, queue_max_records)
+            .await
+            .unwrap_or_default();
+        let queue_records: Vec<MemoryRecord> = queue_rows
+            .into_iter()
+            .filter(|rec| {
+                memory_record_active(rec)
+                    && requested_scope
+                        .map(|scope| memory_search_scope_mode_matches(rec, scope, scope_mode))
+                        .unwrap_or(true)
+            })
+            .collect();
+        let mut queue_edges_by_key: HashMap<String, Vec<MemoryEdge>> = HashMap::new();
+        for rec in &queue_records {
+            if let Ok(edges) = store.memory_neighbors(&rec.key).await {
+                queue_edges_by_key.insert(rec.key.clone(), edges);
+            }
+        }
+        let queue = memory_consolidation_queue_from_records(
+            &queue_records,
+            &queue_edges_by_key,
+            MemoryConsolidationQueueOptions {
+                max_per_bucket: queue_max_per_bucket,
+                preview_chars: 0,
+                large_content_chars: 2_400,
+                low_use_max_access_count: 1,
+            },
+        );
+        let suppression_map = memory_biocortex_suppression_map(&queue);
+        let alternate_keys = memory_biocortex_alternate_order(&baseline_keys, &suppression_map);
+        let suppressed_baseline_count = baseline_keys
+            .iter()
+            .filter(|key| suppression_map.contains_key(*key))
+            .count();
+        let alternate_order_changed = baseline_keys != alternate_keys;
+
+        Ok(ToolResult::json_text(&json!({
+            "schema": "agent_bridge.memory_biocortex_shadow_trial.v0",
+            "generated_at": unix_now_secs(),
+            "read_only": true,
+            "purpose": "T5 shadow packet: compare default AB baseline candidates with graph/T3/T4-derived suppression/advisory controls before any BioCortex runtime influence.",
+            "input_contract": {
+                "raw_query_included": false,
+                "raw_keys_included": false,
+                "content_included": false,
+                "candidate_content_included": false,
+                "unknown_fields_ignored": true,
+            },
+            "query": {
+                "hash": memory_biocortex_sha256_json(&json!({"query": query})),
+                "tag_filter_count": tags_any.len(),
+                "limit": limit,
+            },
+            "baseline": {
+                "source": "memory_search",
+                "key_count": baseline_keys.len(),
+                "order_hash": memory_biocortex_order_hash("baseline", &baseline_keys),
+                "top_key_hash": baseline_keys
+                    .first()
+                    .map(|key| Value::String(memory_biocortex_key_hash(key)))
+                    .unwrap_or(Value::Null),
+                "redacted_rank_rows": memory_biocortex_redacted_rank_rows(&baseline_keys, "baseline_rank"),
+                "raw_keys_included": false,
+                "content_included": false,
+            },
+            "graph_neighborhood": {
+                "baseline_key_count": baseline_keys.len(),
+                "neighbor_row_count": neighborhood_rows.len(),
+                "neighbor_limit_per_baseline_key": neighbor_limit,
+                "rows": neighborhood_rows,
+                "raw_keys_included": false,
+                "content_included": false,
+            },
+            "consolidation_queue": {
+                "schema": queue.get("schema").cloned().unwrap_or(Value::Null),
+                "scanned_records": queue.pointer("/summary/scanned_records").cloned().unwrap_or(Value::Null),
+                "bucket_counts": memory_biocortex_bucket_counts(&queue),
+                "raw_rows_included": false,
+            },
+            "suppression_set": {
+                "source": "t3_t4_feedback_buckets",
+                "source_buckets": ["duplicate_lessons", "stale_warnings", "harmful_memories", "too_large_memories"],
+                "redacted_count": suppression_map.len(),
+                "suppressed_baseline_count": suppressed_baseline_count,
+                "redacted_rows": memory_biocortex_redacted_suppression_rows(&suppression_map),
+                "raw_keys_included": false,
+            },
+            "advisory_control_order": {
+                "source": "deterministic_t3_t4_suppression_control",
+                "key_count": alternate_keys.len(),
+                "order_hash": memory_biocortex_order_hash("deterministic_t3_t4_control", &alternate_keys),
+                "redacted_rank_rows": memory_biocortex_redacted_rank_rows(&alternate_keys, "advisory_control_rank"),
+                "alternate_order_changed": alternate_order_changed,
+                "used_for_return_order": false,
+                "raw_keys_included": false,
+                "content_included": false,
+            },
+            "biocortex_runtime_path": {
+                "adapter_run_in_this_tool": false,
+                "next_existing_tools": [
+                    "biocortex_retrieval_opt_in_dry_run",
+                    "biocortex_retrieval_opt_in_review_packet",
+                    "biocortex_retrieval_opt_in_execution_packet",
+                    "biocortex_retrieval_opt_in_runtime_trial",
+                    "biocortex_retrieval_opt_in_order_diff_packet",
+                    "biocortex_retrieval_relevance_lift_eval"
+                ],
+                "candidate_content_required_later": true,
+                "candidate_content_included_now": false,
+            },
+            "current_biocortex_frontier": {
+                "thread": 89,
+                "latest_position": "substrate_discovered_selection_is_open_frontier",
+                "stale_s93_s94_s95_sequence_avoided": true,
+                "discovered_selection_claimed": false,
+                "bio_cortex_as_agent_cognitive_substrate_extension": true,
+            },
+            "comparison": {
+                "baseline_returned": true,
+                "actual_return_order_changed": false,
+                "alternate_order_changed": alternate_order_changed,
+                "suppressed_baseline_count": suppressed_baseline_count,
+            },
+            "non_goals": [
+                "Does not run BioCortex or claim substrate-discovered selection.",
+                "Does not change memory_search order or bootstrap selection.",
+                "Does not write memory, graph edges, approval packets, or runtime influence decisions.",
+                "Does not include raw query, memory keys, or memory content."
+            ],
+            "calls_memory_search": true,
+            "calls_memory_neighbors": true,
+            "runs_biocortex": false,
+            "writes_memory": false,
+            "changes_memory_search_order": false,
+            "default_search_order_change_allowed": false,
+        })))
+    }
+}
+
+const MEMORY_BIOCORTEX_T6_INFLUENCE_GATE_SCHEMA: &str =
+    "agent_bridge.memory_biocortex_t6_influence_gate.v0";
+const MEMORY_BIOCORTEX_SHADOW_TRIAL_SCHEMA: &str =
+    "agent_bridge.memory_biocortex_shadow_trial.v0";
+const BIOCORTEX_RETRIEVAL_RELEVANCE_LIFT_EVAL_SCHEMA_LOCAL: &str =
+    "agent_bridge.biocortex_retrieval.relevance_lift_eval.v0";
+const BIOCORTEX_RETRIEVAL_REDACTED_EVIDENCE_AGGREGATE_SCHEMA_LOCAL: &str =
+    "agent_bridge.biocortex_retrieval.opt_in_redacted_evidence_aggregate.v0";
+
+fn memory_biocortex_t6_bool_at(value: &Value, path: &str) -> Option<bool> {
+    value.pointer(path).and_then(Value::as_bool)
+}
+
+fn memory_biocortex_t6_string_at<'a>(value: &'a Value, path: &str) -> Option<&'a str> {
+    value.pointer(path).and_then(Value::as_str)
+}
+
+fn memory_biocortex_t6_f64_at(value: &Value, path: &str) -> Option<f64> {
+    value.pointer(path).and_then(Value::as_f64)
+}
+
+fn memory_biocortex_t6_u64_at(value: &Value, path: &str) -> Option<u64> {
+    value.pointer(path).and_then(Value::as_u64)
+}
+
+fn memory_biocortex_t6_push_reason(reasons: &mut BTreeSet<String>, reason: &str) {
+    reasons.insert(reason.to_string());
+}
+
+fn memory_biocortex_t6_has_raw_payload_fields(value: &Value) -> bool {
+    ["raw_query", "raw_key", "raw_keys", "baseline_keys", "content"]
+        .iter()
+        .any(|field| value.get(*field).is_some())
+}
+
+fn memory_biocortex_t6_any_true(value: &Value, paths: &[&str]) -> bool {
+    paths
+        .iter()
+        .any(|path| memory_biocortex_t6_bool_at(value, path) == Some(true))
+}
+
+fn memory_biocortex_t6_check_shadow_trial(value: &Value, reasons: &mut BTreeSet<String>) {
+    if memory_biocortex_t6_string_at(value, "/schema") != Some(MEMORY_BIOCORTEX_SHADOW_TRIAL_SCHEMA)
+    {
+        memory_biocortex_t6_push_reason(reasons, "shadow_schema_invalid");
+    }
+    if memory_biocortex_t6_bool_at(value, "/read_only") != Some(true) {
+        memory_biocortex_t6_push_reason(reasons, "shadow_not_read_only");
+    }
+    if memory_biocortex_t6_bool_at(value, "/runs_biocortex") != Some(false) {
+        memory_biocortex_t6_push_reason(reasons, "shadow_runs_biocortex");
+    }
+    if memory_biocortex_t6_bool_at(value, "/changes_memory_search_order") != Some(false) {
+        memory_biocortex_t6_push_reason(reasons, "shadow_changes_memory_search_order");
+    }
+    if memory_biocortex_t6_bool_at(value, "/current_biocortex_frontier/discovered_selection_claimed")
+        != Some(false)
+    {
+        memory_biocortex_t6_push_reason(reasons, "shadow_frontier_claimed_discovered_selection");
+    }
+    if memory_biocortex_t6_has_raw_payload_fields(value)
+        || memory_biocortex_t6_any_true(
+            value,
+            &[
+                "/input_contract/raw_query_included",
+                "/input_contract/raw_keys_included",
+                "/input_contract/content_included",
+                "/input_contract/candidate_content_included",
+                "/baseline/raw_keys_included",
+                "/baseline/content_included",
+                "/graph_neighborhood/raw_keys_included",
+                "/graph_neighborhood/content_included",
+                "/suppression_set/raw_keys_included",
+                "/advisory_control_order/raw_keys_included",
+                "/advisory_control_order/content_included",
+            ],
+        )
+    {
+        memory_biocortex_t6_push_reason(reasons, "shadow_raw_query_key_or_content_included");
+    }
+}
+
+fn memory_biocortex_t6_check_relevance_lift(
+    value: Option<&Value>,
+    min_evaluated_count: u64,
+    min_mrr_lift: f64,
+    max_worsened: u64,
+    reasons: &mut BTreeSet<String>,
+) -> (Option<u64>, Option<f64>, Option<u64>, Option<u64>, Option<u64>) {
+    let Some(value) = value else {
+        memory_biocortex_t6_push_reason(reasons, "missing_relevance_lift_eval");
+        return (None, None, None, None, None);
+    };
+
+    if memory_biocortex_t6_string_at(value, "/schema")
+        != Some(BIOCORTEX_RETRIEVAL_RELEVANCE_LIFT_EVAL_SCHEMA_LOCAL)
+    {
+        memory_biocortex_t6_push_reason(reasons, "relevance_lift_schema_invalid");
+    }
+    if memory_biocortex_t6_string_at(value, "/status") != Some("completed") {
+        memory_biocortex_t6_push_reason(reasons, "relevance_lift_not_completed");
+    }
+    if memory_biocortex_t6_bool_at(value, "/safety/read_only") != Some(true)
+        || memory_biocortex_t6_bool_at(value, "/safety/mutates_ab_memory") != Some(false)
+        || memory_biocortex_t6_bool_at(value, "/safety/changes_prod_retrieval_order") != Some(false)
+        || memory_biocortex_t6_bool_at(value, "/safety/writes_state") != Some(false)
+    {
+        memory_biocortex_t6_push_reason(reasons, "relevance_lift_safety_contract_invalid");
+    }
+    if matches!(
+        memory_biocortex_t6_string_at(value, "/verdict"),
+        Some("regression" | "blocked" | "error")
+    ) {
+        memory_biocortex_t6_push_reason(reasons, "relevance_lift_verdict_not_positive");
+    }
+    if memory_biocortex_t6_has_raw_payload_fields(value) {
+        memory_biocortex_t6_push_reason(reasons, "relevance_lift_raw_payload_supplied");
+    }
+
+    let evaluated_count = memory_biocortex_t6_u64_at(value, "/sampling/evaluated_count");
+    if evaluated_count.unwrap_or(0) < min_evaluated_count {
+        memory_biocortex_t6_push_reason(reasons, "insufficient_evaluated_count");
+    }
+    let mrr_lift = memory_biocortex_t6_f64_at(value, "/metrics/mrr_lift");
+    if mrr_lift.unwrap_or(f64::NEG_INFINITY) < min_mrr_lift {
+        memory_biocortex_t6_push_reason(reasons, "insufficient_mrr_lift");
+    }
+    let worsened = memory_biocortex_t6_u64_at(value, "/metrics/worsened");
+    if worsened.unwrap_or(u64::MAX) > max_worsened {
+        memory_biocortex_t6_push_reason(reasons, "regressions_exceed_max_worsened");
+    }
+
+    (
+        evaluated_count,
+        mrr_lift,
+        worsened,
+        memory_biocortex_t6_u64_at(value, "/metrics/improved"),
+        memory_biocortex_t6_u64_at(value, "/metrics/unchanged"),
+    )
+}
+
+fn memory_biocortex_t6_check_redacted_aggregate(
+    value: Option<&Value>,
+    reasons: &mut BTreeSet<String>,
+) -> bool {
+    let Some(value) = value else {
+        memory_biocortex_t6_push_reason(reasons, "missing_redacted_evidence_aggregate");
+        return false;
+    };
+
+    if memory_biocortex_t6_string_at(value, "/schema")
+        != Some(BIOCORTEX_RETRIEVAL_REDACTED_EVIDENCE_AGGREGATE_SCHEMA_LOCAL)
+    {
+        memory_biocortex_t6_push_reason(reasons, "redacted_evidence_aggregate_schema_invalid");
+    }
+    if memory_biocortex_t6_bool_at(value, "/read_only") != Some(true)
+        || memory_biocortex_t6_bool_at(value, "/redacted_evidence_aggregate") != Some(true)
+    {
+        memory_biocortex_t6_push_reason(reasons, "redacted_evidence_aggregate_not_read_only");
+    }
+    if memory_biocortex_t6_any_true(
+        value,
+        &[
+            "/input_contract/raw_queries_included",
+            "/input_contract/raw_keys_included",
+            "/input_contract/content_included",
+            "/input_contract/side_signal_raw_included",
+        ],
+    )
+    {
+        memory_biocortex_t6_push_reason(
+            reasons,
+            "redacted_evidence_aggregate_raw_query_key_or_content_included",
+        );
+    }
+    let aggregate_ready =
+        memory_biocortex_t6_bool_at(value, "/interpretation/aggregate_evidence_ready")
+            == Some(true);
+    if !aggregate_ready {
+        memory_biocortex_t6_push_reason(reasons, "redacted_evidence_aggregate_not_ready");
+    }
+    if memory_biocortex_t6_bool_at(value, "/interpretation/default_influence_ready") == Some(true) {
+        memory_biocortex_t6_push_reason(reasons, "redacted_evidence_claims_default_influence_ready");
+    }
+    aggregate_ready
+}
+
+fn memory_biocortex_t6_influence_gate_payload(args: Value) -> Value {
+    let min_shadow_trials = args
+        .get("min_shadow_trials")
+        .and_then(Value::as_u64)
+        .unwrap_or(3)
+        .clamp(1, 100);
+    let min_evaluated_count = args
+        .get("min_evaluated_count")
+        .and_then(Value::as_u64)
+        .unwrap_or(10)
+        .clamp(1, 10_000);
+    let min_mrr_lift = args
+        .get("min_mrr_lift")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.001)
+        .max(0.0);
+    let max_worsened = args
+        .get("max_worsened")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+
+    let shadow_trials = args
+        .get("shadow_trials")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut block_reasons = BTreeSet::<String>::new();
+    if shadow_trials.len() < min_shadow_trials as usize {
+        memory_biocortex_t6_push_reason(&mut block_reasons, "insufficient_shadow_trials");
+    }
+    for shadow in &shadow_trials {
+        memory_biocortex_t6_check_shadow_trial(shadow, &mut block_reasons);
+    }
+
+    let (evaluated_count, mrr_lift, worsened, improved, unchanged) =
+        memory_biocortex_t6_check_relevance_lift(
+            args.get("relevance_lift_eval"),
+            min_evaluated_count,
+            min_mrr_lift,
+            max_worsened,
+            &mut block_reasons,
+        );
+    let redacted_evidence_aggregate_ready = memory_biocortex_t6_check_redacted_aggregate(
+        args.get("redacted_evidence_aggregate"),
+        &mut block_reasons,
+    );
+    let ready_for_opt_in_experiment = block_reasons.is_empty();
+    let block_reasons = block_reasons.into_iter().collect::<Vec<_>>();
+
+    json!({
+        "schema": MEMORY_BIOCORTEX_T6_INFLUENCE_GATE_SCHEMA,
+        "generated_at": unix_now_secs(),
+        "read_only": true,
+        "purpose": "T6 gate: decide whether T5 BioCortex shadow evidence is sufficient to request an opt-in influence experiment review, without approving runtime influence.",
+        "ready_for_opt_in_experiment": ready_for_opt_in_experiment,
+        "ready_for_influence": false,
+        "runtime_influence_approved": false,
+        "may_change_search_order_now": false,
+        "changes_memory_search_order": false,
+        "default_search_order_change_allowed": false,
+        "calls_memory_search": false,
+        "runs_biocortex": false,
+        "writes_memory": false,
+        "block_reasons": block_reasons,
+        "decision": {
+            "verdict": if ready_for_opt_in_experiment { "ready_for_human_review" } else { "blocked" },
+            "next_gate": if ready_for_opt_in_experiment {
+                "human_review_before_any_runtime_influence"
+            } else {
+                "collect_more_redacted_shadow_and_lift_evidence"
+            },
+            "human_review_required": true,
+            "runtime_influence_decision_out_of_scope": true,
+        },
+        "thresholds": {
+            "min_shadow_trials": min_shadow_trials,
+            "min_evaluated_count": min_evaluated_count,
+            "min_mrr_lift": min_mrr_lift,
+            "max_worsened": max_worsened,
+        },
+        "evidence_summary": {
+            "shadow_trial_count": shadow_trials.len(),
+            "relevance_lift_eval_provided": args.get("relevance_lift_eval").is_some(),
+            "redacted_evidence_aggregate_provided": args.get("redacted_evidence_aggregate").is_some(),
+            "redacted_evidence_aggregate_ready": redacted_evidence_aggregate_ready,
+            "evaluated_count": evaluated_count,
+            "mrr_lift": mrr_lift,
+            "worsened": worsened,
+            "improved": improved,
+            "unchanged": unchanged,
+        },
+        "input_contract": {
+            "shadow_trials_included": false,
+            "relevance_lift_eval_included": false,
+            "redacted_evidence_aggregate_included": false,
+            "raw_query_included": false,
+            "raw_queries_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "side_signal_raw_included": false,
+        },
+        "non_goals": [
+            "Does not run BioCortex.",
+            "Does not call memory_search.",
+            "Does not write memory, graph edges, authorization records, or approval packets.",
+            "Does not approve runtime influence or change retrieval order.",
+            "Does not include raw shadow packets, lift samples, queries, keys, or content."
+        ],
+    })
+}
+
+// ===========================================================================
+//          memory_biocortex_t6_influence_gate — T6 evidence/readiness gate
+// ===========================================================================
+
+pub struct MemoryBioCortexT6InfluenceGateTool;
+impl MemoryBioCortexT6InfluenceGateTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+#[async_trait]
+impl McpTool for MemoryBioCortexT6InfluenceGateTool {
+    fn name(&self) -> &'static str {
+        "memory_biocortex_t6_influence_gate"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only T6 evidence gate for AB memory BioCortex opt-in influence. \
+                Consumes T5 shadow-trial packets, a relevance-lift eval, and a redacted \
+                evidence aggregate; returns whether the evidence is sufficient to request \
+                human opt-in experiment review. It never approves runtime influence, runs \
+                BioCortex, calls memory_search, mutates memory, echoes raw query/keys/content, \
+                or changes retrieval order."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "shadow_trials": {
+                        "type": "array",
+                        "items": { "type": "object" },
+                        "default": [],
+                        "description": "T5 memory_biocortex_shadow_trial outputs. Output never echoes them."
+                    },
+                    "relevance_lift_eval": {
+                        "type": "object",
+                        "description": "BioCortex relevance-lift eval output. Output consumes only safe aggregate fields."
+                    },
+                    "redacted_evidence_aggregate": {
+                        "type": "object",
+                        "description": "Optional existing BioCortex redacted evidence aggregate. Required for ready_for_opt_in_experiment."
+                    },
+                    "min_shadow_trials": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100,
+                        "default": 3
+                    },
+                    "min_evaluated_count": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10000,
+                        "default": 10
+                    },
+                    "min_mrr_lift": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "default": 0.001
+                    },
+                    "max_worsened": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 0
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        Ok(ToolResult::json_text(
+            &memory_biocortex_t6_influence_gate_payload(args),
+        ))
+    }
+}
+
+const MEMORY_NEURAL_CRITIC_SHADOW_EVAL_SCHEMA: &str =
+    "agent_bridge.memory_neural_critic_shadow_eval.v0";
+const MEMORY_NEURAL_CRITIC_LABELS: [&str; 5] =
+    ["stale", "duplicate", "missing", "too_large", "ok"];
+
+fn memory_neural_critic_round3(value: f64) -> f64 {
+    (value * 1000.0).round() / 1000.0
+}
+
+fn memory_neural_critic_label_at(value: &Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|label| !label.is_empty())
+        .map(|label| label.to_ascii_lowercase())
+}
+
+fn memory_neural_critic_label_valid(label: &str) -> bool {
+    MEMORY_NEURAL_CRITIC_LABELS.contains(&label)
+}
+
+fn memory_neural_critic_push_reason(reasons: &mut BTreeSet<String>, reason: &str) {
+    reasons.insert(reason.to_string());
+}
+
+fn memory_neural_critic_case_hash(value: &Value, fallback_index: usize) -> String {
+    let case_id = value
+        .get("case_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("case:{fallback_index}"));
+    memory_biocortex_sha256_json(&json!({ "case_id": case_id }))
+}
+
+fn memory_neural_critic_has_raw_fields(value: &Value) -> bool {
+    ["raw_query", "raw_key", "raw_keys", "memory_key", "content"]
+        .iter()
+        .any(|field| value.get(*field).is_some())
+}
+
+fn memory_neural_critic_shadow_eval_payload(args: Value) -> Value {
+    let cases = args
+        .get("cases")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let min_cases = args
+        .get("min_cases")
+        .and_then(Value::as_u64)
+        .unwrap_or(20)
+        .clamp(1, 10_000);
+    let min_delta_accuracy = args
+        .get("min_delta_accuracy")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.01)
+        .max(0.0);
+    let max_critic_regressions = args
+        .get("max_critic_regressions")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+
+    let mut block_reasons = BTreeSet::<String>::new();
+    if cases.is_empty() {
+        memory_neural_critic_push_reason(&mut block_reasons, "missing_heldout_cases");
+    }
+
+    let mut valid_case_count = 0u64;
+    let mut deterministic_correct = 0u64;
+    let mut critic_correct = 0u64;
+    let mut critic_fixes = 0u64;
+    let mut critic_regressions = 0u64;
+    let mut invalid_label_count = 0u64;
+    let mut input_raw_fields_ignored_count = 0u64;
+    let mut label_counts = BTreeMap::<String, u64>::new();
+    let mut redacted_case_rows = Vec::<Value>::new();
+
+    for (idx, case) in cases.iter().enumerate() {
+        if memory_neural_critic_has_raw_fields(case) {
+            input_raw_fields_ignored_count += 1;
+        }
+        let expected = memory_neural_critic_label_at(case, "expected_label");
+        let deterministic = memory_neural_critic_label_at(case, "deterministic_label");
+        let critic = memory_neural_critic_label_at(case, "critic_label");
+        let labels_valid = expected
+            .as_deref()
+            .map(memory_neural_critic_label_valid)
+            .unwrap_or(false)
+            && deterministic
+                .as_deref()
+                .map(memory_neural_critic_label_valid)
+                .unwrap_or(false)
+            && critic
+                .as_deref()
+                .map(memory_neural_critic_label_valid)
+                .unwrap_or(false);
+        if !labels_valid {
+            invalid_label_count += 1;
+            continue;
+        }
+        let expected = expected.expect("valid expected label");
+        let deterministic = deterministic.expect("valid deterministic label");
+        let critic = critic.expect("valid critic label");
+        valid_case_count += 1;
+        *label_counts.entry(expected.clone()).or_default() += 1;
+
+        let deterministic_hit = deterministic == expected;
+        let critic_hit = critic == expected;
+        if deterministic_hit {
+            deterministic_correct += 1;
+        }
+        if critic_hit {
+            critic_correct += 1;
+        }
+        if !deterministic_hit && critic_hit {
+            critic_fixes += 1;
+        }
+        if deterministic_hit && !critic_hit {
+            critic_regressions += 1;
+        }
+        if redacted_case_rows.len() < 20 {
+            redacted_case_rows.push(json!({
+                "case_hash": memory_neural_critic_case_hash(case, idx),
+                "expected_label": expected,
+                "deterministic_label": deterministic,
+                "critic_label": critic,
+                "deterministic_correct": deterministic_hit,
+                "critic_correct": critic_hit,
+            }));
+        }
+    }
+
+    if invalid_label_count > 0 {
+        memory_neural_critic_push_reason(&mut block_reasons, "invalid_or_missing_labels");
+    }
+    if valid_case_count < min_cases {
+        memory_neural_critic_push_reason(&mut block_reasons, "insufficient_heldout_cases");
+    }
+
+    let deterministic_accuracy = if valid_case_count == 0 {
+        0.0
+    } else {
+        deterministic_correct as f64 / valid_case_count as f64
+    };
+    let critic_accuracy = if valid_case_count == 0 {
+        0.0
+    } else {
+        critic_correct as f64 / valid_case_count as f64
+    };
+    let delta_accuracy = critic_accuracy - deterministic_accuracy;
+    let critic_beats_deterministic =
+        critic_accuracy > deterministic_accuracy && delta_accuracy >= min_delta_accuracy;
+    if !critic_beats_deterministic {
+        memory_neural_critic_push_reason(
+            &mut block_reasons,
+            "critic_does_not_beat_deterministic_baseline",
+        );
+    }
+    if critic_regressions > max_critic_regressions {
+        memory_neural_critic_push_reason(&mut block_reasons, "critic_regressions_exceed_max");
+    }
+
+    let ready_for_review = block_reasons.is_empty();
+    let block_reasons = block_reasons.into_iter().collect::<Vec<_>>();
+
+    json!({
+        "schema": MEMORY_NEURAL_CRITIC_SHADOW_EVAL_SCHEMA,
+        "generated_at": unix_now_secs(),
+        "read_only": true,
+        "purpose": "T7 offline neural-critic shadow eval: compare externally produced critic labels against deterministic T3/T4 baseline labels on held-out cases before granting any write or ranking authority.",
+        "ready_for_review": ready_for_review,
+        "critic_beats_deterministic": critic_beats_deterministic,
+        "critic_write_authority": false,
+        "may_write_memory_now": false,
+        "changes_memory_search_order": false,
+        "default_search_order_change_allowed": false,
+        "runs_neural_model": false,
+        "calls_memory_search": false,
+        "writes_memory": false,
+        "block_reasons": block_reasons,
+        "decision": {
+            "verdict": if ready_for_review { "ready_for_human_review" } else { "blocked" },
+            "next_gate": if ready_for_review {
+                "human_review_before_any_write_or_ranking_authority"
+            } else {
+                "collect_more_or_better_heldout_critic_evidence"
+            },
+            "human_review_required": true,
+            "write_or_ranking_authority_out_of_scope": true,
+        },
+        "thresholds": {
+            "min_cases": min_cases,
+            "min_delta_accuracy": min_delta_accuracy,
+            "max_critic_regressions": max_critic_regressions,
+        },
+        "metrics": {
+            "case_count": valid_case_count,
+            "submitted_case_count": cases.len(),
+            "invalid_label_count": invalid_label_count,
+            "deterministic_correct": deterministic_correct,
+            "critic_correct": critic_correct,
+            "deterministic_accuracy": memory_neural_critic_round3(deterministic_accuracy),
+            "critic_accuracy": memory_neural_critic_round3(critic_accuracy),
+            "delta_accuracy": memory_neural_critic_round3(delta_accuracy),
+            "critic_fixes": critic_fixes,
+            "critic_regressions": critic_regressions,
+            "input_raw_fields_ignored_count": input_raw_fields_ignored_count,
+        },
+        "label_counts": label_counts,
+        "redacted_case_rows": redacted_case_rows,
+        "labels_supported": MEMORY_NEURAL_CRITIC_LABELS,
+        "input_contract": {
+            "cases_included": false,
+            "raw_query_included": false,
+            "raw_queries_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "critic_scores_are_external": true,
+        },
+        "non_goals": [
+            "Does not run a neural model.",
+            "Does not train, fine-tune, or persist model weights.",
+            "Does not call memory_search.",
+            "Does not write memories, graph edges, feedback labels, or consolidation decisions.",
+            "Does not grant write authority, ranking authority, or default retrieval influence.",
+            "Does not echo raw case ids, memory keys, queries, or content."
+        ],
+    })
+}
+
+// ===========================================================================
+//          memory_neural_critic_shadow_eval — T7 offline critic evaluator
+// ===========================================================================
+
+pub struct MemoryNeuralCriticShadowEvalTool;
+impl MemoryNeuralCriticShadowEvalTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+#[async_trait]
+impl McpTool for MemoryNeuralCriticShadowEvalTool {
+    fn name(&self) -> &'static str {
+        "memory_neural_critic_shadow_eval"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only T7 offline neural-critic evaluator for AB memory. \
+                Compares externally produced critic labels against deterministic T3/T4 \
+                baseline labels on held-out stale/duplicate/missing/too_large/ok cases. \
+                It does not run a model, train weights, call memory_search, write memory, \
+                expose raw case ids/keys/content, change retrieval order, or grant critic \
+                write/ranking authority."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "cases": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "case_id": { "type": "string" },
+                                "expected_label": {
+                                    "type": "string",
+                                    "enum": MEMORY_NEURAL_CRITIC_LABELS
+                                },
+                                "deterministic_label": {
+                                    "type": "string",
+                                    "enum": MEMORY_NEURAL_CRITIC_LABELS
+                                },
+                                "critic_label": {
+                                    "type": "string",
+                                    "enum": MEMORY_NEURAL_CRITIC_LABELS
+                                },
+                                "critic_score": { "type": "number" }
+                            }
+                        },
+                        "default": [],
+                        "description": "Held-out offline eval rows. Output includes only hash/redacted rows."
+                    },
+                    "min_cases": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10000,
+                        "default": 20
+                    },
+                    "min_delta_accuracy": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "default": 0.01
+                    },
+                    "max_critic_regressions": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 0
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        Ok(ToolResult::json_text(
+            &memory_neural_critic_shadow_eval_payload(args),
+        ))
+    }
+}
+
 // ===========================================================================
 //          memory_link_orphans (ζ-7 — clear orphan backlog)
 // ===========================================================================
@@ -38841,6 +41250,23 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // Search-ranking diagnostics: read-only graph topology preflight for
     // PageRank-like centrality experiments.
     "memory_graph_topology",
+    // Continuity T3 feedback: write-only telemetry for used/ignored/stale/
+    // duplicate/harmful/missing/too_large retrieval labels. It records
+    // feedback memories/edges but does not change ranking by itself.
+    "memory_retrieval_feedback",
+    // Continuity T4 consolidation queue: read-only candidate buckets for
+    // handoffs, duplicate/stale/harmful/too_large feedback, high-token
+    // low-use rows, and intentional orphans.
+    "memory_consolidation_queue",
+    // Continuity T5 BioCortex shadow packet: read-only redacted baseline,
+    // graph-neighborhood, T3/T4 suppression, and advisory-control comparison.
+    "memory_biocortex_shadow_trial",
+    // Continuity T6 influence gate: read-only evidence threshold for entering
+    // opt-in experiment review; it never approves runtime influence.
+    "memory_biocortex_t6_influence_gate",
+    // Continuity T7 neural critic shadow eval: read-only offline held-out
+    // comparison against deterministic T3/T4 labels; no model/write authority.
+    "memory_neural_critic_shadow_eval",
     // BioCortex retrieval side-signal: review-only, explicit candidates only,
     // and runtime-disabled unless AB_BIOCORTEX_RETRIEVAL_SHADOW=1.
     "biocortex_retrieval_shadow",
@@ -42143,6 +44569,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         &mut reg,
         policy,
         Tier::Standard,
+        Arc::new(MemoryRetrievalFeedbackTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
         Arc::new(MemoryStatsTool::new(hub.clone())),
     );
     reg_if(
@@ -42353,6 +44785,30 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Standard,
         Arc::new(MemoryOrphanInventoryTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryConsolidationQueueTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryBioCortexShadowTrialTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryBioCortexT6InfluenceGateTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryNeuralCriticShadowEvalTool::new()),
     );
     reg_if(
         &mut reg,
@@ -44139,6 +46595,132 @@ mod tests {
             "clean row must NOT be marked: {}",
             out[3]
         );
+    }
+
+    #[test]
+    fn bootstrap_rows_render_continuity_reason_without_raw_continuity_tags() {
+        let row = MemoryRecord {
+            key: "continuity_constraint".into(),
+            kind: "decision".into(),
+            content: "Do not change memory authority while adding continuity presentation.".into(),
+            tags: vec![
+                "ab_memory".into(),
+                "continuity_role:constraint".into(),
+                "continuity_confidence:verified".into(),
+                "continuity_actionability:must_block".into(),
+                "continuity_blast_radius:project".into(),
+            ],
+            related_keys: vec![],
+            scope: None,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.9,
+            status: "active".into(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+
+        let out = format_bootstrap_memory_rows(&[row], 120);
+        assert!(out[0].contains("[ab_memory]"), "ordinary tag kept: {}", out[0]);
+        assert!(
+            out[0].contains("{why: must_block, role=constraint, conf=verified, radius=project}"),
+            "continuity reason rendered: {}",
+            out[0]
+        );
+        assert!(
+            !out[0].contains("continuity_role:constraint"),
+            "raw continuity tags should not inflate bootstrap rows: {}",
+            out[0]
+        );
+    }
+
+    #[test]
+    fn continuity_kernel_groups_rows_by_cognitive_tier() {
+        let mk = |key: &str, tags: Vec<&str>| MemoryRecord {
+            key: key.into(),
+            kind: "decision".into(),
+            content: format!("content for {key}"),
+            tags: tags.into_iter().map(str::to_string).collect(),
+            related_keys: vec![],
+            scope: None,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.8,
+            status: "active".into(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        let rows = vec![
+            mk("background", vec!["continuity_role:evidence"]),
+            mk("constraint", vec!["continuity_actionability:must_block"]),
+            mk("state", vec!["continuity_role:state"]),
+            mk("plain", vec!["ordinary"]),
+        ];
+
+        let block = format_continuity_kernel_block(&rows, false, 80).expect("kernel block");
+        let joined = block.join("\n");
+        assert!(joined.contains("Continuity Kernel"));
+        assert!(joined.contains("-- must-block / constraints --"));
+        assert!(joined.contains("-- active state / procedures --"));
+        assert!(joined.contains("-- evidence / background --"));
+        assert!(!joined.contains("plain"));
+        assert!(
+            joined.find("constraint").unwrap() < joined.find("state").unwrap()
+                && joined.find("state").unwrap() < joined.find("background").unwrap(),
+            "expected tier order, got:\n{joined}"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn session_bootstrap_surfaces_continuity_kernel_from_selected_rows() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let cwd = temp_dir.display().to_string();
+        let store = hub.store.clone().expect("store");
+        store
+            .memory_save(&MemoryRecord {
+                key: "bootstrap_continuity_constraint".into(),
+                kind: "decision".into(),
+                content: "Bootstrap must surface continuity constraints with retrieval reasons.".into(),
+                tags: vec![
+                    "continuity_role:constraint".into(),
+                    "continuity_confidence:verified".into(),
+                    "continuity_actionability:must_block".into(),
+                    "continuity_blast_radius:project".into(),
+                ],
+                related_keys: vec![],
+                scope: Some(format!("project:{cwd}")),
+                created_at: 0,
+                updated_at: 0,
+                last_accessed_at: 0,
+                access_count: 0,
+                importance: 0.9,
+                status: "active".into(),
+                trigger_pattern: None,
+                superseded_by: None,
+            })
+            .await
+            .expect("save continuity row");
+
+        let out = SessionBootstrapTool::new(hub)
+            .execute(
+                json!({"cwd": cwd, "limit": 10, "frontend": "claude-code"}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("bootstrap execute");
+        let text = result_text(&out);
+        assert!(text.contains("Continuity Kernel"), "{text}");
+        assert!(text.contains("bootstrap_continuity_constraint"), "{text}");
+        assert!(
+            text.contains("{why: must_block, role=constraint, conf=verified, radius=project}"),
+            "{text}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
     fn result_json(res: &ToolResult) -> Value {
@@ -47843,6 +50425,11 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(p.includes(Tier::Standard, "semantic_bus_peer_conformance"));
         assert!(!p.includes(Tier::Standard, "browser_lite_probe"));
         assert!(p.includes(Tier::Standard, "system_control"));
+        assert!(p.includes(Tier::Standard, "memory_retrieval_feedback"));
+        assert!(p.includes(Tier::Standard, "memory_consolidation_queue"));
+        assert!(p.includes(Tier::Standard, "memory_biocortex_shadow_trial"));
+        assert!(p.includes(Tier::Standard, "memory_biocortex_t6_influence_gate"));
+        assert!(p.includes(Tier::Standard, "memory_neural_critic_shadow_eval"));
         assert!(p.includes(Tier::Standard, "biocortex_retrieval_shadow"));
         assert!(!p.includes(Tier::Standard, "embed_text"));
         assert!(!p.includes(Tier::Niche, "browser_navigate"));
@@ -47895,11 +50482,16 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 52 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 57 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-        //      + DIRECT(40: 6 avatar observation/sync/renderer tools
+        //      + DIRECT(45: 6 avatar observation/sync/renderer tools
         //      + xiao_shu_action_request + 14 mobile bridge tools
-        //      + memory_graph_topology + biocortex_retrieval_shadow
+        //      + memory_graph_topology + memory_retrieval_feedback
+        //      + memory_consolidation_queue
+        //      + memory_biocortex_shadow_trial
+        //      + memory_biocortex_t6_influence_gate
+        //      + memory_neural_critic_shadow_eval
+        //      + biocortex_retrieval_shadow
         //      + memory_related_keys_preflight
         //      + memory_orphan_candidates + memory_orphan_inventory
         //      + desktop_snapshot + vision_grounding_ocr + desktop_verify
@@ -47913,7 +50505,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         // forum_digest joined via the FORUM_READ capability group (2026-05-23).
         // Native-overlap probes such as browser_lite_probe stay in broader
         // profiles, not codex-essential direct extras.
-        assert_eq!(extras.len(), 52);
+        assert_eq!(extras.len(), 57);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -47941,6 +50533,11 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(extras.contains(&"mobile_ios_apps"));
         assert!(extras.contains(&"mobile_ios_syslog_tail"));
         assert!(extras.contains(&"memory_graph_topology"));
+        assert!(extras.contains(&"memory_retrieval_feedback"));
+        assert!(extras.contains(&"memory_consolidation_queue"));
+        assert!(extras.contains(&"memory_biocortex_shadow_trial"));
+        assert!(extras.contains(&"memory_biocortex_t6_influence_gate"));
+        assert!(extras.contains(&"memory_neural_critic_shadow_eval"));
         assert!(extras.contains(&"biocortex_retrieval_shadow"));
         assert!(extras.contains(&"memory_related_keys_preflight"));
         assert!(!extras.contains(&"memory_related_keys_materialize"));
@@ -53132,6 +55729,116 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         serde_json::from_str(&txt).expect("parse json")
     }
 
+    #[test]
+    fn memory_continuity_metadata_tags_roundtrip_and_replace_existing_values() {
+        let mut tags = vec![
+            "continuity_role:archive".to_string(),
+            "continuity_confidence:stale".to_string(),
+            "unrelated".to_string(),
+        ];
+        let metadata = MemoryContinuityMetadata {
+            continuity_role: Some("state".to_string()),
+            retrieval_trigger: Some("when resuming AB memory work".to_string()),
+            confidence: Some("verified".to_string()),
+            freshness_policy: Some("project_phase_bound".to_string()),
+            actionability: Some("plan_influence".to_string()),
+            blast_radius: Some("project".to_string()),
+            supersedes: vec!["old_memory_key".to_string()],
+            superseded_by: None,
+        };
+
+        memory_apply_continuity_metadata_tags(&mut tags, &metadata);
+        let parsed = memory_continuity_metadata_from_tags(&tags, None).expect("metadata");
+
+        assert_eq!(parsed.continuity_role.as_deref(), Some("state"));
+        assert_eq!(parsed.confidence.as_deref(), Some("verified"));
+        assert_eq!(
+            parsed.retrieval_trigger.as_deref(),
+            Some("when resuming AB memory work")
+        );
+        assert_eq!(parsed.supersedes, vec!["old_memory_key".to_string()]);
+        assert!(tags.contains(&"unrelated".to_string()));
+        assert!(!tags.contains(&"continuity_role:archive".to_string()));
+        assert!(!tags.contains(&"continuity_confidence:stale".to_string()));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn memory_save_get_and_search_surface_continuity_metadata() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let save_tool = MemorySaveTool::new(hub.clone());
+        let get_tool = MemoryGetTool::new(hub.clone());
+        let search_tool = MemorySearchTool::new(hub.clone());
+
+        let save = save_tool
+            .execute(
+                json!({
+                    "key": "continuity_metadata_roundtrip",
+                    "kind": "decision",
+                    "content": "continuity metadata searchable anchor",
+                    "tags": ["baseline"],
+                    "continuity": {
+                        "continuity_role": "state",
+                        "retrieval_trigger": "when resuming continuity work",
+                        "confidence": "verified",
+                        "freshness_policy": "project_phase_bound",
+                        "actionability": "plan_influence",
+                        "blast_radius": "project",
+                        "supersedes": ["continuity_metadata_old"]
+                    }
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("save execute");
+        assert_eq!(result_text_as_json(&save)["status"], json!("saved"));
+
+        let got = get_tool
+            .execute(
+                json!({"key": "continuity_metadata_roundtrip"}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("get execute");
+        let got_payload = result_text_as_json(&got);
+        assert_eq!(
+            got_payload["continuity_metadata"]["continuity_role"],
+            json!("state")
+        );
+        assert_eq!(
+            got_payload["continuity_metadata"]["retrieval_trigger"],
+            json!("when resuming continuity work")
+        );
+        assert_eq!(
+            got_payload["continuity_metadata"]["supersedes"],
+            json!(["continuity_metadata_old"])
+        );
+
+        let searched = search_tool
+            .execute(
+                json!({
+                    "query": "continuity metadata searchable anchor",
+                    "limit": 5,
+                    "mode": "fts"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("search execute");
+        let search_payload = result_text_as_json(&searched);
+        let hit = search_payload
+            .as_array()
+            .expect("search array")
+            .iter()
+            .find(|row| row["record"]["key"] == json!("continuity_metadata_roundtrip"))
+            .expect("roundtrip hit");
+        assert_eq!(
+            hit["record"]["continuity_metadata"]["actionability"],
+            json!("plan_influence")
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
     #[tokio::test]
     async fn agent_session_reconcile_finalises_stale_running_local_sessions() {
         use ab_core::SessionId;
@@ -57252,6 +59959,704 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert_eq!(v2["status"], json!("ok"));
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_retrieval_feedback_records_targeted_outcome_and_edge() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        store
+            .memory_save(&MemoryRecord {
+                key: "tests:retrieved_stale_target".into(),
+                kind: "decision".into(),
+                content: "old retrieval target".into(),
+                tags: vec![],
+                related_keys: vec![],
+                scope: None,
+                created_at: 0,
+                updated_at: 0,
+                last_accessed_at: 0,
+                access_count: 0,
+                importance: 0.8,
+                status: "active".into(),
+                trigger_pattern: None,
+                superseded_by: None,
+            })
+            .await
+            .expect("seed target");
+
+        let tool = MemoryRetrievalFeedbackTool::new(hub.clone());
+        let out = tool
+            .execute(
+                json!({
+                    "memory_key": "tests:retrieved_stale_target",
+                    "outcome": "stale",
+                    "source": "memory_search",
+                    "query": "current task query",
+                    "note": "The result referenced obsolete bootstrap behavior.",
+                    "retrieved_keys": ["tests:retrieved_stale_target", "tests:missing_context"]
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+        assert_eq!(payload["status"], json!("ok"));
+        assert_eq!(payload["outcome"], json!("stale"));
+        assert_eq!(payload["target_key"], json!("tests:retrieved_stale_target"));
+        assert_eq!(payload["edge"]["edge_type"], json!("retrieval_stale"));
+
+        let feedback_key = payload["feedback_key"].as_str().expect("feedback_key");
+        let saved = store
+            .memory_get(feedback_key)
+            .await
+            .expect("get feedback")
+            .expect("feedback exists");
+        assert_eq!(saved.kind, "feedback");
+        assert!(saved.tags.contains(&"retrieval_feedback".to_string()));
+        assert!(saved.tags.contains(&"retrieval_feedback:stale".to_string()));
+        assert!(saved.tags.contains(&"retrieval_source:memory_search".to_string()));
+        assert!(saved
+            .related_keys
+            .contains(&"tests:retrieved_stale_target".to_string()));
+        assert!(saved.content.contains("outcome: stale"));
+        assert!(saved.content.contains("query: current task query"));
+        assert!(saved
+            .content
+            .contains("The result referenced obsolete bootstrap behavior."));
+
+        let edges = store.memory_neighbors(feedback_key).await.expect("neighbors");
+        assert!(
+            edges.iter().any(|e| {
+                e.edge_type == "retrieval_stale" && e.to_key == "tests:retrieved_stale_target"
+            }),
+            "expected retrieval_stale edge to target, got {edges:?}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_retrieval_feedback_allows_missing_without_target_but_rejects_other_missing_targets()
+    {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let tool = MemoryRetrievalFeedbackTool::new(hub.clone());
+
+        let missing = tool
+            .execute(
+                json!({
+                    "outcome": "missing",
+                    "source": "session_bootstrap",
+                    "query": "needed current task constraint",
+                    "note": "No selected memory covered the active constraint."
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("missing execute");
+        let payload = result_text_as_json(&missing);
+        assert_eq!(payload["status"], json!("ok"));
+        assert_eq!(payload["target_key"], Value::Null);
+        assert_eq!(payload["edge"], Value::Null);
+
+        let invalid = tool
+            .execute(
+                json!({
+                    "memory_key": "tests:not_found",
+                    "outcome": "used",
+                    "source": "manual"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("invalid execute");
+        assert!(invalid.is_error, "non-missing target feedback must anchor to an existing memory");
+        let text = result_text(&invalid);
+        assert!(text.contains("not found"), "{text}");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    fn t4_memory_record(
+        key: &str,
+        kind: &str,
+        content: &str,
+        tags: &[&str],
+        related_keys: &[&str],
+        access_count: u64,
+        importance: f64,
+    ) -> MemoryRecord {
+        MemoryRecord {
+            key: key.to_string(),
+            kind: kind.to_string(),
+            content: content.to_string(),
+            tags: tags.iter().map(|tag| (*tag).to_string()).collect(),
+            related_keys: related_keys.iter().map(|key| (*key).to_string()).collect(),
+            scope: None,
+            created_at: 1_700_000_000,
+            updated_at: 1_700_000_000,
+            last_accessed_at: 0,
+            access_count,
+            importance,
+            status: "active".to_string(),
+            trigger_pattern: None,
+            superseded_by: None,
+        }
+    }
+
+    fn t4_bucket_keys(queue: &Value, bucket: &str) -> Vec<String> {
+        queue["buckets"][bucket]
+            .as_array()
+            .expect("bucket array")
+            .iter()
+            .map(|row| row["key"].as_str().expect("key").to_string())
+            .collect()
+    }
+
+    #[test]
+    fn memory_consolidation_queue_groups_feedback_cost_and_orphan_candidates() {
+        let long_content = "high token low use ".repeat(180);
+        let records = vec![
+            t4_memory_record(
+                "handoff_next",
+                "session_handoff",
+                "handoff: promote this decision into a durable memory",
+                &[],
+                &[],
+                0,
+                0.8,
+            ),
+            t4_memory_record(
+                "lesson_dup_target",
+                "lesson",
+                "duplicated lesson target",
+                &[],
+                &[],
+                3,
+                0.7,
+            ),
+            t4_memory_record(
+                "feedback_duplicate",
+                "feedback",
+                "outcome: duplicate",
+                &["retrieval_feedback", "retrieval_feedback:duplicate"],
+                &["lesson_dup_target"],
+                0,
+                0.7,
+            ),
+            t4_memory_record(
+                "stale_warning",
+                "warning",
+                "old warning",
+                &["continuity_confidence:stale"],
+                &[],
+                1,
+                0.8,
+            ),
+            t4_memory_record("large_low_use", "fact", &long_content, &[], &[], 0, 0.2),
+            t4_memory_record(
+                "intentional_archive",
+                "archive",
+                "kept isolated on purpose",
+                &["continuity_role:archive"],
+                &[],
+                0,
+                0.5,
+            ),
+            t4_memory_record("ordinary_connected", "fact", "ordinary", &[], &[], 4, 0.5),
+        ];
+        let mut edges_by_key = HashMap::new();
+        edges_by_key.insert(
+            "ordinary_connected".to_string(),
+            vec![MemoryEdge {
+                from_key: "ordinary_connected".to_string(),
+                to_key: "lesson_dup_target".to_string(),
+                edge_type: "relates".to_string(),
+                weight: 1.0,
+            }],
+        );
+
+        let queue = memory_consolidation_queue_from_records(
+            &records,
+            &edges_by_key,
+            MemoryConsolidationQueueOptions {
+                max_per_bucket: 10,
+                preview_chars: 80,
+                large_content_chars: 1_000,
+                low_use_max_access_count: 1,
+            },
+        );
+
+        assert_eq!(queue["schema"], json!("agent_bridge.memory_consolidation_queue.v0"));
+        assert_eq!(
+            t4_bucket_keys(&queue, "handoff_to_decision"),
+            vec!["handoff_next"]
+        );
+        assert_eq!(
+            t4_bucket_keys(&queue, "duplicate_lessons"),
+            vec!["lesson_dup_target"]
+        );
+        assert_eq!(t4_bucket_keys(&queue, "stale_warnings"), vec!["stale_warning"]);
+        assert_eq!(
+            t4_bucket_keys(&queue, "high_token_low_use"),
+            vec!["large_low_use"]
+        );
+        assert_eq!(
+            t4_bucket_keys(&queue, "intentional_orphans"),
+            vec!["intentional_archive"]
+        );
+        assert!(
+            !t4_bucket_keys(&queue, "intentional_orphans")
+                .contains(&"ordinary_connected".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn memory_consolidation_queue_tool_is_read_only_and_returns_buckets() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        store
+            .memory_save(&t4_memory_record(
+                "tests:queue_handoff",
+                "session_handoff",
+                "handoff: extract next implementation decision",
+                &[],
+                &[],
+                0,
+                0.8,
+            ))
+            .await
+            .expect("seed handoff");
+
+        let tool = MemoryConsolidationQueueTool::new(hub.clone());
+        let out = tool
+            .execute(
+                json!({
+                    "max_records": 50,
+                    "max_per_bucket": 5,
+                    "preview_chars": 60
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+        assert_eq!(payload["schema"], json!("agent_bridge.memory_consolidation_queue.v0"));
+        assert_eq!(
+            t4_bucket_keys(&payload, "handoff_to_decision"),
+            vec!["tests:queue_handoff"]
+        );
+
+        let saved = store
+            .memory_get("tests:queue_handoff")
+            .await
+            .expect("lookup seeded memory");
+        assert!(saved.is_some(), "tool must not delete or mutate candidates");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_shadow_trial_redacts_baseline_graph_and_suppression_sets() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        store
+            .memory_save(&t4_memory_record(
+                "tests:shadow_duplicate_target",
+                "lesson",
+                "shadow trial retrieval candidate duplicate target",
+                &[],
+                &[],
+                0,
+                0.7,
+            ))
+            .await
+            .expect("seed duplicate target");
+        store
+            .memory_save(&t4_memory_record(
+                "tests:shadow_regular",
+                "lesson",
+                "shadow trial retrieval candidate regular survivor",
+                &[],
+                &[],
+                2,
+                0.8,
+            ))
+            .await
+            .expect("seed regular");
+        store
+            .memory_save(&t4_memory_record(
+                "tests:shadow_feedback_duplicate",
+                "feedback",
+                "outcome: duplicate",
+                &["retrieval_feedback", "retrieval_feedback:duplicate"],
+                &["tests:shadow_duplicate_target"],
+                0,
+                0.7,
+            ))
+            .await
+            .expect("seed feedback");
+        store
+            .memory_link(
+                "tests:shadow_regular",
+                "tests:shadow_duplicate_target",
+                "relates",
+                1.0,
+            )
+            .await
+            .expect("seed edge");
+
+        let tool = MemoryBioCortexShadowTrialTool::new(hub.clone());
+        let out = tool
+            .execute(
+                json!({
+                    "query": "shadow trial retrieval candidate",
+                    "limit": 10,
+                    "neighbor_limit": 4,
+                    "queue_max_records": 50,
+                    "queue_max_per_bucket": 5
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+        assert_eq!(payload["schema"], json!("agent_bridge.memory_biocortex_shadow_trial.v0"));
+        assert_eq!(payload["read_only"], json!(true));
+        assert_eq!(payload["runs_biocortex"], json!(false));
+        assert_eq!(payload["changes_memory_search_order"], json!(false));
+        assert_eq!(payload["baseline"]["raw_keys_included"], json!(false));
+        assert_eq!(payload["baseline"]["content_included"], json!(false));
+        assert!(payload["baseline"]["key_count"].as_u64().unwrap_or(0) >= 2);
+        assert!(
+            payload["suppression_set"]["redacted_count"]
+                .as_u64()
+                .unwrap_or(0)
+                >= 1
+        );
+        assert_eq!(
+            payload["current_biocortex_frontier"]["discovered_selection_claimed"],
+            json!(false)
+        );
+
+        let serialized = serde_json::to_string(&payload).expect("serialize");
+        assert!(!serialized.contains("tests:shadow_duplicate_target"));
+        assert!(!serialized.contains("tests:shadow_regular"));
+        assert!(!serialized.contains("duplicate target"));
+        assert!(!serialized.contains("regular survivor"));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_t6_influence_gate_requires_redacted_lift_evidence() {
+        let tool = MemoryBioCortexT6InfluenceGateTool::new();
+        let unsafe_shadow = json!({
+            "schema": "agent_bridge.memory_biocortex_shadow_trial.v0",
+            "read_only": true,
+            "runs_biocortex": false,
+            "changes_memory_search_order": false,
+            "input_contract": {
+                "raw_query_included": false,
+                "raw_keys_included": true,
+                "content_included": false
+            },
+            "current_biocortex_frontier": {
+                "discovered_selection_claimed": true
+            },
+            "raw_key": "secret_shadow_key",
+            "content": "secret shadow content"
+        });
+
+        let out = tool.execute(
+            json!({
+                "shadow_trials": [unsafe_shadow],
+                "min_shadow_trials": 2
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(
+            payload["schema"],
+            json!("agent_bridge.memory_biocortex_t6_influence_gate.v0")
+        );
+        assert_eq!(payload["read_only"], json!(true));
+        assert_eq!(payload["ready_for_opt_in_experiment"], json!(false));
+        assert_eq!(payload["runtime_influence_approved"], json!(false));
+        assert_eq!(payload["changes_memory_search_order"], json!(false));
+        assert!(
+            payload["block_reasons"]
+                .as_array()
+                .expect("block reasons")
+                .contains(&json!("missing_relevance_lift_eval"))
+        );
+        assert!(
+            payload["block_reasons"]
+                .as_array()
+                .expect("block reasons")
+                .contains(&json!("shadow_frontier_claimed_discovered_selection"))
+        );
+        assert!(
+            payload["block_reasons"]
+                .as_array()
+                .expect("block reasons")
+                .contains(&json!("shadow_raw_query_key_or_content_included"))
+        );
+
+        let serialized = serde_json::to_string(&payload).expect("serialize");
+        assert!(!serialized.contains("secret_shadow_key"));
+        assert!(!serialized.contains("secret shadow content"));
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_t6_influence_gate_allows_review_without_approving_runtime() {
+        let tool = MemoryBioCortexT6InfluenceGateTool::new();
+        let safe_shadow = json!({
+            "schema": "agent_bridge.memory_biocortex_shadow_trial.v0",
+            "read_only": true,
+            "runs_biocortex": false,
+            "writes_memory": false,
+            "changes_memory_search_order": false,
+            "default_search_order_change_allowed": false,
+            "input_contract": {
+                "raw_query_included": false,
+                "raw_keys_included": false,
+                "content_included": false
+            },
+            "baseline": {
+                "raw_keys_included": false,
+                "content_included": false
+            },
+            "current_biocortex_frontier": {
+                "discovered_selection_claimed": false
+            }
+        });
+        let relevance_lift_eval = json!({
+            "schema": "agent_bridge.biocortex_retrieval.relevance_lift_eval.v0",
+            "status": "completed",
+            "verdict": "lift",
+            "sampling": {
+                "evaluated_count": 8,
+                "side_signal_unavailable": 0
+            },
+            "metrics": {
+                "mrr_lift": 0.04,
+                "improved": 3,
+                "worsened": 0,
+                "unchanged": 5
+            },
+            "safety": {
+                "read_only": true,
+                "mutates_ab_memory": false,
+                "changes_prod_retrieval_order": false,
+                "writes_state": false
+            },
+            "samples": [
+                {
+                    "source_key": "secret_lift_key",
+                    "status": "ok"
+                }
+            ]
+        });
+        let redacted_evidence_aggregate = json!({
+            "schema": "agent_bridge.biocortex_retrieval.opt_in_redacted_evidence_aggregate.v0",
+            "read_only": true,
+            "redacted_evidence_aggregate": true,
+            "input_contract": {
+                "raw_queries_included": false,
+                "raw_keys_included": false,
+                "content_included": false,
+                "side_signal_raw_included": false
+            },
+            "movement_evidence": {
+                "raw_flags_all_false": true,
+                "movement_observed": true
+            },
+            "coverage_evidence": {
+                "raw_flags_all_false": true,
+                "expanded_coverage_observed": true
+            },
+            "interpretation": {
+                "aggregate_evidence_ready": true,
+                "default_influence_ready": false,
+                "human_review_required": true
+            },
+            "raw_query": "secret aggregate query"
+        });
+
+        let out = tool.execute(
+            json!({
+                "shadow_trials": [safe_shadow.clone(), safe_shadow],
+                "relevance_lift_eval": relevance_lift_eval,
+                "redacted_evidence_aggregate": redacted_evidence_aggregate,
+                "min_shadow_trials": 2,
+                "min_evaluated_count": 5,
+                "min_mrr_lift": 0.01,
+                "max_worsened": 0
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(payload["ready_for_opt_in_experiment"], json!(true));
+        assert_eq!(payload["runtime_influence_approved"], json!(false));
+        assert_eq!(payload["may_change_search_order_now"], json!(false));
+        assert_eq!(
+            payload["decision"]["next_gate"],
+            json!("human_review_before_any_runtime_influence")
+        );
+        assert_eq!(payload["evidence_summary"]["shadow_trial_count"], json!(2));
+        assert_eq!(payload["evidence_summary"]["evaluated_count"], json!(8));
+        assert_eq!(payload["evidence_summary"]["mrr_lift"], json!(0.04));
+        assert_eq!(payload["block_reasons"], json!([]));
+
+        let serialized = serde_json::to_string(&payload).expect("serialize");
+        assert!(!serialized.contains("secret_lift_key"));
+        assert!(!serialized.contains("secret aggregate query"));
+    }
+
+    #[tokio::test]
+    async fn memory_neural_critic_shadow_eval_blocks_when_critic_does_not_beat_baseline() {
+        let tool = MemoryNeuralCriticShadowEvalTool::new();
+        let out = tool
+            .execute(
+                json!({
+                    "cases": [
+                        {
+                            "case_id": "secret_case_1",
+                            "expected_label": "stale",
+                            "deterministic_label": "stale",
+                            "critic_label": "stale",
+                            "raw_key": "secret_memory_key_1",
+                            "content": "secret memory content 1"
+                        },
+                        {
+                            "case_id": "secret_case_2",
+                            "expected_label": "duplicate",
+                            "deterministic_label": "duplicate",
+                            "critic_label": "missing"
+                        },
+                        {
+                            "case_id": "secret_case_3",
+                            "expected_label": "too_large",
+                            "deterministic_label": "ok",
+                            "critic_label": "ok"
+                        },
+                        {
+                            "case_id": "secret_case_4",
+                            "expected_label": "ok",
+                            "deterministic_label": "ok",
+                            "critic_label": "ok"
+                        }
+                    ],
+                    "min_cases": 4,
+                    "min_delta_accuracy": 0.1,
+                    "max_critic_regressions": 0
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(
+            payload["schema"],
+            json!("agent_bridge.memory_neural_critic_shadow_eval.v0")
+        );
+        assert_eq!(payload["read_only"], json!(true));
+        assert_eq!(payload["ready_for_review"], json!(false));
+        assert_eq!(payload["critic_write_authority"], json!(false));
+        assert_eq!(payload["may_write_memory_now"], json!(false));
+        assert_eq!(payload["changes_memory_search_order"], json!(false));
+        assert_eq!(
+            payload["metrics"]["case_count"],
+            json!(4)
+        );
+        assert!(
+            payload["block_reasons"]
+                .as_array()
+                .expect("block reasons")
+                .contains(&json!("critic_does_not_beat_deterministic_baseline"))
+        );
+        assert!(
+            payload["block_reasons"]
+                .as_array()
+                .expect("block reasons")
+                .contains(&json!("critic_regressions_exceed_max"))
+        );
+
+        let serialized = serde_json::to_string(&payload).expect("serialize");
+        assert!(!serialized.contains("secret_case_1"));
+        assert!(!serialized.contains("secret_memory_key_1"));
+        assert!(!serialized.contains("secret memory content 1"));
+    }
+
+    #[tokio::test]
+    async fn memory_neural_critic_shadow_eval_allows_review_without_write_authority() {
+        let tool = MemoryNeuralCriticShadowEvalTool::new();
+        let out = tool
+            .execute(
+                json!({
+                    "cases": [
+                        {
+                            "case_id": "secret_good_case_1",
+                            "expected_label": "stale",
+                            "deterministic_label": "ok",
+                            "critic_label": "stale"
+                        },
+                        {
+                            "case_id": "secret_good_case_2",
+                            "expected_label": "duplicate",
+                            "deterministic_label": "ok",
+                            "critic_label": "duplicate"
+                        },
+                        {
+                            "case_id": "secret_good_case_3",
+                            "expected_label": "too_large",
+                            "deterministic_label": "too_large",
+                            "critic_label": "too_large"
+                        },
+                        {
+                            "case_id": "secret_good_case_4",
+                            "expected_label": "missing",
+                            "deterministic_label": "missing",
+                            "critic_label": "missing"
+                        }
+                    ],
+                    "min_cases": 4,
+                    "min_delta_accuracy": 0.25,
+                    "max_critic_regressions": 0
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(payload["ready_for_review"], json!(true));
+        assert_eq!(payload["critic_beats_deterministic"], json!(true));
+        assert_eq!(payload["critic_write_authority"], json!(false));
+        assert_eq!(payload["may_write_memory_now"], json!(false));
+        assert_eq!(payload["changes_memory_search_order"], json!(false));
+        assert_eq!(payload["runs_neural_model"], json!(false));
+        assert_eq!(
+            payload["decision"]["next_gate"],
+            json!("human_review_before_any_write_or_ranking_authority")
+        );
+        assert_eq!(payload["metrics"]["case_count"], json!(4));
+        assert_eq!(payload["metrics"]["deterministic_accuracy"], json!(0.5));
+        assert_eq!(payload["metrics"]["critic_accuracy"], json!(1.0));
+        assert_eq!(payload["metrics"]["delta_accuracy"], json!(0.5));
+        assert_eq!(payload["metrics"]["critic_regressions"], json!(0));
+        assert_eq!(payload["block_reasons"], json!([]));
+
+        let serialized = serde_json::to_string(&payload).expect("serialize");
+        assert!(!serialized.contains("secret_good_case_1"));
     }
 
     #[test]
