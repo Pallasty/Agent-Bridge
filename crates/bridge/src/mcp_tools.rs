@@ -34370,7 +34370,9 @@ impl McpTool for IdeCommandTool {
             name: self.name().into(),
             description: "Queue a lightweight command for an IDE extension to execute via the \
                  file bridge. Supported commands: open_file, reveal_range, run_task, \
-                 write_snapshot. Writes JSONL to <workspace>/.agent-bridge/ide-commands.jsonl \
+                 write_snapshot, apply_workspace_edit, save_file, format_document. The \
+                 edit/save/format commands are confined by the extension to files inside \
+                 the workspace root. Writes JSONL to <workspace>/.agent-bridge/ide-commands.jsonl \
                  (or command_dir / AGENT_BRIDGE_IDE_COMMAND_DIR) and optionally waits \
                  for a matching response in ide-responses.jsonl."
                 .into(),
@@ -34379,13 +34381,13 @@ impl McpTool for IdeCommandTool {
                 "properties": {
                     "command": {
                         "type": "string",
-                        "enum": ["open_file", "reveal_range", "run_task", "write_snapshot"],
+                        "enum": ["open_file", "reveal_range", "run_task", "write_snapshot", "apply_workspace_edit", "save_file", "format_document"],
                         "description": "IDE action to request."
                     },
                     "args": {
                         "type": "object",
                         "default": {},
-                        "description": "Command-specific JSON args. open_file/reveal_range use {path, range?, preview?, preserve_focus?}; run_task uses {name}; write_snapshot uses {}."
+                        "description": "Command-specific JSON args. open_file/reveal_range use {path, range?, preview?, preserve_focus?}; run_task uses {name}; write_snapshot uses {}; apply_workspace_edit uses {edits:[{path, range?, text}], save?} (omit range to replace the whole file); save_file uses {path}; format_document uses {path, save?}. Edit/save/format paths must be inside the workspace root."
                     },
                     "cwd": {
                         "type": "string",

@@ -479,6 +479,12 @@ async function runIdeCommand(command, args) {
       const target = await writeSnapshot();
       return { snapshot_path: target };
     }
+    case "apply_workspace_edit":
+      return applyWorkspaceEdit(args);
+    case "save_file":
+      return saveFile(args);
+    case "format_document":
+      return formatDocument(args);
     default:
       throw new Error(`unsupported command: ${command}`);
   }
@@ -516,6 +522,90 @@ async function runTask(args) {
     name: execution.task.name,
     source: execution.task.source || null
   };
+}
+
+// Guard: confine write/format commands to files inside the workspace root,
+// so the agent cannot edit arbitrary filesystem paths through the IDE bridge.
+function assertInsideWorkspace(filePath) {
+  const root = workspaceRoot();
+  if (!root) {
+    throw new Error("no workspace root; refusing to edit");
+  }
+  const resolved = path.resolve(filePath);
+  const rel = path.relative(root, resolved);
+  if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) {
+    throw new Error(`path is outside the workspace root: ${filePath}`);
+  }
+  return resolved;
+}
+
+async function applyWorkspaceEdit(args) {
+  const edits = Array.isArray(args.edits) ? args.edits : null;
+  if (!edits || edits.length === 0) {
+    throw new Error("edits must be a non-empty array");
+  }
+  const workspaceEdit = new vscode.WorkspaceEdit();
+  const touched = [];
+  for (const edit of edits) {
+    const filePath = assertInsideWorkspace(requiredString(edit.path, "edit.path"));
+    if (typeof edit.text !== "string") {
+      throw new Error("edit.text is required");
+    }
+    const uri = vscode.Uri.file(filePath);
+    const document = await vscode.workspace.openTextDocument(uri);
+    const fullRange = new vscode.Range(
+      document.positionAt(0),
+      document.positionAt(document.getText().length)
+    );
+    const range = rangeFromInfo(edit.range) || fullRange;
+    workspaceEdit.replace(uri, range, edit.text);
+    if (!touched.includes(filePath)) {
+      touched.push(filePath);
+    }
+  }
+  const applied = await vscode.workspace.applyEdit(workspaceEdit);
+  if (!applied) {
+    throw new Error("workspace edit was not applied");
+  }
+  let saved = false;
+  if (args.save) {
+    for (const filePath of touched) {
+      const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+      saved = (await doc.save()) || saved;
+    }
+  }
+  return { applied: true, files: touched, saved };
+}
+
+async function saveFile(args) {
+  const filePath = assertInsideWorkspace(requiredString(args.path, "path"));
+  const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+  const saved = await document.save();
+  return { saved, path: filePath };
+}
+
+async function formatDocument(args) {
+  const filePath = assertInsideWorkspace(requiredString(args.path, "path"));
+  const uri = vscode.Uri.file(filePath);
+  const document = await vscode.workspace.openTextDocument(uri);
+  const formatEdits = await vscode.commands.executeCommand(
+    "vscode.executeFormatDocumentProvider",
+    uri,
+    { tabSize: 4, insertSpaces: true }
+  );
+  if (!Array.isArray(formatEdits) || formatEdits.length === 0) {
+    return { formatted: false, path: filePath, reason: "no formatter or no changes" };
+  }
+  const workspaceEdit = new vscode.WorkspaceEdit();
+  for (const e of formatEdits) {
+    workspaceEdit.replace(uri, e.range, e.newText);
+  }
+  const applied = await vscode.workspace.applyEdit(workspaceEdit);
+  let saved = false;
+  if (applied && args.save) {
+    saved = await document.save();
+  }
+  return { formatted: applied, path: filePath, saved };
 }
 
 function requiredString(value, name) {

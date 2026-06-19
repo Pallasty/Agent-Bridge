@@ -93,7 +93,13 @@ pub fn queue_ide_command(command: &str, args: Value, options: IdeCommandOptions)
     }
     if !matches!(
         command,
-        "open_file" | "reveal_range" | "run_task" | "write_snapshot"
+        "open_file"
+            | "reveal_range"
+            | "run_task"
+            | "write_snapshot"
+            | "apply_workspace_edit"
+            | "save_file"
+            | "format_document"
     ) {
         return Err(Error::InvalidArgument(format!(
             "unsupported IDE command: {command}"
