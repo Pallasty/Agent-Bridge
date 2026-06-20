@@ -69,6 +69,9 @@ const VIEWER_NODE_CAP: usize = 500;
 const STORE_FETCH_LIMIT: u32 = 2000;
 const DEFAULT_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON: &str =
     "docs/design/fixtures/memory-biocortex-materialization-review-packet-2026-06-20.json";
+const DEFAULT_PALACE_MATERIALIZATION_REVIEW_PACKET_BODY: &str = include_str!(
+    "../../../docs/design/fixtures/memory-biocortex-materialization-review-packet-2026-06-20.json"
+);
 
 const PALACE_HTML: &str = include_str!("../assets/palace.html");
 
@@ -995,17 +998,14 @@ fn palace_materialization_review_candidate_has_write_signal(candidate: &Value) -
         || palace_json_bool_at(candidate, &["can_materialize_edges"])
 }
 
-fn load_palace_materialization_review_packet(path: &FsPath) -> Result<Value, String> {
-    let raw = fs::read_to_string(path)
-        .map_err(|e| format!("read materialization review packet {}: {e}", path.display()))?;
+fn parse_palace_materialization_review_packet(raw: &str, source: &str) -> Result<Value, String> {
     let packet: Value = serde_json::from_str(&raw)
-        .map_err(|e| format!("parse materialization review packet {}: {e}", path.display()))?;
+        .map_err(|e| format!("parse materialization review packet {source}: {e}"))?;
     if packet.get("schema").and_then(Value::as_str)
         != Some("agent_bridge.biocortex_retrieval.materialization_review_packet.v0")
     {
         return Err(format!(
-            "unexpected materialization review packet schema at {}",
-            path.display()
+            "unexpected materialization review packet schema at {source}"
         ));
     }
     if !palace_json_bool_at(&packet, &["read_only"])
@@ -1016,10 +1016,7 @@ fn load_palace_materialization_review_packet(path: &FsPath) -> Result<Value, Str
         || palace_json_bool_at(&packet, &["approval_writes_allowed"])
         || palace_json_bool_at(&packet, &["can_materialize_edges"])
     {
-        return Err(format!(
-            "materialization review packet at {} is not read-only",
-            path.display()
-        ));
+        return Err(format!("materialization review packet at {source} is not read-only"));
     }
     if packet
         .get("candidates")
@@ -1030,12 +1027,34 @@ fn load_palace_materialization_review_packet(path: &FsPath) -> Result<Value, Str
                 .any(palace_materialization_review_candidate_has_write_signal)
         })
     {
-        return Err(format!(
-            "materialization review packet at {} is not read-only",
-            path.display()
-        ));
+        return Err(format!("materialization review packet at {source} is not read-only"));
     }
     Ok(packet)
+}
+
+fn load_palace_materialization_review_packet(path: &FsPath) -> Result<Value, String> {
+    let raw = fs::read_to_string(path)
+        .map_err(|e| format!("read materialization review packet {}: {e}", path.display()))?;
+    parse_palace_materialization_review_packet(&raw, &path.display().to_string())
+}
+
+fn load_default_palace_materialization_review_packet(path: &FsPath) -> Result<Value, String> {
+    if std::env::var_os("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON").is_some() {
+        return load_palace_materialization_review_packet(path);
+    }
+
+    load_palace_materialization_review_packet(path).or_else(|err| {
+        if path == FsPath::new(DEFAULT_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON)
+            && err.starts_with("read materialization review packet ")
+        {
+            parse_palace_materialization_review_packet(
+                DEFAULT_PALACE_MATERIALIZATION_REVIEW_PACKET_BODY,
+                DEFAULT_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON,
+            )
+        } else {
+            Err(err)
+        }
+    })
 }
 
 fn palace_review_artifact_for_sources(
@@ -1969,7 +1988,7 @@ async fn api_materialization_review_artifact(
     State(_s): State<AppState>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
     let packet_path = default_palace_materialization_review_packet_path();
-    let packet = load_palace_materialization_review_packet(&packet_path)
+    let packet = load_default_palace_materialization_review_packet(&packet_path)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     Ok(Json(palace_materialization_review_artifact_from_packet(
         &packet,
@@ -5394,6 +5413,65 @@ mod tests {
             }
             None => std::env::remove_var("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON"),
         }
+    }
+
+    #[test]
+    fn palace_materialization_review_artifact_route_uses_embedded_default_without_repo_cwd() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let old_packet =
+            std::env::var_os("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON");
+        let old_cwd = std::env::current_dir().expect("current dir");
+
+        std::env::remove_var("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON");
+        std::env::set_current_dir(dir.path()).expect("set temp cwd");
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let artifact_result = rt.block_on(async {
+            let db_path = dir.path().join("state.db");
+            let store = Arc::new(
+                ab_store::SqliteStore::open(&db_path)
+                    .await
+                    .expect("open sqlite store"),
+            );
+            let state = AppState {
+                store,
+                markdown_root: None,
+                reports_dir: None,
+                recent_clicks: Arc::new(Mutex::new(VecDeque::with_capacity(CLICK_WINDOW))),
+            };
+
+            api_materialization_review_artifact(State(state))
+                .await
+                .map(|Json(artifact)| artifact)
+        });
+
+        std::env::set_current_dir(&old_cwd).expect("restore cwd");
+        match old_packet {
+            Some(value) => {
+                std::env::set_var("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON", value)
+            }
+            None => std::env::remove_var("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON"),
+        }
+
+        let artifact = artifact_result.expect("materialization review artifact");
+        assert_eq!(
+            artifact["schema"],
+            json!("agent_bridge.palace.materialization_review_artifact.v0")
+        );
+        assert_eq!(artifact["read_only"], json!(true));
+        assert_eq!(artifact["writes_memory"], json!(false));
+        assert_eq!(
+            artifact["source"]["packet_path"],
+            json!(DEFAULT_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON)
+        );
+        assert_eq!(
+            artifact["source"]["packet_schema"],
+            json!("agent_bridge.biocortex_retrieval.materialization_review_packet.v0")
+        );
     }
 
     #[test]
