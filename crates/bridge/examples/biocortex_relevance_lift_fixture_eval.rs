@@ -190,6 +190,8 @@ struct GraphEvidenceCaseRow {
     candidate_count: usize,
     induced_edge_count: usize,
     induced_node_count: usize,
+    missing_edge_candidate_count: usize,
+    missing_edge_candidate_relevant_count: usize,
     source_graph_rank: Option<usize>,
     source_graph_score: Option<f64>,
     best_relevant_graph_rank: Option<usize>,
@@ -412,6 +414,13 @@ async fn analyze_graph_evidence(
         let induced_edges = collect_candidate_induced_edges(store, &candidate_keys)
             .await
             .with_context(|| format!("candidate induced edges for graph case {}", idx + 1))?;
+        let missing_edge_candidates =
+            collect_related_key_missing_edges(&baseline_hits, &candidate_keys, &induced_edges);
+        let missing_edge_candidate_count = missing_edge_candidates.len();
+        let missing_edge_candidate_relevant_count = missing_edge_candidates
+            .iter()
+            .filter(|edge| relevant.contains(&edge.from_key) || relevant.contains(&edge.to_key))
+            .count();
         let mut induced_nodes = BTreeSet::<String>::new();
         let mut edge_type_counts = BTreeMap::<String, usize>::new();
         for edge in &induced_edges {
@@ -476,6 +485,40 @@ async fn analyze_graph_evidence(
             source_key,
             &relevant,
         ));
+        if !missing_edge_candidates.is_empty() {
+            let mut materialized_edges = induced_edges.clone();
+            materialized_edges.extend(missing_edge_candidates.iter().cloned());
+            let related_materialized_scores = score_graph_candidates(
+                &candidate_keys,
+                &materialized_edges,
+                GraphScoreVariant::NonContinuityIncident,
+            );
+            variants.push(summarize_graph_scores(
+                "related_mat",
+                &baseline_hits,
+                &baseline_ranking,
+                &related_materialized_scores,
+                source_key,
+                &relevant,
+            ));
+            let bounded_materialized_scores =
+                score_bounded_graph_proximity(store, &candidate_keys, &materialized_edges)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "bounded materialized graph scores for graph case {}",
+                            idx + 1
+                        )
+                    })?;
+            variants.push(summarize_graph_scores(
+                "bounded_mat",
+                &baseline_hits,
+                &baseline_ranking,
+                &bounded_materialized_scores,
+                source_key,
+                &relevant,
+            ));
+        }
 
         out.push(GraphEvidenceCaseRow {
             sample_index: idx,
@@ -486,6 +529,8 @@ async fn analyze_graph_evidence(
             candidate_count: candidate_keys.len(),
             induced_edge_count: induced_edges.len(),
             induced_node_count: induced_nodes.len(),
+            missing_edge_candidate_count,
+            missing_edge_candidate_relevant_count,
             source_graph_rank,
             source_graph_score,
             best_relevant_graph_rank,
@@ -498,6 +543,50 @@ async fn analyze_graph_evidence(
         });
     }
     Ok(out)
+}
+
+fn collect_related_key_missing_edges(
+    baseline_hits: &[ab_store::MemorySearchHit],
+    candidate_keys: &BTreeSet<String>,
+    induced_edges: &[MemoryEdge],
+) -> Vec<MemoryEdge> {
+    let existing_pairs = induced_edges
+        .iter()
+        .map(|edge| undirected_pair_key(&edge.from_key, &edge.to_key))
+        .collect::<HashSet<_>>();
+    let mut seen_pairs = existing_pairs.clone();
+    let mut out = Vec::new();
+    for hit in baseline_hits {
+        let from_key = hit.record.key.trim();
+        if !candidate_keys.contains(from_key) {
+            continue;
+        }
+        for raw_target in &hit.record.related_keys {
+            let to_key = raw_target.trim();
+            if to_key.is_empty() || from_key == to_key || !candidate_keys.contains(to_key) {
+                continue;
+            }
+            let pair_key = undirected_pair_key(from_key, to_key);
+            if !seen_pairs.insert(pair_key) {
+                continue;
+            }
+            out.push(MemoryEdge {
+                from_key: from_key.to_string(),
+                to_key: to_key.to_string(),
+                edge_type: "relates".to_string(),
+                weight: 1.0,
+            });
+        }
+    }
+    out
+}
+
+fn undirected_pair_key(a: &str, b: &str) -> (String, String) {
+    if a <= b {
+        (a.to_string(), b.to_string())
+    } else {
+        (b.to_string(), a.to_string())
+    }
 }
 
 async fn collect_candidate_induced_edges(
@@ -1309,6 +1398,48 @@ fn print_report(
         }
     }
     println!();
+    println!("## Per-case missing-edge materialization candidate rows");
+    println!(
+        "{:<4} {:<34} {:>5} {:>8} {:>8}",
+        "#", "class_label", "cand", "miss_e", "rel_hit"
+    );
+    for row in graph_rows {
+        println!(
+            "{:<4} {:<34} {:>5} {:>8} {:>8}",
+            row.sample_index + 1,
+            truncate(&row.class_label, 34),
+            row.candidate_count,
+            row.missing_edge_candidate_count,
+            row.missing_edge_candidate_relevant_count,
+        );
+    }
+    println!();
+    println!("## Missing-edge materialization candidate summary");
+    let candidate_cases = graph_rows
+        .iter()
+        .filter(|row| row.missing_edge_candidate_count > 0)
+        .count();
+    let relevant_candidate_cases = graph_rows
+        .iter()
+        .filter(|row| row.missing_edge_candidate_relevant_count > 0)
+        .count();
+    let total_candidates = graph_rows
+        .iter()
+        .map(|row| row.missing_edge_candidate_count)
+        .sum::<usize>();
+    let total_relevant_candidates = graph_rows
+        .iter()
+        .map(|row| row.missing_edge_candidate_relevant_count)
+        .sum::<usize>();
+    println!(
+        "cases={} candidate_cases={} total_candidates={} relevant_candidate_cases={} total_relevant_candidates={}",
+        graph_rows.len(),
+        candidate_cases,
+        total_candidates,
+        relevant_candidate_cases,
+        total_relevant_candidates,
+    );
+    println!();
     println!("## Graph side-signal blend simulation summary");
     println!(
         "{:<10} {:>5} {:>7} {:>8} {:>9} {:>8} {:>8} {:>9}",
@@ -1478,6 +1609,12 @@ fn print_report(
     );
     println!(
         "- Treat positive `mrr_d` as a design hint only: this example is read-only and does not approve production graph influence."
+    );
+    println!(
+        "- Missing-edge candidates come only from explicit `related_keys` among baseline candidates. `rel_hit` is post-hoc label evaluation, not an input to candidate generation."
+    );
+    println!(
+        "- Compare `related_mat` and `bounded_mat` with their non-materialized baselines before considering any write-capable edge materializer."
     );
     println!(
         "- In the preflight table, `in_cand=0` points to candidate-generation limits; `dir_e=0` with strong `sem_rank` points to missing materialized graph edges."

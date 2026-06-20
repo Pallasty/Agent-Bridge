@@ -413,6 +413,40 @@ materialization will help; it gives the next slice a clean target for asking
 which missing edge candidates would be safe, explainable, and no-harm before any
 write-capable materializer or T6 influence path is considered.
 
+The first missing-edge candidate-generation simulation used the safest existing
+source: explicit `MemoryRecord.related_keys`. For each fixture case, the local
+evaluator only inspected the baseline candidate set, proposed a missing
+`relates` edge when one candidate's `related_keys` named another baseline
+candidate and no candidate-induced edge already existed, then simulated the
+proposed edges in memory without writing `memory_edges`. Fixture labels were
+used only after scoring to count whether a proposed edge touched a labelled
+relevant memory.
+
+Current result on the missing-graph fixture:
+
+- the latest rerun had no lexical side-signal lift:
+  `mrr_baseline=0.257`, `mrr_reordered=0.257`, `mrr_lift=0.000`,
+  `improved=0`, `worsened=0`, `unchanged=5`;
+- candidate generation found proposals in four of five cases;
+- total proposed missing edges: `16`;
+- only one case had a proposed edge touching a labelled relevant memory;
+- total relevance-touching proposed edges: `1`;
+- simulated materialization remained negative:
+  - `related_mat`: available in four cases, changed four, improved zero,
+    worsened three, average MRR delta `-0.043`;
+  - `bounded_mat`: available in four cases, changed four, improved zero,
+    worsened three, average MRR delta `-0.045`.
+
+Interpretation: explicit `related_keys` are a safe provenance source, but they
+are too broad to justify a write-capable materializer for this fixture. The next
+slice should not build a writer. It should add a stricter read-only candidate
+quality gate first, for example requiring the proposed edge to touch the
+labelled accept set in fixture evaluation, to pass a no-harm simulation, and to
+carry a stronger reason bucket than "candidate related_key exists". For
+production, the equivalent gate must be label-free and based on author intent,
+scope compatibility, edge type, temporal relation, or repeated retrieval
+evidence.
+
 ## Verification
 
 Targeted validation for this slice after `/Data` space was recovered:
