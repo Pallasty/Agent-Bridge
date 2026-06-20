@@ -1115,14 +1115,19 @@ supports_parallel_tool_calls = false
 }
 
 fn codex_tool_approval_tables(raw: &str, toolset: CodexToolset) -> Vec<String> {
-    let mut tables = existing_agent_bridge_tool_tables(raw);
-    let mut seen: HashSet<String> = tables.iter().map(|(name, _)| name.clone()).collect();
-
-    for tool_name in mcp_tools::exposed_tool_names_for(
+    let tool_names = mcp_tools::exposed_tool_names_for(
         Some(toolset.label()),
         Some("codex"),
         Some(toolset.profile_label()),
-    ) {
+    );
+    let desired: HashSet<String> = tool_names.iter().cloned().collect();
+    let mut tables: Vec<(String, String)> = existing_agent_bridge_tool_tables(raw)
+        .into_iter()
+        .filter(|(name, _)| desired.contains(name))
+        .collect();
+    let mut seen: HashSet<String> = tables.iter().map(|(name, _)| name.clone()).collect();
+
+    for tool_name in tool_names {
         if seen.insert(tool_name.clone()) {
             tables.push((
                 tool_name.clone(),
@@ -2037,6 +2042,9 @@ AGENT_BRIDGE_TOOLSET = "codex-lean"
 [mcp_servers.agent-bridge.tools.project_detect]
 approval_mode = "ask"
 
+[mcp_servers.agent-bridge.tools.desktop_verify]
+approval_mode = "ask"
+
 [mcp_servers.other.tools.external_tool]
 approval_mode = "ask"
 
@@ -2063,6 +2071,7 @@ enabled = true
         );
         assert!(out
             .contains("[mcp_servers.agent-bridge.tools.project_detect]\napproval_mode = \"ask\""));
+        assert!(!out.contains("[mcp_servers.agent-bridge.tools.desktop_verify]"));
         assert!(out.contains(
             "[mcp_servers.agent-bridge.tools.memory_search]\napproval_mode = \"approve\""
         ));
