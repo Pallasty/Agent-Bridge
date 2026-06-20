@@ -578,6 +578,38 @@ Interpretation: this preview artifact is a human-review surface only. It makes
 the reason-packet decision inspectable, but it still does not approve automatic
 materialization, production retrieval influence, or memory graph writes.
 
+The next slice turns that preview evidence into a stable export shape without
+leaving the local evaluator boundary. `biocortex_relevance_lift_fixture_eval`
+now accepts `--packet-json` and emits a dedicated read-only review packet
+schema:
+
+- schema: `agent_bridge.biocortex_retrieval.materialization_review_packet.v0`;
+- packet state: `review_state=needs_human_review`,
+  `approval_state=not_approved`, `default_decision=keep_preview_only`;
+- hard boundaries: `read_only=true`, `writes_memory=false`,
+  `writes_edges=false`, `changes_search_order=false`,
+  `approval_writes_allowed=false`, `can_materialize_edges=false`;
+- packet source: evaluator id, fixture path, fixture schema, query-case count;
+- summary: preview-case count, preview-candidate count, reason-packet selected /
+  relevant / blocked counts;
+- candidate rows: case index, class label, optional fixture review intent,
+  endpoint keys, edge type, reason-kind/rationale, top-three rank evidence,
+  endpoint rank movements, alignment, and coverage.
+
+Current result on the missing-graph fixture:
+
+- packet candidate rows: `1`;
+- packet preview cases: `1`;
+- selected packet case: `missing_graph_moderate_case_15`;
+- candidate edge: `palace_review_artifact_v1_slice_committed_20260619` ->
+  `palace_review_artifact_external_patterns_20260618`;
+- approval boundary: `approval_writes_allowed=false`,
+  `can_materialize_edges=false`, `changes_search_order=false`.
+
+Interpretation: the review packet is now a stable handoff artifact for later
+Palace/UI integration, but it is still evidence-only and does not authorize a
+writer or runtime influence.
+
 ## Verification
 
 Targeted validation for this slice after `/Data` space was recovered:
@@ -600,6 +632,11 @@ CARGO_TARGET_DIR=/home/pallasting/.cache/agent-bridge-target-t6-materialization-
 CARGO_TARGET_DIR=/home/pallasting/.cache/agent-bridge-target-t6-materialization-preview cargo test -p ab-bridge memory_biocortex_relevance_lift_missing_graph_fixture_contract -- --nocapture
 CARGO_TARGET_DIR=/home/pallasting/.cache/agent-bridge-target-t6-materialization-preview AB_BIOCORTEX_RS=/Data/CascadeProjects/biocortex-rs cargo run -p ab-bridge --example biocortex_relevance_lift_fixture_eval docs/design/fixtures/memory-biocortex-relevance-lift-missing-graph-cases-2026-06-20.json
 CARGO_TARGET_DIR=/home/pallasting/.cache/agent-bridge-target-t6-materialization-preview cargo check -p ab-bridge --all-targets
+CARGO_TARGET_DIR=/home/pallasting/.cache/agent-bridge-target-t6-materialization-review-packet cargo test -p ab-bridge --example biocortex_relevance_lift_fixture_eval materialization_review_packet_is_read_only_and_redacted -- --nocapture
+CARGO_TARGET_DIR=/home/pallasting/.cache/agent-bridge-target-t6-materialization-review-packet cargo test -p ab-bridge --example biocortex_relevance_lift_fixture_eval reason_packet_gate_emits_read_only_materialization_preview -- --nocapture
+CARGO_TARGET_DIR=/home/pallasting/.cache/agent-bridge-target-t6-materialization-review-packet cargo test -p ab-bridge memory_biocortex_relevance_lift_missing_graph_fixture_contract -- --nocapture
+CARGO_TARGET_DIR=/home/pallasting/.cache/agent-bridge-target-t6-materialization-review-packet cargo run -p ab-bridge --example biocortex_relevance_lift_fixture_eval -- docs/design/fixtures/memory-biocortex-relevance-lift-missing-graph-cases-2026-06-20.json --packet-json
+CARGO_TARGET_DIR=/home/pallasting/.cache/agent-bridge-target-t6-materialization-review-packet cargo check -p ab-bridge --all-targets
 ```
 
 The feature-branch commit hook also ran `cargo check -p ab-bridge --all-targets`.
