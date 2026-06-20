@@ -10,6 +10,8 @@ let commandTimer = undefined;
 let recentTasks = [];
 const processedCommandIds = new Set();
 let processingCommands = false;
+let refreshTimer = undefined;
+let lastStableJson = undefined;
 
 function activate(context) {
   const writeNow = () => writeSnapshot().catch((err) => {
@@ -46,6 +48,13 @@ function activate(context) {
     })
   );
 
+  if (vscode.window.tabGroups) {
+    context.subscriptions.push(
+      vscode.window.tabGroups.onDidChangeTabs(schedule),
+      vscode.window.tabGroups.onDidChangeTabGroups(schedule)
+    );
+  }
+
   loadProcessedCommandIds().finally(() => {
     processCommandsNow();
     commandTimer = setInterval(processCommandsNow, 500);
@@ -56,6 +65,20 @@ function activate(context) {
     }
   }));
 
+  const refreshMs = clampNumber(
+    vscode.workspace.getConfiguration("agentBridge").get("refreshIntervalMs", 10000),
+    0,
+    600000
+  );
+  if (refreshMs > 0) {
+    refreshTimer = setInterval(writeNow, refreshMs);
+    context.subscriptions.push(new vscode.Disposable(() => {
+      if (refreshTimer) {
+        clearInterval(refreshTimer);
+      }
+    }));
+  }
+
   schedule();
 }
 
@@ -65,6 +88,9 @@ function deactivate() {
   }
   if (commandTimer) {
     clearInterval(commandTimer);
+  }
+  if (refreshTimer) {
+    clearInterval(refreshTimer);
   }
 }
 
@@ -88,6 +114,24 @@ async function writeSnapshot() {
     updated_at: new Date().toISOString()
   };
 
+  // Change-gate: periodic refreshes keep the snapshot mtime fresh so the
+  // ide_snapshot MCP tool does not flag it stale during agent-panel focus,
+  // when no editor events fire. If the meaningful content is unchanged, just
+  // bump the mtime instead of rewriting the full payload on every tick.
+  const stable = JSON.stringify({ ...snapshot, updated_at: undefined });
+  if (stable === lastStableJson) {
+    try {
+      const now = new Date();
+      await fs.promises.utimes(target, now, now);
+      return target;
+    } catch (err) {
+      if (!err || err.code !== "ENOENT") {
+        throw err;
+      }
+      // File vanished — fall through to a full write.
+    }
+  }
+  lastStableJson = stable;
   await atomicWriteJson(target, snapshot);
   return target;
 }
@@ -178,18 +222,65 @@ function selectionInfo(editor) {
 }
 
 function openFiles() {
-  return vscode.workspace.textDocuments
-    .filter((doc) => doc.uri.scheme === "file")
-    .map((doc) => ({
+  const activeUri = vscode.window.activeTextEditor
+    ? vscode.window.activeTextEditor.document.uri.toString()
+    : null;
+
+  // Index loaded documents so we can enrich tabs with language/dirty state.
+  const docByUri = new Map();
+  for (const doc of vscode.workspace.textDocuments) {
+    if (doc.uri.scheme === "file") {
+      docByUri.set(doc.uri.toString(), doc);
+    }
+  }
+
+  const seen = new Set();
+  const items = [];
+
+  // Primary source: real editor tabs. Survives agent-panel focus, where
+  // vscode.workspace.textDocuments can be empty even with files open.
+  const groups = (vscode.window.tabGroups && vscode.window.tabGroups.all) || [];
+  for (const group of groups) {
+    for (const tab of group.tabs) {
+      const input = tab.input;
+      const uri = input && input.uri ? input.uri : null; // TabInputText
+      if (!uri || uri.scheme !== "file") {
+        continue;
+      }
+      const key = uri.toString();
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      const doc = docByUri.get(key);
+      items.push({
+        path: uri.fsPath,
+        uri: key,
+        language: doc ? doc.languageId : null,
+        is_dirty: doc ? doc.isDirty : !!tab.isDirty,
+        is_untitled: false,
+        is_active: key === activeUri
+      });
+    }
+  }
+
+  // Union in any loaded documents not surfaced as tabs.
+  for (const [key, doc] of docByUri) {
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    items.push({
       path: doc.uri.fsPath,
-      uri: doc.uri.toString(),
+      uri: key,
       language: doc.languageId,
       is_dirty: doc.isDirty,
       is_untitled: doc.isUntitled,
-      is_active: vscode.window.activeTextEditor
-        ? doc.uri.toString() === vscode.window.activeTextEditor.document.uri.toString()
-        : false
-    }));
+      is_active: key === activeUri
+    });
+  }
+
+  return items;
 }
 
 function diagnostics(root) {
