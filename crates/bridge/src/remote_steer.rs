@@ -411,6 +411,140 @@ pub async fn launch(
     Ok(has_session(target, mux, session).await)
 }
 
+// ── prompt injection profile (OB-3) ─────────────────────────────────────────
+//
+// How a given agent CLI accepts an injected prompt. Maps orca's
+// `promptInjectionMode` onto AB terms (see docs/design/ORCA_BORROW_PLAN §4 OB-3).
+// The mux layer (`Multiplexer`) stays ORTHOGONAL: it describes tmux/rmux, this
+// describes the *CLI's* input contract. The two compose at `send_profiled`.
+
+/// The way a CLI consumes its prompt at steer time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InjectionMode {
+    /// Launch bare, then type the prompt into the running TUI and submit. AB's
+    /// only currently-exercised mode (orca: `flag-interactive`).
+    FlagInteractive,
+    /// Prompt supplied at launch (argv / `--prompt`); a running session does not
+    /// take a fresh prompt via the TUI (orca: `argv` / `flag-prompt`). Runtime
+    /// steer `send` is therefore unsupported for such a backend.
+    LaunchOnly,
+    /// Prompt piped to the process stdin after start (orca: `stdin-after-start`).
+    /// Not expressible via `tmux send-keys`; reserved for a future stdin mux.
+    StdinAfterStart,
+}
+
+/// Per-CLI prompt-injection descriptor consumed by `send_profiled`. `submit_key`
+/// is the tmux key token used to submit after the literal text (re-validated by
+/// `send_key`). `needs_quiet_render` asks the caller to confirm the pane is
+/// input-ready before injecting; `paste_safe` records whether the CLI's composer
+/// tolerates a trailing Enter after bulk literal input — `false` means the
+/// long-prompt / bracketed-paste submit gotcha may apply and a caller may prefer
+/// a split submit. These two flags are advisory (the steer driver / future
+/// quiet-render logic reads them); `mode` and `submit_key` drive `send_profiled`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InjectionProfile {
+    pub mode: InjectionMode,
+    pub submit_key: String,
+    pub needs_quiet_render: bool,
+    pub paste_safe: bool,
+}
+
+impl Default for InjectionProfile {
+    /// The conservative default == AB's historical steer behavior: type the text
+    /// literally, submit with a single `Enter`, no quiet-render gating, paste
+    /// safety NOT assumed. Every unverified backend resolves to this so the
+    /// mechanism can never regress a working path.
+    fn default() -> Self {
+        Self {
+            mode: InjectionMode::FlagInteractive,
+            submit_key: "Enter".to_string(),
+            needs_quiet_render: false,
+            paste_safe: false,
+        }
+    }
+}
+
+/// Classify a backend label (a `Frontend` label like `claude-code`, or a steer
+/// session role) into an [`InjectionProfile`]. **Verify-first discipline**: ONLY
+/// rows confirmed by a real wet-test may diverge from [`InjectionProfile::default`];
+/// every other backend returns the default verbatim, pending per-row
+/// falsification (ORCA_BORROW_PLAN §4 OB-3 C-table). The explicit arms below are
+/// the falsification slots — fill a row's profile only after its wet-test, never
+/// from a hypothesis.
+pub fn injection_profile(backend: &str) -> InjectionProfile {
+    match backend.trim().to_ascii_lowercase().as_str() {
+        // Confirmed path: the primary tested steer flow (type-then-Enter works).
+        // paste/multi-line edge is still unverified, so paste_safe stays false
+        // (identical to default) until a wet-test confirms the composer.
+        "claude-code" | "claudecode" | "claude" => InjectionProfile::default(),
+        // Pending wet-test (C-table ⚠️ rows). Listed as explicit no-ops so the
+        // falsification work has obvious, greppable slots:
+        "codex" | "codex-cli" | "gemini-cli" | "warp" | "auggie" | "local-cli" => {
+            InjectionProfile::default()
+        }
+        // IDE-embedded backends are very likely NOT tmux-steerable at all; their
+        // profile is N/A pending a probe, so default (and the steer launch path
+        // would not target them via tmux in the first place).
+        "codex-ide" | "cursor" => InjectionProfile::default(),
+        _ => InjectionProfile::default(),
+    }
+}
+
+/// Inject `text` into `session` and (when `submit`) submit it per `profile`.
+/// With the default profile (`submit_key == "Enter"`) this is byte-identical to
+/// the historical single-command path. A non-`Enter` submit key types the text
+/// literally (no Enter), then sends the profile's key as a separate validated
+/// key event — the seam for fixing the long-prompt / bracketed-paste gotcha
+/// once a backend's row is wet-tested.
+pub async fn send_profiled(
+    target: &Target,
+    mux: &dyn Multiplexer,
+    session: &str,
+    text: &str,
+    submit: bool,
+    profile: &InjectionProfile,
+) -> Result<(), String> {
+    if profile.mode == InjectionMode::LaunchOnly {
+        return Err(
+            "backend takes its prompt only at launch; runtime steer send is unsupported".to_string(),
+        );
+    }
+    if profile.mode == InjectionMode::StdinAfterStart {
+        return Err(
+            "backend expects stdin injection; not expressible via tmux send-keys".to_string(),
+        );
+    }
+    // Default Enter submit (or no submit): the historical combined command.
+    if !submit || profile.submit_key == "Enter" {
+        let r = run_shell(
+            target,
+            &mux.send_cmd(session, text, submit),
+            Duration::from_secs(15),
+        )
+        .await;
+        return if r.ok() {
+            Ok(())
+        } else {
+            Err(format!("send failed (code {}): {}", r.code, r.stderr.trim()))
+        };
+    }
+    // Non-default submit key: type literally (no Enter), then submit separately.
+    let r = run_shell(
+        target,
+        &mux.send_cmd(session, text, false),
+        Duration::from_secs(15),
+    )
+    .await;
+    if !r.ok() {
+        return Err(format!("send failed (code {}): {}", r.code, r.stderr.trim()));
+    }
+    send_key(target, mux, session, &profile.submit_key).await
+}
+
+/// Inject `text` into `session`, submitting with `Enter` when `submit`. Routes
+/// through [`send_profiled`] with the default profile, so behavior is unchanged
+/// from the historical path; callers that know the backend can use
+/// [`send_profiled`] with [`injection_profile`] to opt into a tuned profile.
 pub async fn send(
     target: &Target,
     mux: &dyn Multiplexer,
@@ -418,21 +552,15 @@ pub async fn send(
     text: &str,
     submit: bool,
 ) -> Result<(), String> {
-    let r = run_shell(
+    send_profiled(
         target,
-        &mux.send_cmd(session, text, submit),
-        Duration::from_secs(15),
+        mux,
+        session,
+        text,
+        submit,
+        &InjectionProfile::default(),
     )
-    .await;
-    if r.ok() {
-        Ok(())
-    } else {
-        Err(format!(
-            "send failed (code {}): {}",
-            r.code,
-            r.stderr.trim()
-        ))
-    }
+    .await
 }
 
 /// Send a named key event (e.g. `Enter`) to auto-answer a gate. `key` is
@@ -993,6 +1121,50 @@ mod tests {
         assert!(launch.contains("-c '/tmp'"));
         assert!(launch.contains("-e 'K=V'"));
         assert!(launch.contains("'codex resume'"));
+    }
+
+    #[test]
+    fn injection_profile_defaults_are_conservative() {
+        let d = InjectionProfile::default();
+        assert_eq!(d.mode, InjectionMode::FlagInteractive);
+        assert_eq!(d.submit_key, "Enter");
+        assert!(!d.needs_quiet_render);
+        assert!(!d.paste_safe);
+    }
+
+    #[test]
+    fn injection_profile_known_backends_resolve_to_default_pending_wettest() {
+        // Until a backend's C-table row is wet-tested, every label resolves to
+        // the conservative default so the mechanism never regresses a path.
+        for b in [
+            "claude-code",
+            "ClaudeCode",
+            "claude",
+            "codex",
+            "codex-cli",
+            "gemini-cli",
+            "warp",
+            "auggie",
+            "local-cli",
+            "codex-ide",
+            "cursor",
+            "totally-unknown-backend",
+            "",
+        ] {
+            assert_eq!(
+                injection_profile(b),
+                InjectionProfile::default(),
+                "backend {b:?} should resolve to default until wet-tested"
+            );
+        }
+    }
+
+    #[test]
+    fn injection_profile_is_case_and_whitespace_insensitive() {
+        assert_eq!(
+            injection_profile("  CLAUDE-CODE  "),
+            injection_profile("claude-code")
+        );
     }
 
     #[test]
