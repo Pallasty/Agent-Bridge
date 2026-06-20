@@ -43,6 +43,23 @@ struct FixtureCase {
     relevant_keys: Vec<String>,
     class_label: Option<String>,
     baseline_fts_rank_observed: Option<u64>,
+    #[serde(default)]
+    materialization_reason_packets: Vec<MaterializationReasonPacket>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MaterializationReasonPacket {
+    from_key: String,
+    to_key: String,
+    edge_type: String,
+    reason_kind: String,
+    rationale: String,
+    #[serde(default = "default_reason_packet_status")]
+    status: String,
+}
+
+fn default_reason_packet_status() -> String {
+    "active".to_string()
 }
 
 #[tokio::main]
@@ -206,6 +223,10 @@ struct GraphEvidenceCaseRow {
     coretrieval_edge_relevant_count: usize,
     coretrieval_edge_blocked_signal_count: usize,
     coretrieval_edge_blocked_shadow_count: usize,
+    reason_packet_edge_selected_count: usize,
+    reason_packet_edge_relevant_count: usize,
+    reason_packet_blocked_packet_count: usize,
+    reason_packet_blocked_shadow_count: usize,
     source_graph_rank: Option<usize>,
     source_graph_score: Option<f64>,
     best_relevant_graph_rank: Option<usize>,
@@ -474,6 +495,19 @@ async fn analyze_graph_evidence(
             .iter()
             .filter(|edge| relevant.contains(&edge.from_key) || relevant.contains(&edge.to_key))
             .count();
+        let reason_packet_gate = select_reason_packet_quality_edges(
+            &baseline_hits,
+            &baseline_ranking,
+            &candidate_keys,
+            &induced_edges,
+            &missing_edge_candidates,
+            &case.materialization_reason_packets,
+        );
+        let reason_packet_edge_relevant_count = reason_packet_gate
+            .selected_edges
+            .iter()
+            .filter(|edge| relevant.contains(&edge.from_key) || relevant.contains(&edge.to_key))
+            .count();
         let mut induced_nodes = BTreeSet::<String>::new();
         let mut edge_type_counts = BTreeMap::<String, usize>::new();
         for edge in &induced_edges {
@@ -623,6 +657,23 @@ async fn analyze_graph_evidence(
                 &relevant,
             ));
         }
+        if !reason_packet_gate.selected_edges.is_empty() {
+            let mut reason_packet_edges = induced_edges.clone();
+            reason_packet_edges.extend(reason_packet_gate.selected_edges.iter().cloned());
+            let reason_packet_scores = score_graph_candidates(
+                &candidate_keys,
+                &reason_packet_edges,
+                GraphScoreVariant::NonContinuityIncident,
+            );
+            variants.push(summarize_graph_scores(
+                "reason_pkt",
+                &baseline_hits,
+                &baseline_ranking,
+                &reason_packet_scores,
+                source_key,
+                &relevant,
+            ));
+        }
 
         out.push(GraphEvidenceCaseRow {
             sample_index: idx,
@@ -649,6 +700,10 @@ async fn analyze_graph_evidence(
             coretrieval_edge_relevant_count,
             coretrieval_edge_blocked_signal_count: coretrieval_gate.blocked_signal_count,
             coretrieval_edge_blocked_shadow_count: coretrieval_gate.blocked_shadow_count,
+            reason_packet_edge_selected_count: reason_packet_gate.selected_edges.len(),
+            reason_packet_edge_relevant_count,
+            reason_packet_blocked_packet_count: reason_packet_gate.blocked_packet_count,
+            reason_packet_blocked_shadow_count: reason_packet_gate.blocked_shadow_count,
             source_graph_rank,
             source_graph_score,
             best_relevant_graph_rank,
@@ -684,6 +739,13 @@ struct LabelFreeCandidateQualityGate {
 struct CoretrievalCandidateQualityGate {
     selected_edges: Vec<MemoryEdge>,
     blocked_signal_count: usize,
+    blocked_shadow_count: usize,
+}
+
+#[derive(Debug, Default)]
+struct ReasonPacketCandidateQualityGate {
+    selected_edges: Vec<MemoryEdge>,
+    blocked_packet_count: usize,
     blocked_shadow_count: usize,
 }
 
@@ -816,6 +878,104 @@ fn select_coretrieval_quality_edges(
         out.selected_edges.push(candidate.clone());
     }
     out
+}
+
+fn select_reason_packet_quality_edges(
+    baseline_hits: &[ab_store::MemorySearchHit],
+    baseline_ranking: &[String],
+    candidate_keys: &BTreeSet<String>,
+    induced_edges: &[MemoryEdge],
+    missing_edge_candidates: &[MemoryEdge],
+    reason_packets: &[MaterializationReasonPacket],
+) -> ReasonPacketCandidateQualityGate {
+    let active_packets = reason_packets
+        .iter()
+        .filter(|packet| reason_packet_valid(packet))
+        .map(|packet| (undirected_pair_key(&packet.from_key, &packet.to_key), packet))
+        .collect::<HashMap<_, _>>();
+    let mut out = ReasonPacketCandidateQualityGate::default();
+    for candidate in missing_edge_candidates {
+        let pair_key = undirected_pair_key(&candidate.from_key, &candidate.to_key);
+        let Some(packet) = active_packets.get(&pair_key) else {
+            out.blocked_packet_count += 1;
+            continue;
+        };
+        if packet.edge_type != candidate.edge_type {
+            out.blocked_packet_count += 1;
+            continue;
+        }
+        if !reason_packet_shadow_top3_aligned(
+            baseline_hits,
+            baseline_ranking,
+            candidate_keys,
+            induced_edges,
+            candidate,
+            packet,
+        ) {
+            out.blocked_shadow_count += 1;
+            continue;
+        }
+        out.selected_edges.push(candidate.clone());
+    }
+    out
+}
+
+fn reason_packet_valid(packet: &MaterializationReasonPacket) -> bool {
+    packet.status == "active"
+        && reason_packet_edge_type_allowed(&packet.edge_type)
+        && !packet.reason_kind.trim().is_empty()
+        && !packet.rationale.trim().is_empty()
+        && !packet.from_key.trim().is_empty()
+        && !packet.to_key.trim().is_empty()
+        && packet.from_key != packet.to_key
+}
+
+fn reason_packet_edge_type_allowed(edge_type: &str) -> bool {
+    matches!(edge_type, "relates" | "implements" | "derived_from")
+}
+
+fn reason_packet_shadow_top3_aligned(
+    baseline_hits: &[ab_store::MemorySearchHit],
+    baseline_ranking: &[String],
+    candidate_keys: &BTreeSet<String>,
+    induced_edges: &[MemoryEdge],
+    candidate: &MemoryEdge,
+    packet: &MaterializationReasonPacket,
+) -> bool {
+    let baseline_prefix = baseline_ranking
+        .iter()
+        .take(3)
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    if baseline_prefix.is_empty() {
+        return false;
+    }
+    let mut trial_edges = induced_edges.to_vec();
+    trial_edges.push(candidate.clone());
+    let trial_scores = score_graph_candidates(
+        candidate_keys,
+        &trial_edges,
+        GraphScoreVariant::NonContinuityIncident,
+    );
+    let graph_signals = graph_scores_to_side_signal(&trial_scores);
+    let (blend_hits, _, blend_available) =
+        ab_store::biocortex_opt_in_apply_side_signal(baseline_hits, &graph_signals, 0.8, 0.0, true);
+    if !blend_available {
+        return false;
+    }
+    let blend_prefix = blend_hits
+        .iter()
+        .take(baseline_prefix.len())
+        .map(|hit| hit.record.key.as_str())
+        .collect::<Vec<_>>();
+    if blend_prefix == baseline_prefix {
+        return true;
+    }
+    blend_prefix.iter().all(|key| {
+        baseline_prefix.contains(key)
+            || *key == packet.from_key.as_str()
+            || *key == packet.to_key.as_str()
+    })
 }
 
 fn label_free_endpoint_metadata_allowed(record: &MemoryRecord) -> bool {
@@ -1939,6 +2099,59 @@ fn print_report(
         coretrieval_relevant,
         coretrieval_blocked_signal,
         coretrieval_blocked_shadow,
+    );
+    println!();
+    println!("## Per-case reason-packet missing-edge gate rows");
+    println!(
+        "{:<4} {:<34} {:>7} {:>7} {:>9} {:>8}",
+        "#", "class_label", "sel", "sel_rel", "blk_pkt", "blk_align"
+    );
+    for row in graph_rows {
+        println!(
+            "{:<4} {:<34} {:>7} {:>7} {:>9} {:>8}",
+            row.sample_index + 1,
+            truncate(&row.class_label, 34),
+            row.reason_packet_edge_selected_count,
+            row.reason_packet_edge_relevant_count,
+            row.reason_packet_blocked_packet_count,
+            row.reason_packet_blocked_shadow_count,
+        );
+    }
+    println!();
+    println!("## Reason-packet missing-edge gate summary");
+    let reason_packet_selected_cases = graph_rows
+        .iter()
+        .filter(|row| row.reason_packet_edge_selected_count > 0)
+        .count();
+    let reason_packet_relevant_cases = graph_rows
+        .iter()
+        .filter(|row| row.reason_packet_edge_relevant_count > 0)
+        .count();
+    let reason_packet_selected = graph_rows
+        .iter()
+        .map(|row| row.reason_packet_edge_selected_count)
+        .sum::<usize>();
+    let reason_packet_relevant = graph_rows
+        .iter()
+        .map(|row| row.reason_packet_edge_relevant_count)
+        .sum::<usize>();
+    let reason_packet_blocked_packet = graph_rows
+        .iter()
+        .map(|row| row.reason_packet_blocked_packet_count)
+        .sum::<usize>();
+    let reason_packet_blocked_shadow = graph_rows
+        .iter()
+        .map(|row| row.reason_packet_blocked_shadow_count)
+        .sum::<usize>();
+    println!(
+        "cases={} selected_cases={} selected_edges={} relevant_cases={} relevant_edges={} blocked_packet={} blocked_align={}",
+        graph_rows.len(),
+        reason_packet_selected_cases,
+        reason_packet_selected,
+        reason_packet_relevant_cases,
+        reason_packet_relevant,
+        reason_packet_blocked_packet,
+        reason_packet_blocked_shadow,
     );
     println!();
     println!("## Graph side-signal blend simulation summary");

@@ -124,7 +124,18 @@
         "bfs_relevant_reached": 0,
         "coactivation_relevant_edge_count": 0,
         "semantic_relevant_rank_observed": 1732
-      }
+      },
+      "materialization_reason_packets": [
+        {
+          "from_key": "palace_review_artifact_v1_slice_committed_20260619",
+          "to_key": "palace_review_artifact_external_patterns_20260618",
+          "edge_type": "relates",
+          "reason_kind": "operator_review_intent",
+          "rationale": "The slice commit record explicitly cites the external-pattern synthesis memory as its design input, making this a reviewer-authored provenance relation candidate for preview only.",
+          "status": "active",
+          "writes_memory": false
+        }
+      ]
     }
   ],
   "recommended_call": {

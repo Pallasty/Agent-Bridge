@@ -522,6 +522,32 @@ co-retrieval telemetry fixture that proves repeated candidate-pair evidence can
 exist, or an operator-authored candidate-reason packet format that records
 explicit materialization intent before any edge write path.
 
+The operator-authored reason-packet prototype then tested that second path, still
+entirely inside the fixture evaluator. The fixture can now attach
+`materialization_reason_packets` to a case. A candidate missing edge is selected
+only when it has an active packet for the same endpoint pair, the packet's edge
+type matches the candidate, the edge type is on a small allow-list
+(`relates`, `implements`, `derived_from`), the packet carries non-empty
+`reason_kind` and `rationale`, and the shadow run either preserves the top-three
+prefix or changes it only by introducing one of the packet endpoints. Labels
+remain evaluation-only.
+
+Current result on the missing-graph fixture:
+
+- selected edges: `1` of `16`, in one of five cases;
+- selected edges touching labelled relevance: `1`;
+- blocked by absent or invalid packet: `15`;
+- blocked by endpoint-alignment shadow: `0`;
+- `reason_pkt`: available in one case, changed one, improved one, worsened
+  zero, average MRR delta `0.667`, average blend coverage `0.100`.
+
+Interpretation: an operator-authored reason packet is the first label-free
+prototype in this sequence that selects the same useful edge as the oracle gate
+on the fixture. It is still not a writer design. The next safe step is a
+read-only materialization preview artifact that shows the candidate edge,
+reason packet, shadow decision, and before/after ranking evidence for human
+approval, without changing retrieval or writing graph edges.
+
 ## Verification
 
 Targeted validation for this slice after `/Data` space was recovered:
