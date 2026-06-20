@@ -2,7 +2,7 @@
 
 Date: 2026-06-20
 
-Status: Draft acceptance notes
+Status: ACCEPTED_G18_VERIFIED_OUTCOME_INGESTION_GATE_OUTPUT_ONLY
 
 ## 1. Required Checks
 
