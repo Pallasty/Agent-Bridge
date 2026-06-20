@@ -376,6 +376,43 @@ separate materialization fixture where the problem is genuinely missing graph
 structure rather than candidate ranking. `bounded_prox` remains useful as a
 negative control in the local evaluator.
 
+The missing-graph materialization fixture was then split out:
+
+```text
+docs/design/fixtures/memory-biocortex-relevance-lift-missing-graph-cases-2026-06-20.json
+```
+
+It keeps the same `query_cases` shape as the existing relevance-lift fixtures so
+the local evaluator can run it directly with an explicit fixture path. Extra
+`missing_graph_contract` and per-case `materialization_observation` fields are
+documentation/test metadata only. They do not change retrieval, register a new
+tool, or write graph edges.
+
+Selection rule: keep only headroom cases where a labelled relevant memory is
+already present in the baseline candidate set, but no candidate-induced direct
+graph edge touches the relevant key. On the current Mac state DB, that yields
+five cases.
+
+Current run:
+
+- relevance lift still comes only from the existing BioCortex lexical side
+  signal: `mrr_baseline=0.247`, `mrr_reordered=0.257`, `mrr_lift=0.010`,
+  `improved=1`, `worsened=0`, `unchanged=4`;
+- graph preflight confirms the fixture boundary:
+  `cases=5`, `missing_candidate=0`, `direct_edge=0`, `bfs_reachable=1`,
+  `coactivation=0`, `semantic_top20=0`;
+- raw graph and bounded graph boosts still fail as influence candidates:
+  `all=-0.083`, `cont_only=-0.083`, `bounded_prox=-0.035`,
+  `incoming=-0.027`, `outgoing=-0.057`, while sparse `non_cont=0.000`.
+
+Interpretation: this fixture is now a better next yardstick than the full
+headroom fixture for materialization design. It proves the current hard subset
+is not blocked by candidate generation, and it avoids mixing in the two cases
+that already have direct relevant graph edges. It does not prove that edge
+materialization will help; it gives the next slice a clean target for asking
+which missing edge candidates would be safe, explainable, and no-harm before any
+write-capable materializer or T6 influence path is considered.
+
 ## Verification
 
 Targeted validation for this slice after `/Data` space was recovered:
@@ -389,7 +426,9 @@ cargo test -p ab-bridge memory_biocortex_ -- --nocapture
 cargo test -p ab-bridge tool_policy_codex_essential_exposes_extras_list -- --nocapture
 cargo test -p ab-bridge --lib memory_biocortex_relevance_lift_hard_query_fixture_contract -- --nocapture
 cargo test -p ab-bridge --lib memory_biocortex_relevance_lift_headroom_fixture_contract -- --nocapture
+cargo test -p ab-bridge memory_biocortex_relevance_lift_missing_graph_fixture_contract -- --nocapture
 AB_BIOCORTEX_RS=/Users/pallasting/.cache/agent-bridge-biocortex-rs-verify cargo run -p ab-bridge --example biocortex_relevance_lift_fixture_eval
+AB_BIOCORTEX_RS=/Users/pallasting/.cache/agent-bridge-biocortex-rs-verify cargo run -p ab-bridge --example biocortex_relevance_lift_fixture_eval docs/design/fixtures/memory-biocortex-relevance-lift-missing-graph-cases-2026-06-20.json
 ```
 
 The feature-branch commit hook also ran `cargo check -p ab-bridge --all-targets`.

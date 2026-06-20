@@ -1,0 +1,152 @@
+{
+  "schema": "agent_bridge.memory_biocortex.relevance_lift_missing_graph_cases.v0",
+  "read_only": true,
+  "purpose": "Reusable local-memory cases for testing whether graph materialization is the right next experiment. These cases are selected from the headroom fixture where a labelled relevant memory is already present in baseline candidates but candidate-induced explicit graph evidence is missing.",
+  "selection_source": {
+    "fixture": "docs/design/fixtures/memory-biocortex-relevance-lift-headroom-cases-2026-06-20.json",
+    "harness": "crates/bridge/examples/biocortex_relevance_lift_fixture_eval.rs",
+    "command": "AB_BIOCORTEX_RS=/Users/pallasting/.cache/agent-bridge-biocortex-rs-verify cargo run -p ab-bridge --example biocortex_relevance_lift_fixture_eval",
+    "observed_on": "2026-06-20",
+    "db": "default agent-bridge state.db on this Mac node",
+    "selection_rule": "include cases whose relevant key is present in the baseline candidate set and direct_relevant_edge_count is 0",
+    "observed_preflight_summary": {
+      "cases": 7,
+      "selected_cases": 5,
+      "missing_candidate": 0,
+      "selected_direct_edge_cases": 0,
+      "selected_bfs_reachable_cases": 1,
+      "selected_coactivation_relevant_cases": 0,
+      "selected_semantic_top20_cases": 0
+    }
+  },
+  "input_boundary": {
+    "raw_queries_are_fixture_inputs": true,
+    "raw_relevant_keys_are_fixture_inputs": true,
+    "raw_queries_may_be_read_by_the_operator_or_mcp_caller": true,
+    "raw_queries_must_not_be_returned_by_summary": true,
+    "raw_relevant_keys_must_not_be_returned_by_summary": true,
+    "content_included": false,
+    "side_signal_raw_included": false,
+    "writes_memory": false,
+    "changes_search_order": false,
+    "materializes_edges": false
+  },
+  "missing_graph_contract": {
+    "baseline_mode": "fts",
+    "baseline_candidate_must_include_relevant": true,
+    "direct_relevant_candidate_edge_must_be_missing": true,
+    "coactivation_relevant_edge_must_be_missing": true,
+    "semantic_top20_relevant_not_required": true,
+    "note": "This fixture is not approval to write graph edges. It is a read-only yardstick for deciding whether a separate materialization fixture or writer is worth designing."
+  },
+  "query_cases": [
+    {
+      "query": "codex 的核心工具集和原生能力重叠,该不该因为很少用就降级",
+      "relevant_keys": [
+        "codex_essential_native_overlap_demotion_superseded_20260618",
+        "mcp_codex_native_overlap_surface_narrowed_deployed_20260617"
+      ],
+      "class_label": "missing_graph_hard_case_4",
+      "review_intent": "Candidate-present but no direct explicit candidate graph edge; useful for testing whether safe materialization can create a rankable relationship.",
+      "source_fixture_class_label": "recall_eval_hard_case_4",
+      "baseline_fts_rank_observed": 7,
+      "materialization_observation": {
+        "relevant_in_candidates": 1,
+        "direct_relevant_edge_count": 0,
+        "bfs_relevant_reached": 0,
+        "coactivation_relevant_edge_count": 0,
+        "semantic_relevant_rank_observed": 62
+      }
+    },
+    {
+      "query": "怎么查看 sibling 推到远端的文件内容又不影响我的工作树",
+      "relevant_keys": [
+        "lesson_git_show_origin_master_read_without_pull_20260518"
+      ],
+      "class_label": "missing_graph_hard_case_5",
+      "review_intent": "Candidate-present git workflow lesson without direct candidate graph support.",
+      "source_fixture_class_label": "recall_eval_hard_case_5",
+      "baseline_fts_rank_observed": 9,
+      "materialization_observation": {
+        "relevant_in_candidates": 1,
+        "direct_relevant_edge_count": 0,
+        "bfs_relevant_reached": 0,
+        "coactivation_relevant_edge_count": 0,
+        "semantic_relevant_rank_observed": 666
+      }
+    },
+    {
+      "query": "多个 agent 在同一个 git 仓库一起干活 HEAD 争用怎么预防",
+      "relevant_keys": [
+        "lesson_multi_agent_shared_git_worktree_head_contention"
+      ],
+      "class_label": "missing_graph_hard_case_7",
+      "review_intent": "Candidate-present multi-agent coordination lesson with BFS proximity but no direct candidate edge.",
+      "source_fixture_class_label": "recall_eval_hard_case_7",
+      "baseline_fts_rank_observed": 3,
+      "materialization_observation": {
+        "relevant_in_candidates": 1,
+        "direct_relevant_edge_count": 0,
+        "bfs_relevant_reached": 1,
+        "coactivation_relevant_edge_count": 0,
+        "semantic_relevant_rank_observed": 1055
+      }
+    },
+    {
+      "query": "EdgeRazor 那篇论文有什么值得我们借鉴的地方",
+      "relevant_keys": [
+        "aiot_edgerazor_borrow_eval_20260526"
+      ],
+      "class_label": "missing_graph_moderate_case_10",
+      "review_intent": "Candidate-present paper-borrowing memory without direct graph support.",
+      "source_fixture_class_label": "recall_eval_moderate_case_10",
+      "baseline_fts_rank_observed": 2,
+      "materialization_observation": {
+        "relevant_in_candidates": 1,
+        "direct_relevant_edge_count": 0,
+        "bfs_relevant_reached": 0,
+        "coactivation_relevant_edge_count": 0,
+        "semantic_relevant_rank_observed": 1515
+      }
+    },
+    {
+      "query": "palace 评审 artifact 从外部工具借鉴了哪些设计模式",
+      "relevant_keys": [
+        "palace_review_artifact_external_patterns_20260618"
+      ],
+      "class_label": "missing_graph_moderate_case_15",
+      "review_intent": "Candidate-present Palace artifact provenance memory without direct candidate graph support.",
+      "source_fixture_class_label": "recall_eval_moderate_case_15",
+      "baseline_fts_rank_observed": 4,
+      "materialization_observation": {
+        "relevant_in_candidates": 1,
+        "direct_relevant_edge_count": 0,
+        "bfs_relevant_reached": 0,
+        "coactivation_relevant_edge_count": 0,
+        "semantic_relevant_rank_observed": 1732
+      }
+    }
+  ],
+  "recommended_call": {
+    "tool": "memory_biocortex_relevance_lift_summary",
+    "args": {
+      "sample_size": 5,
+      "limit": 20,
+      "query_cases": "<copy query_cases from this fixture>",
+      "timeout_ms": 180000
+    }
+  },
+  "expected_summary_contract": {
+    "schema": "agent_bridge.biocortex_retrieval.relevance_lift_eval.v0",
+    "status": "completed",
+    "sampling.query_source": "explicit_cases",
+    "sampling.query_cases_count": 5,
+    "input_contract.raw_queries_included": false,
+    "input_contract.raw_keys_included": false,
+    "input_contract.content_included": false,
+    "input_contract.samples_included": false,
+    "input_contract.first_side_signal_error_included": false,
+    "safety.read_only": true,
+    "safety.changes_prod_retrieval_order": false
+  }
+}
