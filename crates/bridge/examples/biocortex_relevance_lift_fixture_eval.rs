@@ -196,6 +196,87 @@ struct GraphEvidenceCaseRow {
     top_graph_score: Option<f64>,
     distinct_graph_scores: usize,
     edge_type_counts: BTreeMap<String, usize>,
+    variants: Vec<GraphScoreVariantRow>,
+}
+
+#[derive(Debug)]
+struct GraphScoreVariantRow {
+    label: &'static str,
+    scored_node_count: usize,
+    source_rank: Option<usize>,
+    source_score: Option<f64>,
+    best_relevant_rank: Option<usize>,
+    best_relevant_score: Option<f64>,
+    top_relevant: bool,
+    top_score: Option<f64>,
+    distinct_scores: usize,
+}
+
+#[derive(Copy, Clone, Debug)]
+enum GraphScoreVariant {
+    AllIncident,
+    IncomingOnly,
+    OutgoingOnly,
+    NonContinuityIncident,
+    ContinuityIncident,
+}
+
+const GRAPH_SCORE_VARIANTS: &[GraphScoreVariant] = &[
+    GraphScoreVariant::AllIncident,
+    GraphScoreVariant::IncomingOnly,
+    GraphScoreVariant::OutgoingOnly,
+    GraphScoreVariant::NonContinuityIncident,
+    GraphScoreVariant::ContinuityIncident,
+];
+
+impl GraphScoreVariant {
+    fn label(self) -> &'static str {
+        match self {
+            GraphScoreVariant::AllIncident => "all",
+            GraphScoreVariant::IncomingOnly => "incoming",
+            GraphScoreVariant::OutgoingOnly => "outgoing",
+            GraphScoreVariant::NonContinuityIncident => "non_cont",
+            GraphScoreVariant::ContinuityIncident => "cont_only",
+        }
+    }
+
+    fn includes_edge(self, edge: &MemoryEdge) -> bool {
+        match self {
+            GraphScoreVariant::AllIncident
+            | GraphScoreVariant::IncomingOnly
+            | GraphScoreVariant::OutgoingOnly => true,
+            GraphScoreVariant::NonContinuityIncident => !is_continuity_edge_type(&edge.edge_type),
+            GraphScoreVariant::ContinuityIncident => is_continuity_edge_type(&edge.edge_type),
+        }
+    }
+
+    fn apply_edge(self, scores: &mut BTreeMap<String, f64>, edge: &MemoryEdge) {
+        if !self.includes_edge(edge) {
+            return;
+        }
+        match self {
+            GraphScoreVariant::IncomingOnly => {
+                if let Some(score) = scores.get_mut(&edge.to_key) {
+                    *score += edge.weight;
+                }
+            }
+            GraphScoreVariant::OutgoingOnly => {
+                if let Some(score) = scores.get_mut(&edge.from_key) {
+                    *score += edge.weight;
+                }
+            }
+            GraphScoreVariant::AllIncident
+            | GraphScoreVariant::NonContinuityIncident
+            | GraphScoreVariant::ContinuityIncident => {
+                if let Some(score) = scores.get_mut(&edge.from_key) {
+                    *score += edge.weight;
+                }
+                if let Some(score) = scores.get_mut(&edge.to_key) {
+                    *score += edge.weight;
+                }
+            }
+        }
+    }
 }
 
 async fn analyze_graph_evidence(
@@ -245,7 +326,11 @@ async fn analyze_graph_evidence(
             }
         }
 
-        let graph_scores = score_graph_candidates(&candidate_keys, &induced_edges);
+        let graph_scores = score_graph_candidates(
+            &candidate_keys,
+            &induced_edges,
+            GraphScoreVariant::AllIncident,
+        );
         let source_graph_rank = source_key
             .and_then(|source| graph_scores.iter().position(|(key, _)| key == source))
             .map(|pos| pos + 1);
@@ -268,6 +353,14 @@ async fn analyze_graph_evidence(
             .unwrap_or(false);
         let distinct_graph_scores =
             distinct_f64_values(graph_scores.iter().map(|(_, score)| Some(*score)));
+        let variants = GRAPH_SCORE_VARIANTS
+            .iter()
+            .copied()
+            .map(|variant| {
+                let scores = score_graph_candidates(&candidate_keys, &induced_edges, variant);
+                summarize_graph_variant(variant, &scores, source_key, &relevant)
+            })
+            .collect::<Vec<_>>();
 
         out.push(GraphEvidenceCaseRow {
             sample_index: idx,
@@ -286,6 +379,7 @@ async fn analyze_graph_evidence(
             top_graph_score,
             distinct_graph_scores,
             edge_type_counts,
+            variants,
         });
     }
     Ok(out)
@@ -294,18 +388,14 @@ async fn analyze_graph_evidence(
 fn score_graph_candidates(
     candidate_keys: &BTreeSet<String>,
     induced_edges: &[MemoryEdge],
+    variant: GraphScoreVariant,
 ) -> Vec<(String, f64)> {
     let mut scores = candidate_keys
         .iter()
         .map(|key| (key.clone(), 0.0_f64))
         .collect::<BTreeMap<_, _>>();
     for edge in induced_edges {
-        if let Some(score) = scores.get_mut(&edge.from_key) {
-            *score += edge.weight;
-        }
-        if let Some(score) = scores.get_mut(&edge.to_key) {
-            *score += edge.weight;
-        }
+        variant.apply_edge(&mut scores, edge);
     }
     let mut out = scores
         .into_iter()
@@ -317,6 +407,54 @@ fn score_graph_candidates(
             .then_with(|| a.0.cmp(&b.0))
     });
     out
+}
+
+fn summarize_graph_variant(
+    variant: GraphScoreVariant,
+    scores: &[(String, f64)],
+    source_key: Option<&str>,
+    relevant: &BTreeSet<String>,
+) -> GraphScoreVariantRow {
+    let source_rank = source_key
+        .and_then(|source| scores.iter().position(|(key, _)| key == source))
+        .map(|pos| pos + 1);
+    let source_score = source_key.and_then(|source| {
+        scores
+            .iter()
+            .find(|(key, _)| key == source)
+            .map(|(_, score)| *score)
+    });
+    let (best_relevant_rank, best_relevant_score) = scores
+        .iter()
+        .enumerate()
+        .find(|(_, (key, _))| relevant.contains(key.as_str()))
+        .map(|(idx, (_, score))| (Some(idx + 1), Some(*score)))
+        .unwrap_or((None, None));
+    let top_score = scores.first().map(|(_, score)| *score);
+    let top_relevant = scores
+        .first()
+        .map(|(key, score)| *score > 0.0 && relevant.contains(key.as_str()))
+        .unwrap_or(false);
+    let distinct_scores = distinct_f64_values(scores.iter().map(|(_, score)| Some(*score)));
+
+    GraphScoreVariantRow {
+        label: variant.label(),
+        scored_node_count: scores.len(),
+        source_rank,
+        source_score,
+        best_relevant_rank,
+        best_relevant_score,
+        top_relevant,
+        top_score,
+        distinct_scores,
+    }
+}
+
+fn is_continuity_edge_type(edge_type: &str) -> bool {
+    matches!(
+        edge_type,
+        "evolved" | "derived_from" | "supersedes" | "updates" | "corrects" | "caused_by"
+    )
 }
 
 async fn analyze_side_signal(
@@ -775,6 +913,28 @@ fn print_report(
         );
     }
     println!();
+    println!("## Per-case memory graph scoring variant rows");
+    println!(
+        "{:<4} {:<34} {:<10} {:>6} {:>10} {:>10} {:>8} {:>8} {:>8}",
+        "#", "class_label", "variant", "scored", "src", "rel", "top_rel", "top_g", "distinct"
+    );
+    for row in graph_rows {
+        for variant in &row.variants {
+            println!(
+                "{:<4} {:<34} {:<10} {:>6} {:>10} {:>10} {:>8} {:>8} {:>8}",
+                row.sample_index + 1,
+                truncate(&row.class_label, 34),
+                variant.label,
+                variant.scored_node_count,
+                graph_rank_score(variant.source_rank, variant.source_score),
+                graph_rank_score(variant.best_relevant_rank, variant.best_relevant_score),
+                variant.top_relevant,
+                opt_f64(variant.top_score),
+                variant.distinct_scores,
+            );
+        }
+    }
+    println!();
     println!("## Interpretation");
     println!(
         "- If `match` is low or `cov` is below the threshold, fix side-signal coverage before tuning rank blend."
@@ -805,6 +965,12 @@ fn print_report(
     );
     println!(
         "- If graph evidence exists but `top_rel=false`, the store has usable edge signal but needs better weighting, edge-type filtering, or directionality before it can influence ranking."
+    );
+    println!(
+        "- Compare graph variants: `incoming` and `outgoing` test directionality, while `non_cont` excludes continuity/provenance edge types and `cont_only` isolates them."
+    );
+    println!(
+        "- If only `cont_only` scores many nodes and still misses relevant keys, continuity edges are useful context but too noisy for direct rank influence."
     );
 }
 

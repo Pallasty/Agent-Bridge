@@ -276,6 +276,30 @@ promotes distractors. The next useful design slice is to diagnose edge-type
 semantics, directionality, temporal weighting, and source/accept-set proximity
 before feeding graph evidence into the BioCortex side-signal adapter.
 
+The follow-up graph scoring variant run split the same candidate-induced edges
+into five read-only projections: all incident edges, incoming-only edges,
+outgoing-only edges, non-continuity/provenance edges, and continuity/provenance
+edges only. The observed pattern was sharper:
+
+- `incoming`/`outgoing` did not make the graph ranker generally relevant; both
+  still missed the relevant key at the top in all seven cases;
+- `cont_only` covered many nodes, but behaved like the all-edge score and still
+  promoted distractors;
+- `non_cont` was sparse, scoring 0, 2, 4, or 5 nodes depending on the case, but
+  it was the only projection that put a relevant key at graph rank 1, in cases
+  #5 and #7;
+- cases #3, #4, and #6 had no non-continuity candidate-induced graph signal at
+  all, so they cannot benefit from a non-continuity graph boost without better
+  edge materialization.
+
+Interpretation: directionality alone is not the missing piece. Continuity and
+provenance edges (`evolved`, `derived_from`, and related maintenance edges) are
+useful context for explainability, but too noisy for direct rank influence in
+this fixture. A future adapter payload should treat non-continuity edges as the
+first rank-signal candidate and continuity/provenance edges as auxiliary
+evidence or a capped prior, while keeping zero-coverage cases explicitly
+visible.
+
 ## Verification
 
 Targeted validation for this slice after `/Data` space was recovered:
