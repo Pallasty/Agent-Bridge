@@ -5758,7 +5758,7 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_pr
     );
     assert_eq!(
         execution_preflight["source_verified_outcome_ingestion_gate_verdict"],
-        "ready_for_verified_outcome_ingestion_execution"
+        "ready_for_verified_outcome_admission"
     );
     assert_eq!(
         execution_preflight["verified_outcome_ingestion_execution_decision_schema"],
@@ -6969,7 +6969,7 @@ fn explicit_verified_outcome_ingestion_execution_decision() -> Value {
         "execution_reason": "verified_outcome_ingestion_gate_package_is_scoped_and_ready_for_separate_commit_execution",
         "source_world_verdict": "not_verified",
         "verified_world_verdict": "verified",
-        "reviewed_verified_outcome_ingestion_gate_verdict": "ready_for_verified_outcome_ingestion_execution",
+        "reviewed_verified_outcome_ingestion_gate_verdict": "ready_for_verified_outcome_admission",
         "verified_outcome_package_confirmed": true,
         "ingestion_gate_output_confirmed": true,
         "reviewer_attestation_present": true,

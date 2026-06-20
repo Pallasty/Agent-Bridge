@@ -9495,19 +9495,19 @@ pub fn build_interaction_feedback_runtime_executor_verified_outcome_ingestion_ex
     }
     if ingestion_gate_schema_ok
         && ingestion_gate["verified_outcome_ingestion_gate_verdict"]
-            != "ready_for_verified_outcome_ingestion_execution"
+            != "ready_for_verified_outcome_admission"
     {
         failure_reasons.push("source_verified_outcome_ingestion_gate_not_ready".to_string());
     }
     if ingestion_gate_schema_ok
-        && ingestion_gate["next_allowed_gate"] != "verified_outcome_ingestion_execution"
+        && ingestion_gate["next_allowed_gate"] != "verified_outcome_admission_gate"
     {
         failure_reasons
             .push("source_verified_outcome_ingestion_gate_next_gate_mismatch".to_string());
     }
-    if ingestion_gate_schema_ok && gate["ready_for_verified_outcome_ingestion_execution"] != true {
+    if ingestion_gate_schema_ok && gate["ready_for_verified_outcome_admission"] != true {
         failure_reasons
-            .push("source_gate_not_ready_for_verified_outcome_ingestion_execution".to_string());
+            .push("source_gate_not_ready_for_verified_outcome_admission".to_string());
     }
     if ingestion_gate_schema_ok && gate["previous_world_verdict"] != "not_verified" {
         failure_reasons.push("source_previous_world_verdict_must_be_not_verified".to_string());
@@ -9516,11 +9516,12 @@ pub fn build_interaction_feedback_runtime_executor_verified_outcome_ingestion_ex
         failure_reasons.push("source_verified_world_verdict_must_be_verified".to_string());
     }
     if ingestion_gate_schema_ok
-        && (gate["verified_outcome_package_emitted_by_this_tool"] != true
+        && (gate["verified_outcome_admission_package_emitted_by_this_tool"] != true
             || gate["verified_outcome_ingestion_gate_output_only"] != true
             || gate["verified_outcome_ingested_by_this_tool"] != false
             || gate["world_verdict_persisted_by_this_tool"] != false
             || gate["durable_outcome_record_written_by_this_tool"] != false
+            || gate["store_write_allowed"] != false
             || gate["memory_write_allowed"] != false
             || gate["outcome_ingestion_allowed"] != false)
     {
@@ -9542,7 +9543,7 @@ pub fn build_interaction_feedback_runtime_executor_verified_outcome_ingestion_ex
         && (gate_guardrails["read_only"] != true
             || gate_guardrails["writes_state"] != false
             || gate_guardrails["performs_verified_outcome_ingestion"] != false
-            || gate_guardrails["verified_outcome_ingestion_allowed"] != false
+            || gate_guardrails["store_write_allowed"] != false
             || gate_guardrails["persists_world_verdict"] != false
             || gate_guardrails["persists_outcome_record"] != false)
     {
@@ -9550,10 +9551,11 @@ pub fn build_interaction_feedback_runtime_executor_verified_outcome_ingestion_ex
             .push("source_verified_outcome_ingestion_guardrails_not_protective".to_string());
     }
     if ingestion_gate_schema_ok
-        && (gate_contract["may_enter_verified_outcome_ingestion_execution_after_gate"] != true
-            || gate_contract["require_separate_verified_outcome_ingestion_execution"] != true
+        && (gate_contract["may_enter_verified_outcome_admission_gate_after_ingestion_decision"] != true
+            || gate_contract["require_separate_verified_outcome_admission_gate"] != true
             || gate_contract["do_not_ingest_outcome"] != true
             || gate_contract["do_not_write_memory"] != true
+            || gate_contract["do_not_write_store"] != true
             || gate_contract["do_not_persist_world_verdict"] != true
             || gate_contract["do_not_persist_outcome_record"] != true)
     {
@@ -9595,7 +9597,7 @@ pub fn build_interaction_feedback_runtime_executor_verified_outcome_ingestion_ex
     }
     if execution_schema_ok
         && execution_decision["reviewed_verified_outcome_ingestion_gate_verdict"]
-            != "ready_for_verified_outcome_ingestion_execution"
+            != "ready_for_verified_outcome_admission"
     {
         failure_reasons
             .push("verified_outcome_ingestion_execution_must_review_ready_g18_gate".to_string());

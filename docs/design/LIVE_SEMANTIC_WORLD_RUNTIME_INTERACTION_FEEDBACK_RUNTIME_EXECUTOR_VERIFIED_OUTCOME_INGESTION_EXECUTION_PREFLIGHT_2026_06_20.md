@@ -10,6 +10,7 @@ G19 adds the next narrow preflight after G18:
 
 ```text
 verified outcome ingestion gate
+  -> verified outcome admission gate package
   -> verified outcome ingestion execution preflight
   -> verified outcome ingestion execution commit
 ```
@@ -28,12 +29,12 @@ records, write memory, register MCP tools, or query a live runtime.
 The source gate must be G18:
 
 - schema `agent_bridge.lswr.interaction_feedback_runtime_executor_verified_outcome_ingestion_gate.v0`;
-- `verified_outcome_ingestion_gate_verdict=ready_for_verified_outcome_ingestion_execution`;
-- `next_allowed_gate=verified_outcome_ingestion_execution`;
-- `ready_for_verified_outcome_ingestion_execution=true`;
+- `verified_outcome_ingestion_gate_verdict=ready_for_verified_outcome_admission`;
+- `next_allowed_gate=verified_outcome_admission_gate`;
+- `ready_for_verified_outcome_admission=true`;
 - `previous_world_verdict=not_verified`;
 - `verified_world_verdict=verified`;
-- `verified_outcome_package_emitted_by_this_tool=true`;
+- `verified_outcome_admission_package_emitted_by_this_tool=true`;
 - `verified_outcome_ingestion_gate_output_only=true`;
 - no write, memory, ingestion, world-verdict persistence, store, or MCP surface
   allowed by the source.
@@ -50,7 +51,7 @@ Required decision properties:
 - `decision=approved_for_verified_outcome_ingestion_execution_preflight`;
 - `source_world_verdict=not_verified`;
 - `verified_world_verdict=verified`;
-- `reviewed_verified_outcome_ingestion_gate_verdict=ready_for_verified_outcome_ingestion_execution`;
+- `reviewed_verified_outcome_ingestion_gate_verdict=ready_for_verified_outcome_admission`;
 - `verified_outcome_package_confirmed=true`;
 - `ingestion_gate_output_confirmed=true`;
 - `reviewer_attestation_present=true`;
