@@ -300,6 +300,31 @@ first rank-signal candidate and continuity/provenance edges as auxiliary
 evidence or a capped prior, while keeping zero-coverage cases explicitly
 visible.
 
+The next read-only simulation normalized each graph-variant score into a
+`0..1` opt-in side signal, then fed it through the existing
+`biocortex_opt_in_apply_side_signal` blend function with alpha `0.8` and
+coverage threshold `0.0` so sparse graph signals could be measured. This tests
+whether graph evidence is immediately useful as a rank boost without changing
+production retrieval.
+
+Current result:
+
+- `all` changed six cases and worsened three, with average MRR delta `-0.060`;
+- `cont_only` matched that negative pattern: six changed, three worsened, MRR
+  delta `-0.060`;
+- `incoming` was less harmful but still negative: one worsened, MRR delta
+  `-0.019`;
+- `outgoing` worsened three, MRR delta `-0.040`;
+- `non_cont` was safest but not useful yet: four cases had available sparse
+  signal, three changed order, none improved, none worsened, MRR delta `0.000`.
+
+Interpretation: even the promising non-continuity projection is not ready to
+become adapter influence by simple normalized-score blending. The graph evidence
+line should now focus on a better graph feature, such as source/accept-set
+proximity, edge-type-specific caps, or materializing co-retrieval/semantic
+neighbor edges for the zero-signal cases. Do not wire raw graph incident scores
+into BioCortex adapter influence yet.
+
 ## Verification
 
 Targeted validation for this slice after `/Data` space was recovered:

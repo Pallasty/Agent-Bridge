@@ -210,6 +210,12 @@ struct GraphScoreVariantRow {
     top_relevant: bool,
     top_score: Option<f64>,
     distinct_scores: usize,
+    blend_available: bool,
+    blend_coverage: f64,
+    baseline_first_relevant_rank: Option<usize>,
+    blend_first_relevant_rank: Option<usize>,
+    blend_rr_delta: f64,
+    blend_order_changed: bool,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -290,6 +296,10 @@ async fn analyze_graph_evidence(
             .memory_search(&case.query, &[], limit)
             .await
             .with_context(|| format!("baseline memory_search for graph case {}", idx + 1))?;
+        let baseline_ranking = baseline_hits
+            .iter()
+            .map(|hit| hit.record.key.clone())
+            .collect::<Vec<_>>();
         let candidate_keys = baseline_hits
             .iter()
             .map(|hit| hit.record.key.clone())
@@ -358,7 +368,14 @@ async fn analyze_graph_evidence(
             .copied()
             .map(|variant| {
                 let scores = score_graph_candidates(&candidate_keys, &induced_edges, variant);
-                summarize_graph_variant(variant, &scores, source_key, &relevant)
+                summarize_graph_variant(
+                    variant,
+                    &baseline_hits,
+                    &baseline_ranking,
+                    &scores,
+                    source_key,
+                    &relevant,
+                )
             })
             .collect::<Vec<_>>();
 
@@ -411,6 +428,8 @@ fn score_graph_candidates(
 
 fn summarize_graph_variant(
     variant: GraphScoreVariant,
+    baseline_hits: &[ab_store::MemorySearchHit],
+    baseline_ranking: &[String],
     scores: &[(String, f64)],
     source_key: Option<&str>,
     relevant: &BTreeSet<String>,
@@ -436,6 +455,18 @@ fn summarize_graph_variant(
         .map(|(key, score)| *score > 0.0 && relevant.contains(key.as_str()))
         .unwrap_or(false);
     let distinct_scores = distinct_f64_values(scores.iter().map(|(_, score)| Some(*score)));
+    let graph_signals = graph_scores_to_side_signal(scores);
+    let (blend_hits, blend_summary, blend_available) =
+        ab_store::biocortex_opt_in_apply_side_signal(baseline_hits, &graph_signals, 0.8, 0.0, true);
+    let blend_ranking = blend_hits
+        .iter()
+        .map(|hit| hit.record.key.clone())
+        .collect::<Vec<_>>();
+    let baseline_first_relevant_rank = first_relevant_rank(baseline_ranking, relevant);
+    let blend_first_relevant_rank = first_relevant_rank(&blend_ranking, relevant);
+    let blend_rr_delta =
+        reciprocal_rank(blend_first_relevant_rank) - reciprocal_rank(baseline_first_relevant_rank);
+    let blend_order_changed = baseline_ranking != blend_ranking.as_slice();
 
     GraphScoreVariantRow {
         label: variant.label(),
@@ -447,7 +478,40 @@ fn summarize_graph_variant(
         top_relevant,
         top_score,
         distinct_scores,
+        blend_available,
+        blend_coverage: blend_summary.coverage,
+        baseline_first_relevant_rank,
+        blend_first_relevant_rank,
+        blend_rr_delta,
+        blend_order_changed,
     }
+}
+
+fn graph_scores_to_side_signal(scores: &[(String, f64)]) -> Vec<BioCortexRetrievalOptInSideSignal> {
+    let max_score = scores
+        .iter()
+        .map(|(_, score)| *score)
+        .filter(|score| score.is_finite() && *score > 0.0)
+        .fold(0.0_f64, f64::max);
+    if max_score <= 0.0 {
+        return Vec::new();
+    }
+    scores
+        .iter()
+        .filter_map(|(key, score)| {
+            if !score.is_finite() || *score <= 0.0 {
+                return None;
+            }
+            Some(BioCortexRetrievalOptInSideSignal {
+                candidate_key: key.clone(),
+                score: (*score / max_score).clamp(0.0, 1.0) as f32,
+            })
+        })
+        .collect()
+}
+
+fn reciprocal_rank(rank: Option<usize>) -> f64 {
+    rank.map(|rank| 1.0 / rank as f64).unwrap_or(0.0)
 }
 
 fn is_continuity_edge_type(edge_type: &str) -> bool {
@@ -915,13 +979,26 @@ fn print_report(
     println!();
     println!("## Per-case memory graph scoring variant rows");
     println!(
-        "{:<4} {:<34} {:<10} {:>6} {:>10} {:>10} {:>8} {:>8} {:>8}",
-        "#", "class_label", "variant", "scored", "src", "rel", "top_rel", "top_g", "distinct"
+        "{:<4} {:<34} {:<10} {:>6} {:>10} {:>10} {:>8} {:>8} {:>8} {:>6} {:>6} {:>7} {:>6} {:>7}",
+        "#",
+        "class_label",
+        "variant",
+        "scored",
+        "src",
+        "rel",
+        "top_rel",
+        "top_g",
+        "distinct",
+        "base",
+        "blend",
+        "rr_d",
+        "avail",
+        "cov"
     );
     for row in graph_rows {
         for variant in &row.variants {
             println!(
-                "{:<4} {:<34} {:<10} {:>6} {:>10} {:>10} {:>8} {:>8} {:>8}",
+                "{:<4} {:<34} {:<10} {:>6} {:>10} {:>10} {:>8} {:>8} {:>8} {:>6} {:>6} {:>7} {:>6} {:>7}",
                 row.sample_index + 1,
                 truncate(&row.class_label, 34),
                 variant.label,
@@ -931,8 +1008,62 @@ fn print_report(
                 variant.top_relevant,
                 opt_f64(variant.top_score),
                 variant.distinct_scores,
+                opt_usize(variant.baseline_first_relevant_rank),
+                opt_usize(variant.blend_first_relevant_rank),
+                format!("{:.3}", variant.blend_rr_delta),
+                variant.blend_available,
+                format!("{:.3}", variant.blend_coverage),
             );
         }
+    }
+    println!();
+    println!("## Graph side-signal blend simulation summary");
+    println!(
+        "{:<10} {:>5} {:>7} {:>8} {:>9} {:>8} {:>8} {:>9}",
+        "variant", "avail", "changed", "improved", "worsened", "same", "mrr_d", "avg_cov"
+    );
+    for variant in GRAPH_SCORE_VARIANTS {
+        let label = variant.label();
+        let rows = graph_rows
+            .iter()
+            .filter_map(|row| {
+                row.variants
+                    .iter()
+                    .find(|candidate| candidate.label == label)
+            })
+            .collect::<Vec<_>>();
+        let available = rows.iter().filter(|row| row.blend_available).count();
+        let changed = rows.iter().filter(|row| row.blend_order_changed).count();
+        let improved = rows
+            .iter()
+            .filter(|row| row.blend_rr_delta > f64::EPSILON)
+            .count();
+        let worsened = rows
+            .iter()
+            .filter(|row| row.blend_rr_delta < -f64::EPSILON)
+            .count();
+        let same = rows.len().saturating_sub(improved + worsened);
+        let mrr_delta = if rows.is_empty() {
+            0.0
+        } else {
+            rows.iter().map(|row| row.blend_rr_delta).sum::<f64>() / rows.len() as f64
+        };
+        let avg_coverage = if rows.is_empty() {
+            0.0
+        } else {
+            rows.iter().map(|row| row.blend_coverage).sum::<f64>() / rows.len() as f64
+        };
+        println!(
+            "{:<10} {:>5} {:>7} {:>8} {:>9} {:>8} {:>8} {:>9}",
+            label,
+            available,
+            changed,
+            improved,
+            worsened,
+            same,
+            format!("{:.3}", mrr_delta),
+            format!("{:.3}", avg_coverage),
+        );
     }
     println!();
     println!("## Interpretation");
@@ -971,6 +1102,12 @@ fn print_report(
     );
     println!(
         "- If only `cont_only` scores many nodes and still misses relevant keys, continuity edges are useful context but too noisy for direct rank influence."
+    );
+    println!(
+        "- Graph blend simulation normalizes graph scores to `0..1`, applies the existing side-signal blend with alpha `0.8`, and uses threshold `0.0` so sparse graph signals can be tested."
+    );
+    println!(
+        "- Treat positive `mrr_d` as a design hint only: this example is read-only and does not approve production graph influence."
     );
 }
 
