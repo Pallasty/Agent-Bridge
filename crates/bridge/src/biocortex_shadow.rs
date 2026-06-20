@@ -8495,6 +8495,10 @@ pub struct RelevanceLiftEvalOptions {
     pub sample_size: usize,
     /// Optional `kind` filter for the sampled memories.
     pub kind: Option<String>,
+    /// Optional explicit downstream-query cases. When present, these replace
+    /// self-retrieval sampling so the yardstick can measure harder recall
+    /// tasks without deriving the query from the target memory.
+    pub query_cases: Vec<RelevanceLiftQueryCase>,
     /// Sort used to pick the head sample.
     pub sort: MemoryListSort,
     /// `memory_search` candidate limit per derived query. Clamped 5..=100.
@@ -8518,6 +8522,14 @@ pub struct RelevanceLiftEvalOptions {
     pub checkout: Option<PathBuf>,
     /// Per side-signal call timeout (ms). Clamped 1_000..=600_000.
     pub timeout_ms: u64,
+}
+
+/// Explicit relevance case for the read-only lift yardstick.
+#[derive(Debug, Clone)]
+pub struct RelevanceLiftQueryCase {
+    pub query: String,
+    pub relevant_keys: Vec<String>,
+    pub class_label: Option<String>,
 }
 
 /// Strip a leading YAML frontmatter block (`---\n...\n---`) if present.
@@ -8607,7 +8619,11 @@ pub async fn biocortex_retrieval_relevance_lift_eval(
     let limit = opts.limit.clamp(5, 100);
     let query_chars = opts.query_chars.clamp(16, 400);
     let or_terms = opts.or_terms.min(24);
-    let query_mode = if or_terms > 0 { "or_broad" } else { "and_precise" };
+    let query_mode = if or_terms > 0 {
+        "or_broad"
+    } else {
+        "and_precise"
+    };
     let timeout_ms = opts.timeout_ms.clamp(1_000, 600_000);
     let coverage_threshold = opts.coverage_threshold.clamp(0.0, 1.0);
     let blend_alpha = if opts.blend_alpha.is_finite() && opts.blend_alpha >= 0.0 {
@@ -8621,18 +8637,49 @@ pub async fn biocortex_retrieval_relevance_lift_eval(
         MemoryListSort::Newest => "newest",
         MemoryListSort::ByImportance => "by_importance",
     };
+    let explicit_cases = opts
+        .query_cases
+        .iter()
+        .filter_map(|case| {
+            let query = case.query.trim().to_string();
+            let relevant_keys = case
+                .relevant_keys
+                .iter()
+                .map(|key| key.trim())
+                .filter(|key| !key.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            if query.is_empty() || relevant_keys.is_empty() {
+                None
+            } else {
+                Some(RelevanceLiftQueryCase {
+                    query,
+                    relevant_keys,
+                    class_label: case.class_label.clone(),
+                })
+            }
+        })
+        .take(sample_size)
+        .collect::<Vec<_>>();
+    let explicit_case_count = explicit_cases.len();
+    let invalid_query_case_count = opts.query_cases.len().saturating_sub(explicit_case_count);
+    let using_explicit_cases = explicit_case_count > 0;
 
-    let sampled: Vec<MemoryRecord> = match store
-        .list_memories(opts.kind.as_deref(), opts.sort, sample_size as u32)
-        .await
-    {
-        Ok(rows) => rows,
-        Err(err) => {
-            return json!({
-                "schema": BIOCORTEX_RETRIEVAL_RELEVANCE_LIFT_EVAL_SCHEMA,
-                "status": "list_memories_failed",
-                "error": err.to_string(),
-            });
+    let sampled: Vec<MemoryRecord> = if using_explicit_cases {
+        Vec::new()
+    } else {
+        match store
+            .list_memories(opts.kind.as_deref(), opts.sort, sample_size as u32)
+            .await
+        {
+            Ok(rows) => rows,
+            Err(err) => {
+                return json!({
+                    "schema": BIOCORTEX_RETRIEVAL_RELEVANCE_LIFT_EVAL_SCHEMA,
+                    "status": "list_memories_failed",
+                    "error": err.to_string(),
+                });
+            }
         }
     };
 
@@ -8642,37 +8689,24 @@ pub async fn biocortex_retrieval_relevance_lift_eval(
     let mut first_side_error: Option<Value> = None;
     let mut empty_query_skipped = 0usize;
 
-    for (idx, record) in sampled.iter().enumerate() {
-        let query = if or_terms > 0 {
-            derive_or_query(&record.content, or_terms)
-        } else {
-            derive_self_retrieval_query(&record.content, query_chars)
-        };
-        if query.trim().is_empty() {
-            empty_query_skipped += 1;
-            continue;
-        }
-
-        let baseline_hits = match store.memory_search(&query, &[], limit).await {
+    for (idx, case) in explicit_cases.iter().enumerate() {
+        let baseline_hits = match store.memory_search(&case.query, &[], limit).await {
             Ok(hits) => hits,
             Err(err) => {
                 sample_rows.push(json!({
                     "sample_index": idx,
-                    "source_key": record.key,
+                    "query_hash": sha256_json(&json!({"query": &case.query})),
                     "status": "baseline_search_failed",
                     "error": err.to_string(),
+                    "relevant_key_count": case.relevant_keys.len(),
+                    "class_label": case.class_label.clone().unwrap_or_else(|| "unlabelled".to_string()),
                 }));
                 continue;
             }
         };
 
-        let mut relevant = BTreeSet::new();
-        relevant.insert(record.key.clone());
-        if opts.include_related {
-            for rk in &record.related_keys {
-                relevant.insert(rk.clone());
-            }
-        }
+        let relevant = case.relevant_keys.iter().cloned().collect::<BTreeSet<_>>();
+        let source_key = case.relevant_keys[0].as_str();
 
         let baseline_candidates = baseline_hits
             .iter()
@@ -8688,9 +8722,9 @@ pub async fn biocortex_retrieval_relevance_lift_eval(
             .collect::<BTreeSet<_>>();
 
         let run = match run_retrieval_side_signal(
-            &query,
+            &case.query,
             &baseline_candidates,
-            Some(record.key.as_str()),
+            Some(source_key),
             opts.checkout.as_deref(),
             timeout_ms,
         )
@@ -8705,10 +8739,12 @@ pub async fn biocortex_retrieval_relevance_lift_eval(
                 }
                 sample_rows.push(json!({
                     "sample_index": idx,
-                    "source_key": record.key,
+                    "query_hash": sha256_json(&json!({"query": &case.query})),
                     "status": "side_signal_unavailable",
                     "side_signal_status": status,
                     "baseline_hit_count": baseline_hits.len(),
+                    "relevant_key_count": relevant.len(),
+                    "class_label": case.class_label.clone().unwrap_or_else(|| "unlabelled".to_string()),
                 }));
                 continue;
             }
@@ -8725,9 +8761,6 @@ pub async fn biocortex_retrieval_relevance_lift_eval(
             })
             .collect::<Vec<_>>();
 
-        // Apply the EXACT production reorder blend. gate_allows_ordering=true is
-        // eval-local: the reordered list is consumed only to measure rank lift —
-        // it is never returned as live recall (see `safety` block below).
         let (reordered_hits, summary, _experimental_available) = biocortex_opt_in_apply_side_signal(
             &baseline_hits,
             &side_signal_scores,
@@ -8745,18 +8778,14 @@ pub async fn biocortex_retrieval_relevance_lift_eval(
             .map(|hit| hit.record.key.clone())
             .collect::<Vec<_>>();
 
-        let lift = releval::sample_lift(
-            &baseline_ranking,
-            &reordered_ranking,
-            &record.key,
-            &relevant,
-        );
+        let lift =
+            releval::sample_lift(&baseline_ranking, &reordered_ranking, source_key, &relevant);
 
         sample_rows.push(json!({
             "sample_index": idx,
-            "source_key": record.key,
-            "kind": record.kind,
-            "query_chars": query.chars().count(),
+            "query_hash": sha256_json(&json!({"query": &case.query})),
+            "class_label": case.class_label.clone().unwrap_or_else(|| "unlabelled".to_string()),
+            "query_chars": case.query.chars().count(),
             "relevant_set_size": relevant.len(),
             "baseline_hit_count": baseline_hits.len(),
             "status": "ok",
@@ -8773,6 +8802,140 @@ pub async fn biocortex_retrieval_relevance_lift_eval(
         lift_samples.push(lift);
     }
 
+    if !using_explicit_cases {
+        for (idx, record) in sampled.iter().enumerate() {
+            let query = if or_terms > 0 {
+                derive_or_query(&record.content, or_terms)
+            } else {
+                derive_self_retrieval_query(&record.content, query_chars)
+            };
+            if query.trim().is_empty() {
+                empty_query_skipped += 1;
+                continue;
+            }
+
+            let baseline_hits = match store.memory_search(&query, &[], limit).await {
+                Ok(hits) => hits,
+                Err(err) => {
+                    sample_rows.push(json!({
+                        "sample_index": idx,
+                        "source_key": record.key,
+                        "status": "baseline_search_failed",
+                        "error": err.to_string(),
+                    }));
+                    continue;
+                }
+            };
+
+            let mut relevant = BTreeSet::new();
+            relevant.insert(record.key.clone());
+            if opts.include_related {
+                for rk in &record.related_keys {
+                    relevant.insert(rk.clone());
+                }
+            }
+
+            let baseline_candidates = baseline_hits
+                .iter()
+                .map(|hit| BioCortexRetrievalCandidate {
+                    key: hit.record.key.clone(),
+                    content: hit.record.content.clone(),
+                })
+                .collect::<Vec<_>>();
+
+            let candidate_keys = baseline_candidates
+                .iter()
+                .map(|c| c.key.as_str())
+                .collect::<BTreeSet<_>>();
+
+            let run = match run_retrieval_side_signal(
+                &query,
+                &baseline_candidates,
+                Some(record.key.as_str()),
+                opts.checkout.as_deref(),
+                timeout_ms,
+            )
+            .await
+            {
+                Ok(run) => run,
+                Err(error) => {
+                    side_signal_unavailable += 1;
+                    let status = safe_side_signal_error_status(&error);
+                    if first_side_error.is_none() {
+                        first_side_error = Some(error);
+                    }
+                    sample_rows.push(json!({
+                        "sample_index": idx,
+                        "source_key": record.key,
+                        "status": "side_signal_unavailable",
+                        "side_signal_status": status,
+                        "baseline_hit_count": baseline_hits.len(),
+                    }));
+                    continue;
+                }
+            };
+
+            let side_signal_scores = run
+                .rows
+                .into_iter()
+                .filter(|row| row.query_id == "q_runtime_shadow")
+                .filter(|row| candidate_keys.contains(row.candidate_key.as_str()))
+                .map(|row| BioCortexRetrievalOptInSideSignal {
+                    candidate_key: row.candidate_key,
+                    score: row.score,
+                })
+                .collect::<Vec<_>>();
+
+            // Apply the EXACT production reorder blend. gate_allows_ordering=true is
+            // eval-local: the reordered list is consumed only to measure rank lift —
+            // it is never returned as live recall (see `safety` block below).
+            let (reordered_hits, summary, _experimental_available) =
+                biocortex_opt_in_apply_side_signal(
+                    &baseline_hits,
+                    &side_signal_scores,
+                    blend_alpha,
+                    coverage_threshold,
+                    true,
+                );
+
+            let baseline_ranking = baseline_hits
+                .iter()
+                .map(|hit| hit.record.key.clone())
+                .collect::<Vec<_>>();
+            let reordered_ranking = reordered_hits
+                .iter()
+                .map(|hit| hit.record.key.clone())
+                .collect::<Vec<_>>();
+
+            let lift = releval::sample_lift(
+                &baseline_ranking,
+                &reordered_ranking,
+                &record.key,
+                &relevant,
+            );
+
+            sample_rows.push(json!({
+                "sample_index": idx,
+                "source_key": record.key,
+                "kind": record.kind,
+                "query_chars": query.chars().count(),
+                "relevant_set_size": relevant.len(),
+                "baseline_hit_count": baseline_hits.len(),
+                "status": "ok",
+                "side_signal_matched": summary.matched_candidate_count,
+                "side_signal_coverage": round3(summary.coverage),
+                "side_signal_gate_available": summary.available,
+                "baseline_rank_of_source": lift.baseline.rank_of_source,
+                "reordered_rank_of_source": lift.reordered.rank_of_source,
+                "rank_delta": lift.rank_delta,
+                "rr_delta": round3(lift.rr_delta),
+                "direction": lift.direction.as_str(),
+                "order_changed": lift.order_changed,
+            }));
+            lift_samples.push(lift);
+        }
+    }
+
     let agg = releval::aggregate_lift(&lift_samples);
 
     json!({
@@ -8783,13 +8946,16 @@ pub async fn biocortex_retrieval_relevance_lift_eval(
         "verdict": agg.verdict.as_str(),
         "sampling": {
             "requested_sample_size": sample_size,
-            "sampled_count": sampled.len(),
+            "sampled_count": if using_explicit_cases { explicit_case_count } else { sampled.len() },
             "evaluated_count": agg.sample_count,
             "side_signal_unavailable": side_signal_unavailable,
             "empty_query_skipped": empty_query_skipped,
+            "query_source": if using_explicit_cases { "explicit_cases" } else { "self_retrieval" },
+            "query_cases_count": explicit_case_count,
+            "invalid_query_cases": invalid_query_case_count,
             "sort": sort_label,
             "kind_filter": opts.kind.clone().map(Value::String).unwrap_or(Value::Null),
-            "head_sample_not_random": true,
+            "head_sample_not_random": !using_explicit_cases,
             "query_mode": query_mode,
             "or_terms": or_terms,
             "query_chars": query_chars,
@@ -8815,6 +8981,7 @@ pub async fn biocortex_retrieval_relevance_lift_eval(
         "first_side_signal_error": first_side_error.unwrap_or(Value::Null),
         "caveats": {
             "self_retrieval_labels_are_proxy": "Query is derived FROM the target memory, so this measures self-identification ranking, not a real downstream recall need. A lift here is necessary-not-sufficient evidence for real-recall lift.",
+            "explicit_query_cases_are_operator_supplied": "When query_source=explicit_cases, relevance labels are supplied by the caller; raw queries and keys are kept out of the summary surface.",
             "head_sample_not_random": "Samples are the head of the chosen sort, not a uniform random draw.",
             "eval_local_reorder_only": "The production reorder blend is applied only to compute rank lift; the reordered list is never returned as live recall.",
             "regressions_reported": "A reorder that demotes the source yields a negative mrr_lift and a 'regression' verdict — never clamped to zero.",

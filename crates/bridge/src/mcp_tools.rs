@@ -77,7 +77,7 @@ use crate::biocortex_shadow::{
     BioCortexRetrievalOptInRuntimeTrialOptions,
     BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions,
     BioCortexRetrievalOptInStoreTrialOptions, BioCortexShadowOptions, RelevanceLiftEvalOptions,
-    BIOCORTEX_CHECKOUT_ENV, BIOCORTEX_RETRIEVAL_DISABLE_ENV,
+    RelevanceLiftQueryCase, BIOCORTEX_CHECKOUT_ENV, BIOCORTEX_RETRIEVAL_DISABLE_ENV,
 };
 #[cfg(feature = "biocortex-retrieval-shadow")]
 use crate::biocortex_shadow::{biocortex_retrieval_shadow_report, BioCortexRetrievalShadowOptions};
@@ -30415,6 +30415,52 @@ impl BioCortexRetrievalRelevanceLiftEvalTool {
     }
 }
 
+fn relevance_lift_query_cases_from_args(args: &Value) -> Vec<RelevanceLiftQueryCase> {
+    args.get("query_cases")
+        .and_then(Value::as_array)
+        .map(|cases| {
+            cases
+                .iter()
+                .filter_map(|case| {
+                    let query = case
+                        .get("query")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|query| !query.is_empty())?
+                        .to_string();
+                    let relevant_keys = case
+                        .get("relevant_keys")
+                        .and_then(Value::as_array)
+                        .map(|keys| {
+                            keys.iter()
+                                .filter_map(Value::as_str)
+                                .map(str::trim)
+                                .filter(|key| !key.is_empty())
+                                .map(str::to_string)
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    if relevant_keys.is_empty() {
+                        return None;
+                    }
+                    let class_label = case
+                        .get("class_label")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|label| !label.is_empty())
+                        .map(str::to_string);
+                    Some(RelevanceLiftQueryCase {
+                        query,
+                        relevant_keys,
+                        class_label,
+                    })
+                })
+                .take(30)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
 #[async_trait]
 impl McpTool for BioCortexRetrievalRelevanceLiftEvalTool {
     fn name(&self) -> &'static str {
@@ -30449,6 +30495,29 @@ impl McpTool for BioCortexRetrievalRelevanceLiftEvalTool {
                     "kind": {
                         "type": "string",
                         "description": "Optional memory kind filter (e.g. 'lesson', 'decision')."
+                    },
+                    "query_cases": {
+                        "type": "array",
+                        "description": "Optional explicit downstream-query relevance cases. When present, these replace self-retrieval sampling. Raw queries and relevant keys are accepted as input but are not echoed in output.",
+                        "items": {
+                            "type": "object",
+                            "required": ["query", "relevant_keys"],
+                            "properties": {
+                                "query": {
+                                    "type": "string",
+                                    "description": "Downstream-style FTS query to evaluate. Output includes only a query hash."
+                                },
+                                "relevant_keys": {
+                                    "type": "array",
+                                    "items": { "type": "string" },
+                                    "description": "Known relevant memory keys for this query. Output includes only counts and rank metrics."
+                                },
+                                "class_label": {
+                                    "type": "string",
+                                    "description": "Optional sanitized bucket label for aggregate review."
+                                }
+                            }
+                        }
                     },
                     "sort": {
                         "type": "string",
@@ -30529,7 +30598,12 @@ impl McpTool for BioCortexRetrievalRelevanceLiftEvalTool {
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(str::to_string);
-        let sort = match args.get("sort").and_then(Value::as_str).unwrap_or("by_importance") {
+        let query_cases = relevance_lift_query_cases_from_args(&args);
+        let sort = match args
+            .get("sort")
+            .and_then(Value::as_str)
+            .unwrap_or("by_importance")
+        {
             "recent" => MemoryListSort::Recent,
             "frequent" => MemoryListSort::Frequent,
             "newest" => MemoryListSort::Newest,
@@ -30578,6 +30652,7 @@ impl McpTool for BioCortexRetrievalRelevanceLiftEvalTool {
             RelevanceLiftEvalOptions {
                 sample_size,
                 kind,
+                query_cases,
                 sort,
                 limit,
                 query_chars,
@@ -35600,6 +35675,7 @@ impl McpTool for MemoryBioCortexRelevanceLiftSummaryTool {
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(str::to_string);
+        let query_cases = relevance_lift_query_cases_from_args(&args);
         let sort = match args
             .get("sort")
             .and_then(Value::as_str)
@@ -35653,6 +35729,7 @@ impl McpTool for MemoryBioCortexRelevanceLiftSummaryTool {
             RelevanceLiftEvalOptions {
                 sample_size,
                 kind,
+                query_cases,
                 sort,
                 limit,
                 query_chars,
@@ -61121,7 +61198,9 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             "purpose": "secret purpose is not raw",
             "verdict": "lift",
             "sampling": {
-                "evaluated_count": 5
+                "evaluated_count": 5,
+                "query_source": "explicit_cases",
+                "query_cases_count": 1
             },
             "metrics": {
                 "mrr_lift": 0.02,
@@ -61144,7 +61223,14 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             "first_side_signal_error": {
                 "raw_key": "secret_error_key",
                 "content": "secret adapter content"
-            }
+            },
+            "query_cases": [
+                {
+                    "query": "secret downstream query",
+                    "relevant_keys": ["secret_relevant_key"],
+                    "class_label": "hard"
+                }
+            ]
         });
         let summary = memory_biocortex_relevance_lift_summary_payload(payload);
 
@@ -61164,8 +61250,11 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(!serialized.contains("secret_lift_key"));
         assert!(!serialized.contains("secret_error_key"));
         assert!(!serialized.contains("secret adapter content"));
+        assert!(!serialized.contains("secret downstream query"));
+        assert!(!serialized.contains("secret_relevant_key"));
         assert!(!serialized.contains("\"samples\":"));
         assert!(!serialized.contains("\"first_side_signal_error\":"));
+        assert!(!serialized.contains("\"query_cases\":"));
     }
 
     #[tokio::test]
