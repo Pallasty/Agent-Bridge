@@ -56,13 +56,15 @@ experiment review. It still reports `runtime_influence_approved=false` and
 
 ## Verification
 
-Targeted validation for this slice:
+Targeted validation for this slice after `/Data` space was recovered:
 
 ```bash
-CARGO_TARGET_DIR=/home/pallasting/.cache/agent-bridge-target-evidence-surfaces cargo test -p ab-bridge --lib memory_biocortex_ -- --nocapture
-CARGO_TARGET_DIR=/home/pallasting/.cache/agent-bridge-target-evidence-surfaces cargo test -p ab-bridge --lib tool_policy_codex_essential_exposes_extras_list -- --nocapture
 git diff --check
+cargo test -p ab-bridge memory_biocortex_ -- --nocapture
+cargo test -p ab-bridge tool_policy_codex_essential_exposes_extras_list -- --nocapture
 ```
+
+The feature-branch commit hook also ran `cargo check -p ab-bridge --all-targets`.
 
 The broad `cargo fmt --check` path is not a clean signal for this slice: the
 same checkout contains pre-existing rustfmt diffs in unrelated files/regions.

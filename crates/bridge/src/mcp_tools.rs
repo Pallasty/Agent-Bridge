@@ -50,8 +50,7 @@ use crate::biocortex_shadow::{
     biocortex_replay_comparison, biocortex_retrieval_opt_in_audit_report,
     biocortex_retrieval_opt_in_authorization_decision_packet,
     biocortex_retrieval_opt_in_batch_diagnostics, biocortex_retrieval_opt_in_dry_run_plan,
-    biocortex_retrieval_opt_in_execution_packet, biocortex_retrieval_relevance_lift_eval,
-    RelevanceLiftEvalOptions,
+    biocortex_retrieval_opt_in_execution_packet,
     biocortex_retrieval_opt_in_gated_batch_diagnostics,
     biocortex_retrieval_opt_in_gated_store_trial, biocortex_retrieval_opt_in_order_diff_packet,
     biocortex_retrieval_opt_in_post_implementation_review_gate,
@@ -61,9 +60,9 @@ use crate::biocortex_shadow::{
     biocortex_retrieval_opt_in_runtime_readiness_packet,
     biocortex_retrieval_opt_in_runtime_transition_gate, biocortex_retrieval_opt_in_runtime_trial,
     biocortex_retrieval_opt_in_runtime_trial_review_packet, biocortex_retrieval_opt_in_store_trial,
-    biocortex_shadow_digest, supported_benchmarks, BioCortexReplayComparisonOptions,
-    BioCortexRetrievalCandidate, BioCortexRetrievalOptInAuditOptions,
-    BioCortexRetrievalOptInAuthorizationDecisionPacketOptions,
+    biocortex_retrieval_relevance_lift_eval, biocortex_shadow_digest, supported_benchmarks,
+    BioCortexReplayComparisonOptions, BioCortexRetrievalCandidate,
+    BioCortexRetrievalOptInAuditOptions, BioCortexRetrievalOptInAuthorizationDecisionPacketOptions,
     BioCortexRetrievalOptInBatchDiagnosticsOptions, BioCortexRetrievalOptInBatchQueryCase,
     BioCortexRetrievalOptInDryRunOptions, BioCortexRetrievalOptInExecutionPacketOptions,
     BioCortexRetrievalOptInGatedBatchDiagnosticsOptions,
@@ -77,8 +76,8 @@ use crate::biocortex_shadow::{
     BioCortexRetrievalOptInRuntimeTransitionGateOptions,
     BioCortexRetrievalOptInRuntimeTrialOptions,
     BioCortexRetrievalOptInRuntimeTrialReviewPacketOptions,
-    BioCortexRetrievalOptInStoreTrialOptions, BioCortexShadowOptions, BIOCORTEX_CHECKOUT_ENV,
-    BIOCORTEX_RETRIEVAL_DISABLE_ENV,
+    BioCortexRetrievalOptInStoreTrialOptions, BioCortexShadowOptions, RelevanceLiftEvalOptions,
+    BIOCORTEX_CHECKOUT_ENV, BIOCORTEX_RETRIEVAL_DISABLE_ENV,
 };
 #[cfg(feature = "biocortex-retrieval-shadow")]
 use crate::biocortex_shadow::{biocortex_retrieval_shadow_report, BioCortexRetrievalShadowOptions};
@@ -35272,8 +35271,7 @@ impl McpTool for MemoryBioCortexShadowTrialTool {
 
 const MEMORY_BIOCORTEX_T6_INFLUENCE_GATE_SCHEMA: &str =
     "agent_bridge.memory_biocortex_t6_influence_gate.v0";
-const MEMORY_BIOCORTEX_SHADOW_TRIAL_SCHEMA: &str =
-    "agent_bridge.memory_biocortex_shadow_trial.v0";
+const MEMORY_BIOCORTEX_SHADOW_TRIAL_SCHEMA: &str = "agent_bridge.memory_biocortex_shadow_trial.v0";
 const BIOCORTEX_RETRIEVAL_RELEVANCE_LIFT_EVAL_SCHEMA_LOCAL: &str =
     "agent_bridge.biocortex_retrieval.relevance_lift_eval.v0";
 const BIOCORTEX_RETRIEVAL_REDACTED_EVIDENCE_AGGREGATE_SCHEMA_LOCAL: &str =
@@ -60855,15 +60853,16 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             "content": "secret shadow content"
         });
 
-        let out = tool.execute(
-            json!({
-                "shadow_trials": [unsafe_shadow],
-                "min_shadow_trials": 2
-            }),
-            &ToolContext::default(),
-        )
-        .await
-        .expect("execute");
+        let out = tool
+            .execute(
+                json!({
+                    "shadow_trials": [unsafe_shadow],
+                    "min_shadow_trials": 2
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
         let payload = result_text_as_json(&out);
 
         assert_eq!(
@@ -60874,24 +60873,18 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert_eq!(payload["ready_for_opt_in_experiment"], json!(false));
         assert_eq!(payload["runtime_influence_approved"], json!(false));
         assert_eq!(payload["changes_memory_search_order"], json!(false));
-        assert!(
-            payload["block_reasons"]
-                .as_array()
-                .expect("block reasons")
-                .contains(&json!("missing_relevance_lift_eval"))
-        );
-        assert!(
-            payload["block_reasons"]
-                .as_array()
-                .expect("block reasons")
-                .contains(&json!("shadow_frontier_claimed_discovered_selection"))
-        );
-        assert!(
-            payload["block_reasons"]
-                .as_array()
-                .expect("block reasons")
-                .contains(&json!("shadow_raw_query_key_or_content_included"))
-        );
+        assert!(payload["block_reasons"]
+            .as_array()
+            .expect("block reasons")
+            .contains(&json!("missing_relevance_lift_eval")));
+        assert!(payload["block_reasons"]
+            .as_array()
+            .expect("block reasons")
+            .contains(&json!("shadow_frontier_claimed_discovered_selection")));
+        assert!(payload["block_reasons"]
+            .as_array()
+            .expect("block reasons")
+            .contains(&json!("shadow_raw_query_key_or_content_included")));
 
         let serialized = serde_json::to_string(&payload).expect("serialize");
         assert!(!serialized.contains("secret_shadow_key"));
@@ -60908,8 +60901,8 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             "default_search_order_change_allowed": false,
             "input_contract": {
                 "raw_query_included": false,
-                "raw_queries_included": false,
                 "raw_keys_included": false,
+                "raw_queries_included": false,
                 "content_included": false,
                 "candidate_content_included": false
             },
@@ -60925,6 +60918,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             },
             "suppression_set": {
                 "redacted_count": 1,
+                "suppressed_baseline_count": 0,
                 "raw_keys_included": false
             },
             "comparison": {
@@ -61020,7 +61014,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             "schema": "agent_bridge.biocortex_retrieval.relevance_lift_eval.v0",
             "generated_at": 123,
             "status": "completed",
-            "purpose": "summary keeps purpose but strips raw review rows",
+            "purpose": "secret purpose is not raw",
             "verdict": "lift",
             "sampling": {
                 "evaluated_count": 5
@@ -61073,26 +61067,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
     #[tokio::test]
     async fn memory_biocortex_t6_influence_gate_allows_review_without_approving_runtime() {
         let tool = MemoryBioCortexT6InfluenceGateTool::new();
-        let safe_shadow = json!({
-            "schema": "agent_bridge.memory_biocortex_shadow_trial.v0",
-            "read_only": true,
-            "runs_biocortex": false,
-            "writes_memory": false,
-            "changes_memory_search_order": false,
-            "default_search_order_change_allowed": false,
-            "input_contract": {
-                "raw_query_included": false,
-                "raw_keys_included": false,
-                "content_included": false
-            },
-            "baseline": {
-                "raw_keys_included": false,
-                "content_included": false
-            },
-            "current_biocortex_frontier": {
-                "discovered_selection_claimed": false
-            }
-        });
+        let safe_shadow = memory_biocortex_safe_shadow_fixture();
         let relevance_lift_eval = json!({
             "schema": "agent_bridge.biocortex_retrieval.relevance_lift_eval.v0",
             "status": "completed",
@@ -61146,20 +61121,21 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             "raw_query": "secret aggregate query"
         });
 
-        let out = tool.execute(
-            json!({
-                "shadow_trials": [safe_shadow.clone(), safe_shadow],
-                "relevance_lift_eval": relevance_lift_eval,
-                "redacted_evidence_aggregate": redacted_evidence_aggregate,
-                "min_shadow_trials": 2,
-                "min_evaluated_count": 5,
-                "min_mrr_lift": 0.01,
-                "max_worsened": 0
-            }),
-            &ToolContext::default(),
-        )
-        .await
-        .expect("execute");
+        let out = tool
+            .execute(
+                json!({
+                    "shadow_trials": [safe_shadow.clone(), safe_shadow],
+                    "relevance_lift_eval": relevance_lift_eval,
+                    "redacted_evidence_aggregate": redacted_evidence_aggregate,
+                    "min_shadow_trials": 2,
+                    "min_evaluated_count": 5,
+                    "min_mrr_lift": 0.01,
+                    "max_worsened": 0
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
         let payload = result_text_as_json(&out);
 
         assert_eq!(payload["ready_for_opt_in_experiment"], json!(true));
