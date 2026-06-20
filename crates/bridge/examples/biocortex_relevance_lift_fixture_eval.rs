@@ -447,7 +447,7 @@ async fn analyze_graph_evidence(
             .unwrap_or(false);
         let distinct_graph_scores =
             distinct_f64_values(graph_scores.iter().map(|(_, score)| Some(*score)));
-        let variants = GRAPH_SCORE_VARIANTS
+        let mut variants = GRAPH_SCORE_VARIANTS
             .iter()
             .copied()
             .map(|variant| {
@@ -462,6 +462,20 @@ async fn analyze_graph_evidence(
                 )
             })
             .collect::<Vec<_>>();
+        let bounded_proximity_scores =
+            score_bounded_graph_proximity(store, &candidate_keys, &induced_edges)
+                .await
+                .with_context(|| {
+                    format!("bounded graph proximity scores for graph case {}", idx + 1)
+                })?;
+        variants.push(summarize_graph_scores(
+            "bounded_prox",
+            &baseline_hits,
+            &baseline_ranking,
+            &bounded_proximity_scores,
+            source_key,
+            &relevant,
+        ));
 
         out.push(GraphEvidenceCaseRow {
             sample_index: idx,
@@ -609,6 +623,24 @@ fn summarize_graph_variant(
     source_key: Option<&str>,
     relevant: &BTreeSet<String>,
 ) -> GraphScoreVariantRow {
+    summarize_graph_scores(
+        variant.label(),
+        baseline_hits,
+        baseline_ranking,
+        scores,
+        source_key,
+        relevant,
+    )
+}
+
+fn summarize_graph_scores(
+    label: &'static str,
+    baseline_hits: &[ab_store::MemorySearchHit],
+    baseline_ranking: &[String],
+    scores: &[(String, f64)],
+    source_key: Option<&str>,
+    relevant: &BTreeSet<String>,
+) -> GraphScoreVariantRow {
     let source_rank = source_key
         .and_then(|source| scores.iter().position(|(key, _)| key == source))
         .map(|pos| pos + 1);
@@ -644,7 +676,7 @@ fn summarize_graph_variant(
     let blend_order_changed = baseline_ranking != blend_ranking.as_slice();
 
     GraphScoreVariantRow {
-        label: variant.label(),
+        label,
         scored_node_count: scores.len(),
         source_rank,
         source_score,
@@ -659,6 +691,90 @@ fn summarize_graph_variant(
         blend_first_relevant_rank,
         blend_rr_delta,
         blend_order_changed,
+    }
+}
+
+async fn score_bounded_graph_proximity(
+    store: &SqliteStore,
+    candidate_keys: &BTreeSet<String>,
+    induced_edges: &[MemoryEdge],
+) -> Result<Vec<(String, f64)>> {
+    let mut scores = candidate_keys
+        .iter()
+        .map(|key| (key.clone(), 0.0_f64))
+        .collect::<BTreeMap<_, _>>();
+
+    for edge in induced_edges {
+        let cap = graph_edge_type_cap(&edge.edge_type);
+        if cap <= 0.0 || !edge.weight.is_finite() || edge.weight <= 0.0 {
+            continue;
+        }
+        let contribution = edge.weight.min(cap);
+        if let Some(score) = scores.get_mut(&edge.to_key) {
+            *score = (*score + contribution).min(1.0);
+        }
+        if let Some(score) = scores.get_mut(&edge.from_key) {
+            *score = (*score + contribution * 0.7).min(1.0);
+        }
+    }
+
+    let mut hubs = score_graph_candidates(
+        candidate_keys,
+        induced_edges,
+        GraphScoreVariant::NonContinuityIncident,
+    );
+    if hubs.is_empty() {
+        hubs = score_graph_candidates(
+            candidate_keys,
+            induced_edges,
+            GraphScoreVariant::AllIncident,
+        );
+    }
+    let mut seen_hub_endpoint = HashSet::<(String, String, String)>::new();
+    for (hub, _) in hubs.iter().take(5) {
+        let rows = store.memory_neighbors_bfs(hub, 2, 0.7, 0.01).await?;
+        for (edge, energy) in rows {
+            if !energy.is_finite() || energy <= 0.0 {
+                continue;
+            }
+            let cap = graph_edge_type_cap(&edge.edge_type);
+            if cap <= 0.0 {
+                continue;
+            }
+            for endpoint in [&edge.from_key, &edge.to_key] {
+                if endpoint == hub || !candidate_keys.contains(endpoint) {
+                    continue;
+                }
+                let dedupe_key = (hub.clone(), endpoint.clone(), edge.edge_type.clone());
+                if !seen_hub_endpoint.insert(dedupe_key) {
+                    continue;
+                }
+                if let Some(score) = scores.get_mut(endpoint) {
+                    *score = (*score + (energy * cap).min(0.35)).min(1.0);
+                }
+            }
+        }
+    }
+
+    let mut out = scores
+        .into_iter()
+        .filter(|(_, score)| *score > 0.0)
+        .collect::<Vec<_>>();
+    out.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| a.0.cmp(&b.0))
+    });
+    Ok(out)
+}
+
+fn graph_edge_type_cap(edge_type: &str) -> f64 {
+    if is_continuity_edge_type(edge_type) {
+        0.10
+    } else if matches!(edge_type, "conflicts" | "conflict" | "contradicts") {
+        0.20
+    } else {
+        0.45
     }
 }
 
@@ -1198,8 +1314,11 @@ fn print_report(
         "{:<10} {:>5} {:>7} {:>8} {:>9} {:>8} {:>8} {:>9}",
         "variant", "avail", "changed", "improved", "worsened", "same", "mrr_d", "avg_cov"
     );
-    for variant in GRAPH_SCORE_VARIANTS {
-        let label = variant.label();
+    let variant_labels = graph_rows
+        .iter()
+        .flat_map(|row| row.variants.iter().map(|variant| variant.label))
+        .collect::<BTreeSet<_>>();
+    for label in variant_labels {
         let rows = graph_rows
             .iter()
             .filter_map(|row| {
@@ -1349,7 +1468,7 @@ fn print_report(
         "- If graph evidence exists but `top_rel=false`, the store has usable edge signal but needs better weighting, edge-type filtering, or directionality before it can influence ranking."
     );
     println!(
-        "- Compare graph variants: `incoming` and `outgoing` test directionality, while `non_cont` excludes continuity/provenance edge types and `cont_only` isolates them."
+        "- Compare graph variants: `incoming` and `outgoing` test directionality, `non_cont` excludes continuity/provenance edge types, `cont_only` isolates them, and `bounded_prox` applies edge-type caps plus hub BFS energy."
     );
     println!(
         "- If only `cont_only` scores many nodes and still misses relevant keys, continuity edges are useful context but too noisy for direct rank influence."

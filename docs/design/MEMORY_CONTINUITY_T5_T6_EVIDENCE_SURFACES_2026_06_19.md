@@ -350,6 +350,32 @@ edge-type caps, and zero-signal fallback. Only after that should materialization
 be revisited, ideally with a fixture where relevant memories are semantically
 near but absent from explicit graph structure.
 
+The bounded proximity simulation added one more read-only graph variant,
+`bounded_prox`. It does not use fixture labels while scoring. It scores baseline
+candidates from candidate-internal graph structure, applies low caps to
+continuity/provenance edge types, chooses non-continuity hubs when available,
+falls back to all graph hubs when not, and adds capped BFS energy back into the
+candidate set. The relevance labels are used only after scoring to measure
+rank-lift.
+
+Current result:
+
+- `bounded_prox` was available in all seven cases and changed six rankings;
+- it improved zero cases, worsened three, and left four effectively unchanged;
+- average MRR delta was `-0.025`;
+- average blend coverage was `0.579`;
+- this is less harmful than raw `all` / `cont_only` graph incident scores
+  (`-0.060`), but still worse than sparse `non_cont`, which stayed neutral at
+  `0.000`.
+
+Interpretation: edge-type caps plus hub BFS are not sufficient for T6 influence
+on this fixture. The next graph line should not keep tuning this bounded
+proximity score in place. It should either (a) use `non_cont` as the conservative
+no-harm baseline while looking for a real improvement signal, or (b) build a
+separate materialization fixture where the problem is genuinely missing graph
+structure rather than candidate ranking. `bounded_prox` remains useful as a
+negative control in the local evaluator.
+
 ## Verification
 
 Targeted validation for this slice after `/Data` space was recovered:
