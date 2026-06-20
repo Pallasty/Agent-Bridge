@@ -192,6 +192,10 @@ struct GraphEvidenceCaseRow {
     induced_node_count: usize,
     missing_edge_candidate_count: usize,
     missing_edge_candidate_relevant_count: usize,
+    gated_edge_selected_count: usize,
+    gated_edge_relevant_count: usize,
+    gated_edge_blocked_label_count: usize,
+    gated_edge_blocked_harm_count: usize,
     source_graph_rank: Option<usize>,
     source_graph_score: Option<f64>,
     best_relevant_graph_rank: Option<usize>,
@@ -421,6 +425,15 @@ async fn analyze_graph_evidence(
             .iter()
             .filter(|edge| relevant.contains(&edge.from_key) || relevant.contains(&edge.to_key))
             .count();
+        let gate = select_quality_gated_edges(
+            &baseline_hits,
+            &baseline_ranking,
+            &candidate_keys,
+            &induced_edges,
+            &missing_edge_candidates,
+            source_key,
+            &relevant,
+        );
         let mut induced_nodes = BTreeSet::<String>::new();
         let mut edge_type_counts = BTreeMap::<String, usize>::new();
         for edge in &induced_edges {
@@ -519,6 +532,23 @@ async fn analyze_graph_evidence(
                 &relevant,
             ));
         }
+        if !gate.selected_edges.is_empty() {
+            let mut gated_edges = induced_edges.clone();
+            gated_edges.extend(gate.selected_edges.iter().cloned());
+            let gated_scores = score_graph_candidates(
+                &candidate_keys,
+                &gated_edges,
+                GraphScoreVariant::NonContinuityIncident,
+            );
+            variants.push(summarize_graph_scores(
+                "gated_rel",
+                &baseline_hits,
+                &baseline_ranking,
+                &gated_scores,
+                source_key,
+                &relevant,
+            ));
+        }
 
         out.push(GraphEvidenceCaseRow {
             sample_index: idx,
@@ -531,6 +561,10 @@ async fn analyze_graph_evidence(
             induced_node_count: induced_nodes.len(),
             missing_edge_candidate_count,
             missing_edge_candidate_relevant_count,
+            gated_edge_selected_count: gate.selected_edges.len(),
+            gated_edge_relevant_count: gate.relevant_selected_count,
+            gated_edge_blocked_label_count: gate.blocked_no_relevance_count,
+            gated_edge_blocked_harm_count: gate.blocked_harm_count,
             source_graph_rank,
             source_graph_score,
             best_relevant_graph_rank,
@@ -543,6 +577,54 @@ async fn analyze_graph_evidence(
         });
     }
     Ok(out)
+}
+
+#[derive(Debug, Default)]
+struct CandidateQualityGate {
+    selected_edges: Vec<MemoryEdge>,
+    relevant_selected_count: usize,
+    blocked_no_relevance_count: usize,
+    blocked_harm_count: usize,
+}
+
+fn select_quality_gated_edges(
+    baseline_hits: &[ab_store::MemorySearchHit],
+    baseline_ranking: &[String],
+    candidate_keys: &BTreeSet<String>,
+    induced_edges: &[MemoryEdge],
+    missing_edge_candidates: &[MemoryEdge],
+    source_key: Option<&str>,
+    relevant: &BTreeSet<String>,
+) -> CandidateQualityGate {
+    let mut out = CandidateQualityGate::default();
+    for candidate in missing_edge_candidates {
+        if !relevant.contains(&candidate.from_key) && !relevant.contains(&candidate.to_key) {
+            out.blocked_no_relevance_count += 1;
+            continue;
+        }
+        let mut trial_edges = induced_edges.to_vec();
+        trial_edges.push(candidate.clone());
+        let trial_scores = score_graph_candidates(
+            candidate_keys,
+            &trial_edges,
+            GraphScoreVariant::NonContinuityIncident,
+        );
+        let trial = summarize_graph_scores(
+            "single_edge_trial",
+            baseline_hits,
+            baseline_ranking,
+            &trial_scores,
+            source_key,
+            relevant,
+        );
+        if trial.blend_rr_delta < -f64::EPSILON {
+            out.blocked_harm_count += 1;
+            continue;
+        }
+        out.relevant_selected_count += 1;
+        out.selected_edges.push(candidate.clone());
+    }
+    out
 }
 
 fn collect_related_key_missing_edges(
@@ -1438,6 +1520,49 @@ fn print_report(
         total_candidates,
         relevant_candidate_cases,
         total_relevant_candidates,
+    );
+    println!();
+    println!("## Per-case missing-edge quality gate rows");
+    println!(
+        "{:<4} {:<34} {:>7} {:>7} {:>9} {:>9}",
+        "#", "class_label", "sel", "sel_rel", "blk_lbl", "blk_harm"
+    );
+    for row in graph_rows {
+        println!(
+            "{:<4} {:<34} {:>7} {:>7} {:>9} {:>9}",
+            row.sample_index + 1,
+            truncate(&row.class_label, 34),
+            row.gated_edge_selected_count,
+            row.gated_edge_relevant_count,
+            row.gated_edge_blocked_label_count,
+            row.gated_edge_blocked_harm_count,
+        );
+    }
+    println!();
+    println!("## Missing-edge quality gate summary");
+    let selected_cases = graph_rows
+        .iter()
+        .filter(|row| row.gated_edge_selected_count > 0)
+        .count();
+    let total_selected = graph_rows
+        .iter()
+        .map(|row| row.gated_edge_selected_count)
+        .sum::<usize>();
+    let total_blocked_label = graph_rows
+        .iter()
+        .map(|row| row.gated_edge_blocked_label_count)
+        .sum::<usize>();
+    let total_blocked_harm = graph_rows
+        .iter()
+        .map(|row| row.gated_edge_blocked_harm_count)
+        .sum::<usize>();
+    println!(
+        "cases={} selected_cases={} selected_edges={} blocked_no_relevance={} blocked_harm={}",
+        graph_rows.len(),
+        selected_cases,
+        total_selected,
+        total_blocked_label,
+        total_blocked_harm,
     );
     println!();
     println!("## Graph side-signal blend simulation summary");

@@ -447,6 +447,30 @@ production, the equivalent gate must be label-free and based on author intent,
 scope compatibility, edge type, temporal relation, or repeated retrieval
 evidence.
 
+The first quality-gate simulation stays inside the local fixture evaluator. It
+uses labels only as an evaluation oracle: a proposed missing edge is selected
+only when it touches the labelled accept set and a single-edge no-harm trial
+does not reduce that case's blended reciprocal rank. This is deliberately not a
+production gate, because production retrieval does not have labels.
+
+Current result on the missing-graph fixture:
+
+- selected edges: `1` of `16`, in one of five cases;
+- blocked for no labelled relevance contact: `15`;
+- blocked for single-edge harm after label contact: `0`;
+- `gated_rel`: available in one case, changed one, improved zero, worsened
+  zero, average MRR delta `0.000`, average blend coverage `0.100`.
+
+Interpretation: the quality gate is useful as a fixture-level safety check
+because it filters the broad `related_keys` candidate set down to the one edge
+that at least touches labelled relevance and does not hurt the local simulation.
+It still does not demonstrate lift, and it still does not justify a writer or
+T6 influence. The next production-grade design must replace labels with
+auditable label-free reasons: explicit author intent, project/scope
+compatibility, edge type and direction, temporal/causal relation, repeated
+co-retrieval evidence, and a per-edge no-harm shadow check before any
+materialization path is considered.
+
 ## Verification
 
 Targeted validation for this slice after `/Data` space was recovered:
