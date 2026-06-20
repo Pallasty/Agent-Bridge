@@ -498,6 +498,30 @@ before selection, especially repeated co-retrieval, explicit edge intent from
 saved continuity metadata, or an operator-authored candidate reason that can be
 audited independently of fixture labels.
 
+The repeated co-retrieval gate then tested the first stronger label-free signal.
+It kept the same explicit `related_keys` candidate source, required a
+`memory_coactivation` row between the proposed endpoints with count at least
+two, and would then apply the same top-three shadow-stability check before
+simulation. Labels again stayed evaluation-only.
+
+Current result on the missing-graph fixture:
+
+- selected edges: `0` of `16`;
+- selected edges touching labelled relevance: `0`;
+- blocked by missing repeated co-retrieval signal: `16`;
+- blocked by top-three shadow stability after co-retrieval: `0`;
+- no `co_ret_gate` blend variant was available because no candidate passed the
+  repeated co-retrieval signal gate.
+
+Interpretation: repeated co-retrieval is the right kind of production signal,
+but the current telemetry does not contain it for this fixture's missing-edge
+candidates. That blocks materialization just as strongly as the negative
+metadata gate, but for a better reason: the system lacks evidence instead of
+selecting distractors. The next useful work is not a writer; it is either a
+co-retrieval telemetry fixture that proves repeated candidate-pair evidence can
+exist, or an operator-authored candidate-reason packet format that records
+explicit materialization intent before any edge write path.
+
 ## Verification
 
 Targeted validation for this slice after `/Data` space was recovered:

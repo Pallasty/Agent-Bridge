@@ -202,6 +202,10 @@ struct GraphEvidenceCaseRow {
     label_free_edge_blocked_scope_count: usize,
     label_free_edge_blocked_temporal_count: usize,
     label_free_edge_blocked_shadow_count: usize,
+    coretrieval_edge_selected_count: usize,
+    coretrieval_edge_relevant_count: usize,
+    coretrieval_edge_blocked_signal_count: usize,
+    coretrieval_edge_blocked_shadow_count: usize,
     source_graph_rank: Option<usize>,
     source_graph_score: Option<f64>,
     best_relevant_graph_rank: Option<usize>,
@@ -424,6 +428,11 @@ async fn analyze_graph_evidence(
         let induced_edges = collect_candidate_induced_edges(store, &candidate_keys)
             .await
             .with_context(|| format!("candidate induced edges for graph case {}", idx + 1))?;
+        let candidate_key_vec = candidate_keys.iter().cloned().collect::<Vec<_>>();
+        let coactivation_edges = store
+            .coactivation_among(&candidate_key_vec)
+            .await
+            .with_context(|| format!("coactivation_among for graph case {}", idx + 1))?;
         let missing_edge_candidates =
             collect_related_key_missing_edges(&baseline_hits, &candidate_keys, &induced_edges);
         let missing_edge_candidate_count = missing_edge_candidates.len();
@@ -448,6 +457,19 @@ async fn analyze_graph_evidence(
             &missing_edge_candidates,
         );
         let label_free_edge_relevant_count = label_free_gate
+            .selected_edges
+            .iter()
+            .filter(|edge| relevant.contains(&edge.from_key) || relevant.contains(&edge.to_key))
+            .count();
+        let coretrieval_gate = select_coretrieval_quality_edges(
+            &baseline_hits,
+            &baseline_ranking,
+            &candidate_keys,
+            &induced_edges,
+            &missing_edge_candidates,
+            &coactivation_edges,
+        );
+        let coretrieval_edge_relevant_count = coretrieval_gate
             .selected_edges
             .iter()
             .filter(|edge| relevant.contains(&edge.from_key) || relevant.contains(&edge.to_key))
@@ -584,6 +606,23 @@ async fn analyze_graph_evidence(
                 &relevant,
             ));
         }
+        if !coretrieval_gate.selected_edges.is_empty() {
+            let mut coretrieval_edges = induced_edges.clone();
+            coretrieval_edges.extend(coretrieval_gate.selected_edges.iter().cloned());
+            let coretrieval_scores = score_graph_candidates(
+                &candidate_keys,
+                &coretrieval_edges,
+                GraphScoreVariant::NonContinuityIncident,
+            );
+            variants.push(summarize_graph_scores(
+                "co_ret_gate",
+                &baseline_hits,
+                &baseline_ranking,
+                &coretrieval_scores,
+                source_key,
+                &relevant,
+            ));
+        }
 
         out.push(GraphEvidenceCaseRow {
             sample_index: idx,
@@ -606,6 +645,10 @@ async fn analyze_graph_evidence(
             label_free_edge_blocked_scope_count: label_free_gate.blocked_scope_count,
             label_free_edge_blocked_temporal_count: label_free_gate.blocked_temporal_count,
             label_free_edge_blocked_shadow_count: label_free_gate.blocked_shadow_count,
+            coretrieval_edge_selected_count: coretrieval_gate.selected_edges.len(),
+            coretrieval_edge_relevant_count,
+            coretrieval_edge_blocked_signal_count: coretrieval_gate.blocked_signal_count,
+            coretrieval_edge_blocked_shadow_count: coretrieval_gate.blocked_shadow_count,
             source_graph_rank,
             source_graph_score,
             best_relevant_graph_rank,
@@ -634,6 +677,13 @@ struct LabelFreeCandidateQualityGate {
     blocked_metadata_count: usize,
     blocked_scope_count: usize,
     blocked_temporal_count: usize,
+    blocked_shadow_count: usize,
+}
+
+#[derive(Debug, Default)]
+struct CoretrievalCandidateQualityGate {
+    selected_edges: Vec<MemoryEdge>,
+    blocked_signal_count: usize,
     blocked_shadow_count: usize,
 }
 
@@ -710,6 +760,47 @@ fn select_label_free_quality_edges(
         }
         if !label_free_temporal_proximity(from.updated_at, to.updated_at) {
             out.blocked_temporal_count += 1;
+            continue;
+        }
+        if !label_free_shadow_top3_preserved(
+            baseline_hits,
+            baseline_ranking,
+            candidate_keys,
+            induced_edges,
+            candidate,
+        ) {
+            out.blocked_shadow_count += 1;
+            continue;
+        }
+        out.selected_edges.push(candidate.clone());
+    }
+    out
+}
+
+fn select_coretrieval_quality_edges(
+    baseline_hits: &[ab_store::MemorySearchHit],
+    baseline_ranking: &[String],
+    candidate_keys: &BTreeSet<String>,
+    induced_edges: &[MemoryEdge],
+    missing_edge_candidates: &[MemoryEdge],
+    coactivation_edges: &[CoactivationEdge],
+) -> CoretrievalCandidateQualityGate {
+    const MIN_CORETRIEVAL_COUNT: u64 = 2;
+    let coactivation_by_pair = coactivation_edges
+        .iter()
+        .map(|edge| {
+            (
+                undirected_pair_key(&edge.key_a, &edge.key_b),
+                edge.count,
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    let mut out = CoretrievalCandidateQualityGate::default();
+    for candidate in missing_edge_candidates {
+        let pair_key = undirected_pair_key(&candidate.from_key, &candidate.to_key);
+        let count = coactivation_by_pair.get(&pair_key).copied().unwrap_or(0);
+        if count < MIN_CORETRIEVAL_COUNT {
+            out.blocked_signal_count += 1;
             continue;
         }
         if !label_free_shadow_top3_preserved(
@@ -1795,6 +1886,59 @@ fn print_report(
         label_free_blocked_scope,
         label_free_blocked_temporal,
         label_free_blocked_shadow,
+    );
+    println!();
+    println!("## Per-case co-retrieval missing-edge gate rows");
+    println!(
+        "{:<4} {:<34} {:>7} {:>7} {:>9} {:>8}",
+        "#", "class_label", "sel", "sel_rel", "blk_sig", "blk_top3"
+    );
+    for row in graph_rows {
+        println!(
+            "{:<4} {:<34} {:>7} {:>7} {:>9} {:>8}",
+            row.sample_index + 1,
+            truncate(&row.class_label, 34),
+            row.coretrieval_edge_selected_count,
+            row.coretrieval_edge_relevant_count,
+            row.coretrieval_edge_blocked_signal_count,
+            row.coretrieval_edge_blocked_shadow_count,
+        );
+    }
+    println!();
+    println!("## Co-retrieval missing-edge gate summary");
+    let coretrieval_selected_cases = graph_rows
+        .iter()
+        .filter(|row| row.coretrieval_edge_selected_count > 0)
+        .count();
+    let coretrieval_relevant_cases = graph_rows
+        .iter()
+        .filter(|row| row.coretrieval_edge_relevant_count > 0)
+        .count();
+    let coretrieval_selected = graph_rows
+        .iter()
+        .map(|row| row.coretrieval_edge_selected_count)
+        .sum::<usize>();
+    let coretrieval_relevant = graph_rows
+        .iter()
+        .map(|row| row.coretrieval_edge_relevant_count)
+        .sum::<usize>();
+    let coretrieval_blocked_signal = graph_rows
+        .iter()
+        .map(|row| row.coretrieval_edge_blocked_signal_count)
+        .sum::<usize>();
+    let coretrieval_blocked_shadow = graph_rows
+        .iter()
+        .map(|row| row.coretrieval_edge_blocked_shadow_count)
+        .sum::<usize>();
+    println!(
+        "cases={} selected_cases={} selected_edges={} relevant_cases={} relevant_edges={} blocked_signal={} blocked_top3={}",
+        graph_rows.len(),
+        coretrieval_selected_cases,
+        coretrieval_selected,
+        coretrieval_relevant_cases,
+        coretrieval_relevant,
+        coretrieval_blocked_signal,
+        coretrieval_blocked_shadow,
     );
     println!();
     println!("## Graph side-signal blend simulation summary");
