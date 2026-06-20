@@ -35270,6 +35270,400 @@ const BIOCORTEX_RETRIEVAL_RELEVANCE_LIFT_EVAL_SCHEMA_LOCAL: &str =
 const BIOCORTEX_RETRIEVAL_REDACTED_EVIDENCE_AGGREGATE_SCHEMA_LOCAL: &str =
     "agent_bridge.biocortex_retrieval.opt_in_redacted_evidence_aggregate.v0";
 
+fn memory_biocortex_value_u64_at(value: &Value, path: &str) -> u64 {
+    value.pointer(path).and_then(Value::as_u64).unwrap_or(0)
+}
+
+fn memory_biocortex_value_bool_at(value: &Value, path: &str) -> Option<bool> {
+    value.pointer(path).and_then(Value::as_bool)
+}
+
+fn memory_biocortex_shadow_raw_flags_ok(value: &Value) -> bool {
+    !memory_biocortex_t6_has_raw_payload_fields(value)
+        && !memory_biocortex_t6_any_true(
+            value,
+            &[
+                "/input_contract/raw_query_included",
+                "/input_contract/raw_keys_included",
+                "/input_contract/raw_queries_included",
+                "/input_contract/content_included",
+                "/input_contract/candidate_content_included",
+                "/baseline/raw_keys_included",
+                "/baseline/content_included",
+                "/graph_neighborhood/raw_keys_included",
+                "/graph_neighborhood/content_included",
+                "/suppression_set/raw_keys_included",
+                "/advisory_control_order/raw_keys_included",
+                "/advisory_control_order/content_included",
+            ],
+        )
+}
+
+fn memory_biocortex_redacted_evidence_aggregate_payload(args: Value) -> Value {
+    let min_shadow_trials = args
+        .get("min_shadow_trials")
+        .and_then(Value::as_u64)
+        .unwrap_or(3)
+        .clamp(1, 100);
+    let shadow_trials = args
+        .get("shadow_trials")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut block_reasons = BTreeSet::<String>::new();
+    if shadow_trials.len() < min_shadow_trials as usize {
+        memory_biocortex_t6_push_reason(&mut block_reasons, "insufficient_shadow_trials");
+    }
+
+    let mut baseline_returned_count = 0u64;
+    let mut baseline_candidate_count = 0u64;
+    let mut graph_neighbor_row_count = 0u64;
+    let mut suppressed_baseline_count = 0u64;
+    let mut suppression_redacted_count = 0u64;
+    let mut alternate_order_changed_count = 0u64;
+    let mut read_only_count = 0u64;
+    let mut raw_flags_ok_count = 0u64;
+    let mut frontier_safe_count = 0u64;
+
+    for shadow in &shadow_trials {
+        if memory_biocortex_t6_string_at(shadow, "/schema")
+            != Some(MEMORY_BIOCORTEX_SHADOW_TRIAL_SCHEMA)
+        {
+            memory_biocortex_t6_push_reason(&mut block_reasons, "shadow_schema_invalid");
+        }
+        if memory_biocortex_t6_bool_at(shadow, "/read_only") != Some(true) {
+            memory_biocortex_t6_push_reason(&mut block_reasons, "shadow_not_read_only");
+        } else {
+            read_only_count += 1;
+        }
+        if memory_biocortex_t6_bool_at(shadow, "/runs_biocortex") != Some(false) {
+            memory_biocortex_t6_push_reason(&mut block_reasons, "shadow_runs_biocortex");
+        }
+        if memory_biocortex_t6_bool_at(shadow, "/writes_memory") == Some(true) {
+            memory_biocortex_t6_push_reason(&mut block_reasons, "shadow_writes_memory");
+        }
+        if memory_biocortex_t6_bool_at(shadow, "/changes_memory_search_order") != Some(false) {
+            memory_biocortex_t6_push_reason(
+                &mut block_reasons,
+                "shadow_changes_memory_search_order",
+            );
+        }
+        if memory_biocortex_shadow_raw_flags_ok(shadow) {
+            raw_flags_ok_count += 1;
+        } else {
+            memory_biocortex_t6_push_reason(
+                &mut block_reasons,
+                "shadow_raw_query_key_or_content_included",
+            );
+        }
+        if memory_biocortex_t6_bool_at(
+            shadow,
+            "/current_biocortex_frontier/discovered_selection_claimed",
+        ) == Some(false)
+        {
+            frontier_safe_count += 1;
+        } else {
+            memory_biocortex_t6_push_reason(
+                &mut block_reasons,
+                "shadow_frontier_claimed_discovered_selection",
+            );
+        }
+
+        if memory_biocortex_value_bool_at(shadow, "/comparison/baseline_returned") == Some(true) {
+            baseline_returned_count += 1;
+        }
+        if memory_biocortex_value_bool_at(shadow, "/comparison/alternate_order_changed")
+            == Some(true)
+        {
+            alternate_order_changed_count += 1;
+        }
+        baseline_candidate_count += memory_biocortex_value_u64_at(shadow, "/baseline/key_count");
+        graph_neighbor_row_count +=
+            memory_biocortex_value_u64_at(shadow, "/graph_neighborhood/neighbor_row_count");
+        suppressed_baseline_count +=
+            memory_biocortex_value_u64_at(shadow, "/comparison/suppressed_baseline_count");
+        suppression_redacted_count +=
+            memory_biocortex_value_u64_at(shadow, "/suppression_set/redacted_count");
+    }
+
+    let aggregate_evidence_ready = block_reasons.is_empty();
+    let block_reasons = block_reasons.into_iter().collect::<Vec<_>>();
+
+    json!({
+        "schema": BIOCORTEX_RETRIEVAL_REDACTED_EVIDENCE_AGGREGATE_SCHEMA_LOCAL,
+        "generated_at": unix_now_secs(),
+        "read_only": true,
+        "redacted_evidence_aggregate": true,
+        "implementation_stage": "memory_continuity_t5_redacted_evidence_aggregate",
+        "purpose": "Aggregate redacted T5 memory_biocortex_shadow_trial packets into the schema consumed by the T6 influence gate. This does not run BioCortex, call memory_search, write memory, echo shadow packets, or change retrieval order.",
+        "input_contract": {
+            "shadow_trials_included": false,
+            "movement_fixture_run_included": false,
+            "coverage_fixture_run_included": false,
+            "raw_queries_included": false,
+            "raw_query_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "side_signal_raw_included": false,
+        },
+        "shadow_evidence": {
+            "shadow_trial_count": shadow_trials.len(),
+            "min_shadow_trials": min_shadow_trials,
+            "baseline_returned_count": baseline_returned_count,
+            "baseline_candidate_count": baseline_candidate_count,
+            "graph_neighbor_row_count": graph_neighbor_row_count,
+            "suppression_redacted_count": suppression_redacted_count,
+            "suppressed_baseline_count": suppressed_baseline_count,
+            "alternate_order_changed_count": alternate_order_changed_count,
+        },
+        "movement_evidence": {
+            "raw_flags_all_false": raw_flags_ok_count == shadow_trials.len() as u64,
+            "movement_observed": alternate_order_changed_count > 0,
+            "actual_return_order_changed": false,
+        },
+        "coverage_evidence": {
+            "raw_flags_all_false": raw_flags_ok_count == shadow_trials.len() as u64,
+            "graph_neighborhood_observed": graph_neighbor_row_count > 0,
+            "baseline_candidates_observed": baseline_candidate_count > 0,
+            "expanded_coverage_observed": graph_neighbor_row_count > baseline_candidate_count,
+        },
+        "safety": {
+            "shadow_trials_read_only_count": read_only_count,
+            "raw_flags_ok_count": raw_flags_ok_count,
+            "frontier_safe_count": frontier_safe_count,
+            "calls_memory_search": false,
+            "runs_biocortex": false,
+            "writes_memory": false,
+            "changes_memory_search_order": false,
+            "default_search_order_change_allowed": false,
+        },
+        "interpretation": {
+            "aggregate_evidence_ready": aggregate_evidence_ready,
+            "controlled_rank_movement_observed": alternate_order_changed_count > 0,
+            "expanded_coverage_without_additional_movement": graph_neighbor_row_count > 0 && alternate_order_changed_count == 0,
+            "default_influence_ready": false,
+            "human_review_required": true,
+            "review_state": if aggregate_evidence_ready { "redacted_aggregate_ready" } else { "blocked" },
+            "block_reasons": block_reasons,
+        },
+        "approval_state": "evidence_aggregate_only",
+        "authorization_state": "does_not_grant_runtime_influence",
+        "approval_writes_allowed": false,
+        "writes_approval": false,
+        "calls_memory_search": false,
+        "runs_biocortex": false,
+        "registers_embedding_backend": false,
+        "changes_memory_search_order": false,
+        "default_search_order_change_allowed": false,
+        "default_calls_unchanged": true,
+    })
+}
+
+// ===========================================================================
+//          memory_biocortex_redacted_evidence_aggregate — T5 aggregate
+// ===========================================================================
+
+pub struct MemoryBioCortexRedactedEvidenceAggregateTool;
+
+impl MemoryBioCortexRedactedEvidenceAggregateTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+#[async_trait]
+impl McpTool for MemoryBioCortexRedactedEvidenceAggregateTool {
+    fn name(&self) -> &'static str {
+        "memory_biocortex_redacted_evidence_aggregate"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only T5 evidence aggregate for AB memory BioCortex shadow trials. \
+                Consumes redacted memory_biocortex_shadow_trial packets and emits the \
+                redacted aggregate schema expected by the T6 influence gate. It never \
+                runs BioCortex, calls memory_search, writes memory, echoes raw packets, \
+                exposes raw queries/keys/content, or changes retrieval order."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "shadow_trials": {
+                        "type": "array",
+                        "items": { "type": "object" },
+                        "default": [],
+                        "description": "T5 memory_biocortex_shadow_trial outputs. Output never echoes them."
+                    },
+                    "min_shadow_trials": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100,
+                        "default": 3
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        Ok(ToolResult::json_text(
+            &memory_biocortex_redacted_evidence_aggregate_payload(args),
+        ))
+    }
+}
+
+fn memory_biocortex_relevance_lift_summary_payload(payload: Value) -> Value {
+    let mut summary = json!({
+        "schema": payload.get("schema").cloned().unwrap_or(Value::Null),
+        "generated_at": payload.get("generated_at").cloned().unwrap_or(Value::Null),
+        "status": payload.get("status").cloned().unwrap_or(Value::Null),
+        "purpose": payload.get("purpose").cloned().unwrap_or(Value::Null),
+        "verdict": payload.get("verdict").cloned().unwrap_or(Value::Null),
+        "sampling": payload.get("sampling").cloned().unwrap_or(Value::Null),
+        "metrics": payload.get("metrics").cloned().unwrap_or(Value::Null),
+        "caveats": payload.get("caveats").cloned().unwrap_or(Value::Null),
+        "safety": payload.get("safety").cloned().unwrap_or(Value::Null),
+        "input_contract": {
+            "source_eval_included": false,
+            "samples_included": false,
+            "first_side_signal_error_included": false,
+            "raw_query_included": false,
+            "raw_queries_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "side_signal_raw_included": false,
+        }
+    });
+    if let Some(obj) = summary.as_object_mut() {
+        obj.retain(|_, value| !value.is_null());
+    }
+    summary
+}
+
+// ===========================================================================
+//          memory_biocortex_relevance_lift_summary — T6 lift summary
+// ===========================================================================
+
+pub struct MemoryBioCortexRelevanceLiftSummaryTool {
+    hub: Hub,
+}
+
+impl MemoryBioCortexRelevanceLiftSummaryTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for MemoryBioCortexRelevanceLiftSummaryTool {
+    fn name(&self) -> &'static str {
+        "memory_biocortex_relevance_lift_summary"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only redacted relevance-lift summary for AB memory BioCortex T6. \
+                Runs the existing relevance-lift yardstick, then strips per-sample rows and \
+                raw side-signal errors so the output contains only schema/status/verdict, \
+                sampling, metrics, caveats, and safety fields consumed by the T6 gate. \
+                It never writes memory or changes production retrieval order."
+                .into(),
+            input_schema: BioCortexRetrievalRelevanceLiftEvalTool::new(self.hub.clone())
+                .schema()
+                .input_schema,
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = self
+            .hub
+            .store
+            .as_ref()
+            .ok_or_else(|| ab_core::Error::Backend("store unavailable".into()))?;
+        let sample_size = args
+            .get("sample_size")
+            .and_then(Value::as_u64)
+            .unwrap_or(8)
+            .clamp(1, 30) as usize;
+        let kind = args
+            .get("kind")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        let sort = match args
+            .get("sort")
+            .and_then(Value::as_str)
+            .unwrap_or("by_importance")
+        {
+            "recent" => MemoryListSort::Recent,
+            "frequent" => MemoryListSort::Frequent,
+            "newest" => MemoryListSort::Newest,
+            _ => MemoryListSort::ByImportance,
+        };
+        let limit = args
+            .get("limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(20)
+            .clamp(5, 100) as u32;
+        let query_chars = args
+            .get("query_chars")
+            .and_then(Value::as_u64)
+            .unwrap_or(120)
+            .clamp(16, 400) as usize;
+        let or_terms = args
+            .get("or_terms")
+            .and_then(Value::as_u64)
+            .unwrap_or(10)
+            .min(24) as usize;
+        let include_related = args
+            .get("include_related")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let blend_alpha = args
+            .get("blend_alpha")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.8) as f32;
+        let coverage_threshold = args
+            .get("coverage_threshold")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.8);
+        let checkout = args
+            .get("checkout_path")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from);
+        let timeout_ms = args
+            .get("timeout_ms")
+            .and_then(Value::as_u64)
+            .unwrap_or(180_000);
+
+        let payload = biocortex_retrieval_relevance_lift_eval(
+            store.as_ref(),
+            RelevanceLiftEvalOptions {
+                sample_size,
+                kind,
+                sort,
+                limit,
+                query_chars,
+                or_terms,
+                blend_alpha,
+                coverage_threshold,
+                include_related,
+                checkout,
+                timeout_ms,
+            },
+        )
+        .await;
+        Ok(ToolResult::json_text(
+            &memory_biocortex_relevance_lift_summary_payload(payload),
+        ))
+    }
+}
+
 fn memory_biocortex_t6_bool_at(value: &Value, path: &str) -> Option<bool> {
     value.pointer(path).and_then(Value::as_bool)
 }
@@ -41262,6 +41656,13 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // Continuity T5 BioCortex shadow packet: read-only redacted baseline,
     // graph-neighborhood, T3/T4 suppression, and advisory-control comparison.
     "memory_biocortex_shadow_trial",
+    // Continuity T5 aggregate: consumes redacted shadow packets and emits the
+    // aggregate schema required by T6 without running BioCortex or echoing raw
+    // query/key/content fields.
+    "memory_biocortex_redacted_evidence_aggregate",
+    // Continuity T6 lift summary: runs the relevance-lift yardstick but strips
+    // per-sample rows and raw adapter errors before the T6 gate consumes it.
+    "memory_biocortex_relevance_lift_summary",
     // Continuity T6 influence gate: read-only evidence threshold for entering
     // opt-in experiment review; it never approves runtime influence.
     "memory_biocortex_t6_influence_gate",
@@ -44798,6 +45199,18 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Standard,
         Arc::new(MemoryBioCortexShadowTrialTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryBioCortexRedactedEvidenceAggregateTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryBioCortexRelevanceLiftSummaryTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
@@ -50429,6 +50842,14 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(p.includes(Tier::Standard, "memory_retrieval_feedback"));
         assert!(p.includes(Tier::Standard, "memory_consolidation_queue"));
         assert!(p.includes(Tier::Standard, "memory_biocortex_shadow_trial"));
+        assert!(p.includes(
+            Tier::Standard,
+            "memory_biocortex_redacted_evidence_aggregate"
+        ));
+        assert!(p.includes(
+            Tier::Standard,
+            "memory_biocortex_relevance_lift_summary"
+        ));
         assert!(p.includes(Tier::Standard, "memory_biocortex_t6_influence_gate"));
         assert!(p.includes(Tier::Standard, "memory_neural_critic_shadow_eval"));
         assert!(p.includes(Tier::Standard, "biocortex_retrieval_shadow"));
@@ -50483,13 +50904,15 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 57 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 59 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-        //      + DIRECT(45: 6 avatar observation/sync/renderer tools
+        //      + DIRECT(47: 6 avatar observation/sync/renderer tools
         //      + xiao_shu_action_request + 14 mobile bridge tools
         //      + memory_graph_topology + memory_retrieval_feedback
         //      + memory_consolidation_queue
         //      + memory_biocortex_shadow_trial
+        //      + memory_biocortex_redacted_evidence_aggregate
+        //      + memory_biocortex_relevance_lift_summary
         //      + memory_biocortex_t6_influence_gate
         //      + memory_neural_critic_shadow_eval
         //      + biocortex_retrieval_shadow
@@ -50506,7 +50929,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         // forum_digest joined via the FORUM_READ capability group (2026-05-23).
         // Native-overlap probes such as browser_lite_probe stay in broader
         // profiles, not codex-essential direct extras.
-        assert_eq!(extras.len(), 57);
+        assert_eq!(extras.len(), 59);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -50537,6 +50960,8 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(extras.contains(&"memory_retrieval_feedback"));
         assert!(extras.contains(&"memory_consolidation_queue"));
         assert!(extras.contains(&"memory_biocortex_shadow_trial"));
+        assert!(extras.contains(&"memory_biocortex_redacted_evidence_aggregate"));
+        assert!(extras.contains(&"memory_biocortex_relevance_lift_summary"));
         assert!(extras.contains(&"memory_biocortex_t6_influence_gate"));
         assert!(extras.contains(&"memory_neural_critic_shadow_eval"));
         assert!(extras.contains(&"biocortex_retrieval_shadow"));
@@ -60413,6 +60838,178 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         let serialized = serde_json::to_string(&payload).expect("serialize");
         assert!(!serialized.contains("secret_shadow_key"));
         assert!(!serialized.contains("secret shadow content"));
+    }
+
+    fn memory_biocortex_safe_shadow_fixture() -> Value {
+        json!({
+            "schema": "agent_bridge.memory_biocortex_shadow_trial.v0",
+            "read_only": true,
+            "runs_biocortex": false,
+            "writes_memory": false,
+            "changes_memory_search_order": false,
+            "default_search_order_change_allowed": false,
+            "input_contract": {
+                "raw_query_included": false,
+                "raw_queries_included": false,
+                "raw_keys_included": false,
+                "content_included": false,
+                "candidate_content_included": false
+            },
+            "baseline": {
+                "key_count": 2,
+                "raw_keys_included": false,
+                "content_included": false
+            },
+            "graph_neighborhood": {
+                "neighbor_row_count": 5,
+                "raw_keys_included": false,
+                "content_included": false
+            },
+            "suppression_set": {
+                "redacted_count": 1,
+                "raw_keys_included": false
+            },
+            "comparison": {
+                "baseline_returned": true,
+                "alternate_order_changed": false,
+                "suppressed_baseline_count": 0
+            },
+            "current_biocortex_frontier": {
+                "discovered_selection_claimed": false
+            }
+        })
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_redacted_evidence_aggregate_summarizes_shadow_without_echoing() {
+        let tool = MemoryBioCortexRedactedEvidenceAggregateTool::new();
+        let shadow = memory_biocortex_safe_shadow_fixture();
+        let out = tool
+            .execute(
+                json!({
+                    "shadow_trials": [shadow.clone(), shadow],
+                    "min_shadow_trials": 2
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(
+            payload["schema"],
+            json!("agent_bridge.biocortex_retrieval.opt_in_redacted_evidence_aggregate.v0")
+        );
+        assert_eq!(payload["read_only"], json!(true));
+        assert_eq!(payload["redacted_evidence_aggregate"], json!(true));
+        assert_eq!(
+            payload["interpretation"]["aggregate_evidence_ready"],
+            json!(true)
+        );
+        assert_eq!(payload["shadow_evidence"]["shadow_trial_count"], json!(2));
+        assert_eq!(
+            payload["shadow_evidence"]["baseline_candidate_count"],
+            json!(4)
+        );
+        assert_eq!(
+            payload["shadow_evidence"]["graph_neighbor_row_count"],
+            json!(10)
+        );
+        assert_eq!(payload["calls_memory_search"], json!(false));
+        assert_eq!(payload["runs_biocortex"], json!(false));
+        assert_eq!(payload["changes_memory_search_order"], json!(false));
+
+        let serialized = serde_json::to_string(&payload).expect("serialize");
+        assert!(!serialized.contains("\"shadow_trials\":"));
+        assert!(!serialized.contains("source_key"));
+        assert!(!serialized.contains("\"raw_key\":"));
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_redacted_evidence_aggregate_blocks_raw_shadow_flags() {
+        let tool = MemoryBioCortexRedactedEvidenceAggregateTool::new();
+        let mut shadow = memory_biocortex_safe_shadow_fixture();
+        shadow["input_contract"]["raw_keys_included"] = json!(true);
+        shadow["raw_key"] = json!("secret_shadow_key");
+
+        let out = tool
+            .execute(
+                json!({
+                    "shadow_trials": [shadow],
+                    "min_shadow_trials": 1
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(
+            payload["interpretation"]["aggregate_evidence_ready"],
+            json!(false)
+        );
+        assert!(payload["interpretation"]["block_reasons"]
+            .as_array()
+            .expect("block reasons")
+            .contains(&json!("shadow_raw_query_key_or_content_included")));
+        let serialized = serde_json::to_string(&payload).expect("serialize");
+        assert!(!serialized.contains("secret_shadow_key"));
+    }
+
+    #[test]
+    fn memory_biocortex_relevance_lift_summary_strips_sample_rows_and_raw_errors() {
+        let payload = json!({
+            "schema": "agent_bridge.biocortex_retrieval.relevance_lift_eval.v0",
+            "generated_at": 123,
+            "status": "completed",
+            "purpose": "summary keeps purpose but strips raw review rows",
+            "verdict": "lift",
+            "sampling": {
+                "evaluated_count": 5
+            },
+            "metrics": {
+                "mrr_lift": 0.02,
+                "improved": 2,
+                "worsened": 0,
+                "unchanged": 3
+            },
+            "safety": {
+                "read_only": true,
+                "mutates_ab_memory": false,
+                "changes_prod_retrieval_order": false,
+                "writes_state": false
+            },
+            "samples": [
+                {
+                    "source_key": "secret_lift_key",
+                    "status": "ok"
+                }
+            ],
+            "first_side_signal_error": {
+                "raw_key": "secret_error_key",
+                "content": "secret adapter content"
+            }
+        });
+        let summary = memory_biocortex_relevance_lift_summary_payload(payload);
+
+        assert_eq!(
+            summary["schema"],
+            json!("agent_bridge.biocortex_retrieval.relevance_lift_eval.v0")
+        );
+        assert_eq!(summary["sampling"]["evaluated_count"], json!(5));
+        assert_eq!(summary["metrics"]["mrr_lift"], json!(0.02));
+        assert_eq!(summary["input_contract"]["samples_included"], json!(false));
+        assert_eq!(
+            summary["input_contract"]["first_side_signal_error_included"],
+            json!(false)
+        );
+
+        let serialized = serde_json::to_string(&summary).expect("serialize");
+        assert!(!serialized.contains("secret_lift_key"));
+        assert!(!serialized.contains("secret_error_key"));
+        assert!(!serialized.contains("secret adapter content"));
+        assert!(!serialized.contains("\"samples\":"));
+        assert!(!serialized.contains("\"first_side_signal_error\":"));
     }
 
     #[tokio::test]
