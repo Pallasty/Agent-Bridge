@@ -6955,7 +6955,7 @@ run cargo run -q -p ab-bridge \
     -- \
     --with-verified-outcome-ingestion-decision \
     --format json \
-    --assert-ready-for-verified-outcome-ingestion-execution \
+    --assert-ready-for-verified-outcome-admission \
     --assert-output-only >/dev/null
 
 current_corpus="crates/bridge/tests/fixtures/biocortex_retrieval_gate_corpus.jsonl"

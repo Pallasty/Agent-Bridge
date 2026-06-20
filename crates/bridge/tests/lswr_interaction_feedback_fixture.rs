@@ -5528,13 +5528,13 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_gate_blocks_
         "explicit_verified_outcome_ingestion_decision_required"
     );
     assert_eq!(
-        ingestion_gate["verified_outcome_ingestion_gate"]["ready_for_verified_outcome_ingestion_execution"],
+        ingestion_gate["verified_outcome_ingestion_gate"]["ready_for_verified_outcome_admission"],
         false
     );
     assert_runtime_executor_verified_outcome_ingestion_gate_output_only(&ingestion_gate);
 
     assert!(markdown.contains("- verified_outcome_ingestion_gate_verdict: `blocked`"));
-    assert!(markdown.contains("- ready_for_verified_outcome_ingestion_execution: `false`"));
+    assert!(markdown.contains("- ready_for_verified_outcome_admission: `false`"));
 }
 
 #[test]
@@ -5560,14 +5560,14 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_gate_accepts
     );
     assert_eq!(
         ingestion_gate["verified_outcome_ingestion_gate_verdict"],
-        "ready_for_verified_outcome_ingestion_execution",
+        "ready_for_verified_outcome_admission",
         "failure_reasons={}",
         ingestion_gate["failure_reasons"]
     );
     assert_eq!(ingestion_gate["status"], "ready");
     assert_eq!(
         ingestion_gate["reason"],
-        "verified_outcome_ingestion_gate_ready_for_ingestion_execution"
+        "verified_outcome_ingestion_gate_ready_for_verified_outcome_admission"
     );
     assert_eq!(ingestion_gate["failure_reasons"], json!([]));
     assert_eq!(
@@ -5583,21 +5583,21 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_gate_accepts
         "verified"
     );
     assert_eq!(
-        ingestion_gate["verified_outcome_ingestion_gate"]["ready_for_verified_outcome_ingestion_execution"],
+        ingestion_gate["verified_outcome_ingestion_gate"]["ready_for_verified_outcome_admission"],
         true
     );
     assert_eq!(
-        ingestion_gate["verified_outcome_ingestion_gate"]["verified_outcome_package_emitted_by_this_tool"],
+        ingestion_gate["verified_outcome_ingestion_gate"]["verified_outcome_admission_package_emitted_by_this_tool"],
         true
     );
     assert_eq!(
         ingestion_gate["next_allowed_gate"],
-        "verified_outcome_ingestion_execution"
+        "verified_outcome_admission_gate"
     );
     assert_runtime_executor_verified_outcome_ingestion_gate_output_only(&ingestion_gate);
 
     assert!(markdown.contains(
-        "- verified_outcome_ingestion_gate_verdict: `ready_for_verified_outcome_ingestion_execution`"
+        "- verified_outcome_ingestion_gate_verdict: `ready_for_verified_outcome_admission`"
     ));
     assert!(markdown.contains("- previous_world_verdict: `not_verified`"));
     assert!(markdown.contains("- verified_world_verdict: `verified`"));
@@ -5609,19 +5609,19 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_gate_blocks_
     let mut decision = explicit_verified_outcome_ingestion_decision();
     decision["decision_kind"] = json!("operator_note");
     decision["decision"] = json!("ingest_now");
-    decision["source_world_verdict"] = json!("verified");
-    decision["rewritten_world_verdict"] = json!("not_verified");
+    decision["source_world_verdict"] = json!("not_verified");
     decision["reviewed_world_verdict_rewrite_gate_verdict"] = json!("blocked");
+    decision["bounded_verified_verdict_package_present"] = json!(false);
     decision["verified_outcome_claim_present"] = json!(false);
-    decision["world_verdict_rewrite_output_confirmed"] = json!(false);
+    decision["world_verdict_rewrite_output_only_confirmed"] = json!(false);
     decision["reviewer_attestation_present"] = json!(false);
     decision["evidence_lineage_preserved"] = json!(false);
     decision["outcome_record_digest_confirmed"] = json!(false);
     decision["idempotency_key_confirmed"] = json!(false);
     decision["persisted_key_confirmed"] = json!(false);
     decision["persisted_digest_confirmed"] = json!(false);
-    decision["ingestion_boundary_acknowledged"] = json!(false);
-    decision["outcome_ingestion_allowed"] = json!(true);
+    decision["verified_outcome_ingestion_allowed"] = json!(false);
+    decision["store_write_allowed"] = json!(true);
     decision["memory_write_allowed"] = json!(true);
     decision["verified_outcome_ingested_by_this_tool"] = json!(true);
     decision["durable_outcome_record_written_by_this_tool"] = json!(true);
@@ -5645,19 +5645,19 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_gate_blocks_
     assert!(failure_reasons.contains(&json!("verified_outcome_ingestion_decision_kind_required")));
     assert!(failure_reasons.contains(&json!("verified_outcome_ingestion_decision_not_approved")));
     assert!(failure_reasons.contains(&json!(
-        "verified_outcome_ingestion_source_must_be_not_verified"
-    )));
-    assert!(failure_reasons.contains(&json!(
-        "verified_outcome_ingestion_rewritten_verdict_must_be_verified"
+        "verified_outcome_ingestion_source_must_be_verified"
     )));
     assert!(failure_reasons.contains(&json!(
         "verified_outcome_ingestion_must_review_ready_rewrite_gate"
     )));
     assert!(failure_reasons.contains(&json!(
+        "verified_outcome_ingestion_requires_bounded_package"
+    )));
+    assert!(failure_reasons.contains(&json!(
         "verified_outcome_ingestion_requires_verified_outcome_claim"
     )));
     assert!(failure_reasons.contains(&json!(
-        "verified_outcome_ingestion_requires_rewrite_output_confirmation"
+        "verified_outcome_ingestion_requires_output_only_rewrite"
     )));
     assert!(failure_reasons.contains(&json!(
         "verified_outcome_ingestion_requires_reviewer_attestation"
@@ -5674,10 +5674,10 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_gate_blocks_
         "verified_outcome_ingestion_requires_persisted_digest"
     )));
     assert!(failure_reasons.contains(&json!(
-        "verified_outcome_ingestion_requires_boundary_acknowledgement"
+        "verified_outcome_ingestion_decision_must_allow_ingestion"
     )));
     assert!(failure_reasons.contains(&json!(
-        "verified_outcome_ingestion_gate_must_not_allow_ingestion"
+        "verified_outcome_ingestion_gate_must_not_allow_store_write"
     )));
     assert!(failure_reasons.contains(&json!(
         "verified_outcome_ingestion_gate_must_not_allow_memory_write"
@@ -6618,7 +6618,7 @@ fn explicit_verified_outcome_ingestion_decision() -> Value {
     json!({
         "schema": LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_DECISION_SCHEMA,
         "ingestion_decision_id": "verified_outcome_ingestion_arrival_bath_move_002",
-        "decision_kind": "verified_outcome_ingestion_gate",
+        "decision_kind": "verified_outcome_ingestion",
         "source_world_verdict_rewrite_scope": {
             "rewrite_decision_id": "world_verdict_rewrite_arrival_bath_move_002",
             "source_review_decision_id": "durable_outcome_record_write_evidence_review_arrival_bath_move_002",
@@ -6637,20 +6637,21 @@ fn explicit_verified_outcome_ingestion_decision() -> Value {
             "persisted_outcome_record_key": "onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_record_candidate_arrival_bath_move_002",
             "persisted_outcome_record_digest": "sha256:arrival-bath-move-002-outcome-record"
         },
-        "decision": "approved_for_verified_outcome_ingestion_gate",
-        "ingestion_reason": "world_verdict_rewrite_output_is_scoped_and_ready_for_separate_ingestion_execution",
-        "source_world_verdict": "not_verified",
-        "rewritten_world_verdict": "verified",
+        "decision": "admit_verified_outcome_package",
+        "ingestion_reason": "world_verdict_rewrite_output_is_scoped_and_ready_for_separate_admission",
+        "source_world_verdict": "verified",
         "reviewed_world_verdict_rewrite_gate_verdict": "ready_for_verified_outcome_ingestion_gate",
+        "bounded_verified_verdict_package_present": true,
         "verified_outcome_claim_present": true,
-        "world_verdict_rewrite_output_confirmed": true,
+        "world_verdict_rewrite_output_only_confirmed": true,
         "reviewer_attestation_present": true,
         "evidence_lineage_preserved": true,
         "outcome_record_digest_confirmed": true,
         "idempotency_key_confirmed": true,
         "persisted_key_confirmed": true,
         "persisted_digest_confirmed": true,
-        "ingestion_boundary_acknowledged": true,
+        "verified_outcome_ingestion_allowed": true,
+        "store_write_allowed": false,
         "outcome_ingestion_allowed": false,
         "memory_write_allowed": false,
         "verified_outcome_ingested_by_this_tool": false,
@@ -8355,7 +8356,7 @@ fn assert_runtime_executor_verified_outcome_ingestion_gate_output_only(gate: &Va
         true
     );
     assert_eq!(
-        gate["guardrails"]["performs_verified_outcome_package_output"],
+        gate["guardrails"]["performs_verified_outcome_admission_output"],
         true
     );
     assert_eq!(
@@ -8366,13 +8367,11 @@ fn assert_runtime_executor_verified_outcome_ingestion_gate_output_only(gate: &Va
     assert_eq!(gate["guardrails"]["durable_outcome_record_written"], false);
     assert_eq!(gate["guardrails"]["memory_write_allowed"], false);
     assert_eq!(gate["guardrails"]["outcome_ingestion_allowed"], false);
-    assert_eq!(
-        gate["guardrails"]["verified_outcome_ingestion_allowed"],
-        false
-    );
+    assert_eq!(gate["guardrails"]["store_write_allowed"], false);
     assert_eq!(gate["guardrails"]["persists_outcome_record"], false);
     assert_eq!(gate["agent_action_contract"]["do_not_ingest_outcome"], true);
     assert_eq!(gate["agent_action_contract"]["do_not_write_memory"], true);
+    assert_eq!(gate["agent_action_contract"]["do_not_write_store"], true);
     assert_eq!(
         gate["agent_action_contract"]["do_not_persist_world_verdict"],
         true
@@ -8382,7 +8381,7 @@ fn assert_runtime_executor_verified_outcome_ingestion_gate_output_only(gate: &Va
         true
     );
     assert_eq!(
-        gate["agent_action_contract"]["require_separate_verified_outcome_ingestion_execution"],
+        gate["agent_action_contract"]["require_separate_verified_outcome_admission_gate"],
         true
     );
 }

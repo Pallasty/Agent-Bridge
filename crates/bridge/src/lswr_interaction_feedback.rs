@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 pub const LSWR_INTERACTION_FEEDBACK_FIXTURE_SCHEMA: &str =
     "agent_bridge.lswr.interaction_feedback_fixture.v0";
@@ -7566,7 +7566,8 @@ pub fn build_interaction_feedback_runtime_executor_durable_outcome_record_write_
     if store_write_preflight_schema_ok
         && (store_write_contract["may_execute_durable_outcome_record_store_write_after_preflight"]
             != true
-            || store_write_contract["require_separate_durable_outcome_record_store_write_execution"]
+            || store_write_contract
+                ["require_separate_durable_outcome_record_store_write_execution"]
                 != true
             || store_write_contract["require_world_verdict_rewrite_gate_after_ingestion"] != true
             || store_write_contract["do_not_ingest_outcome"] != true
@@ -8106,9 +8107,11 @@ pub fn build_interaction_feedback_runtime_executor_durable_outcome_record_write_
         );
     }
     if write_evidence_preflight_schema_ok
-        && (write_evidence_contract["may_review_durable_outcome_record_write_evidence_after_preflight"]
+        && (write_evidence_contract
+            ["may_review_durable_outcome_record_write_evidence_after_preflight"]
             != true
-            || write_evidence_contract["require_separate_durable_outcome_record_write_evidence_review"]
+            || write_evidence_contract
+                ["require_separate_durable_outcome_record_write_evidence_review"]
                 != true
             || write_evidence_contract["require_world_verdict_rewrite_gate_after_evidence_review"]
                 != true
@@ -9098,22 +9101,14 @@ pub fn build_interaction_feedback_runtime_executor_verified_outcome_ingestion_ga
     {
         failure_reasons.push("verified_outcome_ingestion_decision_id_required".to_string());
     }
-    if ingestion_schema_ok
-        && ingestion_decision["decision_kind"] != "verified_outcome_ingestion_gate"
-    {
+    if ingestion_schema_ok && ingestion_decision["decision_kind"] != "verified_outcome_ingestion" {
         failure_reasons.push("verified_outcome_ingestion_decision_kind_required".to_string());
     }
-    if ingestion_schema_ok
-        && ingestion_decision["decision"] != "approved_for_verified_outcome_ingestion_gate"
-    {
+    if ingestion_schema_ok && ingestion_decision["decision"] != "admit_verified_outcome_package" {
         failure_reasons.push("verified_outcome_ingestion_decision_not_approved".to_string());
     }
-    if ingestion_schema_ok && ingestion_decision["source_world_verdict"] != "not_verified" {
-        failure_reasons.push("verified_outcome_ingestion_source_must_be_not_verified".to_string());
-    }
-    if ingestion_schema_ok && ingestion_decision["rewritten_world_verdict"] != "verified" {
-        failure_reasons
-            .push("verified_outcome_ingestion_rewritten_verdict_must_be_verified".to_string());
+    if ingestion_schema_ok && ingestion_decision["source_world_verdict"] != "verified" {
+        failure_reasons.push("verified_outcome_ingestion_source_must_be_verified".to_string());
     }
     if ingestion_schema_ok
         && ingestion_decision["reviewed_world_verdict_rewrite_gate_verdict"]
@@ -9124,12 +9119,16 @@ pub fn build_interaction_feedback_runtime_executor_verified_outcome_ingestion_ga
     }
     for (key, reason) in [
         (
+            "bounded_verified_verdict_package_present",
+            "verified_outcome_ingestion_requires_bounded_package",
+        ),
+        (
             "verified_outcome_claim_present",
             "verified_outcome_ingestion_requires_verified_outcome_claim",
         ),
         (
-            "world_verdict_rewrite_output_confirmed",
-            "verified_outcome_ingestion_requires_rewrite_output_confirmation",
+            "world_verdict_rewrite_output_only_confirmed",
+            "verified_outcome_ingestion_requires_output_only_rewrite",
         ),
         (
             "reviewer_attestation_present",
@@ -9156,17 +9155,17 @@ pub fn build_interaction_feedback_runtime_executor_verified_outcome_ingestion_ga
             "verified_outcome_ingestion_requires_persisted_digest",
         ),
         (
-            "ingestion_boundary_acknowledged",
-            "verified_outcome_ingestion_requires_boundary_acknowledgement",
+            "verified_outcome_ingestion_allowed",
+            "verified_outcome_ingestion_decision_must_allow_ingestion",
         ),
     ] {
         if ingestion_schema_ok && ingestion_decision[key] != true {
             failure_reasons.push(reason.to_string());
         }
     }
-    if ingestion_schema_ok && ingestion_decision["outcome_ingestion_allowed"] != false {
+    if ingestion_schema_ok && ingestion_decision["store_write_allowed"] != false {
         failure_reasons
-            .push("verified_outcome_ingestion_gate_must_not_allow_ingestion".to_string());
+            .push("verified_outcome_ingestion_gate_must_not_allow_store_write".to_string());
     }
     if ingestion_schema_ok && ingestion_decision["memory_write_allowed"] != false {
         failure_reasons
@@ -9279,7 +9278,7 @@ pub fn build_interaction_feedback_runtime_executor_verified_outcome_ingestion_ga
 
     let ready = failure_reasons.is_empty();
     let reason = if ready {
-        "verified_outcome_ingestion_gate_ready_for_ingestion_execution".to_string()
+        "verified_outcome_ingestion_gate_ready_for_verified_outcome_admission".to_string()
     } else {
         failure_reasons
             .first()
@@ -9304,7 +9303,7 @@ pub fn build_interaction_feedback_runtime_executor_verified_outcome_ingestion_ga
             .cloned()
             .unwrap_or(Value::Null),
         "verified_outcome_ingestion_decision_schema": ingestion_decision.get("schema").cloned().unwrap_or(Value::Null),
-        "verified_outcome_ingestion_gate_verdict": if ready { "ready_for_verified_outcome_ingestion_execution" } else { "blocked" },
+        "verified_outcome_ingestion_gate_verdict": if ready { "ready_for_verified_outcome_admission" } else { "blocked" },
         "status": if ready { "ready" } else { "blocked" },
         "reason": reason,
         "failure_reasons": unique_strings(failure_reasons),
@@ -9321,8 +9320,8 @@ pub fn build_interaction_feedback_runtime_executor_verified_outcome_ingestion_ga
             "decision_kind": if ready { ingestion_decision.get("decision_kind").cloned().unwrap_or(Value::Null) } else { Value::Null },
             "decision": if ready { ingestion_decision.get("decision").cloned().unwrap_or(Value::Null) } else { Value::Null },
             "ingestion_reason": if ready { ingestion_decision.get("ingestion_reason").cloned().unwrap_or(Value::Null) } else { Value::Null },
-            "previous_world_verdict": if ready { ingestion_decision.get("source_world_verdict").cloned().unwrap_or(Value::Null) } else { Value::Null },
-            "verified_world_verdict": if ready { ingestion_decision.get("rewritten_world_verdict").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "previous_world_verdict": if ready { rewrite.get("previous_world_verdict").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "verified_world_verdict": if ready { ingestion_decision.get("source_world_verdict").cloned().unwrap_or(Value::Null) } else { Value::Null },
             "outcome_record_candidate_id": if ready { ingestion_scope.get("outcome_record_candidate_id").cloned().unwrap_or(Value::Null) } else { Value::Null },
             "outcome_record_schema": if ready { ingestion_scope.get("outcome_record_schema").cloned().unwrap_or(Value::Null) } else { Value::Null },
             "idempotency_key": if ready { ingestion_scope.get("idempotency_key").cloned().unwrap_or(Value::Null) } else { Value::Null },
@@ -9332,42 +9331,46 @@ pub fn build_interaction_feedback_runtime_executor_verified_outcome_ingestion_ga
             "outcome_record_digest": if ready { ingestion_scope.get("outcome_record_digest").cloned().unwrap_or(Value::Null) } else { Value::Null },
             "persisted_outcome_record_key": if ready { ingestion_scope.get("persisted_outcome_record_key").cloned().unwrap_or(Value::Null) } else { Value::Null },
             "persisted_outcome_record_digest": if ready { ingestion_scope.get("persisted_outcome_record_digest").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "bounded_verified_verdict_package_present": if ready { ingestion_decision.get("bounded_verified_verdict_package_present").cloned().unwrap_or(Value::Null) } else { Value::Null },
             "verified_outcome_claim_present": if ready { ingestion_decision.get("verified_outcome_claim_present").cloned().unwrap_or(Value::Null) } else { Value::Null },
-            "world_verdict_rewrite_output_confirmed": if ready { ingestion_decision.get("world_verdict_rewrite_output_confirmed").cloned().unwrap_or(Value::Null) } else { Value::Null },
+            "world_verdict_rewrite_output_only_confirmed": if ready { ingestion_decision.get("world_verdict_rewrite_output_only_confirmed").cloned().unwrap_or(Value::Null) } else { Value::Null },
             "reviewer_attestation_present": if ready { ingestion_decision.get("reviewer_attestation_present").cloned().unwrap_or(Value::Null) } else { Value::Null },
             "evidence_lineage_preserved": if ready { ingestion_decision.get("evidence_lineage_preserved").cloned().unwrap_or(Value::Null) } else { Value::Null },
-            "ready_for_verified_outcome_ingestion_execution": ready,
-            "verified_outcome_package_emitted_by_this_tool": ready,
+            "ready_for_verified_outcome_admission": ready,
+            "verified_outcome_admission_package_emitted_by_this_tool": ready,
             "verified_outcome_ingestion_gate_output_only": true,
             "verified_outcome_ingested_by_this_tool": false,
             "world_verdict_persisted_by_this_tool": false,
             "durable_outcome_record_written_by_this_tool": false,
+            "store_write_allowed": false,
             "memory_write_allowed": false,
             "outcome_ingestion_allowed": false
         },
-        "next_allowed_gate": if ready { "verified_outcome_ingestion_execution" } else { "repair_verified_outcome_ingestion_gate_input" },
+        "next_allowed_gate": if ready { "verified_outcome_admission_gate" } else { "repair_verified_outcome_ingestion_gate_input" },
         "agent_action_contract": {
             "mode": "runtime_executor_verified_outcome_ingestion_gate_only",
-            "may_enter_verified_outcome_ingestion_execution_after_gate": ready,
-            "may_emit_verified_outcome_ingestion_package": ready,
+            "may_enter_verified_outcome_admission_gate_after_ingestion_decision": ready,
+            "may_emit_verified_outcome_admission_package": ready,
             "do_not_ingest_outcome": true,
             "do_not_write_memory": true,
+            "do_not_write_store": true,
             "do_not_persist_world_verdict": true,
             "do_not_persist_outcome_record": true,
-            "require_separate_verified_outcome_ingestion_execution": true
+            "require_separate_verified_outcome_admission_gate": true
         },
         "source_world_verdict_rewrite_gate": if rewrite_gate_schema_ok { rewrite_gate } else { Value::Null },
         "verified_outcome_ingestion_decision": if ingestion_schema_ok { ingestion_decision } else { Value::Null },
         "verified_outcome_ingestion_gate_performed_by_this_tool": true,
+        "verified_outcome_ingestion_decision_accepted_by_this_tool": ready,
         "verified_outcome_ingestion_performed_by_this_tool": false,
-        "verified_outcome_package_emitted_by_this_tool": ready,
+        "verified_outcome_admission_package_emitted_by_this_tool": ready,
         "world_verdict_persisted_by_this_tool": false,
         "durable_outcome_record_written_by_this_tool": false,
         "durable_outcome_ingestion_performed_by_this_tool": false,
         "writes_state": false,
         "store_access_required": false,
         "mcp_tool_registered": false,
-        "note": "pure verified outcome ingestion gate: emits a bounded ingestion package without durable writes, memory/store access, MCP exposure, world-verdict persistence, or verified-outcome ingestion execution"
+        "note": "pure verified outcome ingestion gate: emits a bounded admission package without store writes, memory writes, MCP exposure, world-verdict persistence, or verified-outcome ingestion"
     })
 }
 
@@ -9425,14 +9428,16 @@ pub fn render_interaction_feedback_runtime_executor_verified_outcome_ingestion_g
         "persisted_outcome_record_key",
         "persisted_outcome_record_digest",
         "verified_outcome_claim_present",
-        "world_verdict_rewrite_output_confirmed",
+        "bounded_verified_verdict_package_present",
+        "world_verdict_rewrite_output_only_confirmed",
         "reviewer_attestation_present",
         "evidence_lineage_preserved",
-        "ready_for_verified_outcome_ingestion_execution",
-        "verified_outcome_package_emitted_by_this_tool",
+        "ready_for_verified_outcome_admission",
+        "verified_outcome_admission_package_emitted_by_this_tool",
         "verified_outcome_ingestion_gate_output_only",
         "verified_outcome_ingested_by_this_tool",
         "world_verdict_persisted_by_this_tool",
+        "store_write_allowed",
         "memory_write_allowed",
         "outcome_ingestion_allowed",
     ] {
@@ -9448,13 +9453,14 @@ pub fn render_interaction_feedback_runtime_executor_verified_outcome_ingestion_g
     lines.push(String::new());
     for key in [
         "mode",
-        "may_enter_verified_outcome_ingestion_execution_after_gate",
-        "may_emit_verified_outcome_ingestion_package",
+        "may_enter_verified_outcome_admission_gate_after_ingestion_decision",
+        "may_emit_verified_outcome_admission_package",
         "do_not_ingest_outcome",
         "do_not_write_memory",
+        "do_not_write_store",
         "do_not_persist_world_verdict",
         "do_not_persist_outcome_record",
-        "require_separate_verified_outcome_ingestion_execution",
+        "require_separate_verified_outcome_admission_gate",
     ] {
         push_markdown_kv(&mut lines, key, &gate["agent_action_contract"][key]);
     }
@@ -11374,15 +11380,15 @@ fn runtime_executor_verified_outcome_ingestion_gate_guardrails() -> Value {
         "queries_live_runtime": false,
         "requires_ready_world_verdict_rewrite_gate": true,
         "requires_explicit_verified_outcome_ingestion_decision": true,
-        "decision_kind": "verified_outcome_ingestion_gate",
+        "decision_kind": "verified_outcome_ingestion",
         "performs_verified_outcome_ingestion_gate": true,
-        "performs_verified_outcome_package_output": true,
+        "performs_verified_outcome_admission_output": true,
         "performs_verified_outcome_ingestion": false,
         "persists_world_verdict": false,
         "durable_outcome_record_written": false,
+        "store_write_allowed": false,
         "memory_write_allowed": false,
         "outcome_ingestion_allowed": false,
-        "verified_outcome_ingestion_allowed": false,
         "persists_outcome_record": false,
         "runtime_executor_verified_outcome_ingestion_gate_only": true
     })
@@ -11642,21 +11648,15 @@ mod tests {
         }));
 
         assert!(!report.valid);
-        assert!(
-            report
-                .failure_reasons
-                .contains(&"schema_mismatch".to_string())
-        );
-        assert!(
-            report
-                .failure_reasons
-                .contains(&"primary_readback_requires_screenshot".to_string())
-        );
-        assert!(
-            report
-                .failure_reasons
-                .contains(&"event_sequence_mismatch".to_string())
-        );
+        assert!(report
+            .failure_reasons
+            .contains(&"schema_mismatch".to_string()));
+        assert!(report
+            .failure_reasons
+            .contains(&"primary_readback_requires_screenshot".to_string()));
+        assert!(report
+            .failure_reasons
+            .contains(&"event_sequence_mismatch".to_string()));
         assert_eq!(report.to_value()["writes_state"], false);
         assert_eq!(report.to_value()["store_access_required"], false);
         assert_eq!(report.to_value()["mcp_tool_registered"], false);
