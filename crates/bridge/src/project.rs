@@ -374,6 +374,38 @@ pub fn changes_digest(cwd: &Path, scope: &str) -> Result<Value> {
         })
         .collect();
 
+    // Patch/hunk scope: the same diff WITH its unified hunks, split per file and
+    // bounded so a digest can show *what* changed, not just how much. Additive
+    // (`patches`/`patch_truncated`) — existing consumers ignore the new fields,
+    // and the signature is unchanged so no MCP-tool wiring shifts. Caps keep the
+    // response bounded regardless of diff size (OB-4 step 1, ORCA_BORROW_PLAN §3).
+    let patch_raw = match scope {
+        "working_tree" => git_output_joined(cwd, &["diff"], &[])?,
+        "staged" => git_output_joined(cwd, &["diff", "--cached"], &[])?,
+        "last_commit" => git_output_joined(cwd, &["show", "--pretty=format:"], &[])?,
+        "branch_vs_main" => {
+            let range = branch_range.as_ref().map(|s| s.as_str()).unwrap_or("");
+            git_output_joined(cwd, &["diff"], &[range])?
+        }
+        other => {
+            return Err(Error::InvalidArgument(format!(
+                "unknown scope '{other}'; expected working_tree|staged|last_commit|branch_vs_main"
+            )));
+        }
+    };
+    let mut patch_truncated = false;
+    let mut patches: Vec<Value> = Vec::new();
+    for (i, (path, text)) in split_patch_by_file(&patch_raw).into_iter().enumerate() {
+        if i >= CHANGES_DIGEST_MAX_PATCH_FILES {
+            patch_truncated = true;
+            break;
+        }
+        let (body, file_trunc) =
+            truncate_patch_lines(&text, CHANGES_DIGEST_MAX_PATCH_LINES_PER_FILE);
+        patch_truncated |= file_trunc;
+        patches.push(json!({ "file": path, "patch": body, "truncated": file_trunc }));
+    }
+
     Ok(json!({
         "scope": scope,
         "cwd": cwd.display().to_string(),
@@ -382,6 +414,8 @@ pub fn changes_digest(cwd: &Path, scope: &str) -> Result<Value> {
         "deletions": total_del,
         "summary": summary,
         "name_status": name_status,
+        "patches": patches,
+        "patch_truncated": patch_truncated,
     }))
 }
 
@@ -595,6 +629,62 @@ fn parse_name_status(raw: &str) -> Vec<Value> {
     out
 }
 
+/// Caps that keep `changes_digest`'s `patches` bounded regardless of diff size:
+/// at most this many files carry a patch, and each patch is truncated past this
+/// many lines (with a marker). Both surface via `patch_truncated`.
+const CHANGES_DIGEST_MAX_PATCH_FILES: usize = 50;
+const CHANGES_DIGEST_MAX_PATCH_LINES_PER_FILE: usize = 200;
+
+/// Extract the b-side (new) path from a `diff --git a/<old> b/<new>` header.
+/// Best-effort: uses the last ` b/` marker, which is correct for the common
+/// case (paths without an embedded ` b/`). Returns None if not a diff header.
+fn diff_git_b_path(line: &str) -> Option<String> {
+    let rest = line.strip_prefix("diff --git ")?;
+    rest.rfind(" b/").map(|idx| rest[idx + 3..].to_string())
+}
+
+/// Split a unified `git diff` into `(file_path, patch_text)` pairs — one chunk
+/// per file, each starting at its `diff --git` header and running to the next.
+/// The path is the diff's b-side; an unparseable header falls back to `"?"`.
+/// Pure (no git), so it is unit-tested without a repository.
+fn split_patch_by_file(patch: &str) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    let mut cur_path: Option<String> = None;
+    let mut cur_lines: Vec<&str> = Vec::new();
+    for line in patch.lines() {
+        if line.starts_with("diff --git ") {
+            if let Some(p) = cur_path.take() {
+                out.push((p, cur_lines.join("\n")));
+            }
+            cur_lines.clear();
+            cur_path = Some(diff_git_b_path(line).unwrap_or_else(|| "?".to_string()));
+        }
+        if cur_path.is_some() {
+            cur_lines.push(line);
+        }
+    }
+    if let Some(p) = cur_path.take() {
+        out.push((p, cur_lines.join("\n")));
+    }
+    out
+}
+
+/// Truncate `text` to at most `max_lines` lines, appending a count marker when
+/// trimmed. Returns `(body, truncated)`.
+fn truncate_patch_lines(text: &str, max_lines: usize) -> (String, bool) {
+    let lines: Vec<&str> = text.lines().collect();
+    if lines.len() <= max_lines {
+        (text.to_string(), false)
+    } else {
+        let omitted = lines.len() - max_lines;
+        let kept = lines[..max_lines].join("\n");
+        (
+            format!("{kept}\n… ({omitted} more lines truncated)"),
+            true,
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -620,6 +710,88 @@ mod tests {
         assert_eq!(v[0]["status"], "R083");
         assert_eq!(v[0]["path"], "new.rs");
         assert_eq!(v[0]["from"], "old.rs");
+    }
+
+    #[test]
+    fn diff_git_b_path_parses_new_side() {
+        assert_eq!(
+            diff_git_b_path("diff --git a/src/a.rs b/src/a.rs").as_deref(),
+            Some("src/a.rs")
+        );
+        assert_eq!(diff_git_b_path("not a header"), None);
+    }
+
+    #[test]
+    fn split_patch_by_file_splits_per_file() {
+        let raw = [
+            "diff --git a/src/a.rs b/src/a.rs",
+            "index 111..222 100644",
+            "--- a/src/a.rs",
+            "+++ b/src/a.rs",
+            "@@ -1,2 +1,3 @@",
+            " keep",
+            "-old",
+            "+new",
+            "+added",
+            "diff --git a/docs/b.md b/docs/b.md",
+            "index 333..444 100644",
+            "--- a/docs/b.md",
+            "+++ b/docs/b.md",
+            "@@ -1 +1 @@",
+            "-x",
+            "+y",
+        ]
+        .join("\n");
+        let pairs = split_patch_by_file(&raw);
+        assert_eq!(pairs.len(), 2);
+        assert_eq!(pairs[0].0, "src/a.rs");
+        assert_eq!(pairs[1].0, "docs/b.md");
+        // Each chunk starts at its own header and does not bleed into the next.
+        assert!(pairs[0].1.starts_with("diff --git a/src/a.rs b/src/a.rs"));
+        assert!(pairs[0].1.contains("+added"));
+        assert!(!pairs[0].1.contains("docs/b.md"));
+        assert!(pairs[1].1.contains("+y"));
+        // Context line keeps its leading space.
+        assert!(pairs[0].1.contains("\n keep"));
+    }
+
+    #[test]
+    fn truncate_patch_lines_caps_and_marks() {
+        let (body, trunc) = truncate_patch_lines("l1\nl2\nl3", 5);
+        assert!(!trunc);
+        assert_eq!(body, "l1\nl2\nl3");
+
+        let (body, trunc) = truncate_patch_lines("l1\nl2\nl3\nl4\nl5", 2);
+        assert!(trunc);
+        assert!(body.starts_with("l1\nl2\n"));
+        assert!(body.contains("3 more lines truncated"));
+    }
+
+    #[test]
+    fn changes_digest_last_commit_emits_patches() {
+        // End-to-end git→patch path against the real repo. `last_commit` (HEAD)
+        // is churn-independent, so this does not race concurrent tests mutating
+        // the working tree.
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let repo_root = manifest_dir
+            .ancestors()
+            .find(|p| p.join("Cargo.toml").is_file() && p.join("crates").is_dir())
+            .expect("workspace root")
+            .to_path_buf();
+        let v = changes_digest(&repo_root, "last_commit").expect("changes_digest");
+        let patches = v["patches"].as_array().expect("patches array");
+        assert!(
+            !patches.is_empty(),
+            "expected non-empty patches for last_commit"
+        );
+        let first = &patches[0];
+        assert!(first["file"].is_string());
+        assert!(first["patch"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("diff --git"));
+        assert!(first["truncated"].is_boolean());
+        assert!(v["patch_truncated"].is_boolean());
     }
 
     #[test]
