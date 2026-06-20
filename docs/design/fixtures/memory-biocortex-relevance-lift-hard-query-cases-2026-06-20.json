@@ -1,0 +1,66 @@
+{
+  "schema": "agent_bridge.memory_biocortex.relevance_lift_hard_query_cases.v0",
+  "read_only": true,
+  "purpose": "Reusable local-memory hard query cases for memory_biocortex_relevance_lift_summary. These cases exercise downstream-style recall labels rather than self-retrieval queries derived from target memory content.",
+  "input_boundary": {
+    "raw_queries_are_fixture_inputs": true,
+    "raw_relevant_keys_are_fixture_inputs": true,
+    "raw_queries_may_be_read_by_the_operator_or_mcp_caller": true,
+    "raw_queries_must_not_be_returned_by_summary": true,
+    "raw_relevant_keys_must_not_be_returned_by_summary": true,
+    "content_included": false,
+    "side_signal_raw_included": false,
+    "writes_memory": false,
+    "changes_search_order": false
+  },
+  "query_cases": [
+    {
+      "query": "Agent-Bridge PageRank scoped topology readout graph hygiene",
+      "relevant_keys": [
+        "agent_bridge_scoped_topology_readout_20260529",
+        "agent_bridge_durable_topology_filter_20260529"
+      ],
+      "class_label": "graph_hygiene",
+      "review_intent": "Recover durable topology and PageRank-readiness memories from a downstream maintenance query."
+    },
+    {
+      "query": "LSWR G16 write evidence review preflight world verdict rewrite gate",
+      "relevant_keys": [
+        "agent_bridge_lswr_g16_write_evidence_review_preflight_20260618"
+      ],
+      "class_label": "lswr_gate",
+      "review_intent": "Recover the deployed read-only LSWR G16 gate record without deriving the query from that memory."
+    },
+    {
+      "query": "state.db codebase index no database engine switch Dolt evaluation",
+      "relevant_keys": [
+        "state_db_1gb_is_codebase_index_no_engine_switch_20260603",
+        "decision_dolt_no_engine_memory_revisions_spike_closed_20260618"
+      ],
+      "class_label": "storage_decision",
+      "review_intent": "Recover prior storage-engine decisions from a mixed operational/design query."
+    }
+  ],
+  "recommended_call": {
+    "tool": "memory_biocortex_relevance_lift_summary",
+    "args": {
+      "sample_size": 3,
+      "limit": 20,
+      "query_cases": "<copy query_cases from this fixture>",
+      "timeout_ms": 180000
+    }
+  },
+  "expected_summary_contract": {
+    "schema": "agent_bridge.biocortex_retrieval.relevance_lift_eval.v0",
+    "status": "completed",
+    "sampling.query_source": "explicit_cases",
+    "sampling.query_cases_count": 3,
+    "input_contract.raw_queries_included": false,
+    "input_contract.raw_keys_included": false,
+    "input_contract.content_included": false,
+    "input_contract.samples_included": false,
+    "input_contract.first_side_signal_error_included": false,
+    "safety.read_only": true,
+    "safety.changes_prod_retrieval_order": false
+  }
+}

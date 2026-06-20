@@ -80,6 +80,44 @@ These thresholds can block weak positive lift without changing the default
 runtime boundary. Even when evidence is strong enough for review, T6 still does
 not approve runtime influence or retrieval-order changes.
 
+## Hard Query Fixture Follow-up
+
+Date: 2026-06-20
+
+`memory_biocortex_relevance_lift_summary` now has a checked-in downstream-query
+fixture:
+
+```text
+docs/design/fixtures/memory-biocortex-relevance-lift-hard-query-cases-2026-06-20.json
+```
+
+The fixture supplies operator-labelled `query_cases`: each case has a
+downstream-style query, a set of known relevant memory keys, and a sanitized
+class label. This closes the main weakness of self-retrieval sampling: the query
+is no longer derived from the target memory itself.
+
+The fixture is intentionally a local-memory evidence fixture, not a deterministic
+unit-test corpus. Different machines may lack one of the referenced memory keys
+or have different BioCortex side-signal availability. The invariant contract is
+the summary surface:
+
+- `sampling.query_source` must be `explicit_cases`;
+- `sampling.query_cases_count` should match the valid fixture cases supplied;
+- summary output must not include raw queries, raw relevant keys, memory content,
+  per-sample rows, or raw side-signal errors;
+- the tool remains read-only and cannot change production retrieval order.
+
+Use this fixture as the next T6 evidence-strength step before deciding whether a
+lean-safe Codex entrypoint is worth exposing. The default `codex-lean` toolset
+should remain unchanged until the fixture shows repeatable value.
+
+Current Mac verification caveat: the fixture smoke validates the redacted summary
+contract, but the local sibling `/Users/pallasting/Projects/biocortex-rs`
+checkout is behind and lacks the `ab_retrieval_side_signal_adapter` example.
+That makes the hard-query run report `side_signal_unavailable`; it should not be
+read as negative relevance-lift evidence. A clean, up-to-date BioCortex checkout
+is required before using this fixture as a lift-quality measurement.
+
 ## Verification
 
 Targeted validation for this slice after `/Data` space was recovered:
@@ -91,6 +129,7 @@ CARGO_TARGET_DIR=/home/pallasting/.cache/agent-bridge-target-t6-evidence-strengt
 git diff --check
 cargo test -p ab-bridge memory_biocortex_ -- --nocapture
 cargo test -p ab-bridge tool_policy_codex_essential_exposes_extras_list -- --nocapture
+cargo test -p ab-bridge --lib memory_biocortex_relevance_lift_hard_query_fixture_contract -- --nocapture
 ```
 
 The feature-branch commit hook also ran `cargo check -p ab-bridge --all-targets`.

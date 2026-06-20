@@ -61257,6 +61257,146 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(!serialized.contains("\"query_cases\":"));
     }
 
+    fn memory_biocortex_relevance_lift_hard_query_fixture() -> Value {
+        serde_json::from_str(include_str!(
+            "../../../docs/design/fixtures/memory-biocortex-relevance-lift-hard-query-cases-2026-06-20.json"
+        ))
+        .expect("hard query relevance-lift fixture")
+    }
+
+    #[test]
+    fn memory_biocortex_relevance_lift_hard_query_fixture_contract() {
+        let fixture = memory_biocortex_relevance_lift_hard_query_fixture();
+        assert_eq!(
+            fixture["schema"],
+            json!("agent_bridge.memory_biocortex.relevance_lift_hard_query_cases.v0")
+        );
+        assert_eq!(fixture["read_only"], json!(true));
+        assert_eq!(
+            fixture["input_boundary"]["raw_queries_are_fixture_inputs"],
+            json!(true)
+        );
+        assert_eq!(
+            fixture["input_boundary"]["raw_relevant_keys_are_fixture_inputs"],
+            json!(true)
+        );
+        assert_eq!(
+            fixture["input_boundary"]["raw_queries_must_not_be_returned_by_summary"],
+            json!(true)
+        );
+        assert_eq!(
+            fixture["input_boundary"]["raw_relevant_keys_must_not_be_returned_by_summary"],
+            json!(true)
+        );
+        assert_eq!(fixture["input_boundary"]["writes_memory"], json!(false));
+        assert_eq!(
+            fixture["input_boundary"]["changes_search_order"],
+            json!(false)
+        );
+
+        let cases = relevance_lift_query_cases_from_args(&fixture);
+        assert_eq!(cases.len(), 3);
+        assert!(cases.iter().all(|case| !case.query.trim().is_empty()));
+        assert!(cases
+            .iter()
+            .all(|case| !case.relevant_keys.is_empty()));
+        assert_eq!(cases[0].class_label.as_deref(), Some("graph_hygiene"));
+        assert_eq!(cases[1].class_label.as_deref(), Some("lswr_gate"));
+        assert_eq!(cases[2].class_label.as_deref(), Some("storage_decision"));
+
+        let first_query = &cases[0].query;
+        let first_key = &cases[0].relevant_keys[0];
+        let payload = json!({
+            "schema": "agent_bridge.biocortex_retrieval.relevance_lift_eval.v0",
+            "generated_at": 123,
+            "status": "completed",
+            "purpose": "read-only hard query fixture smoke",
+            "verdict": "insufficient",
+            "sampling": {
+                "evaluated_count": 3,
+                "query_source": "explicit_cases",
+                "query_cases_count": cases.len()
+            },
+            "metrics": {
+                "mrr_lift": 0.0,
+                "improved": 0,
+                "worsened": 0,
+                "unchanged": 3
+            },
+            "safety": {
+                "read_only": true,
+                "mutates_ab_memory": false,
+                "changes_prod_retrieval_order": false,
+                "writes_state": false
+            },
+            "samples": [
+                {
+                    "query": first_query,
+                    "source_key": first_key,
+                    "content": "secret hard-query sample content"
+                }
+            ],
+            "first_side_signal_error": {
+                "query": first_query,
+                "raw_key": first_key,
+                "content": "secret hard-query adapter content"
+            },
+            "query_cases": fixture["query_cases"].clone()
+        });
+        let summary = memory_biocortex_relevance_lift_summary_payload(payload);
+        let expected = &fixture["expected_summary_contract"];
+        assert_eq!(
+            summary["schema"],
+            json!("agent_bridge.biocortex_retrieval.relevance_lift_eval.v0")
+        );
+        assert_eq!(
+            summary["sampling"]["query_source"],
+            expected["sampling.query_source"]
+        );
+        assert_eq!(
+            summary["sampling"]["query_cases_count"],
+            expected["sampling.query_cases_count"]
+        );
+        assert_eq!(
+            summary["input_contract"]["raw_queries_included"],
+            expected["input_contract.raw_queries_included"]
+        );
+        assert_eq!(
+            summary["input_contract"]["raw_keys_included"],
+            expected["input_contract.raw_keys_included"]
+        );
+        assert_eq!(
+            summary["input_contract"]["content_included"],
+            expected["input_contract.content_included"]
+        );
+        assert_eq!(
+            summary["input_contract"]["samples_included"],
+            expected["input_contract.samples_included"]
+        );
+        assert_eq!(
+            summary["input_contract"]["first_side_signal_error_included"],
+            expected["input_contract.first_side_signal_error_included"]
+        );
+        assert_eq!(summary["safety"]["read_only"], expected["safety.read_only"]);
+        assert_eq!(
+            summary["safety"]["changes_prod_retrieval_order"],
+            expected["safety.changes_prod_retrieval_order"]
+        );
+
+        let serialized = serde_json::to_string(&summary).expect("serialize");
+        for case in cases {
+            assert!(!serialized.contains(&case.query));
+            for key in case.relevant_keys {
+                assert!(!serialized.contains(&key));
+            }
+        }
+        assert!(!serialized.contains("secret hard-query sample content"));
+        assert!(!serialized.contains("secret hard-query adapter content"));
+        assert!(!serialized.contains("\"samples\":"));
+        assert!(!serialized.contains("\"first_side_signal_error\":"));
+        assert!(!serialized.contains("\"query_cases\":"));
+    }
+
     #[tokio::test]
     async fn memory_biocortex_t6_influence_gate_allows_review_without_approving_runtime() {
         let tool = MemoryBioCortexT6InfluenceGateTool::new();
