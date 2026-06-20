@@ -35765,13 +35765,20 @@ fn memory_biocortex_recall_expansion_class_label(label: Option<&str>) -> String 
 
 fn memory_biocortex_recall_expansion_class_row(class_label: String, rows: &[Value]) -> Value {
     let evaluated_count = rows.len() as u64;
+    let search_error_count = rows
+        .iter()
+        .filter(|row| row["status"] == json!("search_error"))
+        .count() as u64;
     let baseline_hit_count = rows
         .iter()
         .filter(|row| row["status"] == json!("baseline_hit"))
         .count() as u64;
     let baseline_miss_count = rows
         .iter()
-        .filter(|row| row["status"] != json!("baseline_hit"))
+        .filter(|row| {
+            row["status"] == json!("graph_expansion_found")
+                || row["status"] == json!("graph_expansion_miss")
+        })
         .count() as u64;
     let graph_expansion_found_count = rows
         .iter()
@@ -35789,6 +35796,7 @@ fn memory_biocortex_recall_expansion_class_row(class_label: String, rows: &[Valu
     json!({
         "class_label": class_label,
         "evaluated_count": evaluated_count,
+        "search_error_count": search_error_count,
         "baseline_hit_count": baseline_hit_count,
         "baseline_miss_count": baseline_miss_count,
         "graph_expansion_found_count": graph_expansion_found_count,
@@ -35912,7 +35920,39 @@ impl McpTool for MemoryBioCortexRecallExpansionSummaryTool {
                 .cloned()
                 .collect::<BTreeSet<_>>();
 
-            let baseline_hits = store.memory_search(&case.query, &[], limit).await?;
+            let baseline_hits = match store.memory_search(&case.query, &[], limit).await {
+                Ok(hits) => hits,
+                Err(_) => {
+                    let row = json!({
+                        "case_index": idx,
+                        "query_hash": query_hash,
+                        "class_label": class_label,
+                        "status": "search_error",
+                        "error_kind": "memory_search_error",
+                        "relevant_key_count": relevant.len(),
+                        "baseline_candidate_count": 0,
+                        "baseline_relevant_count": 0,
+                        "baseline_order_hash": memory_biocortex_order_hash("baseline", &[]),
+                        "graph_neighbor_row_count": 0,
+                        "graph_unique_neighbor_count": 0,
+                        "graph_relevant_count": 0,
+                        "graph_neighbor_order_hash": memory_biocortex_order_hash(
+                            "graph_neighbors",
+                            &[]
+                        ),
+                        "raw_query_included": false,
+                        "raw_keys_included": false,
+                        "content_included": false,
+                        "raw_error_included": false,
+                    });
+                    rows_by_class
+                        .entry(class_label)
+                        .or_default()
+                        .push(row.clone());
+                    case_rows.push(row);
+                    continue;
+                }
+            };
             let baseline_keys = baseline_hits
                 .iter()
                 .map(|hit| hit.record.key.clone())
@@ -35972,11 +36012,21 @@ impl McpTool for MemoryBioCortexRecallExpansionSummaryTool {
         }
 
         let evaluated_count = case_rows.len() as u64;
+        let search_error_count = case_rows
+            .iter()
+            .filter(|row| row["status"] == json!("search_error"))
+            .count() as u64;
         let baseline_hit_count = case_rows
             .iter()
             .filter(|row| row["status"] == json!("baseline_hit"))
             .count() as u64;
-        let baseline_miss_count = evaluated_count.saturating_sub(baseline_hit_count);
+        let baseline_miss_count = case_rows
+            .iter()
+            .filter(|row| {
+                row["status"] == json!("graph_expansion_found")
+                    || row["status"] == json!("graph_expansion_miss")
+            })
+            .count() as u64;
         let graph_expansion_found_count = case_rows
             .iter()
             .filter(|row| row["status"] == json!("graph_expansion_found"))
@@ -36010,6 +36060,7 @@ impl McpTool for MemoryBioCortexRecallExpansionSummaryTool {
             },
             "metrics": {
                 "evaluated_count": evaluated_count,
+                "search_error_count": search_error_count,
                 "baseline_hit_count": baseline_hit_count,
                 "baseline_miss_count": baseline_miss_count,
                 "graph_expansion_found_count": graph_expansion_found_count,
@@ -36032,6 +36083,7 @@ impl McpTool for MemoryBioCortexRecallExpansionSummaryTool {
                 "content_included": false,
                 "candidate_content_included": false,
                 "source_eval_included": false,
+                "raw_error_included": false,
             },
             "safety": {
                 "read_only": true,
@@ -61562,6 +61614,73 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(!serialized.contains("tests:recall_expansion_baseline"));
         assert!(!serialized.contains("tests:recall_expansion_target"));
         assert!(!serialized.contains("omega hidden relevant target"));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_recall_expansion_summary_redacts_search_errors() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        store
+            .memory_save(&t4_memory_record(
+                "tests:recall_expansion_error_target",
+                "lesson",
+                "alpha fallback target",
+                &[],
+                &[],
+                0,
+                0.8,
+            ))
+            .await
+            .expect("seed target");
+
+        let tool = MemoryBioCortexRecallExpansionSummaryTool::new(hub.clone());
+        let out = tool
+            .execute(
+                json!({
+                    "query_cases": [
+                        {
+                            "query": "alpha OR",
+                            "relevant_keys": ["tests:recall_expansion_error_target"],
+                            "class_label": "syntax error"
+                        }
+                    ],
+                    "limit": 1,
+                    "neighbor_limit": 8
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(payload["read_only"], json!(true));
+        assert_eq!(payload["metrics"]["evaluated_count"], json!(1));
+        assert_eq!(payload["metrics"]["search_error_count"], json!(1));
+        assert_eq!(payload["metrics"]["baseline_miss_count"], json!(0));
+        assert_eq!(payload["metrics"]["graph_expansion_found_count"], json!(0));
+        assert_eq!(payload["case_rows"][0]["status"], json!("search_error"));
+        assert_eq!(
+            payload["case_rows"][0]["error_kind"],
+            json!("memory_search_error")
+        );
+        assert_eq!(payload["case_rows"][0]["raw_error_included"], json!(false));
+        assert_eq!(
+            payload["class_aggregates"][0]["class_label"],
+            json!("syntax_error")
+        );
+        assert_eq!(
+            payload["class_aggregates"][0]["search_error_count"],
+            json!(1)
+        );
+        assert_eq!(payload["input_contract"]["raw_error_included"], json!(false));
+
+        let serialized = serde_json::to_string(&payload).expect("serialize");
+        assert!(!serialized.contains("alpha OR"));
+        assert!(!serialized.contains("tests:recall_expansion_error_target"));
+        assert!(!serialized.contains("fallback target"));
+        assert!(!serialized.contains("syntax error near"));
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
