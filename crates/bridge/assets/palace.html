@@ -7238,8 +7238,12 @@ function renderMaterializationReviewArtifactButton(regionId) {
   return `<button type="button" class="orphan-candidate-mini-button" data-materialization-review-artifact="${escapeHTML(regionId || "")}">materialization</button>`;
 }
 
+function renderMaterializationApprovedPlanButton(regionId) {
+  return `<button type="button" class="orphan-candidate-mini-button" data-materialization-approved-plan="${escapeHTML(regionId || "")}">mat plan</button>`;
+}
+
 function renderOrphanReviewActions(regionId) {
-  return `${renderOrphanCandidatePlanButton(regionId)}${renderOrphanReviewArtifactButton(regionId)}${renderMaterializationReviewArtifactButton(regionId)}`;
+  return `${renderOrphanCandidatePlanButton(regionId)}${renderOrphanReviewArtifactButton(regionId)}${renderMaterializationReviewArtifactButton(regionId)}${renderMaterializationApprovedPlanButton(regionId)}`;
 }
 
 function renderOrphanCandidateBackButton(regionId) {
@@ -8119,6 +8123,27 @@ function renderMaterializationReviewQuestions(artifact, regionId) {
   </div>`;
 }
 
+function materializationCandidateDecision(candidate) {
+  const decision = candidate && candidate.review && typeof candidate.review.decision === "string"
+    ? candidate.review.decision
+    : "pending";
+  return ["approve", "reject", "defer", "pending"].includes(decision) ? decision : "pending";
+}
+
+function renderMaterializationReviewCandidateActions(candidate) {
+  if (!candidate || !candidate.from_key || !candidate.to_key) return "";
+  const current = materializationCandidateDecision(candidate);
+  const edgeType = candidate.edge_type || "relates";
+  return `<div class="orphan-candidate-actions">` + ["approve", "defer", "reject"].map(decision =>
+    `<button type="button"
+      class="orphan-candidate-action${current === decision ? " active" : ""}"
+      data-materialization-review-decision="${escapeHTML(decision)}"
+      data-materialization-review-from="${escapeHTML(candidate.from_key)}"
+      data-materialization-review-to="${escapeHTML(candidate.to_key)}"
+      data-materialization-review-edge-type="${escapeHTML(edgeType)}">${escapeHTML(decision)}</button>`
+  ).join("") + `</div>`;
+}
+
 function renderMaterializationReviewCandidates(artifact, regionId) {
   const rows = Array.isArray(artifact && artifact.candidates) ? artifact.candidates : [];
   const body = rows.length
@@ -8136,11 +8161,13 @@ function renderMaterializationReviewCandidates(artifact, regionId) {
         const coverage = Number.isFinite(row && row.blend_coverage)
           ? Number(row.blend_coverage).toFixed(3)
           : "n/a";
+        const decision = materializationCandidateDecision(row);
         return `<div class="palace-review-artifact-row">
           <strong>${escapeHTML(edgeType)} · ${escapeHTML(source)} · ${escapeHTML(gate)}</strong>
           <span title="${escapeHTML(from)} → ${escapeHTML(to)}">${escapeHTML(from)} → ${escapeHTML(to)}</span>
           <span>${escapeHTML(reason)}</span>
-          <span>from ${escapeHTML(String(baselineFrom))}→${escapeHTML(String(previewFrom))} · to ${escapeHTML(String(baselineTo))}→${escapeHTML(String(previewTo))} · coverage ${escapeHTML(String(coverage))}</span>
+          <span>decision ${escapeHTML(decision)} · from ${escapeHTML(String(baselineFrom))}→${escapeHTML(String(previewFrom))} · to ${escapeHTML(String(baselineTo))}→${escapeHTML(String(previewTo))} · coverage ${escapeHTML(String(coverage))}</span>
+          ${renderMaterializationReviewCandidateActions(row)}
         </div>`;
       }).join("")
     : `<div class="palace-review-artifact-row"><span>no packet candidates</span></div>`;
@@ -8170,6 +8197,62 @@ function renderRegionMaterializationReviewArtifact(artifact, regionId) {
     </div>
     ${renderMaterializationReviewQuestions(artifact || {}, regionId)}
     ${renderMaterializationReviewCandidates(artifact || {}, regionId)}
+  </div>`;
+}
+
+function renderMaterializationApprovedPlanStats(plan) {
+  const stats = [
+    ["approved", Number.isFinite(plan && plan.approved_pair_count) ? plan.approved_pair_count : 0],
+    ["would_write", Number.isFinite(plan && plan.would_write_edges) ? plan.would_write_edges : 0],
+    ["links", Array.isArray(plan && plan.links) ? plan.links.length : 0],
+  ];
+  return `<div class="palace-review-artifact-summary">` + stats.map(([label, value]) =>
+    `<div class="palace-review-artifact-stat">
+      <span class="label">${escapeHTML(label)}</span>
+      <span class="value">${escapeHTML(String(value))}</span>
+    </div>`
+  ).join("") + `</div>`;
+}
+
+function renderMaterializationApprovedPlanLinks(plan) {
+  const links = Array.isArray(plan && plan.links) ? plan.links : [];
+  if (links.length === 0) return `<div class="maintenance-empty">no approved materialization candidates</div>`;
+  return links.slice(0, 10).map(link => {
+    const from = link && link.from_key ? String(link.from_key) : "";
+    const to = link && link.to_key ? String(link.to_key) : "";
+    const edgeType = link && link.edge_type ? String(link.edge_type) : "relates";
+    const rationale = link && link.rationale ? String(link.rationale) : "approved preview candidate";
+    return `<div class="palace-review-artifact-row">
+      <strong>${escapeHTML(edgeType)} · dry-run only</strong>
+      <span title="${escapeHTML(from)} → ${escapeHTML(to)}">${escapeHTML(from)} → ${escapeHTML(to)}</span>
+      <span>${escapeHTML(rationale)}</span>
+    </div>`;
+  }).join("");
+}
+
+function renderRegionMaterializationApprovedPlan(plan, regionId) {
+  const readOnly = plan && plan.read_only &&
+    plan.dry_run &&
+    !plan.writes_edges &&
+    !plan.writes_memory &&
+    !plan.changes_search_order &&
+    !plan.can_change_retrieval_order &&
+    !plan.approval_writes_allowed &&
+    !plan.can_materialize_edges
+      ? "dry-run only"
+      : "check";
+  const next = plan && plan.next_step ? String(plan.next_step) : "review approved materialization plan";
+  return `${renderOrphanCandidateHead("materialization approved plan", readOnly, renderOrphanCandidateBackButton(regionId))}
+  <div class="palace-review-artifact">
+    <div class="palace-review-artifact-card">
+      ${renderPalaceReviewArtifactSectionHead(regionId, "materialization-approved-plan", "approved dry-run plan")}
+      ${renderMaterializationApprovedPlanStats(plan || {})}
+      <div>${escapeHTML(next)}</div>
+    </div>
+    <div class="palace-review-artifact-card verified">
+      ${renderPalaceReviewArtifactSectionHead(regionId, "materialization-approved-links", "approved candidate links")}
+      ${renderMaterializationApprovedPlanLinks(plan || {})}
+    </div>
   </div>`;
 }
 
@@ -8245,6 +8328,28 @@ async function loadRegionMaterializationReviewArtifact(regionId) {
   } catch (error) {
     if (!document.body.contains(slot) || slot.dataset.region !== regionId) return;
     slot.innerHTML = `${renderOrphanCandidateHead("materialization review", "unavailable", renderOrphanCandidateBackButton(regionId))}
+    <div class="maintenance-empty">${escapeHTML(String(error))}</div>`;
+  }
+}
+
+async function loadRegionMaterializationApprovedPlan(regionId) {
+  const slot = document.getElementById("region-orphan-candidates");
+  if (!slot || !regionId) return;
+  slot.dataset.region = regionId;
+  slot.innerHTML = `${renderOrphanCandidateHead("materialization approved plan", "loading", renderOrphanCandidateBackButton(regionId))}
+    <div class="maintenance-empty">loading materialization approved plan...</div>`;
+  try {
+    const r = await fetch("/api/materialization-review-approved-plan");
+    if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    const plan = await r.json();
+    if (plan.writes_memory || plan.writes_edges || plan.changes_search_order || plan.can_change_retrieval_order || plan.approval_writes_allowed || plan.can_materialize_edges || !plan.dry_run) {
+      throw new Error("unexpected write-capable materialization approved plan response");
+    }
+    if (!document.body.contains(slot) || slot.dataset.region !== regionId) return;
+    slot.innerHTML = renderRegionMaterializationApprovedPlan(plan, regionId);
+  } catch (error) {
+    if (!document.body.contains(slot) || slot.dataset.region !== regionId) return;
+    slot.innerHTML = `${renderOrphanCandidateHead("materialization approved plan", "unavailable", renderOrphanCandidateBackButton(regionId))}
     <div class="maintenance-empty">${escapeHTML(String(error))}</div>`;
   }
 }
@@ -8357,6 +8462,35 @@ async function recordOrphanCandidateDecision(regionId, orphanKey, candidateKey, 
   }
   await loadRegionOrphanCandidates(regionId);
   focusNextOrphanCandidateReviewFromSlot();
+}
+
+async function recordMaterializationReviewDecision(regionId, candidate, decision) {
+  const slot = document.getElementById("region-orphan-candidates");
+  if (!candidate || !candidate.from_key || !candidate.to_key || !["approve", "defer", "reject"].includes(decision)) return;
+  const r = await fetch("/api/materialization-review-decision", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      from_key: candidate.from_key,
+      to_key: candidate.to_key,
+      edge_type: candidate.edge_type || "relates",
+      decision,
+      reviewer: "palace",
+    }),
+  });
+  if (!r.ok) {
+    const text = await r.text();
+    throw new Error(`${r.status} ${text || r.statusText}`);
+  }
+  const result = await r.json();
+  if (result.writes_memory || result.writes_edges || result.changes_search_order || result.can_change_retrieval_order || result.approval_writes_allowed || result.can_materialize_edges) {
+    throw new Error("unexpected write-capable materialization review response");
+  }
+  if (slot) {
+    slot.innerHTML = `${renderOrphanCandidateHead("materialization review", "refreshing", renderOrphanCandidateBackButton(regionId))}
+    <div class="maintenance-empty">recorded ${escapeHTML(decision)} · refreshing materialization review...</div>`;
+  }
+  await loadRegionMaterializationReviewArtifact(regionId);
 }
 
 function recordFocusedOrphanCandidateDecision(regionId, decision) {
@@ -8670,6 +8804,12 @@ function handleOrphanRepairClick(e, regionId) {
     loadRegionMaterializationReviewArtifact(materializationBtn.dataset.materializationReviewArtifact || regionId);
     return true;
   }
+  const materializationPlanBtn = e.target.closest("[data-materialization-approved-plan]");
+  if (materializationPlanBtn) {
+    e.preventDefault();
+    loadRegionMaterializationApprovedPlan(materializationPlanBtn.dataset.materializationApprovedPlan || regionId);
+    return true;
+  }
   const artifactCopyBtn = e.target.closest("[data-review-artifact-copy]");
   if (artifactCopyBtn) {
     e.preventDefault();
@@ -8703,6 +8843,25 @@ function handleOrphanRepairClick(e, regionId) {
       const slot = document.getElementById("region-orphan-candidates");
       if (slot) {
         slot.innerHTML = `${renderOrphanCandidateHead("candidate links", "review error", renderOrphanReviewActions(regionId))}
+        <div class="maintenance-empty">${escapeHTML(String(error))}</div>`;
+      }
+    });
+    return true;
+  }
+  const materializationDecisionBtn = e.target.closest("[data-materialization-review-decision]");
+  if (materializationDecisionBtn) {
+    e.preventDefault();
+    const decision = materializationDecisionBtn.dataset.materializationReviewDecision;
+    const candidate = {
+      from_key: materializationDecisionBtn.dataset.materializationReviewFrom || "",
+      to_key: materializationDecisionBtn.dataset.materializationReviewTo || "",
+      edge_type: materializationDecisionBtn.dataset.materializationReviewEdgeType || "relates",
+    };
+    materializationDecisionBtn.disabled = true;
+    recordMaterializationReviewDecision(regionId, candidate, decision).catch(error => {
+      const slot = document.getElementById("region-orphan-candidates");
+      if (slot) {
+        slot.innerHTML = `${renderOrphanCandidateHead("materialization review", "review error", renderOrphanCandidateBackButton(regionId))}
         <div class="maintenance-empty">${escapeHTML(String(error))}</div>`;
       }
     });

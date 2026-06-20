@@ -128,6 +128,14 @@ pub async fn run(
             get(api_materialization_review_artifact),
         )
         .route(
+            "/api/materialization-review-approved-plan",
+            get(api_materialization_review_approved_plan),
+        )
+        .route(
+            "/api/materialization-review-decision",
+            post(api_materialization_review_decision),
+        )
+        .route(
             "/api/palace-review-artifact",
             get(api_palace_review_artifact),
         )
@@ -244,6 +252,19 @@ struct OrphanCandidateDecisionRequest {
     note: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct MaterializationReviewDecisionRequest {
+    from_key: String,
+    to_key: String,
+    #[serde(default)]
+    edge_type: Option<String>,
+    decision: String,
+    #[serde(default)]
+    reviewer: Option<String>,
+    #[serde(default)]
+    note: Option<String>,
+}
+
 #[derive(Deserialize, Default)]
 struct OrphanApprovedLinkApplyRequest {
     #[serde(default)]
@@ -332,6 +353,13 @@ struct PalaceOrphanApprovedLink {
     edge_type: String,
 }
 
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+struct PalaceMaterializationReviewPair {
+    from_key: String,
+    to_key: String,
+    edge_type: String,
+}
+
 #[derive(Debug, Default)]
 struct PalaceOrphanApprovedLinkApplyOutcome {
     results: Vec<Value>,
@@ -354,6 +382,24 @@ fn normalize_palace_orphan_decision(decision: &str) -> std::io::Result<&'static 
 
 fn palace_orphan_pair_id(pair: &PalaceOrphanCandidatePair) -> String {
     format!("{} -> {}", pair.orphan_key, pair.candidate_key)
+}
+
+fn palace_materialization_pair_id(pair: &PalaceMaterializationReviewPair) -> String {
+    format!("{} -[{}]-> {}", pair.from_key, pair.edge_type, pair.to_key)
+}
+
+fn normalize_palace_materialization_edge_type(edge_type: Option<&str>) -> String {
+    let value = edge_type
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("relates");
+    value
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '_' || *ch == '-')
+        .take(64)
+        .collect::<String>()
+        .trim()
+        .to_string()
 }
 
 fn default_palace_review_dir_path() -> PathBuf {
@@ -382,6 +428,13 @@ fn default_palace_materialization_review_packet_path() -> PathBuf {
         return PathBuf::from(path);
     }
     PathBuf::from(DEFAULT_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON)
+}
+
+fn default_palace_materialization_review_decisions_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("AB_PALACE_MATERIALIZATION_REVIEW_DECISIONS") {
+        return PathBuf::from(path);
+    }
+    default_palace_review_dir_path().join("materialization-review-decisions.jsonl")
 }
 
 fn palace_private_home_dir_path() -> PathBuf {
@@ -443,6 +496,100 @@ fn load_palace_orphan_candidate_decisions(path: &FsPath) -> std::io::Result<Vec<
 }
 
 fn append_palace_orphan_candidate_decision(path: &FsPath, value: &Value) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+        set_palace_private_home_root_permissions_if_needed(parent)?;
+        set_palace_private_dir_permissions(parent)?;
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    let line = serde_json::to_string(value)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    writeln!(file, "{line}")?;
+    set_palace_private_file_permissions(path)?;
+    Ok(())
+}
+
+fn palace_materialization_review_pair_from_candidate(
+    candidate: &Value,
+) -> Option<PalaceMaterializationReviewPair> {
+    let from_key = candidate.get("from_key").and_then(Value::as_str)?.trim();
+    let to_key = candidate.get("to_key").and_then(Value::as_str)?.trim();
+    if from_key.is_empty() || to_key.is_empty() {
+        return None;
+    }
+    let edge_type = normalize_palace_materialization_edge_type(
+        candidate.get("edge_type").and_then(Value::as_str),
+    );
+    if edge_type.is_empty() {
+        return None;
+    }
+    Some(PalaceMaterializationReviewPair {
+        from_key: from_key.to_string(),
+        to_key: to_key.to_string(),
+        edge_type,
+    })
+}
+
+fn palace_materialization_review_decision_record_for_time(
+    pair: &PalaceMaterializationReviewPair,
+    decision: &str,
+    reviewer: Option<&str>,
+    note: Option<&str>,
+    generated_at_unix: u64,
+) -> std::io::Result<Value> {
+    let decision = normalize_palace_orphan_decision(decision)?;
+    Ok(json!({
+        "schema": "agent_bridge.palace.materialization_review_decision.v0",
+        "generated_at_unix": generated_at_unix,
+        "pair_id": palace_materialization_pair_id(pair),
+        "from_key": pair.from_key,
+        "to_key": pair.to_key,
+        "edge_type": pair.edge_type,
+        "decision": decision,
+        "reviewer": reviewer,
+        "note": note,
+        "writes_memory": false,
+        "writes_edges": false,
+        "changes_search_order": false,
+        "can_change_retrieval_order": false,
+        "approval_writes_allowed": false,
+        "can_materialize_edges": false,
+        "auto_apply_allowed": false,
+    }))
+}
+
+fn load_palace_materialization_review_decisions(path: &FsPath) -> std::io::Result<Vec<Value>> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+    let mut decisions = Vec::new();
+    for line in text.lines().filter(|line| !line.trim().is_empty()) {
+        let value: Value = serde_json::from_str(line)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        if value.get("schema").and_then(|v| v.as_str())
+            == Some("agent_bridge.palace.materialization_review_decision.v0")
+        {
+            decisions.push(value);
+        }
+    }
+    decisions.sort_by_key(|value| {
+        value
+            .get("generated_at_unix")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0)
+    });
+    Ok(decisions)
+}
+
+fn append_palace_materialization_review_decision(
+    path: &FsPath,
+    value: &Value,
+) -> std::io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
         set_palace_private_home_root_permissions_if_needed(parent)?;
@@ -1016,7 +1163,9 @@ fn parse_palace_materialization_review_packet(raw: &str, source: &str) -> Result
         || palace_json_bool_at(&packet, &["approval_writes_allowed"])
         || palace_json_bool_at(&packet, &["can_materialize_edges"])
     {
-        return Err(format!("materialization review packet at {source} is not read-only"));
+        return Err(format!(
+            "materialization review packet at {source} is not read-only"
+        ));
     }
     if packet
         .get("candidates")
@@ -1027,7 +1176,9 @@ fn parse_palace_materialization_review_packet(raw: &str, source: &str) -> Result
                 .any(palace_materialization_review_candidate_has_write_signal)
         })
     {
-        return Err(format!("materialization review packet at {source} is not read-only"));
+        return Err(format!(
+            "materialization review packet at {source} is not read-only"
+        ));
     }
     Ok(packet)
 }
@@ -1054,6 +1205,197 @@ fn load_default_palace_materialization_review_packet(path: &FsPath) -> Result<Va
         } else {
             Err(err)
         }
+    })
+}
+
+fn palace_materialization_review_decision_inbox_for_packet(
+    packet: &Value,
+    decisions: &[Value],
+) -> Value {
+    let mut latest_by_pair: BTreeMap<(String, String, String), &Value> = BTreeMap::new();
+    for decision in decisions.iter().filter(|value| {
+        value.get("schema").and_then(|v| v.as_str())
+            == Some("agent_bridge.palace.materialization_review_decision.v0")
+    }) {
+        let Some(from_key) = decision.get("from_key").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(to_key) = decision.get("to_key").and_then(Value::as_str) else {
+            continue;
+        };
+        let edge_type = normalize_palace_materialization_edge_type(
+            decision.get("edge_type").and_then(Value::as_str),
+        );
+        if from_key.trim().is_empty() || to_key.trim().is_empty() || edge_type.is_empty() {
+            continue;
+        }
+        let key = (from_key.to_string(), to_key.to_string(), edge_type);
+        let current_ts = decision
+            .get("generated_at_unix")
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        let existing_ts = latest_by_pair
+            .get(&key)
+            .and_then(|v| v.get("generated_at_unix"))
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+        if !latest_by_pair.contains_key(&key) || current_ts >= existing_ts {
+            latest_by_pair.insert(key, decision);
+        }
+    }
+
+    let mut pending_count = 0_u64;
+    let mut approved_count = 0_u64;
+    let mut rejected_count = 0_u64;
+    let mut deferred_count = 0_u64;
+    let candidates: Vec<Value> = packet
+        .get("candidates")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|candidate| {
+            let pair = palace_materialization_review_pair_from_candidate(candidate)?;
+            let key = (
+                pair.from_key.clone(),
+                pair.to_key.clone(),
+                pair.edge_type.clone(),
+            );
+            let latest = latest_by_pair.get(&key).copied();
+            let decision = latest
+                .and_then(|value| value.get("decision"))
+                .and_then(Value::as_str)
+                .unwrap_or("pending");
+            match decision {
+                "approve" => approved_count += 1,
+                "reject" => rejected_count += 1,
+                "defer" => deferred_count += 1,
+                _ => pending_count += 1,
+            }
+            let review = json!({
+                "pair_id": palace_materialization_pair_id(&pair),
+                "from_key": pair.from_key,
+                "to_key": pair.to_key,
+                "edge_type": pair.edge_type,
+                "decision": decision,
+                "latest_decision_at_unix": latest
+                    .and_then(|value| value.get("generated_at_unix"))
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "reviewer": latest
+                    .and_then(|value| value.get("reviewer"))
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "note": latest
+                    .and_then(|value| value.get("note"))
+                    .cloned()
+                    .unwrap_or(Value::Null),
+            });
+            let mut candidate_with_review = candidate.clone();
+            if let Some(obj) = candidate_with_review.as_object_mut() {
+                obj.insert("review".to_string(), review.clone());
+            }
+            Some(json!({
+                "pair_id": review.get("pair_id").cloned().unwrap_or(Value::Null),
+                "from_key": review.get("from_key").cloned().unwrap_or(Value::Null),
+                "to_key": review.get("to_key").cloned().unwrap_or(Value::Null),
+                "edge_type": review.get("edge_type").cloned().unwrap_or(Value::Null),
+                "decision": decision,
+                "latest_decision_at_unix": review
+                    .get("latest_decision_at_unix")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "reviewer": review.get("reviewer").cloned().unwrap_or(Value::Null),
+                "note": review.get("note").cloned().unwrap_or(Value::Null),
+                "candidate": candidate_with_review,
+            }))
+        })
+        .collect();
+
+    json!({
+        "schema": "agent_bridge.palace.materialization_review_decision_inbox.v0",
+        "read_only": true,
+        "candidate_count": candidates.len(),
+        "pending_count": pending_count,
+        "approved_count": approved_count,
+        "rejected_count": rejected_count,
+        "deferred_count": deferred_count,
+        "writes_memory": false,
+        "writes_edges": false,
+        "changes_search_order": false,
+        "can_change_retrieval_order": false,
+        "approval_writes_allowed": false,
+        "can_materialize_edges": false,
+        "auto_apply_allowed": false,
+        "candidates": candidates,
+    })
+}
+
+fn palace_materialization_approved_edge_plan_for_inbox(inbox: &Value) -> Value {
+    let links: Vec<Value> = inbox
+        .get("candidates")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter(|candidate| candidate.get("decision").and_then(Value::as_str) == Some("approve"))
+        .filter_map(|candidate| {
+            let full = candidate.get("candidate").and_then(Value::as_object)?;
+            let from_key = candidate.get("from_key").and_then(Value::as_str)?;
+            let to_key = candidate.get("to_key").and_then(Value::as_str)?;
+            let edge_type = candidate
+                .get("edge_type")
+                .and_then(Value::as_str)
+                .unwrap_or("relates");
+            Some(json!({
+                "pair_id": candidate.get("pair_id").cloned().unwrap_or_else(|| {
+                    json!(format!("{from_key} -[{edge_type}]-> {to_key}"))
+                }),
+                "from_key": from_key,
+                "to_key": to_key,
+                "edge_type": edge_type,
+                "decision": "approve",
+                "latest_decision_at_unix": candidate
+                    .get("latest_decision_at_unix")
+                    .cloned()
+                    .unwrap_or(Value::Null),
+                "reviewer": candidate.get("reviewer").cloned().unwrap_or(Value::Null),
+                "note": candidate.get("note").cloned().unwrap_or(Value::Null),
+                "candidate_source": full.get("candidate_source").cloned().unwrap_or(Value::Null),
+                "gate": full.get("gate").cloned().unwrap_or(Value::Null),
+                "reason_kind": full.get("reason_kind").cloned().unwrap_or(Value::Null),
+                "rationale": full.get("rationale").cloned().unwrap_or(Value::Null),
+                "shadow_aligned": full.get("shadow_aligned").cloned().unwrap_or(Value::Null),
+                "baseline_top3": full.get("baseline_top3").cloned().unwrap_or_else(|| json!([])),
+                "preview_top3": full.get("preview_top3").cloned().unwrap_or_else(|| json!([])),
+                "baseline_from_rank": full.get("baseline_from_rank").cloned().unwrap_or(Value::Null),
+                "preview_from_rank": full.get("preview_from_rank").cloned().unwrap_or(Value::Null),
+                "baseline_to_rank": full.get("baseline_to_rank").cloned().unwrap_or(Value::Null),
+                "preview_to_rank": full.get("preview_to_rank").cloned().unwrap_or(Value::Null),
+                "blend_coverage": full.get("blend_coverage").cloned().unwrap_or(Value::Null),
+                "writes_memory": false,
+                "writes_edges": false,
+                "changes_search_order": false,
+                "can_change_retrieval_order": false,
+                "approval_writes_allowed": false,
+                "can_materialize_edges": false,
+            }))
+        })
+        .collect();
+
+    json!({
+        "schema": "agent_bridge.palace.materialization_approved_edge_plan.v0",
+        "read_only": true,
+        "dry_run": true,
+        "approved_pair_count": links.len(),
+        "would_write_edges": links.len(),
+        "writes_memory": false,
+        "writes_edges": false,
+        "changes_search_order": false,
+        "can_change_retrieval_order": false,
+        "approval_writes_allowed": false,
+        "can_materialize_edges": false,
+        "auto_apply_allowed": false,
+        "links": links,
+        "next_step": "Dry-run only: review the approved edge plan before designing any separate write-capable materializer.",
     })
 }
 
@@ -1139,7 +1481,69 @@ fn palace_review_artifact_for_sources(
     })
 }
 
-fn palace_materialization_review_artifact_from_packet(packet: &Value, path: &FsPath) -> Value {
+fn palace_materialization_review_artifact_from_packet(
+    packet: &Value,
+    path: &FsPath,
+    decisions_path: &FsPath,
+    decisions: &[Value],
+) -> Value {
+    let decision_inbox = palace_materialization_review_decision_inbox_for_packet(packet, decisions);
+    let approved_plan = palace_materialization_approved_edge_plan_for_inbox(&decision_inbox);
+    let mut summary = packet.get("summary").cloned().unwrap_or_else(|| json!({}));
+    if !summary.is_object() {
+        summary = json!({});
+    }
+    if let Some(summary_obj) = summary.as_object_mut() {
+        summary_obj.insert(
+            "materialization_candidate_count".to_string(),
+            decision_inbox
+                .get("candidate_count")
+                .cloned()
+                .unwrap_or(Value::Null),
+        );
+        summary_obj.insert(
+            "materialization_pending_count".to_string(),
+            decision_inbox
+                .get("pending_count")
+                .cloned()
+                .unwrap_or(Value::Null),
+        );
+        summary_obj.insert(
+            "materialization_approved_count".to_string(),
+            decision_inbox
+                .get("approved_count")
+                .cloned()
+                .unwrap_or(Value::Null),
+        );
+        summary_obj.insert(
+            "materialization_rejected_count".to_string(),
+            decision_inbox
+                .get("rejected_count")
+                .cloned()
+                .unwrap_or(Value::Null),
+        );
+        summary_obj.insert(
+            "materialization_deferred_count".to_string(),
+            decision_inbox
+                .get("deferred_count")
+                .cloned()
+                .unwrap_or(Value::Null),
+        );
+        summary_obj.insert(
+            "materialization_approved_pair_count".to_string(),
+            approved_plan
+                .get("approved_pair_count")
+                .cloned()
+                .unwrap_or(Value::Null),
+        );
+    }
+    let candidates: Vec<Value> = decision_inbox
+        .get("candidates")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|candidate| candidate.get("candidate").cloned())
+        .collect();
     json!({
         "schema": "agent_bridge.palace.materialization_review_artifact.v0",
         "artifact_kind": "materialization_review_packet",
@@ -1155,19 +1559,22 @@ fn palace_materialization_review_artifact_from_packet(packet: &Value, path: &FsP
         "default_decision": packet.get("default_decision").cloned().unwrap_or(Value::Null),
         "source": {
             "packet_path": path.display().to_string(),
+            "decisions_path": decisions_path.display().to_string(),
             "packet_schema": packet.get("schema").cloned().unwrap_or(Value::Null),
             "generator": packet.pointer("/packet_source/generator").cloned().unwrap_or(Value::Null),
             "fixture_path": packet.pointer("/packet_source/fixture_path").cloned().unwrap_or(Value::Null),
             "fixture_schema": packet.pointer("/packet_source/fixture_schema").cloned().unwrap_or(Value::Null),
         },
-        "summary": packet.get("summary").cloned().unwrap_or_else(|| json!({})),
+        "summary": summary,
         "questions": packet.get("review_questions").cloned().unwrap_or_else(|| json!([])),
-        "candidates": packet.get("candidates").cloned().unwrap_or_else(|| json!([])),
+        "candidates": candidates,
         "sections": {
             "input_contract": packet.get("input_contract").cloned().unwrap_or_else(|| json!({})),
             "packet_source": packet.get("packet_source").cloned().unwrap_or_else(|| json!({})),
+            "decision_inbox": decision_inbox,
+            "approved_plan": approved_plan,
         },
-        "next_step": "Keep this evidence preview-only until a separate write path is explicitly approved."
+        "next_step": "Record human decisions here, then inspect the dry-run approved plan before designing any separate write-capable materializer."
     })
 }
 
@@ -1990,10 +2397,99 @@ async fn api_materialization_review_artifact(
     let packet_path = default_palace_materialization_review_packet_path();
     let packet = load_default_palace_materialization_review_packet(&packet_path)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let decisions_path = default_palace_materialization_review_decisions_path();
+    let decisions = load_palace_materialization_review_decisions(&decisions_path).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("load materialization review decisions: {e}"),
+        )
+    })?;
     Ok(Json(palace_materialization_review_artifact_from_packet(
         &packet,
         &packet_path,
+        &decisions_path,
+        &decisions,
     )))
+}
+
+async fn api_materialization_review_approved_plan(
+    State(_s): State<AppState>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let packet_path = default_palace_materialization_review_packet_path();
+    let packet = load_default_palace_materialization_review_packet(&packet_path)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let decisions_path = default_palace_materialization_review_decisions_path();
+    let decisions = load_palace_materialization_review_decisions(&decisions_path).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("load materialization review decisions: {e}"),
+        )
+    })?;
+    let inbox = palace_materialization_review_decision_inbox_for_packet(&packet, &decisions);
+    let mut plan = palace_materialization_approved_edge_plan_for_inbox(&inbox);
+    if let Some(obj) = plan.as_object_mut() {
+        obj.insert(
+            "packet_path".to_string(),
+            json!(packet_path.display().to_string()),
+        );
+        obj.insert(
+            "decisions_path".to_string(),
+            json!(decisions_path.display().to_string()),
+        );
+        obj.insert(
+            "reviewed_candidate_count".to_string(),
+            inbox.get("candidate_count").cloned().unwrap_or(Value::Null),
+        );
+    }
+    Ok(Json(plan))
+}
+
+async fn api_materialization_review_decision(
+    Json(req): Json<MaterializationReviewDecisionRequest>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let pair = PalaceMaterializationReviewPair {
+        from_key: req.from_key.trim().to_string(),
+        to_key: req.to_key.trim().to_string(),
+        edge_type: normalize_palace_materialization_edge_type(req.edge_type.as_deref()),
+    };
+    if pair.from_key.is_empty() || pair.to_key.is_empty() || pair.edge_type.is_empty() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "from_key, to_key, and edge_type are required".to_string(),
+        ));
+    }
+    let generated_at_unix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let record = palace_materialization_review_decision_record_for_time(
+        &pair,
+        req.decision.trim(),
+        req.reviewer.as_deref(),
+        req.note.as_deref(),
+        generated_at_unix,
+    )
+    .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
+    let decisions_path = default_palace_materialization_review_decisions_path();
+    append_palace_materialization_review_decision(&decisions_path, &record).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("append materialization review decision: {e}"),
+        )
+    })?;
+    Ok(Json(json!({
+        "schema": "agent_bridge.palace.materialization_review_decision_response.v0",
+        "written": true,
+        "decisions_path": decisions_path.display().to_string(),
+        "writes_memory": false,
+        "writes_edges": false,
+        "changes_search_order": false,
+        "can_change_retrieval_order": false,
+        "approval_writes_allowed": false,
+        "can_materialize_edges": false,
+        "auto_apply_allowed": false,
+        "record": record,
+    })))
 }
 
 async fn api_orphan_candidates(
@@ -5281,13 +5777,9 @@ mod tests {
     fn palace_materialization_review_artifact_route_loads_read_only_packet_fixture() {
         let _guard = ENV_LOCK.lock().expect("env lock");
         let dir = tempfile::tempdir().expect("tempdir");
-        let old_packet =
-            std::env::var_os("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON");
+        let old_packet = std::env::var_os("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON");
         let packet_path = dir.path().join("materialization-review-packet.json");
-        std::env::set_var(
-            "AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON",
-            &packet_path,
-        );
+        std::env::set_var("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON", &packet_path);
         std::fs::write(
             &packet_path,
             serde_json::to_vec_pretty(&json!({
@@ -5384,7 +5876,10 @@ mod tests {
                 artifact["schema"],
                 json!("agent_bridge.palace.materialization_review_artifact.v0")
             );
-            assert_eq!(artifact["artifact_kind"], json!("materialization_review_packet"));
+            assert_eq!(
+                artifact["artifact_kind"],
+                json!("materialization_review_packet")
+            );
             assert_eq!(artifact["read_only"], json!(true));
             assert_eq!(artifact["writes_memory"], json!(false));
             assert_eq!(artifact["writes_edges"], json!(false));
@@ -5408,9 +5903,7 @@ mod tests {
         });
 
         match old_packet {
-            Some(value) => {
-                std::env::set_var("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON", value)
-            }
+            Some(value) => std::env::set_var("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON", value),
             None => std::env::remove_var("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON"),
         }
     }
@@ -5419,8 +5912,7 @@ mod tests {
     fn palace_materialization_review_artifact_route_uses_embedded_default_without_repo_cwd() {
         let _guard = ENV_LOCK.lock().expect("env lock");
         let dir = tempfile::tempdir().expect("tempdir");
-        let old_packet =
-            std::env::var_os("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON");
+        let old_packet = std::env::var_os("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON");
         let old_cwd = std::env::current_dir().expect("current dir");
 
         std::env::remove_var("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON");
@@ -5451,9 +5943,7 @@ mod tests {
 
         std::env::set_current_dir(&old_cwd).expect("restore cwd");
         match old_packet {
-            Some(value) => {
-                std::env::set_var("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON", value)
-            }
+            Some(value) => std::env::set_var("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON", value),
             None => std::env::remove_var("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON"),
         }
 
@@ -5472,6 +5962,257 @@ mod tests {
             artifact["source"]["packet_schema"],
             json!("agent_bridge.biocortex_retrieval.materialization_review_packet.v0")
         );
+    }
+
+    #[test]
+    fn palace_materialization_review_artifact_surfaces_decision_inbox_and_dry_run_plan() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let old_packet = std::env::var_os("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON");
+        let old_decisions = std::env::var_os("AB_PALACE_MATERIALIZATION_REVIEW_DECISIONS");
+        let packet_path = dir.path().join("materialization-review-packet.json");
+        let decisions_path = dir.path().join("materialization-review-decisions.jsonl");
+        std::env::set_var("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON", &packet_path);
+        std::env::set_var(
+            "AB_PALACE_MATERIALIZATION_REVIEW_DECISIONS",
+            &decisions_path,
+        );
+        std::fs::write(
+            &packet_path,
+            serde_json::to_vec_pretty(&json!({
+                "schema": "agent_bridge.biocortex_retrieval.materialization_review_packet.v0",
+                "review_state": "needs_human_review",
+                "approval_state": "not_approved",
+                "default_decision": "keep_preview_only",
+                "read_only": true,
+                "writes_memory": false,
+                "writes_edges": false,
+                "changes_search_order": false,
+                "can_change_retrieval_order": false,
+                "approval_writes_allowed": false,
+                "can_materialize_edges": false,
+                "summary": {
+                    "preview_case_count": 1,
+                    "preview_candidate_count": 1
+                },
+                "candidates": [{
+                    "case_index": 15,
+                    "class_label": "missing_graph_moderate_case_15",
+                    "candidate_source": "reason_packet",
+                    "gate": "explicit_related_keys",
+                    "from_key": "from_a",
+                    "to_key": "to_b",
+                    "edge_type": "relates",
+                    "reason_kind": "explicit_related_keys",
+                    "rationale": "shared review artifact context",
+                    "shadow_aligned": true,
+                    "baseline_top3": ["one", "two", "three"],
+                    "preview_top3": ["one", "from_a", "to_b"],
+                    "baseline_from_rank": 3,
+                    "preview_from_rank": 1,
+                    "baseline_to_rank": 4,
+                    "preview_to_rank": 3,
+                    "blend_coverage": 0.2,
+                    "writes_memory": false,
+                    "writes_edges": false,
+                    "changes_search_order": false,
+                    "can_change_retrieval_order": false,
+                    "approval_writes_allowed": false,
+                    "can_materialize_edges": false
+                }]
+            }))
+            .expect("serialize packet fixture"),
+        )
+        .expect("write packet fixture");
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(async {
+            let db_path = dir.path().join("state.db");
+            let store = Arc::new(
+                ab_store::SqliteStore::open(&db_path)
+                    .await
+                    .expect("open sqlite store"),
+            );
+            let state = AppState {
+                store,
+                markdown_root: None,
+                reports_dir: None,
+                recent_clicks: Arc::new(Mutex::new(VecDeque::with_capacity(CLICK_WINDOW))),
+            };
+
+            let Json(artifact) = api_materialization_review_artifact(State(state))
+                .await
+                .expect("materialization review artifact");
+
+            assert_eq!(
+                artifact["sections"]["decision_inbox"]["schema"],
+                json!("agent_bridge.palace.materialization_review_decision_inbox.v0")
+            );
+            assert_eq!(
+                artifact["sections"]["approved_plan"]["schema"],
+                json!("agent_bridge.palace.materialization_approved_edge_plan.v0")
+            );
+            assert_eq!(
+                artifact["summary"]["materialization_pending_count"],
+                json!(1)
+            );
+            assert_eq!(
+                artifact["summary"]["materialization_approved_count"],
+                json!(0)
+            );
+            assert_eq!(
+                artifact["candidates"][0]["review"]["decision"],
+                json!("pending")
+            );
+            assert_eq!(
+                artifact["sections"]["approved_plan"]["dry_run"],
+                json!(true)
+            );
+            assert_eq!(
+                artifact["sections"]["approved_plan"]["writes_edges"],
+                json!(false)
+            );
+            assert_eq!(
+                artifact["sections"]["approved_plan"]["changes_search_order"],
+                json!(false)
+            );
+        });
+
+        match old_packet {
+            Some(value) => std::env::set_var("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON", value),
+            None => std::env::remove_var("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON"),
+        }
+        match old_decisions {
+            Some(value) => std::env::set_var("AB_PALACE_MATERIALIZATION_REVIEW_DECISIONS", value),
+            None => std::env::remove_var("AB_PALACE_MATERIALIZATION_REVIEW_DECISIONS"),
+        }
+    }
+
+    #[test]
+    fn palace_materialization_review_decision_route_records_dry_run_approval_plan() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let old_packet = std::env::var_os("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON");
+        let old_decisions = std::env::var_os("AB_PALACE_MATERIALIZATION_REVIEW_DECISIONS");
+        let packet_path = dir.path().join("materialization-review-packet.json");
+        let decisions_path = dir.path().join("materialization-review-decisions.jsonl");
+        std::env::set_var("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON", &packet_path);
+        std::env::set_var(
+            "AB_PALACE_MATERIALIZATION_REVIEW_DECISIONS",
+            &decisions_path,
+        );
+        std::fs::write(
+            &packet_path,
+            serde_json::to_vec_pretty(&json!({
+                "schema": "agent_bridge.biocortex_retrieval.materialization_review_packet.v0",
+                "read_only": true,
+                "writes_memory": false,
+                "writes_edges": false,
+                "changes_search_order": false,
+                "can_change_retrieval_order": false,
+                "approval_writes_allowed": false,
+                "can_materialize_edges": false,
+                "candidates": [{
+                    "candidate_source": "reason_packet",
+                    "gate": "explicit_related_keys",
+                    "from_key": "from_a",
+                    "to_key": "to_b",
+                    "edge_type": "relates",
+                    "reason_kind": "explicit_related_keys",
+                    "rationale": "shared review artifact context",
+                    "shadow_aligned": true,
+                    "baseline_top3": ["one", "two", "three"],
+                    "preview_top3": ["one", "from_a", "to_b"],
+                    "baseline_from_rank": 3,
+                    "preview_from_rank": 1,
+                    "baseline_to_rank": 4,
+                    "preview_to_rank": 3,
+                    "blend_coverage": 0.2,
+                    "writes_memory": false,
+                    "writes_edges": false,
+                    "changes_search_order": false,
+                    "can_change_retrieval_order": false,
+                    "approval_writes_allowed": false,
+                    "can_materialize_edges": false
+                }]
+            }))
+            .expect("serialize packet fixture"),
+        )
+        .expect("write packet fixture");
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(async {
+            let db_path = dir.path().join("state.db");
+            let store = Arc::new(
+                ab_store::SqliteStore::open(&db_path)
+                    .await
+                    .expect("open sqlite store"),
+            );
+            let state = AppState {
+                store,
+                markdown_root: None,
+                reports_dir: None,
+                recent_clicks: Arc::new(Mutex::new(VecDeque::with_capacity(CLICK_WINDOW))),
+            };
+
+            let Json(response) =
+                api_materialization_review_decision(Json(MaterializationReviewDecisionRequest {
+                    from_key: "from_a".to_string(),
+                    to_key: "to_b".to_string(),
+                    edge_type: Some("relates".to_string()),
+                    decision: "approve".to_string(),
+                    reviewer: Some("test".to_string()),
+                    note: Some("looks evidence-backed".to_string()),
+                }))
+                .await
+                .expect("record decision");
+
+            assert_eq!(
+                response["schema"],
+                json!("agent_bridge.palace.materialization_review_decision_response.v0")
+            );
+            assert_eq!(response["writes_memory"], json!(false));
+            assert_eq!(response["writes_edges"], json!(false));
+            assert_eq!(response["changes_search_order"], json!(false));
+
+            let loaded = load_palace_materialization_review_decisions(&decisions_path)
+                .expect("load decisions");
+            assert_eq!(loaded.len(), 1);
+            assert_eq!(loaded[0]["decision"], json!("approve"));
+            assert_eq!(loaded[0]["writes_edges"], json!(false));
+
+            let Json(plan) = api_materialization_review_approved_plan(State(state))
+                .await
+                .expect("approved plan");
+            assert_eq!(
+                plan["schema"],
+                json!("agent_bridge.palace.materialization_approved_edge_plan.v0")
+            );
+            assert_eq!(plan["dry_run"], json!(true));
+            assert_eq!(plan["approved_pair_count"], json!(1));
+            assert_eq!(plan["would_write_edges"], json!(1));
+            assert_eq!(plan["writes_memory"], json!(false));
+            assert_eq!(plan["writes_edges"], json!(false));
+            assert_eq!(plan["changes_search_order"], json!(false));
+            assert_eq!(plan["can_materialize_edges"], json!(false));
+            assert_eq!(plan["links"][0]["from_key"], json!("from_a"));
+            assert_eq!(plan["links"][0]["to_key"], json!("to_b"));
+        });
+
+        match old_packet {
+            Some(value) => std::env::set_var("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON", value),
+            None => std::env::remove_var("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON"),
+        }
+        match old_decisions {
+            Some(value) => std::env::set_var("AB_PALACE_MATERIALIZATION_REVIEW_DECISIONS", value),
+            None => std::env::remove_var("AB_PALACE_MATERIALIZATION_REVIEW_DECISIONS"),
+        }
     }
 
     #[test]

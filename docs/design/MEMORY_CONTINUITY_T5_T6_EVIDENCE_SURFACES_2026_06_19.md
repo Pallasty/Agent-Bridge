@@ -665,6 +665,31 @@ summary/questions/candidate evidence through the existing Palace review panel.
 The route also rejects packets whose candidate rows carry write-capable or
 retrieval-order-changing flags, even when the packet-level boundary is read-only.
 
+The next Palace slice adds a human decision layer over the same packet without
+adding a materializer:
+
+- decision route: `POST /api/materialization-review-decision`;
+- approved-plan route: `GET /api/materialization-review-approved-plan`;
+- decision record schema:
+  `agent_bridge.palace.materialization_review_decision.v0`;
+- decision inbox schema:
+  `agent_bridge.palace.materialization_review_decision_inbox.v0`;
+- approved plan schema:
+  `agent_bridge.palace.materialization_approved_edge_plan.v0`;
+- default private decision log:
+  `$HOME/.agent-bridge-private/palace-review/materialization-review-decisions.jsonl`;
+- decision log override:
+  `AB_PALACE_MATERIALIZATION_REVIEW_DECISIONS=/abs/path/to/decisions.jsonl`.
+
+The decision log is append-only JSONL and private like the orphan-review queue.
+It records only operator decisions (`approve`, `defer`, `reject`) over candidate
+`from_key` / `to_key` / `edge_type` triples. Approving a candidate does **not**
+write `memory_edges` and does **not** grant production retrieval influence. It
+only makes the read-only approved-plan endpoint list the candidate in a dry-run
+plan with `dry_run=true`, `writes_edges=false`,
+`changes_search_order=false`, `approval_writes_allowed=false`, and
+`can_materialize_edges=false`.
+
 ## Verification
 
 Targeted validation for this slice after `/Data` space was recovered:
