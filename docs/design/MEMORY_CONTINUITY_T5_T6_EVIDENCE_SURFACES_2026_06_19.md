@@ -188,6 +188,43 @@ enough to justify influence. The next useful work is not to loosen T6; it is to
 improve the side-signal/candidate scoring path or add a separate
 recall-expansion experiment for the pure FTS misses.
 
+## Fixture Diagnostic Example Follow-up
+
+Date: 2026-06-20
+
+The redacted MCP summary is intentionally too compact to explain *why* a
+headroom run did or did not lift. A read-only local example now exposes the
+per-case rank fields without adding a new MCP tool:
+
+```bash
+AB_BIOCORTEX_RS=/Users/pallasting/.cache/agent-bridge-biocortex-rs-verify \
+  cargo run -p ab-bridge --example biocortex_relevance_lift_fixture_eval
+```
+
+The example uses the same `biocortex_retrieval_relevance_lift_eval` ruler and
+defaults to the headroom fixture. It prints aggregate metrics plus redacted
+per-case rows: observed fixture FTS rank, current baseline source rank,
+reordered source rank, rank delta, reciprocal-rank delta, side-signal match
+count, coverage, and whether the ordering changed.
+
+Current source-run result on this Mac:
+
+- `verdict=lift_demonstrated`, but only weakly;
+- `mrr_baseline=0.260`, `mrr_reordered=0.267`, `mrr_lift=0.007`;
+- `improved=1`, `worsened=0`, `unchanged=6`;
+- `source_found_count=6`;
+- side-signal coverage was not the blocker: all evaluated rows reported
+  `side_signal_coverage=1.0`.
+
+Interpretation: this is still not strong enough for T6 runtime influence. The
+useful next scoring work is to inspect why high-coverage side signals mostly
+move distractors or leave source ranks unchanged. Also note the measurement
+distinction surfaced by the example: the fixture's `baseline_fts_rank_observed`
+is first-hit over the accept set, while `baseline_rank_of_source` tracks the
+first listed primary source key. Case #4 demonstrates the difference: the
+accept-set hit exists, but the primary source key is absent from the baseline
+candidate list.
+
 ## Verification
 
 Targeted validation for this slice after `/Data` space was recovered:
@@ -201,6 +238,7 @@ cargo test -p ab-bridge memory_biocortex_ -- --nocapture
 cargo test -p ab-bridge tool_policy_codex_essential_exposes_extras_list -- --nocapture
 cargo test -p ab-bridge --lib memory_biocortex_relevance_lift_hard_query_fixture_contract -- --nocapture
 cargo test -p ab-bridge --lib memory_biocortex_relevance_lift_headroom_fixture_contract -- --nocapture
+AB_BIOCORTEX_RS=/Users/pallasting/.cache/agent-bridge-biocortex-rs-verify cargo run -p ab-bridge --example biocortex_relevance_lift_fixture_eval
 ```
 
 The feature-branch commit hook also ran `cargo check -p ab-bridge --all-targets`.
