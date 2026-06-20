@@ -14,12 +14,12 @@
 //! ```
 
 use ab_bridge::biocortex_shadow::{
-    biocortex_retrieval_relevance_lift_eval, run_retrieval_side_signal,
     BioCortexRetrievalCandidate, RelevanceLiftEvalOptions, RelevanceLiftQueryCase,
+    biocortex_retrieval_relevance_lift_eval, run_retrieval_side_signal,
 };
 use ab_store::{
-    cosine_similarity, default_db_path, embed_text, BioCortexRetrievalOptInSideSignal,
-    CoactivationEdge, MemoryEdge, MemoryListSort, MemoryRecord, SqliteStore, StateStore,
+    BioCortexRetrievalOptInSideSignal, CoactivationEdge, MemoryEdge, MemoryListSort, MemoryRecord,
+    SqliteStore, StateStore, cosine_similarity, default_db_path, embed_text,
 };
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -236,6 +236,7 @@ struct GraphEvidenceCaseRow {
     distinct_graph_scores: usize,
     edge_type_counts: BTreeMap<String, usize>,
     variants: Vec<GraphScoreVariantRow>,
+    materialization_previews: Vec<MaterializationPreviewRow>,
 }
 
 #[derive(Debug)]
@@ -255,6 +256,41 @@ struct GraphScoreVariantRow {
     blend_first_relevant_rank: Option<usize>,
     blend_rr_delta: f64,
     blend_order_changed: bool,
+}
+
+#[derive(Clone, Debug)]
+struct MaterializationPreviewRow {
+    candidate_source: &'static str,
+    gate: &'static str,
+    from_key: String,
+    to_key: String,
+    edge_type: String,
+    reason_kind: String,
+    rationale: String,
+    shadow_aligned: bool,
+    baseline_top3: Vec<String>,
+    preview_top3: Vec<String>,
+    baseline_from_rank: Option<usize>,
+    preview_from_rank: Option<usize>,
+    baseline_to_rank: Option<usize>,
+    preview_to_rank: Option<usize>,
+    preview_order_changed: bool,
+    blend_coverage: f64,
+    writes_memory: bool,
+    changes_search_order: bool,
+}
+
+#[derive(Debug)]
+struct ReasonPacketShadowEvidence {
+    aligned: bool,
+    baseline_top3: Vec<String>,
+    preview_top3: Vec<String>,
+    baseline_from_rank: Option<usize>,
+    preview_from_rank: Option<usize>,
+    baseline_to_rank: Option<usize>,
+    preview_to_rank: Option<usize>,
+    preview_order_changed: bool,
+    blend_coverage: f64,
 }
 
 #[derive(Debug)]
@@ -713,6 +749,7 @@ async fn analyze_graph_evidence(
             distinct_graph_scores,
             edge_type_counts,
             variants,
+            materialization_previews: reason_packet_gate.preview_rows.clone(),
         });
     }
     Ok(out)
@@ -745,6 +782,7 @@ struct CoretrievalCandidateQualityGate {
 #[derive(Debug, Default)]
 struct ReasonPacketCandidateQualityGate {
     selected_edges: Vec<MemoryEdge>,
+    preview_rows: Vec<MaterializationPreviewRow>,
     blocked_packet_count: usize,
     blocked_shadow_count: usize,
 }
@@ -810,8 +848,7 @@ fn select_label_free_quality_edges(
             out.blocked_metadata_count += 1;
             continue;
         };
-        if !label_free_endpoint_metadata_allowed(from)
-            || !label_free_endpoint_metadata_allowed(to)
+        if !label_free_endpoint_metadata_allowed(from) || !label_free_endpoint_metadata_allowed(to)
         {
             out.blocked_metadata_count += 1;
             continue;
@@ -850,12 +887,7 @@ fn select_coretrieval_quality_edges(
     const MIN_CORETRIEVAL_COUNT: u64 = 2;
     let coactivation_by_pair = coactivation_edges
         .iter()
-        .map(|edge| {
-            (
-                undirected_pair_key(&edge.key_a, &edge.key_b),
-                edge.count,
-            )
-        })
+        .map(|edge| (undirected_pair_key(&edge.key_a, &edge.key_b), edge.count))
         .collect::<HashMap<_, _>>();
     let mut out = CoretrievalCandidateQualityGate::default();
     for candidate in missing_edge_candidates {
@@ -891,7 +923,12 @@ fn select_reason_packet_quality_edges(
     let active_packets = reason_packets
         .iter()
         .filter(|packet| reason_packet_valid(packet))
-        .map(|packet| (undirected_pair_key(&packet.from_key, &packet.to_key), packet))
+        .map(|packet| {
+            (
+                undirected_pair_key(&packet.from_key, &packet.to_key),
+                packet,
+            )
+        })
         .collect::<HashMap<_, _>>();
     let mut out = ReasonPacketCandidateQualityGate::default();
     for candidate in missing_edge_candidates {
@@ -904,17 +941,23 @@ fn select_reason_packet_quality_edges(
             out.blocked_packet_count += 1;
             continue;
         }
-        if !reason_packet_shadow_top3_aligned(
+        let Some(shadow) = reason_packet_shadow_evidence(
             baseline_hits,
             baseline_ranking,
             candidate_keys,
             induced_edges,
             candidate,
             packet,
-        ) {
+        ) else {
+            out.blocked_shadow_count += 1;
+            continue;
+        };
+        if !shadow.aligned {
             out.blocked_shadow_count += 1;
             continue;
         }
+        out.preview_rows
+            .push(materialization_preview_row(candidate, packet, shadow));
         out.selected_edges.push(candidate.clone());
     }
     out
@@ -934,21 +977,17 @@ fn reason_packet_edge_type_allowed(edge_type: &str) -> bool {
     matches!(edge_type, "relates" | "implements" | "derived_from")
 }
 
-fn reason_packet_shadow_top3_aligned(
+fn reason_packet_shadow_evidence(
     baseline_hits: &[ab_store::MemorySearchHit],
     baseline_ranking: &[String],
     candidate_keys: &BTreeSet<String>,
     induced_edges: &[MemoryEdge],
     candidate: &MemoryEdge,
     packet: &MaterializationReasonPacket,
-) -> bool {
-    let baseline_prefix = baseline_ranking
-        .iter()
-        .take(3)
-        .map(String::as_str)
-        .collect::<Vec<_>>();
+) -> Option<ReasonPacketShadowEvidence> {
+    let baseline_prefix = baseline_ranking.iter().take(3).cloned().collect::<Vec<_>>();
     if baseline_prefix.is_empty() {
-        return false;
+        return None;
     }
     let mut trial_edges = induced_edges.to_vec();
     trial_edges.push(candidate.clone());
@@ -958,24 +997,69 @@ fn reason_packet_shadow_top3_aligned(
         GraphScoreVariant::NonContinuityIncident,
     );
     let graph_signals = graph_scores_to_side_signal(&trial_scores);
-    let (blend_hits, _, blend_available) =
+    let (blend_hits, blend_summary, blend_available) =
         ab_store::biocortex_opt_in_apply_side_signal(baseline_hits, &graph_signals, 0.8, 0.0, true);
     if !blend_available {
-        return false;
+        return None;
     }
+    let blend_ranking = blend_hits
+        .iter()
+        .map(|hit| hit.record.key.clone())
+        .collect::<Vec<_>>();
     let blend_prefix = blend_hits
         .iter()
         .take(baseline_prefix.len())
-        .map(|hit| hit.record.key.as_str())
+        .map(|hit| hit.record.key.clone())
         .collect::<Vec<_>>();
-    if blend_prefix == baseline_prefix {
-        return true;
-    }
-    blend_prefix.iter().all(|key| {
-        baseline_prefix.contains(key)
-            || *key == packet.from_key.as_str()
-            || *key == packet.to_key.as_str()
+    let aligned = blend_prefix == baseline_prefix
+        || blend_prefix.iter().all(|key| {
+            baseline_prefix.contains(key) || key == &packet.from_key || key == &packet.to_key
+        });
+    Some(ReasonPacketShadowEvidence {
+        aligned,
+        baseline_top3: baseline_prefix,
+        preview_top3: blend_prefix,
+        baseline_from_rank: rank_of_key(baseline_ranking, &packet.from_key),
+        preview_from_rank: rank_of_key(&blend_ranking, &packet.from_key),
+        baseline_to_rank: rank_of_key(baseline_ranking, &packet.to_key),
+        preview_to_rank: rank_of_key(&blend_ranking, &packet.to_key),
+        preview_order_changed: baseline_ranking != blend_ranking.as_slice(),
+        blend_coverage: blend_summary.coverage,
     })
+}
+
+fn materialization_preview_row(
+    candidate: &MemoryEdge,
+    packet: &MaterializationReasonPacket,
+    shadow: ReasonPacketShadowEvidence,
+) -> MaterializationPreviewRow {
+    MaterializationPreviewRow {
+        candidate_source: "explicit_related_keys",
+        gate: "reason_packet",
+        from_key: candidate.from_key.clone(),
+        to_key: candidate.to_key.clone(),
+        edge_type: candidate.edge_type.clone(),
+        reason_kind: packet.reason_kind.clone(),
+        rationale: packet.rationale.clone(),
+        shadow_aligned: shadow.aligned,
+        baseline_top3: shadow.baseline_top3,
+        preview_top3: shadow.preview_top3,
+        baseline_from_rank: shadow.baseline_from_rank,
+        preview_from_rank: shadow.preview_from_rank,
+        baseline_to_rank: shadow.baseline_to_rank,
+        preview_to_rank: shadow.preview_to_rank,
+        preview_order_changed: shadow.preview_order_changed,
+        blend_coverage: shadow.blend_coverage,
+        writes_memory: false,
+        changes_search_order: false,
+    }
+}
+
+fn rank_of_key(ranking: &[String], key: &str) -> Option<usize> {
+    ranking
+        .iter()
+        .position(|candidate| candidate == key)
+        .map(|idx| idx + 1)
 }
 
 fn label_free_endpoint_metadata_allowed(record: &MemoryRecord) -> bool {
@@ -2154,6 +2238,41 @@ fn print_report(
         reason_packet_blocked_shadow,
     );
     println!();
+    println!("## Read-only reason-packet materialization preview artifact");
+    let preview_count = graph_rows
+        .iter()
+        .map(|row| row.materialization_previews.len())
+        .sum::<usize>();
+    println!(
+        "previews={} writes_memory=false changes_search_order=false",
+        preview_count
+    );
+    for row in graph_rows {
+        for preview in &row.materialization_previews {
+            println!(
+                "- case={} class={} gate={} source={} edge={} -> {} type={} reason_kind={} aligned={} from_rank={} to_rank={} top3={}=>{} preview_changed={} coverage={} writes_memory={} changes_search_order={} rationale={}",
+                row.sample_index + 1,
+                truncate(&row.class_label, 34),
+                preview.gate,
+                preview.candidate_source,
+                truncate(&preview.from_key, 36),
+                truncate(&preview.to_key, 36),
+                preview.edge_type,
+                preview.reason_kind,
+                preview.shadow_aligned,
+                rank_transition(preview.baseline_from_rank, preview.preview_from_rank),
+                rank_transition(preview.baseline_to_rank, preview.preview_to_rank),
+                top3_summary(&preview.baseline_top3),
+                top3_summary(&preview.preview_top3),
+                preview.preview_order_changed,
+                format!("{:.3}", preview.blend_coverage),
+                preview.writes_memory,
+                preview.changes_search_order,
+                truncate(&preview.rationale, 96),
+            );
+        }
+    }
+    println!();
     println!("## Graph side-signal blend simulation summary");
     println!(
         "{:<10} {:>5} {:>7} {:>8} {:>9} {:>8} {:>8} {:>9}",
@@ -2413,6 +2532,20 @@ fn graph_rank_score(rank: Option<usize>, score: Option<f64>) -> String {
     }
 }
 
+fn rank_transition(before: Option<usize>, after: Option<usize>) -> String {
+    format!("{}->{}", opt_usize(before), opt_usize(after))
+}
+
+fn top3_summary(keys: &[String]) -> String {
+    if keys.is_empty() {
+        return "-".to_string();
+    }
+    keys.iter()
+        .map(|key| truncate(key, 18))
+        .collect::<Vec<_>>()
+        .join(">")
+}
+
 fn edge_type_summary(counts: &BTreeMap<String, usize>) -> String {
     if counts.is_empty() {
         return "-".to_string();
@@ -2430,4 +2563,104 @@ fn truncate(value: &str, max_chars: usize) -> String {
         out.push_str("...");
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reason_packet_gate_emits_read_only_materialization_preview() {
+        let baseline_hits = vec![
+            test_hit("anchor_a", 1.00),
+            test_hit("anchor_b", 0.95),
+            test_hit("from_key", 0.40),
+            test_hit("to_key", 0.35),
+        ];
+        let baseline_ranking = baseline_hits
+            .iter()
+            .map(|hit| hit.record.key.clone())
+            .collect::<Vec<_>>();
+        let candidate_keys = baseline_ranking.iter().cloned().collect::<BTreeSet<_>>();
+        let candidate = MemoryEdge {
+            from_key: "from_key".to_string(),
+            to_key: "to_key".to_string(),
+            edge_type: "relates".to_string(),
+            weight: 1.0,
+        };
+        let packet = MaterializationReasonPacket {
+            from_key: "from_key".to_string(),
+            to_key: "to_key".to_string(),
+            edge_type: "relates".to_string(),
+            reason_kind: "operator_review_intent".to_string(),
+            rationale: "reviewer supplied provenance rationale".to_string(),
+            status: "active".to_string(),
+        };
+
+        let gate = select_reason_packet_quality_edges(
+            &baseline_hits,
+            &baseline_ranking,
+            &candidate_keys,
+            &[],
+            &[candidate],
+            &[packet],
+        );
+
+        assert_eq!(gate.selected_edges.len(), 1);
+        assert_eq!(gate.preview_rows.len(), 1);
+        let preview = &gate.preview_rows[0];
+        assert_eq!(preview.candidate_source, "explicit_related_keys");
+        assert_eq!(preview.gate, "reason_packet");
+        assert_eq!(preview.from_key, "from_key");
+        assert_eq!(preview.to_key, "to_key");
+        assert_eq!(preview.edge_type, "relates");
+        assert_eq!(preview.reason_kind, "operator_review_intent");
+        assert_eq!(preview.rationale, "reviewer supplied provenance rationale");
+        assert!(preview.shadow_aligned);
+        assert_eq!(
+            preview.baseline_top3,
+            vec![
+                "anchor_a".to_string(),
+                "anchor_b".to_string(),
+                "from_key".to_string()
+            ]
+        );
+        assert_eq!(
+            preview.preview_top3,
+            vec![
+                "from_key".to_string(),
+                "to_key".to_string(),
+                "anchor_a".to_string()
+            ]
+        );
+        assert_eq!(preview.baseline_from_rank, Some(3));
+        assert_eq!(preview.preview_from_rank, Some(1));
+        assert_eq!(preview.baseline_to_rank, Some(4));
+        assert_eq!(preview.preview_to_rank, Some(2));
+        assert!(!preview.writes_memory);
+        assert!(!preview.changes_search_order);
+    }
+
+    fn test_hit(key: &str, score: f64) -> ab_store::MemorySearchHit {
+        ab_store::MemorySearchHit {
+            record: MemoryRecord {
+                key: key.to_string(),
+                kind: "lesson".to_string(),
+                content: String::new(),
+                tags: Vec::new(),
+                related_keys: Vec::new(),
+                scope: None,
+                created_at: 0,
+                updated_at: 0,
+                last_accessed_at: 0,
+                access_count: 0,
+                importance: 0.5,
+                status: "active".to_string(),
+                trigger_pattern: None,
+                superseded_by: None,
+            },
+            score,
+            cosine: None,
+        }
+    }
 }

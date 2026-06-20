@@ -548,6 +548,36 @@ read-only materialization preview artifact that shows the candidate edge,
 reason packet, shadow decision, and before/after ranking evidence for human
 approval, without changing retrieval or writing graph edges.
 
+The first read-only materialization preview slice keeps that boundary and adds
+the missing review packet to the local evaluator output. For each selected
+reason-packet candidate, the preview row includes:
+
+- candidate source: currently `explicit_related_keys`;
+- gate: currently `reason_packet`;
+- candidate edge endpoints and edge type;
+- packet `reason_kind` and rationale;
+- shadow alignment result;
+- baseline and preview ranks for both endpoints;
+- baseline and preview top-three ranking evidence;
+- preview coverage and preview-order-change flag;
+- explicit `writes_memory=false` and `changes_search_order=false`.
+
+Current result on the missing-graph fixture:
+
+- preview rows: `1`;
+- selected preview case: `missing_graph_moderate_case_15`;
+- selected preview edge type: `relates`;
+- gate/source: `reason_packet` from `explicit_related_keys`;
+- endpoint rank movement: `from_rank=2->1`, `to_rank=4->3`;
+- shadow alignment: `true`;
+- preview order changed: `true`;
+- blend coverage: `0.200`;
+- write boundary: `writes_memory=false`, `changes_search_order=false`.
+
+Interpretation: this preview artifact is a human-review surface only. It makes
+the reason-packet decision inspectable, but it still does not approve automatic
+materialization, production retrieval influence, or memory graph writes.
+
 ## Verification
 
 Targeted validation for this slice after `/Data` space was recovered:
@@ -564,11 +594,17 @@ cargo test -p ab-bridge --lib memory_biocortex_relevance_lift_headroom_fixture_c
 cargo test -p ab-bridge memory_biocortex_relevance_lift_missing_graph_fixture_contract -- --nocapture
 AB_BIOCORTEX_RS=/Users/pallasting/.cache/agent-bridge-biocortex-rs-verify cargo run -p ab-bridge --example biocortex_relevance_lift_fixture_eval
 AB_BIOCORTEX_RS=/Users/pallasting/.cache/agent-bridge-biocortex-rs-verify cargo run -p ab-bridge --example biocortex_relevance_lift_fixture_eval docs/design/fixtures/memory-biocortex-relevance-lift-missing-graph-cases-2026-06-20.json
+rustfmt --edition 2024 crates/bridge/examples/biocortex_relevance_lift_fixture_eval.rs
+python3 -m json.tool docs/design/fixtures/memory-biocortex-relevance-lift-missing-graph-cases-2026-06-20.json >/dev/null
+CARGO_TARGET_DIR=/home/pallasting/.cache/agent-bridge-target-t6-materialization-preview cargo test -p ab-bridge --example biocortex_relevance_lift_fixture_eval reason_packet_gate_emits_read_only_materialization_preview -- --nocapture
+CARGO_TARGET_DIR=/home/pallasting/.cache/agent-bridge-target-t6-materialization-preview cargo test -p ab-bridge memory_biocortex_relevance_lift_missing_graph_fixture_contract -- --nocapture
+CARGO_TARGET_DIR=/home/pallasting/.cache/agent-bridge-target-t6-materialization-preview AB_BIOCORTEX_RS=/Data/CascadeProjects/biocortex-rs cargo run -p ab-bridge --example biocortex_relevance_lift_fixture_eval docs/design/fixtures/memory-biocortex-relevance-lift-missing-graph-cases-2026-06-20.json
+CARGO_TARGET_DIR=/home/pallasting/.cache/agent-bridge-target-t6-materialization-preview cargo check -p ab-bridge --all-targets
 ```
 
 The feature-branch commit hook also ran `cargo check -p ab-bridge --all-targets`.
 
 The broad `cargo fmt --check` path is not a clean signal for this slice: the
 same checkout contains pre-existing rustfmt diffs in unrelated files/regions.
-This slice keeps edits localized and does not run whole-file formatting to avoid
-mixing unrelated churn into the review.
+This slice keeps edits localized and uses single-file `rustfmt` only for the
+local evaluator touched by the preview-artifact change.
