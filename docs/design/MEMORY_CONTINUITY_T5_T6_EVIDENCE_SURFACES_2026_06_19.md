@@ -118,6 +118,22 @@ That makes the hard-query run report `side_signal_unavailable`; it should not be
 read as negative relevance-lift evidence. A clean, up-to-date BioCortex checkout
 is required before using this fixture as a lift-quality measurement.
 
+Follow-up with a clean detached BioCortex worktree at
+`/Users/pallasting/.cache/agent-bridge-biocortex-rs-verify` (origin/main
+`b7b3509`) removed the adapter caveat. The same fixture ran with
+`side_signal_unavailable=0`, `evaluated_count=3`, and
+`runs_biocortex_adapter=true`, while still preserving the summary redaction
+contract. The measured verdict was `no_lift`: `mrr_baseline=1.0`,
+`mrr_reordered=1.0`, `mrr_lift=0.0`, `improved=0`, `worsened=0`,
+`unchanged=3`, and `order_changed_count=1`.
+
+Interpretation: this first fixture is a valid contract smoke, not a useful lift
+yardstick. Baseline FTS already ranks the chosen source memories at the top, so
+there is little or no headroom for a side-signal to improve rank. The next
+evidence step should build a held-out hard-query corpus whose acceptance
+criteria include baseline source-rank headroom (for example: source found but
+not already rank 1) before treating T6 lift as quality evidence.
+
 ## Verification
 
 Targeted validation for this slice after `/Data` space was recovered:
