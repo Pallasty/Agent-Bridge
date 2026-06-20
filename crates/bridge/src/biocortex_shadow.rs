@@ -8607,6 +8607,29 @@ fn recall_pairs_to_json(pairs: &[(usize, f64)]) -> Value {
     )
 }
 
+fn relevance_lift_class_aggregate_to_json(
+    class_label: String,
+    samples: &[crate::biocortex_relevance_eval::SampleLift],
+) -> Value {
+    let agg = crate::biocortex_relevance_eval::aggregate_lift(samples);
+    json!({
+        "class_label": class_label,
+        "evaluated_count": agg.sample_count,
+        "source_found_count": agg.source_found_count,
+        "mrr_baseline": round3(agg.mrr_baseline),
+        "mrr_reordered": round3(agg.mrr_reordered),
+        "mrr_lift": round3(agg.mrr_lift),
+        "recall_baseline": recall_pairs_to_json(&agg.recall_baseline),
+        "recall_reordered": recall_pairs_to_json(&agg.recall_reordered),
+        "recall_lift": recall_pairs_to_json(&agg.recall_lift),
+        "improved": agg.improved,
+        "worsened": agg.worsened,
+        "unchanged": agg.unchanged,
+        "order_changed_count": agg.order_changed_count,
+        "verdict": agg.verdict.as_str(),
+    })
+}
+
 /// Read-only relevance-lift eval. Samples memories, derives a self-retrieval
 /// query per sample, runs baseline FTS `memory_search`, computes the BioCortex
 /// biomimetic side-signal, applies the **exact production reorder blend**
@@ -8693,11 +8716,13 @@ pub async fn biocortex_retrieval_relevance_lift_eval(
 
     let mut lift_samples: Vec<releval::SampleLift> = Vec::new();
     let mut sample_rows: Vec<Value> = Vec::new();
+    let mut lift_samples_by_class = BTreeMap::<String, Vec<releval::SampleLift>>::new();
     let mut side_signal_unavailable = 0usize;
     let mut first_side_error: Option<Value> = None;
     let mut empty_query_skipped = 0usize;
 
     for (idx, case) in explicit_cases.iter().enumerate() {
+        let class_label = safe_batch_class_label(case.class_label.as_deref());
         let baseline_hits = match store.memory_search(&case.query, &[], limit).await {
             Ok(hits) => hits,
             Err(err) => {
@@ -8707,7 +8732,7 @@ pub async fn biocortex_retrieval_relevance_lift_eval(
                     "status": "baseline_search_failed",
                     "error": err.to_string(),
                     "relevant_key_count": case.relevant_keys.len(),
-                    "class_label": case.class_label.clone().unwrap_or_else(|| "unlabelled".to_string()),
+                    "class_label": class_label,
                 }));
                 continue;
             }
@@ -8752,7 +8777,7 @@ pub async fn biocortex_retrieval_relevance_lift_eval(
                     "side_signal_status": status,
                     "baseline_hit_count": baseline_hits.len(),
                     "relevant_key_count": relevant.len(),
-                    "class_label": case.class_label.clone().unwrap_or_else(|| "unlabelled".to_string()),
+                    "class_label": class_label,
                 }));
                 continue;
             }
@@ -8792,7 +8817,7 @@ pub async fn biocortex_retrieval_relevance_lift_eval(
         sample_rows.push(json!({
             "sample_index": idx,
             "query_hash": sha256_json(&json!({"query": &case.query})),
-            "class_label": case.class_label.clone().unwrap_or_else(|| "unlabelled".to_string()),
+            "class_label": class_label.clone(),
             "query_chars": case.query.chars().count(),
             "relevant_set_size": relevant.len(),
             "baseline_hit_count": baseline_hits.len(),
@@ -8807,6 +8832,10 @@ pub async fn biocortex_retrieval_relevance_lift_eval(
             "direction": lift.direction.as_str(),
             "order_changed": lift.order_changed,
         }));
+        lift_samples_by_class
+            .entry(class_label)
+            .or_default()
+            .push(lift.clone());
         lift_samples.push(lift);
     }
 
@@ -8945,6 +8974,12 @@ pub async fn biocortex_retrieval_relevance_lift_eval(
     }
 
     let agg = releval::aggregate_lift(&lift_samples);
+    let class_aggregates = lift_samples_by_class
+        .into_iter()
+        .map(|(class_label, samples)| {
+            relevance_lift_class_aggregate_to_json(class_label, &samples)
+        })
+        .collect::<Vec<_>>();
 
     json!({
         "schema": BIOCORTEX_RETRIEVAL_RELEVANCE_LIFT_EVAL_SCHEMA,
@@ -8985,6 +9020,7 @@ pub async fn biocortex_retrieval_relevance_lift_eval(
             "unchanged": agg.unchanged,
             "order_changed_count": agg.order_changed_count,
         },
+        "class_aggregates": class_aggregates,
         "samples": sample_rows,
         "first_side_signal_error": first_side_error.unwrap_or(Value::Null),
         "caveats": {
@@ -12929,6 +12965,43 @@ mod tests {
             "uppercase operators must be lowercased to barewords: {q3}"
         );
         assert_eq!(q3, "s10a seed robustness wild hash quote paren and not");
+    }
+
+    #[test]
+    fn relevance_lift_class_aggregate_reports_redacted_bucket_metrics() {
+        let relevant = BTreeSet::from(["src".to_string()]);
+        let improved = crate::biocortex_relevance_eval::sample_lift(
+            &["decoy".to_string(), "src".to_string()],
+            &["src".to_string(), "decoy".to_string()],
+            "src",
+            &relevant,
+        );
+        let unchanged = crate::biocortex_relevance_eval::sample_lift(
+            &["src".to_string(), "decoy".to_string()],
+            &["src".to_string(), "decoy".to_string()],
+            "src",
+            &relevant,
+        );
+
+        let value =
+            relevance_lift_class_aggregate_to_json("hard".to_string(), &[improved, unchanged]);
+
+        assert_eq!(value["class_label"], json!("hard"));
+        assert_eq!(value["evaluated_count"], json!(2));
+        assert_eq!(value["source_found_count"], json!(2));
+        assert_eq!(value["improved"], json!(1));
+        assert_eq!(value["worsened"], json!(0));
+        assert_eq!(value["unchanged"], json!(1));
+        assert_eq!(value["order_changed_count"], json!(1));
+        assert_eq!(value["mrr_baseline"], json!(0.75));
+        assert_eq!(value["mrr_reordered"], json!(1.0));
+        assert_eq!(value["mrr_lift"], json!(0.25));
+        assert_eq!(value["verdict"], json!("lift_demonstrated"));
+
+        let serialized = serde_json::to_string(&value).expect("serialize");
+        assert!(!serialized.contains("query"));
+        assert!(!serialized.contains("key"));
+        assert!(!serialized.contains("content"));
     }
 
     #[test]

@@ -35596,6 +35596,8 @@ impl McpTool for MemoryBioCortexRedactedEvidenceAggregateTool {
 }
 
 fn memory_biocortex_relevance_lift_summary_payload(payload: Value) -> Value {
+    let class_aggregates =
+        memory_biocortex_relevance_lift_summary_class_aggregates(&payload);
     let mut summary = json!({
         "schema": payload.get("schema").cloned().unwrap_or(Value::Null),
         "generated_at": payload.get("generated_at").cloned().unwrap_or(Value::Null),
@@ -35604,6 +35606,7 @@ fn memory_biocortex_relevance_lift_summary_payload(payload: Value) -> Value {
         "verdict": payload.get("verdict").cloned().unwrap_or(Value::Null),
         "sampling": payload.get("sampling").cloned().unwrap_or(Value::Null),
         "metrics": payload.get("metrics").cloned().unwrap_or(Value::Null),
+        "class_aggregates": class_aggregates,
         "caveats": payload.get("caveats").cloned().unwrap_or(Value::Null),
         "safety": payload.get("safety").cloned().unwrap_or(Value::Null),
         "input_contract": {
@@ -35621,6 +35624,48 @@ fn memory_biocortex_relevance_lift_summary_payload(payload: Value) -> Value {
         obj.retain(|_, value| !value.is_null());
     }
     summary
+}
+
+fn memory_biocortex_relevance_lift_summary_class_aggregates(payload: &Value) -> Value {
+    const ALLOWED_FIELDS: &[&str] = &[
+        "class_label",
+        "evaluated_count",
+        "source_found_count",
+        "mrr_baseline",
+        "mrr_reordered",
+        "mrr_lift",
+        "recall_baseline",
+        "recall_reordered",
+        "recall_lift",
+        "improved",
+        "worsened",
+        "unchanged",
+        "order_changed_count",
+        "verdict",
+    ];
+
+    let rows = payload
+        .get("class_aggregates")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_object())
+                .map(|item| {
+                    let mut row = Map::new();
+                    for field in ALLOWED_FIELDS {
+                        if let Some(value) = item.get(*field) {
+                            row.insert((*field).to_string(), value.clone());
+                        }
+                    }
+                    Value::Object(row)
+                })
+                .filter(|row| row.as_object().map_or(false, |obj| !obj.is_empty()))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    Value::Array(rows)
 }
 
 // ===========================================================================
@@ -61219,6 +61264,17 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
                 "worsened": 0,
                 "unchanged": 3
             },
+            "class_aggregates": [
+                {
+                    "class_label": "hard",
+                    "evaluated_count": 5,
+                    "mrr_lift": 0.02,
+                    "improved": 2,
+                    "worsened": 0,
+                    "unchanged": 3,
+                    "raw_query": "secret class query"
+                }
+            ],
             "safety": {
                 "read_only": true,
                 "mutates_ab_memory": false,
@@ -61251,6 +61307,9 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         );
         assert_eq!(summary["sampling"]["evaluated_count"], json!(5));
         assert_eq!(summary["metrics"]["mrr_lift"], json!(0.02));
+        assert_eq!(summary["class_aggregates"][0]["class_label"], json!("hard"));
+        assert_eq!(summary["class_aggregates"][0]["evaluated_count"], json!(5));
+        assert_eq!(summary["class_aggregates"][0]["mrr_lift"], json!(0.02));
         assert_eq!(summary["input_contract"]["samples_included"], json!(false));
         assert_eq!(
             summary["input_contract"]["first_side_signal_error_included"],
@@ -61263,6 +61322,8 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(!serialized.contains("secret adapter content"));
         assert!(!serialized.contains("secret downstream query"));
         assert!(!serialized.contains("secret_relevant_key"));
+        assert!(!serialized.contains("secret class query"));
+        assert!(!serialized.contains("\"raw_query\":"));
         assert!(!serialized.contains("\"samples\":"));
         assert!(!serialized.contains("\"first_side_signal_error\":"));
         assert!(!serialized.contains("\"query_cases\":"));
