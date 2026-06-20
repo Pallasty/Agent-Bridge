@@ -18,13 +18,14 @@ use ab_bridge::biocortex_shadow::{
     BioCortexRetrievalCandidate, RelevanceLiftEvalOptions, RelevanceLiftQueryCase,
 };
 use ab_store::{
-    default_db_path, BioCortexRetrievalOptInSideSignal, MemoryListSort, SqliteStore, StateStore,
+    default_db_path, BioCortexRetrievalOptInSideSignal, MemoryEdge, MemoryListSort, SqliteStore,
+    StateStore,
 };
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_json::Value;
 use std::cmp::Ordering;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 const DEFAULT_FIXTURE: &str =
@@ -105,8 +106,16 @@ async fn main() -> Result<()> {
         blend_alpha,
     )
     .await?;
+    let graph_rows = analyze_graph_evidence(&store, &fixture, limit).await?;
 
-    print_report(&fixture_path, &fixture, &db_path, &payload, &side_rows);
+    print_report(
+        &fixture_path,
+        &fixture,
+        &db_path,
+        &payload,
+        &side_rows,
+        &graph_rows,
+    );
     Ok(())
 }
 
@@ -170,6 +179,144 @@ struct SideScoreRecord {
 struct SideEvidence {
     overlap: Option<f32>,
     competition_spikes: Option<usize>,
+}
+
+#[derive(Debug)]
+struct GraphEvidenceCaseRow {
+    sample_index: usize,
+    class_label: String,
+    candidate_count: usize,
+    induced_edge_count: usize,
+    induced_node_count: usize,
+    source_graph_rank: Option<usize>,
+    source_graph_score: Option<f64>,
+    best_relevant_graph_rank: Option<usize>,
+    best_relevant_graph_score: Option<f64>,
+    top_graph_relevant: bool,
+    top_graph_score: Option<f64>,
+    distinct_graph_scores: usize,
+    edge_type_counts: BTreeMap<String, usize>,
+}
+
+async fn analyze_graph_evidence(
+    store: &SqliteStore,
+    fixture: &Fixture,
+    limit: u32,
+) -> Result<Vec<GraphEvidenceCaseRow>> {
+    let mut out = Vec::new();
+    for (idx, case) in fixture.query_cases.iter().enumerate() {
+        let baseline_hits = store
+            .memory_search(&case.query, &[], limit)
+            .await
+            .with_context(|| format!("baseline memory_search for graph case {}", idx + 1))?;
+        let candidate_keys = baseline_hits
+            .iter()
+            .map(|hit| hit.record.key.clone())
+            .collect::<BTreeSet<_>>();
+        let source_key = case.relevant_keys.first().map(String::as_str);
+        let relevant = case.relevant_keys.iter().cloned().collect::<BTreeSet<_>>();
+        let mut seen_edges = HashSet::<(String, String, String)>::new();
+        let mut induced_edges = Vec::<MemoryEdge>::new();
+        let mut induced_nodes = BTreeSet::<String>::new();
+        let mut edge_type_counts = BTreeMap::<String, usize>::new();
+
+        for key in &candidate_keys {
+            let neighbors = store.memory_neighbors(key).await.with_context(|| {
+                format!("memory_neighbors for graph case {} key {}", idx + 1, key)
+            })?;
+            for edge in neighbors {
+                if !candidate_keys.contains(&edge.from_key)
+                    || !candidate_keys.contains(&edge.to_key)
+                {
+                    continue;
+                }
+                let dedupe_key = (
+                    edge.from_key.clone(),
+                    edge.to_key.clone(),
+                    edge.edge_type.clone(),
+                );
+                if !seen_edges.insert(dedupe_key) {
+                    continue;
+                }
+                *edge_type_counts.entry(edge.edge_type.clone()).or_default() += 1;
+                induced_nodes.insert(edge.from_key.clone());
+                induced_nodes.insert(edge.to_key.clone());
+                induced_edges.push(edge);
+            }
+        }
+
+        let graph_scores = score_graph_candidates(&candidate_keys, &induced_edges);
+        let source_graph_rank = source_key
+            .and_then(|source| graph_scores.iter().position(|(key, _)| key == source))
+            .map(|pos| pos + 1);
+        let source_graph_score = source_key.and_then(|source| {
+            graph_scores
+                .iter()
+                .find(|(key, _)| key == source)
+                .map(|(_, score)| *score)
+        });
+        let (best_relevant_graph_rank, best_relevant_graph_score) = graph_scores
+            .iter()
+            .enumerate()
+            .find(|(_, (key, _))| relevant.contains(key.as_str()))
+            .map(|(idx, (_, score))| (Some(idx + 1), Some(*score)))
+            .unwrap_or((None, None));
+        let top_graph_score = graph_scores.first().map(|(_, score)| *score);
+        let top_graph_relevant = graph_scores
+            .first()
+            .map(|(key, score)| *score > 0.0 && relevant.contains(key.as_str()))
+            .unwrap_or(false);
+        let distinct_graph_scores =
+            distinct_f64_values(graph_scores.iter().map(|(_, score)| Some(*score)));
+
+        out.push(GraphEvidenceCaseRow {
+            sample_index: idx,
+            class_label: case
+                .class_label
+                .clone()
+                .unwrap_or_else(|| "unlabelled".to_string()),
+            candidate_count: candidate_keys.len(),
+            induced_edge_count: induced_edges.len(),
+            induced_node_count: induced_nodes.len(),
+            source_graph_rank,
+            source_graph_score,
+            best_relevant_graph_rank,
+            best_relevant_graph_score,
+            top_graph_relevant,
+            top_graph_score,
+            distinct_graph_scores,
+            edge_type_counts,
+        });
+    }
+    Ok(out)
+}
+
+fn score_graph_candidates(
+    candidate_keys: &BTreeSet<String>,
+    induced_edges: &[MemoryEdge],
+) -> Vec<(String, f64)> {
+    let mut scores = candidate_keys
+        .iter()
+        .map(|key| (key.clone(), 0.0_f64))
+        .collect::<BTreeMap<_, _>>();
+    for edge in induced_edges {
+        if let Some(score) = scores.get_mut(&edge.from_key) {
+            *score += edge.weight;
+        }
+        if let Some(score) = scores.get_mut(&edge.to_key) {
+            *score += edge.weight;
+        }
+    }
+    let mut out = scores
+        .into_iter()
+        .filter(|(_, score)| *score > 0.0)
+        .collect::<Vec<_>>();
+    out.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| a.0.cmp(&b.0))
+    });
+    out
 }
 
 async fn analyze_side_signal(
@@ -389,6 +536,21 @@ fn distinct_f32_values(values: impl Iterator<Item = Option<f32>>) -> usize {
         .len()
 }
 
+fn distinct_f64_values(values: impl Iterator<Item = Option<f64>>) -> usize {
+    values
+        .flatten()
+        .fold(Vec::<f64>::new(), |mut acc, value| {
+            if !acc
+                .iter()
+                .any(|existing| (*existing - value).abs() < f64::EPSILON)
+            {
+                acc.push(value);
+            }
+            acc
+        })
+        .len()
+}
+
 fn distinct_usize_values(values: impl Iterator<Item = Option<usize>>) -> usize {
     values.flatten().collect::<BTreeSet<_>>().len()
 }
@@ -467,6 +629,7 @@ fn print_report(
     db_path: &PathBuf,
     payload: &Value,
     side_rows: &[SideSignalCaseRow],
+    graph_rows: &[GraphEvidenceCaseRow],
 ) {
     println!("# BioCortex relevance-lift fixture diagnostics");
     println!("fixture: {}", fixture_path.display());
@@ -580,6 +743,38 @@ fn print_report(
         );
     }
     println!();
+    println!("## Per-case memory graph evidence rows");
+    println!(
+        "{:<4} {:<34} {:>5} {:>5} {:>5} {:>10} {:>10} {:>8} {:>8} {:>8} {:<24}",
+        "#",
+        "class_label",
+        "cand",
+        "edge",
+        "node",
+        "src_graph",
+        "rel_graph",
+        "top_rel",
+        "top_g",
+        "distinct",
+        "edge_types"
+    );
+    for row in graph_rows {
+        println!(
+            "{:<4} {:<34} {:>5} {:>5} {:>5} {:>10} {:>10} {:>8} {:>8} {:>8} {:<24}",
+            row.sample_index + 1,
+            truncate(&row.class_label, 34),
+            row.candidate_count,
+            row.induced_edge_count,
+            row.induced_node_count,
+            graph_rank_score(row.source_graph_rank, row.source_graph_score),
+            graph_rank_score(row.best_relevant_graph_rank, row.best_relevant_graph_score),
+            row.top_graph_relevant,
+            opt_f64(row.top_graph_score),
+            row.distinct_graph_scores,
+            truncate(&edge_type_summary(&row.edge_type_counts), 24),
+        );
+    }
+    println!();
     println!("## Interpretation");
     println!(
         "- If `match` is low or `cov` is below the threshold, fix side-signal coverage before tuning rank blend."
@@ -604,6 +799,12 @@ fn print_report(
     );
     println!(
         "- If `overlap_tie` or `spike_tie` is large, saturation is happening inside the adapter before AB blending."
+    );
+    println!(
+        "- If graph `edge`/`node` coverage is tiny, Track B needs graph materialization or better co-retrieval edges before adapter integration."
+    );
+    println!(
+        "- If graph evidence exists but `top_rel=false`, the store has usable edge signal but needs better weighting, edge-type filtering, or directionality before it can influence ranking."
     );
 }
 
@@ -656,11 +857,35 @@ fn opt_f32(value: Option<f32>) -> String {
         .unwrap_or_else(|| "-".to_string())
 }
 
+fn opt_f64(value: Option<f64>) -> String {
+    value
+        .map(|value| format!("{value:.3}"))
+        .unwrap_or_else(|| "-".to_string())
+}
+
 fn side_rank_score(rank: Option<usize>, score: Option<f32>) -> String {
     match (rank, score) {
         (Some(rank), Some(score)) => format!("{rank}/{score:.3}"),
         _ => "-".to_string(),
     }
+}
+
+fn graph_rank_score(rank: Option<usize>, score: Option<f64>) -> String {
+    match (rank, score) {
+        (Some(rank), Some(score)) => format!("{rank}/{score:.3}"),
+        _ => "-".to_string(),
+    }
+}
+
+fn edge_type_summary(counts: &BTreeMap<String, usize>) -> String {
+    if counts.is_empty() {
+        return "-".to_string();
+    }
+    counts
+        .iter()
+        .map(|(kind, count)| format!("{kind}:{count}"))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn truncate(value: &str, max_chars: usize) -> String {

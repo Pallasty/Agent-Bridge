@@ -251,6 +251,31 @@ candidate list. Do not loosen T6 based on this; improve side-signal score
 normalization/discrimination first, and treat graph-evidence integration as the
 likely scoring fix rather than a pure tokenizer tweak.
 
+Track B graph-readiness follow-up: the same example now prints read-only
+candidate-induced memory graph evidence. For each fixture case, it reuses the
+baseline candidate set, reads `memory_neighbors` for those candidates, keeps
+only edges where both endpoints are in the candidate set, and reports induced
+edge/node coverage plus a simple incident-weight graph ranking. This still does
+not change production retrieval order or add a new MCP tool.
+
+Current Mac run showed that graph evidence exists but is not yet usable as a
+naive ranker:
+
+- induced candidate-internal edge counts were non-zero for every case: 10, 22,
+  7, 3, 9, 4, and 10;
+- induced node counts were 12, 10, 6, 3, 7, 5, and 10;
+- `top_graph_relevant=false` for all seven cases;
+- the primary source key only appeared in positive graph-score ranking for
+  cases #5 and #7, at graph ranks 2 and 5 respectively;
+- observed edge types were dominated by existing continuity/provenance-style
+  edges such as `evolved` and `derived_from`.
+
+Interpretation: Track B should not start by assuming graph coverage is absent.
+The local store has edge signal, but the naive incident-weight projection mostly
+promotes distractors. The next useful design slice is to diagnose edge-type
+semantics, directionality, temporal weighting, and source/accept-set proximity
+before feeding graph evidence into the BioCortex side-signal adapter.
+
 ## Verification
 
 Targeted validation for this slice after `/Data` space was recovered:
