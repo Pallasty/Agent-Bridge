@@ -12,6 +12,18 @@ Focused fixture:
 cargo test -p ab-bridge --test lswr_interaction_feedback_fixture interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_execution -- --nocapture
 ```
 
+Blocked smoke:
+
+```text
+cargo run -q -p ab-bridge --example lswr_interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_execution_smoke -- --format json --assert-blocked-without-verified-outcome-ingestion-writer-execution-decision --assert-output-only
+```
+
+Ready smoke:
+
+```text
+cargo run -q -p ab-bridge --example lswr_interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_execution_smoke -- --with-verified-outcome-ingestion-writer-execution-decision --format json --assert-ready-for-verified-outcome-ingestion-persistence --assert-output-only
+```
+
 Expected:
 
 - missing writer-execution decision blocks with
