@@ -471,6 +471,33 @@ compatibility, edge type and direction, temporal/causal relation, repeated
 co-retrieval evidence, and a per-edge no-harm shadow check before any
 materialization path is considered.
 
+The first production-shaped label-free gate prototype then removed labels from
+selection. It kept the same explicit `related_keys` candidate source, required
+active endpoint metadata, compatible memory scope, endpoint update timestamps
+within 30 days, and a single-edge shadow trial that preserves the baseline top
+three prefix. Labels were used only after scoring to evaluate relevance contact.
+
+Current result on the missing-graph fixture:
+
+- selected edges: `4` of `16`, all in one case;
+- selected edges touching labelled relevance: `0`;
+- blocked by endpoint metadata: `0`;
+- blocked by scope compatibility: `1`;
+- blocked by temporal distance: `0`;
+- blocked by top-three shadow stability: `11`;
+- `prod_gate`: available in one case, changed one, improved zero, worsened one,
+  average MRR delta `-0.050`, average blend coverage `0.300`.
+
+Interpretation: the production-shaped gate is safer than broad `related_keys`
+materialization in volume, but it still selects the wrong edges on this fixture.
+The negative result is stronger than the previous broad regression: simple
+metadata checks plus prefix stability can look conservative while still pushing
+distractors. Do not build a materialization preview or writer from these
+signals alone. The next useful line is to add stronger label-free evidence
+before selection, especially repeated co-retrieval, explicit edge intent from
+saved continuity metadata, or an operator-authored candidate reason that can be
+audited independently of fixture labels.
+
 ## Verification
 
 Targeted validation for this slice after `/Data` space was recovered:

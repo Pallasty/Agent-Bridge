@@ -196,6 +196,12 @@ struct GraphEvidenceCaseRow {
     gated_edge_relevant_count: usize,
     gated_edge_blocked_label_count: usize,
     gated_edge_blocked_harm_count: usize,
+    label_free_edge_selected_count: usize,
+    label_free_edge_relevant_count: usize,
+    label_free_edge_blocked_metadata_count: usize,
+    label_free_edge_blocked_scope_count: usize,
+    label_free_edge_blocked_temporal_count: usize,
+    label_free_edge_blocked_shadow_count: usize,
     source_graph_rank: Option<usize>,
     source_graph_score: Option<f64>,
     best_relevant_graph_rank: Option<usize>,
@@ -434,6 +440,18 @@ async fn analyze_graph_evidence(
             source_key,
             &relevant,
         );
+        let label_free_gate = select_label_free_quality_edges(
+            &baseline_hits,
+            &baseline_ranking,
+            &candidate_keys,
+            &induced_edges,
+            &missing_edge_candidates,
+        );
+        let label_free_edge_relevant_count = label_free_gate
+            .selected_edges
+            .iter()
+            .filter(|edge| relevant.contains(&edge.from_key) || relevant.contains(&edge.to_key))
+            .count();
         let mut induced_nodes = BTreeSet::<String>::new();
         let mut edge_type_counts = BTreeMap::<String, usize>::new();
         for edge in &induced_edges {
@@ -549,6 +567,23 @@ async fn analyze_graph_evidence(
                 &relevant,
             ));
         }
+        if !label_free_gate.selected_edges.is_empty() {
+            let mut label_free_edges = induced_edges.clone();
+            label_free_edges.extend(label_free_gate.selected_edges.iter().cloned());
+            let label_free_scores = score_graph_candidates(
+                &candidate_keys,
+                &label_free_edges,
+                GraphScoreVariant::NonContinuityIncident,
+            );
+            variants.push(summarize_graph_scores(
+                "prod_gate",
+                &baseline_hits,
+                &baseline_ranking,
+                &label_free_scores,
+                source_key,
+                &relevant,
+            ));
+        }
 
         out.push(GraphEvidenceCaseRow {
             sample_index: idx,
@@ -565,6 +600,12 @@ async fn analyze_graph_evidence(
             gated_edge_relevant_count: gate.relevant_selected_count,
             gated_edge_blocked_label_count: gate.blocked_no_relevance_count,
             gated_edge_blocked_harm_count: gate.blocked_harm_count,
+            label_free_edge_selected_count: label_free_gate.selected_edges.len(),
+            label_free_edge_relevant_count,
+            label_free_edge_blocked_metadata_count: label_free_gate.blocked_metadata_count,
+            label_free_edge_blocked_scope_count: label_free_gate.blocked_scope_count,
+            label_free_edge_blocked_temporal_count: label_free_gate.blocked_temporal_count,
+            label_free_edge_blocked_shadow_count: label_free_gate.blocked_shadow_count,
             source_graph_rank,
             source_graph_score,
             best_relevant_graph_rank,
@@ -585,6 +626,15 @@ struct CandidateQualityGate {
     relevant_selected_count: usize,
     blocked_no_relevance_count: usize,
     blocked_harm_count: usize,
+}
+
+#[derive(Debug, Default)]
+struct LabelFreeCandidateQualityGate {
+    selected_edges: Vec<MemoryEdge>,
+    blocked_metadata_count: usize,
+    blocked_scope_count: usize,
+    blocked_temporal_count: usize,
+    blocked_shadow_count: usize,
 }
 
 fn select_quality_gated_edges(
@@ -625,6 +675,123 @@ fn select_quality_gated_edges(
         out.selected_edges.push(candidate.clone());
     }
     out
+}
+
+fn select_label_free_quality_edges(
+    baseline_hits: &[ab_store::MemorySearchHit],
+    baseline_ranking: &[String],
+    candidate_keys: &BTreeSet<String>,
+    induced_edges: &[MemoryEdge],
+    missing_edge_candidates: &[MemoryEdge],
+) -> LabelFreeCandidateQualityGate {
+    let records = baseline_hits
+        .iter()
+        .map(|hit| (hit.record.key.as_str(), &hit.record))
+        .collect::<HashMap<_, _>>();
+    let mut out = LabelFreeCandidateQualityGate::default();
+    for candidate in missing_edge_candidates {
+        let Some(from) = records.get(candidate.from_key.as_str()).copied() else {
+            out.blocked_metadata_count += 1;
+            continue;
+        };
+        let Some(to) = records.get(candidate.to_key.as_str()).copied() else {
+            out.blocked_metadata_count += 1;
+            continue;
+        };
+        if !label_free_endpoint_metadata_allowed(from)
+            || !label_free_endpoint_metadata_allowed(to)
+        {
+            out.blocked_metadata_count += 1;
+            continue;
+        }
+        if !label_free_scopes_compatible(from.scope.as_deref(), to.scope.as_deref()) {
+            out.blocked_scope_count += 1;
+            continue;
+        }
+        if !label_free_temporal_proximity(from.updated_at, to.updated_at) {
+            out.blocked_temporal_count += 1;
+            continue;
+        }
+        if !label_free_shadow_top3_preserved(
+            baseline_hits,
+            baseline_ranking,
+            candidate_keys,
+            induced_edges,
+            candidate,
+        ) {
+            out.blocked_shadow_count += 1;
+            continue;
+        }
+        out.selected_edges.push(candidate.clone());
+    }
+    out
+}
+
+fn label_free_endpoint_metadata_allowed(record: &MemoryRecord) -> bool {
+    if record.status != "active" {
+        return false;
+    }
+    if record.importance >= 0.6 || record.access_count > 0 {
+        return true;
+    }
+    matches!(
+        record.kind.as_str(),
+        "decision" | "lesson" | "session_handoff" | "context"
+    )
+}
+
+fn label_free_scopes_compatible(a: Option<&str>, b: Option<&str>) -> bool {
+    match (normalize_memory_scope(a), normalize_memory_scope(b)) {
+        (None, _) | (_, None) => true,
+        (Some(a), Some(b)) => a == b,
+    }
+}
+
+fn normalize_memory_scope(scope: Option<&str>) -> Option<&str> {
+    match scope.map(str::trim).filter(|scope| !scope.is_empty()) {
+        None | Some("global") => None,
+        Some(scope) => Some(scope),
+    }
+}
+
+fn label_free_temporal_proximity(a_updated_at: i64, b_updated_at: i64) -> bool {
+    const MAX_UPDATED_AT_DISTANCE_SECS: i64 = 30 * 24 * 60 * 60;
+    a_updated_at
+        .checked_sub(b_updated_at)
+        .map(i64::abs)
+        .is_some_and(|distance| distance <= MAX_UPDATED_AT_DISTANCE_SECS)
+}
+
+fn label_free_shadow_top3_preserved(
+    baseline_hits: &[ab_store::MemorySearchHit],
+    baseline_ranking: &[String],
+    candidate_keys: &BTreeSet<String>,
+    induced_edges: &[MemoryEdge],
+    candidate: &MemoryEdge,
+) -> bool {
+    let baseline_prefix = baseline_ranking.iter().take(3).collect::<Vec<_>>();
+    if baseline_prefix.is_empty() {
+        return false;
+    }
+    let mut trial_edges = induced_edges.to_vec();
+    trial_edges.push(candidate.clone());
+    let trial_scores = score_graph_candidates(
+        candidate_keys,
+        &trial_edges,
+        GraphScoreVariant::NonContinuityIncident,
+    );
+    let graph_signals = graph_scores_to_side_signal(&trial_scores);
+    let (blend_hits, _, blend_available) =
+        ab_store::biocortex_opt_in_apply_side_signal(baseline_hits, &graph_signals, 0.8, 0.0, true);
+    if !blend_available {
+        return false;
+    }
+    let blend_prefix = blend_hits
+        .iter()
+        .take(baseline_prefix.len())
+        .map(|hit| &hit.record.key)
+        .collect::<Vec<_>>();
+    blend_prefix == baseline_prefix
 }
 
 fn collect_related_key_missing_edges(
@@ -1563,6 +1730,71 @@ fn print_report(
         total_selected,
         total_blocked_label,
         total_blocked_harm,
+    );
+    println!();
+    println!("## Per-case label-free missing-edge gate rows");
+    println!(
+        "{:<4} {:<34} {:>7} {:>7} {:>8} {:>7} {:>7} {:>8}",
+        "#", "class_label", "sel", "sel_rel", "blk_meta", "blk_sc", "blk_tm", "blk_top3"
+    );
+    for row in graph_rows {
+        println!(
+            "{:<4} {:<34} {:>7} {:>7} {:>8} {:>7} {:>7} {:>8}",
+            row.sample_index + 1,
+            truncate(&row.class_label, 34),
+            row.label_free_edge_selected_count,
+            row.label_free_edge_relevant_count,
+            row.label_free_edge_blocked_metadata_count,
+            row.label_free_edge_blocked_scope_count,
+            row.label_free_edge_blocked_temporal_count,
+            row.label_free_edge_blocked_shadow_count,
+        );
+    }
+    println!();
+    println!("## Label-free missing-edge gate summary");
+    let label_free_selected_cases = graph_rows
+        .iter()
+        .filter(|row| row.label_free_edge_selected_count > 0)
+        .count();
+    let label_free_relevant_cases = graph_rows
+        .iter()
+        .filter(|row| row.label_free_edge_relevant_count > 0)
+        .count();
+    let label_free_selected = graph_rows
+        .iter()
+        .map(|row| row.label_free_edge_selected_count)
+        .sum::<usize>();
+    let label_free_relevant = graph_rows
+        .iter()
+        .map(|row| row.label_free_edge_relevant_count)
+        .sum::<usize>();
+    let label_free_blocked_metadata = graph_rows
+        .iter()
+        .map(|row| row.label_free_edge_blocked_metadata_count)
+        .sum::<usize>();
+    let label_free_blocked_scope = graph_rows
+        .iter()
+        .map(|row| row.label_free_edge_blocked_scope_count)
+        .sum::<usize>();
+    let label_free_blocked_temporal = graph_rows
+        .iter()
+        .map(|row| row.label_free_edge_blocked_temporal_count)
+        .sum::<usize>();
+    let label_free_blocked_shadow = graph_rows
+        .iter()
+        .map(|row| row.label_free_edge_blocked_shadow_count)
+        .sum::<usize>();
+    println!(
+        "cases={} selected_cases={} selected_edges={} relevant_cases={} relevant_edges={} blocked_metadata={} blocked_scope={} blocked_temporal={} blocked_top3={}",
+        graph_rows.len(),
+        label_free_selected_cases,
+        label_free_selected,
+        label_free_relevant_cases,
+        label_free_relevant,
+        label_free_blocked_metadata,
+        label_free_blocked_scope,
+        label_free_blocked_temporal,
+        label_free_blocked_shadow,
     );
     println!();
     println!("## Graph side-signal blend simulation summary");
