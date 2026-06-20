@@ -35687,6 +35687,15 @@ fn memory_biocortex_t6_u64_at(value: &Value, path: &str) -> Option<u64> {
     value.pointer(path).and_then(Value::as_u64)
 }
 
+fn memory_biocortex_t6_rate(numerator: Option<u64>, denominator: Option<u64>) -> Option<f64> {
+    match (numerator, denominator) {
+        (Some(numerator), Some(denominator)) if denominator > 0 => {
+            Some(numerator as f64 / denominator as f64)
+        }
+        _ => None,
+    }
+}
+
 fn memory_biocortex_t6_push_reason(reasons: &mut BTreeSet<String>, reason: &str) {
     reasons.insert(reason.to_string());
 }
@@ -35869,6 +35878,17 @@ fn memory_biocortex_t6_influence_gate_payload(args: Value) -> Value {
         .get("max_worsened")
         .and_then(Value::as_u64)
         .unwrap_or(0);
+    let min_improved_count = args
+        .get("min_improved_count")
+        .and_then(Value::as_u64)
+        .unwrap_or(0)
+        .min(10_000);
+    let min_improved_rate = args
+        .get("min_improved_rate")
+        .and_then(Value::as_f64)
+        .filter(|value| value.is_finite())
+        .unwrap_or(0.0)
+        .clamp(0.0, 1.0);
 
     let shadow_trials = args
         .get("shadow_trials")
@@ -35891,10 +35911,62 @@ fn memory_biocortex_t6_influence_gate_payload(args: Value) -> Value {
             max_worsened,
             &mut block_reasons,
         );
+    let improved_rate = memory_biocortex_t6_rate(improved, evaluated_count);
+    if improved.unwrap_or(0) < min_improved_count {
+        memory_biocortex_t6_push_reason(&mut block_reasons, "insufficient_improved_count");
+    }
+    if min_improved_rate > 0.0
+        && improved_rate.unwrap_or(f64::NEG_INFINITY) < min_improved_rate
+    {
+        memory_biocortex_t6_push_reason(&mut block_reasons, "insufficient_improved_rate");
+    }
     let redacted_evidence_aggregate_ready = memory_biocortex_t6_check_redacted_aggregate(
         args.get("redacted_evidence_aggregate"),
         &mut block_reasons,
     );
+    let relevance_lift_eval = args.get("relevance_lift_eval");
+    let relevance_kind_filter = relevance_lift_eval
+        .and_then(|value| memory_biocortex_t6_string_at(value, "/sampling/kind_filter"));
+    let relevance_sort =
+        relevance_lift_eval.and_then(|value| memory_biocortex_t6_string_at(value, "/sampling/sort"));
+    let mut review_caveats = Vec::new();
+    if let Some(evaluated_count) = evaluated_count {
+        if evaluated_count < 30 {
+            review_caveats.push("low_evaluated_count_for_strength_label");
+        }
+    }
+    if let Some(mrr_lift) = mrr_lift {
+        if mrr_lift < 0.01 {
+            review_caveats.push("weak_mrr_lift_margin");
+        }
+    }
+    if let Some(improved_rate) = improved_rate {
+        if improved_rate < 0.10 {
+            review_caveats.push("low_improved_rate");
+        }
+    }
+    if relevance_kind_filter.is_some() {
+        review_caveats.push("kind_stratified_evidence_narrow_scope");
+    } else if relevance_lift_eval.is_some() {
+        review_caveats.push("unstratified_evidence_scope");
+    }
+    let evidence_strength_tier = if block_reasons.is_empty() {
+        if review_caveats.iter().any(|caveat| {
+            matches!(
+                *caveat,
+                "low_evaluated_count_for_strength_label"
+                    | "weak_mrr_lift_margin"
+                    | "low_improved_rate"
+                    | "kind_stratified_evidence_narrow_scope"
+            )
+        }) {
+            "weak_narrow_lift"
+        } else {
+            "review_ready"
+        }
+    } else {
+        "blocked"
+    };
     let ready_for_opt_in_experiment = block_reasons.is_empty();
     let block_reasons = block_reasons.into_iter().collect::<Vec<_>>();
 
@@ -35928,6 +36000,8 @@ fn memory_biocortex_t6_influence_gate_payload(args: Value) -> Value {
             "min_evaluated_count": min_evaluated_count,
             "min_mrr_lift": min_mrr_lift,
             "max_worsened": max_worsened,
+            "min_improved_count": min_improved_count,
+            "min_improved_rate": min_improved_rate,
         },
         "evidence_summary": {
             "shadow_trial_count": shadow_trials.len(),
@@ -35938,7 +36012,25 @@ fn memory_biocortex_t6_influence_gate_payload(args: Value) -> Value {
             "mrr_lift": mrr_lift,
             "worsened": worsened,
             "improved": improved,
+            "improved_rate": improved_rate,
             "unchanged": unchanged,
+        },
+        "evidence_strength": {
+            "tier": evidence_strength_tier,
+            "evaluated_count": evaluated_count,
+            "mrr_lift": mrr_lift,
+            "worsened": worsened,
+            "improved": improved,
+            "improved_rate": improved_rate,
+            "unchanged": unchanged,
+            "kind_filter": relevance_kind_filter,
+            "sort": relevance_sort,
+            "review_caveats": review_caveats,
+            "label_thresholds": {
+                "low_evaluated_count_below": 30,
+                "weak_mrr_lift_below": 0.01,
+                "low_improved_rate_below": 0.10
+            }
         },
         "input_contract": {
             "shadow_trials_included": false,
@@ -36018,6 +36110,18 @@ impl McpTool for MemoryBioCortexT6InfluenceGateTool {
                         "type": "number",
                         "minimum": 0.0,
                         "default": 0.001
+                    },
+                    "min_improved_count": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 10000,
+                        "default": 0
+                    },
+                    "min_improved_rate": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "default": 0.0
                     },
                     "max_worsened": {
                         "type": "integer",
@@ -61153,6 +61257,86 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         let serialized = serde_json::to_string(&payload).expect("serialize");
         assert!(!serialized.contains("secret_lift_key"));
         assert!(!serialized.contains("secret aggregate query"));
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_t6_influence_gate_blocks_weak_lift_when_improved_rate_threshold_requested(
+    ) {
+        let tool = MemoryBioCortexT6InfluenceGateTool::new();
+        let safe_shadow = memory_biocortex_safe_shadow_fixture();
+        let relevance_lift_eval = json!({
+            "schema": "agent_bridge.biocortex_retrieval.relevance_lift_eval.v0",
+            "status": "completed",
+            "verdict": "lift_demonstrated",
+            "sampling": {
+                "evaluated_count": 30,
+                "kind_filter": "session_handoff",
+                "sort": "by_importance",
+                "side_signal_unavailable": 0
+            },
+            "metrics": {
+                "mrr_lift": 0.006,
+                "improved": 2,
+                "worsened": 0,
+                "unchanged": 28
+            },
+            "safety": {
+                "read_only": true,
+                "mutates_ab_memory": false,
+                "changes_prod_retrieval_order": false,
+                "writes_state": false
+            }
+        });
+        let redacted_evidence_aggregate = json!({
+            "schema": "agent_bridge.biocortex_retrieval.opt_in_redacted_evidence_aggregate.v0",
+            "read_only": true,
+            "redacted_evidence_aggregate": true,
+            "input_contract": {
+                "raw_queries_included": false,
+                "raw_keys_included": false,
+                "content_included": false,
+                "side_signal_raw_included": false
+            },
+            "interpretation": {
+                "aggregate_evidence_ready": true,
+                "default_influence_ready": false,
+                "human_review_required": true
+            }
+        });
+
+        let out = tool.execute(
+            json!({
+                "shadow_trials": [safe_shadow.clone(), safe_shadow],
+                "relevance_lift_eval": relevance_lift_eval,
+                "redacted_evidence_aggregate": redacted_evidence_aggregate,
+                "min_shadow_trials": 2,
+                "min_evaluated_count": 30,
+                "min_mrr_lift": 0.005,
+                "min_improved_rate": 0.1,
+                "max_worsened": 0
+            }),
+            &ToolContext::default(),
+        )
+        .await
+        .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(payload["ready_for_opt_in_experiment"], json!(false));
+        assert!(payload["block_reasons"]
+            .as_array()
+            .expect("block reasons")
+            .contains(&json!("insufficient_improved_rate")));
+        assert_eq!(payload["evidence_strength"]["tier"], json!("blocked"));
+        let improved_rate = payload["evidence_strength"]["improved_rate"]
+            .as_f64()
+            .expect("improved rate");
+        assert!((improved_rate - (2.0 / 30.0)).abs() < 0.0001);
+        let caveats = payload["evidence_strength"]["review_caveats"]
+            .as_array()
+            .expect("review caveats");
+        assert!(caveats.contains(&json!("low_improved_rate")));
+        assert!(caveats.contains(&json!("weak_mrr_lift_margin")));
+        assert!(caveats.contains(&json!("kind_stratified_evidence_narrow_scope")));
     }
 
     #[tokio::test]

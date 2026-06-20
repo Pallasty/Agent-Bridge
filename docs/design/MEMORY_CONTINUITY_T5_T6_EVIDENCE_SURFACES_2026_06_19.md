@@ -54,11 +54,40 @@ T6 remains the gate. Even when these two inputs are present and valid,
 experiment review. It still reports `runtime_influence_approved=false` and
 `may_change_search_order_now=false`.
 
+## Evidence Strength Follow-up
+
+Date: 2026-06-20
+
+The post-reconnect stratified lift matrix showed that rank movement is broad but
+measured relevance lift is weak and concentrated in `session_handoff` evidence.
+That is useful for a narrow opt-in review path, but easy to misread as broad
+memory-readiness evidence.
+
+T6 now emits an `evidence_strength` block with:
+
+- `tier`: `blocked`, `weak_narrow_lift`, or `review_ready`;
+- `improved_rate`, alongside evaluated/improved/unchanged/worsened counts;
+- `kind_filter` and `sort` copied from the redacted lift summary metadata;
+- `review_caveats`, including low sample count, weak MRR margin, low improved
+  rate, narrow kind-stratified evidence, or unstratified evidence.
+
+T6 also accepts optional stricter thresholds:
+
+- `min_improved_count`
+- `min_improved_rate`
+
+These thresholds can block weak positive lift without changing the default
+runtime boundary. Even when evidence is strong enough for review, T6 still does
+not approve runtime influence or retrieval-order changes.
+
 ## Verification
 
 Targeted validation for this slice after `/Data` space was recovered:
 
 ```bash
+CARGO_TARGET_DIR=/home/pallasting/.cache/agent-bridge-target-evidence-surfaces cargo test -p ab-bridge --lib memory_biocortex_ -- --nocapture
+CARGO_TARGET_DIR=/home/pallasting/.cache/agent-bridge-target-evidence-surfaces cargo test -p ab-bridge --lib tool_policy_codex_essential_exposes_extras_list -- --nocapture
+CARGO_TARGET_DIR=/home/pallasting/.cache/agent-bridge-target-t6-evidence-strength cargo test -p ab-bridge --lib memory_biocortex_ -- --nocapture
 git diff --check
 cargo test -p ab-bridge memory_biocortex_ -- --nocapture
 cargo test -p ab-bridge tool_policy_codex_essential_exposes_extras_list -- --nocapture
