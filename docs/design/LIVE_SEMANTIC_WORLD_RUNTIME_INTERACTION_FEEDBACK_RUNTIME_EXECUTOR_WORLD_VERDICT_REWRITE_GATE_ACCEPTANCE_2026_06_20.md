@@ -2,7 +2,7 @@
 
 Date: 2026-06-20
 
-Status: Draft acceptance notes
+Status: ACCEPTED_G17_WORLD_VERDICT_REWRITE_GATE_OUTPUT_ONLY
 
 ## 1. Required Checks
 
