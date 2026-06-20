@@ -303,6 +303,24 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Render an evidence-anchored session walkthrough doc (JSON) into a
+    /// shareable HTML artifact in the present gallery — the daily-wire entry
+    /// for `present::write_walkthrough_artifact`. Adds NO new MCP tool; pair
+    /// with the `/walkthrough` skill, which assembles the doc from session
+    /// evidence (event-spine / memory / commit refs) and calls this.
+    ///
+    /// Doc shape: `{summary, steps:[{heading,narrative,evidence:[{kind,
+    /// reference,label}]}]}`. Reads the file at `doc`, or stdin when `doc=-`.
+    Walkthrough {
+        /// Path to the walkthrough doc JSON, or `-` to read it from stdin.
+        doc: String,
+        /// Optional artifact title (shown in the gallery + `<title>`).
+        #[arg(long)]
+        title: Option<String>,
+        /// Emit JSON `{id, path, self_check}` instead of the human-readable lines.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -6146,6 +6164,13 @@ async fn real_main() -> Result<()> {
         return Ok(());
     }
 
+    // Walkthrough: render an evidence-anchored doc JSON into a present-gallery
+    // artifact. Pure file IO (no daemon / no Hub) — the daily-wire mechanism for
+    // present::write_walkthrough_artifact, invoked by the `/walkthrough` skill.
+    if let Cmd::Walkthrough { doc, title, json } = &cmd {
+        return run_walkthrough(doc, title.as_deref(), *json);
+    }
+
     // Deployment self-check — pure file/process inspection, no Hub.
     if let Cmd::Doctor { json, markdown } = &cmd {
         return doctor::run_doctor(*json, *markdown).await;
@@ -7059,8 +7084,102 @@ async fn real_main() -> Result<()> {
         | Cmd::WorktreeSession { .. }
         | Cmd::RescueSnapshot { .. }
         | Cmd::Doctor { .. }
+        | Cmd::Walkthrough { .. }
         | Cmd::Instinct { .. } => unreachable!(),
     }
+}
+
+/// Daily-wire mechanism for the evidence-anchored session walkthrough: read a
+/// walkthrough `doc` JSON (file path, or `-` for stdin), render it through
+/// `present::write_walkthrough_artifact` into the present gallery, and read the
+/// artifact back to self-verify (the embedded `#ab-payload` round-trips AND the
+/// rendered region is non-empty — a content-less doc renders blank by design, so
+/// this surfaces "you handed me an empty walkthrough" as a hard failure rather
+/// than silently writing a useless artifact). NO new MCP tool; the `/walkthrough`
+/// skill assembles the doc from session evidence and shells out to this.
+/// True iff a rendered walkthrough artifact's `#ab-render` region carries actual
+/// content (a summary, or >=1 step with a heading / narrative / evidence) — not just
+/// the always-present `<section>` wrapper and the per-step `wt-step` shells. This is
+/// the honesty falsifier behind `walkthrough`'s self-check, factored out so the
+/// marker contract against `present::render_walkthrough_body` is unit-tested.
+fn walkthrough_region_has_content(html: &str) -> bool {
+    ab_bridge::present::render_region(html)
+        .map(|r| {
+            r.contains("wt-summary")
+                || r.contains("wt-heading")
+                || r.contains("wt-narrative")
+                || r.contains("wt-ev")
+        })
+        .unwrap_or(false)
+}
+
+fn run_walkthrough(doc_arg: &str, title: Option<&str>, as_json: bool) -> Result<()> {
+    use ab_bridge::present::{extract_ab_payload, presentations_dir, write_walkthrough_artifact};
+    use std::io::Read as _;
+
+    let raw = if doc_arg == "-" {
+        let mut s = String::new();
+        std::io::stdin()
+            .read_to_string(&mut s)
+            .context("read walkthrough doc from stdin")?;
+        s
+    } else {
+        std::fs::read_to_string(doc_arg)
+            .with_context(|| format!("read walkthrough doc {doc_arg}"))?
+    };
+    let doc: Value =
+        serde_json::from_str(&raw).context("parse walkthrough doc JSON ({summary, steps:[...]})")?;
+
+    let dir = presentations_dir();
+    let (id, path) = write_walkthrough_artifact(&dir, &doc, title, None)
+        .context("write walkthrough artifact into present gallery")?;
+
+    // Self-verify: read the artifact back. payload must round-trip and the
+    // rendered region must carry content (else the doc was empty / unrenderable).
+    let html = std::fs::read_to_string(&path).context("read back walkthrough artifact")?;
+    let payload_ok = extract_ab_payload(&html).is_some();
+    // A walkthrough ALWAYS emits the `<section class="ab-walkthrough">` wrapper AND a
+    // bare `<li class="wt-step">` per step entry, so checking for those is too weak —
+    // it passes an empty doc OR a doc of empty steps. Require a CONTENT-BEARING marker
+    // (`wt-summary` / `wt-heading` / `wt-narrative` / `wt-ev`), each emitted only when
+    // its field is actually present. A content-less doc must FAIL — we never silently
+    // write a blank "walkthrough".
+    let region_has_content = walkthrough_region_has_content(&html);
+    let self_check = payload_ok && region_has_content;
+
+    if as_json {
+        println!(
+            "{}",
+            serde_json::to_string(&serde_json::json!({
+                "id": id,
+                "path": path.display().to_string(),
+                "self_check": self_check,
+                "payload_ok": payload_ok,
+                "region_has_content": region_has_content,
+            }))?
+        );
+    } else {
+        println!("walkthrough artifact written:");
+        println!("  id        : {id}");
+        println!("  path      : {}", path.display());
+        println!(
+            "  self-check: {}",
+            if self_check {
+                "PASS (#ab-payload round-trips + rendered region non-empty)"
+            } else {
+                "FAIL"
+            }
+        );
+        println!("  gallery   : present_list shows kind=walkthrough; open the .html to view/share");
+    }
+
+    if !self_check {
+        anyhow::bail!(
+            "walkthrough self-check FAILED (payload_ok={payload_ok} region_has_content={region_has_content}) \
+             — the doc rendered no content; supply a summary and/or steps with evidence"
+        );
+    }
+    Ok(())
 }
 
 async fn run_avatar_surface(
@@ -19077,6 +19196,36 @@ async fn build_hub() -> Result<Hub> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ── `walkthrough` CLI self-check: the honesty falsifier behind the daily-wire ──
+    #[test]
+    fn walkthrough_region_has_content_rejects_empty_accepts_each_channel() {
+        use ab_bridge::present::build_walkthrough_html;
+        // An empty doc OR a doc of empty steps renders no content -> must FAIL the
+        // self-check (we never silently write a blank "walkthrough").
+        for doc in [json!({"summary": "", "steps": []}), json!({"summary": "  ", "steps": [{}]})] {
+            let html = build_walkthrough_html(&doc, None, None);
+            assert!(
+                !walkthrough_region_has_content(&html),
+                "empty/degenerate doc must be content-less: {doc}"
+            );
+        }
+        // Each content channel ALONE must satisfy the check (summary / heading /
+        // narrative / evidence) — so the daily-wire accepts partial-but-real docs.
+        let cases = [
+            json!({"summary": "s", "steps": []}),
+            json!({"steps": [{"heading": "h"}]}),
+            json!({"steps": [{"narrative": "n"}]}),
+            json!({"steps": [{"evidence": [{"kind": "commit", "reference": "abc123"}]}]}),
+        ];
+        for doc in cases {
+            let html = build_walkthrough_html(&doc, None, None);
+            assert!(
+                walkthrough_region_has_content(&html),
+                "doc with real content must pass: {doc}"
+            );
+        }
+    }
 
     // ── Phase 3 (C): summarize_snapshot_rows + human_bytes ──────────────
 
