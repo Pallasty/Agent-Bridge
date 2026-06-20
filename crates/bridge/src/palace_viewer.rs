@@ -132,6 +132,10 @@ pub async fn run(
             get(api_materialization_review_approved_plan),
         )
         .route(
+            "/api/materialization-review-apply",
+            post(api_materialization_review_apply),
+        )
+        .route(
             "/api/materialization-review-decision",
             post(api_materialization_review_decision),
         )
@@ -266,6 +270,16 @@ struct MaterializationReviewDecisionRequest {
 }
 
 #[derive(Deserialize, Default)]
+struct MaterializationApprovedEdgeApplyRequest {
+    #[serde(default)]
+    dry_run: Option<bool>,
+    #[serde(default)]
+    confirm: Option<String>,
+    #[serde(default)]
+    actor: Option<String>,
+}
+
+#[derive(Deserialize, Default)]
 struct OrphanApprovedLinkApplyRequest {
     #[serde(default)]
     region: Option<String>,
@@ -305,6 +319,7 @@ where
 const PALACE_ORPHAN_SKIP_TAGS: &[&str] = &["auto_curated", "alert", "ttl:7d"];
 const PALACE_ORPHAN_SKIP_KINDS: &[&str] = &["alert", "work_memory", "session_handoff", "snapshot"];
 const PALACE_ORPHAN_APPROVED_LINK_APPLY_CONFIRM: &str = "APPLY APPROVED LINKS";
+const PALACE_MATERIALIZATION_APPROVED_EDGE_APPLY_CONFIRM: &str = "APPLY MATERIALIZATION EDGES";
 const PALACE_ORPHAN_SAFE_BATCH_LIMIT: usize = 3;
 const PALACE_ORPHAN_SAFE_BATCH_MIN_CONFIDENCE: f64 = 0.85;
 const PALACE_ORPHAN_SAFE_BATCH_SCOPE_RELATION: &str = "same_scope";
@@ -350,6 +365,14 @@ struct PalaceOrphanApprovedLink {
     pair_id: String,
     orphan_key: String,
     candidate_key: String,
+    edge_type: String,
+}
+
+#[derive(Debug, Clone)]
+struct PalaceMaterializationApprovedEdge {
+    pair_id: String,
+    from_key: String,
+    to_key: String,
     edge_type: String,
 }
 
@@ -435,6 +458,13 @@ fn default_palace_materialization_review_decisions_path() -> PathBuf {
         return PathBuf::from(path);
     }
     default_palace_review_dir_path().join("materialization-review-decisions.jsonl")
+}
+
+fn default_palace_materialization_approved_edge_apply_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("AB_PALACE_MATERIALIZATION_APPROVED_EDGE_APPLY_AUDIT") {
+        return PathBuf::from(path);
+    }
+    default_palace_review_dir_path().join("materialization-approved-edge-apply.jsonl")
 }
 
 fn palace_private_home_dir_path() -> PathBuf {
@@ -587,6 +617,95 @@ fn load_palace_materialization_review_decisions(path: &FsPath) -> std::io::Resul
 }
 
 fn append_palace_materialization_review_decision(
+    path: &FsPath,
+    value: &Value,
+) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+        set_palace_private_home_root_permissions_if_needed(parent)?;
+        set_palace_private_dir_permissions(parent)?;
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)?;
+    let line = serde_json::to_string(value)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    writeln!(file, "{line}")?;
+    set_palace_private_file_permissions(path)?;
+    Ok(())
+}
+
+fn palace_materialization_approved_edge_apply_record_for_time(
+    response: &Value,
+    actor: Option<&str>,
+    generated_at_unix: u64,
+) -> Value {
+    json!({
+        "schema": "agent_bridge.palace.materialization_approved_edge_apply_audit.v0",
+        "generated_at_unix": generated_at_unix,
+        "actor": actor.map(str::trim).filter(|value| !value.is_empty()),
+        "response_schema": response.get("schema").cloned().unwrap_or(Value::Null),
+        "status": response.get("status").cloned().unwrap_or(Value::Null),
+        "blocked": response.get("blocked").cloned().unwrap_or(json!(true)),
+        "dry_run": response.get("dry_run").cloned().unwrap_or(json!(true)),
+        "approved_pair_count": response.get("approved_pair_count").cloned().unwrap_or(json!(0)),
+        "would_write_edges": response.get("would_write_edges").cloned().unwrap_or(json!(0)),
+        "applied_count": response.get("applied_count").cloned().unwrap_or(json!(0)),
+        "failed_count": response.get("failed_count").cloned().unwrap_or(json!(0)),
+        "skipped_count": response.get("skipped_count").cloned().unwrap_or(json!(0)),
+        "writes_memory": response.get("writes_memory").cloned().unwrap_or(json!(false)),
+        "writes_edges": response.get("writes_edges").cloned().unwrap_or(json!(false)),
+        "changes_search_order": response.get("changes_search_order").cloned().unwrap_or(json!(false)),
+        "can_change_retrieval_order": response
+            .get("can_change_retrieval_order")
+            .cloned()
+            .unwrap_or(json!(false)),
+        "approval_writes_allowed": response
+            .get("approval_writes_allowed")
+            .cloned()
+            .unwrap_or(json!(false)),
+        "can_materialize_edges": response
+            .get("can_materialize_edges")
+            .cloned()
+            .unwrap_or(json!(false)),
+        "blocking_reasons": response.get("blocking_reasons").cloned().unwrap_or_else(|| json!([])),
+        "results": response.get("results").cloned().unwrap_or_else(|| json!([])),
+    })
+}
+
+fn load_palace_materialization_approved_edge_apply_records(
+    path: &FsPath,
+) -> std::io::Result<Vec<Value>> {
+    let text = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+    let mut records = Vec::new();
+    for line in text.lines().filter(|line| !line.trim().is_empty()) {
+        let stream = serde_json::Deserializer::from_str(line).into_iter::<Value>();
+        for parsed in stream {
+            let Ok(value) = parsed else {
+                continue;
+            };
+            if value.get("schema").and_then(|v| v.as_str())
+                == Some("agent_bridge.palace.materialization_approved_edge_apply_audit.v0")
+            {
+                records.push(value);
+            }
+        }
+    }
+    records.sort_by_key(|value| {
+        value
+            .get("generated_at_unix")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0)
+    });
+    Ok(records)
+}
+
+fn append_palace_materialization_approved_edge_apply_record(
     path: &FsPath,
     value: &Value,
 ) -> std::io::Result<()> {
@@ -1397,6 +1516,143 @@ fn palace_materialization_approved_edge_plan_for_inbox(inbox: &Value) -> Value {
         "links": links,
         "next_step": "Dry-run only: review the approved edge plan before designing any separate write-capable materializer.",
     })
+}
+
+fn palace_materialization_approved_edges_from_plan(
+    plan: &Value,
+) -> Vec<PalaceMaterializationApprovedEdge> {
+    plan.get("links")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|link| {
+            let from_key = link.get("from_key").and_then(Value::as_str)?.trim();
+            let to_key = link.get("to_key").and_then(Value::as_str)?.trim();
+            if from_key.is_empty() || to_key.is_empty() {
+                return None;
+            }
+            let edge_type = normalize_palace_materialization_edge_type(
+                link.get("edge_type").and_then(Value::as_str),
+            );
+            if edge_type.is_empty() {
+                return None;
+            }
+            Some(PalaceMaterializationApprovedEdge {
+                pair_id: link
+                    .get("pair_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+                    .unwrap_or_else(|| format!("{from_key} -[{edge_type}]-> {to_key}")),
+                from_key: from_key.to_string(),
+                to_key: to_key.to_string(),
+                edge_type,
+            })
+        })
+        .collect()
+}
+
+fn palace_materialization_approved_edge_apply_gate_for_plan(
+    plan: &Value,
+    dry_run: bool,
+    confirm: Option<&str>,
+) -> Value {
+    let links = palace_materialization_approved_edges_from_plan(plan);
+    let confirmation_required = !dry_run && !links.is_empty();
+    let confirmation_matches = confirm
+        .map(str::trim)
+        .is_some_and(|value| value == PALACE_MATERIALIZATION_APPROVED_EDGE_APPLY_CONFIRM);
+    let mut blocking_reasons = Vec::new();
+    if confirmation_required && !confirmation_matches {
+        blocking_reasons.push("confirmation_required");
+    }
+    json!({
+        "schema": "agent_bridge.palace.materialization_approved_edge_apply.v0",
+        "dry_run": dry_run,
+        "blocked": !blocking_reasons.is_empty(),
+        "status": if blocking_reasons.is_empty() { "ready" } else { "blocked" },
+        "confirm_phrase": PALACE_MATERIALIZATION_APPROVED_EDGE_APPLY_CONFIRM,
+        "confirmation_required": confirmation_required,
+        "confirmation_matches": confirmation_matches,
+        "approved_pair_count": links.len(),
+        "would_write_edges": links.len(),
+        "writes_memory": false,
+        "writes_edges": false,
+        "changes_search_order": false,
+        "can_change_retrieval_order": false,
+        "approval_writes_allowed": false,
+        "can_materialize_edges": false,
+        "auto_apply_allowed": false,
+        "blocking_reasons": blocking_reasons,
+    })
+}
+
+async fn palace_materialization_approved_edge_apply_edges(
+    store: &dyn StateStore,
+    links: Vec<PalaceMaterializationApprovedEdge>,
+    dry_run: bool,
+) -> PalaceOrphanApprovedLinkApplyOutcome {
+    let mut outcome = PalaceOrphanApprovedLinkApplyOutcome::default();
+    for link in links {
+        if link.edge_type != "relates" {
+            outcome.skipped_count += 1;
+            outcome.results.push(json!({
+                "pair_id": link.pair_id,
+                "from_key": link.from_key,
+                "to_key": link.to_key,
+                "edge_type": link.edge_type,
+                "status": "skipped_unsupported_edge_type",
+            }));
+            continue;
+        }
+        if link.from_key == link.to_key {
+            outcome.skipped_count += 1;
+            outcome.results.push(json!({
+                "pair_id": link.pair_id,
+                "from_key": link.from_key,
+                "to_key": link.to_key,
+                "edge_type": link.edge_type,
+                "status": "skipped_self_edge",
+            }));
+            continue;
+        }
+        if dry_run {
+            outcome.results.push(json!({
+                "pair_id": link.pair_id,
+                "from_key": link.from_key,
+                "to_key": link.to_key,
+                "edge_type": link.edge_type,
+                "status": "would_write",
+            }));
+            continue;
+        }
+        match store
+            .memory_link(&link.from_key, &link.to_key, &link.edge_type, 1.0)
+            .await
+        {
+            Ok(()) => {
+                outcome.applied_count += 1;
+                outcome.results.push(json!({
+                    "pair_id": link.pair_id,
+                    "from_key": link.from_key,
+                    "to_key": link.to_key,
+                    "edge_type": link.edge_type,
+                    "status": "applied",
+                }));
+            }
+            Err(e) => {
+                outcome.failed_count += 1;
+                outcome.results.push(json!({
+                    "pair_id": link.pair_id,
+                    "from_key": link.from_key,
+                    "to_key": link.to_key,
+                    "edge_type": link.edge_type,
+                    "status": "failed",
+                    "error": e.to_string(),
+                }));
+            }
+        }
+    }
+    outcome
 }
 
 fn palace_review_artifact_for_sources(
@@ -2427,6 +2683,64 @@ async fn api_materialization_review_approved_plan(
     })?;
     let inbox = palace_materialization_review_decision_inbox_for_packet(&packet, &decisions);
     let mut plan = palace_materialization_approved_edge_plan_for_inbox(&inbox);
+    let apply_audit_path = default_palace_materialization_approved_edge_apply_path();
+    let apply_records = load_palace_materialization_approved_edge_apply_records(&apply_audit_path)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("load materialization approved edge apply audit: {e}"),
+            )
+        })?;
+    if let Some(obj) = plan.as_object_mut() {
+        obj.insert(
+            "packet_path".to_string(),
+            json!(packet_path.display().to_string()),
+        );
+        obj.insert(
+            "decisions_path".to_string(),
+            json!(decisions_path.display().to_string()),
+        );
+        obj.insert(
+            "reviewed_candidate_count".to_string(),
+            inbox.get("candidate_count").cloned().unwrap_or(Value::Null),
+        );
+        obj.insert(
+            "apply_audit_path".to_string(),
+            json!(apply_audit_path.display().to_string()),
+        );
+        obj.insert("apply_audit_count".to_string(), json!(apply_records.len()));
+        obj.insert(
+            "recent_apply_audit".to_string(),
+            json!(
+                apply_records
+                    .iter()
+                    .rev()
+                    .take(5)
+                    .cloned()
+                    .collect::<Vec<_>>()
+            ),
+        );
+    }
+    Ok(Json(plan))
+}
+
+async fn api_materialization_review_apply(
+    State(s): State<AppState>,
+    Json(req): Json<MaterializationApprovedEdgeApplyRequest>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let dry_run = req.dry_run.unwrap_or(true);
+    let packet_path = default_palace_materialization_review_packet_path();
+    let packet = load_default_palace_materialization_review_packet(&packet_path)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    let decisions_path = default_palace_materialization_review_decisions_path();
+    let decisions = load_palace_materialization_review_decisions(&decisions_path).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("load materialization review decisions: {e}"),
+        )
+    })?;
+    let inbox = palace_materialization_review_decision_inbox_for_packet(&packet, &decisions);
+    let mut plan = palace_materialization_approved_edge_plan_for_inbox(&inbox);
     if let Some(obj) = plan.as_object_mut() {
         obj.insert(
             "packet_path".to_string(),
@@ -2441,7 +2755,112 @@ async fn api_materialization_review_approved_plan(
             inbox.get("candidate_count").cloned().unwrap_or(Value::Null),
         );
     }
-    Ok(Json(plan))
+
+    let links = palace_materialization_approved_edges_from_plan(&plan);
+    let mut response = palace_materialization_approved_edge_apply_gate_for_plan(
+        &plan,
+        dry_run,
+        req.confirm.as_deref(),
+    );
+    let apply_audit_path = default_palace_materialization_approved_edge_apply_path();
+    if let Some(obj) = response.as_object_mut() {
+        obj.insert(
+            "packet_path".to_string(),
+            json!(packet_path.display().to_string()),
+        );
+        obj.insert(
+            "decisions_path".to_string(),
+            json!(decisions_path.display().to_string()),
+        );
+        obj.insert(
+            "apply_audit_path".to_string(),
+            json!(apply_audit_path.display().to_string()),
+        );
+        obj.insert(
+            "actor".to_string(),
+            req.actor
+                .as_deref()
+                .map(str::trim)
+                .filter(|actor| !actor.is_empty())
+                .map(|actor| json!(actor))
+                .unwrap_or(Value::Null),
+        );
+    }
+
+    let blocked = response
+        .get("blocked")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    if blocked {
+        let generated_at_unix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let record = palace_materialization_approved_edge_apply_record_for_time(
+            &response,
+            req.actor.as_deref(),
+            generated_at_unix,
+        );
+        append_palace_materialization_approved_edge_apply_record(&apply_audit_path, &record)
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("append materialization approved edge apply audit: {e}"),
+                )
+            })?;
+        return Ok(Json(response));
+    }
+
+    let outcome =
+        palace_materialization_approved_edge_apply_edges(s.store.as_ref(), links, dry_run).await;
+
+    if let Some(obj) = response.as_object_mut() {
+        obj.insert(
+            "status".to_string(),
+            json!(if dry_run {
+                "dry_run"
+            } else if outcome.failed_count > 0 {
+                "partial"
+            } else if outcome.applied_count > 0 {
+                "applied"
+            } else {
+                "noop"
+            }),
+        );
+        obj.insert("applied_count".to_string(), json!(outcome.applied_count));
+        obj.insert("failed_count".to_string(), json!(outcome.failed_count));
+        obj.insert("skipped_count".to_string(), json!(outcome.skipped_count));
+        obj.insert("results".to_string(), json!(outcome.results));
+        obj.insert(
+            "writes_edges".to_string(),
+            json!(!dry_run && outcome.applied_count > 0),
+        );
+        obj.insert(
+            "can_materialize_edges".to_string(),
+            json!(!dry_run && outcome.applied_count > 0),
+        );
+        obj.insert("plan".to_string(), plan);
+    }
+
+    let generated_at_unix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let record = palace_materialization_approved_edge_apply_record_for_time(
+        &response,
+        req.actor.as_deref(),
+        generated_at_unix,
+    );
+    append_palace_materialization_approved_edge_apply_record(&apply_audit_path, &record).map_err(
+        |e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("append materialization approved edge apply audit: {e}"),
+            )
+        },
+    )?;
+
+    Ok(Json(response))
 }
 
 async fn api_materialization_review_decision(
@@ -6212,6 +6631,248 @@ mod tests {
         match old_decisions {
             Some(value) => std::env::set_var("AB_PALACE_MATERIALIZATION_REVIEW_DECISIONS", value),
             None => std::env::remove_var("AB_PALACE_MATERIALIZATION_REVIEW_DECISIONS"),
+        }
+    }
+
+    #[test]
+    fn palace_materialization_approved_edge_apply_gate_requires_confirmation_before_writes() {
+        let plan = json!({
+            "schema": "agent_bridge.palace.materialization_approved_edge_plan.v0",
+            "links": [{
+                "pair_id": "from_a -[relates]-> to_b",
+                "from_key": "from_a",
+                "to_key": "to_b",
+                "edge_type": "relates",
+            }],
+        });
+
+        let gate = palace_materialization_approved_edge_apply_gate_for_plan(
+            &plan,
+            false,
+            Some("wrong phrase"),
+        );
+
+        assert_eq!(
+            gate["schema"],
+            "agent_bridge.palace.materialization_approved_edge_apply.v0"
+        );
+        assert_eq!(
+            gate["confirm_phrase"],
+            json!(PALACE_MATERIALIZATION_APPROVED_EDGE_APPLY_CONFIRM)
+        );
+        assert_eq!(gate["dry_run"], json!(false));
+        assert_eq!(gate["blocked"], json!(true));
+        assert_eq!(gate["writes_edges"], json!(false));
+        assert_eq!(gate["blocking_reasons"][0], json!("confirmation_required"));
+    }
+
+    #[test]
+    fn palace_materialization_review_apply_route_uses_recorded_approvals_and_writes_edges() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let old_packet = std::env::var_os("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON");
+        let old_decisions = std::env::var_os("AB_PALACE_MATERIALIZATION_REVIEW_DECISIONS");
+        let old_apply_audit =
+            std::env::var_os("AB_PALACE_MATERIALIZATION_APPROVED_EDGE_APPLY_AUDIT");
+        let packet_path = dir.path().join("materialization-review-packet.json");
+        let decisions_path = dir.path().join("materialization-review-decisions.jsonl");
+        let apply_audit_path = dir.path().join("materialization-approved-edge-apply.jsonl");
+        std::env::set_var("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON", &packet_path);
+        std::env::set_var(
+            "AB_PALACE_MATERIALIZATION_REVIEW_DECISIONS",
+            &decisions_path,
+        );
+        std::env::set_var(
+            "AB_PALACE_MATERIALIZATION_APPROVED_EDGE_APPLY_AUDIT",
+            &apply_audit_path,
+        );
+        std::fs::write(
+            &packet_path,
+            serde_json::to_vec_pretty(&json!({
+                "schema": "agent_bridge.biocortex_retrieval.materialization_review_packet.v0",
+                "read_only": true,
+                "writes_memory": false,
+                "writes_edges": false,
+                "changes_search_order": false,
+                "can_change_retrieval_order": false,
+                "approval_writes_allowed": false,
+                "can_materialize_edges": false,
+                "candidates": [{
+                    "candidate_source": "reason_packet",
+                    "gate": "explicit_related_keys",
+                    "from_key": "from_a",
+                    "to_key": "to_b",
+                    "edge_type": "relates",
+                    "reason_kind": "explicit_related_keys",
+                    "rationale": "shared review artifact context",
+                    "shadow_aligned": true,
+                    "baseline_top3": ["one", "two", "three"],
+                    "preview_top3": ["one", "from_a", "to_b"],
+                    "baseline_from_rank": 3,
+                    "preview_from_rank": 1,
+                    "baseline_to_rank": 4,
+                    "preview_to_rank": 3,
+                    "blend_coverage": 0.2,
+                    "writes_memory": false,
+                    "writes_edges": false,
+                    "changes_search_order": false,
+                    "can_change_retrieval_order": false,
+                    "approval_writes_allowed": false,
+                    "can_materialize_edges": false
+                }]
+            }))
+            .expect("serialize packet fixture"),
+        )
+        .expect("write packet fixture");
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(async {
+            let db_path = dir.path().join("state.db");
+            let store = Arc::new(
+                ab_store::SqliteStore::open(&db_path)
+                    .await
+                    .expect("open sqlite store"),
+            );
+            store
+                .memory_save(&test_mem(
+                    "from_a",
+                    "lesson",
+                    "shared materialization review content alpha beta gamma",
+                    &["memory"],
+                ))
+                .await
+                .expect("save source");
+            store
+                .memory_save(&test_mem(
+                    "to_b",
+                    "lesson",
+                    "shared materialization review content alpha beta delta",
+                    &["memory"],
+                ))
+                .await
+                .expect("save target");
+
+            let state = AppState {
+                store: store.clone(),
+                markdown_root: None,
+                reports_dir: None,
+                recent_clicks: Arc::new(Mutex::new(VecDeque::with_capacity(CLICK_WINDOW))),
+            };
+
+            let Json(decision) =
+                api_materialization_review_decision(Json(MaterializationReviewDecisionRequest {
+                    from_key: "from_a".to_string(),
+                    to_key: "to_b".to_string(),
+                    edge_type: Some("relates".to_string()),
+                    decision: "approve".to_string(),
+                    reviewer: Some("test".to_string()),
+                    note: Some("looks evidence-backed".to_string()),
+                }))
+                .await
+                .expect("record materialization approval");
+            assert_eq!(decision["writes_edges"], json!(false));
+
+            let Json(blocked) = api_materialization_review_apply(
+                State(state.clone()),
+                Json(MaterializationApprovedEdgeApplyRequest {
+                    dry_run: Some(false),
+                    confirm: Some("wrong phrase".to_string()),
+                    actor: Some("codex-test".to_string()),
+                }),
+            )
+            .await
+            .expect("blocked live apply");
+            assert_eq!(blocked["status"], json!("blocked"));
+            assert_eq!(blocked["writes_edges"], json!(false));
+            assert_eq!(
+                blocked["blocking_reasons"][0],
+                json!("confirmation_required")
+            );
+
+            let Json(dry_run) = api_materialization_review_apply(
+                State(state.clone()),
+                Json(MaterializationApprovedEdgeApplyRequest {
+                    dry_run: Some(true),
+                    confirm: None,
+                    actor: Some("codex-test".to_string()),
+                }),
+            )
+            .await
+            .expect("dry-run apply");
+            assert_eq!(dry_run["status"], json!("dry_run"));
+            assert_eq!(dry_run["would_write_edges"], json!(1));
+            assert_eq!(dry_run["writes_edges"], json!(false));
+            assert_eq!(dry_run["results"][0]["status"], json!("would_write"));
+            let dry_run_neighbors = store
+                .memory_neighbors("from_a")
+                .await
+                .expect("dry-run neighbors");
+            assert!(
+                !dry_run_neighbors.iter().any(|edge| {
+                    edge.from_key == "from_a"
+                        && edge.to_key == "to_b"
+                        && edge.edge_type == "relates"
+                }),
+                "dry-run must not write the materialized relates edge; got {dry_run_neighbors:?}"
+            );
+
+            let Json(live) = api_materialization_review_apply(
+                State(state),
+                Json(MaterializationApprovedEdgeApplyRequest {
+                    dry_run: Some(false),
+                    confirm: Some(PALACE_MATERIALIZATION_APPROVED_EDGE_APPLY_CONFIRM.to_string()),
+                    actor: Some("codex-test".to_string()),
+                }),
+            )
+            .await
+            .expect("live apply");
+            assert_eq!(
+                live["schema"],
+                json!("agent_bridge.palace.materialization_approved_edge_apply.v0")
+            );
+            assert_eq!(live["status"], json!("applied"));
+            assert_eq!(live["applied_count"], json!(1));
+            assert_eq!(live["writes_edges"], json!(true));
+            assert_eq!(live["changes_search_order"], json!(false));
+            assert_eq!(live["can_change_retrieval_order"], json!(false));
+
+            let neighbors = store.memory_neighbors("from_a").await.expect("neighbors");
+            assert!(
+                neighbors.iter().any(|edge| {
+                    edge.from_key == "from_a"
+                        && edge.to_key == "to_b"
+                        && edge.edge_type == "relates"
+                }),
+                "expected live materialization apply to write the relates edge; got {neighbors:?}"
+            );
+        });
+
+        let records = load_palace_materialization_approved_edge_apply_records(&apply_audit_path)
+            .expect("load apply audit");
+        assert_eq!(records.len(), 3);
+        assert_eq!(
+            records[2]["schema"],
+            json!("agent_bridge.palace.materialization_approved_edge_apply_audit.v0")
+        );
+        assert_eq!(records[2]["status"], json!("applied"));
+        assert_eq!(records[2]["writes_edges"], json!(true));
+
+        match old_packet {
+            Some(value) => std::env::set_var("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON", value),
+            None => std::env::remove_var("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON"),
+        }
+        match old_decisions {
+            Some(value) => std::env::set_var("AB_PALACE_MATERIALIZATION_REVIEW_DECISIONS", value),
+            None => std::env::remove_var("AB_PALACE_MATERIALIZATION_REVIEW_DECISIONS"),
+        }
+        match old_apply_audit {
+            Some(value) => {
+                std::env::set_var("AB_PALACE_MATERIALIZATION_APPROVED_EDGE_APPLY_AUDIT", value)
+            }
+            None => std::env::remove_var("AB_PALACE_MATERIALIZATION_APPROVED_EDGE_APPLY_AUDIT"),
         }
     }
 

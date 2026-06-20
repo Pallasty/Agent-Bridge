@@ -4798,6 +4798,7 @@ function handleSelfReviewBoardAction(action) {
 // ── Global state ────────────────────────────────────────────────
 const PALACE_VIEW_STATE_KEY = "palace:view:v2";
 const PALACE_ORPHAN_APPLY_CONFIRM = "APPLY APPROVED LINKS";
+const PALACE_MATERIALIZATION_APPLY_CONFIRM = "APPLY MATERIALIZATION EDGES";
 const VALID_VIEW_PRESETS = new Set(["overview", "fresh", "stale", "hubs", "orphans", "coactivation"]);
 const VALID_REGION_NODE_FILTERS = new Set(["all", "fresh", "stale", "hubs", "orphans"]);
 const VALID_REGION_NODE_SORTS = new Set(["rank", "degree", "recent", "key"]);
@@ -8230,6 +8231,27 @@ function renderMaterializationApprovedPlanLinks(plan) {
   }).join("");
 }
 
+function renderMaterializationApprovedPlanApplyGate(plan, regionId) {
+  const approved = Number.isFinite(plan && plan.approved_pair_count) ? plan.approved_pair_count : 0;
+  const disabled = approved > 0 ? "" : " disabled";
+  return `<div class="orphan-approved-apply-gate" data-materialization-approved-apply-gate="${escapeHTML(regionId || "")}">
+    <div class="orphan-approved-apply-head">
+      <strong>explicit materialization gate</strong>
+      <span>${escapeHTML(String(approved))} approved edge${approved === 1 ? "" : "s"}</span>
+    </div>
+    <label class="orphan-approved-apply-confirm">
+      <span>confirm</span>
+      <input type="text" data-materialization-approved-confirm="${escapeHTML(regionId || "")}" placeholder="${escapeHTML(PALACE_MATERIALIZATION_APPLY_CONFIRM)}">
+    </label>
+    <div class="orphan-approved-apply-actions">
+      <button type="button" class="orphan-approved-apply-button" data-materialization-approved-apply="dry-run"${disabled}>dry run</button>
+      <button type="button" class="orphan-approved-apply-button live" data-materialization-approved-apply="live"${disabled}>apply</button>
+    </div>
+    <div class="orphan-approved-apply-result" data-materialization-approved-apply-result="${escapeHTML(regionId || "")}">${approved > 0 ? "ready" : "no approved materialization edges"}</div>
+    <div class="orphan-approved-apply-detail" data-materialization-approved-apply-detail="${escapeHTML(regionId || "")}"></div>
+  </div>`;
+}
+
 function renderRegionMaterializationApprovedPlan(plan, regionId) {
   const readOnly = plan && plan.read_only &&
     plan.dry_run &&
@@ -8248,6 +8270,7 @@ function renderRegionMaterializationApprovedPlan(plan, regionId) {
       ${renderPalaceReviewArtifactSectionHead(regionId, "materialization-approved-plan", "approved dry-run plan")}
       ${renderMaterializationApprovedPlanStats(plan || {})}
       <div>${escapeHTML(next)}</div>
+      ${renderMaterializationApprovedPlanApplyGate(plan || {}, regionId)}
     </div>
     <div class="palace-review-artifact-card verified">
       ${renderPalaceReviewArtifactSectionHead(regionId, "materialization-approved-links", "approved candidate links")}
@@ -8422,6 +8445,88 @@ async function runOrphanApprovedPlanApply(regionId, dryRun) {
     renderStoredSelfReviewBoard();
     if (!result.dry_run && result.writes_edges && !result.blocked) {
       await loadRegionOrphanApprovedPlan(regionId);
+    }
+  } catch (error) {
+    resultEl.textContent = String(error);
+    resultEl.className = "orphan-approved-apply-result error";
+    if (detailEl) detailEl.innerHTML = "";
+  }
+}
+
+async function runMaterializationApprovedPlanApply(regionId, dryRun) {
+  const slot = document.getElementById("region-orphan-candidates");
+  const gate = slot && slot.querySelector("[data-materialization-approved-apply-gate]");
+  const resultEl = gate && gate.querySelector("[data-materialization-approved-apply-result]");
+  const detailEl = gate && gate.querySelector("[data-materialization-approved-apply-detail]");
+  const confirmEl = gate && gate.querySelector("[data-materialization-approved-confirm]");
+  if (!regionId || !resultEl) return;
+  resultEl.className = "orphan-approved-apply-result";
+  resultEl.textContent = dryRun ? "dry run..." : "applying...";
+  if (detailEl) detailEl.innerHTML = "";
+  try {
+    const r = await fetch("/api/materialization-review-apply", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        dry_run: !!dryRun,
+        confirm: confirmEl ? confirmEl.value : "",
+        actor: "palace",
+      }),
+    });
+    if (!r.ok) {
+      const text = await r.text();
+      throw new Error(`${r.status} ${text || r.statusText}`);
+    }
+    const result = await r.json();
+    if (!result.dry_run && result.writes_edges && !result.blocked) {
+      await loadGraph();
+    }
+    resultEl.textContent = renderOrphanApprovedApplyResult(result);
+    if (detailEl) detailEl.innerHTML = renderOrphanApprovedApplyDetails(result);
+    resultEl.className = `orphan-approved-apply-result ${escapeHTML(result.blocked ? "blocked" : (result.status || ""))}`;
+    if (!result.dry_run && result.writes_edges && !result.blocked) {
+      await loadRegionMaterializationApprovedPlan(regionId);
+    }
+  } catch (error) {
+    resultEl.textContent = String(error);
+    resultEl.className = "orphan-approved-apply-result error";
+    if (detailEl) detailEl.innerHTML = "";
+  }
+}
+
+async function runMaterializationApprovedPlanApply(regionId, dryRun) {
+  const slot = document.getElementById("region-orphan-candidates");
+  const gate = slot && slot.querySelector("[data-materialization-approved-apply-gate]");
+  const resultEl = gate && gate.querySelector("[data-materialization-approved-apply-result]");
+  const detailEl = gate && gate.querySelector("[data-materialization-approved-apply-detail]");
+  const confirmEl = gate && gate.querySelector("[data-materialization-approved-confirm]");
+  if (!regionId || !resultEl) return;
+  resultEl.className = "orphan-approved-apply-result";
+  resultEl.textContent = dryRun ? "dry run..." : "applying...";
+  if (detailEl) detailEl.innerHTML = "";
+  try {
+    const r = await fetch("/api/materialization-review-apply", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        dry_run: !!dryRun,
+        confirm: confirmEl ? confirmEl.value : "",
+        actor: "palace",
+      }),
+    });
+    if (!r.ok) {
+      const text = await r.text();
+      throw new Error(`${r.status} ${text || r.statusText}`);
+    }
+    const result = await r.json();
+    if (!result.dry_run && result.writes_edges && !result.blocked) {
+      await loadGraph();
+    }
+    resultEl.textContent = renderOrphanApprovedApplyResult(result);
+    if (detailEl) detailEl.innerHTML = renderOrphanApprovedApplyDetails(result);
+    resultEl.className = `orphan-approved-apply-result ${escapeHTML(result.blocked ? "blocked" : (result.status || ""))}`;
+    if (!result.dry_run && result.writes_edges && !result.blocked) {
+      await loadRegionMaterializationApprovedPlan(regionId);
     }
   } catch (error) {
     resultEl.textContent = String(error);
@@ -8829,6 +8934,26 @@ function handleOrphanRepairClick(e, regionId) {
     applyBtn.disabled = true;
     runOrphanApprovedPlanApply(regionId, mode !== "live").finally(() => {
       applyBtn.disabled = false;
+    });
+    return true;
+  }
+  const materializationApplyBtn = e.target.closest("[data-materialization-approved-apply]");
+  if (materializationApplyBtn) {
+    e.preventDefault();
+    const mode = materializationApplyBtn.dataset.materializationApprovedApply;
+    materializationApplyBtn.disabled = true;
+    runMaterializationApprovedPlanApply(regionId, mode !== "live").finally(() => {
+      materializationApplyBtn.disabled = false;
+    });
+    return true;
+  }
+  const materializationApplyBtn = e.target.closest("[data-materialization-approved-apply]");
+  if (materializationApplyBtn) {
+    e.preventDefault();
+    const mode = materializationApplyBtn.dataset.materializationApprovedApply;
+    materializationApplyBtn.disabled = true;
+    runMaterializationApprovedPlanApply(regionId, mode !== "live").finally(() => {
+      materializationApplyBtn.disabled = false;
     });
     return true;
   }

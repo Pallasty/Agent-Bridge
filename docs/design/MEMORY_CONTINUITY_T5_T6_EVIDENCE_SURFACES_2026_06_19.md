@@ -715,6 +715,29 @@ plan with `dry_run=true`, `writes_edges=false`,
 `changes_search_order=false`, `approval_writes_allowed=false`, and
 `can_materialize_edges=false`.
 
+The follow-up Palace apply slice keeps materialization separate from approval:
+
+- apply route: `POST /api/materialization-review-apply`;
+- apply response schema:
+  `agent_bridge.palace.materialization_approved_edge_apply.v0`;
+- apply audit schema:
+  `agent_bridge.palace.materialization_approved_edge_apply_audit.v0`;
+- default private apply audit:
+  `$HOME/.agent-bridge-private/palace-review/materialization-approved-edge-apply.jsonl`;
+- apply audit override:
+  `AB_PALACE_MATERIALIZATION_APPROVED_EDGE_APPLY_AUDIT=/abs/path/to/apply.jsonl`;
+- live apply confirmation phrase: `APPLY MATERIALIZATION EDGES`.
+
+The route recomputes the approved plan from the packet plus decision log on each
+call. `dry_run` defaults to `true`; dry-run responses report
+`would_write_edges` and never write `memory_edges`. Live apply requires the
+exact confirmation phrase. When unblocked, the first implementation only writes
+approved `relates` edges through the existing `memory_link` path, records an
+append-only private audit row, and still sets
+`changes_search_order=false` / `can_change_retrieval_order=false`. The apply
+route can make graph topology durable, but it still does not grant BioCortex
+runtime influence or production retrieval-order authority.
+
 ## Verification
 
 Targeted validation for this slice after `/Data` space was recovered:

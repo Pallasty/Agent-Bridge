@@ -562,6 +562,16 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("dry-run only", html)
         self.assertIn("unexpected write-capable materialization approved plan response", html)
 
+    def test_materialization_approved_plan_surfaces_explicit_apply_gate(self):
+        html = palace_html()
+
+        self.assertIn("function renderMaterializationApprovedPlanApplyGate(plan, regionId)", html)
+        self.assertIn("data-materialization-approved-apply", html)
+        self.assertIn("data-materialization-approved-confirm", html)
+        self.assertIn("function runMaterializationApprovedPlanApply(regionId, dryRun)", html)
+        self.assertIn("/api/materialization-review-apply", html)
+        self.assertIn("APPLY MATERIALIZATION EDGES", html)
+
     def test_orphan_candidate_review_decision_queue_filters_rows(self):
         html = palace_html()
 
