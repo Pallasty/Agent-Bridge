@@ -35347,6 +35347,8 @@ impl McpTool for MemoryBioCortexShadowTrialTool {
 const MEMORY_BIOCORTEX_T6_INFLUENCE_GATE_SCHEMA: &str =
     "agent_bridge.memory_biocortex_t6_influence_gate.v0";
 const MEMORY_BIOCORTEX_SHADOW_TRIAL_SCHEMA: &str = "agent_bridge.memory_biocortex_shadow_trial.v0";
+const MEMORY_BIOCORTEX_RECALL_EXPANSION_SUMMARY_SCHEMA: &str =
+    "agent_bridge.memory_biocortex.recall_expansion_summary.v0";
 const BIOCORTEX_RETRIEVAL_RELEVANCE_LIFT_EVAL_SCHEMA_LOCAL: &str =
     "agent_bridge.biocortex_retrieval.relevance_lift_eval.v0";
 const BIOCORTEX_RETRIEVAL_REDACTED_EVIDENCE_AGGREGATE_SCHEMA_LOCAL: &str =
@@ -35666,6 +35668,401 @@ fn memory_biocortex_relevance_lift_summary_class_aggregates(payload: &Value) -> 
         .unwrap_or_default();
 
     Value::Array(rows)
+}
+
+// ===========================================================================
+//   memory_biocortex_recall_expansion_summary — baseline-miss graph evidence
+// ===========================================================================
+
+#[derive(Debug, Clone)]
+struct MemoryBioCortexRecallExpansionCase {
+    query: String,
+    relevant_keys: Vec<String>,
+    class_label: Option<String>,
+}
+
+fn memory_biocortex_recall_expansion_cases_from_args(
+    args: &Value,
+) -> Vec<MemoryBioCortexRecallExpansionCase> {
+    args.get("query_cases")
+        .and_then(Value::as_array)
+        .map(|cases| {
+            cases
+                .iter()
+                .filter_map(|case| {
+                    let query = case
+                        .get("query")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|query| !query.is_empty())?
+                        .to_string();
+                    let relevant_keys = case
+                        .get("relevant_keys")
+                        .and_then(Value::as_array)
+                        .map(|keys| {
+                            keys.iter()
+                                .filter_map(Value::as_str)
+                                .map(str::trim)
+                                .filter(|key| !key.is_empty())
+                                .map(str::to_string)
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default();
+                    if relevant_keys.is_empty() {
+                        return None;
+                    }
+                    let class_label = case
+                        .get("class_label")
+                        .and_then(Value::as_str)
+                        .map(str::trim)
+                        .filter(|label| !label.is_empty())
+                        .map(str::to_string);
+                    Some(MemoryBioCortexRecallExpansionCase {
+                        query,
+                        relevant_keys,
+                        class_label,
+                    })
+                })
+                .take(30)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
+}
+
+fn memory_biocortex_recall_expansion_neighbor_key(edge: &MemoryEdge, source_key: &str) -> Option<String> {
+    if edge.from_key == source_key {
+        Some(edge.to_key.clone())
+    } else if edge.to_key == source_key {
+        Some(edge.from_key.clone())
+    } else {
+        None
+    }
+}
+
+fn memory_biocortex_recall_expansion_round3(value: f64) -> f64 {
+    (value * 1000.0).round() / 1000.0
+}
+
+fn memory_biocortex_recall_expansion_class_label(label: Option<&str>) -> String {
+    let cleaned = label
+        .unwrap_or("unlabeled")
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    let trimmed = cleaned.trim_matches('_');
+    if trimmed.is_empty() {
+        "unlabeled".to_string()
+    } else {
+        trimmed.chars().take(64).collect()
+    }
+}
+
+fn memory_biocortex_recall_expansion_class_row(class_label: String, rows: &[Value]) -> Value {
+    let evaluated_count = rows.len() as u64;
+    let baseline_hit_count = rows
+        .iter()
+        .filter(|row| row["status"] == json!("baseline_hit"))
+        .count() as u64;
+    let baseline_miss_count = rows
+        .iter()
+        .filter(|row| row["status"] != json!("baseline_hit"))
+        .count() as u64;
+    let graph_expansion_found_count = rows
+        .iter()
+        .filter(|row| row["status"] == json!("graph_expansion_found"))
+        .count() as u64;
+    let graph_expansion_miss_count = rows
+        .iter()
+        .filter(|row| row["status"] == json!("graph_expansion_miss"))
+        .count() as u64;
+    let graph_neighbor_row_count = rows
+        .iter()
+        .map(|row| row["graph_neighbor_row_count"].as_u64().unwrap_or(0))
+        .sum::<u64>();
+
+    json!({
+        "class_label": class_label,
+        "evaluated_count": evaluated_count,
+        "baseline_hit_count": baseline_hit_count,
+        "baseline_miss_count": baseline_miss_count,
+        "graph_expansion_found_count": graph_expansion_found_count,
+        "graph_expansion_miss_count": graph_expansion_miss_count,
+        "graph_neighbor_row_count": graph_neighbor_row_count,
+        "graph_expansion_found_rate": if baseline_miss_count > 0 {
+            memory_biocortex_recall_expansion_round3(
+                graph_expansion_found_count as f64 / baseline_miss_count as f64,
+            )
+        } else {
+            0.0
+        },
+    })
+}
+
+pub struct MemoryBioCortexRecallExpansionSummaryTool {
+    hub: Hub,
+}
+
+impl MemoryBioCortexRecallExpansionSummaryTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for MemoryBioCortexRecallExpansionSummaryTool {
+    fn name(&self) -> &'static str {
+        "memory_biocortex_recall_expansion_summary"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only recall-expansion evidence for AB memory BioCortex T6. \
+                For explicit query/relevance cases, it checks whether baseline FTS already \
+                contains a relevant memory; for baseline misses, it inspects graph neighbors \
+                of the baseline candidates to estimate whether graph expansion could recover \
+                a relevant memory. It never runs BioCortex, writes memory, exposes raw \
+                queries/keys/content, or changes retrieval order."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["query_cases"],
+                "properties": {
+                    "query_cases": {
+                        "type": "array",
+                        "description": "Explicit downstream recall cases. Raw queries and relevant keys are accepted as input but never echoed.",
+                        "items": {
+                            "type": "object",
+                            "required": ["query", "relevant_keys"],
+                            "properties": {
+                                "query": {
+                                    "type": "string",
+                                    "description": "Baseline FTS query. Output includes only a query hash."
+                                },
+                                "relevant_keys": {
+                                    "type": "array",
+                                    "items": { "type": "string" },
+                                    "description": "Known relevant memory keys. Output includes only counts and hashes."
+                                },
+                                "class_label": {
+                                    "type": "string",
+                                    "description": "Optional sanitized bucket label for aggregate review."
+                                }
+                            }
+                        }
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100,
+                        "default": 10,
+                        "description": "Baseline memory_search candidate limit."
+                    },
+                    "neighbor_limit": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 50,
+                        "default": 8,
+                        "description": "Maximum direct graph-neighbor edges inspected per baseline candidate."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = self
+            .hub
+            .store
+            .as_ref()
+            .ok_or_else(|| ab_core::Error::Backend("store unavailable".into()))?;
+        let cases = memory_biocortex_recall_expansion_cases_from_args(&args);
+        let invalid_case_count = args
+            .get("query_cases")
+            .and_then(Value::as_array)
+            .map(|raw| raw.len().saturating_sub(cases.len()))
+            .unwrap_or(0);
+        let limit = args
+            .get("limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(10)
+            .clamp(1, 100) as u32;
+        let neighbor_limit = args
+            .get("neighbor_limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(8)
+            .min(50) as usize;
+
+        let mut case_rows = Vec::new();
+        let mut rows_by_class = BTreeMap::<String, Vec<Value>>::new();
+
+        for (idx, case) in cases.iter().enumerate() {
+            let class_label =
+                memory_biocortex_recall_expansion_class_label(case.class_label.as_deref());
+            let query_hash = memory_biocortex_sha256_json(&json!({"query": case.query}));
+            let relevant = case
+                .relevant_keys
+                .iter()
+                .cloned()
+                .collect::<BTreeSet<_>>();
+
+            let baseline_hits = store.memory_search(&case.query, &[], limit).await?;
+            let baseline_keys = baseline_hits
+                .iter()
+                .map(|hit| hit.record.key.clone())
+                .collect::<Vec<_>>();
+            let baseline_key_set = baseline_keys.iter().cloned().collect::<BTreeSet<_>>();
+            let baseline_relevant_count =
+                relevant.intersection(&baseline_key_set).count() as u64;
+
+            let mut graph_neighbor_row_count = 0u64;
+            let mut graph_neighbor_keys = BTreeSet::<String>::new();
+            for hit in &baseline_hits {
+                let edges = store.memory_neighbors(&hit.record.key).await.unwrap_or_default();
+                for edge in edges.into_iter().take(neighbor_limit) {
+                    graph_neighbor_row_count += 1;
+                    if let Some(neighbor_key) =
+                        memory_biocortex_recall_expansion_neighbor_key(&edge, &hit.record.key)
+                    {
+                        graph_neighbor_keys.insert(neighbor_key);
+                    }
+                }
+            }
+
+            let graph_relevant_count =
+                relevant.intersection(&graph_neighbor_keys).count() as u64;
+            let status = if baseline_relevant_count > 0 {
+                "baseline_hit"
+            } else if graph_relevant_count > 0 {
+                "graph_expansion_found"
+            } else {
+                "graph_expansion_miss"
+            };
+            let row = json!({
+                "case_index": idx,
+                "query_hash": query_hash,
+                "class_label": class_label,
+                "status": status,
+                "relevant_key_count": relevant.len(),
+                "baseline_candidate_count": baseline_keys.len(),
+                "baseline_relevant_count": baseline_relevant_count,
+                "baseline_order_hash": memory_biocortex_order_hash("baseline", &baseline_keys),
+                "graph_neighbor_row_count": graph_neighbor_row_count,
+                "graph_unique_neighbor_count": graph_neighbor_keys.len(),
+                "graph_relevant_count": graph_relevant_count,
+                "graph_neighbor_order_hash": memory_biocortex_order_hash(
+                    "graph_neighbors",
+                    &graph_neighbor_keys.iter().cloned().collect::<Vec<_>>()
+                ),
+                "raw_query_included": false,
+                "raw_keys_included": false,
+                "content_included": false,
+            });
+            rows_by_class
+                .entry(class_label)
+                .or_default()
+                .push(row.clone());
+            case_rows.push(row);
+        }
+
+        let evaluated_count = case_rows.len() as u64;
+        let baseline_hit_count = case_rows
+            .iter()
+            .filter(|row| row["status"] == json!("baseline_hit"))
+            .count() as u64;
+        let baseline_miss_count = evaluated_count.saturating_sub(baseline_hit_count);
+        let graph_expansion_found_count = case_rows
+            .iter()
+            .filter(|row| row["status"] == json!("graph_expansion_found"))
+            .count() as u64;
+        let graph_expansion_miss_count = case_rows
+            .iter()
+            .filter(|row| row["status"] == json!("graph_expansion_miss"))
+            .count() as u64;
+        let graph_neighbor_row_count = case_rows
+            .iter()
+            .map(|row| row["graph_neighbor_row_count"].as_u64().unwrap_or(0))
+            .sum::<u64>();
+        let class_aggregates = rows_by_class
+            .into_iter()
+            .map(|(class_label, rows)| {
+                memory_biocortex_recall_expansion_class_row(class_label, &rows)
+            })
+            .collect::<Vec<_>>();
+
+        Ok(ToolResult::json_text(&json!({
+            "schema": MEMORY_BIOCORTEX_RECALL_EXPANSION_SUMMARY_SCHEMA,
+            "generated_at": unix_now_secs(),
+            "read_only": true,
+            "purpose": "Read-only recall-expansion yardstick: for explicit downstream cases, measure whether baseline FTS already recalls a relevant memory and whether direct graph-neighbor expansion could recover relevant memories for baseline misses.",
+            "sampling": {
+                "query_source": "explicit_cases",
+                "query_cases_count": cases.len(),
+                "invalid_query_cases": invalid_case_count,
+                "search_limit": limit,
+                "neighbor_limit_per_baseline_key": neighbor_limit,
+            },
+            "metrics": {
+                "evaluated_count": evaluated_count,
+                "baseline_hit_count": baseline_hit_count,
+                "baseline_miss_count": baseline_miss_count,
+                "graph_expansion_found_count": graph_expansion_found_count,
+                "graph_expansion_miss_count": graph_expansion_miss_count,
+                "graph_neighbor_row_count": graph_neighbor_row_count,
+                "graph_expansion_found_rate": if baseline_miss_count > 0 {
+                    memory_biocortex_recall_expansion_round3(
+                        graph_expansion_found_count as f64 / baseline_miss_count as f64,
+                    )
+                } else {
+                    0.0
+                },
+            },
+            "class_aggregates": class_aggregates,
+            "case_rows": case_rows,
+            "input_contract": {
+                "raw_query_included": false,
+                "raw_queries_included": false,
+                "raw_keys_included": false,
+                "content_included": false,
+                "candidate_content_included": false,
+                "source_eval_included": false,
+            },
+            "safety": {
+                "read_only": true,
+                "calls_memory_search": true,
+                "calls_memory_neighbors": true,
+                "runs_biocortex": false,
+                "writes_memory": false,
+                "changes_search_order": false,
+                "changes_prod_retrieval_order": false,
+                "writes_state": false,
+                "default_search_order_change_allowed": false,
+            },
+            "interpretation": {
+                "baseline_misses_have_graph_expansion_signal": graph_expansion_found_count > 0,
+                "runtime_influence_ready": false,
+                "next_gate": "inspect_redacted_recall_expansion_evidence_before_any_candidate-expansion_experiment",
+            },
+            "non_goals": [
+                "Does not run BioCortex.",
+                "Does not add graph neighbors to live memory_search results.",
+                "Does not change memory_search ranking or default recall.",
+                "Does not write memory, graph edges, approval packets, or runtime influence decisions.",
+                "Does not include raw query, memory keys, or memory content."
+            ],
+            "calls_memory_search": true,
+            "calls_memory_neighbors": true,
+            "runs_biocortex": false,
+            "writes_memory": false,
+            "changes_memory_search_order": false,
+        })))
+    }
 }
 
 // ===========================================================================
@@ -41895,6 +42292,9 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // aggregate schema required by T6 without running BioCortex or echoing raw
     // query/key/content fields.
     "memory_biocortex_redacted_evidence_aggregate",
+    // Continuity T6 recall-expansion summary: read-only evidence for whether
+    // graph neighbors could recover relevant memories on baseline FTS misses.
+    "memory_biocortex_recall_expansion_summary",
     // Continuity T6 lift summary: runs the relevance-lift yardstick but strips
     // per-sample rows and raw adapter errors before the T6 gate consumes it.
     "memory_biocortex_relevance_lift_summary",
@@ -45451,6 +45851,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Standard,
         Arc::new(MemoryBioCortexRedactedEvidenceAggregateTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryBioCortexRecallExpansionSummaryTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
@@ -51197,14 +51603,15 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 59 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 60 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-        //      + DIRECT(47: 6 avatar observation/sync/renderer tools
+        //      + DIRECT(48: 6 avatar observation/sync/renderer tools
         //      + xiao_shu_action_request + 14 mobile bridge tools
         //      + memory_graph_topology + memory_retrieval_feedback
         //      + memory_consolidation_queue
         //      + memory_biocortex_shadow_trial
         //      + memory_biocortex_redacted_evidence_aggregate
+        //      + memory_biocortex_recall_expansion_summary
         //      + memory_biocortex_relevance_lift_summary
         //      + memory_biocortex_t6_influence_gate
         //      + memory_neural_critic_shadow_eval
@@ -51222,7 +51629,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         // forum_digest joined via the FORUM_READ capability group (2026-05-23).
         // Native-overlap probes such as browser_lite_probe stay in broader
         // profiles, not codex-essential direct extras.
-        assert_eq!(extras.len(), 59);
+        assert_eq!(extras.len(), 60);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -51254,6 +51661,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(extras.contains(&"memory_consolidation_queue"));
         assert!(extras.contains(&"memory_biocortex_shadow_trial"));
         assert!(extras.contains(&"memory_biocortex_redacted_evidence_aggregate"));
+        assert!(extras.contains(&"memory_biocortex_recall_expansion_summary"));
         assert!(extras.contains(&"memory_biocortex_relevance_lift_summary"));
         assert!(extras.contains(&"memory_biocortex_t6_influence_gate"));
         assert!(extras.contains(&"memory_neural_critic_shadow_eval"));
@@ -61066,6 +61474,94 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(!serialized.contains("tests:shadow_regular"));
         assert!(!serialized.contains("duplicate target"));
         assert!(!serialized.contains("regular survivor"));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_recall_expansion_summary_redacts_graph_hits() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        store
+            .memory_save(&t4_memory_record(
+                "tests:recall_expansion_baseline",
+                "lesson",
+                "alpha baseline retrieval anchor",
+                &[],
+                &[],
+                0,
+                0.8,
+            ))
+            .await
+            .expect("seed baseline");
+        store
+            .memory_save(&t4_memory_record(
+                "tests:recall_expansion_target",
+                "lesson",
+                "omega hidden relevant target",
+                &[],
+                &[],
+                0,
+                0.8,
+            ))
+            .await
+            .expect("seed target");
+        store
+            .memory_link(
+                "tests:recall_expansion_baseline",
+                "tests:recall_expansion_target",
+                "relates",
+                1.0,
+            )
+            .await
+            .expect("seed edge");
+
+        let tool = MemoryBioCortexRecallExpansionSummaryTool::new(hub.clone());
+        let out = tool
+            .execute(
+                json!({
+                    "query_cases": [
+                        {
+                            "query": "alpha",
+                            "relevant_keys": ["tests:recall_expansion_target"],
+                            "class_label": "graph_recall"
+                        }
+                    ],
+                    "limit": 1,
+                    "neighbor_limit": 8
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(
+            payload["schema"],
+            json!("agent_bridge.memory_biocortex.recall_expansion_summary.v0")
+        );
+        assert_eq!(payload["read_only"], json!(true));
+        assert_eq!(payload["safety"]["runs_biocortex"], json!(false));
+        assert_eq!(payload["safety"]["writes_memory"], json!(false));
+        assert_eq!(payload["safety"]["changes_search_order"], json!(false));
+        assert_eq!(payload["metrics"]["evaluated_count"], json!(1));
+        assert_eq!(payload["metrics"]["baseline_miss_count"], json!(1));
+        assert_eq!(payload["metrics"]["graph_expansion_found_count"], json!(1));
+        assert_eq!(payload["case_rows"][0]["status"], json!("graph_expansion_found"));
+        assert_eq!(payload["class_aggregates"][0]["class_label"], json!("graph_recall"));
+        assert_eq!(
+            payload["class_aggregates"][0]["graph_expansion_found_count"],
+            json!(1)
+        );
+        assert_eq!(payload["input_contract"]["raw_query_included"], json!(false));
+        assert_eq!(payload["input_contract"]["raw_keys_included"], json!(false));
+        assert_eq!(payload["input_contract"]["content_included"], json!(false));
+
+        let serialized = serde_json::to_string(&payload).expect("serialize");
+        assert!(!serialized.contains("alpha"));
+        assert!(!serialized.contains("tests:recall_expansion_baseline"));
+        assert!(!serialized.contains("tests:recall_expansion_target"));
+        assert!(!serialized.contains("omega hidden relevant target"));
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
