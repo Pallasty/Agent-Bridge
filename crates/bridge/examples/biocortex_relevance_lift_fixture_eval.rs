@@ -11,6 +11,10 @@
 //! ```text
 //! AB_BIOCORTEX_RS=/path/to/biocortex-rs \
 //!   cargo run -p ab-bridge --example biocortex_relevance_lift_fixture_eval
+//! AB_BIOCORTEX_RS=/path/to/biocortex-rs \
+//!   cargo run -p ab-bridge --example biocortex_relevance_lift_fixture_eval -- \
+//!   docs/design/fixtures/memory-biocortex-relevance-lift-missing-graph-cases-2026-06-20.json \
+//!   --packet-json
 //! ```
 
 use ab_bridge::biocortex_shadow::{
@@ -23,13 +27,16 @@ use ab_store::{
 };
 use anyhow::{Context, Result};
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const DEFAULT_FIXTURE: &str =
     "docs/design/fixtures/memory-biocortex-relevance-lift-headroom-cases-2026-06-20.json";
+const MATERIALIZATION_REVIEW_PACKET_SCHEMA: &str =
+    "agent_bridge.biocortex_retrieval.materialization_review_packet.v0";
 
 #[derive(Debug, Deserialize)]
 struct Fixture {
@@ -43,6 +50,7 @@ struct FixtureCase {
     relevant_keys: Vec<String>,
     class_label: Option<String>,
     baseline_fts_rank_observed: Option<u64>,
+    review_intent: Option<String>,
     #[serde(default)]
     materialization_reason_packets: Vec<MaterializationReasonPacket>,
 }
@@ -62,29 +70,42 @@ fn default_reason_packet_status() -> String {
     "active".to_string()
 }
 
+#[derive(Debug)]
+struct CliOptions {
+    fixture_path: PathBuf,
+    emit_packet_json: bool,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    let fixture_path = std::env::args()
-        .nth(1)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(DEFAULT_FIXTURE));
-    let fixture = load_fixture(&fixture_path)?;
+    let cli = parse_args()?;
+    let fixture = load_fixture(&cli.fixture_path)?;
     let db_path = std::env::var("AB_BASELINE_DB")
         .ok()
         .map(PathBuf::from)
         .unwrap_or_else(default_db_path);
+    let limit = env_u32("AB_RELEVANCE_LIFT_LIMIT", 20).clamp(5, 100);
+
+    let store = SqliteStore::open(&db_path)
+        .await
+        .with_context(|| format!("open {}", db_path.display()))?;
+    let graph_rows = analyze_graph_evidence(&store, &fixture, limit).await?;
+    if cli.emit_packet_json {
+        let packet = materialization_review_packet(&cli.fixture_path, &fixture, &graph_rows);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&packet).context("serialize packet json")?
+        );
+        return Ok(());
+    }
+
     let checkout = std::env::var("AB_BIOCORTEX_RS")
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|s| !s.is_empty())
         .map(PathBuf::from);
-    let limit = env_u32("AB_RELEVANCE_LIFT_LIMIT", 20).clamp(5, 100);
     let timeout_ms = env_u64("AB_RELEVANCE_LIFT_TIMEOUT_MS", 180_000).clamp(1_000, 600_000);
     let blend_alpha = env_f32("AB_RELEVANCE_LIFT_BLEND_ALPHA", 0.8).clamp(0.0, 1.0);
-
-    let store = SqliteStore::open(&db_path)
-        .await
-        .with_context(|| format!("open {}", db_path.display()))?;
     let query_cases = fixture
         .query_cases
         .iter()
@@ -123,11 +144,10 @@ async fn main() -> Result<()> {
         blend_alpha,
     )
     .await?;
-    let graph_rows = analyze_graph_evidence(&store, &fixture, limit).await?;
     let preflight_rows = analyze_graph_preflight(&store, &fixture, limit).await?;
 
     print_report(
-        &fixture_path,
+        &cli.fixture_path,
         &fixture,
         &db_path,
         &payload,
@@ -136,6 +156,31 @@ async fn main() -> Result<()> {
         &preflight_rows,
     );
     Ok(())
+}
+
+fn parse_args() -> Result<CliOptions> {
+    let mut fixture_path: Option<PathBuf> = None;
+    let mut emit_packet_json = false;
+    for arg in std::env::args().skip(1) {
+        match arg.as_str() {
+            "--packet-json" => emit_packet_json = true,
+            "-h" | "--help" => {
+                println!(
+                    "usage: cargo run -p ab-bridge --example biocortex_relevance_lift_fixture_eval -- [fixture.json] [--packet-json]"
+                );
+                std::process::exit(0);
+            }
+            _ if arg.starts_with('-') => anyhow::bail!("unknown argument: {arg}"),
+            _ => {
+                anyhow::ensure!(fixture_path.is_none(), "multiple fixture paths provided");
+                fixture_path = Some(PathBuf::from(arg));
+            }
+        }
+    }
+    Ok(CliOptions {
+        fixture_path: fixture_path.unwrap_or_else(|| PathBuf::from(DEFAULT_FIXTURE)),
+        emit_packet_json,
+    })
 }
 
 fn load_fixture(path: &PathBuf) -> Result<Fixture> {
@@ -1053,6 +1098,111 @@ fn materialization_preview_row(
         writes_memory: false,
         changes_search_order: false,
     }
+}
+
+fn materialization_review_packet(
+    fixture_path: &Path,
+    fixture: &Fixture,
+    graph_rows: &[GraphEvidenceCaseRow],
+) -> Value {
+    let preview_case_count = graph_rows
+        .iter()
+        .filter(|row| !row.materialization_previews.is_empty())
+        .count();
+    let preview_candidate_count = graph_rows
+        .iter()
+        .map(|row| row.materialization_previews.len())
+        .sum::<usize>();
+    let reason_packet_selected_edge_count = graph_rows
+        .iter()
+        .map(|row| row.reason_packet_edge_selected_count)
+        .sum::<usize>();
+    let reason_packet_relevant_edge_count = graph_rows
+        .iter()
+        .map(|row| row.reason_packet_edge_relevant_count)
+        .sum::<usize>();
+    let reason_packet_blocked_packet_count = graph_rows
+        .iter()
+        .map(|row| row.reason_packet_blocked_packet_count)
+        .sum::<usize>();
+    let reason_packet_blocked_shadow_count = graph_rows
+        .iter()
+        .map(|row| row.reason_packet_blocked_shadow_count)
+        .sum::<usize>();
+    let candidates = graph_rows
+        .iter()
+        .flat_map(|row| {
+            let fixture_case = fixture.query_cases.get(row.sample_index);
+            row.materialization_previews.iter().map(move |preview| {
+                json!({
+                    "case_index": row.sample_index + 1,
+                    "class_label": row.class_label,
+                    "baseline_fts_rank_observed": fixture_case.and_then(|case| case.baseline_fts_rank_observed),
+                    "review_intent": fixture_case.and_then(|case| case.review_intent.clone()),
+                    "candidate_source": preview.candidate_source,
+                    "gate": preview.gate,
+                    "from_key": preview.from_key,
+                    "to_key": preview.to_key,
+                    "edge_type": preview.edge_type,
+                    "reason_kind": preview.reason_kind,
+                    "rationale": preview.rationale,
+                    "shadow_aligned": preview.shadow_aligned,
+                    "baseline_top3": preview.baseline_top3,
+                    "preview_top3": preview.preview_top3,
+                    "baseline_from_rank": preview.baseline_from_rank,
+                    "preview_from_rank": preview.preview_from_rank,
+                    "baseline_to_rank": preview.baseline_to_rank,
+                    "preview_to_rank": preview.preview_to_rank,
+                    "preview_order_changed": preview.preview_order_changed,
+                    "blend_coverage": preview.blend_coverage,
+                    "writes_memory": preview.writes_memory,
+                    "changes_search_order": preview.changes_search_order,
+                })
+            })
+        })
+        .collect::<Vec<_>>();
+
+    json!({
+        "schema": MATERIALIZATION_REVIEW_PACKET_SCHEMA,
+        "generated_at": now_secs(),
+        "purpose": "Read-only materialization review packet for human review; this is not approval state.",
+        "review_state": "needs_human_review",
+        "approval_state": "not_approved",
+        "default_decision": "keep_preview_only",
+        "read_only": true,
+        "writes_memory": false,
+        "writes_edges": false,
+        "changes_search_order": false,
+        "approval_writes_allowed": false,
+        "can_materialize_edges": false,
+        "can_change_retrieval_order": false,
+        "input_contract": {
+            "raw_queries_included": false,
+            "raw_relevant_keys_included": false,
+            "content_included": false,
+            "query_cases_included": false,
+        },
+        "packet_source": {
+            "generator": "biocortex_relevance_lift_fixture_eval",
+            "fixture_path": fixture_path.display().to_string(),
+            "fixture_schema": fixture.schema,
+            "query_case_count": fixture.query_cases.len(),
+        },
+        "summary": {
+            "preview_case_count": preview_case_count,
+            "preview_candidate_count": preview_candidate_count,
+            "reason_packet_selected_edge_count": reason_packet_selected_edge_count,
+            "reason_packet_relevant_edge_count": reason_packet_relevant_edge_count,
+            "reason_packet_blocked_packet_count": reason_packet_blocked_packet_count,
+            "reason_packet_blocked_shadow_count": reason_packet_blocked_shadow_count,
+        },
+        "review_questions": [
+            "Does the reason packet justify the proposed edge?",
+            "Do the rank movements support keeping this candidate in preview-only review?",
+            "Should this candidate remain non-materialized until a separate write path is explicitly approved?"
+        ],
+        "candidates": candidates,
+    })
 }
 
 fn rank_of_key(ranking: &[String], key: &str) -> Option<usize> {
@@ -2478,6 +2628,13 @@ fn env_f32(name: &str, default: f32) -> f32 {
         .unwrap_or(default)
 }
 
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
+}
+
 fn rank_cell(value: &Value) -> String {
     if value.is_null() {
         "-".to_string()
@@ -2639,6 +2796,111 @@ mod tests {
         assert_eq!(preview.preview_to_rank, Some(2));
         assert!(!preview.writes_memory);
         assert!(!preview.changes_search_order);
+    }
+
+    #[test]
+    fn materialization_review_packet_is_read_only_and_redacted() {
+        let fixture = Fixture {
+            schema: "agent_bridge.memory_biocortex.relevance_lift_missing_graph_cases.v0"
+                .to_string(),
+            query_cases: vec![FixtureCase {
+                query: "secret packet query".to_string(),
+                relevant_keys: vec!["secret_relevant_key".to_string()],
+                class_label: Some("packet_case".to_string()),
+                baseline_fts_rank_observed: Some(4),
+                review_intent: None,
+                materialization_reason_packets: Vec::new(),
+            }],
+        };
+        let graph_rows = vec![GraphEvidenceCaseRow {
+            sample_index: 0,
+            class_label: "packet_case".to_string(),
+            candidate_count: 4,
+            induced_edge_count: 0,
+            induced_node_count: 0,
+            missing_edge_candidate_count: 1,
+            missing_edge_candidate_relevant_count: 1,
+            gated_edge_selected_count: 0,
+            gated_edge_relevant_count: 0,
+            gated_edge_blocked_label_count: 0,
+            gated_edge_blocked_harm_count: 0,
+            label_free_edge_selected_count: 0,
+            label_free_edge_relevant_count: 0,
+            label_free_edge_blocked_metadata_count: 0,
+            label_free_edge_blocked_scope_count: 0,
+            label_free_edge_blocked_temporal_count: 0,
+            label_free_edge_blocked_shadow_count: 0,
+            coretrieval_edge_selected_count: 0,
+            coretrieval_edge_relevant_count: 0,
+            coretrieval_edge_blocked_signal_count: 0,
+            coretrieval_edge_blocked_shadow_count: 0,
+            reason_packet_edge_selected_count: 1,
+            reason_packet_edge_relevant_count: 1,
+            reason_packet_blocked_packet_count: 0,
+            reason_packet_blocked_shadow_count: 0,
+            source_graph_rank: None,
+            source_graph_score: None,
+            best_relevant_graph_rank: None,
+            best_relevant_graph_score: None,
+            top_graph_relevant: false,
+            top_graph_score: None,
+            distinct_graph_scores: 0,
+            edge_type_counts: BTreeMap::new(),
+            variants: Vec::new(),
+            materialization_previews: vec![MaterializationPreviewRow {
+                candidate_source: "explicit_related_keys",
+                gate: "reason_packet",
+                from_key: "preview_from".to_string(),
+                to_key: "preview_to".to_string(),
+                edge_type: "relates".to_string(),
+                reason_kind: "operator_review_intent".to_string(),
+                rationale: "preview-only rationale".to_string(),
+                shadow_aligned: true,
+                baseline_top3: vec!["anchor_a".to_string(), "anchor_b".to_string()],
+                preview_top3: vec!["preview_from".to_string(), "preview_to".to_string()],
+                baseline_from_rank: Some(3),
+                preview_from_rank: Some(1),
+                baseline_to_rank: Some(4),
+                preview_to_rank: Some(2),
+                preview_order_changed: true,
+                blend_coverage: 0.2,
+                writes_memory: false,
+                changes_search_order: false,
+            }],
+        }];
+
+        let packet = materialization_review_packet(
+            &PathBuf::from("docs/design/fixtures/example.json"),
+            &fixture,
+            &graph_rows,
+        );
+
+        assert_eq!(
+            packet["schema"],
+            Value::String(
+                "agent_bridge.biocortex_retrieval.materialization_review_packet.v0".to_string()
+            )
+        );
+        assert_eq!(packet["read_only"], Value::Bool(true));
+        assert_eq!(packet["approval_writes_allowed"], Value::Bool(false));
+        assert_eq!(packet["can_materialize_edges"], Value::Bool(false));
+        assert_eq!(packet["changes_search_order"], Value::Bool(false));
+        assert_eq!(packet["summary"]["preview_candidate_count"], Value::from(1));
+        assert_eq!(packet["summary"]["preview_case_count"], Value::from(1));
+        assert_eq!(
+            packet["candidates"][0]["from_key"],
+            Value::String("preview_from".to_string())
+        );
+        assert_eq!(
+            packet["candidates"][0]["baseline_from_rank"],
+            Value::from(3)
+        );
+        assert_eq!(packet["candidates"][0]["writes_memory"], Value::Bool(false));
+
+        let serialized = serde_json::to_string(&packet).expect("serialize");
+        assert!(!serialized.contains("secret packet query"));
+        assert!(!serialized.contains("secret_relevant_key"));
+        assert!(!serialized.contains("\"query_cases\""));
     }
 
     fn test_hit(key: &str, score: f64) -> ab_store::MemorySearchHit {
