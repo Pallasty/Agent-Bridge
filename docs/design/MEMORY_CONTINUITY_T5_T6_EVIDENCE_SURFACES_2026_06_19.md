@@ -188,6 +188,41 @@ enough to justify influence. The next useful work is not to loosen T6; it is to
 improve the side-signal/candidate scoring path or add a separate
 recall-expansion experiment for the pure FTS misses.
 
+## Recall-Expansion Graph-Holdout Sampler
+
+Date: 2026-06-20
+
+`memory_biocortex_recall_expansion_summary` now has an optional
+`sample_graph_holdout=true` mode for the separate recall-expansion question:
+when baseline FTS does not return a relevant memory, can direct graph neighbors
+of the baseline candidates recover one?
+
+The sampler is deliberately weakly labelled. It derives cases from existing
+memory graph edges by selecting a source memory, building a sanitized query from
+that source content, and treating one direct neighbor as the held-out relevant
+target. This is less handpicked than the earlier one-off smoke case, but it is
+not a gold human relevance corpus. It should be read as a graph-recovery
+yardstick and candidate generator for review, not as authorization for runtime
+influence.
+
+The output keeps the same redaction and authority boundary as explicit
+`query_cases`:
+
+- `sampling.query_source=graph_holdout_sample`;
+- raw source queries, source keys, target keys, and memory content are not
+  returned;
+- case rows include only hashes, counts, `case_source`, status, and aggregate
+  graph-neighbor evidence;
+- `telemetry_top_miss_query_hashes_included=false`, because this path samples
+  graph structure, not historical mixed-version query logs;
+- `read_only=true`, `writes_memory=false`, `writes_state=false`,
+  `runs_biocortex=false`, and `changes_search_order=false`.
+
+Use this sampler before any candidate-expansion experiment to estimate whether
+existing graph structure contains recoverable neighbors for baseline misses. Do
+not use it to approve edge materialization, default search-order changes, or
+BioCortex influence; those still require the separate review and T6 gates.
+
 ## Fixture Diagnostic Example Follow-up
 
 Date: 2026-06-20

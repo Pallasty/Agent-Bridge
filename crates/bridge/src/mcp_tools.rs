@@ -35679,6 +35679,7 @@ struct MemoryBioCortexRecallExpansionCase {
     query: String,
     relevant_keys: Vec<String>,
     class_label: Option<String>,
+    case_source: String,
 }
 
 fn memory_biocortex_recall_expansion_cases_from_args(
@@ -35721,12 +35722,39 @@ fn memory_biocortex_recall_expansion_cases_from_args(
                         query,
                         relevant_keys,
                         class_label,
+                        case_source: "explicit".to_string(),
                     })
                 })
                 .take(30)
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default()
+}
+
+fn memory_biocortex_recall_expansion_strip_frontmatter(content: &str) -> &str {
+    let trimmed = content.trim_start();
+    if let Some(rest) = trimmed.strip_prefix("---") {
+        if let Some(end) = rest.find("\n---") {
+            return rest[end + 4..].trim_start();
+        }
+    }
+    trimmed
+}
+
+fn memory_biocortex_recall_expansion_derive_query(content: &str, max_chars: usize) -> String {
+    let body = memory_biocortex_recall_expansion_strip_frontmatter(content);
+    let cleaned = body
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
+        .collect::<String>();
+    cleaned
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
+        .chars()
+        .take(max_chars.clamp(16, 400))
+        .collect()
 }
 
 fn memory_biocortex_recall_expansion_neighbor_key(edge: &MemoryEdge, source_key: &str) -> Option<String> {
@@ -35737,6 +35765,56 @@ fn memory_biocortex_recall_expansion_neighbor_key(edge: &MemoryEdge, source_key:
     } else {
         None
     }
+}
+
+async fn memory_biocortex_recall_expansion_graph_holdout_cases(
+    store: &dyn StateStore,
+    sample_size: usize,
+    candidate_limit: u32,
+    query_chars: usize,
+) -> Vec<MemoryBioCortexRecallExpansionCase> {
+    let candidates = store
+        .list_memories(None, MemoryListSort::Recent, candidate_limit)
+        .await
+        .unwrap_or_default();
+    let mut seen_edges = BTreeSet::<(String, String)>::new();
+    let mut cases = Vec::new();
+    for rec in candidates {
+        let query = memory_biocortex_recall_expansion_derive_query(&rec.content, query_chars);
+        if query.is_empty() {
+            continue;
+        }
+        let edges = store.memory_neighbors(&rec.key).await.unwrap_or_default();
+        for edge in edges {
+            let Some(target_key) =
+                memory_biocortex_recall_expansion_neighbor_key(&edge, &rec.key)
+            else {
+                continue;
+            };
+            if target_key == rec.key {
+                continue;
+            }
+            let pair = if rec.key <= target_key {
+                (rec.key.clone(), target_key.clone())
+            } else {
+                (target_key.clone(), rec.key.clone())
+            };
+            if !seen_edges.insert(pair) {
+                continue;
+            }
+            cases.push(MemoryBioCortexRecallExpansionCase {
+                query: query.clone(),
+                relevant_keys: vec![target_key],
+                class_label: Some("graph_holdout".to_string()),
+                case_source: "graph_holdout".to_string(),
+            });
+            break;
+        }
+        if cases.len() >= sample_size {
+            break;
+        }
+    }
+    cases
 }
 
 fn memory_biocortex_recall_expansion_round3(value: f64) -> f64 {
@@ -35835,12 +35913,12 @@ impl McpTool for MemoryBioCortexRecallExpansionSummaryTool {
                 For explicit query/relevance cases, it checks whether baseline FTS already \
                 contains a relevant memory; for baseline misses, it inspects graph neighbors \
                 of the baseline candidates to estimate whether graph expansion could recover \
-                a relevant memory. It never runs BioCortex, writes memory, exposes raw \
+                a relevant memory. It can also build a weakly-labeled graph-holdout sample \
+                from existing memory graph edges. It never runs BioCortex, writes memory, exposes raw \
                 queries/keys/content, or changes retrieval order."
                 .into(),
             input_schema: json!({
                 "type": "object",
-                "required": ["query_cases"],
                 "properties": {
                     "query_cases": {
                         "type": "array",
@@ -35864,6 +35942,32 @@ impl McpTool for MemoryBioCortexRecallExpansionSummaryTool {
                                 }
                             }
                         }
+                    },
+                    "sample_graph_holdout": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "When true and query_cases is omitted/empty, derive weakly-labeled graph holdout cases from existing memory graph edges. Raw source/target keys and derived queries are not echoed."
+                    },
+                    "sample_size": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 30,
+                        "default": 8,
+                        "description": "Maximum graph-holdout cases to sample when sample_graph_holdout=true."
+                    },
+                    "candidate_limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 100,
+                        "description": "Recent memory rows inspected while building graph-holdout cases."
+                    },
+                    "query_chars": {
+                        "type": "integer",
+                        "minimum": 16,
+                        "maximum": 400,
+                        "default": 120,
+                        "description": "Max chars of sanitized memory content used as each graph-holdout baseline query."
                     },
                     "limit": {
                         "type": "integer",
@@ -35890,12 +35994,31 @@ impl McpTool for MemoryBioCortexRecallExpansionSummaryTool {
             .store
             .as_ref()
             .ok_or_else(|| ab_core::Error::Backend("store unavailable".into()))?;
-        let cases = memory_biocortex_recall_expansion_cases_from_args(&args);
+        let mut cases = memory_biocortex_recall_expansion_cases_from_args(&args);
         let invalid_case_count = args
             .get("query_cases")
             .and_then(Value::as_array)
             .map(|raw| raw.len().saturating_sub(cases.len()))
             .unwrap_or(0);
+        let sample_graph_holdout = args
+            .get("sample_graph_holdout")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let sample_size = args
+            .get("sample_size")
+            .and_then(Value::as_u64)
+            .unwrap_or(8)
+            .clamp(1, 30) as usize;
+        let candidate_limit = args
+            .get("candidate_limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(100)
+            .clamp(1, 500) as u32;
+        let query_chars = args
+            .get("query_chars")
+            .and_then(Value::as_u64)
+            .unwrap_or(120)
+            .clamp(16, 400) as usize;
         let limit = args
             .get("limit")
             .and_then(Value::as_u64)
@@ -35906,6 +36029,23 @@ impl McpTool for MemoryBioCortexRecallExpansionSummaryTool {
             .and_then(Value::as_u64)
             .unwrap_or(8)
             .min(50) as usize;
+
+        let query_source = if cases.is_empty() && sample_graph_holdout {
+            cases = memory_biocortex_recall_expansion_graph_holdout_cases(
+                store.as_ref(),
+                sample_size,
+                candidate_limit,
+                query_chars,
+            )
+            .await;
+            "graph_holdout_sample"
+        } else {
+            "explicit_cases"
+        };
+        let graph_holdout_sampled_count = cases
+            .iter()
+            .filter(|case| case.case_source == "graph_holdout")
+            .count();
 
         let mut case_rows = Vec::new();
         let mut rows_by_class = BTreeMap::<String, Vec<Value>>::new();
@@ -35927,6 +36067,7 @@ impl McpTool for MemoryBioCortexRecallExpansionSummaryTool {
                         "case_index": idx,
                         "query_hash": query_hash,
                         "class_label": class_label,
+                        "case_source": case.case_source,
                         "status": "search_error",
                         "error_kind": "memory_search_error",
                         "relevant_key_count": relevant.len(),
@@ -35988,6 +36129,7 @@ impl McpTool for MemoryBioCortexRecallExpansionSummaryTool {
                 "case_index": idx,
                 "query_hash": query_hash,
                 "class_label": class_label,
+                "case_source": case.case_source,
                 "status": status,
                 "relevant_key_count": relevant.len(),
                 "baseline_candidate_count": baseline_keys.len(),
@@ -36052,9 +36194,14 @@ impl McpTool for MemoryBioCortexRecallExpansionSummaryTool {
             "read_only": true,
             "purpose": "Read-only recall-expansion yardstick: for explicit downstream cases, measure whether baseline FTS already recalls a relevant memory and whether direct graph-neighbor expansion could recover relevant memories for baseline misses.",
             "sampling": {
-                "query_source": "explicit_cases",
+                "query_source": query_source,
                 "query_cases_count": cases.len(),
                 "invalid_query_cases": invalid_case_count,
+                "sample_graph_holdout": sample_graph_holdout,
+                "graph_holdout_sampled_count": graph_holdout_sampled_count,
+                "candidate_limit": candidate_limit,
+                "query_chars": query_chars,
+                "telemetry_top_miss_query_hashes_included": false,
                 "search_limit": limit,
                 "neighbor_limit_per_baseline_key": neighbor_limit,
             },
@@ -61681,6 +61828,93 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(!serialized.contains("tests:recall_expansion_error_target"));
         assert!(!serialized.contains("fallback target"));
         assert!(!serialized.contains("syntax error near"));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_recall_expansion_summary_samples_graph_holdout_cases() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        store
+            .memory_save(&t4_memory_record(
+                "tests:recall_expansion_sample_source",
+                "lesson",
+                "anchorphrase source memory for graph holdout sampling",
+                &[],
+                &[],
+                0,
+                0.8,
+            ))
+            .await
+            .expect("seed source");
+        store
+            .memory_save(&t4_memory_record(
+                "tests:recall_expansion_sample_target",
+                "lesson",
+                "hidden target only reachable through graph edge",
+                &[],
+                &[],
+                0,
+                0.8,
+            ))
+            .await
+            .expect("seed target");
+        store
+            .memory_link(
+                "tests:recall_expansion_sample_source",
+                "tests:recall_expansion_sample_target",
+                "relates",
+                1.0,
+            )
+            .await
+            .expect("seed edge");
+
+        let tool = MemoryBioCortexRecallExpansionSummaryTool::new(hub.clone());
+        let out = tool
+            .execute(
+                json!({
+                    "sample_graph_holdout": true,
+                    "sample_size": 5,
+                    "candidate_limit": 20,
+                    "query_chars": 80,
+                    "limit": 1,
+                    "neighbor_limit": 8
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(
+            payload["sampling"]["query_source"],
+            json!("graph_holdout_sample")
+        );
+        assert_eq!(payload["sampling"]["graph_holdout_sampled_count"], json!(1));
+        assert_eq!(
+            payload["sampling"]["telemetry_top_miss_query_hashes_included"],
+            json!(false)
+        );
+        assert_eq!(payload["metrics"]["evaluated_count"], json!(1));
+        assert_eq!(payload["metrics"]["baseline_miss_count"], json!(1));
+        assert_eq!(payload["metrics"]["graph_expansion_found_count"], json!(1));
+        assert_eq!(payload["case_rows"][0]["status"], json!("graph_expansion_found"));
+        assert_eq!(
+            payload["case_rows"][0]["case_source"],
+            json!("graph_holdout")
+        );
+        assert_eq!(payload["case_rows"][0]["raw_query_included"], json!(false));
+        assert_eq!(payload["case_rows"][0]["raw_keys_included"], json!(false));
+        assert_eq!(payload["case_rows"][0]["content_included"], json!(false));
+        assert_eq!(payload["safety"]["writes_memory"], json!(false));
+        assert_eq!(payload["safety"]["changes_search_order"], json!(false));
+
+        let serialized = serde_json::to_string(&payload).expect("serialize");
+        assert!(!serialized.contains("anchorphrase"));
+        assert!(!serialized.contains("tests:recall_expansion_sample_source"));
+        assert!(!serialized.contains("tests:recall_expansion_sample_target"));
+        assert!(!serialized.contains("hidden target"));
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
