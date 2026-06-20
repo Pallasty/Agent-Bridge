@@ -43445,17 +43445,28 @@ pub fn build_registry(hub: Hub) -> ToolRegistry {
 }
 
 /// Count tools exposed for a given toolset/client/profile without spawning MCP.
-pub fn exposed_tool_count_for(
+pub fn exposed_tool_names_for(
     toolset: Option<&str>,
     client: Option<&str>,
     profile: Option<&str>,
-) -> usize {
+) -> Vec<String> {
     build_registry_with_policy(
         Hub::builder().build(),
         ToolPolicy::from_values(toolset, client, None, profile),
     )
     .list()
-    .len()
+    .into_iter()
+    .map(|schema| schema.name)
+    .collect()
+}
+
+/// Count tools exposed for a given toolset/client/profile without spawning MCP.
+pub fn exposed_tool_count_for(
+    toolset: Option<&str>,
+    client: Option<&str>,
+    profile: Option<&str>,
+) -> usize {
+    exposed_tool_names_for(toolset, client, profile).len()
 }
 
 // ── remote session steering (agent_steer_* / agent_orchestrate_scan) ─────────

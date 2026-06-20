@@ -32,8 +32,10 @@
 //!   `UserPromptSubmit / Stop / PreCompact` hooks, so we skip the
 //!   hook scripts and Claude settings rewrite.
 
+use ab_bridge::mcp_tools;
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
+use std::collections::HashSet;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -176,7 +178,7 @@ fn setup_plan(
                 &codex_home(home).join("config.toml"),
                 true,
                 None,
-                "Merge MCP server config, enable hooks, and set Codex desktop tool environment.",
+                "Merge MCP server config, enable hooks, set Codex desktop tool environment, and sync Agent-Bridge MCP tool approvals.",
             ));
             operations.push(plan_op(
                 "codex.hooks",
@@ -193,7 +195,7 @@ fn setup_plan(
             &codex_home(home).join("config.toml"),
             true,
             None,
-            "Merge MCP server config with AGENT_BRIDGE_CODEX_HOST=cli; lifecycle hooks skipped.",
+            "Merge MCP server config with AGENT_BRIDGE_CODEX_HOST=cli, including Agent-Bridge MCP tool approvals; lifecycle hooks skipped.",
         )),
         Frontend::CodexIde => operations.push(plan_op(
             "codex.config",
@@ -201,7 +203,7 @@ fn setup_plan(
             &codex_home(home).join("config.toml"),
             true,
             None,
-            "Merge MCP server config with AGENT_BRIDGE_CODEX_HOST=ide; lifecycle hooks skipped.",
+            "Merge MCP server config with AGENT_BRIDGE_CODEX_HOST=ide, including Agent-Bridge MCP tool approvals; lifecycle hooks skipped.",
         )),
         Frontend::GeminiCli => operations.push(plan_op(
             "gemini.settings",
@@ -226,7 +228,7 @@ fn setup_plan(
                 &codex_home(home).join("config.toml"),
                 true,
                 None,
-                "Merge Codex CLI MCP config; lifecycle hooks skipped.",
+                "Merge Codex CLI MCP config, including Agent-Bridge MCP tool approvals; lifecycle hooks skipped.",
             ));
             operations.push(plan_op(
                 "gemini.settings",
@@ -1068,6 +1070,13 @@ fn merge_codex_config(
         }
     }
 
+    let tool_approval_tables = codex_tool_approval_tables(&raw, toolset);
+    let tool_approval_block = if tool_approval_tables.is_empty() {
+        String::new()
+    } else {
+        format!("\n\n{}", tool_approval_tables.join("\n\n"))
+    };
+
     let block = format!(
         r#"[mcp_servers.agent-bridge]
 command = "{}"
@@ -1078,10 +1087,11 @@ tool_timeout_sec = 300
 supports_parallel_tool_calls = false
 
 [mcp_servers.agent-bridge.env]
-{}
+{}{}
 "#,
         escape_toml_basic_string(&bin_dst.display().to_string()),
-        env_lines.join("\n")
+        env_lines.join("\n"),
+        tool_approval_block
     );
 
     let updated = replace_toml_table(&raw, "mcp_servers.agent-bridge", &block);
@@ -1102,6 +1112,93 @@ supports_parallel_tool_calls = false
     );
 
     Ok(())
+}
+
+fn codex_tool_approval_tables(raw: &str, toolset: CodexToolset) -> Vec<String> {
+    let mut tables = existing_agent_bridge_tool_tables(raw);
+    let mut seen: HashSet<String> = tables.iter().map(|(name, _)| name.clone()).collect();
+
+    for tool_name in mcp_tools::exposed_tool_names_for(
+        Some(toolset.label()),
+        Some("codex"),
+        Some(toolset.profile_label()),
+    ) {
+        if seen.insert(tool_name.clone()) {
+            tables.push((
+                tool_name.clone(),
+                format!(
+                    "[mcp_servers.agent-bridge.tools.{}]\napproval_mode = \"approve\"",
+                    toml_key_segment(&tool_name)
+                ),
+            ));
+        }
+    }
+
+    tables.into_iter().map(|(_, table)| table).collect()
+}
+
+fn existing_agent_bridge_tool_tables(raw: &str) -> Vec<(String, String)> {
+    let mut tables = Vec::new();
+    let mut current_name: Option<String> = None;
+    let mut current = String::new();
+
+    for line in raw.lines() {
+        if let Some(table) = toml_table_name(line) {
+            if let Some(name) = current_name.take() {
+                tables.push((name, current.trim_end().to_string()));
+                current.clear();
+            }
+
+            current_name = agent_bridge_tool_table_name(table);
+            if current_name.is_some() {
+                current.push_str(line);
+                current.push('\n');
+            }
+            continue;
+        }
+
+        if current_name.is_some() {
+            current.push_str(line);
+            current.push('\n');
+        }
+    }
+
+    if let Some(name) = current_name {
+        tables.push((name, current.trim_end().to_string()));
+    }
+
+    tables
+}
+
+fn agent_bridge_tool_table_name(table: &str) -> Option<String> {
+    let raw = table
+        .strip_prefix("mcp_servers.agent-bridge.tools.")?
+        .trim();
+    if raw.is_empty() || raw.contains('.') {
+        return None;
+    }
+    Some(toml_key_segment_value(raw))
+}
+
+fn toml_key_segment(key: &str) -> String {
+    if key
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        key.to_string()
+    } else {
+        format!("\"{}\"", escape_toml_basic_string(key))
+    }
+}
+
+fn toml_key_segment_value(raw: &str) -> String {
+    if raw.starts_with('"') && raw.ends_with('"') && raw.len() >= 2 {
+        raw[1..raw.len() - 1]
+            .replace("\\\"", "\"")
+            .replace("\\\\", "\\")
+    } else {
+        raw.to_string()
+    }
 }
 
 /// Read `~/.codex/hooks.json`, add Agent-Bridge lifecycle hooks if absent,
@@ -1634,7 +1731,7 @@ fn script_name_for_event(event: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        ensure_toml_bool, merge_codex_config, merge_codex_hooks, merge_cursor_settings,
+        ensure_toml_bool, mcp_tools, merge_codex_config, merge_codex_hooks, merge_cursor_settings,
         merge_gemini_settings, remove_toml_key, replace_toml_table, setup_plan, setup_state,
         write_setup_state, CodexHost, CodexToolset, Frontend, HOOK_PRECOMPACT, HOOK_SESSION_END,
     };
@@ -1903,6 +2000,76 @@ enabled = true
         assert!(out.contains("AGENT_BRIDGE_TOOLSET = \"codex-lean\""));
         assert!(out.contains("AGENT_BRIDGE_TOOL_PROFILE = \"essential\""));
         assert!(out.contains("AGENT_BRIDGE_CODEX_HOST = \"desktop\""));
+        assert!(out.contains(
+            "[mcp_servers.agent-bridge.tools.project_detect]\napproval_mode = \"approve\""
+        ));
+        assert!(out.contains(
+            "[mcp_servers.agent-bridge.tools.memory_search]\napproval_mode = \"approve\""
+        ));
+        let expected_tool_count =
+            mcp_tools::exposed_tool_count_for(Some("codex-lean"), Some("codex"), Some("essential"));
+        assert_eq!(
+            out.matches("[mcp_servers.agent-bridge.tools.").count(),
+            expected_tool_count
+        );
+
+        fs::remove_dir_all(tmp).unwrap();
+    }
+
+    #[test]
+    fn merge_codex_config_preserves_existing_agent_bridge_tool_approval() {
+        let tmp = std::env::temp_dir().join(format!(
+            "agent-bridge-codex-tool-approval-test-{}",
+            std::process::id()
+        ));
+        let codex_dir = tmp.join(".codex");
+        fs::create_dir_all(&codex_dir).unwrap();
+        fs::write(
+            codex_dir.join("config.toml"),
+            r#"model = "gpt-5.5"
+
+[mcp_servers.agent-bridge]
+command = "old"
+
+[mcp_servers.agent-bridge.env]
+AGENT_BRIDGE_TOOLSET = "codex-lean"
+
+[mcp_servers.agent-bridge.tools.project_detect]
+approval_mode = "ask"
+
+[mcp_servers.other.tools.external_tool]
+approval_mode = "ask"
+
+[plugins.example]
+enabled = true
+"#,
+        )
+        .unwrap();
+
+        merge_codex_config(
+            &tmp,
+            &tmp.join(".local/bin/agent-bridge"),
+            false,
+            CodexHost::Cli,
+            CodexToolset::Lean,
+        )
+        .unwrap();
+
+        let out = fs::read_to_string(codex_dir.join("config.toml")).unwrap();
+        assert_eq!(
+            out.matches("[mcp_servers.agent-bridge.tools.project_detect]")
+                .count(),
+            1
+        );
+        assert!(out
+            .contains("[mcp_servers.agent-bridge.tools.project_detect]\napproval_mode = \"ask\""));
+        assert!(out.contains(
+            "[mcp_servers.agent-bridge.tools.memory_search]\napproval_mode = \"approve\""
+        ));
+        assert!(out.contains(
+            "[mcp_servers.other.tools.external_tool]\napproval_mode = \"ask\""
+        ));
+        assert!(out.contains("[plugins.example]\nenabled = true"));
 
         fs::remove_dir_all(tmp).unwrap();
     }
