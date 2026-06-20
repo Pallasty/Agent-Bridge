@@ -66,7 +66,8 @@
 //! + a paraphrase-cosine readiness probe) and SKIPS semantic with a clear note
 //! rather than reporting a false R@k=0.
 
-use ab_store::{default_db_path, SqliteStore, StateStore};
+use ab_store::{default_db_path, MemoryEdge, SqliteStore, StateStore};
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 /// Query difficulty, set by how much lexical signal the paraphrase leaves for
@@ -217,6 +218,7 @@ const CORPUS: &[Case] = &[
 ];
 
 const TOP_K: usize = 10;
+const GRAPH_NEIGHBOR_LIMIT: usize = 8;
 const HASH_BACKEND_NAME: &str = "fnv1a-hash-384";
 
 /// Per-mode tallies accumulated across the corpus.
@@ -248,11 +250,80 @@ impl ModeAgg {
     }
 }
 
+/// Offline candidate-set expansion: keep baseline FTS candidates in their
+/// original order, then append direct graph neighbors that were not already
+/// present. This is a yardstick for recall headroom, not a production ranker.
+#[derive(Default)]
+struct CandidateExpansionAgg {
+    baseline_ranks: Vec<Option<usize>>,
+    ranks: Vec<Option<usize>>,
+    expanded_candidate_counts: Vec<usize>,
+    graph_neighbor_row_count: usize,
+}
+
+impl CandidateExpansionAgg {
+    fn record(
+        &mut self,
+        baseline_rank: Option<usize>,
+        expanded_rank: Option<usize>,
+        expanded_candidate_count: usize,
+        graph_neighbor_row_count: usize,
+    ) {
+        self.baseline_ranks.push(baseline_rank);
+        self.ranks.push(expanded_rank);
+        self.expanded_candidate_counts
+            .push(expanded_candidate_count);
+        self.graph_neighbor_row_count += graph_neighbor_row_count;
+    }
+}
+
+struct ExpandedCandidates {
+    keys: Vec<String>,
+    graph_neighbor_row_count: usize,
+}
+
 /// First 1-based rank at which any expected key appears in `keys`.
 fn first_hit_rank(keys: &[String], expect: &[&str]) -> Option<usize> {
     keys.iter()
         .position(|k| expect.iter().any(|e| e == k))
         .map(|i| i + 1)
+}
+
+fn graph_neighbor_key<'a>(edge: &'a MemoryEdge, source_key: &str) -> Option<&'a str> {
+    if edge.from_key == source_key {
+        Some(edge.to_key.as_str())
+    } else if edge.to_key == source_key {
+        Some(edge.from_key.as_str())
+    } else {
+        None
+    }
+}
+
+fn expand_baseline_with_graph_neighbors(
+    baseline_keys: &[String],
+    edges_by_baseline_key: &[Vec<MemoryEdge>],
+    neighbor_limit: usize,
+) -> ExpandedCandidates {
+    let mut keys = baseline_keys.to_vec();
+    let mut seen = baseline_keys.iter().cloned().collect::<BTreeSet<_>>();
+    let mut graph_neighbor_row_count = 0usize;
+
+    for (source_key, edges) in baseline_keys.iter().zip(edges_by_baseline_key) {
+        for edge in edges.iter().take(neighbor_limit) {
+            graph_neighbor_row_count += 1;
+            let Some(neighbor_key) = graph_neighbor_key(edge, source_key) else {
+                continue;
+            };
+            if seen.insert(neighbor_key.to_string()) {
+                keys.push(neighbor_key.to_string());
+            }
+        }
+    }
+
+    ExpandedCandidates {
+        keys,
+        graph_neighbor_row_count,
+    }
 }
 
 #[tokio::main]
@@ -308,10 +379,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut fts = ModeAgg::default();
     let mut hybrid = ModeAgg::default();
     let mut semantic = ModeAgg::default();
+    let mut fts_graph = CandidateExpansionAgg::default();
 
     for case in CORPUS {
         let fts_keys = keys_of(store.memory_search(case.query, &[], TOP_K as u32).await?);
-        fts.record(first_hit_rank(&fts_keys, case.expect));
+        let fts_rank = first_hit_rank(&fts_keys, case.expect);
+        fts.record(fts_rank);
+
+        let mut edges_by_fts_key = Vec::with_capacity(fts_keys.len());
+        for key in &fts_keys {
+            edges_by_fts_key.push(store.memory_neighbors(key).await.unwrap_or_default());
+        }
+        let expanded = expand_baseline_with_graph_neighbors(
+            &fts_keys,
+            &edges_by_fts_key,
+            GRAPH_NEIGHBOR_LIMIT,
+        );
+        fts_graph.record(
+            fts_rank,
+            first_hit_rank(&expanded.keys, case.expect),
+            expanded.keys.len(),
+            expanded.graph_neighbor_row_count,
+        );
 
         let hyb_keys = keys_of(
             store
@@ -343,8 +432,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if semantic_ready {
         print_mode_row("semantic", &semantic, n);
     } else {
-        println!("  {:<10} {:>7} {:>7} {:>7} {:>7}", "semantic", "—", "—", "—", "—");
+        println!(
+            "  {:<10} {:>7} {:>7} {:>7} {:>7}",
+            "semantic", "—", "—", "—", "—"
+        );
     }
+    println!();
+
+    println!("## Offline candidate expansion (FTS + direct graph neighbors)");
+    print_candidate_expansion_summary(&fts_graph, n);
+    println!(
+        "  mode contract: baseline candidates keep their FTS order; up to \
+         {GRAPH_NEIGHBOR_LIMIT} direct graph-neighbor rows per baseline candidate \
+         are appended after baseline and deduped. This does not change live \
+         memory_search candidates or ranking."
+    );
     println!();
 
     // ── Per-tier breakdown (worst-case paraphrase vs lexically-anchored) ─────
@@ -368,6 +470,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             continue;
         }
         print_tier_row("fts", &fts, &idxs, tier.label());
+        print_candidate_expansion_tier_row("fts+graph", &fts_graph, &idxs, tier.label());
         print_tier_row("hybrid", &hybrid, &idxs, tier.label());
         if semantic_ready {
             print_tier_row("semantic", &semantic, &idxs, tier.label());
@@ -376,18 +479,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // ── Per-case rank matrix (the detail the aggregate hides) ────────────────
-    println!("## Per-case first-hit rank (— = not in top {TOP_K})");
     println!(
-        "  {:<4} {:<9} {:>5} {:>7} {:>9}  {}",
-        "#", "tier", "fts", "hybrid", "semantic", "query"
+        "## Per-case first-hit rank (— = no hit; fts/hybrid/semantic are top {TOP_K}, fts+graph may be appended)"
+    );
+    println!(
+        "  {:<4} {:<9} {:>5} {:>9} {:>7} {:>9}  {}",
+        "#", "tier", "fts", "fts+graph", "hybrid", "semantic", "query"
     );
     for (i, case) in CORPUS.iter().enumerate() {
         let q: String = case.query.chars().take(34).collect();
         println!(
-            "  {:<4} {:<9} {:>5} {:>7} {:>9}  {}",
+            "  {:<4} {:<9} {:>5} {:>9} {:>7} {:>9}  {}",
             i + 1,
             case.tier.label(),
             rank_cell(fts.ranks[i]),
+            rank_cell(fts_graph.ranks[i]),
             rank_cell(hybrid.ranks[i]),
             if semantic_ready {
                 rank_cell(semantic.ranks[i])
@@ -412,6 +518,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "  hybrid misses (not in top {TOP_K}): {} case(s){}",
         hyb_miss.len(),
         fmt_idx(&hyb_miss)
+    );
+    let fts_graph_added = candidate_expansion_added_indices(&fts_graph);
+    println!(
+        "  offline fts+graph added hits over fts misses: {} case(s){}",
+        fts_graph_added.len(),
+        fmt_idx(&fts_graph_added)
     );
     if semantic_ready {
         let sem_miss = miss_indices(&semantic);
@@ -447,11 +559,10 @@ fn keys_of(hits: Vec<ab_store::MemorySearchHit>) -> Vec<String> {
 
 /// Falsification dump for one case (1-based): show the top-k of each mode with
 /// score + cosine, and mark the expected key(s).
-async fn debug_case(
-    store: &SqliteStore,
-    idx1: usize,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let case = CORPUS.get(idx1.saturating_sub(1)).ok_or("case index out of range")?;
+async fn debug_case(store: &SqliteStore, idx1: usize) -> Result<(), Box<dyn std::error::Error>> {
+    let case = CORPUS
+        .get(idx1.saturating_sub(1))
+        .ok_or("case index out of range")?;
     println!("# debug case #{idx1}");
     println!("query:  {}", case.query);
     println!("expect: {:?}\n", case.expect);
@@ -480,7 +591,10 @@ async fn debug_case(
         println!();
     };
 
-    dump("fts", &store.memory_search(case.query, &[], TOP_K as u32).await?);
+    dump(
+        "fts",
+        &store.memory_search(case.query, &[], TOP_K as u32).await?,
+    );
     dump(
         "hybrid",
         &store
@@ -496,7 +610,10 @@ async fn debug_case(
                 .await?,
         );
     } else {
-        println!("## semantic — skipped (backend {} not a confirmed real model)", backend.name());
+        println!(
+            "## semantic — skipped (backend {} not a confirmed real model)",
+            backend.name()
+        );
     }
     Ok(())
 }
@@ -513,10 +630,87 @@ fn print_mode_row(label: &str, agg: &ModeAgg, n: usize) {
     );
 }
 
+fn print_candidate_expansion_summary(agg: &CandidateExpansionAgg, n: usize) {
+    let baseline_miss_count = agg
+        .baseline_ranks
+        .iter()
+        .filter(|rank| rank.is_none())
+        .count();
+    let expanded_hit_count = agg.ranks.iter().filter(|rank| rank.is_some()).count();
+    let added_hit_count = candidate_expansion_added_indices(agg).len();
+    let rr_sum = agg
+        .ranks
+        .iter()
+        .filter_map(|rank| rank.map(|r| 1.0 / r as f64))
+        .sum::<f64>();
+    let avg_candidates = if agg.expanded_candidate_counts.is_empty() {
+        0.0
+    } else {
+        agg.expanded_candidate_counts.iter().sum::<usize>() as f64
+            / agg.expanded_candidate_counts.len() as f64
+    };
+    let added_hit_rate = if baseline_miss_count == 0 {
+        0.0
+    } else {
+        added_hit_count as f64 / baseline_miss_count as f64
+    };
+    println!(
+        "  {:<18} {:>4} {:>7} {:>7} {:>7} {:>7} {:>9} {:>9}",
+        "mode", "n", "hit", "added", "rate", "MRR", "avg_cand", "nbr_rows"
+    );
+    println!(
+        "  {:<18} {:>4} {:>7.3} {:>7} {:>7.3} {:>7.3} {:>9.2} {:>9}",
+        "fts+graph",
+        n,
+        expanded_hit_count as f64 / n as f64,
+        added_hit_count,
+        added_hit_rate,
+        rr_sum / n as f64,
+        avg_candidates,
+        agg.graph_neighbor_row_count
+    );
+}
+
 /// One row of the per-tier table: recompute R@k/MRR over just the case indices
 /// in `idxs` from the already-recorded per-case ranks.
 fn print_tier_row(mode: &str, agg: &ModeAgg, idxs: &[usize], tier: &str) {
     let (mut r1, mut r5, mut r10, mut rr) = (0u32, 0u32, 0u32, 0.0f64);
+    for &i in idxs {
+        if let Some(r) = agg.ranks[i] {
+            if r <= 1 {
+                r1 += 1;
+            }
+            if r <= 5 {
+                r5 += 1;
+            }
+            if r <= 10 {
+                r10 += 1;
+            }
+            rr += 1.0 / r as f64;
+        }
+    }
+    let nf = idxs.len() as f64;
+    println!(
+        "  {:<16} {:>4} {:>7.3} {:>7.3} {:>7.3} {:>7.3}",
+        format!("{mode}/{tier}"),
+        idxs.len(),
+        r1 as f64 / nf,
+        r5 as f64 / nf,
+        r10 as f64 / nf,
+        rr / nf,
+    );
+}
+
+fn print_candidate_expansion_tier_row(
+    mode: &str,
+    agg: &CandidateExpansionAgg,
+    idxs: &[usize],
+    tier: &str,
+) {
+    let mut r1 = 0u32;
+    let mut r5 = 0u32;
+    let mut r10 = 0u32;
+    let mut rr = 0.0f64;
     for &i in idxs {
         if let Some(r) = agg.ranks[i] {
             if r <= 1 {
@@ -558,11 +752,32 @@ fn miss_indices(agg: &ModeAgg) -> Vec<usize> {
         .collect()
 }
 
+fn candidate_expansion_added_indices(agg: &CandidateExpansionAgg) -> Vec<usize> {
+    agg.baseline_ranks
+        .iter()
+        .zip(&agg.ranks)
+        .enumerate()
+        .filter_map(|(i, (baseline, expanded))| {
+            if baseline.is_none() && expanded.is_some() {
+                Some(i + 1)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 fn fmt_idx(idx: &[usize]) -> String {
     if idx.is_empty() {
         String::new()
     } else {
-        format!(" → #{}", idx.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(", #"))
+        format!(
+            " → #{}",
+            idx.iter()
+                .map(|i| i.to_string())
+                .collect::<Vec<_>>()
+                .join(", #")
+        )
     }
 }
 
@@ -591,4 +806,56 @@ async fn confirm_real_embedder() -> bool {
         tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ab_store::MemoryEdge;
+
+    fn edge(from_key: &str, to_key: &str, weight: f64) -> MemoryEdge {
+        MemoryEdge {
+            from_key: from_key.to_string(),
+            to_key: to_key.to_string(),
+            edge_type: "relates".to_string(),
+            weight,
+        }
+    }
+
+    #[test]
+    fn offline_candidate_expansion_appends_direct_graph_neighbors_after_baseline() {
+        let baseline = vec!["source".to_string()];
+        let edges = vec![vec![edge("source", "target", 1.0)]];
+
+        let expanded = expand_baseline_with_graph_neighbors(&baseline, &edges, 8);
+
+        assert_eq!(expanded.keys, vec!["source", "target"]);
+        assert_eq!(expanded.graph_neighbor_row_count, 1);
+        assert_eq!(
+            first_hit_rank(&expanded.keys, &["target"]),
+            Some(2),
+            "the graph-only relevant key should be visible as an appended candidate"
+        );
+    }
+
+    #[test]
+    fn offline_candidate_expansion_preserves_baseline_and_dedupes_neighbors() {
+        let baseline = vec!["source".to_string(), "already_baseline".to_string()];
+        let edges = vec![
+            vec![
+                edge("source", "already_baseline", 1.0),
+                edge("source", "target", 0.9),
+                edge("source", "target", 0.8),
+            ],
+            vec![edge("already_baseline", "later", 0.7)],
+        ];
+
+        let expanded = expand_baseline_with_graph_neighbors(&baseline, &edges, 8);
+
+        assert_eq!(
+            expanded.keys,
+            vec!["source", "already_baseline", "target", "later"]
+        );
+        assert_eq!(expanded.graph_neighbor_row_count, 4);
+    }
 }

@@ -248,6 +248,30 @@ or raw errors. It also keeps the same authority boundary:
 `changes_prod_retrieval_order=false`, `writes_memory=false`, and
 `runs_biocortex=false`.
 
+The fixed `recall_eval` harness now includes the same offline candidate-set
+view as a local drift-free yardstick:
+
+```bash
+AGENT_BRIDGE_ONNX_MODEL=para-ml cargo run -p ab-bridge --example recall_eval
+```
+
+Current Linux live-store run on 2026-06-20:
+
+- baseline FTS over the 18-case fixed corpus: `R@1=0.222`, `R@5=0.611`,
+  `R@10=0.778`, `MRR=0.386`;
+- offline `fts+graph` candidate expansion: `hit=0.833`, `added=1`,
+  `added_hit_rate=0.250` over four FTS misses, `MRR=0.390`;
+- the added hit was case #9, where the relevant memory was not in FTS top 10
+  but appeared at appended candidate position 13 after direct graph-neighbor
+  expansion;
+- the example explicitly prints that baseline FTS order is preserved, graph
+  neighbors are only appended and deduped, and live `memory_search` candidates
+  or ranking are not changed.
+
+Interpretation: the current graph has a real but narrow recall-expansion signal
+on the fixed corpus. This supports further candidate-expansion experiment
+design, but it is not authorization for default retrieval influence.
+
 ## Fixture Diagnostic Example Follow-up
 
 Date: 2026-06-20
