@@ -35841,6 +35841,16 @@ fn memory_biocortex_recall_expansion_class_label(label: Option<&str>) -> String 
     }
 }
 
+fn memory_biocortex_recall_expansion_first_relevant_position(
+    ordered_keys: &[String],
+    relevant: &BTreeSet<String>,
+) -> Option<usize> {
+    ordered_keys
+        .iter()
+        .position(|key| relevant.contains(key))
+        .map(|idx| idx + 1)
+}
+
 fn memory_biocortex_recall_expansion_class_row(class_label: String, rows: &[Value]) -> Value {
     let evaluated_count = rows.len() as u64;
     let search_error_count = rows
@@ -35870,6 +35880,17 @@ fn memory_biocortex_recall_expansion_class_row(class_label: String, rows: &[Valu
         .iter()
         .map(|row| row["graph_neighbor_row_count"].as_u64().unwrap_or(0))
         .sum::<u64>();
+    let candidate_expansion_added_hit_count = rows
+        .iter()
+        .filter(|row| {
+            row["baseline_relevant_count"].as_u64().unwrap_or(0) == 0
+                && row["expanded_relevant_count"].as_u64().unwrap_or(0) > 0
+        })
+        .count() as u64;
+    let expanded_hit_count = rows
+        .iter()
+        .filter(|row| row["expanded_relevant_count"].as_u64().unwrap_or(0) > 0)
+        .count() as u64;
 
     json!({
         "class_label": class_label,
@@ -35880,6 +35901,15 @@ fn memory_biocortex_recall_expansion_class_row(class_label: String, rows: &[Valu
         "graph_expansion_found_count": graph_expansion_found_count,
         "graph_expansion_miss_count": graph_expansion_miss_count,
         "graph_neighbor_row_count": graph_neighbor_row_count,
+        "expanded_hit_count": expanded_hit_count,
+        "candidate_expansion_added_hit_count": candidate_expansion_added_hit_count,
+        "candidate_expansion_added_hit_rate": if baseline_miss_count > 0 {
+            memory_biocortex_recall_expansion_round3(
+                candidate_expansion_added_hit_count as f64 / baseline_miss_count as f64,
+            )
+        } else {
+            0.0
+        },
         "graph_expansion_found_rate": if baseline_miss_count > 0 {
             memory_biocortex_recall_expansion_round3(
                 graph_expansion_found_count as f64 / baseline_miss_count as f64,
@@ -35914,7 +35944,8 @@ impl McpTool for MemoryBioCortexRecallExpansionSummaryTool {
                 contains a relevant memory; for baseline misses, it inspects graph neighbors \
                 of the baseline candidates to estimate whether graph expansion could recover \
                 a relevant memory. It can also build a weakly-labeled graph-holdout sample \
-                from existing memory graph edges. It never runs BioCortex, writes memory, exposes raw \
+                from existing memory graph edges and report a hypothetical baseline-then-neighbor \
+                candidate set. It never runs BioCortex, writes memory, exposes raw \
                 queries/keys/content, or changes retrieval order."
                 .into(),
             input_schema: json!({
@@ -36081,6 +36112,14 @@ impl McpTool for MemoryBioCortexRecallExpansionSummaryTool {
                             "graph_neighbors",
                             &[]
                         ),
+                        "candidate_expansion_mode": "baseline_then_graph_neighbors",
+                        "expanded_candidate_count": 0,
+                        "expanded_relevant_count": 0,
+                        "expanded_first_relevant_position": Value::Null,
+                        "expanded_candidate_order_hash": memory_biocortex_order_hash(
+                            "expanded_candidates",
+                            &[]
+                        ),
                         "raw_query_included": false,
                         "raw_keys_included": false,
                         "content_included": false,
@@ -36104,6 +36143,8 @@ impl McpTool for MemoryBioCortexRecallExpansionSummaryTool {
 
             let mut graph_neighbor_row_count = 0u64;
             let mut graph_neighbor_keys = BTreeSet::<String>::new();
+            let mut graph_neighbor_ordered = Vec::<String>::new();
+            let mut graph_neighbor_seen = BTreeSet::<String>::new();
             for hit in &baseline_hits {
                 let edges = store.memory_neighbors(&hit.record.key).await.unwrap_or_default();
                 for edge in edges.into_iter().take(neighbor_limit) {
@@ -36111,13 +36152,31 @@ impl McpTool for MemoryBioCortexRecallExpansionSummaryTool {
                     if let Some(neighbor_key) =
                         memory_biocortex_recall_expansion_neighbor_key(&edge, &hit.record.key)
                     {
-                        graph_neighbor_keys.insert(neighbor_key);
+                        graph_neighbor_keys.insert(neighbor_key.clone());
+                        if graph_neighbor_seen.insert(neighbor_key.clone()) {
+                            graph_neighbor_ordered.push(neighbor_key);
+                        }
                     }
                 }
             }
 
             let graph_relevant_count =
                 relevant.intersection(&graph_neighbor_keys).count() as u64;
+            let mut expanded_keys = baseline_keys.clone();
+            let mut expanded_seen = baseline_key_set.clone();
+            for neighbor_key in &graph_neighbor_ordered {
+                if expanded_seen.insert(neighbor_key.clone()) {
+                    expanded_keys.push(neighbor_key.clone());
+                }
+            }
+            let expanded_key_set = expanded_keys.iter().cloned().collect::<BTreeSet<_>>();
+            let expanded_relevant_count =
+                relevant.intersection(&expanded_key_set).count() as u64;
+            let expanded_first_relevant_position =
+                memory_biocortex_recall_expansion_first_relevant_position(
+                    &expanded_keys,
+                    &relevant,
+                );
             let status = if baseline_relevant_count > 0 {
                 "baseline_hit"
             } else if graph_relevant_count > 0 {
@@ -36141,6 +36200,14 @@ impl McpTool for MemoryBioCortexRecallExpansionSummaryTool {
                 "graph_neighbor_order_hash": memory_biocortex_order_hash(
                     "graph_neighbors",
                     &graph_neighbor_keys.iter().cloned().collect::<Vec<_>>()
+                ),
+                "candidate_expansion_mode": "baseline_then_graph_neighbors",
+                "expanded_candidate_count": expanded_keys.len(),
+                "expanded_relevant_count": expanded_relevant_count,
+                "expanded_first_relevant_position": expanded_first_relevant_position,
+                "expanded_candidate_order_hash": memory_biocortex_order_hash(
+                    "expanded_candidates",
+                    &expanded_keys
                 ),
                 "raw_query_included": false,
                 "raw_keys_included": false,
@@ -36181,6 +36248,17 @@ impl McpTool for MemoryBioCortexRecallExpansionSummaryTool {
             .iter()
             .map(|row| row["graph_neighbor_row_count"].as_u64().unwrap_or(0))
             .sum::<u64>();
+        let expanded_hit_count = case_rows
+            .iter()
+            .filter(|row| row["expanded_relevant_count"].as_u64().unwrap_or(0) > 0)
+            .count() as u64;
+        let candidate_expansion_added_hit_count = case_rows
+            .iter()
+            .filter(|row| {
+                row["baseline_relevant_count"].as_u64().unwrap_or(0) == 0
+                    && row["expanded_relevant_count"].as_u64().unwrap_or(0) > 0
+            })
+            .count() as u64;
         let class_aggregates = rows_by_class
             .into_iter()
             .map(|(class_label, rows)| {
@@ -36192,7 +36270,7 @@ impl McpTool for MemoryBioCortexRecallExpansionSummaryTool {
             "schema": MEMORY_BIOCORTEX_RECALL_EXPANSION_SUMMARY_SCHEMA,
             "generated_at": unix_now_secs(),
             "read_only": true,
-            "purpose": "Read-only recall-expansion yardstick: for explicit downstream cases, measure whether baseline FTS already recalls a relevant memory and whether direct graph-neighbor expansion could recover relevant memories for baseline misses.",
+            "purpose": "Read-only recall-expansion yardstick: for explicit downstream cases, measure whether baseline FTS already recalls a relevant memory and whether direct graph-neighbor expansion could recover relevant memories for baseline misses. It also reports an offline baseline-then-neighbor candidate set without changing production candidates or ranking.",
             "sampling": {
                 "query_source": query_source,
                 "query_cases_count": cases.len(),
@@ -36213,6 +36291,15 @@ impl McpTool for MemoryBioCortexRecallExpansionSummaryTool {
                 "graph_expansion_found_count": graph_expansion_found_count,
                 "graph_expansion_miss_count": graph_expansion_miss_count,
                 "graph_neighbor_row_count": graph_neighbor_row_count,
+                "expanded_hit_count": expanded_hit_count,
+                "candidate_expansion_added_hit_count": candidate_expansion_added_hit_count,
+                "candidate_expansion_added_hit_rate": if baseline_miss_count > 0 {
+                    memory_biocortex_recall_expansion_round3(
+                        candidate_expansion_added_hit_count as f64 / baseline_miss_count as f64,
+                    )
+                } else {
+                    0.0
+                },
                 "graph_expansion_found_rate": if baseline_miss_count > 0 {
                     memory_biocortex_recall_expansion_round3(
                         graph_expansion_found_count as f64 / baseline_miss_count as f64,
@@ -36242,9 +36329,11 @@ impl McpTool for MemoryBioCortexRecallExpansionSummaryTool {
                 "changes_prod_retrieval_order": false,
                 "writes_state": false,
                 "default_search_order_change_allowed": false,
+                "changes_candidate_set_now": false,
             },
             "interpretation": {
                 "baseline_misses_have_graph_expansion_signal": graph_expansion_found_count > 0,
+                "candidate_expansion_has_added_hit_signal": candidate_expansion_added_hit_count > 0,
                 "runtime_influence_ready": false,
                 "next_gate": "inspect_redacted_recall_expansion_evidence_before_any_candidate-expansion_experiment",
             },
@@ -61746,7 +61835,29 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert_eq!(payload["metrics"]["evaluated_count"], json!(1));
         assert_eq!(payload["metrics"]["baseline_miss_count"], json!(1));
         assert_eq!(payload["metrics"]["graph_expansion_found_count"], json!(1));
+        assert_eq!(
+            payload["metrics"]["candidate_expansion_added_hit_count"],
+            json!(1)
+        );
+        assert_eq!(
+            payload["metrics"]["candidate_expansion_added_hit_rate"],
+            json!(1.0)
+        );
         assert_eq!(payload["case_rows"][0]["status"], json!("graph_expansion_found"));
+        assert_eq!(
+            payload["case_rows"][0]["candidate_expansion_mode"],
+            json!("baseline_then_graph_neighbors")
+        );
+        assert_eq!(payload["case_rows"][0]["expanded_candidate_count"], json!(2));
+        assert_eq!(payload["case_rows"][0]["expanded_relevant_count"], json!(1));
+        assert_eq!(
+            payload["case_rows"][0]["expanded_first_relevant_position"],
+            json!(2)
+        );
+        assert_eq!(
+            payload["class_aggregates"][0]["candidate_expansion_added_hit_count"],
+            json!(1)
+        );
         assert_eq!(payload["class_aggregates"][0]["class_label"], json!("graph_recall"));
         assert_eq!(
             payload["class_aggregates"][0]["graph_expansion_found_count"],
@@ -61899,7 +62010,21 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert_eq!(payload["metrics"]["evaluated_count"], json!(1));
         assert_eq!(payload["metrics"]["baseline_miss_count"], json!(1));
         assert_eq!(payload["metrics"]["graph_expansion_found_count"], json!(1));
+        assert_eq!(
+            payload["metrics"]["candidate_expansion_added_hit_count"],
+            json!(1)
+        );
         assert_eq!(payload["case_rows"][0]["status"], json!("graph_expansion_found"));
+        assert_eq!(
+            payload["case_rows"][0]["candidate_expansion_mode"],
+            json!("baseline_then_graph_neighbors")
+        );
+        assert_eq!(payload["case_rows"][0]["expanded_candidate_count"], json!(2));
+        assert_eq!(payload["case_rows"][0]["expanded_relevant_count"], json!(1));
+        assert_eq!(
+            payload["case_rows"][0]["expanded_first_relevant_position"],
+            json!(2)
+        );
         assert_eq!(
             payload["case_rows"][0]["case_source"],
             json!("graph_holdout")

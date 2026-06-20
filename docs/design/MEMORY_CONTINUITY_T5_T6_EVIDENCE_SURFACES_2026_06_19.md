@@ -223,6 +223,31 @@ existing graph structure contains recoverable neighbors for baseline misses. Do
 not use it to approve edge materialization, default search-order changes, or
 BioCortex influence; those still require the separate review and T6 gates.
 
+## Recall-Expansion Candidate Set Evaluation
+
+Date: 2026-06-20
+
+`memory_biocortex_recall_expansion_summary` also reports an offline candidate
+set view named `baseline_then_graph_neighbors`. For each case, the report
+constructs a hypothetical redacted candidate list by keeping baseline FTS
+candidates first and appending direct graph-neighbor candidates that are not
+already in baseline. It then returns only aggregate/count/hash fields:
+
+- `expanded_candidate_count`;
+- `expanded_relevant_count`;
+- `expanded_first_relevant_position`;
+- `expanded_candidate_order_hash`;
+- aggregate `expanded_hit_count`, `candidate_expansion_added_hit_count`, and
+  `candidate_expansion_added_hit_rate`.
+
+This is still a yardstick, not an online ranking policy. The position field is
+the position in the hypothetical appended list, not a scored production rank.
+The surface does not expose raw queries, keys, candidate contents, edge payloads,
+or raw errors. It also keeps the same authority boundary:
+`changes_candidate_set_now=false`, `changes_search_order=false`,
+`changes_prod_retrieval_order=false`, `writes_memory=false`, and
+`runs_biocortex=false`.
+
 ## Fixture Diagnostic Example Follow-up
 
 Date: 2026-06-20
