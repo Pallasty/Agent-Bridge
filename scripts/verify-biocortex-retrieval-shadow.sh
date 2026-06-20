@@ -6925,6 +6925,22 @@ run cargo run -q -p ab-bridge \
     --format json \
     --assert-ready-for-world-verdict-rewrite-gate \
     --assert-read-only >/dev/null
+run cargo test -p ab-bridge --test lswr_interaction_feedback_fixture \
+    interaction_feedback_runtime_executor_world_verdict_rewrite_gate_preflight \
+    -- --nocapture
+run cargo run -q -p ab-bridge \
+    --example lswr_interaction_feedback_runtime_executor_world_verdict_rewrite_gate_preflight_smoke \
+    -- \
+    --format json \
+    --assert-blocked-without-world-verdict-rewrite-gate-decision \
+    --assert-read-only >/dev/null
+run cargo run -q -p ab-bridge \
+    --example lswr_interaction_feedback_runtime_executor_world_verdict_rewrite_gate_preflight_smoke \
+    -- \
+    --with-world-verdict-rewrite-gate-decision \
+    --format json \
+    --assert-ready-for-world-verdict-rewrite-execution \
+    --assert-read-only >/dev/null
 
 current_corpus="crates/bridge/tests/fixtures/biocortex_retrieval_gate_corpus.jsonl"
 hard_corpus="crates/bridge/tests/fixtures/biocortex_retrieval_gate_hard_holdout_corpus.jsonl"

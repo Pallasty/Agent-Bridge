@@ -2,7 +2,7 @@
 
 Date: 2026-06-18
 
-Status: Draft implementation spec
+Status: ACCEPTED_G16_DURABLE_OUTCOME_RECORD_WRITE_EVIDENCE_REVIEW_PREFLIGHT_ONLY
 
 ## 1. Purpose
 
@@ -134,3 +134,6 @@ Still not accepted:
 The next safe slice is an explicit world-verdict rewrite gate. It must consume
 the accepted G16 output and still require an explicit gate decision before
 changing a world verdict.
+
+- [Runtime executor world-verdict rewrite gate preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_WORLD_VERDICT_REWRITE_GATE_PREFLIGHT_2026_06_20.md)
+- [Runtime executor world-verdict rewrite gate preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_WORLD_VERDICT_REWRITE_GATE_PREFLIGHT_ACCEPTANCE_2026_06_20.md)

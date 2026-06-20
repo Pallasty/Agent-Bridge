@@ -2,7 +2,7 @@
 
 Date: 2026-06-18
 
-Status: Draft acceptance notes
+Status: ACCEPTED_G16_DURABLE_OUTCOME_RECORD_WRITE_EVIDENCE_REVIEW_PREFLIGHT_ONLY
 
 ## 1. Required Checks
 
@@ -12,7 +12,7 @@ Focused fixture:
 cargo test -p ab-bridge --test lswr_interaction_feedback_fixture interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_review_preflight -- --nocapture
 ```
 
-Expected:
+Observed:
 
 - missing review decision blocks with
   `explicit_durable_outcome_record_write_evidence_review_decision_required`;
@@ -26,7 +26,7 @@ Expected:
 Blocked smoke:
 
 ```text
-cargo run -q -p ab-bridge --example lswr_interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_review_preflight_smoke -- --format json --assert-blocked-without-durable-outcome-record-write-evidence-review --assert-read-only
+cargo run -q -p ab-bridge --example lswr_interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_review_preflight_smoke -- --format json --assert-blocked-without-durable-outcome-record-write-evidence-review-decision --assert-read-only
 ```
 
 Ready smoke:
@@ -35,7 +35,7 @@ Ready smoke:
 cargo run -q -p ab-bridge --example lswr_interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_review_preflight_smoke -- --with-durable-outcome-record-write-evidence-review --format json --assert-ready-for-world-verdict-rewrite-gate --assert-read-only
 ```
 
-Expected ready fields:
+Observed ready fields:
 
 - `durable_outcome_record_write_evidence_review_preflight_verdict=ready_for_world_verdict_rewrite_gate`;
 - `next_allowed_gate=world_verdict_rewrite_gate`;
@@ -66,3 +66,6 @@ The critical distinction is:
 The next safe slice is the explicit world-verdict rewrite gate. It must require
 its own gate decision and must not infer verdict rewrite solely from durable
 write evidence or write-evidence review.
+
+- [Runtime executor world-verdict rewrite gate preflight](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_WORLD_VERDICT_REWRITE_GATE_PREFLIGHT_2026_06_20.md)
+- [Runtime executor world-verdict rewrite gate preflight acceptance](LIVE_SEMANTIC_WORLD_RUNTIME_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_WORLD_VERDICT_REWRITE_GATE_PREFLIGHT_ACCEPTANCE_2026_06_20.md)

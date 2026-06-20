@@ -22,6 +22,7 @@ use ab_bridge::lswr_interaction_feedback::{
     build_interaction_feedback_runtime_executor_patch_executor_invocation_preflight,
     build_interaction_feedback_runtime_executor_patch_runtime_application_evidence_preflight,
     build_interaction_feedback_runtime_executor_post_apply_verification_preflight,
+    build_interaction_feedback_runtime_executor_world_verdict_rewrite_gate_preflight,
     build_interaction_feedback_semantic_patch_draft,
     build_interaction_feedback_validation_envelope,
     render_interaction_feedback_consumption_preflight_report,
@@ -46,6 +47,7 @@ use ab_bridge::lswr_interaction_feedback::{
     render_interaction_feedback_runtime_executor_patch_executor_invocation_preflight,
     render_interaction_feedback_runtime_executor_patch_runtime_application_evidence_preflight,
     render_interaction_feedback_runtime_executor_post_apply_verification_preflight,
+    render_interaction_feedback_runtime_executor_world_verdict_rewrite_gate_preflight,
     render_interaction_feedback_semantic_patch_draft,
     render_interaction_feedback_validation_envelope, validate_interaction_feedback_fixture,
     LSWR_INTERACTION_FEEDBACK_ARGUMENT_CONTEXT_SCHEMA,
@@ -74,6 +76,7 @@ use ab_bridge::lswr_interaction_feedback::{
     LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_EXECUTOR_INVOCATION_PREFLIGHT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_RUNTIME_APPLICATION_EVIDENCE_PREFLIGHT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_POST_APPLY_VERIFICATION_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_WORLD_VERDICT_REWRITE_GATE_PREFLIGHT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_SEMANTIC_PATCH_DRAFT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_VALIDATION_ENVELOPE_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_VALIDATION_SCHEMA,
@@ -93,6 +96,7 @@ use ab_bridge::lswr_interaction_feedback::{
     LSWR_RUNTIME_EXECUTOR_PATCH_EXECUTOR_INVOCATION_DECISION_SCHEMA,
     LSWR_RUNTIME_EXECUTOR_PATCH_RUNTIME_APPLICATION_EVIDENCE_SCHEMA,
     LSWR_RUNTIME_EXECUTOR_POST_APPLY_VERIFICATION_EVIDENCE_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_WORLD_VERDICT_REWRITE_GATE_DECISION_SCHEMA,
 };
 use serde_json::{json, Value};
 
@@ -5221,6 +5225,230 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_r
 }
 
 #[test]
+fn interaction_feedback_runtime_executor_world_verdict_rewrite_gate_preflight_blocks_without_gate_decision(
+) {
+    let review_preflight =
+        ready_runtime_executor_durable_outcome_record_write_evidence_review_preflight();
+    let gate_preflight =
+        build_interaction_feedback_runtime_executor_world_verdict_rewrite_gate_preflight(
+            &review_preflight,
+        );
+    let markdown =
+        render_interaction_feedback_runtime_executor_world_verdict_rewrite_gate_preflight(
+            &gate_preflight,
+        );
+
+    assert_eq!(
+        gate_preflight["schema"],
+        LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_WORLD_VERDICT_REWRITE_GATE_PREFLIGHT_SCHEMA
+    );
+    assert_eq!(
+        gate_preflight["input_kind"],
+        "runtime_executor_durable_outcome_record_write_evidence_review_preflight"
+    );
+    assert_eq!(
+        gate_preflight["source_durable_outcome_record_write_evidence_review_preflight_verdict"],
+        "ready_for_world_verdict_rewrite_gate"
+    );
+    assert_eq!(
+        gate_preflight["world_verdict_rewrite_gate_decision_schema"],
+        Value::Null
+    );
+    assert_eq!(
+        gate_preflight["world_verdict_rewrite_gate_preflight_verdict"],
+        "blocked"
+    );
+    assert_eq!(
+        gate_preflight["reason"],
+        "explicit_world_verdict_rewrite_gate_decision_required"
+    );
+    assert_runtime_executor_world_verdict_rewrite_gate_preflight_read_only(&gate_preflight);
+
+    assert!(markdown.contains("- world_verdict_rewrite_gate_preflight_verdict: `blocked`"));
+    assert!(markdown.contains("- ready_for_world_verdict_rewrite_execution: `false`"));
+}
+
+#[test]
+fn interaction_feedback_runtime_executor_world_verdict_rewrite_gate_preflight_accepts_explicit_gate(
+) {
+    let review_preflight =
+        ready_runtime_executor_durable_outcome_record_write_evidence_review_preflight();
+    let gate_preflight =
+        build_interaction_feedback_runtime_executor_world_verdict_rewrite_gate_preflight(
+            &json!({
+                "durable_outcome_record_write_evidence_review_preflight": review_preflight,
+                "world_verdict_rewrite_gate_decision": explicit_world_verdict_rewrite_gate_decision()
+            }),
+        );
+    let markdown =
+        render_interaction_feedback_runtime_executor_world_verdict_rewrite_gate_preflight(
+            &gate_preflight,
+        );
+
+    assert_eq!(
+        gate_preflight["world_verdict_rewrite_gate_decision_schema"],
+        LSWR_RUNTIME_EXECUTOR_WORLD_VERDICT_REWRITE_GATE_DECISION_SCHEMA
+    );
+    assert_eq!(
+        gate_preflight["world_verdict_rewrite_gate_preflight_verdict"],
+        "ready_for_world_verdict_rewrite_execution",
+        "failure_reasons={}",
+        gate_preflight["failure_reasons"]
+    );
+    assert_eq!(gate_preflight["status"], "ready");
+    assert_eq!(gate_preflight["failure_reasons"], json!([]));
+    assert_eq!(
+        gate_preflight["world_verdict_rewrite_gate"]["rewrite_gate_decision_id"],
+        "world_verdict_rewrite_gate_arrival_bath_move_002"
+    );
+    assert_eq!(
+        gate_preflight["world_verdict_rewrite_gate"]["source_world_verdict"],
+        "not_verified"
+    );
+    assert_eq!(
+        gate_preflight["world_verdict_rewrite_gate"]["target_world_verdict"],
+        "verified"
+    );
+    assert_eq!(
+        gate_preflight["world_verdict_rewrite_gate"]["ready_for_world_verdict_rewrite_execution"],
+        true
+    );
+    assert_eq!(
+        gate_preflight["world_verdict_rewrite_gate"]["world_verdict_rewrite_performed_by_this_tool"],
+        false
+    );
+    assert_eq!(
+        gate_preflight["next_allowed_gate"],
+        "world_verdict_rewrite_execution"
+    );
+    assert_runtime_executor_world_verdict_rewrite_gate_preflight_read_only(&gate_preflight);
+
+    assert!(markdown.contains(
+        "- world_verdict_rewrite_gate_preflight_verdict: `ready_for_world_verdict_rewrite_execution`"
+    ));
+    assert!(markdown.contains("- target_world_verdict: `verified`"));
+    assert!(markdown.contains("- world_verdict_rewrite_performed_by_this_tool: `false`"));
+}
+
+#[test]
+fn interaction_feedback_runtime_executor_world_verdict_rewrite_gate_preflight_blocks_bad_gate(
+) {
+    let review_preflight =
+        ready_runtime_executor_durable_outcome_record_write_evidence_review_preflight();
+    let mut gate = explicit_world_verdict_rewrite_gate_decision();
+    gate["gate_kind"] = json!("operator_note");
+    gate["decision"] = json!("rewrite_now");
+    gate["source_world_verdict"] = json!("verified");
+    gate["target_world_verdict"] = json!("not_verified");
+    gate["source_world_verdict_rewrite_gate_scope"]["review_decision_id"] =
+        json!("other_review");
+    gate["durable_outcome_record_write_confirmed"] = json!(false);
+    gate["write_evidence_review_confirmed"] = json!(false);
+    gate["world_verdict_transition_authorized"] = json!(false);
+    gate["source_world_verdict_confirmed"] = json!(false);
+    gate["target_world_verdict_confirmed"] = json!(false);
+    gate["reviewer_attestation_present"] = json!(false);
+    gate["world_verdict_rewrite_allowed"] = json!(true);
+    gate["world_verdict_rewrite_performed_by_this_tool"] = json!(true);
+    gate["durable_outcome_record_written_by_this_tool"] = json!(true);
+    gate["outcome_ingestion_allowed"] = json!(true);
+    gate["memory_write_allowed"] = json!(true);
+
+    let gate_preflight =
+        build_interaction_feedback_runtime_executor_world_verdict_rewrite_gate_preflight(
+            &json!({
+                "durable_outcome_record_write_evidence_review_preflight": review_preflight,
+                "world_verdict_rewrite_gate_decision": gate
+            }),
+        );
+
+    assert_eq!(
+        gate_preflight["world_verdict_rewrite_gate_preflight_verdict"],
+        "blocked"
+    );
+    let failure_reasons = gate_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons");
+    assert!(failure_reasons.contains(&json!("world_verdict_rewrite_gate_kind_required")));
+    assert!(failure_reasons.contains(&json!(
+        "world_verdict_rewrite_gate_decision_not_approved"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "world_verdict_rewrite_gate_must_start_from_not_verified"
+    )));
+    assert!(failure_reasons.contains(&json!("world_verdict_rewrite_gate_requires_verified_target")));
+    assert!(failure_reasons.contains(&json!(
+        "world_verdict_rewrite_gate_requires_write_confirmation"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "world_verdict_rewrite_gate_requires_write_evidence_review_confirmation"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "world_verdict_rewrite_gate_requires_transition_authorization"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "world_verdict_rewrite_gate_requires_source_verdict_confirmation"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "world_verdict_rewrite_gate_requires_target_verdict_confirmation"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "world_verdict_rewrite_gate_requires_reviewer_attestation"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "world_verdict_rewrite_gate_must_not_allow_ingestion"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "world_verdict_rewrite_gate_must_not_allow_memory_write"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "world_verdict_rewrite_gate_must_not_rewrite_verdict"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "world_verdict_rewrite_gate_must_not_rewrite_by_this_tool"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "world_verdict_rewrite_gate_must_not_write_by_this_tool"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "world_verdict_rewrite_gate_review_decision_scope_mismatch"
+    )));
+    assert_runtime_executor_world_verdict_rewrite_gate_preflight_read_only(&gate_preflight);
+}
+
+#[test]
+fn interaction_feedback_runtime_executor_world_verdict_rewrite_gate_preflight_requires_review_input(
+) {
+    let write_evidence_preflight =
+        ready_runtime_executor_durable_outcome_record_write_evidence_preflight();
+    let gate_preflight =
+        build_interaction_feedback_runtime_executor_world_verdict_rewrite_gate_preflight(
+            &json!({
+                "durable_outcome_record_write_evidence_review_preflight": write_evidence_preflight,
+                "world_verdict_rewrite_gate_decision": explicit_world_verdict_rewrite_gate_decision()
+            }),
+        );
+
+    assert_eq!(
+        gate_preflight["source_schema"],
+        LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_EVIDENCE_PREFLIGHT_SCHEMA
+    );
+    assert_eq!(
+        gate_preflight["world_verdict_rewrite_gate_preflight_verdict"],
+        "blocked"
+    );
+    assert_eq!(
+        gate_preflight["reason"],
+        "runtime_executor_durable_outcome_record_write_evidence_review_preflight_required"
+    );
+    assert_eq!(
+        gate_preflight["source_durable_outcome_record_write_evidence_review_preflight"],
+        Value::Null
+    );
+    assert_runtime_executor_world_verdict_rewrite_gate_preflight_read_only(&gate_preflight);
+}
+
+#[test]
 fn interaction_feedback_validator_reports_tampered_fixture() {
     let mut fixture = fixture();
     fixture["events"][5]["refs"]["cause_event_id"] = json!("missing_event");
@@ -6017,6 +6245,68 @@ fn explicit_durable_outcome_record_write_evidence_review_decision() -> Value {
         "outcome_ingestion_allowed": false,
         "memory_write_allowed": false,
         "world_verdict_rewrite_allowed": false,
+        "durable_outcome_record_written_by_this_tool": false
+    })
+}
+
+fn ready_runtime_executor_durable_outcome_record_write_evidence_review_preflight() -> Value {
+    build_interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_review_preflight(
+        &json!({
+            "durable_outcome_record_write_evidence_preflight": ready_runtime_executor_durable_outcome_record_write_evidence_preflight(),
+            "durable_outcome_record_write_evidence_review_decision": explicit_durable_outcome_record_write_evidence_review_decision()
+        }),
+    )
+}
+
+fn explicit_world_verdict_rewrite_gate_decision() -> Value {
+    json!({
+        "schema": LSWR_RUNTIME_EXECUTOR_WORLD_VERDICT_REWRITE_GATE_DECISION_SCHEMA,
+        "rewrite_gate_decision_id": "world_verdict_rewrite_gate_arrival_bath_move_002",
+        "gate_kind": "world_verdict_rewrite_gate",
+        "source_world_verdict_rewrite_gate_scope": {
+            "review_decision_id": "durable_outcome_record_write_evidence_review_arrival_bath_move_002",
+            "write_evidence_id": "durable_outcome_record_write_evidence_arrival_bath_move_002",
+            "store_write_execution_id": "durable_outcome_record_store_write_execution_arrival_bath_move_002",
+            "persistence_id": "durable_outcome_record_persistence_arrival_bath_move_002",
+            "record_write_execution_id": "durable_outcome_record_write_execution_arrival_bath_move_002",
+            "record_write_id": "durable_outcome_record_write_arrival_bath_move_002",
+            "write_implementation_id": "durable_outcome_write_impl_arrival_bath_move_002",
+            "execution_id": "durable_outcome_ingestion_execution_arrival_bath_move_002",
+            "gate_id": "durable_outcome_ingestion_gate_arrival_bath_move_002",
+            "review_id": "outcome_ingestion_review_arrival_bath_move_002",
+            "verification_id": "post_apply_verification_arrival_bath_move_002",
+            "runtime_application_evidence_id": "runtime_application_evidence_arrival_bath_move_002",
+            "source_invocation_request_id": "patch_executor_invocation_arrival_bath_move_002",
+            "world_id": "onsen_live_session",
+            "branch_id": "main",
+            "runtime_generation": "runtime_gen_1284",
+            "patch_id": "patch_arrival_bath_move_002",
+            "outcome_record_candidate_id": "outcome_record_candidate_arrival_bath_move_002",
+            "outcome_record_schema": "agent_bridge.lswr.outcome_record_candidate.v0",
+            "idempotency_key": "onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_ingestion_review_arrival_bath_move_002",
+            "outcome_payload_digest": "sha256:arrival-bath-move-002-outcome-payload",
+            "write_plan_id": "durable_outcome_write_plan_arrival_bath_move_002",
+            "write_destination": "agent_bridge_store_outcome_records",
+            "outcome_record_key": "onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_record_candidate_arrival_bath_move_002",
+            "outcome_record_digest": "sha256:arrival-bath-move-002-outcome-record",
+            "persisted_outcome_record_key": "onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_record_candidate_arrival_bath_move_002",
+            "persisted_outcome_record_digest": "sha256:arrival-bath-move-002-outcome-record"
+        },
+        "decision": "approved_for_world_verdict_rewrite_execution",
+        "gate_reason": "reviewed_durable_write_evidence_supports_later_verified_rewrite_execution",
+        "source_world_verdict": "not_verified",
+        "target_world_verdict": "verified",
+        "reviewed_write_evidence_review_preflight_verdict": "ready_for_world_verdict_rewrite_gate",
+        "durable_outcome_record_write_confirmed": true,
+        "write_evidence_review_confirmed": true,
+        "world_verdict_transition_authorized": true,
+        "source_world_verdict_confirmed": true,
+        "target_world_verdict_confirmed": true,
+        "reviewer_attestation_present": true,
+        "world_verdict_rewrite_allowed": false,
+        "world_verdict_rewrite_performed_by_this_tool": false,
+        "outcome_ingestion_allowed": false,
+        "memory_write_allowed": false,
         "durable_outcome_record_written_by_this_tool": false
     })
 }
@@ -7631,6 +7921,89 @@ fn assert_runtime_executor_durable_outcome_record_write_evidence_review_prefligh
     );
     assert_eq!(
         preflight["agent_action_contract"]["require_separate_world_verdict_rewrite_gate"],
+        true
+    );
+}
+
+fn assert_runtime_executor_world_verdict_rewrite_gate_preflight_read_only(preflight: &Value) {
+    assert_eq!(preflight["writes_state"], false);
+    assert_eq!(preflight["store_access_required"], false);
+    assert_eq!(preflight["mcp_tool_registered"], false);
+    assert_eq!(
+        preflight["world_verdict_rewrite_gate_preflight_performed_by_this_tool"],
+        true
+    );
+    assert_eq!(
+        preflight["world_verdict_rewrite_performed_by_this_tool"],
+        false
+    );
+    assert_eq!(
+        preflight["durable_outcome_record_written_by_this_tool"],
+        false
+    );
+    assert_eq!(
+        preflight["durable_outcome_ingestion_performed_by_this_tool"],
+        false
+    );
+    assert_eq!(preflight["guardrails"]["read_only"], true);
+    assert_eq!(preflight["guardrails"]["mutation_surface"], "none");
+    assert_eq!(preflight["guardrails"]["writes_state"], false);
+    assert_eq!(preflight["guardrails"]["store_access_required"], false);
+    assert_eq!(preflight["guardrails"]["mcp_tool_registered"], false);
+    assert_eq!(
+        preflight["guardrails"]
+            ["requires_ready_durable_outcome_record_write_evidence_review_preflight"],
+        true
+    );
+    assert_eq!(
+        preflight["guardrails"]["requires_explicit_world_verdict_rewrite_gate_decision"],
+        true
+    );
+    assert_eq!(
+        preflight["guardrails"]["performs_world_verdict_rewrite_gate_preflight"],
+        true
+    );
+    assert_eq!(
+        preflight["guardrails"]["world_verdict_rewrite_allowed"],
+        false
+    );
+    assert_eq!(
+        preflight["guardrails"]["world_verdict_rewrite_performed_by_this_tool"],
+        false
+    );
+    assert_eq!(preflight["guardrails"]["memory_write_allowed"], false);
+    assert_eq!(preflight["guardrails"]["outcome_ingestion_allowed"], false);
+    assert_eq!(preflight["guardrails"]["persists_outcome_record"], false);
+    assert_eq!(
+        preflight["guardrails"]["feedback_changes_world_verdict_allowed"],
+        false
+    );
+    assert_eq!(
+        preflight["world_verdict_rewrite_gate"]["world_verdict_rewrite_allowed"],
+        false
+    );
+    assert_eq!(
+        preflight["world_verdict_rewrite_gate"]["world_verdict_rewrite_performed_by_this_tool"],
+        false
+    );
+    assert_eq!(
+        preflight["world_verdict_rewrite_gate"]["memory_write_allowed"],
+        false
+    );
+    assert_eq!(
+        preflight["world_verdict_rewrite_gate"]["outcome_ingestion_allowed"],
+        false
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_rewrite_world_verdict"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_persist_outcome_record"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["require_separate_world_verdict_rewrite_execution"],
         true
     );
 }
