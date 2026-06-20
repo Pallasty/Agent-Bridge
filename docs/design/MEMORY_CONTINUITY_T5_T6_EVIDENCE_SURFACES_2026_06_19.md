@@ -738,6 +738,14 @@ append-only private audit row, and still sets
 route can make graph topology durable, but it still does not grant BioCortex
 runtime influence or production retrieval-order authority.
 
+The approved-plan surface is idempotence-aware after apply. It preserves
+`approved_pair_count` as the count of approved review decisions, but computes
+`would_write_edges` only for approved edges not already present in the live
+memory graph. Already materialized links are marked with
+`already_materialized=true`, `materialization_status=already_materialized`, and
+are counted in `already_materialized_edge_count`; pending writeable links are
+counted in `pending_materialization_edge_count`.
+
 ## Verification
 
 Targeted validation for this slice after `/Data` space was recovered:

@@ -1518,6 +1518,98 @@ fn palace_materialization_approved_edge_plan_for_inbox(inbox: &Value) -> Value {
     })
 }
 
+async fn palace_materialization_approved_edge_plan_mark_existing_edges(
+    store: &dyn StateStore,
+    mut plan: Value,
+) -> std::result::Result<Value, String> {
+    let mut approved_pair_count = 0usize;
+    let mut already_materialized_edge_count = 0usize;
+    let mut would_write_edges = 0usize;
+    let mut neighbor_cache = BTreeMap::new();
+
+    if let Some(links) = plan.get_mut("links").and_then(Value::as_array_mut) {
+        approved_pair_count = links.len();
+        for link in links {
+            let from_key = link
+                .get("from_key")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .unwrap_or("")
+                .to_string();
+            let to_key = link
+                .get("to_key")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .unwrap_or("")
+                .to_string();
+            let edge_type = normalize_palace_materialization_edge_type(
+                link.get("edge_type").and_then(Value::as_str),
+            );
+
+            let already_materialized =
+                if from_key.is_empty() || to_key.is_empty() || edge_type.is_empty() {
+                    false
+                } else {
+                    if !neighbor_cache.contains_key(&from_key) {
+                        let edges = store.memory_neighbors(&from_key).await.map_err(|e| {
+                            format!("load existing materialization edges for {from_key}: {e}")
+                        })?;
+                        neighbor_cache.insert(from_key.clone(), edges);
+                    }
+                    neighbor_cache
+                        .get(&from_key)
+                        .into_iter()
+                        .flatten()
+                        .any(|edge| {
+                            edge.from_key == from_key
+                                && edge.to_key == to_key
+                                && edge.edge_type == edge_type
+                        })
+                };
+
+            if let Some(obj) = link.as_object_mut() {
+                obj.insert(
+                    "already_materialized".to_string(),
+                    json!(already_materialized),
+                );
+                obj.insert(
+                    "materialization_status".to_string(),
+                    json!(if already_materialized {
+                        "already_materialized"
+                    } else {
+                        "pending"
+                    }),
+                );
+                obj.insert("would_write_edge".to_string(), json!(!already_materialized));
+            }
+
+            if already_materialized {
+                already_materialized_edge_count += 1;
+            } else {
+                would_write_edges += 1;
+            }
+        }
+    }
+
+    if let Some(obj) = plan.as_object_mut() {
+        obj.insert(
+            "approved_pair_count".to_string(),
+            json!(approved_pair_count),
+        );
+        obj.insert("would_write_edges".to_string(), json!(would_write_edges));
+        obj.insert(
+            "already_materialized_edge_count".to_string(),
+            json!(already_materialized_edge_count),
+        );
+        obj.insert(
+            "pending_materialization_edge_count".to_string(),
+            json!(would_write_edges),
+        );
+    }
+
+    Ok(plan)
+}
+
 fn palace_materialization_approved_edges_from_plan(
     plan: &Value,
 ) -> Vec<PalaceMaterializationApprovedEdge> {
@@ -1525,6 +1617,8 @@ fn palace_materialization_approved_edges_from_plan(
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
+        .filter(|link| link.get("already_materialized").and_then(Value::as_bool) != Some(true))
+        .filter(|link| link.get("would_write_edge").and_then(Value::as_bool) != Some(false))
         .filter_map(|link| {
             let from_key = link.get("from_key").and_then(Value::as_str)?.trim();
             let to_key = link.get("to_key").and_then(Value::as_str)?.trim();
@@ -1557,6 +1651,14 @@ fn palace_materialization_approved_edge_apply_gate_for_plan(
     confirm: Option<&str>,
 ) -> Value {
     let links = palace_materialization_approved_edges_from_plan(plan);
+    let approved_pair_count = plan
+        .get("approved_pair_count")
+        .and_then(Value::as_u64)
+        .unwrap_or(links.len() as u64);
+    let already_materialized_edge_count = plan
+        .get("already_materialized_edge_count")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
     let confirmation_required = !dry_run && !links.is_empty();
     let confirmation_matches = confirm
         .map(str::trim)
@@ -1573,8 +1675,10 @@ fn palace_materialization_approved_edge_apply_gate_for_plan(
         "confirm_phrase": PALACE_MATERIALIZATION_APPROVED_EDGE_APPLY_CONFIRM,
         "confirmation_required": confirmation_required,
         "confirmation_matches": confirmation_matches,
-        "approved_pair_count": links.len(),
+        "approved_pair_count": approved_pair_count,
         "would_write_edges": links.len(),
+        "already_materialized_edge_count": already_materialized_edge_count,
+        "pending_materialization_edge_count": links.len(),
         "writes_memory": false,
         "writes_edges": false,
         "changes_search_order": false,
@@ -2669,7 +2773,7 @@ async fn api_materialization_review_artifact(
 }
 
 async fn api_materialization_review_approved_plan(
-    State(_s): State<AppState>,
+    State(s): State<AppState>,
 ) -> Result<Json<Value>, (StatusCode, String)> {
     let packet_path = default_palace_materialization_review_packet_path();
     let packet = load_default_palace_materialization_review_packet(&packet_path)
@@ -2682,7 +2786,17 @@ async fn api_materialization_review_approved_plan(
         )
     })?;
     let inbox = palace_materialization_review_decision_inbox_for_packet(&packet, &decisions);
-    let mut plan = palace_materialization_approved_edge_plan_for_inbox(&inbox);
+    let mut plan = palace_materialization_approved_edge_plan_mark_existing_edges(
+        s.store.as_ref(),
+        palace_materialization_approved_edge_plan_for_inbox(&inbox),
+    )
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("mark existing materialization edges: {e}"),
+        )
+    })?;
     let apply_audit_path = default_palace_materialization_approved_edge_apply_path();
     let apply_records = load_palace_materialization_approved_edge_apply_records(&apply_audit_path)
         .map_err(|e| {
@@ -2740,7 +2854,17 @@ async fn api_materialization_review_apply(
         )
     })?;
     let inbox = palace_materialization_review_decision_inbox_for_packet(&packet, &decisions);
-    let mut plan = palace_materialization_approved_edge_plan_for_inbox(&inbox);
+    let mut plan = palace_materialization_approved_edge_plan_mark_existing_edges(
+        s.store.as_ref(),
+        palace_materialization_approved_edge_plan_for_inbox(&inbox),
+    )
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("mark existing materialization edges: {e}"),
+        )
+    })?;
     if let Some(obj) = plan.as_object_mut() {
         obj.insert(
             "packet_path".to_string(),
@@ -6820,7 +6944,7 @@ mod tests {
             );
 
             let Json(live) = api_materialization_review_apply(
-                State(state),
+                State(state.clone()),
                 Json(MaterializationApprovedEdgeApplyRequest {
                     dry_run: Some(false),
                     confirm: Some(PALACE_MATERIALIZATION_APPROVED_EDGE_APPLY_CONFIRM.to_string()),
@@ -6847,6 +6971,17 @@ mod tests {
                         && edge.edge_type == "relates"
                 }),
                 "expected live materialization apply to write the relates edge; got {neighbors:?}"
+            );
+
+            let Json(post_apply_plan) = api_materialization_review_approved_plan(State(state))
+                .await
+                .expect("post-apply approved plan");
+            assert_eq!(post_apply_plan["approved_pair_count"], json!(1));
+            assert_eq!(post_apply_plan["would_write_edges"], json!(0));
+            assert_eq!(post_apply_plan["already_materialized_edge_count"], json!(1));
+            assert_eq!(
+                post_apply_plan["links"][0]["materialization_status"],
+                json!("already_materialized")
             );
         });
 
