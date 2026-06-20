@@ -25,6 +25,7 @@ use ab_bridge::lswr_interaction_feedback::{
     LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_EXECUTOR_INVOCATION_PREFLIGHT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_RUNTIME_APPLICATION_EVIDENCE_PREFLIGHT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_POST_APPLY_VERIFICATION_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_APPLY_GATE_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_EXECUTION_COMMIT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_EXECUTION_PREFLIGHT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_GATE_SCHEMA,
@@ -48,6 +49,7 @@ use ab_bridge::lswr_interaction_feedback::{
     LSWR_RUNTIME_EXECUTOR_PATCH_EXECUTOR_INVOCATION_DECISION_SCHEMA,
     LSWR_RUNTIME_EXECUTOR_PATCH_RUNTIME_APPLICATION_EVIDENCE_SCHEMA,
     LSWR_RUNTIME_EXECUTOR_POST_APPLY_VERIFICATION_EVIDENCE_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_APPLY_DECISION_SCHEMA,
     LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_DECISION_SCHEMA,
     LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_EXECUTION_COMMIT_DECISION_SCHEMA,
     LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_EXECUTION_DECISION_SCHEMA,
@@ -75,6 +77,7 @@ use ab_bridge::lswr_interaction_feedback::{
     build_interaction_feedback_runtime_executor_patch_executor_invocation_preflight,
     build_interaction_feedback_runtime_executor_patch_runtime_application_evidence_preflight,
     build_interaction_feedback_runtime_executor_post_apply_verification_preflight,
+    build_interaction_feedback_runtime_executor_verified_outcome_ingestion_apply_gate,
     build_interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_commit,
     build_interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_preflight,
     build_interaction_feedback_runtime_executor_verified_outcome_ingestion_gate,
@@ -103,6 +106,7 @@ use ab_bridge::lswr_interaction_feedback::{
     render_interaction_feedback_runtime_executor_patch_executor_invocation_preflight,
     render_interaction_feedback_runtime_executor_patch_runtime_application_evidence_preflight,
     render_interaction_feedback_runtime_executor_post_apply_verification_preflight,
+    render_interaction_feedback_runtime_executor_verified_outcome_ingestion_apply_gate,
     render_interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_commit,
     render_interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_preflight,
     render_interaction_feedback_runtime_executor_verified_outcome_ingestion_gate,
@@ -6271,6 +6275,253 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_co
 }
 
 #[test]
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_apply_gate_blocks_without_decision()
+ {
+    let commit = ready_runtime_executor_verified_outcome_ingestion_execution_commit();
+    let apply =
+        build_interaction_feedback_runtime_executor_verified_outcome_ingestion_apply_gate(&commit);
+    let markdown =
+        render_interaction_feedback_runtime_executor_verified_outcome_ingestion_apply_gate(&apply);
+
+    assert_eq!(
+        apply["schema"],
+        LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_APPLY_GATE_SCHEMA
+    );
+    assert_eq!(
+        apply["input_kind"],
+        "runtime_executor_verified_outcome_ingestion_execution_commit"
+    );
+    assert_eq!(
+        apply["source_verified_outcome_ingestion_execution_commit_verdict"],
+        "ready_for_verified_outcome_ingestion_apply"
+    );
+    assert_eq!(
+        apply["verified_outcome_ingestion_apply_decision_schema"],
+        Value::Null
+    );
+    assert_eq!(apply["verified_outcome_ingestion_apply_verdict"], "blocked");
+    assert_eq!(apply["status"], "blocked");
+    assert_eq!(
+        apply["reason"],
+        "explicit_verified_outcome_ingestion_apply_decision_required"
+    );
+    assert_eq!(
+        apply["verified_outcome_ingestion_apply"]["ready_for_verified_outcome_ingestion_writer"],
+        false
+    );
+    assert_runtime_executor_verified_outcome_ingestion_apply_gate_output_only(&apply);
+
+    assert!(markdown.contains("- verified_outcome_ingestion_apply_verdict: `blocked`"));
+    assert!(markdown.contains("- ready_for_verified_outcome_ingestion_writer: `false`"));
+}
+
+#[test]
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_apply_gate_accepts_explicit_decision()
+ {
+    let commit = ready_runtime_executor_verified_outcome_ingestion_execution_commit();
+    let apply =
+        build_interaction_feedback_runtime_executor_verified_outcome_ingestion_apply_gate(&json!({
+            "verified_outcome_ingestion_execution_commit": commit,
+            "verified_outcome_ingestion_apply_decision":
+                explicit_verified_outcome_ingestion_apply_decision()
+        }));
+    let markdown =
+        render_interaction_feedback_runtime_executor_verified_outcome_ingestion_apply_gate(&apply);
+
+    assert_eq!(
+        apply["schema"],
+        LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_APPLY_GATE_SCHEMA
+    );
+    assert_eq!(
+        apply["verified_outcome_ingestion_apply_decision_schema"],
+        LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_APPLY_DECISION_SCHEMA
+    );
+    assert_eq!(
+        apply["verified_outcome_ingestion_apply_verdict"],
+        "ready_for_verified_outcome_ingestion_writer",
+        "failure_reasons={}",
+        apply["failure_reasons"]
+    );
+    assert_eq!(apply["status"], "ready");
+    assert_eq!(
+        apply["reason"],
+        "verified_outcome_ingestion_apply_ready_for_writer"
+    );
+    assert_eq!(apply["failure_reasons"], json!([]));
+    assert_eq!(
+        apply["verified_outcome_ingestion_apply"]["apply_decision_id"],
+        "verified_outcome_ingestion_apply_arrival_bath_move_002"
+    );
+    assert_eq!(
+        apply["verified_outcome_ingestion_apply"]["commit_decision_id"],
+        "verified_outcome_ingestion_execution_commit_arrival_bath_move_002"
+    );
+    assert_eq!(
+        apply["verified_outcome_ingestion_apply"]["previous_world_verdict"],
+        "not_verified"
+    );
+    assert_eq!(
+        apply["verified_outcome_ingestion_apply"]["verified_world_verdict"],
+        "verified"
+    );
+    assert_eq!(
+        apply["verified_outcome_ingestion_apply"]["ready_for_verified_outcome_ingestion_writer"],
+        true
+    );
+    assert_eq!(
+        apply["next_allowed_gate"],
+        "verified_outcome_ingestion_writer"
+    );
+    assert_runtime_executor_verified_outcome_ingestion_apply_gate_output_only(&apply);
+
+    assert!(markdown.contains(
+        "- verified_outcome_ingestion_apply_verdict: `ready_for_verified_outcome_ingestion_writer`"
+    ));
+    assert!(markdown.contains("- previous_world_verdict: `not_verified`"));
+    assert!(markdown.contains("- verified_world_verdict: `verified`"));
+}
+
+#[test]
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_apply_gate_blocks_bad_decision()
+{
+    let commit = ready_runtime_executor_verified_outcome_ingestion_execution_commit();
+    let mut decision = explicit_verified_outcome_ingestion_apply_decision();
+    decision["decision_kind"] = json!("operator_note");
+    decision["decision"] = json!("write_now");
+    decision["source_world_verdict"] = json!("verified");
+    decision["verified_world_verdict"] = json!("not_verified");
+    decision["reviewed_verified_outcome_ingestion_execution_commit_verdict"] = json!("blocked");
+    decision["commit_package_confirmed"] = json!(false);
+    decision["execution_preflight_package_confirmed"] = json!(false);
+    decision["verified_outcome_package_confirmed"] = json!(false);
+    decision["reviewer_attestation_present"] = json!(false);
+    decision["evidence_lineage_preserved"] = json!(false);
+    decision["outcome_record_digest_confirmed"] = json!(false);
+    decision["idempotency_key_confirmed"] = json!(false);
+    decision["persisted_key_confirmed"] = json!(false);
+    decision["persisted_digest_confirmed"] = json!(false);
+    decision["writer_boundary_acknowledged"] = json!(false);
+    decision["outcome_ingestion_allowed_by_this_tool"] = json!(true);
+    decision["memory_write_allowed"] = json!(true);
+    decision["verified_outcome_ingested_by_this_tool"] = json!(true);
+    decision["durable_outcome_record_written_by_this_tool"] = json!(true);
+    decision["world_verdict_persisted_by_this_tool"] = json!(true);
+    decision["source_verified_outcome_ingestion_execution_commit_scope"]["commit_decision_id"] =
+        json!("other_commit");
+    decision["source_verified_outcome_ingestion_execution_commit_scope"]["outcome_record_digest"] =
+        json!("sha256:other");
+
+    let apply =
+        build_interaction_feedback_runtime_executor_verified_outcome_ingestion_apply_gate(&json!({
+            "verified_outcome_ingestion_execution_commit": commit,
+            "verified_outcome_ingestion_apply_decision": decision
+        }));
+
+    assert_eq!(apply["verified_outcome_ingestion_apply_verdict"], "blocked");
+    let failure_reasons = apply["failure_reasons"]
+        .as_array()
+        .expect("failure reasons");
+    assert!(failure_reasons.contains(&json!(
+        "verified_outcome_ingestion_apply_decision_kind_required"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "verified_outcome_ingestion_apply_decision_not_approved"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "verified_outcome_ingestion_apply_source_must_be_not_verified"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "verified_outcome_ingestion_apply_verdict_must_be_verified"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "verified_outcome_ingestion_apply_must_review_ready_g20_commit"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "verified_outcome_ingestion_apply_requires_commit_package"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "verified_outcome_ingestion_apply_requires_preflight_package"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "verified_outcome_ingestion_apply_requires_verified_package"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "verified_outcome_ingestion_apply_requires_reviewer_attestation"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "verified_outcome_ingestion_apply_requires_evidence_lineage"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "verified_outcome_ingestion_apply_requires_outcome_record_digest"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "verified_outcome_ingestion_apply_requires_idempotency"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "verified_outcome_ingestion_apply_requires_persisted_key"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "verified_outcome_ingestion_apply_requires_persisted_digest"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "verified_outcome_ingestion_apply_requires_writer_boundary"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "verified_outcome_ingestion_apply_must_not_allow_ingestion_by_this_tool"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "verified_outcome_ingestion_apply_must_not_allow_memory_write"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "verified_outcome_ingestion_apply_must_not_ingest_outcome"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "verified_outcome_ingestion_apply_must_not_write_outcome_record"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "verified_outcome_ingestion_apply_must_not_persist_verdict"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "verified_outcome_ingestion_apply_commit_decision_scope_mismatch"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "verified_outcome_ingestion_apply_digest_scope_mismatch"
+    )));
+    assert_runtime_executor_verified_outcome_ingestion_apply_gate_output_only(&apply);
+}
+
+#[test]
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_apply_gate_requires_commit() {
+    let execution_preflight =
+        ready_runtime_executor_verified_outcome_ingestion_execution_preflight();
+    let apply =
+        build_interaction_feedback_runtime_executor_verified_outcome_ingestion_apply_gate(&json!({
+            "verified_outcome_ingestion_execution_commit": execution_preflight,
+            "verified_outcome_ingestion_apply_decision":
+                explicit_verified_outcome_ingestion_apply_decision()
+        }));
+
+    assert_eq!(
+        apply["input_kind"],
+        "verified_outcome_ingestion_execution_commit_with_apply_decision_wrapper"
+    );
+    assert_eq!(
+        apply["source_schema"],
+        LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_EXECUTION_PREFLIGHT_SCHEMA
+    );
+    assert_eq!(apply["verified_outcome_ingestion_apply_verdict"], "blocked");
+    assert_eq!(
+        apply["reason"],
+        "runtime_executor_verified_outcome_ingestion_execution_commit_required"
+    );
+    assert_eq!(
+        apply["source_verified_outcome_ingestion_execution_commit"],
+        Value::Null
+    );
+    assert_runtime_executor_verified_outcome_ingestion_apply_gate_output_only(&apply);
+}
+
+#[test]
 fn interaction_feedback_validator_reports_tampered_fixture() {
     let mut fixture = fixture();
     fixture["events"][5]["refs"]["cause_event_id"] = json!("missing_event");
@@ -7302,6 +7553,66 @@ fn explicit_verified_outcome_ingestion_execution_commit_decision() -> Value {
         "persisted_digest_confirmed": true,
         "apply_boundary_acknowledged": true,
         "outcome_ingestion_allowed": false,
+        "memory_write_allowed": false,
+        "verified_outcome_ingested_by_this_tool": false,
+        "durable_outcome_record_written_by_this_tool": false,
+        "world_verdict_persisted_by_this_tool": false
+    })
+}
+
+fn ready_runtime_executor_verified_outcome_ingestion_execution_commit() -> Value {
+    build_interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_commit(
+        &json!({
+            "verified_outcome_ingestion_execution_preflight":
+                ready_runtime_executor_verified_outcome_ingestion_execution_preflight(),
+            "verified_outcome_ingestion_execution_commit_decision":
+                explicit_verified_outcome_ingestion_execution_commit_decision()
+        }),
+    )
+}
+
+fn explicit_verified_outcome_ingestion_apply_decision() -> Value {
+    json!({
+        "schema": LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_APPLY_DECISION_SCHEMA,
+        "apply_decision_id": "verified_outcome_ingestion_apply_arrival_bath_move_002",
+        "decision_kind": "verified_outcome_ingestion_apply",
+        "source_verified_outcome_ingestion_execution_commit_scope": {
+            "commit_decision_id": "verified_outcome_ingestion_execution_commit_arrival_bath_move_002",
+            "source_execution_decision_id": "verified_outcome_ingestion_execution_arrival_bath_move_002",
+            "source_ingestion_decision_id": "verified_outcome_ingestion_arrival_bath_move_002",
+            "source_rewrite_decision_id": "world_verdict_rewrite_arrival_bath_move_002",
+            "source_review_decision_id": "durable_outcome_record_write_evidence_review_arrival_bath_move_002",
+            "write_evidence_id": "durable_outcome_record_write_evidence_arrival_bath_move_002",
+            "world_id": "onsen_live_session",
+            "branch_id": "main",
+            "runtime_generation": "runtime_gen_1284",
+            "patch_id": "patch_arrival_bath_move_002",
+            "outcome_record_candidate_id": "outcome_record_candidate_arrival_bath_move_002",
+            "outcome_record_schema": "agent_bridge.lswr.outcome_record_candidate.v0",
+            "idempotency_key": "onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_ingestion_review_arrival_bath_move_002",
+            "outcome_payload_digest": "sha256:arrival-bath-move-002-outcome-payload",
+            "write_destination": "agent_bridge_store_outcome_records",
+            "outcome_record_key": "onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_record_candidate_arrival_bath_move_002",
+            "outcome_record_digest": "sha256:arrival-bath-move-002-outcome-record",
+            "persisted_outcome_record_key": "onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_record_candidate_arrival_bath_move_002",
+            "persisted_outcome_record_digest": "sha256:arrival-bath-move-002-outcome-record"
+        },
+        "decision": "approved_for_verified_outcome_ingestion_writer",
+        "apply_reason": "verified_outcome_ingestion_execution_commit_is_scoped_and_ready_for_separate_writer",
+        "source_world_verdict": "not_verified",
+        "verified_world_verdict": "verified",
+        "reviewed_verified_outcome_ingestion_execution_commit_verdict": "ready_for_verified_outcome_ingestion_apply",
+        "commit_package_confirmed": true,
+        "execution_preflight_package_confirmed": true,
+        "verified_outcome_package_confirmed": true,
+        "reviewer_attestation_present": true,
+        "evidence_lineage_preserved": true,
+        "outcome_record_digest_confirmed": true,
+        "idempotency_key_confirmed": true,
+        "persisted_key_confirmed": true,
+        "persisted_digest_confirmed": true,
+        "writer_boundary_acknowledged": true,
+        "outcome_ingestion_allowed_by_this_tool": false,
         "memory_write_allowed": false,
         "verified_outcome_ingested_by_this_tool": false,
         "durable_outcome_record_written_by_this_tool": false,
@@ -9189,6 +9500,77 @@ fn assert_runtime_executor_verified_outcome_ingestion_execution_commit_output_on
     );
     assert_eq!(
         commit["agent_action_contract"]["require_separate_verified_outcome_ingestion_apply"],
+        true
+    );
+}
+
+fn assert_runtime_executor_verified_outcome_ingestion_apply_gate_output_only(apply: &Value) {
+    assert_eq!(apply["writes_state"], false);
+    assert_eq!(apply["store_access_required"], false);
+    assert_eq!(apply["mcp_tool_registered"], false);
+    assert_eq!(
+        apply["verified_outcome_ingestion_apply_gate_performed_by_this_tool"],
+        true
+    );
+    assert_eq!(
+        apply["verified_outcome_ingestion_performed_by_this_tool"],
+        false
+    );
+    assert_eq!(apply["verified_outcome_ingested_by_this_tool"], false);
+    assert_eq!(apply["world_verdict_persisted_by_this_tool"], false);
+    assert_eq!(apply["durable_outcome_record_written_by_this_tool"], false);
+    assert_eq!(
+        apply["durable_outcome_ingestion_performed_by_this_tool"],
+        false
+    );
+    assert_eq!(apply["guardrails"]["read_only"], true);
+    assert_eq!(apply["guardrails"]["mutation_surface"], "output_only");
+    assert_eq!(apply["guardrails"]["writes_state"], false);
+    assert_eq!(apply["guardrails"]["store_access_required"], false);
+    assert_eq!(apply["guardrails"]["mcp_tool_registered"], false);
+    assert_eq!(
+        apply["guardrails"]["requires_ready_verified_outcome_ingestion_execution_commit"],
+        true
+    );
+    assert_eq!(
+        apply["guardrails"]["requires_explicit_verified_outcome_ingestion_apply_decision"],
+        true
+    );
+    assert_eq!(
+        apply["guardrails"]["performs_verified_outcome_ingestion_apply_gate"],
+        true
+    );
+    assert_eq!(
+        apply["guardrails"]["performs_verified_outcome_ingestion"],
+        false
+    );
+    assert_eq!(apply["guardrails"]["persists_world_verdict"], false);
+    assert_eq!(apply["guardrails"]["durable_outcome_record_written"], false);
+    assert_eq!(apply["guardrails"]["memory_write_allowed"], false);
+    assert_eq!(
+        apply["guardrails"]["outcome_ingestion_allowed_by_this_tool"],
+        false
+    );
+    assert_eq!(apply["guardrails"]["persists_outcome_record"], false);
+    assert_eq!(
+        apply["agent_action_contract"]["may_execute_verified_outcome_ingestion_by_this_tool"],
+        false
+    );
+    assert_eq!(
+        apply["agent_action_contract"]["do_not_ingest_outcome"],
+        true
+    );
+    assert_eq!(apply["agent_action_contract"]["do_not_write_memory"], true);
+    assert_eq!(
+        apply["agent_action_contract"]["do_not_persist_world_verdict"],
+        true
+    );
+    assert_eq!(
+        apply["agent_action_contract"]["do_not_persist_outcome_record"],
+        true
+    );
+    assert_eq!(
+        apply["agent_action_contract"]["require_separate_verified_outcome_ingestion_writer"],
         true
     );
 }
