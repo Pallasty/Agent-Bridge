@@ -986,6 +986,15 @@ fn palace_json_bool_at(value: &Value, path: &[&str]) -> bool {
     current.as_bool().unwrap_or(false)
 }
 
+fn palace_materialization_review_candidate_has_write_signal(candidate: &Value) -> bool {
+    palace_json_bool_at(candidate, &["writes_memory"])
+        || palace_json_bool_at(candidate, &["writes_edges"])
+        || palace_json_bool_at(candidate, &["changes_search_order"])
+        || palace_json_bool_at(candidate, &["can_change_retrieval_order"])
+        || palace_json_bool_at(candidate, &["approval_writes_allowed"])
+        || palace_json_bool_at(candidate, &["can_materialize_edges"])
+}
+
 fn load_palace_materialization_review_packet(path: &FsPath) -> Result<Value, String> {
     let raw = fs::read_to_string(path)
         .map_err(|e| format!("read materialization review packet {}: {e}", path.display()))?;
@@ -1006,6 +1015,20 @@ fn load_palace_materialization_review_packet(path: &FsPath) -> Result<Value, Str
         || palace_json_bool_at(&packet, &["can_change_retrieval_order"])
         || palace_json_bool_at(&packet, &["approval_writes_allowed"])
         || palace_json_bool_at(&packet, &["can_materialize_edges"])
+    {
+        return Err(format!(
+            "materialization review packet at {} is not read-only",
+            path.display()
+        ));
+    }
+    if packet
+        .get("candidates")
+        .and_then(Value::as_array)
+        .is_some_and(|candidates| {
+            candidates
+                .iter()
+                .any(palace_materialization_review_candidate_has_write_signal)
+        })
     {
         return Err(format!(
             "materialization review packet at {} is not read-only",
@@ -5371,6 +5394,41 @@ mod tests {
             }
             None => std::env::remove_var("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON"),
         }
+    }
+
+    #[test]
+    fn palace_materialization_review_packet_rejects_write_capable_candidate() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let packet_path = dir.path().join("materialization-review-packet.json");
+        std::fs::write(
+            &packet_path,
+            serde_json::to_vec_pretty(&json!({
+                "schema": "agent_bridge.biocortex_retrieval.materialization_review_packet.v0",
+                "read_only": true,
+                "writes_memory": false,
+                "writes_edges": false,
+                "changes_search_order": false,
+                "can_change_retrieval_order": false,
+                "approval_writes_allowed": false,
+                "can_materialize_edges": false,
+                "candidates": [{
+                    "from_key": "from_a",
+                    "to_key": "to_b",
+                    "edge_type": "relates",
+                    "writes_memory": true,
+                    "changes_search_order": false
+                }]
+            }))
+            .expect("serialize packet fixture"),
+        )
+        .expect("write packet fixture");
+
+        let err = load_palace_materialization_review_packet(&packet_path)
+            .expect_err("write-capable candidate must be rejected");
+        assert!(
+            err.contains("not read-only"),
+            "unexpected error message: {err}"
+        );
     }
 
     #[test]

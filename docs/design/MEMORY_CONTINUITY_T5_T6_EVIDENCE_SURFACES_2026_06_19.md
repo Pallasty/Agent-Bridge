@@ -627,6 +627,8 @@ loads a packet JSON, validates the hard read-only boundary
 `changes_search_order=false`, `can_change_retrieval_order=false`,
 `approval_writes_allowed=false`, `can_materialize_edges=false`), and exposes
 summary/questions/candidate evidence through the existing Palace review panel.
+The route also rejects packets whose candidate rows carry write-capable or
+retrieval-order-changing flags, even when the packet-level boundary is read-only.
 
 ## Verification
 
