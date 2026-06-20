@@ -207,7 +207,9 @@ per-case rows: observed fixture FTS rank, current baseline source rank,
 reordered source rank, rank delta, reciprocal-rank delta, side-signal match
 count, coverage, whether the ordering changed, source/accept-set side-signal
 rank and score, top-side relevance, distinct side-score count, and top-score tie
-count.
+count. It also prints adapter-input saturation fields: current adapter query
+term count, distinct overlap count, top-overlap tie count, distinct competition
+spike count, and top-spike tie count.
 
 Current source-run result on this Mac:
 
@@ -222,7 +224,21 @@ Current source-run result on this Mac:
     tied;
   - cases #3 and #6 each had 11 candidates tied at the top score;
   - case #5 had 19 candidates tied at the top score;
-  - in the hard cases, `top_rel=false` despite full side-signal coverage.
+  - in the hard cases, `top_rel=false` despite full side-signal coverage;
+- the saturation now localizes inside the adapter before AB blending:
+  - current adapter tokenization leaves the Chinese-heavy queries with only
+    1-3 ASCII terms (`qterm=1` for cases #1/#2/#4/#5);
+  - cases #1/#2/#4 also tie at the overlap stage (`overlap_tie` equals all
+    candidates) and the competition stage (`spike_tie` equals all candidates).
+
+Rejected probe: a local-only `biocortex-rs` adapter experiment added CJK
+bigram/trigram terms. It reduced ties (`distinct` rose to 5-13 in the hard
+cases), but did not improve relevance: the same fixture returned
+`verdict=no_lift`, `mrr_lift=0.0`, `improved=0`, `unchanged=7`. The probe was
+not kept in the verification checkout. Conclusion: tokenization alone makes the
+lexical proxy less saturated, but it still ranks the wrong memories. The next
+useful fix is Track B: feed real AB memory graph/co-retrieval edge evidence into
+the side-signal adapter instead of relying on query-candidate lexical overlap.
 
 Interpretation: this is still not strong enough for T6 runtime influence. The
 useful next scoring work is to inspect why high-coverage side signals mostly
@@ -232,7 +248,8 @@ is first-hit over the accept set, while `baseline_rank_of_source` tracks the
 first listed primary source key. Case #4 demonstrates the difference: the
 accept-set hit exists, but the primary source key is absent from the baseline
 candidate list. Do not loosen T6 based on this; improve side-signal score
-normalization/discrimination first.
+normalization/discrimination first, and treat graph-evidence integration as the
+likely scoring fix rather than a pure tokenizer tweak.
 
 ## Verification
 

@@ -23,6 +23,7 @@ use ab_store::{
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_json::Value;
+use std::cmp::Ordering;
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
@@ -137,6 +138,7 @@ fn load_fixture(path: &PathBuf) -> Result<Fixture> {
 struct SideSignalCaseRow {
     sample_index: usize,
     class_label: String,
+    query_term_count: usize,
     baseline_source_rank: Option<usize>,
     baseline_first_relevant_rank: Option<usize>,
     reordered_source_rank: Option<usize>,
@@ -149,8 +151,25 @@ struct SideSignalCaseRow {
     top_side_score: Option<f32>,
     distinct_side_scores: usize,
     top_score_tie_count: usize,
+    distinct_overlaps: usize,
+    top_overlap_tie_count: usize,
+    distinct_competition_spikes: usize,
+    top_spike_tie_count: usize,
     matched: usize,
     coverage: f64,
+}
+
+#[derive(Debug)]
+struct SideScoreRecord {
+    candidate_key: String,
+    score: f32,
+    evidence: SideEvidence,
+}
+
+#[derive(Debug, Default)]
+struct SideEvidence {
+    overlap: Option<f32>,
+    competition_spikes: Option<usize>,
 }
 
 async fn analyze_side_signal(
@@ -195,22 +214,27 @@ async fn analyze_side_signal(
             .into_iter()
             .filter(|row| row.query_id == "q_runtime_shadow")
             .filter(|row| candidate_keys.contains(row.candidate_key.as_str()))
-            .map(|row| (row.candidate_key, row.score))
+            .map(|row| SideScoreRecord {
+                candidate_key: row.candidate_key,
+                score: row.score,
+                evidence: parse_side_evidence(row.evidence.as_deref()),
+            })
             .collect::<Vec<_>>();
         side_scores.sort_by(|a, b| {
-            b.1.partial_cmp(&a.1)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| a.0.cmp(&b.0))
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(Ordering::Equal)
+                .then_with(|| a.candidate_key.cmp(&b.candidate_key))
         });
         let side_by_key = side_scores
             .iter()
-            .map(|(key, score)| (key.as_str(), *score))
+            .map(|row| (row.candidate_key.as_str(), row.score))
             .collect::<HashMap<_, _>>();
         let side_signal_scores = side_scores
             .iter()
-            .map(|(candidate_key, score)| BioCortexRetrievalOptInSideSignal {
-                candidate_key: candidate_key.clone(),
-                score: *score,
+            .map(|row| BioCortexRetrievalOptInSideSignal {
+                candidate_key: row.candidate_key.clone(),
+                score: row.score,
             })
             .collect::<Vec<_>>();
         let (reordered_hits, summary, _) = ab_store::biocortex_opt_in_apply_side_signal(
@@ -228,38 +252,61 @@ async fn analyze_side_signal(
         let source_side_rank = source_key.and_then(|source| {
             side_scores
                 .iter()
-                .position(|(key, _)| key == source)
+                .position(|row| row.candidate_key == source)
                 .map(|pos| pos + 1)
         });
         let source_side_score = source_key.and_then(|source| side_by_key.get(source).copied());
         let (best_relevant_side_rank, best_relevant_side_score) = side_scores
             .iter()
             .enumerate()
-            .find(|(_, (key, _))| relevant.contains(key))
-            .map(|(idx, (_, score))| (Some(idx + 1), Some(*score)))
+            .find(|(_, row)| relevant.contains(&row.candidate_key))
+            .map(|(idx, row)| (Some(idx + 1), Some(row.score)))
             .unwrap_or((None, None));
         let top_side_relevant = side_scores
             .first()
-            .map(|(key, _)| relevant.contains(key))
+            .map(|row| relevant.contains(&row.candidate_key))
             .unwrap_or(false);
-        let top_side_score = side_scores.first().map(|(_, score)| *score);
-        let distinct_side_scores = side_scores
-            .iter()
-            .fold(Vec::<f32>::new(), |mut acc, (_, score)| {
-                if !acc
-                    .iter()
-                    .any(|existing| (*existing - *score).abs() < f32::EPSILON)
-                {
-                    acc.push(*score);
-                }
-                acc
-            })
-            .len();
+        let top_side_score = side_scores.first().map(|row| row.score);
+        let distinct_side_scores =
+            distinct_f32_values(side_scores.iter().map(|row| Some(row.score)));
         let top_score_tie_count = top_side_score
             .map(|top| {
                 side_scores
                     .iter()
-                    .filter(|(_, score)| (*score - top).abs() < f32::EPSILON)
+                    .filter(|row| (row.score - top).abs() < f32::EPSILON)
+                    .count()
+            })
+            .unwrap_or(0);
+        let distinct_overlaps =
+            distinct_f32_values(side_scores.iter().map(|row| row.evidence.overlap));
+        let top_overlap = side_scores
+            .iter()
+            .filter_map(|row| row.evidence.overlap)
+            .max_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
+        let top_overlap_tie_count = top_overlap
+            .map(|top| {
+                side_scores
+                    .iter()
+                    .filter_map(|row| row.evidence.overlap)
+                    .filter(|overlap| (*overlap - top).abs() < f32::EPSILON)
+                    .count()
+            })
+            .unwrap_or(0);
+        let distinct_competition_spikes = distinct_usize_values(
+            side_scores
+                .iter()
+                .map(|row| row.evidence.competition_spikes),
+        );
+        let top_spikes = side_scores
+            .iter()
+            .filter_map(|row| row.evidence.competition_spikes)
+            .max();
+        let top_spike_tie_count = top_spikes
+            .map(|top| {
+                side_scores
+                    .iter()
+                    .filter_map(|row| row.evidence.competition_spikes)
+                    .filter(|spikes| *spikes == top)
                     .count()
             })
             .unwrap_or(0);
@@ -270,6 +317,7 @@ async fn analyze_side_signal(
                 .class_label
                 .clone()
                 .unwrap_or_else(|| "unlabelled".to_string()),
+            query_term_count: adapter_query_terms(&case.query).len(),
             baseline_source_rank: source_key.and_then(|source| rank_in(&baseline_ranking, source)),
             baseline_first_relevant_rank: first_relevant_rank(&baseline_ranking, &relevant),
             reordered_source_rank: source_key
@@ -283,6 +331,10 @@ async fn analyze_side_signal(
             top_side_score,
             distinct_side_scores,
             top_score_tie_count,
+            distinct_overlaps,
+            top_overlap_tie_count,
+            distinct_competition_spikes,
+            top_spike_tie_count,
             matched: summary.matched_candidate_count,
             coverage: summary.coverage,
         });
@@ -302,6 +354,111 @@ fn rank_in(ranking: &[String], key: &str) -> Option<usize> {
         .iter()
         .position(|candidate| candidate == key)
         .map(|idx| idx + 1)
+}
+
+fn parse_side_evidence(raw: Option<&str>) -> SideEvidence {
+    let mut evidence = SideEvidence::default();
+    let Some(raw) = raw else {
+        return evidence;
+    };
+    for part in raw.split(';') {
+        let Some((key, value)) = part.split_once('=') else {
+            continue;
+        };
+        match key {
+            "overlap" => evidence.overlap = value.parse().ok(),
+            "competition_spikes" => evidence.competition_spikes = value.parse().ok(),
+            _ => {}
+        }
+    }
+    evidence
+}
+
+fn distinct_f32_values(values: impl Iterator<Item = Option<f32>>) -> usize {
+    values
+        .flatten()
+        .fold(Vec::<f32>::new(), |mut acc, value| {
+            if !acc
+                .iter()
+                .any(|existing| (*existing - value).abs() < f32::EPSILON)
+            {
+                acc.push(value);
+            }
+            acc
+        })
+        .len()
+}
+
+fn distinct_usize_values(values: impl Iterator<Item = Option<usize>>) -> usize {
+    values.flatten().collect::<BTreeSet<_>>().len()
+}
+
+fn adapter_query_terms(text: &str) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    let mut cur = String::new();
+    for ch in text.chars() {
+        if ch.is_ascii_alphanumeric() {
+            cur.push(ch.to_ascii_lowercase());
+        } else if !cur.is_empty() {
+            push_adapter_term(&mut out, &mut cur);
+        }
+    }
+    if !cur.is_empty() {
+        push_adapter_term(&mut out, &mut cur);
+    }
+    out
+}
+
+fn push_adapter_term(out: &mut BTreeSet<String>, cur: &mut String) {
+    if cur.len() >= 3 && !is_adapter_stopword(cur) {
+        out.insert(normalize_adapter_term(cur));
+    }
+    cur.clear();
+}
+
+fn normalize_adapter_term(term: &str) -> String {
+    let mut out = term.to_string();
+    for (suffix, replacement, min_len) in [
+        ("ies", "y", 6_usize),
+        ("ing", "", 6),
+        ("ed", "", 5),
+        ("es", "", 5),
+        ("s", "", 5),
+    ] {
+        if out.len() >= min_len && out.ends_with(suffix) {
+            out.truncate(out.len() - suffix.len());
+            out.push_str(replacement);
+            break;
+        }
+    }
+    out
+}
+
+fn is_adapter_stopword(term: &str) -> bool {
+    matches!(
+        term,
+        "the"
+            | "and"
+            | "for"
+            | "with"
+            | "that"
+            | "this"
+            | "not"
+            | "into"
+            | "from"
+            | "what"
+            | "why"
+            | "how"
+            | "does"
+            | "did"
+            | "can"
+            | "yet"
+            | "before"
+            | "after"
+            | "agent"
+            | "bridge"
+            | "biocortex"
+    )
 }
 
 fn print_report(
@@ -367,9 +524,10 @@ fn print_report(
     println!();
     println!("## Per-case side-signal scoring rows");
     println!(
-        "{:<4} {:<34} {:>8} {:>8} {:>8} {:>8} {:>9} {:>9} {:>8} {:>8} {:>8} {:>7} {:>7} {:>7}",
+        "{:<4} {:<34} {:>5} {:>8} {:>8} {:>8} {:>8} {:>9} {:>9} {:>8} {:>8} {:>8} {:>7} {:>7} {:>7}",
         "#",
         "class_label",
+        "qterm",
         "src_b",
         "rel_b",
         "src_r",
@@ -385,9 +543,10 @@ fn print_report(
     );
     for row in side_rows {
         println!(
-            "{:<4} {:<34} {:>8} {:>8} {:>8} {:>8} {:>9} {:>9} {:>8} {:>8} {:>8} {:>7} {:>7} {:>7}",
+            "{:<4} {:<34} {:>5} {:>8} {:>8} {:>8} {:>8} {:>9} {:>9} {:>8} {:>8} {:>8} {:>7} {:>7} {:>7}",
             row.sample_index + 1,
             truncate(&row.class_label, 34),
+            row.query_term_count,
             opt_usize(row.baseline_source_rank),
             opt_usize(row.baseline_first_relevant_rank),
             opt_usize(row.reordered_source_rank),
@@ -400,6 +559,24 @@ fn print_report(
             row.top_score_tie_count,
             row.matched,
             format!("{:.3}", row.coverage),
+        );
+    }
+    println!();
+    println!("## Per-case adapter saturation rows");
+    println!(
+        "{:<4} {:<34} {:>5} {:>12} {:>13} {:>13} {:>12}",
+        "#", "class_label", "qterm", "overlap_dist", "overlap_tie", "spike_dist", "spike_tie"
+    );
+    for row in side_rows {
+        println!(
+            "{:<4} {:<34} {:>5} {:>12} {:>13} {:>13} {:>12}",
+            row.sample_index + 1,
+            truncate(&row.class_label, 34),
+            row.query_term_count,
+            row.distinct_overlaps,
+            row.top_overlap_tie_count,
+            row.distinct_competition_spikes,
+            row.top_spike_tie_count,
         );
     }
     println!();
@@ -421,6 +598,12 @@ fn print_report(
     );
     println!(
         "- If `top_tie` is large or `distinct` is tiny, the side-signal is saturated and cannot reliably discriminate candidates."
+    );
+    println!(
+        "- If `qterm` is tiny, the current adapter tokenization has collapsed the query before substrate scoring."
+    );
+    println!(
+        "- If `overlap_tie` or `spike_tie` is large, saturation is happening inside the adapter before AB blending."
     );
 }
 
