@@ -131,6 +131,7 @@ Still not accepted:
 
 ## 7. Next Slice
 
-The next safe slice is an explicit world-verdict rewrite gate. It must consume
-the accepted G16 output and still require an explicit gate decision before
-changing a world verdict.
+The next safe slice is G17, an explicit world-verdict rewrite gate. It consumes
+the accepted G16 output and still requires an explicit rewrite decision before
+emitting a bounded `verified` verdict package. That package remains output-only
+until a later verified outcome ingestion gate consumes it.

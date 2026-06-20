@@ -63,6 +63,7 @@ The critical distinction is:
 
 ## 3. Next Slice
 
-The next safe slice is the explicit world-verdict rewrite gate. It must require
-its own gate decision and must not infer verdict rewrite solely from durable
-write evidence or write-evidence review.
+The next safe slice is G17, the explicit world-verdict rewrite gate. It must
+require its own rewrite decision, must not infer verdict rewrite solely from
+durable write evidence or write-evidence review, and must keep the resulting
+`verified` verdict package output-only until a later ingestion gate consumes it.
