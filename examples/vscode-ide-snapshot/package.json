@@ -2,7 +2,7 @@
   "name": "agent-bridge-ide-snapshot",
   "displayName": "Agent Bridge IDE Snapshot",
   "description": "Writes a lightweight IDE state snapshot for the agent-bridge ide_snapshot MCP tool.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "agent-bridge",
   "engines": {
     "vscode": "^1.90.0"
