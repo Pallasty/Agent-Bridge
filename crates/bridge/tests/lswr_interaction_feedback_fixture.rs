@@ -30,6 +30,7 @@ use ab_bridge::lswr_interaction_feedback::{
     LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_EXECUTION_PREFLIGHT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_GATE_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_PERSISTENCE_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_STORE_WRITE_EXECUTION_PREFLIGHT_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_WRITER_EXECUTION_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_WRITER_SCHEMA,
     LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_WORLD_VERDICT_REWRITE_GATE_SCHEMA,
@@ -57,6 +58,7 @@ use ab_bridge::lswr_interaction_feedback::{
     LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_EXECUTION_COMMIT_DECISION_SCHEMA,
     LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_EXECUTION_DECISION_SCHEMA,
     LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_PERSISTENCE_DECISION_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_STORE_WRITE_EXECUTION_DECISION_SCHEMA,
     LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_WRITER_DECISION_SCHEMA,
     LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_WRITER_EXECUTION_DECISION_SCHEMA,
     LSWR_RUNTIME_EXECUTOR_WORLD_VERDICT_REWRITE_DECISION_SCHEMA,
@@ -88,6 +90,7 @@ use ab_bridge::lswr_interaction_feedback::{
     build_interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_preflight,
     build_interaction_feedback_runtime_executor_verified_outcome_ingestion_gate,
     build_interaction_feedback_runtime_executor_verified_outcome_ingestion_persistence,
+    build_interaction_feedback_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight,
     build_interaction_feedback_runtime_executor_verified_outcome_ingestion_writer,
     build_interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_execution,
     build_interaction_feedback_runtime_executor_world_verdict_rewrite_gate,
@@ -120,6 +123,7 @@ use ab_bridge::lswr_interaction_feedback::{
     render_interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_preflight,
     render_interaction_feedback_runtime_executor_verified_outcome_ingestion_gate,
     render_interaction_feedback_runtime_executor_verified_outcome_ingestion_persistence,
+    render_interaction_feedback_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight,
     render_interaction_feedback_runtime_executor_verified_outcome_ingestion_writer,
     render_interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_execution,
     render_interaction_feedback_runtime_executor_world_verdict_rewrite_gate,
@@ -7224,6 +7228,246 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_persistence_
 }
 
 #[test]
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight_blocks_without_decision()
+{
+    let persistence = ready_runtime_executor_verified_outcome_ingestion_persistence();
+    let preflight =
+        build_interaction_feedback_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight(
+            &persistence,
+        );
+    let markdown =
+        render_interaction_feedback_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight(
+            &preflight,
+        );
+
+    assert_eq!(
+        preflight["schema"],
+        LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_STORE_WRITE_EXECUTION_PREFLIGHT_SCHEMA
+    );
+    assert_eq!(
+        preflight["input_kind"],
+        "runtime_executor_verified_outcome_ingestion_persistence"
+    );
+    assert_eq!(
+        preflight["source_verified_outcome_ingestion_persistence_verdict"],
+        "ready_for_verified_outcome_ingestion_store_write"
+    );
+    assert_eq!(
+        preflight["verified_outcome_ingestion_store_write_execution_decision_schema"],
+        Value::Null
+    );
+    assert_eq!(
+        preflight["verified_outcome_ingestion_store_write_execution_preflight_verdict"],
+        "blocked"
+    );
+    assert_eq!(
+        preflight["reason"],
+        "explicit_verified_outcome_ingestion_store_write_execution_decision_required"
+    );
+    assert_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight_output_only(
+        &preflight,
+    );
+
+    assert!(markdown.contains(
+        "- verified_outcome_ingestion_store_write_execution_preflight_verdict: `blocked`"
+    ));
+    assert!(markdown.contains("- ready_for_verified_outcome_ingestion_write_evidence: `false`"));
+}
+
+#[test]
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight_accepts_explicit_decision()
+{
+    let persistence = ready_runtime_executor_verified_outcome_ingestion_persistence();
+    let preflight =
+        build_interaction_feedback_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight(
+            &json!({
+                "verified_outcome_ingestion_persistence": persistence,
+                "verified_outcome_ingestion_store_write_execution_decision":
+                    explicit_verified_outcome_ingestion_store_write_execution_decision()
+            }),
+        );
+    let markdown =
+        render_interaction_feedback_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight(
+            &preflight,
+        );
+
+    assert_eq!(
+        preflight["verified_outcome_ingestion_store_write_execution_decision_schema"],
+        LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_STORE_WRITE_EXECUTION_DECISION_SCHEMA
+    );
+    assert_eq!(
+        preflight["verified_outcome_ingestion_store_write_execution_preflight_verdict"],
+        "ready_for_verified_outcome_ingestion_write_evidence",
+        "failure_reasons={}",
+        preflight["failure_reasons"]
+    );
+    assert_eq!(
+        preflight["reason"],
+        "verified_outcome_ingestion_store_write_execution_preflight_ready_for_write_evidence"
+    );
+    assert_eq!(preflight["failure_reasons"], json!([]));
+    assert_eq!(
+        preflight["verified_outcome_ingestion_store_write_execution"]["store_write_execution_id"],
+        "verified_outcome_ingestion_store_write_execution_arrival_bath_move_002"
+    );
+    assert_eq!(
+        preflight["verified_outcome_ingestion_store_write_execution"]["persistence_decision_id"],
+        "verified_outcome_ingestion_persistence_arrival_bath_move_002"
+    );
+    assert_eq!(
+        preflight["verified_outcome_ingestion_store_write_execution"]["decision"],
+        "approved_for_verified_outcome_ingestion_write_evidence"
+    );
+    assert_eq!(
+        preflight["verified_outcome_ingestion_store_write_execution"]["ready_for_verified_outcome_ingestion_write_evidence"],
+        true
+    );
+    assert_eq!(
+        preflight["verified_outcome_ingestion_store_write_execution"]["verified_outcome_store_write_execution_allowed"],
+        false
+    );
+    assert_eq!(
+        preflight["verified_outcome_ingestion_store_write_execution"]["verified_outcome_store_written_by_this_tool"],
+        false
+    );
+    assert_eq!(
+        preflight["next_allowed_gate"],
+        "verified_outcome_ingestion_write_evidence"
+    );
+    assert_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight_output_only(
+        &preflight,
+    );
+
+    assert!(markdown.contains(
+        "- verified_outcome_ingestion_store_write_execution_preflight_verdict: `ready_for_verified_outcome_ingestion_write_evidence`"
+    ));
+    assert!(
+        markdown.contains("- decision: `approved_for_verified_outcome_ingestion_write_evidence`")
+    );
+    assert!(markdown.contains("- verified_outcome_store_write_execution_allowed: `false`"));
+}
+
+#[test]
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight_blocks_bad_decision()
+{
+    let persistence = ready_runtime_executor_verified_outcome_ingestion_persistence();
+    let mut decision = explicit_verified_outcome_ingestion_store_write_execution_decision();
+    decision["store_write_execution_kind"] = json!("operator_note");
+    decision["decision"] = json!("write_now");
+    decision["source_world_verdict"] = json!("verified");
+    decision["verified_world_verdict"] = json!("not_verified");
+    decision["reviewed_verified_outcome_ingestion_persistence_verdict"] = json!("blocked");
+    decision["persistence_package_confirmed"] = json!(false);
+    decision["writer_execution_package_confirmed"] = json!(false);
+    decision["verified_outcome_package_confirmed"] = json!(false);
+    decision["persistence_target_verified"] = json!(false);
+    decision["outcome_record_digest_verified"] = json!(false);
+    decision["idempotent_upsert_confirmed"] = json!(false);
+    decision["store_transaction_plan_complete"] = json!(false);
+    decision["rollback_plan_confirmed"] = json!(false);
+    decision["write_destination"] = Value::Null;
+    decision["outcome_record_key"] = Value::Null;
+    decision["outcome_record_digest"] = Value::Null;
+    decision["verified_outcome_store_write_execution_allowed"] = json!(true);
+    decision["verified_outcome_store_written_by_this_tool"] = json!(true);
+    decision["outcome_ingestion_allowed_by_this_tool"] = json!(true);
+    decision["memory_write_allowed"] = json!(true);
+    decision["verified_outcome_ingested_by_this_tool"] = json!(true);
+    decision["durable_outcome_record_written_by_this_tool"] = json!(true);
+    decision["world_verdict_persisted_by_this_tool"] = json!(true);
+    decision["source_verified_outcome_ingestion_persistence_scope"]["persistence_decision_id"] =
+        json!("other_persistence");
+    decision["source_verified_outcome_ingestion_persistence_scope"]["outcome_record_digest"] =
+        json!("sha256:other");
+
+    let preflight =
+        build_interaction_feedback_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight(
+            &json!({
+                "verified_outcome_ingestion_persistence": persistence,
+                "verified_outcome_ingestion_store_write_execution_decision": decision
+            }),
+        );
+
+    assert_eq!(
+        preflight["verified_outcome_ingestion_store_write_execution_preflight_verdict"],
+        "blocked"
+    );
+    let failure_reasons = preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons");
+    for reason in [
+        "verified_outcome_ingestion_store_write_execution_kind_required",
+        "verified_outcome_ingestion_store_write_execution_decision_not_approved",
+        "verified_outcome_ingestion_store_write_execution_source_must_be_not_verified",
+        "verified_outcome_ingestion_store_write_execution_verdict_must_be_verified",
+        "verified_outcome_ingestion_store_write_execution_must_review_ready_g24_persistence",
+        "verified_outcome_ingestion_store_write_execution_requires_persistence_package",
+        "verified_outcome_ingestion_store_write_execution_requires_writer_execution_package",
+        "verified_outcome_ingestion_store_write_execution_requires_verified_package",
+        "verified_outcome_ingestion_store_write_execution_requires_target_verification",
+        "verified_outcome_ingestion_store_write_execution_requires_digest_verification",
+        "verified_outcome_ingestion_store_write_execution_requires_idempotent_upsert",
+        "verified_outcome_ingestion_store_write_execution_requires_transaction_plan",
+        "verified_outcome_ingestion_store_write_execution_requires_rollback_plan",
+        "verified_outcome_ingestion_store_write_execution_destination_required",
+        "verified_outcome_ingestion_store_write_execution_key_required",
+        "verified_outcome_ingestion_store_write_execution_digest_required",
+        "verified_outcome_ingestion_store_write_execution_must_not_allow_execution",
+        "verified_outcome_ingestion_store_write_execution_must_not_write_store",
+        "verified_outcome_ingestion_store_write_execution_must_not_allow_ingestion_by_this_tool",
+        "verified_outcome_ingestion_store_write_execution_must_not_allow_memory_write",
+        "verified_outcome_ingestion_store_write_execution_must_not_ingest_outcome",
+        "verified_outcome_ingestion_store_write_execution_must_not_write_outcome_record",
+        "verified_outcome_ingestion_store_write_execution_must_not_persist_verdict",
+        "verified_outcome_ingestion_store_write_execution_persistence_scope_mismatch",
+        "verified_outcome_ingestion_store_write_execution_digest_scope_mismatch",
+    ] {
+        assert!(failure_reasons.contains(&json!(reason)), "{reason}");
+    }
+    assert_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight_output_only(
+        &preflight,
+    );
+}
+
+#[test]
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight_requires_persistence()
+ {
+    let execution = ready_runtime_executor_verified_outcome_ingestion_writer_execution();
+    let preflight =
+        build_interaction_feedback_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight(
+            &json!({
+                "verified_outcome_ingestion_persistence": execution,
+                "verified_outcome_ingestion_store_write_execution_decision":
+                    explicit_verified_outcome_ingestion_store_write_execution_decision()
+            }),
+        );
+
+    assert_eq!(
+        preflight["input_kind"],
+        "verified_outcome_ingestion_persistence_with_store_write_execution_decision_wrapper"
+    );
+    assert_eq!(
+        preflight["source_schema"],
+        LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_WRITER_EXECUTION_SCHEMA
+    );
+    assert_eq!(
+        preflight["verified_outcome_ingestion_store_write_execution_preflight_verdict"],
+        "blocked"
+    );
+    assert_eq!(
+        preflight["reason"],
+        "runtime_executor_verified_outcome_ingestion_persistence_required"
+    );
+    assert_eq!(
+        preflight["source_verified_outcome_ingestion_persistence"],
+        Value::Null
+    );
+    assert_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight_output_only(
+        &preflight,
+    );
+}
+
+#[test]
 fn interaction_feedback_validator_reports_tampered_fixture() {
     let mut fixture = fixture();
     fixture["events"][5]["refs"]["cause_event_id"] = json!("missing_event");
@@ -8497,6 +8741,71 @@ fn explicit_verified_outcome_ingestion_persistence_decision() -> Value {
         "outcome_record_key": "onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_record_candidate_arrival_bath_move_002",
         "outcome_record_digest": "sha256:arrival-bath-move-002-outcome-record",
         "verified_outcome_store_write_allowed": false,
+        "outcome_ingestion_allowed_by_this_tool": false,
+        "memory_write_allowed": false,
+        "verified_outcome_ingested_by_this_tool": false,
+        "durable_outcome_record_written_by_this_tool": false,
+        "world_verdict_persisted_by_this_tool": false
+    })
+}
+
+fn ready_runtime_executor_verified_outcome_ingestion_persistence() -> Value {
+    build_interaction_feedback_runtime_executor_verified_outcome_ingestion_persistence(&json!({
+        "verified_outcome_ingestion_writer_execution":
+            ready_runtime_executor_verified_outcome_ingestion_writer_execution(),
+        "verified_outcome_ingestion_persistence_decision":
+            explicit_verified_outcome_ingestion_persistence_decision()
+    }))
+}
+
+fn explicit_verified_outcome_ingestion_store_write_execution_decision() -> Value {
+    json!({
+        "schema": LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_STORE_WRITE_EXECUTION_DECISION_SCHEMA,
+        "store_write_execution_id": "verified_outcome_ingestion_store_write_execution_arrival_bath_move_002",
+        "store_write_execution_kind": "verified_outcome_ingestion_store_write_execution",
+        "source_verified_outcome_ingestion_persistence_scope": {
+            "persistence_decision_id": "verified_outcome_ingestion_persistence_arrival_bath_move_002",
+            "persistence_source_execution_id": "verified_outcome_ingestion_writer_execution_arrival_bath_move_002",
+            "writer_decision_id": "verified_outcome_ingestion_writer_arrival_bath_move_002",
+            "apply_decision_id": "verified_outcome_ingestion_apply_arrival_bath_move_002",
+            "commit_decision_id": "verified_outcome_ingestion_execution_commit_arrival_bath_move_002",
+            "source_execution_decision_id": "verified_outcome_ingestion_execution_arrival_bath_move_002",
+            "source_ingestion_decision_id": "verified_outcome_ingestion_arrival_bath_move_002",
+            "source_rewrite_decision_id": "world_verdict_rewrite_arrival_bath_move_002",
+            "source_review_decision_id": "durable_outcome_record_write_evidence_review_arrival_bath_move_002",
+            "write_evidence_id": "durable_outcome_record_write_evidence_arrival_bath_move_002",
+            "world_id": "onsen_live_session",
+            "branch_id": "main",
+            "runtime_generation": "runtime_gen_1284",
+            "patch_id": "patch_arrival_bath_move_002",
+            "outcome_record_candidate_id": "outcome_record_candidate_arrival_bath_move_002",
+            "outcome_record_schema": "agent_bridge.lswr.outcome_record_candidate.v0",
+            "idempotency_key": "onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_ingestion_review_arrival_bath_move_002",
+            "outcome_payload_digest": "sha256:arrival-bath-move-002-outcome-payload",
+            "write_destination": "agent_bridge_store_outcome_records",
+            "outcome_record_key": "onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_record_candidate_arrival_bath_move_002",
+            "outcome_record_digest": "sha256:arrival-bath-move-002-outcome-record",
+            "persisted_outcome_record_key": "onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_record_candidate_arrival_bath_move_002",
+            "persisted_outcome_record_digest": "sha256:arrival-bath-move-002-outcome-record"
+        },
+        "decision": "approved_for_verified_outcome_ingestion_write_evidence",
+        "store_write_execution_reason": "verified_outcome_ingestion_store_write_preflight_ready_for_later_write_evidence",
+        "source_world_verdict": "not_verified",
+        "verified_world_verdict": "verified",
+        "reviewed_verified_outcome_ingestion_persistence_verdict": "ready_for_verified_outcome_ingestion_store_write",
+        "persistence_package_confirmed": true,
+        "writer_execution_package_confirmed": true,
+        "verified_outcome_package_confirmed": true,
+        "persistence_target_verified": true,
+        "outcome_record_digest_verified": true,
+        "idempotent_upsert_confirmed": true,
+        "store_transaction_plan_complete": true,
+        "rollback_plan_confirmed": true,
+        "write_destination": "agent_bridge_store_outcome_records",
+        "outcome_record_key": "onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_record_candidate_arrival_bath_move_002",
+        "outcome_record_digest": "sha256:arrival-bath-move-002-outcome-record",
+        "verified_outcome_store_write_execution_allowed": false,
+        "verified_outcome_store_written_by_this_tool": false,
         "outcome_ingestion_allowed_by_this_tool": false,
         "memory_write_allowed": false,
         "verified_outcome_ingested_by_this_tool": false,
@@ -10700,6 +11009,112 @@ fn assert_runtime_executor_verified_outcome_ingestion_persistence_output_only(pe
     );
     assert_eq!(
         persistence["agent_action_contract"]["require_separate_verified_outcome_ingestion_store_write"],
+        true
+    );
+}
+
+fn assert_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight_output_only(
+    preflight: &Value,
+) {
+    assert_eq!(preflight["writes_state"], false);
+    assert_eq!(preflight["store_access_required"], false);
+    assert_eq!(preflight["mcp_tool_registered"], false);
+    assert_eq!(
+        preflight["verified_outcome_ingestion_store_write_execution_preflight_performed_by_this_tool"],
+        true
+    );
+    assert_eq!(
+        preflight["verified_outcome_store_written_by_this_tool"],
+        false
+    );
+    assert_eq!(
+        preflight["verified_outcome_ingestion_performed_by_this_tool"],
+        false
+    );
+    assert_eq!(preflight["verified_outcome_ingested_by_this_tool"], false);
+    assert_eq!(preflight["world_verdict_persisted_by_this_tool"], false);
+    assert_eq!(
+        preflight["durable_outcome_record_written_by_this_tool"],
+        false
+    );
+    assert_eq!(
+        preflight["durable_outcome_ingestion_performed_by_this_tool"],
+        false
+    );
+    assert_eq!(preflight["guardrails"]["read_only"], true);
+    assert_eq!(preflight["guardrails"]["mutation_surface"], "output_only");
+    assert_eq!(preflight["guardrails"]["writes_state"], false);
+    assert_eq!(preflight["guardrails"]["store_access_required"], false);
+    assert_eq!(preflight["guardrails"]["mcp_tool_registered"], false);
+    assert_eq!(
+        preflight["guardrails"]["requires_ready_verified_outcome_ingestion_persistence"],
+        true
+    );
+    assert_eq!(
+        preflight["guardrails"]["requires_explicit_verified_outcome_ingestion_store_write_execution_decision"],
+        true
+    );
+    assert_eq!(
+        preflight["guardrails"]["performs_verified_outcome_ingestion_store_write_execution_preflight"],
+        true
+    );
+    assert_eq!(
+        preflight["guardrails"]["performs_verified_outcome_store_write"],
+        false
+    );
+    assert_eq!(
+        preflight["guardrails"]["performs_verified_outcome_ingestion"],
+        false
+    );
+    assert_eq!(preflight["guardrails"]["persists_world_verdict"], false);
+    assert_eq!(
+        preflight["guardrails"]["durable_outcome_record_written"],
+        false
+    );
+    assert_eq!(preflight["guardrails"]["memory_write_allowed"], false);
+    assert_eq!(
+        preflight["guardrails"]["outcome_ingestion_allowed_by_this_tool"],
+        false
+    );
+    assert_eq!(
+        preflight["guardrails"]["verified_outcome_store_write_execution_allowed"],
+        false
+    );
+    assert_eq!(
+        preflight["guardrails"]["verified_outcome_store_written_by_this_tool"],
+        false
+    );
+    assert_eq!(preflight["guardrails"]["persists_outcome_record"], false);
+    assert_eq!(
+        preflight["agent_action_contract"]["may_execute_verified_outcome_store_write_by_this_tool"],
+        false
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["may_execute_verified_outcome_ingestion_by_this_tool"],
+        false
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_ingest_outcome"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_write_memory"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_persist_world_verdict"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["do_not_persist_outcome_record"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["require_separate_verified_outcome_store_write_execution"],
+        true
+    );
+    assert_eq!(
+        preflight["agent_action_contract"]["require_verified_outcome_write_evidence_after_store_write"],
         true
     );
 }

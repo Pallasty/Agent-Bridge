@@ -7053,6 +7053,22 @@ run cargo run -q -p ab-bridge \
     --format json \
     --assert-ready-for-verified-outcome-ingestion-store-write \
     --assert-output-only >/dev/null
+run cargo test -p ab-bridge --test lswr_interaction_feedback_fixture \
+    interaction_feedback_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight \
+    -- --nocapture
+run cargo run -q -p ab-bridge \
+    --example lswr_interaction_feedback_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight_smoke \
+    -- \
+    --format json \
+    --assert-blocked-without-verified-outcome-ingestion-store-write-execution-decision \
+    --assert-output-only >/dev/null
+run cargo run -q -p ab-bridge \
+    --example lswr_interaction_feedback_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight_smoke \
+    -- \
+    --with-verified-outcome-ingestion-store-write-execution-decision \
+    --format json \
+    --assert-ready-for-verified-outcome-ingestion-write-evidence \
+    --assert-output-only >/dev/null
 
 current_corpus="crates/bridge/tests/fixtures/biocortex_retrieval_gate_corpus.jsonl"
 hard_corpus="crates/bridge/tests/fixtures/biocortex_retrieval_gate_hard_holdout_corpus.jsonl"
