@@ -134,6 +134,60 @@ evidence step should build a held-out hard-query corpus whose acceptance
 criteria include baseline source-rank headroom (for example: source found but
 not already rank 1) before treating T6 lift as quality evidence.
 
+## Headroom Fixture Follow-up
+
+Date: 2026-06-20
+
+The next evidence step now reuses the existing drift-free `recall_eval` harness
+instead of adding a second baseline mechanism. On the current Mac state DB:
+
+```bash
+AGENT_BRIDGE_ONNX_MODEL=para-ml cargo run -p ab-bridge --example recall_eval
+```
+
+returned:
+
+- overall FTS: `R@1=0.278`, `R@5=0.556`, `R@10=0.667`, `MRR=0.384`;
+- hard-tier FTS: `R@1=0.000`, `R@5=0.125`, `R@10=0.375`, `MRR=0.073`;
+- semantic was skipped because the real model was not confirmed within the
+  readiness probe timeout, which is acceptable for this T6 rank-lift fixture
+  because the relevance-lift evaluator's baseline candidate list is FTS.
+
+The checked-in headroom fixture is:
+
+```text
+docs/design/fixtures/memory-biocortex-relevance-lift-headroom-cases-2026-06-20.json
+```
+
+Its selection rule is explicit: include only `recall_eval` cases where the first
+relevant FTS hit is present in the top 10 and `baseline_fts_rank_observed > 1`.
+That keeps this fixture focused on reorder lift. Pure FTS misses remain valuable
+recall-expansion evidence, but they are not a fair rank-lift yardstick unless
+the evaluator can introduce new candidate memories.
+
+The selected cases are `recall_eval` #4, #5, #7, #10, #13, #15, and #18, with
+observed baseline FTS ranks 7, 9, 3, 2, 3, 4, and 4. This gives BioCortex a
+measurable opportunity to improve MRR while still preserving the same redacted
+summary contract as the hard-query smoke fixture: raw queries, raw keys, memory
+content, per-sample rows, and raw side-signal errors must stay out of the MCP
+summary.
+
+Clean BioCortex checkout smoke with
+`/Users/pallasting/.cache/agent-bridge-biocortex-rs-verify` preserved the
+redacted summary contract and confirmed the adapter path is available:
+`side_signal_unavailable=0`, `evaluated_count=7`,
+`runs_biocortex_adapter=true`, `raw_query_leaked=false`, and
+`raw_key_leaked=false`. The measured relevance result is still negative for
+quality gating: `verdict=no_lift`, `mrr_baseline=0.267`,
+`mrr_reordered=0.267`, `mrr_lift=0.0`, `improved=0`, `worsened=0`,
+`unchanged=7`, `order_changed_count=2`, and `source_found_count=6`.
+
+Interpretation: the headroom fixture is now good enough as a stricter T6
+yardstick, and it shows current BioCortex side-signal evidence is not yet strong
+enough to justify influence. The next useful work is not to loosen T6; it is to
+improve the side-signal/candidate scoring path or add a separate
+recall-expansion experiment for the pure FTS misses.
+
 ## Verification
 
 Targeted validation for this slice after `/Data` space was recovered:
@@ -146,6 +200,7 @@ git diff --check
 cargo test -p ab-bridge memory_biocortex_ -- --nocapture
 cargo test -p ab-bridge tool_policy_codex_essential_exposes_extras_list -- --nocapture
 cargo test -p ab-bridge --lib memory_biocortex_relevance_lift_hard_query_fixture_contract -- --nocapture
+cargo test -p ab-bridge --lib memory_biocortex_relevance_lift_headroom_fixture_contract -- --nocapture
 ```
 
 The feature-branch commit hook also ran `cargo check -p ab-bridge --all-targets`.

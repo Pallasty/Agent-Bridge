@@ -1,0 +1,128 @@
+{
+  "schema": "agent_bridge.memory_biocortex.relevance_lift_headroom_cases.v0",
+  "read_only": true,
+  "purpose": "Reusable local-memory headroom cases for memory_biocortex_relevance_lift_summary. These cases are selected from recall_eval where baseline FTS finds a relevant memory but does not already rank it first, leaving measurable reorder headroom.",
+  "selection_source": {
+    "harness": "crates/bridge/examples/recall_eval.rs",
+    "command": "AGENT_BRIDGE_ONNX_MODEL=para-ml cargo run -p ab-bridge --example recall_eval",
+    "observed_on": "2026-06-20",
+    "db": "default agent-bridge state.db on this Mac node",
+    "top_k": 10,
+    "selection_rule": "include cases whose first relevant FTS hit is present in top_k and baseline_fts_rank_observed > 1",
+    "observed_summary": {
+      "fts_r_at_1": 0.278,
+      "fts_r_at_5": 0.556,
+      "fts_r_at_10": 0.667,
+      "fts_mrr": 0.384,
+      "hard_tier_fts_r_at_1": 0.0,
+      "hard_tier_fts_r_at_10": 0.375
+    }
+  },
+  "input_boundary": {
+    "raw_queries_are_fixture_inputs": true,
+    "raw_relevant_keys_are_fixture_inputs": true,
+    "raw_queries_may_be_read_by_the_operator_or_mcp_caller": true,
+    "raw_queries_must_not_be_returned_by_summary": true,
+    "raw_relevant_keys_must_not_be_returned_by_summary": true,
+    "content_included": false,
+    "side_signal_raw_included": false,
+    "writes_memory": false,
+    "changes_search_order": false
+  },
+  "baseline_headroom_contract": {
+    "baseline_mode": "fts",
+    "baseline_rank_must_be_present": true,
+    "baseline_rank_must_be_greater_than": 1,
+    "baseline_rank_must_be_at_most": 10,
+    "semantic_backend_required": false,
+    "note": "The relevance-lift evaluator can only prove reorder lift when the relevant source is already in the baseline candidate list; pure misses are separate recall-expansion evidence, not rank-lift evidence."
+  },
+  "query_cases": [
+    {
+      "query": "codex 的核心工具集和原生能力重叠,该不该因为很少用就降级",
+      "relevant_keys": [
+        "codex_essential_native_overlap_demotion_superseded_20260618",
+        "mcp_codex_native_overlap_surface_narrowed_deployed_20260617"
+      ],
+      "class_label": "recall_eval_hard_case_4",
+      "review_intent": "Check whether side-signal reorder can lift Codex-native-overlap demotion guidance when FTS already finds an acceptable answer below rank 1.",
+      "baseline_fts_rank_observed": 7
+    },
+    {
+      "query": "怎么查看 sibling 推到远端的文件内容又不影响我的工作树",
+      "relevant_keys": [
+        "lesson_git_show_origin_master_read_without_pull_20260518"
+      ],
+      "class_label": "recall_eval_hard_case_5",
+      "review_intent": "Check whether side-signal reorder can lift the safe remote-file inspection lesson from a paraphrased git workflow query.",
+      "baseline_fts_rank_observed": 9
+    },
+    {
+      "query": "多个 agent 在同一个 git 仓库一起干活 HEAD 争用怎么预防",
+      "relevant_keys": [
+        "lesson_multi_agent_shared_git_worktree_head_contention"
+      ],
+      "class_label": "recall_eval_hard_case_7",
+      "review_intent": "Check whether side-signal reorder can lift the shared-worktree HEAD contention lesson in a multi-agent coordination query.",
+      "baseline_fts_rank_observed": 3
+    },
+    {
+      "query": "EdgeRazor 那篇论文有什么值得我们借鉴的地方",
+      "relevant_keys": [
+        "aiot_edgerazor_borrow_eval_20260526"
+      ],
+      "class_label": "recall_eval_moderate_case_10",
+      "review_intent": "Check whether side-signal reorder can lift a paper-borrowing memory when a lexical anchor exists but the answer is not rank 1.",
+      "baseline_fts_rank_observed": 2
+    },
+    {
+      "query": "有没有一个全局通用的 TELLS 基线技能",
+      "relevant_keys": [
+        "global_tells_baseline_skill_20260529"
+      ],
+      "class_label": "recall_eval_moderate_case_13",
+      "review_intent": "Check whether side-signal reorder can lift the global TELLS baseline skill memory.",
+      "baseline_fts_rank_observed": 3
+    },
+    {
+      "query": "palace 评审 artifact 从外部工具借鉴了哪些设计模式",
+      "relevant_keys": [
+        "palace_review_artifact_external_patterns_20260618"
+      ],
+      "class_label": "recall_eval_moderate_case_15",
+      "review_intent": "Check whether side-signal reorder can lift Palace artifact design-pattern provenance.",
+      "baseline_fts_rank_observed": 4
+    },
+    {
+      "query": "agent bridge northstar bidirectional bridge vision",
+      "relevant_keys": [
+        "agent_bridge_northstar_bidirectional_bridge_20260529"
+      ],
+      "class_label": "recall_eval_easy_case_18",
+      "review_intent": "Control case with lexical tokens restored; useful for detecting regressions when the target still fails rank 1.",
+      "baseline_fts_rank_observed": 4
+    }
+  ],
+  "recommended_call": {
+    "tool": "memory_biocortex_relevance_lift_summary",
+    "args": {
+      "sample_size": 7,
+      "limit": 20,
+      "query_cases": "<copy query_cases from this fixture>",
+      "timeout_ms": 180000
+    }
+  },
+  "expected_summary_contract": {
+    "schema": "agent_bridge.biocortex_retrieval.relevance_lift_eval.v0",
+    "status": "completed",
+    "sampling.query_source": "explicit_cases",
+    "sampling.query_cases_count": 7,
+    "input_contract.raw_queries_included": false,
+    "input_contract.raw_keys_included": false,
+    "input_contract.content_included": false,
+    "input_contract.samples_included": false,
+    "input_contract.first_side_signal_error_included": false,
+    "safety.read_only": true,
+    "safety.changes_prod_retrieval_order": false
+  }
+}
