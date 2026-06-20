@@ -540,6 +540,15 @@ class PalaceUiContractTests(unittest.TestCase):
         self.assertIn("reason:", html)
         self.assertIn("focusedFromHistory ? renderFocusedOrphanCandidateEvidence(row, candidate) : \"\"", html)
 
+    def test_orphan_review_actions_surface_materialization_review_artifact(self):
+        html = palace_html()
+
+        self.assertIn("function renderMaterializationReviewArtifactButton(regionId)", html)
+        self.assertIn("data-materialization-review-artifact", html)
+        self.assertIn("function loadRegionMaterializationReviewArtifact(regionId)", html)
+        self.assertIn("/api/materialization-review-artifact", html)
+        self.assertIn("unexpected write-capable materialization review artifact response", html)
+
     def test_orphan_candidate_review_decision_queue_filters_rows(self):
         html = palace_html()
 

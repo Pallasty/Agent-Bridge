@@ -67,6 +67,8 @@ const CLICK_WINDOW: usize = 5;
 
 const VIEWER_NODE_CAP: usize = 500;
 const STORE_FETCH_LIMIT: u32 = 2000;
+const DEFAULT_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON: &str =
+    "docs/design/fixtures/memory-biocortex-materialization-review-packet-2026-06-20.json";
 
 const PALACE_HTML: &str = include_str!("../assets/palace.html");
 
@@ -118,6 +120,10 @@ pub async fn run(
         .route("/healthz", get(healthz))
         .route("/api/graph", get(api_graph))
         .route("/api/self-review-packet", get(api_self_review_packet))
+        .route(
+            "/api/materialization-review-artifact",
+            get(api_materialization_review_artifact),
+        )
         .route(
             "/api/palace-review-artifact",
             get(api_palace_review_artifact),
@@ -366,6 +372,13 @@ fn default_palace_orphan_approved_link_apply_path() -> PathBuf {
         return PathBuf::from(path);
     }
     default_palace_review_dir_path().join("orphan-approved-link-apply.jsonl")
+}
+
+fn default_palace_materialization_review_packet_path() -> PathBuf {
+    if let Some(path) = std::env::var_os("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON") {
+        return PathBuf::from(path);
+    }
+    PathBuf::from(DEFAULT_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON)
 }
 
 fn palace_private_home_dir_path() -> PathBuf {
@@ -962,6 +975,46 @@ fn palace_json_u64_at(value: &Value, path: &[&str]) -> u64 {
     current.as_i64().filter(|value| *value > 0).unwrap_or(0) as u64
 }
 
+fn palace_json_bool_at(value: &Value, path: &[&str]) -> bool {
+    let mut current = value;
+    for key in path {
+        let Some(next) = current.get(*key) else {
+            return false;
+        };
+        current = next;
+    }
+    current.as_bool().unwrap_or(false)
+}
+
+fn load_palace_materialization_review_packet(path: &FsPath) -> Result<Value, String> {
+    let raw = fs::read_to_string(path)
+        .map_err(|e| format!("read materialization review packet {}: {e}", path.display()))?;
+    let packet: Value = serde_json::from_str(&raw)
+        .map_err(|e| format!("parse materialization review packet {}: {e}", path.display()))?;
+    if packet.get("schema").and_then(Value::as_str)
+        != Some("agent_bridge.biocortex_retrieval.materialization_review_packet.v0")
+    {
+        return Err(format!(
+            "unexpected materialization review packet schema at {}",
+            path.display()
+        ));
+    }
+    if !palace_json_bool_at(&packet, &["read_only"])
+        || palace_json_bool_at(&packet, &["writes_memory"])
+        || palace_json_bool_at(&packet, &["writes_edges"])
+        || palace_json_bool_at(&packet, &["changes_search_order"])
+        || palace_json_bool_at(&packet, &["can_change_retrieval_order"])
+        || palace_json_bool_at(&packet, &["approval_writes_allowed"])
+        || palace_json_bool_at(&packet, &["can_materialize_edges"])
+    {
+        return Err(format!(
+            "materialization review packet at {} is not read-only",
+            path.display()
+        ));
+    }
+    Ok(packet)
+}
+
 fn palace_review_artifact_for_sources(
     region: Option<&str>,
     threshold: f64,
@@ -1041,6 +1094,38 @@ fn palace_review_artifact_for_sources(
             },
         },
         "next_step": "Review the artifact evidence before publishing or invoking write-capable memory edge behavior.",
+    })
+}
+
+fn palace_materialization_review_artifact_from_packet(packet: &Value, path: &FsPath) -> Value {
+    json!({
+        "schema": "agent_bridge.palace.materialization_review_artifact.v0",
+        "artifact_kind": "materialization_review_packet",
+        "read_only": true,
+        "writes_memory": false,
+        "writes_edges": false,
+        "changes_search_order": false,
+        "can_change_retrieval_order": false,
+        "approval_writes_allowed": false,
+        "can_materialize_edges": false,
+        "review_state": packet.get("review_state").cloned().unwrap_or(Value::Null),
+        "approval_state": packet.get("approval_state").cloned().unwrap_or(Value::Null),
+        "default_decision": packet.get("default_decision").cloned().unwrap_or(Value::Null),
+        "source": {
+            "packet_path": path.display().to_string(),
+            "packet_schema": packet.get("schema").cloned().unwrap_or(Value::Null),
+            "generator": packet.pointer("/packet_source/generator").cloned().unwrap_or(Value::Null),
+            "fixture_path": packet.pointer("/packet_source/fixture_path").cloned().unwrap_or(Value::Null),
+            "fixture_schema": packet.pointer("/packet_source/fixture_schema").cloned().unwrap_or(Value::Null),
+        },
+        "summary": packet.get("summary").cloned().unwrap_or_else(|| json!({})),
+        "questions": packet.get("review_questions").cloned().unwrap_or_else(|| json!([])),
+        "candidates": packet.get("candidates").cloned().unwrap_or_else(|| json!([])),
+        "sections": {
+            "input_contract": packet.get("input_contract").cloned().unwrap_or_else(|| json!({})),
+            "packet_source": packet.get("packet_source").cloned().unwrap_or_else(|| json!({})),
+        },
+        "next_step": "Keep this evidence preview-only until a separate write path is explicitly approved."
     })
 }
 
@@ -1855,6 +1940,18 @@ async fn api_palace_review_artifact(
         );
     }
     Ok(Json(artifact))
+}
+
+async fn api_materialization_review_artifact(
+    State(_s): State<AppState>,
+) -> Result<Json<Value>, (StatusCode, String)> {
+    let packet_path = default_palace_materialization_review_packet_path();
+    let packet = load_palace_materialization_review_packet(&packet_path)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+    Ok(Json(palace_materialization_review_artifact_from_packet(
+        &packet,
+        &packet_path,
+    )))
 }
 
 async fn api_orphan_candidates(
@@ -5136,6 +5233,144 @@ mod tests {
             artifact["sections"]["verification_evidence"]["rows"][0]["from_key"],
             json!("memory_orphan")
         );
+    }
+
+    #[test]
+    fn palace_materialization_review_artifact_route_loads_read_only_packet_fixture() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let old_packet =
+            std::env::var_os("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON");
+        let packet_path = dir.path().join("materialization-review-packet.json");
+        std::env::set_var(
+            "AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON",
+            &packet_path,
+        );
+        std::fs::write(
+            &packet_path,
+            serde_json::to_vec_pretty(&json!({
+                "schema": "agent_bridge.biocortex_retrieval.materialization_review_packet.v0",
+                "generated_at": "2026-06-20T00:00:00Z",
+                "purpose": "Read-only materialization review packet for human review; this is not approval state.",
+                "review_state": "needs_human_review",
+                "approval_state": "not_approved",
+                "default_decision": "keep_preview_only",
+                "read_only": true,
+                "writes_memory": false,
+                "writes_edges": false,
+                "changes_search_order": false,
+                "can_change_retrieval_order": false,
+                "approval_writes_allowed": false,
+                "can_materialize_edges": false,
+                "input_contract": {
+                    "raw_queries_included": false,
+                    "raw_relevant_keys_included": false,
+                    "content_included": false,
+                    "query_cases_included": false
+                },
+                "packet_source": {
+                    "generator": "biocortex_relevance_lift_fixture_eval",
+                    "fixture_path": "docs/design/fixtures/memory-biocortex-relevance-lift-missing-graph-cases-2026-06-20.json",
+                    "fixture_schema": "agent_bridge.biocortex_retrieval.fixture.v0",
+                    "query_case_count": 1
+                },
+                "summary": {
+                    "preview_case_count": 1,
+                    "preview_candidate_count": 1,
+                    "reason_packet_selected_edge_count": 1,
+                    "reason_packet_relevant_edge_count": 1,
+                    "reason_packet_blocked_packet_count": 0,
+                    "reason_packet_blocked_shadow_count": 0
+                },
+                "review_questions": [
+                    "Does the reason packet justify the proposed edge?",
+                    "Do the rank movements support keeping this candidate in preview-only review?",
+                    "Should this candidate remain non-materialized until a separate write path is explicitly approved?"
+                ],
+                "candidates": [{
+                    "case_index": 15,
+                    "class_label": "missing_graph_moderate_case_15",
+                    "baseline_fts_rank_observed": 4,
+                    "review_intent": "candidate-present but no direct explicit candidate graph edge",
+                    "candidate_source": "reason_packet",
+                    "gate": "explicit_related_keys",
+                    "from_key": "from_a",
+                    "to_key": "to_b",
+                    "edge_type": "relates",
+                    "reason_kind": "explicit_related_keys",
+                    "rationale": "shared review artifact context",
+                    "shadow_aligned": true,
+                    "baseline_top3": ["one", "two", "three"],
+                    "preview_top3": ["one", "from_a", "to_b"],
+                    "baseline_from_rank": 3,
+                    "preview_from_rank": 1,
+                    "baseline_to_rank": 4,
+                    "preview_to_rank": 3,
+                    "preview_order_changed": true,
+                    "blend_coverage": 0.2,
+                    "writes_memory": false,
+                    "changes_search_order": false
+                }]
+            }))
+            .expect("serialize packet fixture"),
+        )
+        .expect("write packet fixture");
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        rt.block_on(async {
+            let db_path = dir.path().join("state.db");
+            let store = Arc::new(
+                ab_store::SqliteStore::open(&db_path)
+                    .await
+                    .expect("open sqlite store"),
+            );
+            let state = AppState {
+                store,
+                markdown_root: None,
+                reports_dir: None,
+                recent_clicks: Arc::new(Mutex::new(VecDeque::with_capacity(CLICK_WINDOW))),
+            };
+
+            let Json(artifact) = api_materialization_review_artifact(State(state))
+                .await
+                .expect("materialization review artifact");
+
+            assert_eq!(
+                artifact["schema"],
+                json!("agent_bridge.palace.materialization_review_artifact.v0")
+            );
+            assert_eq!(artifact["artifact_kind"], json!("materialization_review_packet"));
+            assert_eq!(artifact["read_only"], json!(true));
+            assert_eq!(artifact["writes_memory"], json!(false));
+            assert_eq!(artifact["writes_edges"], json!(false));
+            assert_eq!(artifact["changes_search_order"], json!(false));
+            assert_eq!(artifact["can_change_retrieval_order"], json!(false));
+            assert_eq!(artifact["approval_writes_allowed"], json!(false));
+            assert_eq!(artifact["can_materialize_edges"], json!(false));
+            assert_eq!(
+                artifact["source"]["packet_path"],
+                json!(packet_path.display().to_string())
+            );
+            assert_eq!(artifact["summary"]["preview_case_count"], json!(1));
+            assert_eq!(artifact["summary"]["preview_candidate_count"], json!(1));
+            assert_eq!(
+                artifact["questions"][0],
+                json!("Does the reason packet justify the proposed edge?")
+            );
+            assert_eq!(artifact["candidates"][0]["from_key"], json!("from_a"));
+            assert_eq!(artifact["candidates"][0]["to_key"], json!("to_b"));
+            assert_eq!(artifact["candidates"][0]["writes_memory"], json!(false));
+        });
+
+        match old_packet {
+            Some(value) => {
+                std::env::set_var("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON", value)
+            }
+            None => std::env::remove_var("AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON"),
+        }
     }
 
     #[test]

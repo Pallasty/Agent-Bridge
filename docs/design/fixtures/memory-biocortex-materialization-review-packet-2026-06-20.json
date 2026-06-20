@@ -1,0 +1,74 @@
+{
+  "approval_state": "not_approved",
+  "approval_writes_allowed": false,
+  "can_change_retrieval_order": false,
+  "can_materialize_edges": false,
+  "candidates": [
+    {
+      "baseline_from_rank": 2,
+      "baseline_fts_rank_observed": 4,
+      "baseline_to_rank": 4,
+      "baseline_top3": [
+        "palace_review_artifact_anchors_deployed_20260619",
+        "palace_review_artifact_v1_slice_committed_20260619",
+        "palace_review_artifact_v1_deployed_20260618"
+      ],
+      "blend_coverage": 0.25,
+      "candidate_source": "explicit_related_keys",
+      "case_index": 5,
+      "changes_search_order": false,
+      "class_label": "missing_graph_moderate_case_15",
+      "edge_type": "relates",
+      "from_key": "palace_review_artifact_v1_slice_committed_20260619",
+      "gate": "reason_packet",
+      "preview_from_rank": 1,
+      "preview_order_changed": true,
+      "preview_to_rank": 3,
+      "preview_top3": [
+        "palace_review_artifact_v1_slice_committed_20260619",
+        "palace_review_artifact_anchors_deployed_20260619",
+        "palace_review_artifact_external_patterns_20260618"
+      ],
+      "rationale": "The slice commit record explicitly cites the external-pattern synthesis memory as its design input, making this a reviewer-authored provenance relation candidate for preview only.",
+      "reason_kind": "operator_review_intent",
+      "review_intent": "Candidate-present Palace artifact provenance memory without direct candidate graph support.",
+      "shadow_aligned": true,
+      "to_key": "palace_review_artifact_external_patterns_20260618",
+      "writes_memory": false
+    }
+  ],
+  "changes_search_order": false,
+  "default_decision": "keep_preview_only",
+  "generated_at": 1781969408,
+  "input_contract": {
+    "content_included": false,
+    "query_cases_included": false,
+    "raw_queries_included": false,
+    "raw_relevant_keys_included": false
+  },
+  "packet_source": {
+    "fixture_path": "docs/design/fixtures/memory-biocortex-relevance-lift-missing-graph-cases-2026-06-20.json",
+    "fixture_schema": "agent_bridge.memory_biocortex.relevance_lift_missing_graph_cases.v0",
+    "generator": "biocortex_relevance_lift_fixture_eval",
+    "query_case_count": 5
+  },
+  "purpose": "Read-only materialization review packet for human review; this is not approval state.",
+  "read_only": true,
+  "review_questions": [
+    "Does the reason packet justify the proposed edge?",
+    "Do the rank movements support keeping this candidate in preview-only review?",
+    "Should this candidate remain non-materialized until a separate write path is explicitly approved?"
+  ],
+  "review_state": "needs_human_review",
+  "schema": "agent_bridge.biocortex_retrieval.materialization_review_packet.v0",
+  "summary": {
+    "preview_candidate_count": 1,
+    "preview_case_count": 1,
+    "reason_packet_blocked_packet_count": 12,
+    "reason_packet_blocked_shadow_count": 0,
+    "reason_packet_relevant_edge_count": 1,
+    "reason_packet_selected_edge_count": 1
+  },
+  "writes_edges": false,
+  "writes_memory": false
+}

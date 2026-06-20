@@ -610,6 +610,24 @@ Interpretation: the review packet is now a stable handoff artifact for later
 Palace/UI integration, but it is still evidence-only and does not authorize a
 writer or runtime influence.
 
+The next safe step is now landed as a Palace-side read-only consumer of that
+packet contract:
+
+- default fixture packet:
+  `docs/design/fixtures/memory-biocortex-materialization-review-packet-2026-06-20.json`;
+- Palace route: `GET /api/materialization-review-artifact`;
+- Palace default source override:
+  `AB_PALACE_MATERIALIZATION_REVIEW_PACKET_JSON=/abs/path/to/packet.json`;
+- Palace wrapper schema:
+  `agent_bridge.palace.materialization_review_artifact.v0`.
+
+This Palace artifact does not generate candidates or write graph state. It only
+loads a packet JSON, validates the hard read-only boundary
+(`read_only=true`, `writes_memory=false`, `writes_edges=false`,
+`changes_search_order=false`, `can_change_retrieval_order=false`,
+`approval_writes_allowed=false`, `can_materialize_edges=false`), and exposes
+summary/questions/candidate evidence through the existing Palace review panel.
+
 ## Verification
 
 Targeted validation for this slice after `/Data` space was recovered:
