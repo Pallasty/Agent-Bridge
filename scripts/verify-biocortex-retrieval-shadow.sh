@@ -7005,6 +7005,9 @@ run cargo run -q -p ab-bridge \
     --format json \
     --assert-ready-for-verified-outcome-ingestion-writer \
     --assert-output-only >/dev/null
+run cargo test -p ab-bridge --test lswr_interaction_feedback_fixture \
+    interaction_feedback_runtime_executor_verified_outcome_ingestion_writer \
+    -- --nocapture
 
 current_corpus="crates/bridge/tests/fixtures/biocortex_retrieval_gate_corpus.jsonl"
 hard_corpus="crates/bridge/tests/fixtures/biocortex_retrieval_gate_hard_holdout_corpus.jsonl"
