@@ -18,8 +18,8 @@ use ab_bridge::biocortex_shadow::{
     BioCortexRetrievalCandidate, RelevanceLiftEvalOptions, RelevanceLiftQueryCase,
 };
 use ab_store::{
-    default_db_path, BioCortexRetrievalOptInSideSignal, MemoryEdge, MemoryListSort, SqliteStore,
-    StateStore,
+    cosine_similarity, default_db_path, embed_text, BioCortexRetrievalOptInSideSignal,
+    CoactivationEdge, MemoryEdge, MemoryListSort, MemoryRecord, SqliteStore, StateStore,
 };
 use anyhow::{Context, Result};
 use serde::Deserialize;
@@ -107,6 +107,7 @@ async fn main() -> Result<()> {
     )
     .await?;
     let graph_rows = analyze_graph_evidence(&store, &fixture, limit).await?;
+    let preflight_rows = analyze_graph_preflight(&store, &fixture, limit).await?;
 
     print_report(
         &fixture_path,
@@ -115,6 +116,7 @@ async fn main() -> Result<()> {
         &payload,
         &side_rows,
         &graph_rows,
+        &preflight_rows,
     );
     Ok(())
 }
@@ -218,6 +220,25 @@ struct GraphScoreVariantRow {
     blend_order_changed: bool,
 }
 
+#[derive(Debug)]
+struct GraphPreflightCaseRow {
+    sample_index: usize,
+    class_label: String,
+    candidate_count: usize,
+    relevant_count: usize,
+    relevant_in_candidates: usize,
+    direct_relevant_edge_count: usize,
+    direct_relevant_edge_types: BTreeMap<String, usize>,
+    bfs_relevant_reached: usize,
+    best_bfs_energy: Option<f64>,
+    coactivation_edge_count: usize,
+    coactivation_relevant_edge_count: usize,
+    best_relevant_coactivation_count: Option<u64>,
+    semantic_embedding_count: usize,
+    semantic_relevant_rank: Option<usize>,
+    semantic_relevant_cosine: Option<f32>,
+}
+
 #[derive(Copy, Clone, Debug)]
 enum GraphScoreVariant {
     AllIncident,
@@ -285,6 +306,88 @@ impl GraphScoreVariant {
     }
 }
 
+async fn analyze_graph_preflight(
+    store: &SqliteStore,
+    fixture: &Fixture,
+    limit: u32,
+) -> Result<Vec<GraphPreflightCaseRow>> {
+    let embedding_rows = store
+        .memory_load_embeddings()
+        .await
+        .context("memory_load_embeddings for graph preflight")?;
+    let mut out = Vec::new();
+    for (idx, case) in fixture.query_cases.iter().enumerate() {
+        let baseline_hits = store
+            .memory_search(&case.query, &[], limit)
+            .await
+            .with_context(|| format!("baseline memory_search for preflight case {}", idx + 1))?;
+        let candidate_keys = baseline_hits
+            .iter()
+            .map(|hit| hit.record.key.clone())
+            .collect::<BTreeSet<_>>();
+        let relevant = case.relevant_keys.iter().cloned().collect::<BTreeSet<_>>();
+        let induced_edges = collect_candidate_induced_edges(store, &candidate_keys)
+            .await
+            .with_context(|| format!("candidate induced edges for preflight case {}", idx + 1))?;
+        let graph_scores = score_graph_candidates(
+            &candidate_keys,
+            &induced_edges,
+            GraphScoreVariant::AllIncident,
+        );
+        let relevant_in_candidates = relevant
+            .iter()
+            .filter(|key| candidate_keys.contains(*key))
+            .count();
+        let mut direct_relevant_edge_types = BTreeMap::<String, usize>::new();
+        let direct_relevant_edge_count = induced_edges
+            .iter()
+            .filter(|edge| relevant.contains(&edge.from_key) || relevant.contains(&edge.to_key))
+            .inspect(|edge| {
+                *direct_relevant_edge_types
+                    .entry(edge.edge_type.clone())
+                    .or_default() += 1;
+            })
+            .count();
+        let (bfs_relevant_reached, best_bfs_energy) =
+            graph_hub_bfs_relevance(store, &graph_scores, &relevant).await?;
+        let candidate_key_vec = candidate_keys.iter().cloned().collect::<Vec<_>>();
+        let coactivation_edges = store
+            .coactivation_among(&candidate_key_vec)
+            .await
+            .with_context(|| format!("coactivation_among for preflight case {}", idx + 1))?;
+        let coactivation_relevant_edges = coactivation_edges
+            .iter()
+            .filter(|edge| relevant.contains(&edge.key_a) || relevant.contains(&edge.key_b))
+            .count();
+        let best_relevant_coactivation_count =
+            best_relevant_coactivation_count(&coactivation_edges, &relevant);
+        let (semantic_relevant_rank, semantic_relevant_cosine) =
+            semantic_relevant_position(&case.query, &embedding_rows, &relevant);
+
+        out.push(GraphPreflightCaseRow {
+            sample_index: idx,
+            class_label: case
+                .class_label
+                .clone()
+                .unwrap_or_else(|| "unlabelled".to_string()),
+            candidate_count: candidate_keys.len(),
+            relevant_count: relevant.len(),
+            relevant_in_candidates,
+            direct_relevant_edge_count,
+            direct_relevant_edge_types,
+            bfs_relevant_reached,
+            best_bfs_energy,
+            coactivation_edge_count: coactivation_edges.len(),
+            coactivation_relevant_edge_count: coactivation_relevant_edges,
+            best_relevant_coactivation_count,
+            semantic_embedding_count: embedding_rows.len(),
+            semantic_relevant_rank,
+            semantic_relevant_cosine,
+        });
+    }
+    Ok(out)
+}
+
 async fn analyze_graph_evidence(
     store: &SqliteStore,
     fixture: &Fixture,
@@ -306,34 +409,15 @@ async fn analyze_graph_evidence(
             .collect::<BTreeSet<_>>();
         let source_key = case.relevant_keys.first().map(String::as_str);
         let relevant = case.relevant_keys.iter().cloned().collect::<BTreeSet<_>>();
-        let mut seen_edges = HashSet::<(String, String, String)>::new();
-        let mut induced_edges = Vec::<MemoryEdge>::new();
+        let induced_edges = collect_candidate_induced_edges(store, &candidate_keys)
+            .await
+            .with_context(|| format!("candidate induced edges for graph case {}", idx + 1))?;
         let mut induced_nodes = BTreeSet::<String>::new();
         let mut edge_type_counts = BTreeMap::<String, usize>::new();
-
-        for key in &candidate_keys {
-            let neighbors = store.memory_neighbors(key).await.with_context(|| {
-                format!("memory_neighbors for graph case {} key {}", idx + 1, key)
-            })?;
-            for edge in neighbors {
-                if !candidate_keys.contains(&edge.from_key)
-                    || !candidate_keys.contains(&edge.to_key)
-                {
-                    continue;
-                }
-                let dedupe_key = (
-                    edge.from_key.clone(),
-                    edge.to_key.clone(),
-                    edge.edge_type.clone(),
-                );
-                if !seen_edges.insert(dedupe_key) {
-                    continue;
-                }
-                *edge_type_counts.entry(edge.edge_type.clone()).or_default() += 1;
-                induced_nodes.insert(edge.from_key.clone());
-                induced_nodes.insert(edge.to_key.clone());
-                induced_edges.push(edge);
-            }
+        for edge in &induced_edges {
+            *edge_type_counts.entry(edge.edge_type.clone()).or_default() += 1;
+            induced_nodes.insert(edge.from_key.clone());
+            induced_nodes.insert(edge.to_key.clone());
         }
 
         let graph_scores = score_graph_candidates(
@@ -400,6 +484,97 @@ async fn analyze_graph_evidence(
         });
     }
     Ok(out)
+}
+
+async fn collect_candidate_induced_edges(
+    store: &SqliteStore,
+    candidate_keys: &BTreeSet<String>,
+) -> Result<Vec<MemoryEdge>> {
+    let mut seen_edges = HashSet::<(String, String, String)>::new();
+    let mut induced_edges = Vec::<MemoryEdge>::new();
+    for key in candidate_keys {
+        let neighbors = store
+            .memory_neighbors(key)
+            .await
+            .with_context(|| format!("memory_neighbors for key {}", key))?;
+        for edge in neighbors {
+            if !candidate_keys.contains(&edge.from_key) || !candidate_keys.contains(&edge.to_key) {
+                continue;
+            }
+            let dedupe_key = (
+                edge.from_key.clone(),
+                edge.to_key.clone(),
+                edge.edge_type.clone(),
+            );
+            if seen_edges.insert(dedupe_key) {
+                induced_edges.push(edge);
+            }
+        }
+    }
+    Ok(induced_edges)
+}
+
+async fn graph_hub_bfs_relevance(
+    store: &SqliteStore,
+    graph_scores: &[(String, f64)],
+    relevant: &BTreeSet<String>,
+) -> Result<(usize, Option<f64>)> {
+    let mut reached = BTreeSet::<String>::new();
+    let mut best_energy: Option<f64> = None;
+    for (hub, _) in graph_scores.iter().take(5) {
+        let rows = store
+            .memory_neighbors_bfs(hub, 2, 0.7, 0.01)
+            .await
+            .with_context(|| format!("memory_neighbors_bfs for graph hub {}", hub))?;
+        for (edge, energy) in rows {
+            for endpoint in [&edge.from_key, &edge.to_key] {
+                if relevant.contains(endpoint) {
+                    reached.insert(endpoint.clone());
+                    best_energy = Some(best_energy.map_or(energy, |best| best.max(energy)));
+                }
+            }
+        }
+    }
+    Ok((reached.len(), best_energy))
+}
+
+fn best_relevant_coactivation_count(
+    edges: &[CoactivationEdge],
+    relevant: &BTreeSet<String>,
+) -> Option<u64> {
+    edges
+        .iter()
+        .filter(|edge| relevant.contains(&edge.key_a) || relevant.contains(&edge.key_b))
+        .map(|edge| edge.count)
+        .max()
+}
+
+fn semantic_relevant_position(
+    query: &str,
+    embedding_rows: &[(MemoryRecord, Vec<f32>)],
+    relevant: &BTreeSet<String>,
+) -> (Option<usize>, Option<f32>) {
+    if query.trim().is_empty() || embedding_rows.is_empty() {
+        return (None, None);
+    }
+    let query_vec = embed_text(query);
+    if query_vec.is_empty() {
+        return (None, None);
+    }
+    let mut rows = embedding_rows
+        .iter()
+        .map(|(record, embedding)| (record.key.clone(), cosine_similarity(&query_vec, embedding)))
+        .collect::<Vec<_>>();
+    rows.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(Ordering::Equal)
+            .then_with(|| a.0.cmp(&b.0))
+    });
+    rows.iter()
+        .enumerate()
+        .find(|(_, (key, _))| relevant.contains(key.as_str()))
+        .map(|(idx, (_, cosine))| (Some(idx + 1), Some(*cosine)))
+        .unwrap_or((None, None))
 }
 
 fn score_graph_candidates(
@@ -832,6 +1007,7 @@ fn print_report(
     payload: &Value,
     side_rows: &[SideSignalCaseRow],
     graph_rows: &[GraphEvidenceCaseRow],
+    preflight_rows: &[GraphPreflightCaseRow],
 ) {
     println!("# BioCortex relevance-lift fixture diagnostics");
     println!("fixture: {}", fixture_path.display());
@@ -1066,6 +1242,81 @@ fn print_report(
         );
     }
     println!();
+    println!("## Graph proximity/materialization preflight rows");
+    println!(
+        "{:<4} {:<34} {:>5} {:>5} {:>7} {:>6} {:<18} {:>7} {:>7} {:>6} {:>8} {:>8} {:>8} {:>7}",
+        "#",
+        "class_label",
+        "cand",
+        "rel",
+        "in_cand",
+        "dir_e",
+        "dir_types",
+        "bfs_rel",
+        "bfs_e",
+        "coact",
+        "coact_r",
+        "coact_n",
+        "sem_rank",
+        "sem_cos"
+    );
+    for row in preflight_rows {
+        println!(
+            "{:<4} {:<34} {:>5} {:>5} {:>7} {:>6} {:<18} {:>7} {:>7} {:>6} {:>8} {:>8} {:>8} {:>7}",
+            row.sample_index + 1,
+            truncate(&row.class_label, 34),
+            row.candidate_count,
+            row.relevant_count,
+            row.relevant_in_candidates,
+            row.direct_relevant_edge_count,
+            truncate(&edge_type_summary(&row.direct_relevant_edge_types), 18),
+            row.bfs_relevant_reached,
+            opt_f64(row.best_bfs_energy),
+            row.coactivation_edge_count,
+            row.coactivation_relevant_edge_count,
+            opt_u64(row.best_relevant_coactivation_count),
+            opt_usize(row.semantic_relevant_rank),
+            opt_f32(row.semantic_relevant_cosine),
+        );
+    }
+    println!();
+    println!("## Graph proximity/materialization preflight summary");
+    let total_cases = preflight_rows.len();
+    let relevant_missing_from_candidates = preflight_rows
+        .iter()
+        .filter(|row| row.relevant_in_candidates == 0)
+        .count();
+    let direct_edge_cases = preflight_rows
+        .iter()
+        .filter(|row| row.direct_relevant_edge_count > 0)
+        .count();
+    let bfs_reachable_cases = preflight_rows
+        .iter()
+        .filter(|row| row.bfs_relevant_reached > 0)
+        .count();
+    let coactivation_cases = preflight_rows
+        .iter()
+        .filter(|row| row.coactivation_relevant_edge_count > 0)
+        .count();
+    let semantic_top20_cases = preflight_rows
+        .iter()
+        .filter(|row| row.semantic_relevant_rank.is_some_and(|rank| rank <= 20))
+        .count();
+    let semantic_rows = preflight_rows
+        .first()
+        .map(|row| row.semantic_embedding_count)
+        .unwrap_or(0);
+    println!(
+        "cases={} missing_candidate={} direct_edge={} bfs_reachable={} coactivation={} semantic_top20={} embedding_rows={}",
+        total_cases,
+        relevant_missing_from_candidates,
+        direct_edge_cases,
+        bfs_reachable_cases,
+        coactivation_cases,
+        semantic_top20_cases,
+        semantic_rows,
+    );
+    println!();
     println!("## Interpretation");
     println!(
         "- If `match` is low or `cov` is below the threshold, fix side-signal coverage before tuning rank blend."
@@ -1108,6 +1359,12 @@ fn print_report(
     );
     println!(
         "- Treat positive `mrr_d` as a design hint only: this example is read-only and does not approve production graph influence."
+    );
+    println!(
+        "- In the preflight table, `in_cand=0` points to candidate-generation limits; `dir_e=0` with strong `sem_rank` points to missing materialized graph edges."
+    );
+    println!(
+        "- `bfs_rel` and `coact_r` distinguish graph-proximity evidence from semantic-only evidence before deciding whether to materialize new edges."
     );
 }
 
@@ -1163,6 +1420,12 @@ fn opt_f32(value: Option<f32>) -> String {
 fn opt_f64(value: Option<f64>) -> String {
     value
         .map(|value| format!("{value:.3}"))
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn opt_u64(value: Option<u64>) -> String {
+    value
+        .map(|value| value.to_string())
         .unwrap_or_else(|| "-".to_string())
 }
 

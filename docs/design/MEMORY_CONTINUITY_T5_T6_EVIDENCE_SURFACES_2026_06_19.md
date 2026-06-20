@@ -325,6 +325,31 @@ proximity, edge-type-specific caps, or materializing co-retrieval/semantic
 neighbor edges for the zero-signal cases. Do not wire raw graph incident scores
 into BioCortex adapter influence yet.
 
+The graph proximity/materialization preflight then checked whether the fixture
+failures are really missing-edge problems:
+
+- all seven cases already had at least one labelled relevant key in the
+  baseline FTS candidate set, so this fixture is not blocked by candidate
+  generation;
+- only two of seven cases had a direct candidate-induced explicit graph edge
+  touching a relevant key;
+- three of seven cases could reach a relevant key through capped BFS from the
+  top graph hubs;
+- candidate-set coactivation did not support the labelled relevant keys in any
+  case;
+- semantic cosine did not place any labelled relevant key in the top 20
+  (`embedding_rows=2783`), so this fixture does not justify materializing
+  semantic-neighbor edges from query similarity alone.
+
+Interpretation: do not start with semantic/coactivation materialization for this
+fixture. The labelled relevant memories are already inside the baseline
+candidate sets, but explicit graph evidence is too sparse and raw incident
+weights are harmful. The next useful design should test a bounded graph
+proximity feature: direct relevant-edge presence, BFS energy from graph hubs,
+edge-type caps, and zero-signal fallback. Only after that should materialization
+be revisited, ideally with a fixture where relevant memories are semantically
+near but absent from explicit graph structure.
+
 ## Verification
 
 Targeted validation for this slice after `/Data` space was recovered:
