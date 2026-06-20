@@ -205,7 +205,9 @@ The example uses the same `biocortex_retrieval_relevance_lift_eval` ruler and
 defaults to the headroom fixture. It prints aggregate metrics plus redacted
 per-case rows: observed fixture FTS rank, current baseline source rank,
 reordered source rank, rank delta, reciprocal-rank delta, side-signal match
-count, coverage, and whether the ordering changed.
+count, coverage, whether the ordering changed, source/accept-set side-signal
+rank and score, top-side relevance, distinct side-score count, and top-score tie
+count.
 
 Current source-run result on this Mac:
 
@@ -214,7 +216,13 @@ Current source-run result on this Mac:
 - `improved=1`, `worsened=0`, `unchanged=6`;
 - `source_found_count=6`;
 - side-signal coverage was not the blocker: all evaluated rows reported
-  `side_signal_coverage=1.0`.
+  `side_signal_coverage=1.0`;
+- side-signal score saturation is the concrete blocker:
+  - cases #1, #2, and #4 had only one distinct side score, so every candidate
+    tied;
+  - cases #3 and #6 each had 11 candidates tied at the top score;
+  - case #5 had 19 candidates tied at the top score;
+  - in the hard cases, `top_rel=false` despite full side-signal coverage.
 
 Interpretation: this is still not strong enough for T6 runtime influence. The
 useful next scoring work is to inspect why high-coverage side signals mostly
@@ -223,7 +231,8 @@ distinction surfaced by the example: the fixture's `baseline_fts_rank_observed`
 is first-hit over the accept set, while `baseline_rank_of_source` tracks the
 first listed primary source key. Case #4 demonstrates the difference: the
 accept-set hit exists, but the primary source key is absent from the baseline
-candidate list.
+candidate list. Do not loosen T6 based on this; improve side-signal score
+normalization/discrimination first.
 
 ## Verification
 

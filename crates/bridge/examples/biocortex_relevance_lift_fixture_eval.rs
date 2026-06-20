@@ -14,13 +14,17 @@
 //! ```
 
 use ab_bridge::biocortex_shadow::{
-    biocortex_retrieval_relevance_lift_eval, RelevanceLiftEvalOptions, RelevanceLiftQueryCase,
+    biocortex_retrieval_relevance_lift_eval, run_retrieval_side_signal,
+    BioCortexRetrievalCandidate, RelevanceLiftEvalOptions, RelevanceLiftQueryCase,
 };
-use ab_store::{default_db_path, MemoryListSort, SqliteStore};
+use ab_store::{
+    default_db_path, BioCortexRetrievalOptInSideSignal, MemoryListSort, SqliteStore, StateStore,
+};
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use serde_json::Value;
-use std::path::PathBuf;
+use std::collections::{BTreeSet, HashMap};
+use std::path::{Path, PathBuf};
 
 const DEFAULT_FIXTURE: &str =
     "docs/design/fixtures/memory-biocortex-relevance-lift-headroom-cases-2026-06-20.json";
@@ -85,13 +89,23 @@ async fn main() -> Result<()> {
             blend_alpha,
             coverage_threshold: 0.8,
             include_related: true,
-            checkout,
+            checkout: checkout.clone(),
             timeout_ms,
         },
     )
     .await;
 
-    print_report(&fixture_path, &fixture, &db_path, &payload);
+    let side_rows = analyze_side_signal(
+        &store,
+        &fixture,
+        checkout.as_deref(),
+        limit,
+        timeout_ms,
+        blend_alpha,
+    )
+    .await?;
+
+    print_report(&fixture_path, &fixture, &db_path, &payload, &side_rows);
     Ok(())
 }
 
@@ -119,7 +133,184 @@ fn load_fixture(path: &PathBuf) -> Result<Fixture> {
     Ok(fixture)
 }
 
-fn print_report(fixture_path: &PathBuf, fixture: &Fixture, db_path: &PathBuf, payload: &Value) {
+#[derive(Debug)]
+struct SideSignalCaseRow {
+    sample_index: usize,
+    class_label: String,
+    baseline_source_rank: Option<usize>,
+    baseline_first_relevant_rank: Option<usize>,
+    reordered_source_rank: Option<usize>,
+    reordered_first_relevant_rank: Option<usize>,
+    source_side_rank: Option<usize>,
+    source_side_score: Option<f32>,
+    best_relevant_side_rank: Option<usize>,
+    best_relevant_side_score: Option<f32>,
+    top_side_relevant: bool,
+    top_side_score: Option<f32>,
+    distinct_side_scores: usize,
+    top_score_tie_count: usize,
+    matched: usize,
+    coverage: f64,
+}
+
+async fn analyze_side_signal(
+    store: &SqliteStore,
+    fixture: &Fixture,
+    checkout: Option<&Path>,
+    limit: u32,
+    timeout_ms: u64,
+    blend_alpha: f32,
+) -> Result<Vec<SideSignalCaseRow>> {
+    let mut out = Vec::new();
+    for (idx, case) in fixture.query_cases.iter().enumerate() {
+        let baseline_hits = store
+            .memory_search(&case.query, &[], limit)
+            .await
+            .with_context(|| format!("baseline memory_search for case {}", idx + 1))?;
+        let baseline_ranking = baseline_hits
+            .iter()
+            .map(|hit| hit.record.key.clone())
+            .collect::<Vec<_>>();
+        let candidates = baseline_hits
+            .iter()
+            .map(|hit| BioCortexRetrievalCandidate {
+                key: hit.record.key.clone(),
+                content: hit.record.content.clone(),
+            })
+            .collect::<Vec<_>>();
+        let source_key = case.relevant_keys.first().map(String::as_str);
+        let relevant = case.relevant_keys.iter().cloned().collect::<BTreeSet<_>>();
+        let run =
+            run_retrieval_side_signal(&case.query, &candidates, source_key, checkout, timeout_ms)
+                .await
+                .map_err(|value| {
+                    anyhow::anyhow!("side signal failed for case {}: {}", idx + 1, value)
+                })?;
+        let candidate_keys = candidates
+            .iter()
+            .map(|candidate| candidate.key.as_str())
+            .collect::<BTreeSet<_>>();
+        let mut side_scores = run
+            .rows
+            .into_iter()
+            .filter(|row| row.query_id == "q_runtime_shadow")
+            .filter(|row| candidate_keys.contains(row.candidate_key.as_str()))
+            .map(|row| (row.candidate_key, row.score))
+            .collect::<Vec<_>>();
+        side_scores.sort_by(|a, b| {
+            b.1.partial_cmp(&a.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.0.cmp(&b.0))
+        });
+        let side_by_key = side_scores
+            .iter()
+            .map(|(key, score)| (key.as_str(), *score))
+            .collect::<HashMap<_, _>>();
+        let side_signal_scores = side_scores
+            .iter()
+            .map(|(candidate_key, score)| BioCortexRetrievalOptInSideSignal {
+                candidate_key: candidate_key.clone(),
+                score: *score,
+            })
+            .collect::<Vec<_>>();
+        let (reordered_hits, summary, _) = ab_store::biocortex_opt_in_apply_side_signal(
+            &baseline_hits,
+            &side_signal_scores,
+            blend_alpha,
+            0.8,
+            true,
+        );
+        let reordered_ranking = reordered_hits
+            .iter()
+            .map(|hit| hit.record.key.clone())
+            .collect::<Vec<_>>();
+
+        let source_side_rank = source_key.and_then(|source| {
+            side_scores
+                .iter()
+                .position(|(key, _)| key == source)
+                .map(|pos| pos + 1)
+        });
+        let source_side_score = source_key.and_then(|source| side_by_key.get(source).copied());
+        let (best_relevant_side_rank, best_relevant_side_score) = side_scores
+            .iter()
+            .enumerate()
+            .find(|(_, (key, _))| relevant.contains(key))
+            .map(|(idx, (_, score))| (Some(idx + 1), Some(*score)))
+            .unwrap_or((None, None));
+        let top_side_relevant = side_scores
+            .first()
+            .map(|(key, _)| relevant.contains(key))
+            .unwrap_or(false);
+        let top_side_score = side_scores.first().map(|(_, score)| *score);
+        let distinct_side_scores = side_scores
+            .iter()
+            .fold(Vec::<f32>::new(), |mut acc, (_, score)| {
+                if !acc
+                    .iter()
+                    .any(|existing| (*existing - *score).abs() < f32::EPSILON)
+                {
+                    acc.push(*score);
+                }
+                acc
+            })
+            .len();
+        let top_score_tie_count = top_side_score
+            .map(|top| {
+                side_scores
+                    .iter()
+                    .filter(|(_, score)| (*score - top).abs() < f32::EPSILON)
+                    .count()
+            })
+            .unwrap_or(0);
+
+        out.push(SideSignalCaseRow {
+            sample_index: idx,
+            class_label: case
+                .class_label
+                .clone()
+                .unwrap_or_else(|| "unlabelled".to_string()),
+            baseline_source_rank: source_key.and_then(|source| rank_in(&baseline_ranking, source)),
+            baseline_first_relevant_rank: first_relevant_rank(&baseline_ranking, &relevant),
+            reordered_source_rank: source_key
+                .and_then(|source| rank_in(&reordered_ranking, source)),
+            reordered_first_relevant_rank: first_relevant_rank(&reordered_ranking, &relevant),
+            source_side_rank,
+            source_side_score,
+            best_relevant_side_rank,
+            best_relevant_side_score,
+            top_side_relevant,
+            top_side_score,
+            distinct_side_scores,
+            top_score_tie_count,
+            matched: summary.matched_candidate_count,
+            coverage: summary.coverage,
+        });
+    }
+    Ok(out)
+}
+
+fn first_relevant_rank(ranking: &[String], relevant: &BTreeSet<String>) -> Option<usize> {
+    ranking
+        .iter()
+        .position(|key| relevant.contains(key))
+        .map(|idx| idx + 1)
+}
+
+fn rank_in(ranking: &[String], key: &str) -> Option<usize> {
+    ranking
+        .iter()
+        .position(|candidate| candidate == key)
+        .map(|idx| idx + 1)
+}
+
+fn print_report(
+    fixture_path: &PathBuf,
+    fixture: &Fixture,
+    db_path: &PathBuf,
+    payload: &Value,
+    side_rows: &[SideSignalCaseRow],
+) {
     println!("# BioCortex relevance-lift fixture diagnostics");
     println!("fixture: {}", fixture_path.display());
     println!("fixture_schema: {}", fixture.schema);
@@ -174,6 +365,44 @@ fn print_report(fixture_path: &PathBuf, fixture: &Fixture, db_path: &PathBuf, pa
         );
     }
     println!();
+    println!("## Per-case side-signal scoring rows");
+    println!(
+        "{:<4} {:<34} {:>8} {:>8} {:>8} {:>8} {:>9} {:>9} {:>8} {:>8} {:>8} {:>7} {:>7} {:>7}",
+        "#",
+        "class_label",
+        "src_b",
+        "rel_b",
+        "src_r",
+        "rel_r",
+        "src_side",
+        "rel_side",
+        "top_rel",
+        "top_score",
+        "distinct",
+        "top_tie",
+        "match",
+        "cov"
+    );
+    for row in side_rows {
+        println!(
+            "{:<4} {:<34} {:>8} {:>8} {:>8} {:>8} {:>9} {:>9} {:>8} {:>8} {:>8} {:>7} {:>7} {:>7}",
+            row.sample_index + 1,
+            truncate(&row.class_label, 34),
+            opt_usize(row.baseline_source_rank),
+            opt_usize(row.baseline_first_relevant_rank),
+            opt_usize(row.reordered_source_rank),
+            opt_usize(row.reordered_first_relevant_rank),
+            side_rank_score(row.source_side_rank, row.source_side_score),
+            side_rank_score(row.best_relevant_side_rank, row.best_relevant_side_score),
+            row.top_side_relevant,
+            opt_f32(row.top_side_score),
+            row.distinct_side_scores,
+            row.top_score_tie_count,
+            row.matched,
+            format!("{:.3}", row.coverage),
+        );
+    }
+    println!();
     println!("## Interpretation");
     println!(
         "- If `match` is low or `cov` is below the threshold, fix side-signal coverage before tuning rank blend."
@@ -183,6 +412,15 @@ fn print_report(fixture_path: &PathBuf, fixture: &Fixture, db_path: &PathBuf, pa
     );
     println!(
         "- If observed FTS rank differs from current `base`, the live store drifted; refresh the fixture observation before comparing lift."
+    );
+    println!(
+        "- `src_side` is the primary source key's side-signal rank/score; `rel_side` is the best accept-set member's side-signal rank/score."
+    );
+    println!(
+        "- If `top_rel=false` while coverage is high, BioCortex is scoring a distractor above every labelled relevant key."
+    );
+    println!(
+        "- If `top_tie` is large or `distinct` is tiny, the side-signal is saturated and cannot reliably discriminate candidates."
     );
 }
 
@@ -220,6 +458,25 @@ fn cell(value: &Value) -> String {
         Value::String(s) => s.clone(),
         Value::Null => "-".to_string(),
         other => other.to_string(),
+    }
+}
+
+fn opt_usize(value: Option<usize>) -> String {
+    value
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn opt_f32(value: Option<f32>) -> String {
+    value
+        .map(|value| format!("{value:.3}"))
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn side_rank_score(rank: Option<usize>, score: Option<f32>) -> String {
+    match (rank, score) {
+        (Some(rank), Some(score)) => format!("{rank}/{score:.3}"),
+        _ => "-".to_string(),
     }
 }
 

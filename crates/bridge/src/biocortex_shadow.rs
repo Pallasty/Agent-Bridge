@@ -583,7 +583,11 @@ struct RetrievalAlphaConfig {
 }
 
 #[derive(Debug, Deserialize)]
-pub(crate) struct RetrievalSideSignalRow {
+/// One row emitted by the local BioCortex retrieval side-signal diagnostic.
+///
+/// This type is public so examples can inspect score/rank behavior without
+/// adding a new MCP tool surface.
+pub struct RetrievalSideSignalRow {
     pub query_id: String,
     pub candidate_key: String,
     pub score: f32,
@@ -600,7 +604,11 @@ struct RetrievalBaselineScore {
 }
 
 #[derive(Debug)]
-pub(crate) struct RetrievalSideSignalRun {
+/// Raw output from a local BioCortex retrieval side-signal run.
+///
+/// Intended for diagnostics and examples; runtime MCP callers still go through
+/// the guarded opt-in retrieval path.
+pub struct RetrievalSideSignalRun {
     pub rows: Vec<RetrievalSideSignalRow>,
     pub payload: Value,
     pub raw: Value,
@@ -11675,7 +11683,11 @@ fn retrieval_baseline_scores(
     rows
 }
 
-async fn run_retrieval_side_signal(
+/// Run the local BioCortex retrieval side-signal adapter for diagnostics.
+///
+/// This helper exists so fixture examples can inspect score saturation and
+/// ranking behavior directly without widening the MCP API surface.
+pub async fn run_retrieval_side_signal(
     query: &str,
     candidates: &[BioCortexRetrievalCandidate],
     expected_key: Option<&str>,
