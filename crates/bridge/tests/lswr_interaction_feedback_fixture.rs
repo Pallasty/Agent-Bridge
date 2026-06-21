@@ -1,73 +1,4 @@
 use ab_bridge::lswr_interaction_feedback::{
-    LSWR_INTERACTION_FEEDBACK_ARGUMENT_CONTEXT_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_CONSUMPTION_PREFLIGHT_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_EVIDENCE_PACKET_SCHEMA, LSWR_INTERACTION_FEEDBACK_FIXTURE_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_LIVE_RUNTIME_LOOKUP_DESIGN_PREFLIGHT_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_NEXT_REVISION_PLAN_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_PATCH_APPLY_REQUEST_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_PATCH_EXECUTION_PREFLIGHT_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_READBACK_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DESIGN_PREFLIGHT_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_INGESTION_EXECUTION_PREFLIGHT_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_INGESTION_GATE_PREFLIGHT_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_PERSISTENCE_PREFLIGHT_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_STORE_WRITE_EXECUTION_PREFLIGHT_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_EVIDENCE_PREFLIGHT_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_EVIDENCE_REVIEW_PREFLIGHT_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_EXECUTION_PREFLIGHT_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_PREFLIGHT_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_WRITE_IMPLEMENTATION_PREFLIGHT_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_LIVE_LOOKUP_PREFLIGHT_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_OPERATOR_SUBMISSION_TOKEN_PREFLIGHT_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_OUTCOME_INGESTION_REVIEW_PREFLIGHT_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_APPLICATION_GATE_PREFLIGHT_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_EXECUTOR_INVOCATION_PREFLIGHT_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_RUNTIME_APPLICATION_EVIDENCE_PREFLIGHT_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_POST_APPLY_VERIFICATION_PREFLIGHT_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_ADMISSION_PREFLIGHT_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_APPLY_GATE_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_EXECUTION_COMMIT_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_EXECUTION_PREFLIGHT_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_GATE_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_PERSISTENCE_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_STORE_WRITE_EXECUTION_PREFLIGHT_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_WRITE_EVIDENCE_PREFLIGHT_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_WRITE_EVIDENCE_REVIEW_PREFLIGHT_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_WRITER_EXECUTION_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_WRITER_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_WORLD_VERDICT_REWRITE_GATE_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_SEMANTIC_PATCH_DRAFT_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_VALIDATION_ENVELOPE_SCHEMA,
-    LSWR_INTERACTION_FEEDBACK_VALIDATION_SCHEMA,
-    LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_INGESTION_EXECUTION_DECISION_SCHEMA,
-    LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_INGESTION_GATE_DECISION_SCHEMA,
-    LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_PERSISTENCE_DECISION_SCHEMA,
-    LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_STORE_WRITE_EXECUTION_DECISION_SCHEMA,
-    LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_DECISION_SCHEMA,
-    LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_EVIDENCE_REVIEW_DECISION_SCHEMA,
-    LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_EVIDENCE_SCHEMA,
-    LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_EXECUTION_DECISION_SCHEMA,
-    LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_WRITE_IMPLEMENTATION_DECISION_SCHEMA,
-    LSWR_RUNTIME_EXECUTOR_LIVE_LOOKUP_SNAPSHOT_SCHEMA,
-    LSWR_RUNTIME_EXECUTOR_OPERATOR_SUBMISSION_DECISION_SCHEMA,
-    LSWR_RUNTIME_EXECUTOR_OUTCOME_INGESTION_REVIEW_DECISION_SCHEMA,
-    LSWR_RUNTIME_EXECUTOR_PATCH_APPLICATION_GATE_DECISION_SCHEMA,
-    LSWR_RUNTIME_EXECUTOR_PATCH_EXECUTOR_INVOCATION_DECISION_SCHEMA,
-    LSWR_RUNTIME_EXECUTOR_PATCH_RUNTIME_APPLICATION_EVIDENCE_SCHEMA,
-    LSWR_RUNTIME_EXECUTOR_POST_APPLY_VERIFICATION_EVIDENCE_SCHEMA,
-    LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_ADMISSION_DECISION_SCHEMA,
-    LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_APPLY_DECISION_SCHEMA,
-    LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_DECISION_SCHEMA,
-    LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_EXECUTION_COMMIT_DECISION_SCHEMA,
-    LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_EXECUTION_DECISION_SCHEMA,
-    LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_PERSISTENCE_DECISION_SCHEMA,
-    LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_STORE_WRITE_EXECUTION_DECISION_SCHEMA,
-    LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_WRITE_EVIDENCE_REVIEW_DECISION_SCHEMA,
-    LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_WRITE_EVIDENCE_SCHEMA,
-    LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_WRITER_DECISION_SCHEMA,
-    LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_WRITER_EXECUTION_DECISION_SCHEMA,
-    LSWR_RUNTIME_EXECUTOR_WORLD_VERDICT_REWRITE_DECISION_SCHEMA,
     build_interaction_feedback_consumption_report, build_interaction_feedback_evidence_packet,
     build_interaction_feedback_live_runtime_lookup_design_preflight,
     build_interaction_feedback_next_revision_plan,
@@ -141,8 +72,77 @@ use ab_bridge::lswr_interaction_feedback::{
     render_interaction_feedback_runtime_executor_world_verdict_rewrite_gate,
     render_interaction_feedback_semantic_patch_draft,
     render_interaction_feedback_validation_envelope, validate_interaction_feedback_fixture,
+    LSWR_INTERACTION_FEEDBACK_ARGUMENT_CONTEXT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_CONSUMPTION_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_EVIDENCE_PACKET_SCHEMA, LSWR_INTERACTION_FEEDBACK_FIXTURE_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_LIVE_RUNTIME_LOOKUP_DESIGN_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_NEXT_REVISION_PLAN_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_PATCH_APPLY_REQUEST_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_PATCH_EXECUTION_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_READBACK_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DESIGN_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_INGESTION_EXECUTION_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_INGESTION_GATE_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_PERSISTENCE_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_STORE_WRITE_EXECUTION_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_EVIDENCE_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_EVIDENCE_REVIEW_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_EXECUTION_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_DURABLE_OUTCOME_WRITE_IMPLEMENTATION_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_LIVE_LOOKUP_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_OPERATOR_SUBMISSION_TOKEN_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_OUTCOME_INGESTION_REVIEW_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_APPLICATION_GATE_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_EXECUTOR_INVOCATION_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_PATCH_RUNTIME_APPLICATION_EVIDENCE_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_POST_APPLY_VERIFICATION_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_ADMISSION_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_APPLY_GATE_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_EXECUTION_COMMIT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_EXECUTION_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_GATE_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_PERSISTENCE_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_STORE_WRITE_EXECUTION_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_WRITER_EXECUTION_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_WRITER_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_WRITE_EVIDENCE_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_WRITE_EVIDENCE_REVIEW_PREFLIGHT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_WORLD_VERDICT_REWRITE_GATE_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_SEMANTIC_PATCH_DRAFT_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_VALIDATION_ENVELOPE_SCHEMA,
+    LSWR_INTERACTION_FEEDBACK_VALIDATION_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_INGESTION_EXECUTION_DECISION_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_INGESTION_GATE_DECISION_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_PERSISTENCE_DECISION_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_STORE_WRITE_EXECUTION_DECISION_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_DECISION_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_EVIDENCE_REVIEW_DECISION_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_EVIDENCE_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_RECORD_WRITE_EXECUTION_DECISION_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_DURABLE_OUTCOME_WRITE_IMPLEMENTATION_DECISION_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_LIVE_LOOKUP_SNAPSHOT_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_OPERATOR_SUBMISSION_DECISION_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_OUTCOME_INGESTION_REVIEW_DECISION_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_PATCH_APPLICATION_GATE_DECISION_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_PATCH_EXECUTOR_INVOCATION_DECISION_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_PATCH_RUNTIME_APPLICATION_EVIDENCE_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_POST_APPLY_VERIFICATION_EVIDENCE_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_ADMISSION_DECISION_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_APPLY_DECISION_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_DECISION_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_EXECUTION_COMMIT_DECISION_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_EXECUTION_DECISION_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_PERSISTENCE_DECISION_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_STORE_WRITE_EXECUTION_DECISION_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_WRITER_DECISION_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_WRITER_EXECUTION_DECISION_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_WRITE_EVIDENCE_REVIEW_DECISION_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_WRITE_EVIDENCE_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_WORLD_VERDICT_REWRITE_DECISION_SCHEMA,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 const FIXTURE_JSON: &str = include_str!("fixtures/lswr_interaction_feedback_fixture_v0.json");
 const ENVELOPE_MARKDOWN: &str =
@@ -419,12 +419,10 @@ fn interaction_feedback_consumption_preflight_blocks_missing_input() {
     );
     assert_eq!(preflight["implicit_live_runtime_lookup_attempted"], false);
     assert_eq!(preflight["packet"], Value::Null);
-    assert!(
-        preflight["blockers"]
-            .as_array()
-            .expect("blockers")
-            .contains(&json!("explicit_packet_or_fixture_required"))
-    );
+    assert!(preflight["blockers"]
+        .as_array()
+        .expect("blockers")
+        .contains(&json!("explicit_packet_or_fixture_required")));
     assert_eq!(preflight["acceptance_matrix"][0]["gate"], "C1");
     assert_eq!(preflight["acceptance_matrix"][0]["passed"], false);
     assert_eq!(preflight["acceptance_matrix"][1]["gate"], "C2");
@@ -448,18 +446,14 @@ fn interaction_feedback_consumption_preflight_rejects_laundered_packet() {
     assert_eq!(preflight["acceptance_matrix"][1]["passed"], false);
     assert_eq!(preflight["acceptance_matrix"][2]["gate"], "C3");
     assert_eq!(preflight["acceptance_matrix"][2]["passed"], false);
-    assert!(
-        preflight["failure_reasons"]
-            .as_array()
-            .expect("failure reasons")
-            .contains(&json!("C2:guardrails_preserved"))
-    );
-    assert!(
-        preflight["failure_reasons"]
-            .as_array()
-            .expect("failure reasons")
-            .contains(&json!("C3:no_verification_laundering"))
-    );
+    assert!(preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("C2:guardrails_preserved")));
+    assert!(preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("C3:no_verification_laundering")));
     assert_eq!(preflight["implicit_live_runtime_lookup_attempted"], false);
 }
 
@@ -592,10 +586,8 @@ fn interaction_feedback_next_revision_plan_selects_report_cited_patch() {
 
     assert!(markdown.contains("- plan_verdict: `ready_for_revision`"));
     assert!(markdown.contains("- patch_id: `patch_arrival_bath_move_002`"));
-    assert!(
-        markdown
-            .contains("- must_cite: `verify_patch_arrival_bath_move_001, fb_arrival_crowded_001`")
-    );
+    assert!(markdown
+        .contains("- must_cite: `verify_patch_arrival_bath_move_001, fb_arrival_crowded_001`"));
     assert!(markdown.contains("- preserved_world_verdict: `not_verified`"));
 }
 
@@ -767,18 +759,14 @@ fn interaction_feedback_semantic_patch_draft_blocks_laundered_plan() {
     assert_eq!(draft["status"], "blocked");
     assert_eq!(draft["source_plan_verdict"], "blocked");
     assert_eq!(draft["source_world_verdict"], "verified");
-    assert!(
-        draft["failure_reasons"]
-            .as_array()
-            .expect("failure reasons")
-            .contains(&json!("source_plan_not_ready"))
-    );
-    assert!(
-        draft["failure_reasons"]
-            .as_array()
-            .expect("failure reasons")
-            .contains(&json!("source_world_verdict_must_remain_not_verified"))
-    );
+    assert!(draft["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("source_plan_not_ready")));
+    assert!(draft["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("source_world_verdict_must_remain_not_verified")));
     assert_eq!(draft["semantic_patch_draft"]["apply_allowed"], false);
     assert_eq!(draft["guardrails"]["writes_state"], false);
     assert_eq!(draft["agent_action_contract"]["do_not_apply_patch"], true);
@@ -919,18 +907,14 @@ fn interaction_feedback_patch_execution_preflight_blocks_laundered_draft() {
     assert_eq!(preflight["status"], "blocked");
     assert_eq!(preflight["source_draft_verdict"], "blocked");
     assert_eq!(preflight["source_world_verdict"], "verified");
-    assert!(
-        preflight["failure_reasons"]
-            .as_array()
-            .expect("failure reasons")
-            .contains(&json!("source_draft_not_drafted"))
-    );
-    assert!(
-        preflight["failure_reasons"]
-            .as_array()
-            .expect("failure reasons")
-            .contains(&json!("source_world_verdict_must_remain_not_verified"))
-    );
+    assert!(preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("source_draft_not_drafted")));
+    assert!(preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("source_world_verdict_must_remain_not_verified")));
     assert_eq!(
         preflight["resolved_patch"]["ready_for_execution_request"],
         false
@@ -964,24 +948,18 @@ fn interaction_feedback_patch_apply_request_blocks_without_ready_preflight() {
     assert_eq!(request["apply_request_verdict"], "blocked");
     assert_eq!(request["status"], "blocked");
     assert_eq!(request["reason"], "source_preflight_not_ready");
-    assert!(
-        request["failure_reasons"]
-            .as_array()
-            .expect("failure reasons")
-            .contains(&json!("source_preflight_not_ready"))
-    );
-    assert!(
-        request["failure_reasons"]
-            .as_array()
-            .expect("failure reasons")
-            .contains(&json!("resolved_patch_not_ready"))
-    );
-    assert!(
-        request["failure_reasons"]
-            .as_array()
-            .expect("failure reasons")
-            .contains(&json!("resolved_patch_args_required"))
-    );
+    assert!(request["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("source_preflight_not_ready")));
+    assert!(request["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("resolved_patch_not_ready")));
+    assert!(request["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("resolved_patch_args_required")));
     assert_eq!(
         request["apply_request"]["ready_for_external_submission"],
         false
@@ -1111,24 +1089,18 @@ fn interaction_feedback_patch_apply_request_blocks_tampered_preflight_authority(
     let request = build_interaction_feedback_patch_apply_request(&preflight);
 
     assert_eq!(request["apply_request_verdict"], "blocked");
-    assert!(
-        request["failure_reasons"]
-            .as_array()
-            .expect("failure reasons")
-            .contains(&json!("source_preflight_must_not_execute_patch"))
-    );
-    assert!(
-        request["failure_reasons"]
-            .as_array()
-            .expect("failure reasons")
-            .contains(&json!("source_preflight_apply_authority_must_remain_false"))
-    );
-    assert!(
-        request["failure_reasons"]
-            .as_array()
-            .expect("failure reasons")
-            .contains(&json!("source_preflight_guardrails_not_read_only"))
-    );
+    assert!(request["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("source_preflight_must_not_execute_patch")));
+    assert!(request["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("source_preflight_apply_authority_must_remain_false")));
+    assert!(request["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("source_preflight_guardrails_not_read_only")));
     assert_eq!(
         request["apply_request"]["ready_for_external_submission"],
         false
@@ -1155,18 +1127,14 @@ fn interaction_feedback_runtime_executor_design_preflight_blocks_without_ready_a
     assert_eq!(design_preflight["design_preflight_verdict"], "blocked");
     assert_eq!(design_preflight["status"], "blocked");
     assert_eq!(design_preflight["reason"], "source_apply_request_not_ready");
-    assert!(
-        design_preflight["failure_reasons"]
-            .as_array()
-            .expect("failure reasons")
-            .contains(&json!("source_apply_request_not_ready"))
-    );
-    assert!(
-        design_preflight["failure_reasons"]
-            .as_array()
-            .expect("failure reasons")
-            .contains(&json!("external_submission_readiness_missing"))
-    );
+    assert!(design_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("source_apply_request_not_ready")));
+    assert!(design_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("external_submission_readiness_missing")));
     assert_eq!(
         design_preflight["executor_design_request"]["ready_for_design_review"],
         false
@@ -1303,24 +1271,18 @@ fn interaction_feedback_runtime_executor_design_preflight_blocks_tampered_apply_
         build_interaction_feedback_runtime_executor_design_preflight(&apply_request);
 
     assert_eq!(design_preflight["design_preflight_verdict"], "blocked");
-    assert!(
-        design_preflight["failure_reasons"]
-            .as_array()
-            .expect("failure reasons")
-            .contains(&json!("source_apply_request_must_not_apply_patch"))
-    );
-    assert!(
-        design_preflight["failure_reasons"]
-            .as_array()
-            .expect("failure reasons")
-            .contains(&json!("source_apply_request_must_not_be_submitted"))
-    );
-    assert!(
-        design_preflight["failure_reasons"]
-            .as_array()
-            .expect("failure reasons")
-            .contains(&json!("source_apply_request_guardrails_not_read_only"))
-    );
+    assert!(design_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("source_apply_request_must_not_apply_patch")));
+    assert!(design_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("source_apply_request_must_not_be_submitted")));
+    assert!(design_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("source_apply_request_guardrails_not_read_only")));
     assert_eq!(
         design_preflight["executor_design_request"]["ready_for_design_review"],
         false
@@ -1362,12 +1324,10 @@ fn interaction_feedback_live_runtime_lookup_design_preflight_blocks_without_read
         lookup_preflight["reason"],
         "source_design_preflight_not_ready"
     );
-    assert!(
-        lookup_preflight["failure_reasons"]
-            .as_array()
-            .expect("failure reasons")
-            .contains(&json!("source_design_preflight_not_ready"))
-    );
+    assert!(lookup_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("source_design_preflight_not_ready")));
     assert_eq!(
         lookup_preflight["lookup_design_request"]["ready_for_lookup_design_review"],
         false
@@ -1441,15 +1401,18 @@ fn interaction_feedback_live_runtime_lookup_design_preflight_accepts_ready_desig
         json!([5, 2])
     );
     assert_eq!(
-        lookup_preflight["lookup_design_request"]["host_binding_requirements"]["host_endpoint_required_from_operator"],
+        lookup_preflight["lookup_design_request"]["host_binding_requirements"]
+            ["host_endpoint_required_from_operator"],
         true
     );
     assert_eq!(
-        lookup_preflight["lookup_design_request"]["host_binding_requirements"]["host_endpoint_provided"],
+        lookup_preflight["lookup_design_request"]["host_binding_requirements"]
+            ["host_endpoint_provided"],
         false
     );
     assert_eq!(
-        lookup_preflight["lookup_design_request"]["host_binding_requirements"]["network_contact_allowed_by_this_tool"],
+        lookup_preflight["lookup_design_request"]["host_binding_requirements"]
+            ["network_contact_allowed_by_this_tool"],
         false
     );
     assert_eq!(
@@ -1470,10 +1433,8 @@ fn interaction_feedback_live_runtime_lookup_design_preflight_accepts_ready_desig
     );
     assert_live_runtime_lookup_design_preflight_read_only(&lookup_preflight);
 
-    assert!(
-        markdown
-            .contains("- lookup_design_preflight_verdict: `ready_for_live_runtime_lookup_design`")
-    );
+    assert!(markdown
+        .contains("- lookup_design_preflight_verdict: `ready_for_live_runtime_lookup_design`"));
     assert!(markdown.contains(
         "- lookup_design_request_id: `live_runtime_lookup_design_arrival_bath_move_002`"
     ));
@@ -1537,24 +1498,18 @@ fn interaction_feedback_live_runtime_lookup_design_preflight_blocks_tampered_des
         lookup_preflight["lookup_design_preflight_verdict"],
         "blocked"
     );
-    assert!(
-        lookup_preflight["failure_reasons"]
-            .as_array()
-            .expect("failure reasons")
-            .contains(&json!("source_must_not_allow_live_runtime_lookup"))
-    );
-    assert!(
-        lookup_preflight["failure_reasons"]
-            .as_array()
-            .expect("failure reasons")
-            .contains(&json!("source_must_not_have_executed"))
-    );
-    assert!(
-        lookup_preflight["failure_reasons"]
-            .as_array()
-            .expect("failure reasons")
-            .contains(&json!("source_design_guardrails_not_read_only"))
-    );
+    assert!(lookup_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("source_must_not_allow_live_runtime_lookup")));
+    assert!(lookup_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("source_must_not_have_executed")));
+    assert!(lookup_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("source_design_guardrails_not_read_only")));
     assert_eq!(
         lookup_preflight["lookup_design_request"]["ready_for_lookup_design_review"],
         false
@@ -1695,9 +1650,7 @@ fn interaction_feedback_runtime_executor_live_lookup_preflight_accepts_explicit_
     );
     assert_runtime_executor_live_lookup_preflight_read_only(&lookup_preflight);
 
-    assert!(
-        markdown.contains("- lookup_preflight_verdict: `ready_for_operator_submission_review`")
-    );
+    assert!(markdown.contains("- lookup_preflight_verdict: `ready_for_operator_submission_review`"));
     assert!(markdown.contains("- lookup_evidence_id: `live_lookup_arrival_bath_move_002`"));
     assert!(markdown.contains("- ready_for_submission: `false`"));
     assert!(markdown.contains("- ready_for_patch_application: `false`"));
@@ -1719,30 +1672,22 @@ fn interaction_feedback_runtime_executor_live_lookup_preflight_blocks_mismatched
         }));
 
     assert_eq!(lookup_preflight["lookup_preflight_verdict"], "blocked");
-    assert!(
-        lookup_preflight["failure_reasons"]
-            .as_array()
-            .expect("failure reasons")
-            .contains(&json!("lookup_snapshot_must_not_mutate"))
-    );
-    assert!(
-        lookup_preflight["failure_reasons"]
-            .as_array()
-            .expect("failure reasons")
-            .contains(&json!("branch_id_mismatch"))
-    );
-    assert!(
-        lookup_preflight["failure_reasons"]
-            .as_array()
-            .expect("failure reasons")
-            .contains(&json!("target_entities_not_present"))
-    );
-    assert!(
-        lookup_preflight["failure_reasons"]
-            .as_array()
-            .expect("failure reasons")
-            .contains(&json!("lookup_snapshot_missing_patch_entities"))
-    );
+    assert!(lookup_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("lookup_snapshot_must_not_mutate")));
+    assert!(lookup_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("branch_id_mismatch")));
+    assert!(lookup_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("target_entities_not_present")));
+    assert!(lookup_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("lookup_snapshot_missing_patch_entities")));
     assert_eq!(
         lookup_preflight["lookup_evidence"]["ready_for_operator_submission_review"],
         false
@@ -1777,19 +1722,17 @@ fn interaction_feedback_runtime_executor_live_lookup_preflight_requires_design_p
         lookup_preflight["reason"],
         "runtime_executor_design_preflight_required"
     );
-    assert!(
-        lookup_preflight["failure_reasons"]
-            .as_array()
-            .expect("failure reasons")
-            .contains(&json!("runtime_executor_design_preflight_required"))
-    );
+    assert!(lookup_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("runtime_executor_design_preflight_required")));
     assert_eq!(lookup_preflight["source_design_preflight"], Value::Null);
     assert_runtime_executor_live_lookup_preflight_read_only(&lookup_preflight);
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_operator_submission_token_preflight_blocks_without_operator_decision()
- {
+fn interaction_feedback_runtime_executor_operator_submission_token_preflight_blocks_without_operator_decision(
+) {
     let lookup_preflight = ready_runtime_executor_live_lookup_preflight();
     let submission_preflight =
         build_interaction_feedback_runtime_executor_operator_submission_token_preflight(
@@ -1834,7 +1777,8 @@ fn interaction_feedback_runtime_executor_operator_submission_token_preflight_blo
         Value::Null
     );
     assert_eq!(
-        submission_preflight["operator_submission_token"]["ready_for_patch_application_gate_review"],
+        submission_preflight["operator_submission_token"]
+            ["ready_for_patch_application_gate_review"],
         false
     );
     assert_runtime_executor_operator_submission_token_preflight_read_only(&submission_preflight);
@@ -1844,8 +1788,8 @@ fn interaction_feedback_runtime_executor_operator_submission_token_preflight_blo
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_operator_submission_token_preflight_accepts_explicit_decision()
- {
+fn interaction_feedback_runtime_executor_operator_submission_token_preflight_accepts_explicit_decision(
+) {
     let lookup_preflight = ready_runtime_executor_live_lookup_preflight();
     let submission_preflight =
         build_interaction_feedback_runtime_executor_operator_submission_token_preflight(&json!({
@@ -1915,7 +1859,8 @@ fn interaction_feedback_runtime_executor_operator_submission_token_preflight_acc
         false
     );
     assert_eq!(
-        submission_preflight["operator_submission_token"]["ready_for_patch_application_gate_review"],
+        submission_preflight["operator_submission_token"]
+            ["ready_for_patch_application_gate_review"],
         true
     );
     assert_eq!(
@@ -1966,7 +1911,8 @@ fn interaction_feedback_runtime_executor_operator_submission_token_preflight_blo
     assert!(failure_reasons.contains(&json!("operator_decision_must_not_allow_patch_application")));
     assert!(failure_reasons.contains(&json!("operator_decision_must_not_write_state")));
     assert_eq!(
-        submission_preflight["operator_submission_token"]["ready_for_patch_application_gate_review"],
+        submission_preflight["operator_submission_token"]
+            ["ready_for_patch_application_gate_review"],
         false
     );
     assert_runtime_executor_operator_submission_token_preflight_read_only(&submission_preflight);
@@ -1998,19 +1944,17 @@ fn interaction_feedback_runtime_executor_operator_submission_token_preflight_req
         submission_preflight["reason"],
         "runtime_executor_live_lookup_preflight_required"
     );
-    assert!(
-        submission_preflight["failure_reasons"]
-            .as_array()
-            .expect("failure reasons")
-            .contains(&json!("runtime_executor_live_lookup_preflight_required"))
-    );
+    assert!(submission_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("runtime_executor_live_lookup_preflight_required")));
     assert_eq!(submission_preflight["source_lookup_preflight"], Value::Null);
     assert_runtime_executor_operator_submission_token_preflight_read_only(&submission_preflight);
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_patch_application_gate_preflight_blocks_without_gate_decision()
- {
+fn interaction_feedback_runtime_executor_patch_application_gate_preflight_blocks_without_gate_decision(
+) {
     let submission_preflight = ready_runtime_executor_operator_submission_token_preflight();
     let gate_preflight =
         build_interaction_feedback_runtime_executor_patch_application_gate_preflight(
@@ -2065,8 +2009,8 @@ fn interaction_feedback_runtime_executor_patch_application_gate_preflight_blocks
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_patch_application_gate_preflight_accepts_explicit_decision()
- {
+fn interaction_feedback_runtime_executor_patch_application_gate_preflight_accepts_explicit_decision(
+) {
     let submission_preflight = ready_runtime_executor_operator_submission_token_preflight();
     let gate_preflight =
         build_interaction_feedback_runtime_executor_patch_application_gate_preflight(&json!({
@@ -2128,7 +2072,8 @@ fn interaction_feedback_runtime_executor_patch_application_gate_preflight_accept
         true
     );
     assert_eq!(
-        gate_preflight["patch_application_gate"]["separate_patch_executor_invocation_allowed_after_this_gate"],
+        gate_preflight["patch_application_gate"]
+            ["separate_patch_executor_invocation_allowed_after_this_gate"],
         true
     );
     assert_eq!(
@@ -2190,8 +2135,8 @@ fn interaction_feedback_runtime_executor_patch_application_gate_preflight_blocks
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_patch_application_gate_preflight_requires_submission_input()
- {
+fn interaction_feedback_runtime_executor_patch_application_gate_preflight_requires_submission_input(
+) {
     let lookup_preflight = ready_runtime_executor_live_lookup_preflight();
     let gate_preflight =
         build_interaction_feedback_runtime_executor_patch_application_gate_preflight(&json!({
@@ -2215,14 +2160,12 @@ fn interaction_feedback_runtime_executor_patch_application_gate_preflight_requir
         gate_preflight["reason"],
         "runtime_executor_operator_submission_token_preflight_required"
     );
-    assert!(
-        gate_preflight["failure_reasons"]
-            .as_array()
-            .expect("failure reasons")
-            .contains(&json!(
-                "runtime_executor_operator_submission_token_preflight_required"
-            ))
-    );
+    assert!(gate_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!(
+            "runtime_executor_operator_submission_token_preflight_required"
+        )));
     assert_eq!(
         gate_preflight["source_submission_token_preflight"],
         Value::Null
@@ -2231,8 +2174,8 @@ fn interaction_feedback_runtime_executor_patch_application_gate_preflight_requir
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_patch_executor_invocation_preflight_blocks_without_invocation_decision()
- {
+fn interaction_feedback_runtime_executor_patch_executor_invocation_preflight_blocks_without_invocation_decision(
+) {
     let gate_preflight = ready_runtime_executor_patch_application_gate_preflight();
     let invocation_preflight =
         build_interaction_feedback_runtime_executor_patch_executor_invocation_preflight(
@@ -2276,7 +2219,8 @@ fn interaction_feedback_runtime_executor_patch_executor_invocation_preflight_blo
         Value::Null
     );
     assert_eq!(
-        invocation_preflight["patch_executor_invocation_request"]["ready_for_separate_patch_executor_invocation_request"],
+        invocation_preflight["patch_executor_invocation_request"]
+            ["ready_for_separate_patch_executor_invocation_request"],
         false
     );
     assert_runtime_executor_patch_executor_invocation_preflight_read_only(&invocation_preflight);
@@ -2286,8 +2230,8 @@ fn interaction_feedback_runtime_executor_patch_executor_invocation_preflight_blo
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_patch_executor_invocation_preflight_accepts_explicit_decision()
- {
+fn interaction_feedback_runtime_executor_patch_executor_invocation_preflight_accepts_explicit_decision(
+) {
     let gate_preflight = ready_runtime_executor_patch_application_gate_preflight();
     let invocation_preflight =
         build_interaction_feedback_runtime_executor_patch_executor_invocation_preflight(&json!({
@@ -2345,15 +2289,18 @@ fn interaction_feedback_runtime_executor_patch_executor_invocation_preflight_acc
         "patch_arrival_bath_move_002/runtime_gen_1284/patch_application_gate_arrival_bath_move_002/patch_executor_invocation_decision_arrival_bath_move_002"
     );
     assert_eq!(
-        invocation_preflight["patch_executor_invocation_request"]["ready_for_separate_patch_executor_invocation_request"],
+        invocation_preflight["patch_executor_invocation_request"]
+            ["ready_for_separate_patch_executor_invocation_request"],
         true
     );
     assert_eq!(
-        invocation_preflight["patch_executor_invocation_request"]["invocation_request_emitted_by_this_tool"],
+        invocation_preflight["patch_executor_invocation_request"]
+            ["invocation_request_emitted_by_this_tool"],
         true
     );
     assert_eq!(
-        invocation_preflight["patch_executor_invocation_request"]["executor_invocation_performed_by_this_tool"],
+        invocation_preflight["patch_executor_invocation_request"]
+            ["executor_invocation_performed_by_this_tool"],
         false
     );
     assert_eq!(
@@ -2415,7 +2362,8 @@ fn interaction_feedback_runtime_executor_patch_executor_invocation_preflight_blo
         "patch_executor_invocation_decision_must_not_write_state"
     )));
     assert_eq!(
-        invocation_preflight["patch_executor_invocation_request"]["ready_for_separate_patch_executor_invocation_request"],
+        invocation_preflight["patch_executor_invocation_request"]
+            ["ready_for_separate_patch_executor_invocation_request"],
         false
     );
     assert_runtime_executor_patch_executor_invocation_preflight_read_only(&invocation_preflight);
@@ -2446,14 +2394,12 @@ fn interaction_feedback_runtime_executor_patch_executor_invocation_preflight_req
         invocation_preflight["reason"],
         "runtime_executor_patch_application_gate_preflight_required"
     );
-    assert!(
-        invocation_preflight["failure_reasons"]
-            .as_array()
-            .expect("failure reasons")
-            .contains(&json!(
-                "runtime_executor_patch_application_gate_preflight_required"
-            ))
-    );
+    assert!(invocation_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!(
+            "runtime_executor_patch_application_gate_preflight_required"
+        )));
     assert_eq!(
         invocation_preflight["source_patch_application_gate_preflight"],
         Value::Null
@@ -2462,8 +2408,8 @@ fn interaction_feedback_runtime_executor_patch_executor_invocation_preflight_req
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_patch_runtime_application_evidence_preflight_blocks_without_evidence()
- {
+fn interaction_feedback_runtime_executor_patch_runtime_application_evidence_preflight_blocks_without_evidence(
+) {
     let invocation_preflight = ready_runtime_executor_patch_executor_invocation_preflight();
     let evidence_preflight =
         build_interaction_feedback_runtime_executor_patch_runtime_application_evidence_preflight(
@@ -2512,8 +2458,8 @@ fn interaction_feedback_runtime_executor_patch_runtime_application_evidence_pref
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_patch_runtime_application_evidence_preflight_accepts_explicit_evidence()
- {
+fn interaction_feedback_runtime_executor_patch_runtime_application_evidence_preflight_accepts_explicit_evidence(
+) {
     let invocation_preflight = ready_runtime_executor_patch_executor_invocation_preflight();
     let evidence_preflight =
         build_interaction_feedback_runtime_executor_patch_runtime_application_evidence_preflight(
@@ -2570,7 +2516,8 @@ fn interaction_feedback_runtime_executor_patch_runtime_application_evidence_pref
         true
     );
     assert_eq!(
-        evidence_preflight["runtime_application_evidence"]["post_apply_verification_performed_by_this_tool"],
+        evidence_preflight["runtime_application_evidence"]
+            ["post_apply_verification_performed_by_this_tool"],
         false
     );
     assert_eq!(
@@ -2592,8 +2539,8 @@ fn interaction_feedback_runtime_executor_patch_runtime_application_evidence_pref
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_patch_runtime_application_evidence_preflight_blocks_bad_evidence()
- {
+fn interaction_feedback_runtime_executor_patch_runtime_application_evidence_preflight_blocks_bad_evidence(
+) {
     let invocation_preflight = ready_runtime_executor_patch_executor_invocation_preflight();
     let mut evidence = explicit_patch_runtime_application_evidence();
     evidence["evidence_kind"] = json!("operator_note");
@@ -2648,8 +2595,8 @@ fn interaction_feedback_runtime_executor_patch_runtime_application_evidence_pref
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_patch_runtime_application_evidence_preflight_requires_invocation_input()
- {
+fn interaction_feedback_runtime_executor_patch_runtime_application_evidence_preflight_requires_invocation_input(
+) {
     let gate_preflight = ready_runtime_executor_patch_application_gate_preflight();
     let evidence_preflight =
         build_interaction_feedback_runtime_executor_patch_runtime_application_evidence_preflight(
@@ -2729,8 +2676,8 @@ fn interaction_feedback_runtime_executor_post_apply_verification_preflight_block
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_post_apply_verification_preflight_accepts_explicit_evidence()
- {
+fn interaction_feedback_runtime_executor_post_apply_verification_preflight_accepts_explicit_evidence(
+) {
     let application_preflight =
         ready_runtime_executor_patch_runtime_application_evidence_preflight();
     let verification_preflight =
@@ -2848,8 +2795,8 @@ fn interaction_feedback_runtime_executor_post_apply_verification_preflight_block
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_post_apply_verification_preflight_requires_application_input()
- {
+fn interaction_feedback_runtime_executor_post_apply_verification_preflight_requires_application_input(
+) {
     let invocation_preflight = ready_runtime_executor_patch_executor_invocation_preflight();
     let verification_preflight =
         build_interaction_feedback_runtime_executor_post_apply_verification_preflight(&json!({
@@ -2881,8 +2828,8 @@ fn interaction_feedback_runtime_executor_post_apply_verification_preflight_requi
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_outcome_ingestion_review_preflight_blocks_without_decision()
- {
+fn interaction_feedback_runtime_executor_outcome_ingestion_review_preflight_blocks_without_decision(
+) {
     let verification_preflight = ready_runtime_executor_post_apply_verification_preflight();
     let ingestion_preflight =
         build_interaction_feedback_runtime_executor_outcome_ingestion_review_preflight(
@@ -2924,8 +2871,8 @@ fn interaction_feedback_runtime_executor_outcome_ingestion_review_preflight_bloc
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_outcome_ingestion_review_preflight_accepts_explicit_decision()
- {
+fn interaction_feedback_runtime_executor_outcome_ingestion_review_preflight_accepts_explicit_decision(
+) {
     let verification_preflight = ready_runtime_executor_post_apply_verification_preflight();
     let ingestion_preflight =
         build_interaction_feedback_runtime_executor_outcome_ingestion_review_preflight(&json!({
@@ -3049,8 +2996,8 @@ fn interaction_feedback_runtime_executor_outcome_ingestion_review_preflight_bloc
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_outcome_ingestion_review_preflight_requires_verification_input()
- {
+fn interaction_feedback_runtime_executor_outcome_ingestion_review_preflight_requires_verification_input(
+) {
     let application_preflight =
         ready_runtime_executor_patch_runtime_application_evidence_preflight();
     let ingestion_preflight =
@@ -3083,8 +3030,8 @@ fn interaction_feedback_runtime_executor_outcome_ingestion_review_preflight_requ
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_ingestion_gate_preflight_blocks_without_decision()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_ingestion_gate_preflight_blocks_without_decision(
+) {
     let review_preflight = ready_runtime_executor_outcome_ingestion_review_preflight();
     let gate_preflight =
         build_interaction_feedback_runtime_executor_durable_outcome_ingestion_gate_preflight(
@@ -3127,8 +3074,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_ingestion_gate_prefligh
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_ingestion_gate_preflight_accepts_explicit_decision()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_ingestion_gate_preflight_accepts_explicit_decision(
+) {
     let review_preflight = ready_runtime_executor_outcome_ingestion_review_preflight();
     let gate_preflight =
         build_interaction_feedback_runtime_executor_durable_outcome_ingestion_gate_preflight(
@@ -3173,7 +3120,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_ingestion_gate_prefligh
         "approved_for_durable_ingestion_execution"
     );
     assert_eq!(
-        gate_preflight["durable_outcome_ingestion_gate"]["ready_for_durable_outcome_ingestion_execution"],
+        gate_preflight["durable_outcome_ingestion_gate"]
+            ["ready_for_durable_outcome_ingestion_execution"],
         true
     );
     assert_eq!(
@@ -3199,8 +3147,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_ingestion_gate_prefligh
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_ingestion_gate_preflight_blocks_bad_decision()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_ingestion_gate_preflight_blocks_bad_decision(
+) {
     let review_preflight = ready_runtime_executor_outcome_ingestion_review_preflight();
     let mut decision = explicit_durable_outcome_ingestion_gate_decision();
     decision["gate_kind"] = json!("operator_note");
@@ -3266,8 +3214,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_ingestion_gate_prefligh
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_ingestion_gate_preflight_requires_review_input()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_ingestion_gate_preflight_requires_review_input(
+) {
     let verification_preflight = ready_runtime_executor_post_apply_verification_preflight();
     let gate_preflight =
         build_interaction_feedback_runtime_executor_durable_outcome_ingestion_gate_preflight(
@@ -3301,8 +3249,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_ingestion_gate_prefligh
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_ingestion_execution_preflight_blocks_without_decision()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_ingestion_execution_preflight_blocks_without_decision(
+) {
     let gate_preflight = ready_runtime_executor_durable_outcome_ingestion_gate_preflight();
     let execution_preflight =
         build_interaction_feedback_runtime_executor_durable_outcome_ingestion_execution_preflight(
@@ -3342,17 +3290,15 @@ fn interaction_feedback_runtime_executor_durable_outcome_ingestion_execution_pre
         &execution_preflight,
     );
 
-    assert!(
-        markdown.contains("- durable_outcome_ingestion_execution_preflight_verdict: `blocked`")
-    );
+    assert!(markdown.contains("- durable_outcome_ingestion_execution_preflight_verdict: `blocked`"));
     assert!(
         markdown.contains("- ready_for_durable_outcome_ingestion_write_implementation: `false`")
     );
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_ingestion_execution_preflight_accepts_explicit_decision()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_ingestion_execution_preflight_accepts_explicit_decision(
+) {
     let gate_preflight = ready_runtime_executor_durable_outcome_ingestion_gate_preflight();
     let execution_preflight =
         build_interaction_feedback_runtime_executor_durable_outcome_ingestion_execution_preflight(
@@ -3397,15 +3343,18 @@ fn interaction_feedback_runtime_executor_durable_outcome_ingestion_execution_pre
         "approved_for_durable_outcome_ingestion_write_implementation"
     );
     assert_eq!(
-        execution_preflight["durable_outcome_ingestion_execution"]["ready_for_durable_outcome_ingestion_write_implementation"],
+        execution_preflight["durable_outcome_ingestion_execution"]
+            ["ready_for_durable_outcome_ingestion_write_implementation"],
         true
     );
     assert_eq!(
-        execution_preflight["durable_outcome_ingestion_execution"]["durable_write_implementation_allowed"],
+        execution_preflight["durable_outcome_ingestion_execution"]
+            ["durable_write_implementation_allowed"],
         false
     );
     assert_eq!(
-        execution_preflight["durable_outcome_ingestion_execution"]["outcome_record_persisted_by_this_tool"],
+        execution_preflight["durable_outcome_ingestion_execution"]
+            ["outcome_record_persisted_by_this_tool"],
         false
     );
     assert_eq!(
@@ -3419,17 +3368,15 @@ fn interaction_feedback_runtime_executor_durable_outcome_ingestion_execution_pre
     assert!(markdown.contains(
         "- durable_outcome_ingestion_execution_preflight_verdict: `ready_for_durable_outcome_ingestion_write_implementation`"
     ));
-    assert!(
-        markdown
-            .contains("- decision: `approved_for_durable_outcome_ingestion_write_implementation`")
-    );
+    assert!(markdown
+        .contains("- decision: `approved_for_durable_outcome_ingestion_write_implementation`"));
     assert!(markdown.contains("- durable_write_implementation_allowed: `false`"));
     assert!(markdown.contains("- world_verdict_rewrite_allowed: `false`"));
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_ingestion_execution_preflight_blocks_bad_decision()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_ingestion_execution_preflight_blocks_bad_decision(
+) {
     let gate_preflight = ready_runtime_executor_durable_outcome_ingestion_gate_preflight();
     let mut decision = explicit_durable_outcome_ingestion_execution_decision();
     decision["execution_kind"] = json!("operator_note");
@@ -3509,8 +3456,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_ingestion_execution_pre
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_ingestion_execution_preflight_requires_gate_input()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_ingestion_execution_preflight_requires_gate_input(
+) {
     let review_preflight = ready_runtime_executor_outcome_ingestion_review_preflight();
     let execution_preflight =
         build_interaction_feedback_runtime_executor_durable_outcome_ingestion_execution_preflight(
@@ -3546,8 +3493,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_ingestion_execution_pre
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_write_implementation_preflight_blocks_without_decision()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_write_implementation_preflight_blocks_without_decision(
+) {
     let execution_preflight =
         ready_runtime_executor_durable_outcome_ingestion_execution_preflight();
     let write_preflight =
@@ -3595,8 +3542,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_write_implementation_pr
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_write_implementation_preflight_accepts_explicit_decision()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_write_implementation_preflight_accepts_explicit_decision(
+) {
     let execution_preflight =
         ready_runtime_executor_durable_outcome_ingestion_execution_preflight();
     let write_preflight =
@@ -3642,7 +3589,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_write_implementation_pr
         "approved_for_durable_outcome_record_write"
     );
     assert_eq!(
-        write_preflight["durable_outcome_write_implementation"]["ready_for_durable_outcome_record_write"],
+        write_preflight["durable_outcome_write_implementation"]
+            ["ready_for_durable_outcome_record_write"],
         true
     );
     assert_eq!(
@@ -3650,7 +3598,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_write_implementation_pr
         false
     );
     assert_eq!(
-        write_preflight["durable_outcome_write_implementation"]["durable_outcome_record_written_by_this_tool"],
+        write_preflight["durable_outcome_write_implementation"]
+            ["durable_outcome_record_written_by_this_tool"],
         false
     );
     assert_eq!(
@@ -3670,8 +3619,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_write_implementation_pr
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_write_implementation_preflight_blocks_bad_decision()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_write_implementation_preflight_blocks_bad_decision(
+) {
     let execution_preflight =
         ready_runtime_executor_durable_outcome_ingestion_execution_preflight();
     let mut decision = explicit_durable_outcome_write_implementation_decision();
@@ -3749,8 +3698,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_write_implementation_pr
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_write_implementation_preflight_requires_execution_input()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_write_implementation_preflight_requires_execution_input(
+) {
     let gate_preflight = ready_runtime_executor_durable_outcome_ingestion_gate_preflight();
     let write_preflight =
         build_interaction_feedback_runtime_executor_durable_outcome_write_implementation_preflight(
@@ -3786,8 +3735,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_write_implementation_pr
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_record_write_preflight_blocks_without_decision()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_record_write_preflight_blocks_without_decision(
+) {
     let write_preflight = ready_runtime_executor_durable_outcome_write_implementation_preflight();
     let record_preflight =
         build_interaction_feedback_runtime_executor_durable_outcome_record_write_preflight(
@@ -3830,8 +3779,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_write_preflight_
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_record_write_preflight_accepts_explicit_decision()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_record_write_preflight_accepts_explicit_decision(
+) {
     let write_preflight = ready_runtime_executor_durable_outcome_write_implementation_preflight();
     let record_preflight =
         build_interaction_feedback_runtime_executor_durable_outcome_record_write_preflight(
@@ -3876,7 +3825,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_write_preflight_
         "approved_for_durable_outcome_record_write_execution"
     );
     assert_eq!(
-        record_preflight["durable_outcome_record_write"]["ready_for_durable_outcome_record_write_execution"],
+        record_preflight["durable_outcome_record_write"]
+            ["ready_for_durable_outcome_record_write_execution"],
         true
     );
     assert_eq!(
@@ -3884,7 +3834,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_write_preflight_
         false
     );
     assert_eq!(
-        record_preflight["durable_outcome_record_write"]["durable_outcome_record_written_by_this_tool"],
+        record_preflight["durable_outcome_record_write"]
+            ["durable_outcome_record_written_by_this_tool"],
         false
     );
     assert_eq!(
@@ -3902,8 +3853,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_write_preflight_
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_record_write_preflight_blocks_bad_decision()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_record_write_preflight_blocks_bad_decision(
+) {
     let write_preflight = ready_runtime_executor_durable_outcome_write_implementation_preflight();
     let mut decision = explicit_durable_outcome_record_write_decision();
     decision["record_write_kind"] = json!("operator_note");
@@ -3980,8 +3931,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_write_preflight_
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_record_write_preflight_requires_write_implementation_input()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_record_write_preflight_requires_write_implementation_input(
+) {
     let execution_preflight =
         ready_runtime_executor_durable_outcome_ingestion_execution_preflight();
     let record_preflight =
@@ -4016,8 +3967,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_write_preflight_
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_record_write_execution_preflight_blocks_without_decision()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_record_write_execution_preflight_blocks_without_decision(
+) {
     let record_preflight = ready_runtime_executor_durable_outcome_record_write_preflight();
     let execution_preflight =
         build_interaction_feedback_runtime_executor_durable_outcome_record_write_execution_preflight(
@@ -4064,8 +4015,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_write_execution_
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_record_write_execution_preflight_accepts_explicit_decision()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_record_write_execution_preflight_accepts_explicit_decision(
+) {
     let record_preflight = ready_runtime_executor_durable_outcome_record_write_preflight();
     let execution_preflight =
         build_interaction_feedback_runtime_executor_durable_outcome_record_write_execution_preflight(
@@ -4110,15 +4061,18 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_write_execution_
         "approved_for_durable_outcome_record_persistence"
     );
     assert_eq!(
-        execution_preflight["durable_outcome_record_write_execution"]["ready_for_durable_outcome_record_persistence"],
+        execution_preflight["durable_outcome_record_write_execution"]
+            ["ready_for_durable_outcome_record_persistence"],
         true
     );
     assert_eq!(
-        execution_preflight["durable_outcome_record_write_execution"]["durable_record_persistence_allowed"],
+        execution_preflight["durable_outcome_record_write_execution"]
+            ["durable_record_persistence_allowed"],
         false
     );
     assert_eq!(
-        execution_preflight["durable_outcome_record_write_execution"]["durable_outcome_record_written_by_this_tool"],
+        execution_preflight["durable_outcome_record_write_execution"]
+            ["durable_outcome_record_written_by_this_tool"],
         false
     );
     assert_eq!(
@@ -4138,8 +4092,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_write_execution_
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_record_write_execution_preflight_blocks_bad_decision()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_record_write_execution_preflight_blocks_bad_decision(
+) {
     let record_preflight = ready_runtime_executor_durable_outcome_record_write_preflight();
     let mut decision = explicit_durable_outcome_record_write_execution_decision();
     decision["record_write_execution_kind"] = json!("operator_note");
@@ -4234,8 +4188,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_write_execution_
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_record_write_execution_preflight_requires_record_write_input()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_record_write_execution_preflight_requires_record_write_input(
+) {
     let write_preflight = ready_runtime_executor_durable_outcome_write_implementation_preflight();
     let execution_preflight =
         build_interaction_feedback_runtime_executor_durable_outcome_record_write_execution_preflight(
@@ -4271,8 +4225,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_write_execution_
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_record_persistence_preflight_blocks_without_decision()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_record_persistence_preflight_blocks_without_decision(
+) {
     let execution_preflight =
         ready_runtime_executor_durable_outcome_record_write_execution_preflight();
     let persistence_preflight =
@@ -4318,8 +4272,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_persistence_pref
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_record_persistence_preflight_accepts_explicit_decision()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_record_persistence_preflight_accepts_explicit_decision(
+) {
     let execution_preflight =
         ready_runtime_executor_durable_outcome_record_write_execution_preflight();
     let persistence_preflight =
@@ -4365,7 +4319,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_persistence_pref
         "approved_for_durable_outcome_record_store_write"
     );
     assert_eq!(
-        persistence_preflight["durable_outcome_record_persistence"]["ready_for_durable_outcome_record_store_write"],
+        persistence_preflight["durable_outcome_record_persistence"]
+            ["ready_for_durable_outcome_record_store_write"],
         true
     );
     assert_eq!(
@@ -4373,7 +4328,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_persistence_pref
         false
     );
     assert_eq!(
-        persistence_preflight["durable_outcome_record_persistence"]["durable_outcome_record_written_by_this_tool"],
+        persistence_preflight["durable_outcome_record_persistence"]
+            ["durable_outcome_record_written_by_this_tool"],
         false
     );
     assert_eq!(
@@ -4393,8 +4349,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_persistence_pref
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_record_persistence_preflight_blocks_bad_decision()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_record_persistence_preflight_blocks_bad_decision(
+) {
     let execution_preflight =
         ready_runtime_executor_durable_outcome_record_write_execution_preflight();
     let mut decision = explicit_durable_outcome_record_persistence_decision();
@@ -4484,8 +4440,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_persistence_pref
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_record_persistence_preflight_requires_execution_input()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_record_persistence_preflight_requires_execution_input(
+) {
     let record_preflight = ready_runtime_executor_durable_outcome_record_write_preflight();
     let persistence_preflight =
         build_interaction_feedback_runtime_executor_durable_outcome_record_persistence_preflight(
@@ -4521,8 +4477,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_persistence_pref
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_record_store_write_execution_preflight_blocks_without_decision()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_record_store_write_execution_preflight_blocks_without_decision(
+) {
     let persistence_preflight =
         ready_runtime_executor_durable_outcome_record_persistence_preflight();
     let store_write_preflight =
@@ -4563,17 +4519,14 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_store_write_exec
         &store_write_preflight,
     );
 
-    assert!(
-        markdown.contains(
-            "- durable_outcome_record_store_write_execution_preflight_verdict: `blocked`"
-        )
-    );
+    assert!(markdown
+        .contains("- durable_outcome_record_store_write_execution_preflight_verdict: `blocked`"));
     assert!(markdown.contains("- ready_for_durable_outcome_record_write_evidence: `false`"));
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_record_store_write_execution_preflight_accepts_explicit_decision()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_record_store_write_execution_preflight_accepts_explicit_decision(
+) {
     let persistence_preflight =
         ready_runtime_executor_durable_outcome_record_persistence_preflight();
     let store_write_preflight =
@@ -4607,7 +4560,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_store_write_exec
     );
     assert_eq!(store_write_preflight["failure_reasons"], json!([]));
     assert_eq!(
-        store_write_preflight["durable_outcome_record_store_write_execution"]["store_write_execution_id"],
+        store_write_preflight["durable_outcome_record_store_write_execution"]
+            ["store_write_execution_id"],
         "durable_outcome_record_store_write_execution_arrival_bath_move_002"
     );
     assert_eq!(
@@ -4619,15 +4573,18 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_store_write_exec
         "approved_for_durable_outcome_record_write_evidence"
     );
     assert_eq!(
-        store_write_preflight["durable_outcome_record_store_write_execution"]["ready_for_durable_outcome_record_write_evidence"],
+        store_write_preflight["durable_outcome_record_store_write_execution"]
+            ["ready_for_durable_outcome_record_write_evidence"],
         true
     );
     assert_eq!(
-        store_write_preflight["durable_outcome_record_store_write_execution"]["durable_store_write_execution_allowed"],
+        store_write_preflight["durable_outcome_record_store_write_execution"]
+            ["durable_store_write_execution_allowed"],
         false
     );
     assert_eq!(
-        store_write_preflight["durable_outcome_record_store_write_execution"]["durable_outcome_record_written_by_this_tool"],
+        store_write_preflight["durable_outcome_record_store_write_execution"]
+            ["durable_outcome_record_written_by_this_tool"],
         false
     );
     assert_eq!(
@@ -4647,8 +4604,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_store_write_exec
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_record_store_write_execution_preflight_blocks_bad_decision()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_record_store_write_execution_preflight_blocks_bad_decision(
+) {
     let persistence_preflight =
         ready_runtime_executor_durable_outcome_record_persistence_preflight();
     let mut decision = explicit_durable_outcome_record_store_write_execution_decision();
@@ -4744,8 +4701,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_store_write_exec
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_record_store_write_execution_preflight_requires_persistence_input()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_record_store_write_execution_preflight_requires_persistence_input(
+) {
     let execution_preflight =
         ready_runtime_executor_durable_outcome_record_write_execution_preflight();
     let store_write_preflight =
@@ -4782,8 +4739,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_store_write_exec
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_preflight_blocks_without_evidence()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_preflight_blocks_without_evidence(
+) {
     let store_write_preflight =
         ready_runtime_executor_durable_outcome_record_store_write_execution_preflight();
     let write_evidence_preflight =
@@ -4804,7 +4761,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_p
         "runtime_executor_durable_outcome_record_store_write_execution_preflight"
     );
     assert_eq!(
-        write_evidence_preflight["source_durable_outcome_record_store_write_execution_preflight_verdict"],
+        write_evidence_preflight
+            ["source_durable_outcome_record_store_write_execution_preflight_verdict"],
         "ready_for_durable_outcome_record_write_evidence"
     );
     assert_eq!(
@@ -4831,8 +4789,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_p
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_preflight_accepts_explicit_evidence()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_preflight_accepts_explicit_evidence(
+) {
     let store_write_preflight =
         ready_runtime_executor_durable_outcome_record_store_write_execution_preflight();
     let write_evidence_preflight =
@@ -4870,19 +4828,23 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_p
         "durable_outcome_record_write_evidence_arrival_bath_move_002"
     );
     assert_eq!(
-        write_evidence_preflight["durable_outcome_record_write_evidence"]["store_write_execution_id"],
+        write_evidence_preflight["durable_outcome_record_write_evidence"]
+            ["store_write_execution_id"],
         "durable_outcome_record_store_write_execution_arrival_bath_move_002"
     );
     assert_eq!(
-        write_evidence_preflight["durable_outcome_record_write_evidence"]["durable_outcome_record_write_observed"],
+        write_evidence_preflight["durable_outcome_record_write_evidence"]
+            ["durable_outcome_record_write_observed"],
         true
     );
     assert_eq!(
-        write_evidence_preflight["durable_outcome_record_write_evidence"]["ready_for_durable_outcome_record_write_evidence_review"],
+        write_evidence_preflight["durable_outcome_record_write_evidence"]
+            ["ready_for_durable_outcome_record_write_evidence_review"],
         true
     );
     assert_eq!(
-        write_evidence_preflight["durable_outcome_record_write_evidence"]["durable_outcome_record_written_by_this_tool"],
+        write_evidence_preflight["durable_outcome_record_write_evidence"]
+            ["durable_outcome_record_written_by_this_tool"],
         false
     );
     assert_eq!(
@@ -4902,16 +4864,16 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_p
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_preflight_blocks_bad_evidence()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_preflight_blocks_bad_evidence(
+) {
     let store_write_preflight =
         ready_runtime_executor_durable_outcome_record_store_write_execution_preflight();
     let mut evidence = explicit_durable_outcome_record_write_evidence();
     evidence["evidence_kind"] = json!("operator_note");
-    evidence["source_durable_outcome_record_store_write_execution_scope"]["store_write_execution_id"] =
-        json!("durable_outcome_record_store_write_execution_other");
-    evidence["source_durable_outcome_record_store_write_execution_scope"]["outcome_record_digest"] =
-        json!("sha256:other");
+    evidence["source_durable_outcome_record_store_write_execution_scope"]
+        ["store_write_execution_id"] = json!("durable_outcome_record_store_write_execution_other");
+    evidence["source_durable_outcome_record_store_write_execution_scope"]
+        ["outcome_record_digest"] = json!("sha256:other");
     evidence["source_world_verdict"] = json!("verified");
     evidence["reviewed_store_write_execution_decision"] = json!("blocked");
     evidence["durable_outcome_record_write_observed"] = json!(false);
@@ -5005,8 +4967,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_p
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_preflight_requires_store_write_input()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_preflight_requires_store_write_input(
+) {
     let persistence_preflight =
         ready_runtime_executor_durable_outcome_record_persistence_preflight();
     let write_evidence_preflight =
@@ -5043,8 +5005,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_p
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_review_preflight_blocks_without_review()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_review_preflight_blocks_without_review(
+) {
     let write_evidence_preflight =
         ready_runtime_executor_durable_outcome_record_write_evidence_preflight();
     let review_preflight =
@@ -5085,17 +5047,14 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_r
         &review_preflight,
     );
 
-    assert!(
-        markdown.contains(
-            "- durable_outcome_record_write_evidence_review_preflight_verdict: `blocked`"
-        )
-    );
+    assert!(markdown
+        .contains("- durable_outcome_record_write_evidence_review_preflight_verdict: `blocked`"));
     assert!(markdown.contains("- ready_for_world_verdict_rewrite_gate: `false`"));
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_review_preflight_accepts_explicit_review()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_review_preflight_accepts_explicit_review(
+) {
     let write_evidence_preflight =
         ready_runtime_executor_durable_outcome_record_write_evidence_preflight();
     let review_preflight =
@@ -5144,11 +5103,13 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_r
         "approved_for_world_verdict_rewrite_gate"
     );
     assert_eq!(
-        review_preflight["durable_outcome_record_write_evidence_review"]["ready_for_world_verdict_rewrite_gate"],
+        review_preflight["durable_outcome_record_write_evidence_review"]
+            ["ready_for_world_verdict_rewrite_gate"],
         true
     );
     assert_eq!(
-        review_preflight["durable_outcome_record_write_evidence_review"]["world_verdict_rewrite_allowed"],
+        review_preflight["durable_outcome_record_write_evidence_review"]
+            ["world_verdict_rewrite_allowed"],
         false
     );
     assert_eq!(
@@ -5168,8 +5129,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_r
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_review_preflight_blocks_bad_review()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_review_preflight_blocks_bad_review(
+) {
     let write_evidence_preflight =
         ready_runtime_executor_durable_outcome_record_write_evidence_preflight();
     let mut review = explicit_durable_outcome_record_write_evidence_review_decision();
@@ -5269,8 +5230,8 @@ fn interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_r
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_review_preflight_requires_evidence_input()
- {
+fn interaction_feedback_runtime_executor_durable_outcome_record_write_evidence_review_preflight_requires_evidence_input(
+) {
     let store_write_preflight =
         ready_runtime_executor_durable_outcome_record_store_write_execution_preflight();
     let review_preflight =
@@ -5627,7 +5588,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_gate_accepts
         true
     );
     assert_eq!(
-        ingestion_gate["verified_outcome_ingestion_gate"]["verified_outcome_admission_package_emitted_by_this_tool"],
+        ingestion_gate["verified_outcome_ingestion_gate"]
+            ["verified_outcome_admission_package_emitted_by_this_tool"],
         true
     );
     assert_eq!(
@@ -5770,8 +5732,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_gate_require
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_preflight_blocks_without_decision()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_preflight_blocks_without_decision(
+) {
     let ingestion_gate = ready_runtime_executor_verified_outcome_ingestion_gate();
     let execution_preflight =
         build_interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_preflight(
@@ -5808,7 +5770,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_pr
         "explicit_verified_outcome_ingestion_execution_decision_required"
     );
     assert_eq!(
-        execution_preflight["verified_outcome_ingestion_execution"]["ready_for_verified_outcome_ingestion_execution_commit"],
+        execution_preflight["verified_outcome_ingestion_execution"]
+            ["ready_for_verified_outcome_ingestion_execution_commit"],
         false
     );
     assert_runtime_executor_verified_outcome_ingestion_execution_preflight_output_only(
@@ -5822,8 +5785,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_pr
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_preflight_accepts_explicit_decision()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_preflight_accepts_explicit_decision(
+) {
     let ingestion_gate = ready_runtime_executor_verified_outcome_ingestion_gate();
     let execution_preflight =
         build_interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_preflight(
@@ -5871,7 +5834,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_pr
         "verified"
     );
     assert_eq!(
-        execution_preflight["verified_outcome_ingestion_execution"]["ready_for_verified_outcome_ingestion_execution_commit"],
+        execution_preflight["verified_outcome_ingestion_execution"]
+            ["ready_for_verified_outcome_ingestion_execution_commit"],
         true
     );
     assert_eq!(
@@ -5890,8 +5854,156 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_pr
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_preflight_blocks_bad_decision()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_preflight_accepts_admission_preflight(
+) {
+    let admission_preflight =
+        ready_runtime_executor_verified_outcome_ingestion_admission_preflight();
+    let execution_preflight =
+        build_interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_preflight(
+            &json!({
+                "verified_outcome_ingestion_admission_preflight": admission_preflight,
+                "verified_outcome_ingestion_execution_decision":
+                    explicit_verified_outcome_ingestion_execution_decision_for_admission_preflight()
+            }),
+        );
+    let markdown =
+        render_interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_preflight(
+            &execution_preflight,
+        );
+
+    assert_eq!(
+        execution_preflight["input_kind"],
+        "verified_outcome_ingestion_admission_preflight_with_verified_outcome_ingestion_execution_decision_wrapper"
+    );
+    assert_eq!(
+        execution_preflight["source_verified_outcome_ingestion_admission_preflight_verdict"],
+        "ready_for_verified_outcome_ingestion_execution"
+    );
+    assert_eq!(
+        execution_preflight["verified_outcome_ingestion_execution_decision_schema"],
+        LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_EXECUTION_DECISION_SCHEMA
+    );
+    assert_eq!(
+        execution_preflight["verified_outcome_ingestion_execution_preflight_verdict"],
+        "ready_for_verified_outcome_ingestion_execution_commit",
+        "failure_reasons={}",
+        execution_preflight["failure_reasons"]
+    );
+    assert_eq!(execution_preflight["status"], "ready");
+    assert_eq!(execution_preflight["failure_reasons"], json!([]));
+    assert_eq!(
+        execution_preflight["verified_outcome_ingestion_execution"]["source_admission_decision_id"],
+        "verified_outcome_ingestion_admission_arrival_bath_move_002"
+    );
+    assert_eq!(
+        execution_preflight["verified_outcome_ingestion_execution"]
+            ["source_write_evidence_review_decision_id"],
+        "verified_outcome_ingestion_write_evidence_review_arrival_bath_move_002"
+    );
+    assert_eq!(
+        execution_preflight["verified_outcome_ingestion_execution"]["source_ingestion_decision_id"],
+        "verified_outcome_ingestion_arrival_bath_move_002"
+    );
+    assert_eq!(
+        execution_preflight["verified_outcome_ingestion_execution"]
+            ["admission_preflight_confirmed"],
+        true
+    );
+    assert_eq!(
+        execution_preflight["verified_outcome_ingestion_execution"]["admission_decision_confirmed"],
+        true
+    );
+    assert_eq!(
+        execution_preflight["verified_outcome_ingestion_execution"]
+            ["ready_for_verified_outcome_ingestion_execution_commit"],
+        true
+    );
+    assert_eq!(
+        execution_preflight["source_verified_outcome_ingestion_gate"],
+        Value::Null
+    );
+    assert_ne!(
+        execution_preflight["source_verified_outcome_ingestion_admission_preflight"],
+        Value::Null
+    );
+    assert_runtime_executor_verified_outcome_ingestion_execution_preflight_output_only(
+        &execution_preflight,
+    );
+
+    assert!(markdown.contains(
+        "- source_verified_outcome_ingestion_admission_preflight_verdict: `ready_for_verified_outcome_ingestion_execution`"
+    ));
+    assert!(markdown.contains("- admission_preflight_confirmed: `true`"));
+}
+
+#[test]
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_preflight_blocks_bad_admission_preflight(
+) {
+    let mut admission_preflight =
+        ready_runtime_executor_verified_outcome_ingestion_admission_preflight();
+    admission_preflight["verified_outcome_ingestion_admission_preflight_verdict"] =
+        json!("blocked");
+    admission_preflight["next_allowed_gate"] =
+        json!("repair_verified_outcome_ingestion_admission_input");
+    admission_preflight["verified_outcome_ingestion_admission"]
+        ["ready_for_verified_outcome_ingestion_execution"] = json!(false);
+    admission_preflight["verified_outcome_ingestion_admission"]["previous_world_verdict"] =
+        json!("verified");
+    admission_preflight["verified_outcome_ingestion_admission"]["verified_world_verdict"] =
+        json!("not_verified");
+    admission_preflight["verified_outcome_ingestion_admission"]
+        ["verified_outcome_ingestion_execution_allowed"] = json!(true);
+    admission_preflight["verified_outcome_ingested_by_this_tool"] = json!(true);
+
+    let mut decision =
+        explicit_verified_outcome_ingestion_execution_decision_for_admission_preflight();
+    decision["reviewed_verified_outcome_ingestion_admission_preflight_verdict"] = json!("blocked");
+    decision["admission_preflight_confirmed"] = json!(false);
+    decision["admission_decision_confirmed"] = json!(false);
+    decision["source_verified_outcome_ingestion_admission_scope"]["admission_decision_id"] =
+        json!("other_admission");
+    decision["source_verified_outcome_ingestion_admission_scope"]["outcome_record_digest"] =
+        json!("sha256:other");
+
+    let execution_preflight =
+        build_interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_preflight(
+            &json!({
+                "verified_outcome_ingestion_admission_preflight": admission_preflight,
+                "verified_outcome_ingestion_execution_decision": decision
+            }),
+        );
+
+    assert_eq!(
+        execution_preflight["verified_outcome_ingestion_execution_preflight_verdict"],
+        "blocked"
+    );
+    let failure_reasons = execution_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons");
+    for reason in [
+        "source_verified_outcome_ingestion_admission_preflight_not_ready",
+        "source_verified_outcome_ingestion_admission_preflight_next_gate_mismatch",
+        "source_verified_outcome_ingestion_admission_not_ready_for_execution",
+        "source_previous_world_verdict_must_be_not_verified",
+        "source_verified_world_verdict_must_be_verified",
+        "source_verified_outcome_ingestion_admission_boundary_not_output_only",
+        "source_verified_outcome_ingestion_admission_must_be_output_only",
+        "verified_outcome_ingestion_execution_must_review_ready_admission_preflight",
+        "verified_outcome_ingestion_execution_requires_admission_preflight_confirmation",
+        "verified_outcome_ingestion_execution_requires_admission_decision_confirmation",
+        "verified_outcome_ingestion_execution_admission_decision_scope_mismatch",
+        "verified_outcome_ingestion_execution_digest_scope_mismatch",
+    ] {
+        assert!(failure_reasons.contains(&json!(reason)), "{reason}");
+    }
+    assert_runtime_executor_verified_outcome_ingestion_execution_preflight_output_only(
+        &execution_preflight,
+    );
+}
+
+#[test]
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_preflight_blocks_bad_decision(
+) {
     let ingestion_gate = ready_runtime_executor_verified_outcome_ingestion_gate();
     let mut decision = explicit_verified_outcome_ingestion_execution_decision();
     decision["decision_kind"] = json!("operator_note");
@@ -6002,8 +6114,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_pr
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_preflight_requires_ingestion_gate()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_preflight_requires_ingestion_gate(
+) {
     let rewrite_gate = ready_runtime_executor_world_verdict_rewrite_gate();
     let execution_preflight =
         build_interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_preflight(
@@ -6040,8 +6152,151 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_pr
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_commit_blocks_without_decision()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_preflight_accepts_admission_preflight_without_decision_blocks(
+) {
+    let admission_preflight =
+        ready_runtime_executor_verified_outcome_ingestion_admission_preflight();
+    let execution_preflight =
+        build_interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_preflight(
+            &admission_preflight,
+        );
+    let markdown =
+        render_interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_preflight(
+            &execution_preflight,
+        );
+
+    assert_eq!(
+        execution_preflight["input_kind"],
+        "runtime_executor_verified_outcome_ingestion_admission_preflight"
+    );
+    assert_eq!(
+        execution_preflight["source_schema"],
+        LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_ADMISSION_PREFLIGHT_SCHEMA
+    );
+    assert_eq!(
+        execution_preflight["source_verified_outcome_ingestion_admission_preflight_verdict"],
+        "ready_for_verified_outcome_ingestion_execution"
+    );
+    assert_eq!(
+        execution_preflight["verified_outcome_ingestion_execution_preflight_verdict"],
+        "blocked"
+    );
+    assert_eq!(
+        execution_preflight["reason"],
+        "explicit_verified_outcome_ingestion_execution_decision_required"
+    );
+    assert_runtime_executor_verified_outcome_ingestion_execution_preflight_output_only(
+        &execution_preflight,
+    );
+    assert!(markdown.contains(
+        "- source_verified_outcome_ingestion_admission_preflight_verdict: `ready_for_verified_outcome_ingestion_execution`"
+    ));
+    assert!(markdown.contains("- ready_for_verified_outcome_ingestion_execution_commit: `false`"));
+}
+
+#[test]
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_preflight_accepts_admission_preflight_decision(
+) {
+    let admission_preflight =
+        ready_runtime_executor_verified_outcome_ingestion_admission_preflight();
+    let execution_preflight =
+        build_interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_preflight(
+            &json!({
+                "verified_outcome_ingestion_admission_preflight": admission_preflight,
+                "verified_outcome_ingestion_execution_decision":
+                    explicit_verified_outcome_ingestion_execution_decision_for_admission_preflight()
+            }),
+        );
+
+    assert_eq!(
+        execution_preflight["input_kind"],
+        "verified_outcome_ingestion_admission_preflight_with_verified_outcome_ingestion_execution_decision_wrapper"
+    );
+    assert_eq!(
+        execution_preflight["verified_outcome_ingestion_execution_preflight_verdict"],
+        "ready_for_verified_outcome_ingestion_execution_commit",
+        "failure_reasons={}",
+        execution_preflight["failure_reasons"]
+    );
+    assert_eq!(execution_preflight["failure_reasons"], json!([]));
+    assert_eq!(
+        execution_preflight["source_verified_outcome_ingestion_admission_preflight_verdict"],
+        "ready_for_verified_outcome_ingestion_execution"
+    );
+    assert_eq!(
+        execution_preflight["verified_outcome_ingestion_execution"]["source_admission_decision_id"],
+        "verified_outcome_ingestion_admission_arrival_bath_move_002"
+    );
+    assert_eq!(
+        execution_preflight["verified_outcome_ingestion_execution"]
+            ["source_write_evidence_review_decision_id"],
+        "verified_outcome_ingestion_write_evidence_review_arrival_bath_move_002"
+    );
+    assert_eq!(
+        execution_preflight["verified_outcome_ingestion_execution"]
+            ["admission_preflight_confirmed"],
+        true
+    );
+    assert_eq!(
+        execution_preflight["verified_outcome_ingestion_execution"]["admission_decision_confirmed"],
+        true
+    );
+    assert_eq!(
+        execution_preflight["next_allowed_gate"],
+        "verified_outcome_ingestion_execution_commit"
+    );
+    assert_runtime_executor_verified_outcome_ingestion_execution_preflight_output_only(
+        &execution_preflight,
+    );
+}
+
+#[test]
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_preflight_blocks_bad_admission_decision(
+) {
+    let admission_preflight =
+        ready_runtime_executor_verified_outcome_ingestion_admission_preflight();
+    let mut decision =
+        explicit_verified_outcome_ingestion_execution_decision_for_admission_preflight();
+    decision["reviewed_verified_outcome_ingestion_admission_preflight_verdict"] = json!("blocked");
+    decision["admission_preflight_confirmed"] = json!(false);
+    decision["admission_decision_confirmed"] = json!(false);
+    decision["source_verified_outcome_ingestion_admission_scope"]["admission_decision_id"] =
+        json!("other_admission");
+    decision["source_verified_outcome_ingestion_admission_scope"]["outcome_record_digest"] =
+        json!("sha256:other");
+
+    let execution_preflight =
+        build_interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_preflight(
+            &json!({
+                "verified_outcome_ingestion_admission_preflight": admission_preflight,
+                "verified_outcome_ingestion_execution_decision": decision
+            }),
+        );
+
+    assert_eq!(
+        execution_preflight["verified_outcome_ingestion_execution_preflight_verdict"],
+        "blocked"
+    );
+    let failure_reasons = execution_preflight["failure_reasons"]
+        .as_array()
+        .expect("failure reasons");
+    for reason in [
+        "verified_outcome_ingestion_execution_must_review_ready_admission_preflight",
+        "verified_outcome_ingestion_execution_requires_admission_preflight_confirmation",
+        "verified_outcome_ingestion_execution_requires_admission_decision_confirmation",
+        "verified_outcome_ingestion_execution_admission_decision_scope_mismatch",
+        "verified_outcome_ingestion_execution_digest_scope_mismatch",
+    ] {
+        assert!(failure_reasons.contains(&json!(reason)), "{reason}");
+    }
+    assert_runtime_executor_verified_outcome_ingestion_execution_preflight_output_only(
+        &execution_preflight,
+    );
+}
+
+#[test]
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_commit_blocks_without_decision(
+) {
     let execution_preflight =
         ready_runtime_executor_verified_outcome_ingestion_execution_preflight();
     let commit =
@@ -6079,7 +6334,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_co
         "explicit_verified_outcome_ingestion_execution_commit_decision_required"
     );
     assert_eq!(
-        commit["verified_outcome_ingestion_execution_commit"]["ready_for_verified_outcome_ingestion_apply"],
+        commit["verified_outcome_ingestion_execution_commit"]
+            ["ready_for_verified_outcome_ingestion_apply"],
         false
     );
     assert_runtime_executor_verified_outcome_ingestion_execution_commit_output_only(&commit);
@@ -6089,8 +6345,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_co
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_commit_accepts_explicit_decision()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_commit_accepts_explicit_decision(
+) {
     let execution_preflight =
         ready_runtime_executor_verified_outcome_ingestion_execution_preflight();
     let commit =
@@ -6139,7 +6395,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_co
         "verified"
     );
     assert_eq!(
-        commit["verified_outcome_ingestion_execution_commit"]["ready_for_verified_outcome_ingestion_apply"],
+        commit["verified_outcome_ingestion_execution_commit"]
+            ["ready_for_verified_outcome_ingestion_apply"],
         true
     );
     assert_eq!(
@@ -6156,8 +6413,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_co
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_commit_blocks_bad_decision()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_commit_blocks_bad_decision(
+) {
     let execution_preflight =
         ready_runtime_executor_verified_outcome_ingestion_execution_preflight();
     let mut decision = explicit_verified_outcome_ingestion_execution_commit_decision();
@@ -6180,10 +6437,10 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_co
     decision["verified_outcome_ingested_by_this_tool"] = json!(true);
     decision["durable_outcome_record_written_by_this_tool"] = json!(true);
     decision["world_verdict_persisted_by_this_tool"] = json!(true);
-    decision["source_verified_outcome_ingestion_execution_preflight_scope"]["execution_decision_id"] =
-        json!("other_execution");
-    decision["source_verified_outcome_ingestion_execution_preflight_scope"]["outcome_record_digest"] =
-        json!("sha256:other");
+    decision["source_verified_outcome_ingestion_execution_preflight_scope"]
+        ["execution_decision_id"] = json!("other_execution");
+    decision["source_verified_outcome_ingestion_execution_preflight_scope"]
+        ["outcome_record_digest"] = json!("sha256:other");
 
     let commit =
         build_interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_commit(
@@ -6267,8 +6524,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_co
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_commit_requires_execution_preflight()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_commit_requires_execution_preflight(
+) {
     let ingestion_gate = ready_runtime_executor_verified_outcome_ingestion_gate();
     let commit =
         build_interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_commit(
@@ -6303,8 +6560,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_co
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_apply_gate_blocks_without_decision()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_apply_gate_blocks_without_decision(
+) {
     let commit = ready_runtime_executor_verified_outcome_ingestion_execution_commit();
     let apply =
         build_interaction_feedback_runtime_executor_verified_outcome_ingestion_apply_gate(&commit);
@@ -6344,8 +6601,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_apply_gate_b
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_apply_gate_accepts_explicit_decision()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_apply_gate_accepts_explicit_decision(
+) {
     let commit = ready_runtime_executor_verified_outcome_ingestion_execution_commit();
     let apply =
         build_interaction_feedback_runtime_executor_verified_outcome_ingestion_apply_gate(&json!({
@@ -6584,7 +6841,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_block
         "explicit_verified_outcome_ingestion_writer_decision_required"
     );
     assert_eq!(
-        writer["verified_outcome_ingestion_writer"]["ready_for_verified_outcome_ingestion_writer_execution"],
+        writer["verified_outcome_ingestion_writer"]
+            ["ready_for_verified_outcome_ingestion_writer_execution"],
         false
     );
     assert_runtime_executor_verified_outcome_ingestion_writer_output_only(&writer);
@@ -6594,8 +6852,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_block
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_accepts_explicit_decision()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_accepts_explicit_decision(
+) {
     let apply = ready_runtime_executor_verified_outcome_ingestion_apply_gate();
     let writer =
         build_interaction_feedback_runtime_executor_verified_outcome_ingestion_writer(&json!({
@@ -6643,7 +6901,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_accep
         "verified"
     );
     assert_eq!(
-        writer["verified_outcome_ingestion_writer"]["ready_for_verified_outcome_ingestion_writer_execution"],
+        writer["verified_outcome_ingestion_writer"]
+            ["ready_for_verified_outcome_ingestion_writer_execution"],
         true
     );
     assert_eq!(
@@ -6794,8 +7053,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_requi
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_execution_blocks_without_decision()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_execution_blocks_without_decision(
+) {
     let writer = ready_runtime_executor_verified_outcome_ingestion_writer();
     let execution =
         build_interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_execution(
@@ -6831,7 +7090,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_execu
         "explicit_verified_outcome_ingestion_writer_execution_decision_required"
     );
     assert_eq!(
-        execution["verified_outcome_ingestion_writer_execution"]["ready_for_verified_outcome_ingestion_persistence"],
+        execution["verified_outcome_ingestion_writer_execution"]
+            ["ready_for_verified_outcome_ingestion_persistence"],
         false
     );
     assert_runtime_executor_verified_outcome_ingestion_writer_execution_output_only(&execution);
@@ -6841,8 +7101,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_execu
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_execution_accepts_explicit_decision()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_execution_accepts_explicit_decision(
+) {
     let writer = ready_runtime_executor_verified_outcome_ingestion_writer();
     let execution =
         build_interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_execution(
@@ -6889,7 +7149,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_execu
         "verified"
     );
     assert_eq!(
-        execution["verified_outcome_ingestion_writer_execution"]["ready_for_verified_outcome_ingestion_persistence"],
+        execution["verified_outcome_ingestion_writer_execution"]
+            ["ready_for_verified_outcome_ingestion_persistence"],
         true
     );
     assert_eq!(
@@ -6904,8 +7165,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_execu
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_execution_blocks_bad_decision()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_execution_blocks_bad_decision(
+) {
     let writer = ready_runtime_executor_verified_outcome_ingestion_writer();
     let mut decision = explicit_verified_outcome_ingestion_writer_execution_decision();
     decision["decision_kind"] = json!("operator_note");
@@ -6980,8 +7241,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_execu
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_execution_requires_writer()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_execution_requires_writer(
+) {
     let apply = ready_runtime_executor_verified_outcome_ingestion_apply_gate();
     let execution =
         build_interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_execution(
@@ -7016,8 +7277,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_execu
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_persistence_blocks_without_decision()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_persistence_blocks_without_decision(
+) {
     let execution = ready_runtime_executor_verified_outcome_ingestion_writer_execution();
     let persistence =
         build_interaction_feedback_runtime_executor_verified_outcome_ingestion_persistence(
@@ -7053,7 +7314,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_persistence_
         "explicit_verified_outcome_ingestion_persistence_decision_required"
     );
     assert_eq!(
-        persistence["verified_outcome_ingestion_persistence"]["ready_for_verified_outcome_ingestion_store_write"],
+        persistence["verified_outcome_ingestion_persistence"]
+            ["ready_for_verified_outcome_ingestion_store_write"],
         false
     );
     assert_runtime_executor_verified_outcome_ingestion_persistence_output_only(&persistence);
@@ -7063,8 +7325,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_persistence_
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_persistence_accepts_explicit_decision()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_persistence_accepts_explicit_decision(
+) {
     let execution = ready_runtime_executor_verified_outcome_ingestion_writer_execution();
     let persistence =
         build_interaction_feedback_runtime_executor_verified_outcome_ingestion_persistence(
@@ -7111,7 +7373,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_persistence_
         "verified"
     );
     assert_eq!(
-        persistence["verified_outcome_ingestion_persistence"]["ready_for_verified_outcome_ingestion_store_write"],
+        persistence["verified_outcome_ingestion_persistence"]
+            ["ready_for_verified_outcome_ingestion_store_write"],
         true
     );
     assert_eq!(
@@ -7126,8 +7389,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_persistence_
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_persistence_blocks_bad_decision()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_persistence_blocks_bad_decision(
+) {
     let execution = ready_runtime_executor_verified_outcome_ingestion_writer_execution();
     let mut decision = explicit_verified_outcome_ingestion_persistence_decision();
     decision["persistence_kind"] = json!("operator_note");
@@ -7152,8 +7415,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_persistence_
     decision["verified_outcome_ingested_by_this_tool"] = json!(true);
     decision["durable_outcome_record_written_by_this_tool"] = json!(true);
     decision["world_verdict_persisted_by_this_tool"] = json!(true);
-    decision["source_verified_outcome_ingestion_writer_execution_scope"]["persistence_source_execution_id"] =
-        json!("other_execution");
+    decision["source_verified_outcome_ingestion_writer_execution_scope"]
+        ["persistence_source_execution_id"] = json!("other_execution");
     decision["source_verified_outcome_ingestion_writer_execution_scope"]["outcome_record_digest"] =
         json!("sha256:other");
 
@@ -7240,8 +7503,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_persistence_
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight_blocks_without_decision()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight_blocks_without_decision(
+) {
     let persistence = ready_runtime_executor_verified_outcome_ingestion_persistence();
     let preflight =
         build_interaction_feedback_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight(
@@ -7287,8 +7550,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_store_write_
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight_accepts_explicit_decision()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight_accepts_explicit_decision(
+) {
     let persistence = ready_runtime_executor_verified_outcome_ingestion_persistence();
     let preflight =
         build_interaction_feedback_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight(
@@ -7331,15 +7594,18 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_store_write_
         "approved_for_verified_outcome_ingestion_write_evidence"
     );
     assert_eq!(
-        preflight["verified_outcome_ingestion_store_write_execution"]["ready_for_verified_outcome_ingestion_write_evidence"],
+        preflight["verified_outcome_ingestion_store_write_execution"]
+            ["ready_for_verified_outcome_ingestion_write_evidence"],
         true
     );
     assert_eq!(
-        preflight["verified_outcome_ingestion_store_write_execution"]["verified_outcome_store_write_execution_allowed"],
+        preflight["verified_outcome_ingestion_store_write_execution"]
+            ["verified_outcome_store_write_execution_allowed"],
         false
     );
     assert_eq!(
-        preflight["verified_outcome_ingestion_store_write_execution"]["verified_outcome_store_written_by_this_tool"],
+        preflight["verified_outcome_ingestion_store_write_execution"]
+            ["verified_outcome_store_written_by_this_tool"],
         false
     );
     assert_eq!(
@@ -7360,8 +7626,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_store_write_
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight_blocks_bad_decision()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight_blocks_bad_decision(
+) {
     let persistence = ready_runtime_executor_verified_outcome_ingestion_persistence();
     let mut decision = explicit_verified_outcome_ingestion_store_write_execution_decision();
     decision["store_write_execution_kind"] = json!("operator_note");
@@ -7442,8 +7708,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_store_write_
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight_requires_persistence()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight_requires_persistence(
+) {
     let execution = ready_runtime_executor_verified_outcome_ingestion_writer_execution();
     let preflight =
         build_interaction_feedback_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight(
@@ -7480,8 +7746,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_store_write_
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_write_evidence_preflight_blocks_without_evidence()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_write_evidence_preflight_blocks_without_evidence(
+) {
     let store_write_preflight =
         ready_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight();
     let write_evidence_preflight =
@@ -7502,7 +7768,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_write_eviden
         "runtime_executor_verified_outcome_ingestion_store_write_execution_preflight"
     );
     assert_eq!(
-        write_evidence_preflight["source_verified_outcome_ingestion_store_write_execution_preflight_verdict"],
+        write_evidence_preflight
+            ["source_verified_outcome_ingestion_store_write_execution_preflight_verdict"],
         "ready_for_verified_outcome_ingestion_write_evidence"
     );
     assert_eq!(
@@ -7517,18 +7784,16 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_write_eviden
     assert_runtime_executor_verified_outcome_ingestion_write_evidence_preflight_output_only(
         &write_evidence_preflight,
     );
-    assert!(
-        markdown
-            .contains("- verified_outcome_ingestion_write_evidence_preflight_verdict: `blocked`")
-    );
+    assert!(markdown
+        .contains("- verified_outcome_ingestion_write_evidence_preflight_verdict: `blocked`"));
     assert!(
         markdown.contains("- ready_for_verified_outcome_ingestion_write_evidence_review: `false`")
     );
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_write_evidence_preflight_accepts_explicit_evidence()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_write_evidence_preflight_accepts_explicit_evidence(
+) {
     let store_write_preflight =
         ready_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight();
     let write_evidence_preflight =
@@ -7568,19 +7833,23 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_write_eviden
         "verified_outcome_ingestion_write_evidence_arrival_bath_move_002"
     );
     assert_eq!(
-        write_evidence_preflight["verified_outcome_ingestion_write_evidence"]["store_write_execution_id"],
+        write_evidence_preflight["verified_outcome_ingestion_write_evidence"]
+            ["store_write_execution_id"],
         "verified_outcome_ingestion_store_write_execution_arrival_bath_move_002"
     );
     assert_eq!(
-        write_evidence_preflight["verified_outcome_ingestion_write_evidence"]["source_write_evidence_id"],
+        write_evidence_preflight["verified_outcome_ingestion_write_evidence"]
+            ["source_write_evidence_id"],
         "durable_outcome_record_write_evidence_arrival_bath_move_002"
     );
     assert_eq!(
-        write_evidence_preflight["verified_outcome_ingestion_write_evidence"]["ready_for_verified_outcome_ingestion_write_evidence_review"],
+        write_evidence_preflight["verified_outcome_ingestion_write_evidence"]
+            ["ready_for_verified_outcome_ingestion_write_evidence_review"],
         true
     );
     assert_eq!(
-        write_evidence_preflight["verified_outcome_ingestion_write_evidence"]["verified_outcome_store_written_by_this_tool"],
+        write_evidence_preflight["verified_outcome_ingestion_write_evidence"]
+            ["verified_outcome_store_written_by_this_tool"],
         false
     );
     assert_eq!(
@@ -7598,8 +7867,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_write_eviden
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_write_evidence_preflight_blocks_bad_evidence()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_write_evidence_preflight_blocks_bad_evidence(
+) {
     let store_write_preflight =
         ready_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight();
     let mut evidence = explicit_verified_outcome_ingestion_write_evidence();
@@ -7623,10 +7892,10 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_write_eviden
     evidence["verified_outcome_ingested_by_this_tool"] = json!(true);
     evidence["durable_outcome_record_written_by_this_tool"] = json!(true);
     evidence["world_verdict_persisted_by_this_tool"] = json!(true);
-    evidence["source_verified_outcome_ingestion_store_write_execution_scope"]["store_write_execution_id"] =
-        json!("other_store_write");
-    evidence["source_verified_outcome_ingestion_store_write_execution_scope"]["outcome_record_digest"] =
-        json!("sha256:other");
+    evidence["source_verified_outcome_ingestion_store_write_execution_scope"]
+        ["store_write_execution_id"] = json!("other_store_write");
+    evidence["source_verified_outcome_ingestion_store_write_execution_scope"]
+        ["outcome_record_digest"] = json!("sha256:other");
 
     let write_evidence_preflight =
         build_interaction_feedback_runtime_executor_verified_outcome_ingestion_write_evidence_preflight(
@@ -7675,8 +7944,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_write_eviden
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_write_evidence_preflight_requires_store_write_preflight()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_write_evidence_preflight_requires_store_write_preflight(
+) {
     let persistence = ready_runtime_executor_verified_outcome_ingestion_persistence();
     let write_evidence_preflight =
         build_interaction_feedback_runtime_executor_verified_outcome_ingestion_write_evidence_preflight(
@@ -7704,7 +7973,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_write_eviden
         "runtime_executor_verified_outcome_ingestion_store_write_execution_preflight_required"
     );
     assert_eq!(
-        write_evidence_preflight["source_verified_outcome_ingestion_store_write_execution_preflight"],
+        write_evidence_preflight
+            ["source_verified_outcome_ingestion_store_write_execution_preflight"],
         Value::Null
     );
     assert_runtime_executor_verified_outcome_ingestion_write_evidence_preflight_output_only(
@@ -7713,8 +7983,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_write_eviden
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_write_evidence_review_preflight_blocks_without_review()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_write_evidence_review_preflight_blocks_without_review(
+) {
     let write_evidence_preflight =
         ready_runtime_executor_verified_outcome_ingestion_write_evidence_preflight();
     let review_preflight =
@@ -7760,8 +8030,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_write_eviden
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_write_evidence_review_preflight_accepts_explicit_review()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_write_evidence_review_preflight_accepts_explicit_review(
+) {
     let write_evidence_preflight =
         ready_runtime_executor_verified_outcome_ingestion_write_evidence_preflight();
     let review_preflight =
@@ -7805,11 +8075,13 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_write_eviden
         "approved_for_verified_outcome_ingestion_admission"
     );
     assert_eq!(
-        review_preflight["verified_outcome_ingestion_write_evidence_review"]["ready_for_verified_outcome_ingestion_admission"],
+        review_preflight["verified_outcome_ingestion_write_evidence_review"]
+            ["ready_for_verified_outcome_ingestion_admission"],
         true
     );
     assert_eq!(
-        review_preflight["verified_outcome_ingestion_write_evidence_review"]["verified_outcome_admission_allowed"],
+        review_preflight["verified_outcome_ingestion_write_evidence_review"]
+            ["verified_outcome_admission_allowed"],
         false
     );
     assert_eq!(
@@ -7827,8 +8099,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_write_eviden
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_write_evidence_review_preflight_blocks_bad_review()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_write_evidence_review_preflight_blocks_bad_review(
+) {
     let write_evidence_preflight =
         ready_runtime_executor_verified_outcome_ingestion_write_evidence_preflight();
     let mut review = explicit_verified_outcome_ingestion_write_evidence_review_decision();
@@ -7904,8 +8176,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_write_eviden
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_write_evidence_review_preflight_requires_write_evidence_preflight()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_write_evidence_review_preflight_requires_write_evidence_preflight(
+) {
     let store_write_preflight =
         ready_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight();
     let review_preflight =
@@ -7943,8 +8215,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_write_eviden
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_admission_preflight_blocks_without_admission_decision()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_admission_preflight_blocks_without_admission_decision(
+) {
     let review_preflight =
         ready_runtime_executor_verified_outcome_ingestion_write_evidence_review_preflight();
     let admission_preflight =
@@ -7965,7 +8237,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_admission_pr
         "runtime_executor_verified_outcome_ingestion_write_evidence_review_preflight"
     );
     assert_eq!(
-        admission_preflight["source_verified_outcome_ingestion_write_evidence_review_preflight_verdict"],
+        admission_preflight
+            ["source_verified_outcome_ingestion_write_evidence_review_preflight_verdict"],
         "ready_for_verified_outcome_ingestion_admission"
     );
     assert_eq!(
@@ -7990,8 +8263,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_admission_pr
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_admission_preflight_accepts_explicit_decision()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_admission_preflight_accepts_explicit_decision(
+) {
     let review_preflight =
         ready_runtime_executor_verified_outcome_ingestion_write_evidence_review_preflight();
     let admission_preflight =
@@ -8035,11 +8308,13 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_admission_pr
         "approved_for_verified_outcome_ingestion_execution"
     );
     assert_eq!(
-        admission_preflight["verified_outcome_ingestion_admission"]["ready_for_verified_outcome_ingestion_execution"],
+        admission_preflight["verified_outcome_ingestion_admission"]
+            ["ready_for_verified_outcome_ingestion_execution"],
         true
     );
     assert_eq!(
-        admission_preflight["verified_outcome_ingestion_admission"]["verified_outcome_ingestion_execution_allowed"],
+        admission_preflight["verified_outcome_ingestion_admission"]
+            ["verified_outcome_ingestion_execution_allowed"],
         false
     );
     assert_eq!(
@@ -8057,8 +8332,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_admission_pr
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_admission_preflight_blocks_bad_decision()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_admission_preflight_blocks_bad_decision(
+) {
     let review_preflight =
         ready_runtime_executor_verified_outcome_ingestion_write_evidence_review_preflight();
     let mut admission = explicit_verified_outcome_ingestion_admission_decision();
@@ -8138,8 +8413,8 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_admission_pr
 }
 
 #[test]
-fn interaction_feedback_runtime_executor_verified_outcome_ingestion_admission_preflight_requires_review_preflight()
- {
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_admission_preflight_requires_review_preflight(
+) {
     let write_evidence_preflight =
         ready_runtime_executor_verified_outcome_ingestion_write_evidence_preflight();
     let admission_preflight =
@@ -8185,21 +8460,15 @@ fn interaction_feedback_validator_reports_tampered_fixture() {
     let report = validate_interaction_feedback_fixture(&fixture);
 
     assert!(!report.valid);
-    assert!(
-        report
-            .failure_reasons
-            .contains(&"cause_event_missing:missing_event".to_string())
-    );
-    assert!(
-        report
-            .failure_reasons
-            .contains(&"human_reject_not_anchored_to_verification".to_string())
-    );
-    assert!(
-        report
-            .failure_reasons
-            .contains(&"feedback_changes_world_verdict".to_string())
-    );
+    assert!(report
+        .failure_reasons
+        .contains(&"cause_event_missing:missing_event".to_string()));
+    assert!(report
+        .failure_reasons
+        .contains(&"human_reject_not_anchored_to_verification".to_string()));
+    assert!(report
+        .failure_reasons
+        .contains(&"feedback_changes_world_verdict".to_string()));
 }
 
 #[test]
@@ -8216,18 +8485,14 @@ fn interaction_feedback_envelope_reports_tampered_fixture_without_panicking() {
     );
     assert_eq!(envelope["fixture_schema"], "wrong.schema");
     assert_eq!(envelope["valid"], false);
-    assert!(
-        envelope["failure_reasons"]
-            .as_array()
-            .expect("failure reasons")
-            .contains(&json!("schema_mismatch"))
-    );
-    assert!(
-        envelope["failure_reasons"]
-            .as_array()
-            .expect("failure reasons")
-            .contains(&json!("primary_readback_requires_screenshot"))
-    );
+    assert!(envelope["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("schema_mismatch")));
+    assert!(envelope["failure_reasons"]
+        .as_array()
+        .expect("failure reasons")
+        .contains(&json!("primary_readback_requires_screenshot")));
     assert_eq!(envelope["guardrails"]["writes_state"], false);
     assert_eq!(envelope["guardrails"]["store_access_required"], false);
     assert_eq!(envelope["guardrails"]["mcp_tool_registered"], false);
@@ -9158,6 +9423,63 @@ fn explicit_verified_outcome_ingestion_execution_decision() -> Value {
     })
 }
 
+fn explicit_verified_outcome_ingestion_execution_decision_for_admission_preflight() -> Value {
+    json!({
+        "schema": LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_EXECUTION_DECISION_SCHEMA,
+        "execution_decision_id": "verified_outcome_ingestion_execution_from_admission_arrival_bath_move_002",
+        "decision_kind": "verified_outcome_ingestion_execution",
+        "source_verified_outcome_ingestion_admission_scope": {
+            "admission_decision_id": "verified_outcome_ingestion_admission_arrival_bath_move_002",
+            "review_decision_id": "verified_outcome_ingestion_write_evidence_review_arrival_bath_move_002",
+            "write_evidence_id": "verified_outcome_ingestion_write_evidence_arrival_bath_move_002",
+            "store_write_execution_id": "verified_outcome_ingestion_store_write_execution_arrival_bath_move_002",
+            "persistence_decision_id": "verified_outcome_ingestion_persistence_arrival_bath_move_002",
+            "persistence_source_execution_id": "verified_outcome_ingestion_writer_execution_arrival_bath_move_002",
+            "writer_decision_id": "verified_outcome_ingestion_writer_arrival_bath_move_002",
+            "apply_decision_id": "verified_outcome_ingestion_apply_arrival_bath_move_002",
+            "commit_decision_id": "verified_outcome_ingestion_execution_commit_arrival_bath_move_002",
+            "source_execution_decision_id": "verified_outcome_ingestion_execution_arrival_bath_move_002",
+            "source_ingestion_decision_id": "verified_outcome_ingestion_arrival_bath_move_002",
+            "source_rewrite_decision_id": "world_verdict_rewrite_arrival_bath_move_002",
+            "source_review_decision_id": "durable_outcome_record_write_evidence_review_arrival_bath_move_002",
+            "source_write_evidence_id": "durable_outcome_record_write_evidence_arrival_bath_move_002",
+            "world_id": "onsen_live_session",
+            "branch_id": "main",
+            "runtime_generation": "runtime_gen_1284",
+            "patch_id": "patch_arrival_bath_move_002",
+            "outcome_record_candidate_id": "outcome_record_candidate_arrival_bath_move_002",
+            "outcome_record_schema": "agent_bridge.lswr.outcome_record_candidate.v0",
+            "idempotency_key": "onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_ingestion_review_arrival_bath_move_002",
+            "outcome_payload_digest": "sha256:arrival-bath-move-002-outcome-payload",
+            "write_destination": "agent_bridge_store_outcome_records",
+            "outcome_record_key": "onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_record_candidate_arrival_bath_move_002",
+            "outcome_record_digest": "sha256:arrival-bath-move-002-outcome-record",
+            "persisted_outcome_record_key": "onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_record_candidate_arrival_bath_move_002",
+            "persisted_outcome_record_digest": "sha256:arrival-bath-move-002-outcome-record"
+        },
+        "decision": "approved_for_verified_outcome_ingestion_execution_preflight",
+        "execution_reason": "verified_outcome_ingestion_admission_preflight_is_scoped_and_ready_for_separate_commit_execution",
+        "source_world_verdict": "not_verified",
+        "verified_world_verdict": "verified",
+        "reviewed_verified_outcome_ingestion_admission_preflight_verdict": "ready_for_verified_outcome_ingestion_execution",
+        "verified_outcome_package_confirmed": true,
+        "admission_preflight_confirmed": true,
+        "admission_decision_confirmed": true,
+        "reviewer_attestation_present": true,
+        "evidence_lineage_preserved": true,
+        "outcome_record_digest_confirmed": true,
+        "idempotency_key_confirmed": true,
+        "persisted_key_confirmed": true,
+        "persisted_digest_confirmed": true,
+        "execution_boundary_acknowledged": true,
+        "outcome_ingestion_allowed": false,
+        "memory_write_allowed": false,
+        "verified_outcome_ingested_by_this_tool": false,
+        "durable_outcome_record_written_by_this_tool": false,
+        "world_verdict_persisted_by_this_tool": false
+    })
+}
+
 fn ready_runtime_executor_verified_outcome_ingestion_execution_preflight() -> Value {
     build_interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_preflight(
         &json!({
@@ -9724,6 +10046,17 @@ fn explicit_verified_outcome_ingestion_admission_decision() -> Value {
     })
 }
 
+fn ready_runtime_executor_verified_outcome_ingestion_admission_preflight() -> Value {
+    build_interaction_feedback_runtime_executor_verified_outcome_ingestion_admission_preflight(
+        &json!({
+            "verified_outcome_ingestion_write_evidence_review_preflight":
+                ready_runtime_executor_verified_outcome_ingestion_write_evidence_review_preflight(),
+            "verified_outcome_ingestion_admission_decision":
+                explicit_verified_outcome_ingestion_admission_decision()
+        }),
+    )
+}
+
 fn assert_execution_preflight_read_only(preflight: &Value) {
     assert_eq!(preflight["writes_state"], false);
     assert_eq!(preflight["store_access_required"], false);
@@ -9893,11 +10226,13 @@ fn assert_live_runtime_lookup_design_preflight_read_only(preflight: &Value) {
         false
     );
     assert_eq!(
-        preflight["lookup_design_request"]["host_binding_requirements"]["network_contact_allowed_by_this_tool"],
+        preflight["lookup_design_request"]["host_binding_requirements"]
+            ["network_contact_allowed_by_this_tool"],
         false
     );
     assert_eq!(
-        preflight["lookup_design_request"]["host_binding_requirements"]["socket_open_allowed_by_this_tool"],
+        preflight["lookup_design_request"]["host_binding_requirements"]
+            ["socket_open_allowed_by_this_tool"],
         false
     );
     assert_eq!(
@@ -10251,7 +10586,8 @@ fn assert_runtime_executor_patch_executor_invocation_preflight_read_only(preflig
         false
     );
     assert_eq!(
-        preflight["patch_executor_invocation_request"]["executor_invocation_performed_by_this_tool"],
+        preflight["patch_executor_invocation_request"]
+            ["executor_invocation_performed_by_this_tool"],
         false
     );
     assert_eq!(
@@ -10592,7 +10928,8 @@ fn assert_runtime_executor_durable_outcome_ingestion_gate_preflight_read_only(pr
         false
     );
     assert_eq!(
-        preflight["durable_outcome_ingestion_gate"]["durable_outcome_ingestion_gate_performed_by_this_tool"],
+        preflight["durable_outcome_ingestion_gate"]
+            ["durable_outcome_ingestion_gate_performed_by_this_tool"],
         false
     );
     assert_eq!(
@@ -10674,7 +11011,8 @@ fn assert_runtime_executor_durable_outcome_ingestion_execution_preflight_read_on
         false
     );
     assert_eq!(
-        preflight["durable_outcome_ingestion_execution"]["durable_outcome_ingestion_performed_by_this_tool"],
+        preflight["durable_outcome_ingestion_execution"]
+            ["durable_outcome_ingestion_performed_by_this_tool"],
         false
     );
     assert_eq!(
@@ -10757,7 +11095,8 @@ fn assert_runtime_executor_durable_outcome_write_implementation_preflight_read_o
         false
     );
     assert_eq!(
-        preflight["durable_outcome_write_implementation"]["durable_outcome_record_written_by_this_tool"],
+        preflight["durable_outcome_write_implementation"]
+            ["durable_outcome_record_written_by_this_tool"],
         false
     );
     assert_eq!(
@@ -10903,7 +11242,8 @@ fn assert_runtime_executor_durable_outcome_record_write_execution_preflight_read
         true
     );
     assert_eq!(
-        preflight["guardrails"]["requires_explicit_durable_outcome_record_write_execution_decision"],
+        preflight["guardrails"]
+            ["requires_explicit_durable_outcome_record_write_execution_decision"],
         true
     );
     assert_eq!(
@@ -10929,7 +11269,8 @@ fn assert_runtime_executor_durable_outcome_record_write_execution_preflight_read
         false
     );
     assert_eq!(
-        preflight["durable_outcome_record_write_execution"]["durable_outcome_record_written_by_this_tool"],
+        preflight["durable_outcome_record_write_execution"]
+            ["durable_outcome_record_written_by_this_tool"],
         false
     );
     assert_eq!(
@@ -11016,7 +11357,8 @@ fn assert_runtime_executor_durable_outcome_record_persistence_preflight_read_onl
         false
     );
     assert_eq!(
-        preflight["durable_outcome_record_persistence"]["durable_outcome_record_written_by_this_tool"],
+        preflight["durable_outcome_record_persistence"]
+            ["durable_outcome_record_written_by_this_tool"],
         false
     );
     assert_eq!(
@@ -11081,7 +11423,8 @@ fn assert_runtime_executor_durable_outcome_record_store_write_execution_prefligh
         true
     );
     assert_eq!(
-        preflight["guardrails"]["requires_explicit_durable_outcome_record_store_write_execution_decision"],
+        preflight["guardrails"]
+            ["requires_explicit_durable_outcome_record_store_write_execution_decision"],
         true
     );
     assert_eq!(
@@ -11103,11 +11446,13 @@ fn assert_runtime_executor_durable_outcome_record_store_write_execution_prefligh
         false
     );
     assert_eq!(
-        preflight["durable_outcome_record_store_write_execution"]["durable_store_write_execution_allowed"],
+        preflight["durable_outcome_record_store_write_execution"]
+            ["durable_store_write_execution_allowed"],
         false
     );
     assert_eq!(
-        preflight["durable_outcome_record_store_write_execution"]["durable_outcome_record_written_by_this_tool"],
+        preflight["durable_outcome_record_store_write_execution"]
+            ["durable_outcome_record_written_by_this_tool"],
         false
     );
     assert_eq!(
@@ -11135,7 +11480,8 @@ fn assert_runtime_executor_durable_outcome_record_store_write_execution_prefligh
         true
     );
     assert_eq!(
-        preflight["agent_action_contract"]["require_separate_durable_outcome_record_store_write_execution"],
+        preflight["agent_action_contract"]
+            ["require_separate_durable_outcome_record_store_write_execution"],
         true
     );
 }
@@ -11168,7 +11514,8 @@ fn assert_runtime_executor_durable_outcome_record_write_evidence_preflight_read_
     assert_eq!(preflight["guardrails"]["store_access_required"], false);
     assert_eq!(preflight["guardrails"]["mcp_tool_registered"], false);
     assert_eq!(
-        preflight["guardrails"]["requires_ready_durable_outcome_record_store_write_execution_preflight"],
+        preflight["guardrails"]
+            ["requires_ready_durable_outcome_record_store_write_execution_preflight"],
         true
     );
     assert_eq!(
@@ -11191,7 +11538,8 @@ fn assert_runtime_executor_durable_outcome_record_write_evidence_preflight_read_
         false
     );
     assert_eq!(
-        preflight["durable_outcome_record_write_evidence"]["durable_outcome_record_written_by_this_tool"],
+        preflight["durable_outcome_record_write_evidence"]
+            ["durable_outcome_record_written_by_this_tool"],
         false
     );
     assert_eq!(
@@ -11223,7 +11571,8 @@ fn assert_runtime_executor_durable_outcome_record_write_evidence_preflight_read_
         true
     );
     assert_eq!(
-        preflight["agent_action_contract"]["require_separate_durable_outcome_record_write_evidence_review"],
+        preflight["agent_action_contract"]
+            ["require_separate_durable_outcome_record_write_evidence_review"],
         true
     );
 }
@@ -11260,7 +11609,8 @@ fn assert_runtime_executor_durable_outcome_record_write_evidence_review_prefligh
         true
     );
     assert_eq!(
-        preflight["guardrails"]["requires_explicit_durable_outcome_record_write_evidence_review_decision"],
+        preflight["guardrails"]
+            ["requires_explicit_durable_outcome_record_write_evidence_review_decision"],
         true
     );
     assert_eq!(
@@ -11283,7 +11633,8 @@ fn assert_runtime_executor_durable_outcome_record_write_evidence_review_prefligh
         false
     );
     assert_eq!(
-        preflight["durable_outcome_record_write_evidence_review"]["durable_outcome_record_written_by_this_tool"],
+        preflight["durable_outcome_record_write_evidence_review"]
+            ["durable_outcome_record_written_by_this_tool"],
         false
     );
     assert_eq!(
@@ -11488,7 +11839,8 @@ fn assert_runtime_executor_verified_outcome_ingestion_admission_preflight_output
     assert_eq!(preflight["guardrails"]["store_access_required"], false);
     assert_eq!(preflight["guardrails"]["mcp_tool_registered"], false);
     assert_eq!(
-        preflight["guardrails"]["requires_ready_verified_outcome_ingestion_write_evidence_review_preflight"],
+        preflight["guardrails"]
+            ["requires_ready_verified_outcome_ingestion_write_evidence_review_preflight"],
         true
     );
     assert_eq!(
@@ -11535,7 +11887,8 @@ fn assert_runtime_executor_verified_outcome_ingestion_admission_preflight_output
     );
     assert_eq!(preflight["guardrails"]["persists_outcome_record"], false);
     assert_eq!(
-        preflight["agent_action_contract"]["may_enter_verified_outcome_ingestion_execution_after_preflight"],
+        preflight["agent_action_contract"]
+            ["may_enter_verified_outcome_ingestion_execution_after_preflight"],
         preflight["status"] == "ready"
     );
     assert_eq!(
@@ -11646,7 +11999,8 @@ fn assert_runtime_executor_verified_outcome_ingestion_execution_preflight_output
         true
     );
     assert_eq!(
-        preflight["agent_action_contract"]["require_separate_verified_outcome_ingestion_execution_commit"],
+        preflight["agent_action_contract"]
+            ["require_separate_verified_outcome_ingestion_execution_commit"],
         true
     );
 }
@@ -11680,7 +12034,8 @@ fn assert_runtime_executor_verified_outcome_ingestion_execution_commit_output_on
         true
     );
     assert_eq!(
-        commit["guardrails"]["requires_explicit_verified_outcome_ingestion_execution_commit_decision"],
+        commit["guardrails"]
+            ["requires_explicit_verified_outcome_ingestion_execution_commit_decision"],
         true
     );
     assert_eq!(
@@ -11866,7 +12221,8 @@ fn assert_runtime_executor_verified_outcome_ingestion_writer_output_only(writer:
         true
     );
     assert_eq!(
-        writer["agent_action_contract"]["require_separate_verified_outcome_ingestion_writer_execution"],
+        writer["agent_action_contract"]
+            ["require_separate_verified_outcome_ingestion_writer_execution"],
         true
     );
 }
@@ -11905,7 +12261,8 @@ fn assert_runtime_executor_verified_outcome_ingestion_writer_execution_output_on
         true
     );
     assert_eq!(
-        execution["guardrails"]["requires_explicit_verified_outcome_ingestion_writer_execution_decision"],
+        execution["guardrails"]
+            ["requires_explicit_verified_outcome_ingestion_writer_execution_decision"],
         true
     );
     assert_eq!(
@@ -11948,7 +12305,8 @@ fn assert_runtime_executor_verified_outcome_ingestion_writer_execution_output_on
         true
     );
     assert_eq!(
-        execution["agent_action_contract"]["require_separate_verified_outcome_ingestion_persistence"],
+        execution["agent_action_contract"]
+            ["require_separate_verified_outcome_ingestion_persistence"],
         true
     );
 }
@@ -11985,7 +12343,8 @@ fn assert_runtime_executor_verified_outcome_ingestion_persistence_output_only(pe
         true
     );
     assert_eq!(
-        persistence["guardrails"]["requires_explicit_verified_outcome_ingestion_persistence_decision"],
+        persistence["guardrails"]
+            ["requires_explicit_verified_outcome_ingestion_persistence_decision"],
         true
     );
     assert_eq!(
@@ -12036,7 +12395,8 @@ fn assert_runtime_executor_verified_outcome_ingestion_persistence_output_only(pe
         true
     );
     assert_eq!(
-        persistence["agent_action_contract"]["require_separate_verified_outcome_ingestion_store_write"],
+        persistence["agent_action_contract"]
+            ["require_separate_verified_outcome_ingestion_store_write"],
         true
     );
 }
@@ -12048,7 +12408,8 @@ fn assert_runtime_executor_verified_outcome_ingestion_store_write_execution_pref
     assert_eq!(preflight["store_access_required"], false);
     assert_eq!(preflight["mcp_tool_registered"], false);
     assert_eq!(
-        preflight["verified_outcome_ingestion_store_write_execution_preflight_performed_by_this_tool"],
+        preflight
+            ["verified_outcome_ingestion_store_write_execution_preflight_performed_by_this_tool"],
         true
     );
     assert_eq!(
@@ -12079,11 +12440,13 @@ fn assert_runtime_executor_verified_outcome_ingestion_store_write_execution_pref
         true
     );
     assert_eq!(
-        preflight["guardrails"]["requires_explicit_verified_outcome_ingestion_store_write_execution_decision"],
+        preflight["guardrails"]
+            ["requires_explicit_verified_outcome_ingestion_store_write_execution_decision"],
         true
     );
     assert_eq!(
-        preflight["guardrails"]["performs_verified_outcome_ingestion_store_write_execution_preflight"],
+        preflight["guardrails"]
+            ["performs_verified_outcome_ingestion_store_write_execution_preflight"],
         true
     );
     assert_eq!(
@@ -12138,11 +12501,13 @@ fn assert_runtime_executor_verified_outcome_ingestion_store_write_execution_pref
         true
     );
     assert_eq!(
-        preflight["agent_action_contract"]["require_separate_verified_outcome_store_write_execution"],
+        preflight["agent_action_contract"]
+            ["require_separate_verified_outcome_store_write_execution"],
         true
     );
     assert_eq!(
-        preflight["agent_action_contract"]["require_verified_outcome_write_evidence_after_store_write"],
+        preflight["agent_action_contract"]
+            ["require_verified_outcome_write_evidence_after_store_write"],
         true
     );
 }
@@ -12181,7 +12546,8 @@ fn assert_runtime_executor_verified_outcome_ingestion_write_evidence_preflight_o
     assert_eq!(preflight["guardrails"]["store_access_required"], false);
     assert_eq!(preflight["guardrails"]["mcp_tool_registered"], false);
     assert_eq!(
-        preflight["guardrails"]["requires_ready_verified_outcome_ingestion_store_write_execution_preflight"],
+        preflight["guardrails"]
+            ["requires_ready_verified_outcome_ingestion_store_write_execution_preflight"],
         true
     );
     assert_eq!(
@@ -12216,7 +12582,8 @@ fn assert_runtime_executor_verified_outcome_ingestion_write_evidence_preflight_o
     );
     assert_eq!(preflight["guardrails"]["persists_outcome_record"], false);
     assert_eq!(
-        preflight["agent_action_contract"]["may_review_verified_outcome_ingestion_write_evidence_after_preflight"],
+        preflight["agent_action_contract"]
+            ["may_review_verified_outcome_ingestion_write_evidence_after_preflight"],
         preflight["status"] == "ready"
     );
     assert_eq!(
@@ -12244,7 +12611,8 @@ fn assert_runtime_executor_verified_outcome_ingestion_write_evidence_preflight_o
         true
     );
     assert_eq!(
-        preflight["agent_action_contract"]["require_separate_verified_outcome_ingestion_write_evidence_review"],
+        preflight["agent_action_contract"]
+            ["require_separate_verified_outcome_ingestion_write_evidence_review"],
         true
     );
 }
@@ -12256,7 +12624,8 @@ fn assert_runtime_executor_verified_outcome_ingestion_write_evidence_review_pref
     assert_eq!(preflight["store_access_required"], false);
     assert_eq!(preflight["mcp_tool_registered"], false);
     assert_eq!(
-        preflight["verified_outcome_ingestion_write_evidence_review_preflight_performed_by_this_tool"],
+        preflight
+            ["verified_outcome_ingestion_write_evidence_review_preflight_performed_by_this_tool"],
         true
     );
     assert_eq!(
@@ -12283,15 +12652,18 @@ fn assert_runtime_executor_verified_outcome_ingestion_write_evidence_review_pref
     assert_eq!(preflight["guardrails"]["store_access_required"], false);
     assert_eq!(preflight["guardrails"]["mcp_tool_registered"], false);
     assert_eq!(
-        preflight["guardrails"]["requires_ready_verified_outcome_ingestion_write_evidence_preflight"],
+        preflight["guardrails"]
+            ["requires_ready_verified_outcome_ingestion_write_evidence_preflight"],
         true
     );
     assert_eq!(
-        preflight["guardrails"]["requires_explicit_verified_outcome_ingestion_write_evidence_review_decision"],
+        preflight["guardrails"]
+            ["requires_explicit_verified_outcome_ingestion_write_evidence_review_decision"],
         true
     );
     assert_eq!(
-        preflight["guardrails"]["performs_verified_outcome_ingestion_write_evidence_review_preflight"],
+        preflight["guardrails"]
+            ["performs_verified_outcome_ingestion_write_evidence_review_preflight"],
         true
     );
     assert_eq!(
@@ -12326,7 +12698,8 @@ fn assert_runtime_executor_verified_outcome_ingestion_write_evidence_review_pref
     );
     assert_eq!(preflight["guardrails"]["persists_outcome_record"], false);
     assert_eq!(
-        preflight["agent_action_contract"]["may_enter_verified_outcome_ingestion_admission_after_preflight"],
+        preflight["agent_action_contract"]
+            ["may_enter_verified_outcome_ingestion_admission_after_preflight"],
         preflight["status"] == "ready"
     );
     assert_eq!(
