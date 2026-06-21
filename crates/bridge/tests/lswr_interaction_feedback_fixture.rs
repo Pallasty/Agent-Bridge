@@ -6413,6 +6413,124 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_co
 }
 
 #[test]
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_commit_accepts_admission_source_decision(
+) {
+    let execution_preflight =
+        ready_runtime_executor_verified_outcome_ingestion_execution_preflight_from_admission_preflight();
+    let commit =
+        build_interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_commit(
+            &json!({
+                "verified_outcome_ingestion_execution_preflight": execution_preflight,
+                "verified_outcome_ingestion_execution_commit_decision":
+                    explicit_verified_outcome_ingestion_execution_commit_decision_for_admission_preflight()
+            }),
+        );
+    let markdown =
+        render_interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_commit(
+            &commit,
+        );
+
+    assert_eq!(
+        commit["source_verified_outcome_ingestion_admission_preflight_verdict"],
+        "ready_for_verified_outcome_ingestion_execution"
+    );
+    assert_eq!(
+        commit["verified_outcome_ingestion_execution_commit_verdict"],
+        "ready_for_verified_outcome_ingestion_apply",
+        "failure_reasons={}",
+        commit["failure_reasons"]
+    );
+    assert_eq!(commit["status"], "ready");
+    assert_eq!(commit["failure_reasons"], json!([]));
+    assert_eq!(
+        commit["verified_outcome_ingestion_execution_commit"]["commit_decision_id"],
+        "verified_outcome_ingestion_execution_commit_from_admission_arrival_bath_move_002"
+    );
+    assert_eq!(
+        commit["verified_outcome_ingestion_execution_commit"]["source_execution_decision_id"],
+        "verified_outcome_ingestion_execution_from_admission_arrival_bath_move_002"
+    );
+    assert_eq!(
+        commit["verified_outcome_ingestion_execution_commit"]["source_admission_decision_id"],
+        "verified_outcome_ingestion_admission_arrival_bath_move_002"
+    );
+    assert_eq!(
+        commit["verified_outcome_ingestion_execution_commit"]
+            ["source_write_evidence_review_decision_id"],
+        "verified_outcome_ingestion_write_evidence_review_arrival_bath_move_002"
+    );
+    assert_eq!(
+        commit["verified_outcome_ingestion_execution_commit"]["source_commit_decision_id"],
+        "verified_outcome_ingestion_execution_commit_arrival_bath_move_002"
+    );
+    assert_eq!(
+        commit["verified_outcome_ingestion_execution_commit"]["source_prior_execution_decision_id"],
+        "verified_outcome_ingestion_execution_arrival_bath_move_002"
+    );
+    assert_eq!(
+        commit["verified_outcome_ingestion_execution_commit"]["admission_preflight_confirmed"],
+        true
+    );
+    assert_eq!(
+        commit["verified_outcome_ingestion_execution_commit"]["admission_decision_confirmed"],
+        true
+    );
+    assert_eq!(
+        commit["verified_outcome_ingestion_execution_commit"]
+            ["ready_for_verified_outcome_ingestion_apply"],
+        true
+    );
+    assert_runtime_executor_verified_outcome_ingestion_execution_commit_output_only(&commit);
+
+    assert!(markdown.contains(
+        "- source_verified_outcome_ingestion_admission_preflight_verdict: `ready_for_verified_outcome_ingestion_execution`"
+    ));
+    assert!(markdown.contains(
+        "- source_admission_decision_id: `verified_outcome_ingestion_admission_arrival_bath_move_002`"
+    ));
+}
+
+#[test]
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_commit_blocks_bad_admission_source_decision(
+) {
+    let execution_preflight =
+        ready_runtime_executor_verified_outcome_ingestion_execution_preflight_from_admission_preflight();
+    let mut decision =
+        explicit_verified_outcome_ingestion_execution_commit_decision_for_admission_preflight();
+    decision["admission_preflight_confirmed"] = json!(false);
+    decision["admission_decision_confirmed"] = json!(false);
+    decision["source_verified_outcome_ingestion_execution_preflight_scope"]
+        ["source_admission_decision_id"] = json!("other_admission");
+    decision["source_verified_outcome_ingestion_execution_preflight_scope"]
+        ["store_write_execution_id"] = json!("other_store_write");
+
+    let commit =
+        build_interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_commit(
+            &json!({
+                "verified_outcome_ingestion_execution_preflight": execution_preflight,
+                "verified_outcome_ingestion_execution_commit_decision": decision
+            }),
+        );
+
+    assert_eq!(
+        commit["verified_outcome_ingestion_execution_commit_verdict"],
+        "blocked"
+    );
+    let failure_reasons = commit["failure_reasons"]
+        .as_array()
+        .expect("failure reasons");
+    for reason in [
+        "verified_outcome_ingestion_execution_commit_requires_admission_preflight_confirmation",
+        "verified_outcome_ingestion_execution_commit_requires_admission_decision_confirmation",
+        "verified_outcome_ingestion_execution_commit_admission_decision_scope_mismatch",
+        "verified_outcome_ingestion_execution_commit_store_write_scope_mismatch",
+    ] {
+        assert!(failure_reasons.contains(&json!(reason)), "{reason}");
+    }
+    assert_runtime_executor_verified_outcome_ingestion_execution_commit_output_only(&commit);
+}
+
+#[test]
 fn interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_commit_blocks_bad_decision(
 ) {
     let execution_preflight =
@@ -9490,6 +9608,18 @@ fn ready_runtime_executor_verified_outcome_ingestion_execution_preflight() -> Va
     )
 }
 
+fn ready_runtime_executor_verified_outcome_ingestion_execution_preflight_from_admission_preflight(
+) -> Value {
+    build_interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_preflight(
+        &json!({
+            "verified_outcome_ingestion_admission_preflight":
+                ready_runtime_executor_verified_outcome_ingestion_admission_preflight(),
+            "verified_outcome_ingestion_execution_decision":
+                explicit_verified_outcome_ingestion_execution_decision_for_admission_preflight()
+        }),
+    )
+}
+
 fn explicit_verified_outcome_ingestion_execution_commit_decision() -> Value {
     json!({
         "schema": LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_EXECUTION_COMMIT_DECISION_SCHEMA,
@@ -9522,6 +9652,66 @@ fn explicit_verified_outcome_ingestion_execution_commit_decision() -> Value {
         "reviewed_verified_outcome_ingestion_execution_preflight_verdict": "ready_for_verified_outcome_ingestion_execution_commit",
         "execution_preflight_package_confirmed": true,
         "verified_outcome_package_confirmed": true,
+        "reviewer_attestation_present": true,
+        "evidence_lineage_preserved": true,
+        "outcome_record_digest_confirmed": true,
+        "idempotency_key_confirmed": true,
+        "persisted_key_confirmed": true,
+        "persisted_digest_confirmed": true,
+        "apply_boundary_acknowledged": true,
+        "outcome_ingestion_allowed": false,
+        "memory_write_allowed": false,
+        "verified_outcome_ingested_by_this_tool": false,
+        "durable_outcome_record_written_by_this_tool": false,
+        "world_verdict_persisted_by_this_tool": false
+    })
+}
+
+fn explicit_verified_outcome_ingestion_execution_commit_decision_for_admission_preflight() -> Value
+{
+    json!({
+        "schema": LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_EXECUTION_COMMIT_DECISION_SCHEMA,
+        "commit_decision_id": "verified_outcome_ingestion_execution_commit_from_admission_arrival_bath_move_002",
+        "decision_kind": "verified_outcome_ingestion_execution_commit",
+        "source_verified_outcome_ingestion_execution_preflight_scope": {
+            "execution_decision_id": "verified_outcome_ingestion_execution_from_admission_arrival_bath_move_002",
+            "source_admission_decision_id": "verified_outcome_ingestion_admission_arrival_bath_move_002",
+            "source_write_evidence_review_decision_id": "verified_outcome_ingestion_write_evidence_review_arrival_bath_move_002",
+            "source_ingestion_decision_id": "verified_outcome_ingestion_arrival_bath_move_002",
+            "source_rewrite_decision_id": "world_verdict_rewrite_arrival_bath_move_002",
+            "source_review_decision_id": "durable_outcome_record_write_evidence_review_arrival_bath_move_002",
+            "write_evidence_id": "verified_outcome_ingestion_write_evidence_arrival_bath_move_002",
+            "store_write_execution_id": "verified_outcome_ingestion_store_write_execution_arrival_bath_move_002",
+            "persistence_decision_id": "verified_outcome_ingestion_persistence_arrival_bath_move_002",
+            "persistence_source_execution_id": "verified_outcome_ingestion_writer_execution_arrival_bath_move_002",
+            "writer_decision_id": "verified_outcome_ingestion_writer_arrival_bath_move_002",
+            "apply_decision_id": "verified_outcome_ingestion_apply_arrival_bath_move_002",
+            "commit_decision_id": "verified_outcome_ingestion_execution_commit_arrival_bath_move_002",
+            "source_execution_decision_id": "verified_outcome_ingestion_execution_arrival_bath_move_002",
+            "source_write_evidence_id": "durable_outcome_record_write_evidence_arrival_bath_move_002",
+            "world_id": "onsen_live_session",
+            "branch_id": "main",
+            "runtime_generation": "runtime_gen_1284",
+            "patch_id": "patch_arrival_bath_move_002",
+            "outcome_record_candidate_id": "outcome_record_candidate_arrival_bath_move_002",
+            "outcome_record_schema": "agent_bridge.lswr.outcome_record_candidate.v0",
+            "idempotency_key": "onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_ingestion_review_arrival_bath_move_002",
+            "outcome_payload_digest": "sha256:arrival-bath-move-002-outcome-payload",
+            "write_destination": "agent_bridge_store_outcome_records",
+            "outcome_record_key": "onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_record_candidate_arrival_bath_move_002",
+            "outcome_record_digest": "sha256:arrival-bath-move-002-outcome-record",
+            "persisted_outcome_record_key": "onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_record_candidate_arrival_bath_move_002",
+            "persisted_outcome_record_digest": "sha256:arrival-bath-move-002-outcome-record"
+        },
+        "decision": "approved_for_verified_outcome_ingestion_apply",
+        "commit_reason": "admission_source_verified_outcome_ingestion_execution_preflight_is_scoped_and_ready_for_separate_apply",
+        "source_world_verdict": "not_verified",
+        "verified_world_verdict": "verified",
+        "reviewed_verified_outcome_ingestion_execution_preflight_verdict": "ready_for_verified_outcome_ingestion_execution_commit",
+        "execution_preflight_package_confirmed": true,
+        "verified_outcome_package_confirmed": true,
+        "admission_preflight_confirmed": true,
+        "admission_decision_confirmed": true,
         "reviewer_attestation_present": true,
         "evidence_lineage_preserved": true,
         "outcome_record_digest_confirmed": true,

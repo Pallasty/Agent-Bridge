@@ -2,7 +2,7 @@
 
 Date: 2026-06-20
 
-Status: Draft implementation spec
+Status: Draft implementation spec / G30_ACCEPTS_ADMISSION_SOURCE_EXECUTION_PREFLIGHT
 
 ## 1. Purpose
 
@@ -18,6 +18,13 @@ It answers one question:
 
 > Has an explicit commit decision accepted the bounded G19 package as ready
 > for a separate verified outcome ingestion apply step?
+
+G30 keeps the output-only boundary while preserving the G29 admission-source
+lineage carried inside the G19 execution preflight. When the source preflight was
+built from a G28 verified outcome ingestion admission preflight, the commit gate
+must keep that admission, write-evidence, store-write, persistence, writer,
+apply, commit, and source execution lineage intact before it emits an apply-ready
+package.
 
 This remains output-only. It emits a bounded apply-ready package, but it does
 not ingest #94 outcomes, persist the world verdict, write durable outcome
@@ -65,6 +72,12 @@ Required decision properties:
 - `durable_outcome_record_written_by_this_tool=false`;
 - `world_verdict_persisted_by_this_tool=false`.
 
+For a G29 admission-source execution preflight, the commit decision must also
+confirm:
+
+- `admission_preflight_confirmed=true`;
+- `admission_decision_confirmed=true`.
+
 ## 3. Scope Matching
 
 The commit decision must exactly match the G19 execution preflight scope for:
@@ -77,6 +90,16 @@ The commit decision must exactly match the G19 execution preflight scope for:
   record key, record digest, persisted key, and persisted digest.
 
 Any mismatch blocks the commit gate.
+
+For a G29 admission-source execution preflight, the commit decision must also
+match:
+
+- source admission-decision id;
+- source write-evidence review decision id;
+- store-write execution id;
+- persistence decision and source execution ids;
+- writer, apply, source commit, source prior execution, and source
+  write-evidence ids.
 
 ## 4. Ready Output
 
@@ -103,11 +126,22 @@ Ready output:
 }
 ```
 
+When the source is a G29 admission-source execution preflight, ready output also
+carries:
+
+- `source_verified_outcome_ingestion_admission_preflight_verdict=ready_for_verified_outcome_ingestion_execution`;
+- `source_admission_decision_id`;
+- `source_write_evidence_review_decision_id`;
+- store-write, persistence, writer, apply, source commit, source prior
+  execution, and source write-evidence ids;
+- `admission_preflight_confirmed=true`;
+- `admission_decision_confirmed=true`.
+
 ## 5. Boundary
 
-G20 does not execute verified outcome ingestion. It only turns a ready G19
+G20/G30 does not execute verified outcome ingestion. It only turns a ready G19
 package plus an explicit commit decision into a bounded package for a later
-apply slice.
+apply slice, preserving admission-source lineage when present.
 
 The critical distinction is:
 
