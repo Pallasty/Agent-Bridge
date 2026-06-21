@@ -272,6 +272,39 @@ Interpretation: the current graph has a real but narrow recall-expansion signal
 on the fixed corpus. This supports further candidate-expansion experiment
 design, but it is not authorization for default retrieval influence.
 
+## Candidate-Expansion Review Gate
+
+Date: 2026-06-20
+
+`memory_biocortex_t6_influence_gate` now has a separate candidate-expansion
+review path. In addition to the existing BioCortex rank-lift inputs, the gate
+can consume a redacted `memory_biocortex_recall_expansion_summary` via
+`recall_expansion_summary` with
+`candidate_expansion_review_requested=true`.
+
+This path is intentionally independent from the rank-lift opt-in decision:
+
+- `ready_for_opt_in_experiment` still depends on shadow trials, relevance-lift
+  evidence, and the redacted aggregate;
+- `candidate_expansion_gate.ready_for_candidate_expansion_review` depends only
+  on the redacted recall-expansion summary and candidate-expansion thresholds;
+- `candidate_expansion_gate.candidate_expansion_experiment_approved=false`;
+- `candidate_expansion_gate.may_expand_candidate_set_now=false`;
+- `candidate_expansion_gate.changes_candidate_set_now=false`;
+- the output does not echo recall summary `case_rows`, raw queries, keys, or
+  content.
+
+Default recall-expansion review thresholds are deliberately small because this
+is still a review gate, not runtime authority: at least 8 evaluated cases, at
+least one baseline miss, at least one added hit, added-hit rate at least 0.10,
+and zero recall-summary search errors. Callers can raise these thresholds for a
+stricter fixed-corpus or graph-holdout review.
+
+Interpretation: this turns the current #9 fixed-corpus signal into a formal
+human-review packet boundary. It still does not permit default candidate-set
+expansion, BioCortex influence, memory writes, edge writes, or search-order
+changes.
+
 ## Fixture Diagnostic Example Follow-up
 
 Date: 2026-06-20

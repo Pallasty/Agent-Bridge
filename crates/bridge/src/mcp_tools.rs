@@ -36665,6 +36665,121 @@ fn memory_biocortex_t6_check_redacted_aggregate(
     aggregate_ready
 }
 
+#[derive(Debug, Default)]
+struct MemoryBioCortexT6RecallExpansionMetrics {
+    evaluated_count: Option<u64>,
+    search_error_count: Option<u64>,
+    baseline_miss_count: Option<u64>,
+    graph_expansion_found_count: Option<u64>,
+    expanded_hit_count: Option<u64>,
+    candidate_expansion_added_hit_count: Option<u64>,
+    candidate_expansion_added_hit_rate: Option<f64>,
+}
+
+fn memory_biocortex_t6_check_recall_expansion_summary(
+    value: Option<&Value>,
+    min_recall_evaluated_count: u64,
+    min_baseline_miss_count: u64,
+    min_candidate_expansion_added_hit_count: u64,
+    min_candidate_expansion_added_hit_rate: f64,
+    max_recall_search_error_count: u64,
+    reasons: &mut BTreeSet<String>,
+) -> MemoryBioCortexT6RecallExpansionMetrics {
+    let Some(value) = value else {
+        memory_biocortex_t6_push_reason(reasons, "missing_recall_expansion_summary");
+        return MemoryBioCortexT6RecallExpansionMetrics::default();
+    };
+
+    if memory_biocortex_t6_string_at(value, "/schema")
+        != Some(MEMORY_BIOCORTEX_RECALL_EXPANSION_SUMMARY_SCHEMA)
+    {
+        memory_biocortex_t6_push_reason(reasons, "recall_expansion_schema_invalid");
+    }
+    if memory_biocortex_t6_bool_at(value, "/read_only") != Some(true)
+        || memory_biocortex_t6_bool_at(value, "/safety/read_only") != Some(true)
+        || memory_biocortex_t6_bool_at(value, "/safety/runs_biocortex") != Some(false)
+        || memory_biocortex_t6_bool_at(value, "/safety/writes_memory") != Some(false)
+        || memory_biocortex_t6_bool_at(value, "/safety/changes_search_order") != Some(false)
+        || memory_biocortex_t6_bool_at(value, "/safety/changes_prod_retrieval_order")
+            != Some(false)
+        || memory_biocortex_t6_bool_at(value, "/safety/writes_state") != Some(false)
+        || memory_biocortex_t6_bool_at(value, "/safety/default_search_order_change_allowed")
+            != Some(false)
+        || memory_biocortex_t6_bool_at(value, "/safety/changes_candidate_set_now") != Some(false)
+    {
+        memory_biocortex_t6_push_reason(reasons, "recall_expansion_safety_contract_invalid");
+    }
+    if memory_biocortex_t6_has_raw_payload_fields(value)
+        || memory_biocortex_t6_any_true(
+            value,
+            &[
+                "/input_contract/raw_query_included",
+                "/input_contract/raw_queries_included",
+                "/input_contract/raw_keys_included",
+                "/input_contract/content_included",
+                "/input_contract/candidate_content_included",
+                "/input_contract/raw_error_included",
+            ],
+        )
+    {
+        memory_biocortex_t6_push_reason(
+            reasons,
+            "recall_expansion_raw_query_key_or_content_included",
+        );
+    }
+
+    let evaluated_count = memory_biocortex_t6_u64_at(value, "/metrics/evaluated_count");
+    if evaluated_count.unwrap_or(0) < min_recall_evaluated_count {
+        memory_biocortex_t6_push_reason(reasons, "insufficient_recall_evaluated_count");
+    }
+    let search_error_count = memory_biocortex_t6_u64_at(value, "/metrics/search_error_count");
+    if search_error_count.unwrap_or(u64::MAX) > max_recall_search_error_count {
+        memory_biocortex_t6_push_reason(reasons, "recall_expansion_search_errors_exceed_max");
+    }
+    let baseline_miss_count = memory_biocortex_t6_u64_at(value, "/metrics/baseline_miss_count");
+    if baseline_miss_count.unwrap_or(0) < min_baseline_miss_count {
+        memory_biocortex_t6_push_reason(reasons, "insufficient_baseline_miss_count");
+    }
+    let candidate_expansion_added_hit_count =
+        memory_biocortex_t6_u64_at(value, "/metrics/candidate_expansion_added_hit_count");
+    if candidate_expansion_added_hit_count.unwrap_or(0)
+        < min_candidate_expansion_added_hit_count
+    {
+        memory_biocortex_t6_push_reason(
+            reasons,
+            "insufficient_candidate_expansion_added_hits",
+        );
+    }
+    let candidate_expansion_added_hit_rate = memory_biocortex_t6_f64_at(
+        value,
+        "/metrics/candidate_expansion_added_hit_rate",
+    )
+    .or_else(|| {
+        memory_biocortex_t6_rate(candidate_expansion_added_hit_count, baseline_miss_count)
+    });
+    if candidate_expansion_added_hit_rate.unwrap_or(f64::NEG_INFINITY)
+        < min_candidate_expansion_added_hit_rate
+    {
+        memory_biocortex_t6_push_reason(
+            reasons,
+            "insufficient_candidate_expansion_added_hit_rate",
+        );
+    }
+
+    MemoryBioCortexT6RecallExpansionMetrics {
+        evaluated_count,
+        search_error_count,
+        baseline_miss_count,
+        graph_expansion_found_count: memory_biocortex_t6_u64_at(
+            value,
+            "/metrics/graph_expansion_found_count",
+        ),
+        expanded_hit_count: memory_biocortex_t6_u64_at(value, "/metrics/expanded_hit_count"),
+        candidate_expansion_added_hit_count,
+        candidate_expansion_added_hit_rate,
+    }
+}
+
 fn memory_biocortex_t6_influence_gate_payload(args: Value) -> Value {
     let min_shadow_trials = args
         .get("min_shadow_trials")
@@ -36696,6 +36811,36 @@ fn memory_biocortex_t6_influence_gate_payload(args: Value) -> Value {
         .filter(|value| value.is_finite())
         .unwrap_or(0.0)
         .clamp(0.0, 1.0);
+    let candidate_expansion_review_requested = args
+        .get("candidate_expansion_review_requested")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+        || args.get("recall_expansion_summary").is_some();
+    let min_recall_evaluated_count = args
+        .get("min_recall_evaluated_count")
+        .and_then(Value::as_u64)
+        .unwrap_or(8)
+        .clamp(1, 10_000);
+    let min_baseline_miss_count = args
+        .get("min_baseline_miss_count")
+        .and_then(Value::as_u64)
+        .unwrap_or(1)
+        .clamp(1, 10_000);
+    let min_candidate_expansion_added_hit_count = args
+        .get("min_candidate_expansion_added_hit_count")
+        .and_then(Value::as_u64)
+        .unwrap_or(1)
+        .clamp(1, 10_000);
+    let min_candidate_expansion_added_hit_rate = args
+        .get("min_candidate_expansion_added_hit_rate")
+        .and_then(Value::as_f64)
+        .filter(|value| value.is_finite())
+        .unwrap_or(0.10)
+        .clamp(0.0, 1.0);
+    let max_recall_search_error_count = args
+        .get("max_recall_search_error_count")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
 
     let shadow_trials = args
         .get("shadow_trials")
@@ -36731,6 +36876,20 @@ fn memory_biocortex_t6_influence_gate_payload(args: Value) -> Value {
         args.get("redacted_evidence_aggregate"),
         &mut block_reasons,
     );
+    let mut candidate_expansion_block_reasons = BTreeSet::<String>::new();
+    let recall_expansion_metrics = if candidate_expansion_review_requested {
+        memory_biocortex_t6_check_recall_expansion_summary(
+            args.get("recall_expansion_summary"),
+            min_recall_evaluated_count,
+            min_baseline_miss_count,
+            min_candidate_expansion_added_hit_count,
+            min_candidate_expansion_added_hit_rate,
+            max_recall_search_error_count,
+            &mut candidate_expansion_block_reasons,
+        )
+    } else {
+        MemoryBioCortexT6RecallExpansionMetrics::default()
+    };
     let relevance_lift_eval = args.get("relevance_lift_eval");
     let relevance_kind_filter = relevance_lift_eval
         .and_then(|value| memory_biocortex_t6_string_at(value, "/sampling/kind_filter"));
@@ -36775,7 +36934,39 @@ fn memory_biocortex_t6_influence_gate_payload(args: Value) -> Value {
         "blocked"
     };
     let ready_for_opt_in_experiment = block_reasons.is_empty();
+    let mut candidate_expansion_review_caveats = Vec::new();
+    if candidate_expansion_review_requested {
+        if recall_expansion_metrics.evaluated_count.unwrap_or(0) < 30 {
+            candidate_expansion_review_caveats.push("low_recall_evaluated_count_for_strength_label");
+        }
+        if recall_expansion_metrics.baseline_miss_count.unwrap_or(0) < 5 {
+            candidate_expansion_review_caveats.push("low_baseline_miss_count");
+        }
+        if recall_expansion_metrics
+            .candidate_expansion_added_hit_count
+            .unwrap_or(0)
+            < 2
+        {
+            candidate_expansion_review_caveats.push("narrow_candidate_expansion_added_hit_count");
+        }
+    }
+    let candidate_expansion_evidence_strength_tier = if !candidate_expansion_review_requested {
+        "not_requested"
+    } else if candidate_expansion_block_reasons.is_empty() {
+        if candidate_expansion_review_caveats.is_empty() {
+            "review_ready"
+        } else {
+            "weak_narrow_candidate_expansion"
+        }
+    } else {
+        "blocked"
+    };
+    let ready_for_candidate_expansion_review =
+        candidate_expansion_review_requested && candidate_expansion_block_reasons.is_empty();
     let block_reasons = block_reasons.into_iter().collect::<Vec<_>>();
+    let candidate_expansion_block_reasons = candidate_expansion_block_reasons
+        .into_iter()
+        .collect::<Vec<_>>();
 
     json!({
         "schema": MEMORY_BIOCORTEX_T6_INFLUENCE_GATE_SCHEMA,
@@ -36792,6 +36983,57 @@ fn memory_biocortex_t6_influence_gate_payload(args: Value) -> Value {
         "runs_biocortex": false,
         "writes_memory": false,
         "block_reasons": block_reasons,
+        "candidate_expansion_gate": {
+            "requested": candidate_expansion_review_requested,
+            "ready_for_candidate_expansion_review": ready_for_candidate_expansion_review,
+            "candidate_expansion_experiment_approved": false,
+            "may_expand_candidate_set_now": false,
+            "changes_candidate_set_now": false,
+            "block_reasons": candidate_expansion_block_reasons,
+            "decision": {
+                "verdict": if ready_for_candidate_expansion_review {
+                    "ready_for_human_review"
+                } else if candidate_expansion_review_requested {
+                    "blocked"
+                } else {
+                    "not_requested"
+                },
+                "next_gate": if ready_for_candidate_expansion_review {
+                    "human_review_before_candidate_expansion_experiment"
+                } else if candidate_expansion_review_requested {
+                    "collect_more_redacted_recall_expansion_evidence"
+                } else {
+                    "provide_recall_expansion_summary_when_evaluating_candidate_expansion"
+                },
+                "human_review_required": true,
+                "candidate_expansion_authority_out_of_scope": true,
+            },
+            "thresholds": {
+                "min_recall_evaluated_count": min_recall_evaluated_count,
+                "min_baseline_miss_count": min_baseline_miss_count,
+                "min_candidate_expansion_added_hit_count": min_candidate_expansion_added_hit_count,
+                "min_candidate_expansion_added_hit_rate": min_candidate_expansion_added_hit_rate,
+                "max_recall_search_error_count": max_recall_search_error_count,
+            },
+            "metrics": {
+                "evaluated_count": recall_expansion_metrics.evaluated_count,
+                "search_error_count": recall_expansion_metrics.search_error_count,
+                "baseline_miss_count": recall_expansion_metrics.baseline_miss_count,
+                "graph_expansion_found_count": recall_expansion_metrics.graph_expansion_found_count,
+                "expanded_hit_count": recall_expansion_metrics.expanded_hit_count,
+                "candidate_expansion_added_hit_count": recall_expansion_metrics.candidate_expansion_added_hit_count,
+                "candidate_expansion_added_hit_rate": recall_expansion_metrics.candidate_expansion_added_hit_rate,
+            },
+            "evidence_strength": {
+                "tier": candidate_expansion_evidence_strength_tier,
+                "review_caveats": candidate_expansion_review_caveats,
+                "label_thresholds": {
+                    "low_recall_evaluated_count_below": 30,
+                    "low_baseline_miss_count_below": 5,
+                    "narrow_added_hit_count_below": 2
+                }
+            },
+        },
         "decision": {
             "verdict": if ready_for_opt_in_experiment { "ready_for_human_review" } else { "blocked" },
             "next_gate": if ready_for_opt_in_experiment {
@@ -36815,6 +37057,8 @@ fn memory_biocortex_t6_influence_gate_payload(args: Value) -> Value {
             "relevance_lift_eval_provided": args.get("relevance_lift_eval").is_some(),
             "redacted_evidence_aggregate_provided": args.get("redacted_evidence_aggregate").is_some(),
             "redacted_evidence_aggregate_ready": redacted_evidence_aggregate_ready,
+            "recall_expansion_summary_provided": args.get("recall_expansion_summary").is_some(),
+            "ready_for_candidate_expansion_review": ready_for_candidate_expansion_review,
             "evaluated_count": evaluated_count,
             "mrr_lift": mrr_lift,
             "worsened": worsened,
@@ -36843,6 +37087,7 @@ fn memory_biocortex_t6_influence_gate_payload(args: Value) -> Value {
             "shadow_trials_included": false,
             "relevance_lift_eval_included": false,
             "redacted_evidence_aggregate_included": false,
+            "recall_expansion_summary_included": false,
             "raw_query_included": false,
             "raw_queries_included": false,
             "raw_keys_included": false,
@@ -36854,7 +37099,8 @@ fn memory_biocortex_t6_influence_gate_payload(args: Value) -> Value {
             "Does not call memory_search.",
             "Does not write memory, graph edges, authorization records, or approval packets.",
             "Does not approve runtime influence or change retrieval order.",
-            "Does not include raw shadow packets, lift samples, queries, keys, or content."
+            "Does not approve candidate-set expansion.",
+            "Does not include raw shadow packets, lift samples, recall expansion rows, queries, keys, or content."
         ],
     })
 }
@@ -36879,10 +37125,11 @@ impl McpTool for MemoryBioCortexT6InfluenceGateTool {
             name: self.name().into(),
             description: "Read-only T6 evidence gate for AB memory BioCortex opt-in influence. \
                 Consumes T5 shadow-trial packets, a relevance-lift eval, and a redacted \
-                evidence aggregate; returns whether the evidence is sufficient to request \
-                human opt-in experiment review. It never approves runtime influence, runs \
-                BioCortex, calls memory_search, mutates memory, echoes raw query/keys/content, \
-                or changes retrieval order."
+                evidence aggregate; it can also consume a redacted recall-expansion summary \
+                for candidate-expansion review readiness. It returns whether the evidence is \
+                sufficient to request human review. It never approves runtime influence, \
+                candidate-set expansion, runs BioCortex, calls memory_search, mutates memory, \
+                echoes raw query/keys/content, or changes retrieval order."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -36900,6 +37147,15 @@ impl McpTool for MemoryBioCortexT6InfluenceGateTool {
                     "redacted_evidence_aggregate": {
                         "type": "object",
                         "description": "Optional existing BioCortex redacted evidence aggregate. Required for ready_for_opt_in_experiment."
+                    },
+                    "candidate_expansion_review_requested": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "When true, evaluate recall_expansion_summary for candidate-expansion review readiness without approving expansion."
+                    },
+                    "recall_expansion_summary": {
+                        "type": "object",
+                        "description": "Optional memory_biocortex_recall_expansion_summary output. Output consumes only safe aggregate fields and never echoes case rows."
                     },
                     "min_shadow_trials": {
                         "type": "integer",
@@ -36931,6 +37187,35 @@ impl McpTool for MemoryBioCortexT6InfluenceGateTool {
                         "default": 0.0
                     },
                     "max_worsened": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 0
+                    },
+                    "min_recall_evaluated_count": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10000,
+                        "default": 8
+                    },
+                    "min_baseline_miss_count": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10000,
+                        "default": 1
+                    },
+                    "min_candidate_expansion_added_hit_count": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10000,
+                        "default": 1
+                    },
+                    "min_candidate_expansion_added_hit_rate": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "default": 0.10
+                    },
+                    "max_recall_search_error_count": {
                         "type": "integer",
                         "minimum": 0,
                         "default": 0
@@ -63019,7 +63304,174 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             payload["block_reasons"]
                 .as_array()
                 .expect("block reasons")
-                .contains(&json!("relevance_lift_verdict_not_positive"))
+            .contains(&json!("relevance_lift_verdict_not_positive"))
+        );
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_t6_influence_gate_allows_candidate_expansion_review_without_runtime_authority(
+    ) {
+        let tool = MemoryBioCortexT6InfluenceGateTool::new();
+        let recall_expansion_summary = json!({
+            "schema": "agent_bridge.memory_biocortex.recall_expansion_summary.v0",
+            "read_only": true,
+            "metrics": {
+                "evaluated_count": 18,
+                "search_error_count": 0,
+                "baseline_miss_count": 4,
+                "graph_expansion_found_count": 1,
+                "expanded_hit_count": 15,
+                "candidate_expansion_added_hit_count": 1,
+                "candidate_expansion_added_hit_rate": 0.25
+            },
+            "input_contract": {
+                "raw_query_included": false,
+                "raw_queries_included": false,
+                "raw_keys_included": false,
+                "content_included": false,
+                "candidate_content_included": false,
+                "raw_error_included": false
+            },
+            "safety": {
+                "read_only": true,
+                "calls_memory_search": true,
+                "calls_memory_neighbors": true,
+                "runs_biocortex": false,
+                "writes_memory": false,
+                "changes_search_order": false,
+                "changes_prod_retrieval_order": false,
+                "writes_state": false,
+                "default_search_order_change_allowed": false,
+                "changes_candidate_set_now": false
+            },
+            "case_rows": [
+                {
+                    "query_hash": "secret_hash_only",
+                    "candidate_expansion_mode": "baseline_then_graph_neighbors",
+                    "raw_query_included": false,
+                    "raw_keys_included": false,
+                    "content_included": false
+                }
+            ]
+        });
+
+        let out = tool
+            .execute(
+                json!({
+                    "candidate_expansion_review_requested": true,
+                    "recall_expansion_summary": recall_expansion_summary,
+                    "min_recall_evaluated_count": 18,
+                    "min_baseline_miss_count": 4,
+                    "min_candidate_expansion_added_hit_count": 1,
+                    "min_candidate_expansion_added_hit_rate": 0.20,
+                    "max_recall_search_error_count": 0
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(payload["ready_for_opt_in_experiment"], json!(false));
+        assert_eq!(
+            payload["candidate_expansion_gate"]["ready_for_candidate_expansion_review"],
+            json!(true)
+        );
+        assert_eq!(
+            payload["candidate_expansion_gate"]["candidate_expansion_experiment_approved"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["candidate_expansion_gate"]["may_expand_candidate_set_now"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["candidate_expansion_gate"]["block_reasons"],
+            json!([])
+        );
+        assert_eq!(
+            payload["candidate_expansion_gate"]["metrics"]["candidate_expansion_added_hit_rate"],
+            json!(0.25)
+        );
+        assert_eq!(
+            payload["candidate_expansion_gate"]["decision"]["next_gate"],
+            json!("human_review_before_candidate_expansion_experiment")
+        );
+        assert_eq!(
+            payload["input_contract"]["recall_expansion_summary_included"],
+            json!(false)
+        );
+
+        let serialized = serde_json::to_string(&payload).expect("serialize");
+        assert!(!serialized.contains("secret_hash_only"));
+        assert!(!serialized.contains("\"case_rows\""));
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_t6_influence_gate_blocks_weak_candidate_expansion_summary() {
+        let tool = MemoryBioCortexT6InfluenceGateTool::new();
+        let weak_summary = json!({
+            "schema": "agent_bridge.memory_biocortex.recall_expansion_summary.v0",
+            "read_only": true,
+            "metrics": {
+                "evaluated_count": 18,
+                "search_error_count": 1,
+                "baseline_miss_count": 4,
+                "candidate_expansion_added_hit_count": 0,
+                "candidate_expansion_added_hit_rate": 0.0
+            },
+            "input_contract": {
+                "raw_query_included": false,
+                "raw_queries_included": false,
+                "raw_keys_included": false,
+                "content_included": false,
+                "candidate_content_included": false,
+                "raw_error_included": false
+            },
+            "safety": {
+                "read_only": true,
+                "calls_memory_search": true,
+                "calls_memory_neighbors": true,
+                "runs_biocortex": false,
+                "writes_memory": false,
+                "changes_search_order": false,
+                "changes_prod_retrieval_order": false,
+                "writes_state": false,
+                "default_search_order_change_allowed": false,
+                "changes_candidate_set_now": false
+            }
+        });
+
+        let out = tool
+            .execute(
+                json!({
+                    "candidate_expansion_review_requested": true,
+                    "recall_expansion_summary": weak_summary,
+                    "min_recall_evaluated_count": 18,
+                    "min_baseline_miss_count": 4,
+                    "min_candidate_expansion_added_hit_count": 1,
+                    "min_candidate_expansion_added_hit_rate": 0.20,
+                    "max_recall_search_error_count": 0
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(
+            payload["candidate_expansion_gate"]["ready_for_candidate_expansion_review"],
+            json!(false)
+        );
+        let reasons = payload["candidate_expansion_gate"]["block_reasons"]
+            .as_array()
+            .expect("candidate expansion block reasons");
+        assert!(reasons.contains(&json!("recall_expansion_search_errors_exceed_max")));
+        assert!(reasons.contains(&json!("insufficient_candidate_expansion_added_hits")));
+        assert!(reasons.contains(&json!("insufficient_candidate_expansion_added_hit_rate")));
+        assert_eq!(
+            payload["candidate_expansion_gate"]["evidence_strength"]["tier"],
+            json!("blocked")
         );
     }
 
