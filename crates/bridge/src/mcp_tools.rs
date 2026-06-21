@@ -32935,12 +32935,64 @@ fn memory_pair_scope_relation(source: &MemoryRecord, target: &MemoryRecord) -> &
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MemoryRelatedKeysReviewScopeFilter {
+    Compatible,
+    Exact,
+}
+
+impl MemoryRelatedKeysReviewScopeFilter {
+    fn parse(value: Option<&str>) -> Option<Self> {
+        match value {
+            Some("compatible") | None => Some(Self::Compatible),
+            Some("exact") => Some(Self::Exact),
+            _ => None,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Compatible => "compatible",
+            Self::Exact => "exact",
+        }
+    }
+
+    fn matches_record(self, rec: &MemoryRecord, requested_scope: Option<&str>) -> bool {
+        match self {
+            Self::Compatible => true,
+            Self::Exact => requested_scope
+                .map(str::trim)
+                .filter(|scope| !scope.is_empty())
+                .and_then(|scope| memory_scope_value(rec).map(|rec_scope| rec_scope == scope))
+                .unwrap_or(false),
+        }
+    }
+}
+
 fn memory_related_key_excluded_reason(
     rec: &MemoryRecord,
     skip_tags: &[String],
     skip_kinds: &[String],
     requested_scope: Option<&str>,
     scope_mode: MemorySearchScopeMode,
+) -> Option<&'static str> {
+    memory_related_key_excluded_reason_with_scope_filter(
+        rec,
+        skip_tags,
+        skip_kinds,
+        requested_scope,
+        scope_mode,
+        MemoryRelatedKeysReviewScopeFilter::Compatible,
+    )
+}
+
+fn memory_related_key_excluded_reason_with_scope_filter(
+    rec: &MemoryRecord,
+    skip_tags: &[String],
+    skip_kinds: &[String],
+    requested_scope: Option<&str>,
+    scope_mode: MemorySearchScopeMode,
+    scope_filter: MemoryRelatedKeysReviewScopeFilter,
 ) -> Option<&'static str> {
     if rec.status != "active" && !rec.status.is_empty() {
         return Some("target_not_active");
@@ -32959,6 +33011,9 @@ fn memory_related_key_excluded_reason(
         if !memory_search_scope_mode_matches(rec, scope, scope_mode) {
             return Some("target_scope_filtered");
         }
+    }
+    if !scope_filter.matches_record(rec, requested_scope) {
+        return Some("target_scope_not_exact");
     }
     None
 }
@@ -33374,6 +33429,39 @@ fn memory_related_keys_materialize_plan_from_records(
     max_inbound_per_target: u32,
     preview_chars: usize,
 ) -> MemoryRelatedKeysMaterializePlan {
+    memory_related_keys_materialize_plan_from_records_with_scope_filter(
+        all,
+        edges_by_key,
+        skip_tags,
+        skip_kinds,
+        require_scope_compatible,
+        dedupe_undirected_pairs,
+        requested_scope,
+        scope_mode,
+        MemoryRelatedKeysReviewScopeFilter::Compatible,
+        max_edges,
+        max_outbound_per_source,
+        max_inbound_per_target,
+        preview_chars,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn memory_related_keys_materialize_plan_from_records_with_scope_filter(
+    all: &[MemoryRecord],
+    edges_by_key: &HashMap<String, Vec<MemoryEdge>>,
+    skip_tags: &[String],
+    skip_kinds: &[String],
+    require_scope_compatible: bool,
+    dedupe_undirected_pairs: bool,
+    requested_scope: Option<&str>,
+    scope_mode: MemorySearchScopeMode,
+    scope_filter: MemoryRelatedKeysReviewScopeFilter,
+    max_edges: usize,
+    max_outbound_per_source: u32,
+    max_inbound_per_target: u32,
+    preview_chars: usize,
+) -> MemoryRelatedKeysMaterializePlan {
     let by_key: HashMap<&str, &MemoryRecord> =
         all.iter().map(|rec| (rec.key.as_str(), rec)).collect();
     let visible_records: Vec<&MemoryRecord> = all
@@ -33385,7 +33473,7 @@ fn memory_related_keys_materialize_plan_from_records(
                 scope_mode,
                 skip_tags,
                 skip_kinds,
-            )
+            ) && scope_filter.matches_record(rec, requested_scope)
         })
         .collect();
     let visible_keys: HashSet<String> = visible_records.iter().map(|rec| rec.key.clone()).collect();
@@ -33443,12 +33531,13 @@ fn memory_related_keys_materialize_plan_from_records(
                 );
                 continue;
             };
-            if let Some(reason) = memory_related_key_excluded_reason(
+            if let Some(reason) = memory_related_key_excluded_reason_with_scope_filter(
                 target,
                 skip_tags,
                 skip_kinds,
                 requested_scope,
                 scope_mode,
+                scope_filter,
             ) {
                 memory_related_add_bucket(
                     &mut plan.bucket_pair_counts,
@@ -33596,6 +33685,7 @@ fn memory_related_keys_review_packet_from_records(
     edges_by_key: &HashMap<String, Vec<MemoryEdge>>,
     requested_scope: Option<&str>,
     scope_mode: MemorySearchScopeMode,
+    scope_filter: MemoryRelatedKeysReviewScopeFilter,
     max_pairs: usize,
     preview_chars: usize,
 ) -> Value {
@@ -33606,7 +33696,7 @@ fn memory_related_keys_review_packet_from_records(
     let max_inbound_per_target = 3_u32;
     let by_key: HashMap<&str, &MemoryRecord> =
         all.iter().map(|rec| (rec.key.as_str(), rec)).collect();
-    let plan = memory_related_keys_materialize_plan_from_records(
+    let plan = memory_related_keys_materialize_plan_from_records_with_scope_filter(
         all,
         edges_by_key,
         &skip_tags,
@@ -33615,6 +33705,7 @@ fn memory_related_keys_review_packet_from_records(
         true,
         requested_scope,
         scope_mode,
+        scope_filter,
         max_edges,
         max_outbound_per_source,
         max_inbound_per_target,
@@ -33659,6 +33750,7 @@ fn memory_related_keys_review_packet_from_records(
             "dedupe_undirected_pairs": true,
             "scope": requested_scope,
             "scope_mode": scope_mode.label(),
+            "scope_filter": scope_filter.label(),
             "max_pairs": max_edges,
             "max_outbound_per_source": max_outbound_per_source,
             "max_inbound_per_target": max_inbound_per_target,
@@ -33750,6 +33842,12 @@ impl McpTool for MemoryRelatedKeysReviewPacketTool {
                         "default": "local_plus_global",
                         "description": "When scope is set: local_only keeps matching rows; local_plus_global also includes global/unscoped rows; exploratory scans all rows."
                     },
+                    "scope_filter": {
+                        "type": "string",
+                        "enum": ["compatible", "exact"],
+                        "default": "compatible",
+                        "description": "compatible preserves scope-mode matching; exact requires source and target memory scope to exactly equal scope."
+                    },
                     "max_records": {
                         "type": "integer",
                         "minimum": 100,
@@ -33793,6 +33891,21 @@ impl McpTool for MemoryRelatedKeysReviewPacketTool {
                 .filter(|s| !s.is_empty()),
             true,
         );
+        let Some(scope_filter) = MemoryRelatedKeysReviewScopeFilter::parse(
+            args.get("scope_filter")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+        ) else {
+            return Ok(ToolResult::error(
+                "scope_filter must be one of: compatible, exact",
+            ));
+        };
+        if scope_filter == MemoryRelatedKeysReviewScopeFilter::Exact && requested_scope.is_none() {
+            return Ok(ToolResult::error(
+                "scope_filter=exact requires a non-empty scope",
+            ));
+        }
         let max_records = args
             .get("max_records")
             .and_then(|v| v.as_u64())
@@ -33817,13 +33930,14 @@ impl McpTool for MemoryRelatedKeysReviewPacketTool {
             .unwrap_or_default();
         let mut edges_by_key: HashMap<String, Vec<MemoryEdge>> = HashMap::new();
         for rec in &all {
-            if !memory_graph_topology_record_visible(
+            let visible = memory_graph_topology_record_visible(
                 rec,
                 requested_scope,
                 scope_mode,
                 &skip_tags,
                 &skip_kinds,
-            ) {
+            );
+            if !visible || !scope_filter.matches_record(rec, requested_scope) {
                 continue;
             }
             if let Ok(edges) = store.memory_neighbors(&rec.key).await {
@@ -33836,6 +33950,7 @@ impl McpTool for MemoryRelatedKeysReviewPacketTool {
             &edges_by_key,
             requested_scope,
             scope_mode,
+            scope_filter,
             max_pairs,
             preview_chars,
         );
@@ -53535,6 +53650,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             &edges_by_key,
             Some("project:/repo"),
             MemorySearchScopeMode::LocalPlusGlobal,
+            MemoryRelatedKeysReviewScopeFilter::Compatible,
             20,
             80,
         );
@@ -53570,6 +53686,67 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         let serialized = serde_json::to_string(&packet).expect("serialize packet");
         assert!(!serialized.contains("curated_implicit_noisy_source"));
         assert!(!serialized.contains("implicit_target"));
+    }
+
+    #[test]
+    fn memory_related_keys_review_packet_exact_scope_excludes_parent_scope_candidates() {
+        let mut exact_source = mk_mem_scoped(
+            "exact_source",
+            "decision",
+            "exact source content with durable detail",
+            &[],
+            Some("project:/repo/app"),
+        );
+        exact_source.related_keys = vec!["exact_target".into()];
+        let exact_target = mk_mem_scoped(
+            "exact_target",
+            "lesson",
+            "exact target content with durable detail",
+            &[],
+            Some("project:/repo/app"),
+        );
+        let mut parent_source = mk_mem_scoped(
+            "parent_source",
+            "decision",
+            "parent source content that overlaps by path only",
+            &[],
+            Some("project:/repo"),
+        );
+        parent_source.related_keys = vec!["parent_target".into()];
+        let parent_target = mk_mem_scoped(
+            "parent_target",
+            "lesson",
+            "parent target content that overlaps by path only",
+            &[],
+            Some("project:/repo"),
+        );
+        let all = vec![exact_source, exact_target, parent_source, parent_target];
+        let edges_by_key = HashMap::new();
+
+        let packet = memory_related_keys_review_packet_from_records(
+            &all,
+            &edges_by_key,
+            Some("project:/repo/app"),
+            MemorySearchScopeMode::LocalOnly,
+            MemoryRelatedKeysReviewScopeFilter::Exact,
+            20,
+            80,
+        );
+
+        assert_eq!(packet["filters"]["scope_filter"], json!("exact"));
+        assert_eq!(packet["review_packet"]["selected_edges_count"], json!(1));
+        assert_eq!(
+            packet["review_packet"]["selected_edges"][0]["from_key"],
+            json!("exact_source")
+        );
+        assert_eq!(
+            packet["review_packet"]["selected_edges"][0]["to_key"],
+            json!("exact_target")
+        );
+
+        let serialized = serde_json::to_string(&packet).expect("serialize packet");
+        assert!(!serialized.contains("parent_source"));
+        assert!(!serialized.contains("parent_target"));
     }
 
     #[test]
