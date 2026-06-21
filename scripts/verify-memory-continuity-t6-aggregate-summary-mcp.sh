@@ -110,12 +110,15 @@ tools = {
 summary_tool = tools.get("memory_biocortex_recall_expansion_summary")
 report_tool = tools.get("memory_biocortex_t6_candidate_expansion_dry_run_report")
 human_review_tool = tools.get("memory_biocortex_t6_candidate_expansion_human_review_packet")
+owner_decision_tool = tools.get("memory_biocortex_t6_candidate_expansion_owner_decision_record")
 if not summary_tool:
     fail("memory_biocortex_recall_expansion_summary missing from tools/list")
 if not report_tool:
     fail("memory_biocortex_t6_candidate_expansion_dry_run_report missing from tools/list")
 if not human_review_tool:
     fail("memory_biocortex_t6_candidate_expansion_human_review_packet missing from tools/list")
+if not owner_decision_tool:
+    fail("memory_biocortex_t6_candidate_expansion_owner_decision_record missing from tools/list")
 
 summary_props = (summary_tool.get("inputSchema") or {}).get("properties") or {}
 if "include_case_rows" not in summary_props:
@@ -266,6 +269,56 @@ if "candidate_expansion_dry_run_report" in human_review_packet:
 if "case_rows" in human_review_packet:
     fail("human-review packet leaked top-level case_rows")
 
+send(
+    {
+        "jsonrpc": "2.0",
+        "id": 6,
+        "method": "tools/call",
+        "params": {
+            "name": "memory_biocortex_t6_candidate_expansion_owner_decision_record",
+            "arguments": {
+                "human_review_packet": human_review_packet,
+                "owner_decision": "request_more_redacted_dry_run_evidence",
+                "owner": "mcp-smoke",
+                "decision_source": "synthetic:mcp-smoke",
+                "reviewer": "mcp-smoke",
+            },
+        },
+    }
+)
+messages = read_until({6})
+if 6 not in messages:
+    fail("missing owner-decision record response")
+if "error" in messages[6]:
+    fail(f"owner-decision record call error: {messages[6]['error']}")
+owner_decision_record = text_json(messages[6])
+if (
+    owner_decision_record.get("schema")
+    != "agent_bridge.memory_biocortex_t6_candidate_expansion_owner_decision_record.v0"
+):
+    fail("unexpected owner-decision record schema")
+if owner_decision_record.get("input_contract", {}).get("human_review_packet_included") is not False:
+    fail("owner-decision record echoed source human-review packet")
+if (
+    owner_decision_record.get("decision_contract", {}).get("may_prepare_candidate_expansion_design_gate")
+    is not False
+):
+    fail("synthetic owner-decision smoke should not request the next design gate")
+if (
+    owner_decision_record.get("decision_contract", {}).get("may_expand_candidate_set_now")
+    is not False
+):
+    fail("owner-decision record granted candidate expansion authority")
+if (
+    owner_decision_record.get("decision_contract", {}).get("may_run_candidate_expansion_dry_run_now")
+    is not False
+):
+    fail("owner-decision record granted dry-run execution authority")
+if "human_review_packet" in owner_decision_record:
+    fail("owner-decision record leaked source human-review packet")
+if "case_rows" in owner_decision_record:
+    fail("owner-decision record leaked top-level case_rows")
+
 print(
     json.dumps(
         {
@@ -283,6 +336,13 @@ print(
             "human_review_ready": human_review_packet["human_review_packet"]["ready"],
             "human_review_may_expand_candidate_set_now": human_review_packet[
                 "review_contract"
+            ]["may_expand_candidate_set_now"],
+            "owner_decision_ready": owner_decision_record["owner_decision_record"]["ready"],
+            "owner_decision_next_design_gate_requested": owner_decision_record[
+                "decision_contract"
+            ]["next_design_gate_requested"],
+            "owner_decision_may_expand_candidate_set_now": owner_decision_record[
+                "decision_contract"
             ]["may_expand_candidate_set_now"],
         },
         indent=2,

@@ -437,6 +437,43 @@ Interpretation: a ready human-review packet means the evidence is presentable
 for owner/operator judgment. It is not an authorization record and does not
 create any runtime candidate-set expansion path.
 
+## Candidate-Expansion Owner-Decision Record
+
+Date: 2026-06-21
+
+`memory_biocortex_t6_candidate_expansion_owner_decision_record` is the next
+read-only contract layer after the human-review packet. It consumes a safe
+`memory_biocortex_t6_candidate_expansion_human_review_packet` plus an explicit
+external owner decision and records the next disposition.
+
+Supported owner decisions are deliberately narrow:
+
+- `request_more_redacted_dry_run_evidence`;
+- `reject_candidate_expansion_path`;
+- `approve_next_design_gate_only`.
+
+The third option is intentionally named as a design gate, not an experiment or
+runtime approval. It can only request follow-up design/preflight work for a
+separate runtime gate. It does not authorize dry-run execution, search-order
+changes, memory writes, BioCortex execution, or live candidate-set expansion.
+
+The record requires an owner identity and a decision source, such as a forum
+post, issue, or signed review note. This does not cryptographically prove human
+approval, but it prevents silent model-only progression from looking equivalent
+to an externally sourced owner decision.
+
+The record never echoes the source human-review packet, dry-run report,
+dry-run plan, recall-expansion summary, `case_rows`, raw queries, raw keys,
+content, or raw errors. It always forces
+`candidate_expansion_experiment_approved=false`,
+`may_run_candidate_expansion_dry_run_now=false`,
+`may_expand_candidate_set_now=false`, and
+`changes_candidate_set_now=false`.
+
+Interpretation: this is a review ledger surface for the owner/operator decision.
+It may allow the next design/preflight artifact to be written, but it still does
+not create runtime candidate-expansion authority.
+
 ## Fixture Diagnostic Example Follow-up
 
 Date: 2026-06-20
