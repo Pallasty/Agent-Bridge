@@ -1,8 +1,10 @@
 # Live Semantic World Runtime — Runtime Executor Verified Outcome Ingestion Apply Gate
 
 Date: 2026-06-20
+Updated: 2026-06-21
 
-Status: Draft implementation spec
+Status: Implemented; G31 extends the gate to preserve G30 admission-source
+execution-commit lineage.
 
 ## 1. Purpose
 
@@ -37,6 +39,13 @@ The source commit must be G20:
 - no write, memory, ingestion, world-verdict persistence, store, or MCP surface
   allowed by the source.
 
+If the G20 source commit came from the G30 admission-source execution-commit
+path, the source must also carry:
+
+- `source_verified_outcome_ingestion_admission_preflight_verdict=ready_for_verified_outcome_ingestion_execution`;
+- `admission_preflight_confirmed=true`;
+- `admission_decision_confirmed=true`.
+
 The explicit apply decision must use:
 
 ```text
@@ -66,6 +75,11 @@ Required decision properties:
 - `durable_outcome_record_written_by_this_tool=false`;
 - `world_verdict_persisted_by_this_tool=false`.
 
+For an admission-source G20 commit, the apply decision must also confirm:
+
+- `admission_preflight_confirmed=true`;
+- `admission_decision_confirmed=true`.
+
 ## 3. Scope Matching
 
 The apply decision must exactly match the G20 execution commit scope for:
@@ -78,6 +92,19 @@ The apply decision must exactly match the G20 execution commit scope for:
   record key, record digest, persisted key, and persisted digest.
 
 Any mismatch blocks the apply gate.
+
+For an admission-source G20 commit, the apply decision must additionally match:
+
+- source admission decision id;
+- source verified-outcome write-evidence review decision id;
+- verified-outcome store-write execution id;
+- verified-outcome persistence decision id;
+- persistence source execution id;
+- writer decision id;
+- upstream apply decision id;
+- upstream execution commit decision id;
+- upstream execution decision id;
+- upstream durable write-evidence id.
 
 ## 4. Ready Output
 
@@ -93,6 +120,18 @@ Ready output:
   "verified_outcome_ingestion_apply": {
     "previous_world_verdict": "not_verified",
     "verified_world_verdict": "verified",
+    "source_admission_decision_id": "verified_outcome_ingestion_admission_arrival_bath_move_002",
+    "source_write_evidence_review_decision_id": "verified_outcome_ingestion_write_evidence_review_arrival_bath_move_002",
+    "store_write_execution_id": "verified_outcome_ingestion_store_write_execution_arrival_bath_move_002",
+    "persistence_decision_id": "verified_outcome_ingestion_persistence_arrival_bath_move_002",
+    "persistence_source_execution_id": "verified_outcome_ingestion_writer_execution_arrival_bath_move_002",
+    "writer_decision_id": "verified_outcome_ingestion_writer_arrival_bath_move_002",
+    "source_apply_decision_id": "verified_outcome_ingestion_apply_arrival_bath_move_002",
+    "source_commit_decision_id": "verified_outcome_ingestion_execution_commit_arrival_bath_move_002",
+    "source_prior_execution_decision_id": "verified_outcome_ingestion_execution_arrival_bath_move_002",
+    "source_write_evidence_id": "durable_outcome_record_write_evidence_arrival_bath_move_002",
+    "admission_preflight_confirmed": true,
+    "admission_decision_confirmed": true,
     "ready_for_verified_outcome_ingestion_writer": true,
     "verified_outcome_ingestion_apply_gate_output_only": true,
     "verified_outcome_ingestion_writer_allowed_after_gate": true,
@@ -123,6 +162,7 @@ The critical distinction is:
 
 ## 6. Next Slice
 
-The next safe slice is verified outcome ingestion writer design. It must
-consume the G21 package and still keep any durable write path isolated behind
-its own implementation, audit, idempotency, and rollback checks.
+The next safe slice is verified outcome ingestion writer propagation. It should
+consume the G21/G31 package, preserve the admission-source lineage through the
+writer gate, and still keep any durable write path isolated behind its own
+implementation, audit, idempotency, and rollback checks.

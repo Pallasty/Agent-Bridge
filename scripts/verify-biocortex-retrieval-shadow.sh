@@ -7021,6 +7021,14 @@ run cargo run -q -p ab-bridge \
     --format json \
     --assert-ready-for-verified-outcome-ingestion-writer \
     --assert-output-only >/dev/null
+run cargo run -q -p ab-bridge \
+    --example lswr_interaction_feedback_runtime_executor_verified_outcome_ingestion_apply_gate_smoke \
+    -- \
+    --from-verified-outcome-ingestion-admission-source-commit \
+    --with-verified-outcome-ingestion-apply-decision \
+    --format json \
+    --assert-ready-for-verified-outcome-ingestion-writer \
+    --assert-output-only >/dev/null
 run cargo test -p ab-bridge --test lswr_interaction_feedback_fixture \
     interaction_feedback_runtime_executor_verified_outcome_ingestion_writer \
     -- --nocapture
