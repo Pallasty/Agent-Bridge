@@ -2,7 +2,7 @@
 
 Date: 2026-06-20
 
-Status: Draft acceptance notes
+Status: Draft acceptance notes / G30_ACCEPTS_ADMISSION_SOURCE_EXECUTION_PREFLIGHT
 
 ## 1. Required Checks
 
@@ -18,9 +18,14 @@ Expected:
   `explicit_verified_outcome_ingestion_execution_commit_decision_required`;
 - explicit scoped commit decision returns
   `ready_for_verified_outcome_ingestion_apply`;
+- explicit scoped commit decision over a G29 admission-source execution
+  preflight returns `ready_for_verified_outcome_ingestion_apply`;
 - bad commit decision blocks on kind, decision, source verdict, verified
   verdict, G19 review, package confirmations, attestation, lineage, digest,
   idempotency, permission, boundary, and scope errors;
+- bad admission-source commit decision blocks on admission-preflight
+  confirmation, admission-decision confirmation, admission-decision scope, and
+  store-write scope errors;
 - wrong source input blocks with
   `runtime_executor_verified_outcome_ingestion_execution_preflight_required`.
 
@@ -34,6 +39,12 @@ Ready smoke:
 
 ```text
 cargo run -q -p ab-bridge --example lswr_interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_commit_smoke -- --with-verified-outcome-ingestion-execution-commit-decision --format json --assert-ready-for-verified-outcome-ingestion-apply --assert-output-only
+```
+
+G29 admission-source ready smoke:
+
+```text
+cargo run -q -p ab-bridge --example lswr_interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_commit_smoke -- --from-verified-outcome-ingestion-admission-preflight --with-verified-outcome-ingestion-execution-commit-decision --format json --assert-ready-for-verified-outcome-ingestion-apply --assert-output-only
 ```
 
 Expected ready fields:
@@ -50,11 +61,19 @@ Expected ready fields:
 - `memory_write_allowed=false`;
 - `outcome_ingestion_allowed=false`.
 
+For the G29 admission-source smoke, expected ready fields also include:
+
+- `source_verified_outcome_ingestion_admission_preflight_verdict=ready_for_verified_outcome_ingestion_execution`;
+- `source_admission_decision_id=verified_outcome_ingestion_admission_arrival_bath_move_002`;
+- `admission_preflight_confirmed=true`;
+- `admission_decision_confirmed=true`.
+
 ## 2. Boundary
 
-This G20 commit gate can emit a bounded apply-ready package from a scoped G19
-package plus explicit commit decision. It cannot persist the verdict, write a
-durable outcome record, ingest #94 outcomes, write memory, or expose MCP tools.
+This G20/G30 commit gate can emit a bounded apply-ready package from a scoped
+G19 package plus explicit commit decision. It cannot persist the verdict, write
+a durable outcome record, ingest #94 outcomes, write memory, or expose MCP
+tools.
 
 The critical distinction is:
 

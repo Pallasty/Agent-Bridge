@@ -2900,7 +2900,7 @@ run cargo test -p ab-bridge --lib --no-default-features \
     biocortex_retrieval_opt_in_runtime_transition_gate_ -- --nocapture
 run cargo test -p ab-bridge --lib --no-default-features \
     opt_in_gated_store_trial_ -- --nocapture
-run "$repo_root/scripts/verify-biocortex-runtime-readiness-mcp.sh"
+run env AGENT_BRIDGE_TOOL_PROFILE=all "$repo_root/scripts/verify-biocortex-runtime-readiness-mcp.sh"
 
 opt_in_status_disabled="$tmpdir/opt-in-status-disabled.json"
 run cargo run -p ab-bridge --no-default-features -- \
@@ -6993,6 +6993,14 @@ run cargo run -q -p ab-bridge \
 run cargo run -q -p ab-bridge \
     --example lswr_interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_commit_smoke \
     -- \
+    --with-verified-outcome-ingestion-execution-commit-decision \
+    --format json \
+    --assert-ready-for-verified-outcome-ingestion-apply \
+    --assert-output-only >/dev/null
+run cargo run -q -p ab-bridge \
+    --example lswr_interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_commit_smoke \
+    -- \
+    --from-verified-outcome-ingestion-admission-preflight \
     --with-verified-outcome-ingestion-execution-commit-decision \
     --format json \
     --assert-ready-for-verified-outcome-ingestion-apply \
