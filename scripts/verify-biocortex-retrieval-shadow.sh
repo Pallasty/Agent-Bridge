@@ -6973,6 +6973,14 @@ run cargo run -q -p ab-bridge \
     --format json \
     --assert-ready-for-verified-outcome-ingestion-execution-commit \
     --assert-output-only >/dev/null
+run cargo run -q -p ab-bridge \
+    --example lswr_interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_preflight_smoke \
+    -- \
+    --from-verified-outcome-ingestion-admission-preflight \
+    --with-verified-outcome-ingestion-execution-decision \
+    --format json \
+    --assert-ready-for-verified-outcome-ingestion-execution-commit \
+    --assert-output-only >/dev/null
 run cargo test -p ab-bridge --test lswr_interaction_feedback_fixture \
     interaction_feedback_runtime_executor_verified_outcome_ingestion_execution_commit \
     -- --nocapture
