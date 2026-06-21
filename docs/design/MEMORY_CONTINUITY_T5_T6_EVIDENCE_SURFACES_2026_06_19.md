@@ -305,6 +305,33 @@ human-review packet boundary. It still does not permit default candidate-set
 expansion, BioCortex influence, memory writes, edge writes, or search-order
 changes.
 
+## Candidate-Expansion Review Packet
+
+Date: 2026-06-21
+
+`memory_biocortex_t6_candidate_expansion_review_packet` consumes a
+`memory_biocortex_t6_influence_gate` output and emits a bounded human-review
+packet for candidate-expansion review. It extracts only the aggregate
+`candidate_expansion_gate` fields: readiness, block reasons, metrics,
+thresholds, evidence-strength tier/caveats, and the next gate.
+
+The packet is a review artifact, not an execution path:
+
+- it never calls `memory_search`, `memory_neighbors`, or BioCortex;
+- it never writes memory, graph edges, authorization rows, or approval packets;
+- it never echoes the source gate, recall-expansion summary, `case_rows`, raw
+  queries, raw keys, or content;
+- it always forces `candidate_expansion_experiment_approved=false`,
+  `may_expand_candidate_set_now=false`, and `changes_candidate_set_now=false`;
+- if the source gate claims runtime candidate-expansion authority, the packet
+  records a `source_gate_claims_candidate_expansion_authority` warning instead
+  of preserving that claim.
+
+Interpretation: this gives reviewers a stable handoff after the T6 gate and
+before any separate owner-approved dry-run experiment plan. It keeps the current
+v36 retrieval-trigger FTS projection as the first-stage baseline and leaves
+candidate-set expansion behind a distinct future approval boundary.
+
 ## Fixture Diagnostic Example Follow-up
 
 Date: 2026-06-20
