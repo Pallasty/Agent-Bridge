@@ -111,6 +111,9 @@ summary_tool = tools.get("memory_biocortex_recall_expansion_summary")
 report_tool = tools.get("memory_biocortex_t6_candidate_expansion_dry_run_report")
 human_review_tool = tools.get("memory_biocortex_t6_candidate_expansion_human_review_packet")
 owner_decision_tool = tools.get("memory_biocortex_t6_candidate_expansion_owner_decision_record")
+runtime_gate_preflight_tool = tools.get(
+    "memory_biocortex_t6_candidate_expansion_runtime_gate_preflight"
+)
 if not summary_tool:
     fail("memory_biocortex_recall_expansion_summary missing from tools/list")
 if not report_tool:
@@ -119,6 +122,8 @@ if not human_review_tool:
     fail("memory_biocortex_t6_candidate_expansion_human_review_packet missing from tools/list")
 if not owner_decision_tool:
     fail("memory_biocortex_t6_candidate_expansion_owner_decision_record missing from tools/list")
+if not runtime_gate_preflight_tool:
+    fail("memory_biocortex_t6_candidate_expansion_runtime_gate_preflight missing from tools/list")
 
 summary_props = (summary_tool.get("inputSchema") or {}).get("properties") or {}
 if "include_case_rows" not in summary_props:
@@ -319,6 +324,63 @@ if "human_review_packet" in owner_decision_record:
 if "case_rows" in owner_decision_record:
     fail("owner-decision record leaked top-level case_rows")
 
+send(
+    {
+        "jsonrpc": "2.0",
+        "id": 7,
+        "method": "tools/call",
+        "params": {
+            "name": "memory_biocortex_t6_candidate_expansion_runtime_gate_preflight",
+            "arguments": {
+                "owner_decision_record": owner_decision_record,
+                "reviewer": "mcp-smoke",
+            },
+        },
+    }
+)
+messages = read_until({7})
+if 7 not in messages:
+    fail("missing runtime-gate preflight response")
+if "error" in messages[7]:
+    fail(f"runtime-gate preflight call error: {messages[7]['error']}")
+runtime_gate_preflight = text_json(messages[7])
+if (
+    runtime_gate_preflight.get("schema")
+    != "agent_bridge.memory_biocortex_t6_candidate_expansion_runtime_gate_preflight.v0"
+):
+    fail("unexpected runtime-gate preflight schema")
+if (
+    runtime_gate_preflight.get("input_contract", {}).get("owner_decision_record_included")
+    is not False
+):
+    fail("runtime-gate preflight echoed source owner-decision record")
+if runtime_gate_preflight.get("runtime_gate_preflight", {}).get("ready") is not False:
+    fail("synthetic owner-decision smoke should not make runtime-gate preflight ready")
+if (
+    "source_owner_decision_not_approved_for_design_gate"
+    not in runtime_gate_preflight.get("runtime_gate_preflight", {}).get("block_reasons", [])
+):
+    fail("runtime-gate preflight did not block on missing design-gate approval")
+if (
+    runtime_gate_preflight.get("preflight_contract", {}).get("may_prepare_runtime_gate_design_artifact")
+    is not False
+):
+    fail("runtime-gate preflight granted design-prep authority from synthetic evidence-request decision")
+if (
+    runtime_gate_preflight.get("preflight_contract", {}).get("may_expand_candidate_set_now")
+    is not False
+):
+    fail("runtime-gate preflight granted candidate expansion authority")
+if (
+    runtime_gate_preflight.get("preflight_contract", {}).get("may_implement_runtime_gate_code_now")
+    is not False
+):
+    fail("runtime-gate preflight granted runtime implementation authority")
+if "owner_decision_record" in runtime_gate_preflight:
+    fail("runtime-gate preflight leaked source owner-decision record")
+if "case_rows" in runtime_gate_preflight:
+    fail("runtime-gate preflight leaked top-level case_rows")
+
 print(
     json.dumps(
         {
@@ -343,6 +405,15 @@ print(
             ]["next_design_gate_requested"],
             "owner_decision_may_expand_candidate_set_now": owner_decision_record[
                 "decision_contract"
+            ]["may_expand_candidate_set_now"],
+            "runtime_gate_preflight_ready": runtime_gate_preflight[
+                "runtime_gate_preflight"
+            ]["ready"],
+            "runtime_gate_preflight_may_prepare_design": runtime_gate_preflight[
+                "preflight_contract"
+            ]["may_prepare_runtime_gate_design_artifact"],
+            "runtime_gate_preflight_may_expand_candidate_set_now": runtime_gate_preflight[
+                "preflight_contract"
             ]["may_expand_candidate_set_now"],
         },
         indent=2,

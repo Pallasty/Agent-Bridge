@@ -474,6 +474,36 @@ Interpretation: this is a review ledger surface for the owner/operator decision.
 It may allow the next design/preflight artifact to be written, but it still does
 not create runtime candidate-expansion authority.
 
+## Candidate-Expansion Runtime-Gate Preflight
+
+Date: 2026-06-21
+
+`memory_biocortex_t6_candidate_expansion_runtime_gate_preflight` is the
+design-only preflight surface after the owner-decision record. It consumes only
+a safe `memory_biocortex_t6_candidate_expansion_owner_decision_record`.
+
+The preflight blocks unless the source record is ready and the owner decision is
+`approve_next_design_gate_only` with `next_design_gate_requested=true`. This
+means ordinary continuation, evidence requests, or rejected paths cannot silently
+turn into runtime gate work.
+
+Even when ready, the preflight only allows a future design artifact. It requires
+a separate runtime gate, separate owner runtime approval, feature flag default
+off, shadow mode first, deterministic replay fixtures, bounded candidate delta,
+negative controls, telemetry fields, and rollback planning.
+
+The preflight never echoes the source owner-decision record, human-review
+packet, dry-run report, dry-run plan, recall-expansion summary, `case_rows`, raw
+queries, raw keys, content, or raw errors. It always forces
+`may_implement_runtime_gate_code_now=false`,
+`candidate_expansion_experiment_approved=false`,
+`may_run_candidate_expansion_dry_run_now=false`,
+`may_expand_candidate_set_now=false`, and `changes_candidate_set_now=false`.
+
+Interpretation: this is not a runtime gate. It is the checklist that a later,
+separately approved runtime gate must satisfy before any code path can influence
+candidate expansion.
+
 ## Fixture Diagnostic Example Follow-up
 
 Date: 2026-06-20
