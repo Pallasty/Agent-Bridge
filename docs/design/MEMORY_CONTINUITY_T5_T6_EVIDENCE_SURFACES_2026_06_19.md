@@ -601,6 +601,40 @@ Interpretation: this is an implementation plan for a future code gate only. It
 is still not runtime code approval, not runtime approval, and not
 candidate-expansion approval.
 
+## T6 Candidate Expansion Runtime-Gate Code Implementation Gate
+
+Date: 2026-06-21
+
+`memory_biocortex_t6_candidate_expansion_runtime_gate_code_implementation_gate`
+is the explicit code-gate surface after the implementation-plan artifact. It
+consumes only a safe
+`memory_biocortex_t6_candidate_expansion_runtime_gate_implementation_plan_artifact`
+plus an external code-gate decision.
+
+The only positive code-gate decision accepted by this surface is
+`approve_shadow_runtime_gate_code_implementation_only`. That can authorize
+implementing default-off, shadow-only runtime-gate code. It does not authorize
+enabling that code, running shadow mode, running dry-runs, changing search
+order, writing memory or graph edges, or expanding candidate sets.
+
+Even when ready, the code implementation contract only sets
+`may_implement_shadow_runtime_gate_code=true`. It always forces
+`may_enable_runtime_gate_now=false`, `may_run_shadow_mode_now=false`,
+`may_run_candidate_expansion_dry_run_now=false`,
+`may_expand_candidate_set_now=false`,
+`runtime_influence_approved=false`, and
+`this_gate_approves_runtime_candidate_expansion=false`.
+
+The code gate never echoes the implementation-plan artifact,
+owner-review record, runtime-gate design artifact, preflight,
+owner-decision record, human-review packet, dry-run report, dry-run plan,
+recall-expansion summary, `case_rows`, raw queries, raw keys, content, or raw
+errors. Separate shadow-execution and runtime-enable gates remain required.
+
+Interpretation: this is approval to implement a default-off shadow code path
+only. It is not approval to run the code, enable runtime influence, or expand
+candidate sets.
+
 ## Fixture Diagnostic Example Follow-up
 
 Date: 2026-06-20
