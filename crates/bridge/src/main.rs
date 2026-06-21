@@ -2465,8 +2465,9 @@ enum DreamOp {
     /// `AGENT.md`. Lessons that aren't already substantially covered
     /// by the durable preamble become `kind=l7_proposed_update`
     /// memories so they surface in the next session's bootstrap as
-    /// review candidates. **Never auto-edits AGENT.md** — that stays
-    /// user-gated per the L7 design safety rule.
+    /// self-evaluation candidates. **Never auto-edits AGENT.md** —
+    /// integration still goes through `session_finalize(agent_profile=...)`
+    /// and its drift cap.
     ///
     /// Roadmap: `docs/AGENT-BRIDGE-CAPABILITY-ROADMAP-2026-05-15.md` §4.
     AgentMdDrift {
@@ -18681,9 +18682,20 @@ fn print_identity_section(cur: &ab_store::IdentityWindow, prior: &ab_store::Iden
 struct AgentMdDriftProposal {
     lesson_key: String,
     coverage_ratio: f64,
+    triage: &'static str,
+    triage_reason: &'static str,
     snippet: String,
     proposal_key: String,
     skipped: bool,
+}
+
+#[derive(Debug, serde::Serialize)]
+struct AgentMdDriftSkipped {
+    lesson_key: String,
+    coverage_ratio: f64,
+    triage: &'static str,
+    triage_reason: &'static str,
+    snippet: String,
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -18693,6 +18705,9 @@ struct AgentMdDriftReport {
     window_days: u32,
     lessons_scanned: usize,
     covered: usize,
+    skipped: usize,
+    skipped_by_triage: std::collections::BTreeMap<&'static str, usize>,
+    skipped_samples: Vec<AgentMdDriftSkipped>,
     proposed: usize,
     proposals: Vec<AgentMdDriftProposal>,
     dry_run: bool,
@@ -18726,6 +18741,188 @@ fn drift_coverage_ratio(
         .filter(|t| preamble_tokens.contains(*t))
         .count();
     covered as f64 / lesson_tokens.len() as f64
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct AgentMdTriageDecision {
+    accept: bool,
+    kind: &'static str,
+    reason: &'static str,
+}
+
+fn contains_any(haystack: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| haystack.contains(needle))
+}
+
+/// Deterministic v1 gate for AGENT.md drift proposals.
+///
+/// The coverage detector compares long lesson bodies against a deliberately
+/// short self-profile, so low overlap is only candidate pressure. This gate
+/// keeps stable behavior/posture candidates and rejects transient operational
+/// facts before `l7_proposed_update` memories are written.
+fn triage_agent_md_drift_candidate(
+    lesson_key: &str,
+    tags: &[String],
+    content: &str,
+) -> AgentMdTriageDecision {
+    let lower = content.to_lowercase();
+    let key_lower = lesson_key.to_lowercase();
+    let tag_blob = tags.join(" ").to_lowercase();
+    let all = format!("{key_lower}\n{tag_blob}\n{lower}");
+
+    let token_count = drift_tokens(content).len();
+    if token_count < 8 {
+        return AgentMdTriageDecision {
+            accept: false,
+            kind: "low_signal",
+            reason: "too few distinctive tokens",
+        };
+    }
+
+    let transient_markers = [
+        "commit ",
+        "origin/master",
+        "github/master",
+        "gitlab",
+        "branch ",
+        "worktree",
+        "pushed",
+        "deployed",
+        ".real",
+        "pid ",
+        "http://",
+        "https://",
+        "post `#",
+        "pr ",
+        "mr ",
+        "next step",
+        "current ",
+        "status:",
+        "cwd:",
+        "当前",
+        "已经",
+        "刚",
+        "正在",
+        "接下来",
+        "下一步",
+        "看板已更新",
+        "远端",
+        "重启",
+        "重连",
+        "提交",
+        "推送",
+    ];
+    if contains_any(&all, &transient_markers) {
+        return AgentMdTriageDecision {
+            accept: false,
+            kind: "transient_operational",
+            reason: "contains branch/commit/deploy/current-state markers",
+        };
+    }
+
+    let domain_markers = [
+        "godot",
+        "onsen",
+        "nexus",
+        "wuxing",
+        "palace graph",
+        "sprite",
+        "atlas",
+        "facility",
+        "lantern",
+        "bath",
+        "biocortex",
+        "五行",
+        "温泉",
+        "灯笼",
+        "浴池",
+        "贴图",
+    ];
+    if contains_any(&all, &domain_markers) {
+        return AgentMdTriageDecision {
+            accept: false,
+            kind: "domain_specific",
+            reason: "domain lesson belongs in memory, not global agent profile",
+        };
+    }
+
+    let implementation_markers = [
+        "candidate reviewed",
+        "from_key",
+        "writes_memory",
+        "state.db",
+        "memory_search",
+        "store api",
+        "route ",
+        "packet",
+        "artifact",
+        "mcp surface",
+        "t5/t6",
+        "s76",
+        "s32",
+        "s33",
+        "db ",
+    ];
+    if contains_any(&all, &implementation_markers) {
+        return AgentMdTriageDecision {
+            accept: false,
+            kind: "implementation_specific",
+            reason: "implementation fact belongs in memory, not global agent profile",
+        };
+    }
+
+    let stable_markers = [
+        "always ",
+        "never ",
+        "should ",
+        "must ",
+        "avoid ",
+        "prefer ",
+        "before ",
+        "separate ",
+        "split ",
+        "verify ",
+        "evidence",
+        "boundary",
+        "stable",
+        "posture",
+        "preference",
+        "principle",
+        "self-evaluation",
+        "do not ",
+        "don't ",
+        "不要",
+        "必须",
+        "应该",
+        "避免",
+        "先验证",
+        "再规划",
+        "再落地",
+        "保持",
+        "区分",
+        "验证",
+        "边界",
+        "原则",
+        "姿态",
+        "偏好",
+    ];
+    let stable_hits = stable_markers
+        .iter()
+        .filter(|marker| all.contains(**marker))
+        .count();
+    if stable_hits >= 2 {
+        return AgentMdTriageDecision {
+            accept: true,
+            kind: "stable_posture_candidate",
+            reason: "contains reusable behavior/posture markers",
+        };
+    }
+
+    AgentMdTriageDecision {
+        accept: false,
+        kind: "no_stable_posture_signal",
+        reason: "does not contain enough reusable behavior markers",
+    }
 }
 
 async fn run_dream_agent_md_drift(
@@ -18763,7 +18960,10 @@ async fn run_dream_agent_md_drift(
         .collect();
 
     let mut proposals: Vec<AgentMdDriftProposal> = Vec::new();
+    let mut skipped_samples: Vec<AgentMdDriftSkipped> = Vec::new();
+    let mut skipped_by_triage = std::collections::BTreeMap::new();
     let mut covered = 0usize;
+    let mut skipped = 0usize;
     let mut proposed = 0usize;
 
     for lesson in &recent {
@@ -18771,6 +18971,22 @@ async fn run_dream_agent_md_drift(
         let ratio = drift_coverage_ratio(&lesson_tokens, &preamble_tokens);
         if ratio >= AGENT_MD_DRIFT_COVERAGE_THRESHOLD {
             covered += 1;
+            continue;
+        }
+        let snippet: String = lesson.content.chars().take(140).collect();
+        let triage = triage_agent_md_drift_candidate(&lesson.key, &lesson.tags, &lesson.content);
+        if !triage.accept {
+            skipped += 1;
+            *skipped_by_triage.entry(triage.kind).or_insert(0) += 1;
+            if skipped_samples.len() < 12 {
+                skipped_samples.push(AgentMdDriftSkipped {
+                    lesson_key: lesson.key.clone(),
+                    coverage_ratio: ratio,
+                    triage: triage.kind,
+                    triage_reason: triage.reason,
+                    snippet,
+                });
+            }
             continue;
         }
         // Stable derived key — same lesson → same proposal row (idempotent
@@ -18782,18 +18998,21 @@ async fn run_dream_agent_md_drift(
             ab_bridge::mcp_tools::sanitise_target_for_key(&lesson.key),
             coverage_bucket
         );
-        let snippet: String = lesson.content.chars().take(140).collect();
 
         let written = if dry_run {
             true // pretend; nothing actually persisted
         } else {
             let stored_content = format!(
-                "AGENT.md drift candidate (coverage {:.0}%): lesson `{}` is not yet \
-                 substantially represented in AGENT.md. Review and integrate by hand if \
-                 the behavior should become durable.\n\nLesson snippet:\n{}\n\n\
+                "AGENT.md drift candidate (coverage {:.0}%, triage={}): lesson `{}` \
+                 is not yet substantially represented in AGENT.md and passed the v1 \
+                 stable-posture triage gate. Run the self-evaluation rubric before \
+                 integrating via session_finalize(agent_profile=...).\n\nTriage reason: {}\n\n\
+                 Lesson snippet:\n{}\n\n\
                  Source key: {}",
                 ratio * 100.0,
+                triage.kind,
                 lesson.key,
+                triage.reason,
                 snippet,
                 lesson.key,
             );
@@ -18801,7 +19020,12 @@ async fn run_dream_agent_md_drift(
                 key: proposal_key.clone(),
                 kind: "l7_proposed_update".into(),
                 content: stored_content,
-                tags: vec!["l7".into(), "drift_proposal".into(), "needs_review".into()],
+                tags: vec![
+                    "l7".into(),
+                    "drift_proposal".into(),
+                    "needs_self_evaluation".into(),
+                    triage.kind.into(),
+                ],
                 related_keys: vec![lesson.key.clone()],
                 scope: None,
                 created_at: 0,
@@ -18822,6 +19046,8 @@ async fn run_dream_agent_md_drift(
         proposals.push(AgentMdDriftProposal {
             lesson_key: lesson.key.clone(),
             coverage_ratio: ratio,
+            triage: triage.kind,
+            triage_reason: triage.reason,
             snippet,
             proposal_key,
             skipped: false,
@@ -18834,6 +19060,9 @@ async fn run_dream_agent_md_drift(
         window_days,
         lessons_scanned: recent.len(),
         covered,
+        skipped,
+        skipped_by_triage,
+        skipped_samples,
         proposed,
         proposals,
         dry_run,
@@ -18863,6 +19092,10 @@ async fn run_dream_agent_md_drift(
         report.proposed,
         if report.dry_run { " (DRY RUN)" } else { "" }
     );
+    println!("  skipped by triage: {}", report.skipped);
+    for (kind, count) in &report.skipped_by_triage {
+        println!("    - {kind}: {count}");
+    }
     if report.proposals.is_empty() {
         println!();
         println!("(no drift detected in window)");
@@ -18870,9 +19103,10 @@ async fn run_dream_agent_md_drift(
         println!();
         for p in &report.proposals {
             println!(
-                "  - {}  coverage={:.0}%  →  {}",
+                "  - {}  coverage={:.0}%  triage={}  →  {}",
                 p.lesson_key,
                 p.coverage_ratio * 100.0,
+                p.triage,
                 p.proposal_key
             );
             println!("      {}", p.snippet);
@@ -18881,8 +19115,8 @@ async fn run_dream_agent_md_drift(
     println!();
     println!(
         "NOTE: proposals are surfaced via kind=l7_proposed_update memories. \
-         AGENT.md is NEVER auto-edited; review proposals and integrate by hand \
-         via session_finalize(agent_profile=...)."
+         AGENT.md is NEVER auto-edited; apply the self-evaluation rubric and \
+         integrate via session_finalize(agent_profile=...) only when stable."
     );
     Ok(())
 }
@@ -19515,6 +19749,60 @@ mod tests {
         // Pin the v0 threshold — bumping it changes report semantics
         // and should be a coordinated commit, not a silent drift.
         assert!((AGENT_MD_DRIFT_COVERAGE_THRESHOLD - 0.30).abs() < 1e-9);
+    }
+
+    #[test]
+    fn agent_md_triage_accepts_stable_posture_candidate() {
+        let tags = vec!["agent-bridge".to_string(), "lesson".to_string()];
+        let decision = triage_agent_md_drift_candidate(
+            "lesson_agent_bridge_verify_before_claim",
+            &tags,
+            "Always verify live state before outward claims. Separate git deploy MCP forum \
+             and work memory evidence. Avoid executor expansion unless a report shows \
+             measured lift.",
+        );
+        assert!(decision.accept);
+        assert_eq!(decision.kind, "stable_posture_candidate");
+    }
+
+    #[test]
+    fn agent_md_triage_skips_transient_operational_update() {
+        let tags = vec!["agent-bridge".to_string(), "deploy".to_string()];
+        let decision = triage_agent_md_drift_candidate(
+            "curated_implicit_lesson_commit_push_status",
+            &tags,
+            "Commit c75b887 pushed to origin/master and github/master. Current worktree \
+             is clean. Next step is to restart MCP and verify the deployed .real binary.",
+        );
+        assert!(!decision.accept);
+        assert_eq!(decision.kind, "transient_operational");
+    }
+
+    #[test]
+    fn agent_md_triage_skips_domain_specific_visual_lesson() {
+        let tags = vec!["onsen-hd".to_string(), "godot".to_string()];
+        let decision = triage_agent_md_drift_candidate(
+            "lesson_onsen_godot_lantern_alignment",
+            &tags,
+            "Godot lantern sprites should align to the facility grid and avoid overlapping \
+             the bath atlas. Verify with rendered screenshots before shipping.",
+        );
+        assert!(!decision.accept);
+        assert_eq!(decision.kind, "domain_specific");
+    }
+
+    #[test]
+    fn agent_md_triage_skips_implementation_specific_fact() {
+        let tags = vec!["agent-bridge".to_string(), "memory".to_string()];
+        let decision = triage_agent_md_drift_candidate(
+            "curated_implicit_lesson_memory_search_state_db",
+            &tags,
+            "memory_search reads the state.db memories table, not the .claude markdown \
+             files. The store API must verify that the expected key exists before \
+             reporting recall success.",
+        );
+        assert!(!decision.accept);
+        assert_eq!(decision.kind, "implementation_specific");
     }
 
     // ── L7 P3 — skill-retro aggregator (pure) ─────────────────────────
