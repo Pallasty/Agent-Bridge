@@ -34230,6 +34230,12 @@ impl McpTool for MemoryRelatedKeysMaterializeTool {
                         "default": "local_only",
                         "description": "When scope is set: local_only keeps matching rows; local_plus_global also includes global/unscoped rows; exploratory scans all rows."
                     },
+                    "scope_filter": {
+                        "type": "string",
+                        "enum": ["compatible", "exact"],
+                        "default": "compatible",
+                        "description": "compatible preserves scope-mode matching; exact requires source and target memory scope to exactly equal scope."
+                    },
                     "max_records": {
                         "type": "integer",
                         "minimum": 100,
@@ -34321,6 +34327,23 @@ impl McpTool for MemoryRelatedKeysMaterializeTool {
                 .filter(|s| !s.is_empty()),
             false,
         );
+        let Some(scope_filter) = MemoryRelatedKeysReviewScopeFilter::parse(
+            args.get("scope_filter")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+        ) else {
+            return Ok(ToolResult::error(
+                "scope_filter must be one of: compatible, exact",
+            ));
+        };
+        if scope_filter == MemoryRelatedKeysReviewScopeFilter::Exact
+            && requested_scope.is_none()
+        {
+            return Ok(ToolResult::error(
+                "scope_filter=exact requires a non-empty scope",
+            ));
+        }
         let max_records = args
             .get("max_records")
             .and_then(|v| v.as_u64())
@@ -34353,13 +34376,14 @@ impl McpTool for MemoryRelatedKeysMaterializeTool {
             .unwrap_or_default();
         let mut edges_by_key: HashMap<String, Vec<MemoryEdge>> = HashMap::new();
         for rec in &all {
-            if !memory_graph_topology_record_visible(
+            let visible = memory_graph_topology_record_visible(
                 rec,
                 requested_scope,
                 scope_mode,
                 &skip_tags,
                 &skip_kinds,
-            ) {
+            );
+            if !visible || !scope_filter.matches_record(rec, requested_scope) {
                 continue;
             }
             if let Ok(edges) = store.memory_neighbors(&rec.key).await {
@@ -34368,7 +34392,7 @@ impl McpTool for MemoryRelatedKeysMaterializeTool {
         }
         let by_key: HashMap<&str, &MemoryRecord> =
             all.iter().map(|rec| (rec.key.as_str(), rec)).collect();
-        let plan = memory_related_keys_materialize_plan_from_records(
+        let plan = memory_related_keys_materialize_plan_from_records_with_scope_filter(
             &all,
             &edges_by_key,
             &skip_tags,
@@ -34377,6 +34401,7 @@ impl McpTool for MemoryRelatedKeysMaterializeTool {
             dedupe_undirected_pairs,
             requested_scope,
             scope_mode,
+            scope_filter,
             max_edges,
             max_outbound_per_source,
             max_inbound_per_target,
@@ -34405,6 +34430,7 @@ impl McpTool for MemoryRelatedKeysMaterializeTool {
                     "dedupe_undirected_pairs": dedupe_undirected_pairs,
                     "scope": requested_scope,
                     "scope_mode": scope_mode.label(),
+                    "scope_filter": scope_filter.label(),
                 }),
             );
         }
@@ -54393,6 +54419,102 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             Some(1)
         );
         assert_eq!(plan.projected_orphans_after_selected(), 1);
+    }
+
+    #[tokio::test]
+    async fn memory_related_keys_materialize_dry_run_exact_scope_excludes_parent_scope_candidates() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.as_ref().expect("store").clone();
+
+        let mut exact_source = mk_mem_scoped(
+            "exact_source",
+            "decision",
+            "exact source content with durable detail",
+            &[],
+            Some("project:/repo/app"),
+        );
+        exact_source.related_keys = vec!["exact_target".into()];
+        let exact_target = mk_mem_scoped(
+            "exact_target",
+            "lesson",
+            "exact target content with durable detail",
+            &[],
+            Some("project:/repo/app"),
+        );
+        let mut parent_source = mk_mem_scoped(
+            "parent_source",
+            "decision",
+            "parent source content that overlaps by path only",
+            &[],
+            Some("project:/repo"),
+        );
+        parent_source.related_keys = vec!["parent_target".into()];
+        let parent_target = mk_mem_scoped(
+            "parent_target",
+            "lesson",
+            "parent target content that overlaps by path only",
+            &[],
+            Some("project:/repo"),
+        );
+        for rec in [exact_source, exact_target, parent_source, parent_target] {
+            store.memory_save(&rec).await.expect("seed memory");
+        }
+
+        let tool = MemoryRelatedKeysMaterializeTool::new(hub);
+        let schema = tool.schema();
+        assert_eq!(
+            schema.input_schema["properties"]["scope_filter"]["enum"],
+            json!(["compatible", "exact"])
+        );
+        let out = tool
+            .execute(
+                json!({
+                    "dry_run": true,
+                    "scope": "project:/repo/app",
+                    "scope_mode": "local_only",
+                    "scope_filter": "exact",
+                    "max_records": 100,
+                    "max_edges": 10,
+                    "preview_chars": 80
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute materialize dry-run");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(payload["filters"]["scope_filter"], json!("exact"));
+        assert_eq!(payload["selected_edges_count"], json!(1));
+        assert_eq!(payload["selected_edges"][0]["from_key"], json!("exact_source"));
+        assert_eq!(payload["selected_edges"][0]["to_key"], json!("exact_target"));
+
+        let serialized = serde_json::to_string(&payload).expect("serialize payload");
+        assert!(!serialized.contains("parent_source"));
+        assert!(!serialized.contains("parent_target"));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_related_keys_materialize_exact_scope_requires_scope() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let tool = MemoryRelatedKeysMaterializeTool::new(hub);
+        let out = tool
+            .execute(
+                json!({
+                    "dry_run": true,
+                    "scope_filter": "exact"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute materialize dry-run");
+
+        assert!(
+            result_text(&out).contains("scope_filter=exact requires a non-empty scope")
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
     #[test]
