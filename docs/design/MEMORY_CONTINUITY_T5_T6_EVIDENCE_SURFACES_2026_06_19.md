@@ -332,6 +332,41 @@ before any separate owner-approved dry-run experiment plan. It keeps the current
 v36 retrieval-trigger FTS projection as the first-stage baseline and leaves
 candidate-set expansion behind a distinct future approval boundary.
 
+## Candidate-Expansion Dry-Run Plan
+
+Date: 2026-06-21
+
+`memory_biocortex_t6_candidate_expansion_dry_run_plan` consumes a
+`memory_biocortex_t6_candidate_expansion_review_packet` output and emits a
+bounded sampling contract for a later dry-run executor. It exists to turn the
+current weak/narrow candidate-expansion review signal into an explicit
+less-handpicked baseline-miss corpus requirement before any runtime path exists.
+
+The plan is deliberately not an executor:
+
+- it never calls `memory_search`, `memory_neighbors`, or BioCortex;
+- it never samples production memories or graph rows by itself;
+- it never writes memory, graph edges, authorization rows, or approval packets;
+- it never echoes the review packet, source gate, recall summary, case rows,
+  raw queries, raw keys, or content;
+- it always forces `candidate_expansion_experiment_approved=false`,
+  `may_run_candidate_expansion_dry_run_now=false`,
+  `may_expand_candidate_set_now=false`, and
+  `changes_candidate_set_now=false`;
+- it requires a separate owner decision before any dry-run executor is run and a
+  separate post-dry-run decision before any runtime candidate-set expansion path
+  exists.
+
+The default sampling contract requires at least 30 redacted dry-run cases,
+deterministic sampling seed, redacted case ids, baseline-miss strata,
+graph-neighbor recovery strata, trigger-projection strata, and negative
+controls. This is meant to prevent candidate expansion from winning by
+construction on handpicked recovery examples.
+
+Interpretation: this is the next handoff after the review packet. It can make a
+future dry-run experiment auditable, but it still does not authorize running that
+dry run or changing the live candidate set.
+
 ## Fixture Diagnostic Example Follow-up
 
 Date: 2026-06-20
