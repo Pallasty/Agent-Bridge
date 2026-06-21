@@ -33017,6 +33017,30 @@ fn memory_related_key_count_rows(
         .collect()
 }
 
+const MEMORY_RELATED_KEYS_REVIEW_PACKET_SCHEMA: &str =
+    "agent_bridge.memory_related_keys_review_packet.v0";
+
+fn memory_related_keys_review_skip_tags() -> Vec<String> {
+    [
+        "auto_curated",
+        "implicit",
+        "unverified_identifier",
+        "alert",
+        "ttl:7d",
+        "ttl:14d",
+    ]
+    .iter()
+    .map(|tag| (*tag).to_string())
+    .collect()
+}
+
+fn memory_related_keys_review_skip_kinds() -> Vec<String> {
+    ["alert", "work_memory", "snapshot"]
+        .iter()
+        .map(|kind| (*kind).to_string())
+        .collect()
+}
+
 #[allow(clippy::too_many_arguments)]
 fn memory_related_keys_preflight_from_records(
     all: &[MemoryRecord],
@@ -33535,6 +33559,292 @@ fn memory_related_keys_materialize_plan_from_records(
     }
 
     plan
+}
+
+fn memory_related_key_scope_relation_from_values(
+    from_scope: Option<&str>,
+    to_scope: Option<&str>,
+) -> &'static str {
+    match (from_scope, to_scope) {
+        (Some(from), Some(to)) if from == to => "same_scope",
+        (Some(_), Some(_)) => "cross_scope",
+        (Some(_), None) => "target_global",
+        (None, Some(_)) => "source_global",
+        (None, None) => "global_pair",
+    }
+}
+
+fn memory_related_key_review_edge_value(edge: &MemoryRelatedKeyEdgePlan) -> Value {
+    let mut value = edge.value();
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert("proposed_edge_type".into(), json!("relates"));
+        obj.insert("reason".into(), json!("explicit_related_keys"));
+        obj.insert("existing_edge_state".into(), json!("missing"));
+        obj.insert(
+            "scope_relation".into(),
+            json!(memory_related_key_scope_relation_from_values(
+                edge.from_scope.as_deref(),
+                edge.to_scope.as_deref(),
+            )),
+        );
+    }
+    value
+}
+
+fn memory_related_keys_review_packet_from_records(
+    all: &[MemoryRecord],
+    edges_by_key: &HashMap<String, Vec<MemoryEdge>>,
+    requested_scope: Option<&str>,
+    scope_mode: MemorySearchScopeMode,
+    max_pairs: usize,
+    preview_chars: usize,
+) -> Value {
+    let skip_tags = memory_related_keys_review_skip_tags();
+    let skip_kinds = memory_related_keys_review_skip_kinds();
+    let max_edges = max_pairs.min(100);
+    let max_outbound_per_source = 3_u32;
+    let max_inbound_per_target = 3_u32;
+    let by_key: HashMap<&str, &MemoryRecord> =
+        all.iter().map(|rec| (rec.key.as_str(), rec)).collect();
+    let plan = memory_related_keys_materialize_plan_from_records(
+        all,
+        edges_by_key,
+        &skip_tags,
+        &skip_kinds,
+        true,
+        true,
+        requested_scope,
+        scope_mode,
+        max_edges,
+        max_outbound_per_source,
+        max_inbound_per_target,
+        preview_chars,
+    );
+    let selected_edges: Vec<Value> = plan
+        .selected_edges
+        .iter()
+        .map(memory_related_key_review_edge_value)
+        .collect();
+    let ready = !selected_edges.is_empty();
+    let block_reasons: Vec<&str> = if ready {
+        Vec::new()
+    } else if plan.safe_candidate_pairs_before_caps == 0 {
+        vec!["no_safe_related_keys_candidates"]
+    } else {
+        vec!["no_selected_edges_after_caps"]
+    };
+    let projected_orphans = plan.projected_orphans_after_selected();
+
+    json!({
+        "schema": MEMORY_RELATED_KEYS_REVIEW_PACKET_SCHEMA,
+        "read_only": true,
+        "review_packet": {
+            "ready": ready,
+            "block_reasons": block_reasons,
+            "implementation_stage": "ghp1_explicit_related_keys_dry_run_review_only",
+            "selected_edges_count": selected_edges.len(),
+            "safe_candidate_pairs_before_caps": plan.safe_candidate_pairs_before_caps,
+            "visible_total": plan.visible_total,
+            "current_edge_pairs": plan.current_edge_pairs,
+            "current_orphans": plan.current_orphans,
+            "orphan_candidate_nodes_selected": plan.selected_touched_orphans.len(),
+            "projected_orphans_after_selected": projected_orphans,
+            "orphans_reduced_by_selected": (plan.current_orphans as u64).saturating_sub(projected_orphans),
+            "selected_edges": selected_edges,
+        },
+        "filters": {
+            "skip_tags": skip_tags,
+            "skip_kinds": skip_kinds,
+            "require_scope_compatible": true,
+            "dedupe_undirected_pairs": true,
+            "scope": requested_scope,
+            "scope_mode": scope_mode.label(),
+            "max_pairs": max_edges,
+            "max_outbound_per_source": max_outbound_per_source,
+            "max_inbound_per_target": max_inbound_per_target,
+            "preview_chars": preview_chars,
+        },
+        "bucket_counts": plan.bucket_rows(),
+        "top_selected_sources": memory_related_key_count_rows(
+            &plan.selected_source_counts,
+            &by_key,
+            "outbound_selected",
+            12,
+        ),
+        "top_selected_targets": memory_related_key_count_rows(
+            &plan.selected_target_counts,
+            &by_key,
+            "inbound_selected",
+            12,
+        ),
+        "safety": {
+            "read_only": true,
+            "writes_memory": false,
+            "writes_graph_edges": false,
+            "writes_state": false,
+            "changes_search_order": false,
+            "changes_prod_retrieval_order": false,
+            "changes_candidate_set_now": false,
+            "approves_pagerank_prior": false,
+            "approves_centrality_rank_prior": false,
+            "runs_automatic_orphan_linking": false,
+        },
+        "write_contract": {
+            "may_write_edges_now": false,
+            "requires_separate_write_tool": true,
+            "requires_sqlite_backup_before_write": true,
+            "requires_pragma_quick_check_before_write": true,
+            "requires_small_reviewed_batch": true,
+            "requires_topology_rerun_after_write": true,
+            "rollback": "delete reviewed edge batch or restore the pre-write SQLite backup",
+        },
+        "input_contract": {
+            "raw_source_packet_included": false,
+            "content_previews_included": true,
+            "generated_noise_rows_filtered_by_default": true,
+        },
+        "next_step": "Review selected_edges only. A later write, if approved, must use a separate guarded writer with SQLite backup, quick_check, and topology re-run; this packet grants no write or ranking authority.",
+    })
+}
+
+// ===========================================================================
+//          memory_related_keys_review_packet (GHP-1 read-only review packet)
+// ===========================================================================
+
+/// GHP-1 review packet for explicit `related_keys` materialization.
+///
+/// This is stricter than the generic preflight surface: defaults exclude
+/// generated-noise tags and the output is a human-review contract. It never
+/// writes graph edges and never grants ranking or candidate-set authority.
+pub struct MemoryRelatedKeysReviewPacketTool {
+    hub: Hub,
+}
+impl MemoryRelatedKeysReviewPacketTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for MemoryRelatedKeysReviewPacketTool {
+    fn name(&self) -> &'static str {
+        "memory_related_keys_review_packet"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "GHP-1 read-only review packet for explicit memory related_keys graph \
+                hygiene. Produces a capped, same-scope/scope-compatible packet with generated \
+                noise filtered by default. Does not write memory_edges, change ranking, approve \
+                PageRank/centrality, or run automatic orphan linking."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "scope": {
+                        "type": "string",
+                        "description": "Optional memory scope, e.g. project:/abs/path or domain:rust."
+                    },
+                    "scope_mode": {
+                        "type": "string",
+                        "enum": ["local_only", "local_plus_global", "exploratory"],
+                        "default": "local_plus_global",
+                        "description": "When scope is set: local_only keeps matching rows; local_plus_global also includes global/unscoped rows; exploratory scans all rows."
+                    },
+                    "max_records": {
+                        "type": "integer",
+                        "minimum": 100,
+                        "maximum": 50000,
+                        "default": 10000,
+                        "description": "Maximum memory records loaded for analysis."
+                    },
+                    "max_pairs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100,
+                        "default": 20,
+                        "description": "Maximum selected review-packet edge candidates returned."
+                    },
+                    "preview_chars": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 1000,
+                        "default": 160,
+                        "description": "Content preview length for selected edge candidates."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let requested_scope = args
+            .get("scope")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let scope_mode = MemorySearchScopeMode::parse(
+            args.get("scope_mode")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+            true,
+        );
+        let max_records = args
+            .get("max_records")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(10_000)
+            .clamp(100, 50_000) as usize;
+        let max_pairs = args
+            .get("max_pairs")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(20)
+            .min(100) as usize;
+        let preview_chars = args
+            .get("preview_chars")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(160)
+            .min(1000) as usize;
+
+        let skip_tags = memory_related_keys_review_skip_tags();
+        let skip_kinds = memory_related_keys_review_skip_kinds();
+        let all = store
+            .list_memories(None, MemoryListSort::Recent, max_records as u32)
+            .await
+            .unwrap_or_default();
+        let mut edges_by_key: HashMap<String, Vec<MemoryEdge>> = HashMap::new();
+        for rec in &all {
+            if !memory_graph_topology_record_visible(
+                rec,
+                requested_scope,
+                scope_mode,
+                &skip_tags,
+                &skip_kinds,
+            ) {
+                continue;
+            }
+            if let Ok(edges) = store.memory_neighbors(&rec.key).await {
+                edges_by_key.insert(rec.key.clone(), edges);
+            }
+        }
+
+        let mut packet = memory_related_keys_review_packet_from_records(
+            &all,
+            &edges_by_key,
+            requested_scope,
+            scope_mode,
+            max_pairs,
+            preview_chars,
+        );
+        if let Some(obj) = packet.as_object_mut() {
+            obj.insert("loaded_records".into(), json!(all.len()));
+            obj.insert("max_records".into(), json!(max_records));
+        }
+        Ok(ToolResult::json_text(&packet))
+    }
 }
 
 // ===========================================================================
@@ -45131,6 +45441,9 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // Explicit-link diagnostics: read-only projection of related_keys into
     // candidate graph edges before any write-capable backfill is considered.
     "memory_related_keys_preflight",
+    // Explicit-link GHP-1 review packet: stricter read-only packet with
+    // generated-noise filters and no graph-write or rank-prior authority.
+    "memory_related_keys_review_packet",
     // Graph-hygiene diagnostics: read-only orphan candidate preview. The
     // write-capable memory_link_orphans tool stays out of codex-essential.
     "memory_orphan_candidates",
@@ -48636,6 +48949,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Standard,
         Arc::new(MemoryRelatedKeysPreflightTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryRelatedKeysReviewPacketTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
@@ -52334,6 +52653,99 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     }
 
     #[test]
+    fn memory_related_keys_review_packet_is_readonly_capped_and_noise_filtered() {
+        let mut safe_source = mk_mem_scoped(
+            "safe_source",
+            "decision",
+            "safe source content with durable detail",
+            &[],
+            Some("project:/repo"),
+        );
+        safe_source.related_keys = vec!["safe_target".into()];
+        let safe_target = mk_mem_scoped(
+            "safe_target",
+            "lesson",
+            "safe target content with durable detail",
+            &[],
+            Some("project:/repo"),
+        );
+        let mut noisy_source = mk_mem_scoped(
+            "curated_implicit_noisy_source",
+            "decision",
+            "generated source content that should not enter the packet",
+            &["auto_curated"],
+            Some("project:/repo"),
+        );
+        noisy_source.related_keys = vec!["implicit_target".into()];
+        let implicit_target = mk_mem_scoped(
+            "implicit_target",
+            "lesson",
+            "generated target content that should not enter the packet",
+            &["implicit"],
+            Some("project:/repo"),
+        );
+        let all = vec![safe_source, safe_target, noisy_source, implicit_target];
+        let edges_by_key = HashMap::new();
+
+        let packet = memory_related_keys_review_packet_from_records(
+            &all,
+            &edges_by_key,
+            Some("project:/repo"),
+            MemorySearchScopeMode::LocalPlusGlobal,
+            20,
+            80,
+        );
+
+        assert_eq!(
+            packet["schema"],
+            json!("agent_bridge.memory_related_keys_review_packet.v0")
+        );
+        assert_eq!(packet["read_only"], json!(true));
+        assert_eq!(packet["review_packet"]["ready"], json!(true));
+        assert_eq!(packet["review_packet"]["selected_edges_count"], json!(1));
+        assert_eq!(
+            packet["review_packet"]["selected_edges"][0]["proposed_edge_type"],
+            json!("relates")
+        );
+        assert_eq!(
+            packet["review_packet"]["selected_edges"][0]["reason"],
+            json!("explicit_related_keys")
+        );
+        assert_eq!(
+            packet["review_packet"]["selected_edges"][0]["existing_edge_state"],
+            json!("missing")
+        );
+        assert_eq!(
+            packet["filters"]["skip_tags"],
+            json!(["auto_curated", "implicit", "unverified_identifier", "alert", "ttl:7d", "ttl:14d"])
+        );
+        assert_eq!(packet["safety"]["writes_graph_edges"], json!(false));
+        assert_eq!(packet["safety"]["changes_prod_retrieval_order"], json!(false));
+        assert_eq!(packet["safety"]["changes_candidate_set_now"], json!(false));
+        assert_eq!(packet["write_contract"]["may_write_edges_now"], json!(false));
+
+        let serialized = serde_json::to_string(&packet).expect("serialize packet");
+        assert!(!serialized.contains("curated_implicit_noisy_source"));
+        assert!(!serialized.contains("implicit_target"));
+    }
+
+    #[test]
+    fn tool_policy_codex_essential_exposes_related_keys_review_packet_not_materializer() {
+        let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+        let extras = p.extras();
+        assert!(extras.contains(&"memory_related_keys_review_packet"));
+        assert!(!extras.contains(&"memory_related_keys_materialize"));
+
+        let names: Vec<String> = build_registry_with_policy(Hub::builder().build(), p)
+            .list()
+            .into_iter()
+            .map(|schema| schema.name)
+            .collect();
+        assert!(names.iter().any(|name| name == "memory_related_keys_review_packet"));
+        assert!(!names.iter().any(|name| name == "memory_related_keys_materialize"));
+    }
+
+    #[test]
     fn memory_search_scope_filter_is_strict_by_default() {
         let scoped = mk_mem_scoped(
             "scoped",
@@ -54494,9 +54906,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 67 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 68 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-        //      + DIRECT(55: 6 avatar observation/sync/renderer tools
+        //      + DIRECT(58: 6 avatar observation/sync/renderer tools
         //      + xiao_shu_action_request + 14 mobile bridge tools
         //      + memory_graph_topology + memory_retrieval_feedback
         //      + memory_consolidation_queue
@@ -54515,6 +54927,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         //      + memory_neural_critic_shadow_eval
         //      + biocortex_retrieval_shadow
         //      + memory_related_keys_preflight
+        //      + memory_related_keys_review_packet
         //      + memory_orphan_candidates + memory_orphan_inventory
         //      + desktop_snapshot + vision_grounding_ocr + desktop_verify
         //      + macos_ax_probe + macos_ax_verify + semantic_bus_adapter_report
@@ -54522,12 +54935,12 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         //      + semantic_bus_runtime_conformance
         //      + semantic_bus_peer_conformance
         //      + system_control
-        //      + 6 remote-steering tools: agent_steer_launch/drive/capture/list/kill
-        //      + agent_orchestrate_scan, added by d4fd74d).
+        //      + 5 remote-steering tools: agent_steer_launch/drive/capture/list/kill
+        //      + agent_orchestrate_scan).
         // forum_digest joined via the FORUM_READ capability group (2026-05-23).
         // Native-overlap probes such as browser_lite_probe stay in broader
         // profiles, not codex-essential direct extras.
-        assert_eq!(extras.len(), 67);
+        assert_eq!(extras.len(), 68);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -54586,6 +54999,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(extras.contains(&"memory_neural_critic_shadow_eval"));
         assert!(extras.contains(&"biocortex_retrieval_shadow"));
         assert!(extras.contains(&"memory_related_keys_preflight"));
+        assert!(extras.contains(&"memory_related_keys_review_packet"));
         assert!(!extras.contains(&"memory_related_keys_materialize"));
         assert!(extras.contains(&"memory_orphan_candidates"));
         assert!(extras.contains(&"memory_orphan_inventory"));
