@@ -409,6 +409,34 @@ Interpretation: this creates a safe place to compare a broader, less-handpicked
 baseline-miss corpus against the existing v36 FTS baseline and graph-neighbor
 candidate expansion evidence. It does not grant candidate-expansion authority.
 
+## Candidate-Expansion Human-Review Packet
+
+Date: 2026-06-21
+
+`memory_biocortex_t6_candidate_expansion_human_review_packet` is the next
+read-only contract layer after the dry-run report. It consumes only the safe
+aggregate fields from `memory_biocortex_t6_candidate_expansion_dry_run_report`
+and prepares a post-dry-run human decision surface.
+
+The packet exists to make the boundary explicit:
+
+- it verifies the source report schema, ready state, and authority-denial
+  contract;
+- it carries forward aggregate metrics, sampling-contract facts, and
+  evidence-strength caveats;
+- it lists human decision options such as requesting more evidence, rejecting
+  the path, or approving the next design gate only;
+- it never echoes the dry-run report, dry-run plan, recall-expansion summary,
+  `case_rows`, raw queries, raw keys, content, or raw errors;
+- it always forces `candidate_expansion_experiment_approved=false`,
+  `may_run_candidate_expansion_dry_run_now=false`,
+  `may_expand_candidate_set_now=false`, and
+  `changes_candidate_set_now=false`.
+
+Interpretation: a ready human-review packet means the evidence is presentable
+for owner/operator judgment. It is not an authorization record and does not
+create any runtime candidate-set expansion path.
+
 ## Fixture Diagnostic Example Follow-up
 
 Date: 2026-06-20

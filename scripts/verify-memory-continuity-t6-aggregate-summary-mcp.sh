@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Read-only MCP smoke for the T6 aggregate-only recall summary chain.
+# Read-only MCP smoke for the T6 aggregate-only recall summary and human-review chain.
 # Verifies tools/list schema + tools/call behavior without writing memory or
 # granting candidate-set/runtime authority.
 
@@ -109,10 +109,13 @@ tools = {
 }
 summary_tool = tools.get("memory_biocortex_recall_expansion_summary")
 report_tool = tools.get("memory_biocortex_t6_candidate_expansion_dry_run_report")
+human_review_tool = tools.get("memory_biocortex_t6_candidate_expansion_human_review_packet")
 if not summary_tool:
     fail("memory_biocortex_recall_expansion_summary missing from tools/list")
 if not report_tool:
     fail("memory_biocortex_t6_candidate_expansion_dry_run_report missing from tools/list")
+if not human_review_tool:
+    fail("memory_biocortex_t6_candidate_expansion_human_review_packet missing from tools/list")
 
 summary_props = (summary_tool.get("inputSchema") or {}).get("properties") or {}
 if "include_case_rows" not in summary_props:
@@ -221,6 +224,48 @@ if "case_rows" in report:
 if "recall_expansion_summary" in report:
     fail("dry-run report leaked source recall_expansion_summary")
 
+send(
+    {
+        "jsonrpc": "2.0",
+        "id": 5,
+        "method": "tools/call",
+        "params": {
+            "name": "memory_biocortex_t6_candidate_expansion_human_review_packet",
+            "arguments": {
+                "candidate_expansion_dry_run_report": report,
+                "reviewer": "mcp-smoke",
+            },
+        },
+    }
+)
+messages = read_until({5})
+if 5 not in messages:
+    fail("missing human-review packet response")
+if "error" in messages[5]:
+    fail(f"human-review packet call error: {messages[5]['error']}")
+human_review_packet = text_json(messages[5])
+if (
+    human_review_packet.get("schema")
+    != "agent_bridge.memory_biocortex_t6_candidate_expansion_human_review_packet.v0"
+):
+    fail("unexpected human-review packet schema")
+if human_review_packet.get("input_contract", {}).get("dry_run_report_included") is not False:
+    fail("human-review packet echoed source dry-run report")
+if (
+    human_review_packet.get("review_contract", {}).get("may_expand_candidate_set_now")
+    is not False
+):
+    fail("human-review packet granted candidate expansion authority")
+if (
+    human_review_packet.get("review_contract", {}).get("may_run_candidate_expansion_dry_run_now")
+    is not False
+):
+    fail("human-review packet granted dry-run execution authority")
+if "candidate_expansion_dry_run_report" in human_review_packet:
+    fail("human-review packet leaked source dry-run report")
+if "case_rows" in human_review_packet:
+    fail("human-review packet leaked top-level case_rows")
+
 print(
     json.dumps(
         {
@@ -235,6 +280,10 @@ print(
             "may_expand_candidate_set_now": report["experiment_contract"][
                 "may_expand_candidate_set_now"
             ],
+            "human_review_ready": human_review_packet["human_review_packet"]["ready"],
+            "human_review_may_expand_candidate_set_now": human_review_packet[
+                "review_contract"
+            ]["may_expand_candidate_set_now"],
         },
         indent=2,
         sort_keys=True,

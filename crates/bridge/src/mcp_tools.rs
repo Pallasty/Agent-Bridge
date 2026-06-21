@@ -37271,6 +37271,8 @@ const MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_DRY_RUN_PLAN_SCHEMA: &str =
     "agent_bridge.memory_biocortex_t6_candidate_expansion_dry_run_plan.v0";
 const MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_DRY_RUN_REPORT_SCHEMA: &str =
     "agent_bridge.memory_biocortex_t6_candidate_expansion_dry_run_report.v0";
+const MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_HUMAN_REVIEW_PACKET_SCHEMA: &str =
+    "agent_bridge.memory_biocortex_t6_candidate_expansion_human_review_packet.v0";
 
 fn memory_biocortex_t6_clamp_label(value: &str, max_bytes: usize) -> String {
     let value = value.trim();
@@ -38150,6 +38152,276 @@ impl McpTool for MemoryBioCortexT6CandidateExpansionDryRunReportTool {
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
         Ok(ToolResult::json_text(
             &memory_biocortex_t6_candidate_expansion_dry_run_report_payload(args),
+        ))
+    }
+}
+
+fn memory_biocortex_t6_candidate_expansion_human_review_packet_payload(args: Value) -> Value {
+    let report = args
+        .get("candidate_expansion_dry_run_report")
+        .unwrap_or(&Value::Null);
+    let reviewer = args
+        .get("reviewer")
+        .and_then(Value::as_str)
+        .map(|s| memory_biocortex_t6_clamp_label(s, 80))
+        .filter(|s| !s.is_empty());
+    let commit = args
+        .get("commit")
+        .and_then(Value::as_str)
+        .map(|s| memory_biocortex_t6_clamp_label(s, 80))
+        .filter(|s| !s.is_empty());
+    let forum_post_id = args
+        .get("forum_post_id")
+        .and_then(Value::as_str)
+        .map(|s| memory_biocortex_t6_clamp_label(s, 80))
+        .filter(|s| !s.is_empty());
+    let memory_key = args
+        .get("memory_key")
+        .and_then(Value::as_str)
+        .map(|s| memory_biocortex_t6_clamp_label(s, 160))
+        .filter(|s| !s.is_empty());
+
+    let report_schema_valid = memory_biocortex_t6_string_at(report, "/schema")
+        == Some(MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_DRY_RUN_REPORT_SCHEMA);
+    let report_ready = memory_biocortex_t6_bool_at(report, "/dry_run_report/ready") == Some(true);
+    let report_safe_contract = memory_biocortex_t6_bool_at(report, "/read_only") == Some(true)
+        && memory_biocortex_t6_bool_at(
+            report,
+            "/experiment_contract/candidate_expansion_experiment_approved",
+        ) == Some(false)
+        && memory_biocortex_t6_bool_at(
+            report,
+            "/experiment_contract/may_run_candidate_expansion_dry_run_now",
+        ) == Some(false)
+        && memory_biocortex_t6_bool_at(
+            report,
+            "/experiment_contract/may_expand_candidate_set_now",
+        ) == Some(false)
+        && memory_biocortex_t6_bool_at(report, "/experiment_contract/changes_candidate_set_now")
+            == Some(false)
+        && memory_biocortex_t6_bool_at(report, "/experiment_contract/runtime_influence_approved")
+            == Some(false)
+        && memory_biocortex_t6_bool_at(report, "/experiment_contract/may_change_search_order_now")
+            == Some(false);
+    let report_claims_authority = memory_biocortex_t6_any_true(
+        report,
+        &[
+            "/experiment_contract/candidate_expansion_experiment_approved",
+            "/experiment_contract/may_run_candidate_expansion_dry_run_now",
+            "/experiment_contract/may_expand_candidate_set_now",
+            "/experiment_contract/changes_candidate_set_now",
+            "/experiment_contract/runtime_influence_approved",
+            "/experiment_contract/may_change_search_order_now",
+        ],
+    );
+    let report_flags_raw = memory_biocortex_t6_has_raw_payload_fields(report)
+        || report.get("candidate_expansion_dry_run_plan").is_some()
+        || report.get("recall_expansion_summary").is_some()
+        || report.get("case_rows").is_some()
+        || memory_biocortex_t6_any_true(
+            report,
+            &[
+                "/input_contract/dry_run_plan_included",
+                "/input_contract/recall_expansion_summary_included",
+                "/input_contract/case_rows_included",
+                "/input_contract/raw_query_included",
+                "/input_contract/raw_queries_included",
+                "/input_contract/raw_keys_included",
+                "/input_contract/content_included",
+                "/input_contract/raw_error_included",
+            ],
+        );
+
+    let mut block_reasons = BTreeSet::<String>::new();
+    if !report_schema_valid {
+        memory_biocortex_t6_push_reason(&mut block_reasons, "source_dry_run_report_schema_invalid");
+    }
+    if !report_ready {
+        memory_biocortex_t6_push_reason(&mut block_reasons, "source_dry_run_report_not_ready");
+    }
+    if !report_safe_contract || report_claims_authority {
+        memory_biocortex_t6_push_reason(
+            &mut block_reasons,
+            "source_dry_run_report_claims_runtime_authority",
+        );
+    }
+    if report_flags_raw {
+        memory_biocortex_t6_push_reason(&mut block_reasons, "source_dry_run_report_contains_raw");
+    }
+    for reason in memory_biocortex_t6_string_array_at(report, "/dry_run_report/block_reasons") {
+        memory_biocortex_t6_push_reason(&mut block_reasons, &reason);
+    }
+
+    let ready = block_reasons.is_empty();
+    let verdict = if ready {
+        "ready_for_post_dry_run_human_decision"
+    } else {
+        "blocked_collect_more_dry_run_evidence"
+    };
+    let next_gate = if ready {
+        "owner_decision_before_candidate_set_expansion_design"
+    } else {
+        "produce_ready_redacted_candidate_expansion_dry_run_report"
+    };
+
+    json!({
+        "schema": MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_HUMAN_REVIEW_PACKET_SCHEMA,
+        "generated_at": unix_now_secs(),
+        "read_only": true,
+        "purpose": "T6 candidate-expansion human-review packet: consume a safe dry-run report and prepare an explicit post-dry-run human decision surface without approving runtime candidate-set expansion.",
+        "human_review_packet": {
+            "ready": ready,
+            "block_reasons": block_reasons.into_iter().collect::<Vec<_>>(),
+            "decision": {
+                "verdict": verdict,
+                "next_gate": next_gate,
+                "human_review_required": true,
+                "candidate_expansion_authority_out_of_scope": true,
+            },
+            "metrics": {
+                "evaluated_count": memory_biocortex_t6_u64_at(report, "/dry_run_report/metrics/evaluated_count"),
+                "search_error_count": memory_biocortex_t6_u64_at(report, "/dry_run_report/metrics/search_error_count"),
+                "baseline_hit_count": memory_biocortex_t6_u64_at(report, "/dry_run_report/metrics/baseline_hit_count"),
+                "baseline_miss_count": memory_biocortex_t6_u64_at(report, "/dry_run_report/metrics/baseline_miss_count"),
+                "graph_expansion_found_count": memory_biocortex_t6_u64_at(report, "/dry_run_report/metrics/graph_expansion_found_count"),
+                "expanded_hit_count": memory_biocortex_t6_u64_at(report, "/dry_run_report/metrics/expanded_hit_count"),
+                "candidate_expansion_added_hit_count": memory_biocortex_t6_u64_at(report, "/dry_run_report/metrics/candidate_expansion_added_hit_count"),
+                "candidate_expansion_added_hit_rate": memory_biocortex_t6_f64_at(report, "/dry_run_report/metrics/candidate_expansion_added_hit_rate"),
+                "graph_expansion_found_rate": memory_biocortex_t6_f64_at(report, "/dry_run_report/metrics/graph_expansion_found_rate"),
+            },
+            "sampling_contract": {
+                "min_dry_run_cases": memory_biocortex_t6_u64_at(report, "/dry_run_report/sampling_contract/min_dry_run_cases"),
+                "actual_evaluated_count": memory_biocortex_t6_u64_at(report, "/dry_run_report/sampling_contract/actual_evaluated_count"),
+                "enough_cases": memory_biocortex_t6_bool_at(report, "/dry_run_report/sampling_contract/enough_cases"),
+                "requires_less_handpicked_baseline_miss_corpus": memory_biocortex_t6_bool_at(report, "/dry_run_report/sampling_contract/requires_less_handpicked_baseline_miss_corpus"),
+                "requires_negative_controls": memory_biocortex_t6_bool_at(report, "/dry_run_report/sampling_contract/requires_negative_controls"),
+                "requires_trigger_projection_stratum": memory_biocortex_t6_bool_at(report, "/dry_run_report/sampling_contract/requires_trigger_projection_stratum"),
+            },
+            "evidence_strength": {
+                "tier": memory_biocortex_t6_string_at(report, "/dry_run_report/evidence_strength/tier"),
+                "caveats": memory_biocortex_t6_string_array_at(report, "/dry_run_report/evidence_strength/caveats"),
+            },
+        },
+        "human_decision_options": [
+            {
+                "option": "request_more_redacted_dry_run_evidence",
+                "effect": "No runtime change; produce a broader or better-stratified dry-run report."
+            },
+            {
+                "option": "reject_candidate_expansion_path",
+                "effect": "No runtime change; stop T6 candidate-expansion progression."
+            },
+            {
+                "option": "approve_next_design_gate_only",
+                "effect": "Allows design of a separate candidate-expansion experiment gate, but this packet still grants no runtime authority."
+            }
+        ],
+        "review_contract": {
+            "human_review_required": true,
+            "candidate_expansion_experiment_approved": false,
+            "may_run_candidate_expansion_dry_run_now": false,
+            "may_expand_candidate_set_now": false,
+            "changes_candidate_set_now": false,
+            "runtime_influence_approved": false,
+            "may_change_search_order_now": false,
+            "requires_separate_owner_decision": true,
+            "requires_separate_runtime_gate": true,
+            "this_packet_approves_candidate_expansion": false,
+        },
+        "review_checklist": [
+            "Confirm the source dry-run report is ready and aggregate-only.",
+            "Inspect evaluated count, baseline-miss stratum, search-error count, and added-hit signal.",
+            "Check negative-control and trigger-projection strata before interpreting lift.",
+            "Decide whether more dry-run evidence is needed before any experiment design.",
+            "Require a separate explicit owner decision and runtime gate before candidate-set expansion can exist."
+        ],
+        "decision": {
+            "verdict": verdict,
+            "next_gate": next_gate,
+            "human_review_required": true,
+            "candidate_expansion_authority_out_of_scope": true,
+        },
+        "links": {
+            "reviewer": reviewer,
+            "commit": commit,
+            "forum_post_id": forum_post_id,
+            "memory_key": memory_key,
+        },
+        "input_contract": {
+            "dry_run_report_included": false,
+            "dry_run_plan_included": false,
+            "recall_expansion_summary_included": false,
+            "case_rows_included": false,
+            "raw_query_included": false,
+            "raw_queries_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "raw_error_included": false,
+        },
+        "non_goals": [
+            "Does not run BioCortex.",
+            "Does not call memory_search or memory_neighbors.",
+            "Does not sample production memories or graph rows.",
+            "Does not echo dry-run reports, dry-run plans, recall summaries, case rows, queries, keys, content, or raw errors.",
+            "Does not write memory, graph edges, authorization records, or approval packets.",
+            "Does not approve runtime influence, search-order changes, dry-run execution, or candidate-set expansion."
+        ],
+    })
+}
+
+pub struct MemoryBioCortexT6CandidateExpansionHumanReviewPacketTool;
+impl MemoryBioCortexT6CandidateExpansionHumanReviewPacketTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+#[async_trait]
+impl McpTool for MemoryBioCortexT6CandidateExpansionHumanReviewPacketTool {
+    fn name(&self) -> &'static str {
+        "memory_biocortex_t6_candidate_expansion_human_review_packet"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only T6 candidate-expansion human-review packet. \
+                Consumes a safe candidate-expansion dry-run report and emits an \
+                explicit post-dry-run human decision surface without echoing raw \
+                inputs, calling search, writing state, approving runtime \
+                influence, or expanding candidate sets."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["candidate_expansion_dry_run_report"],
+                "properties": {
+                    "candidate_expansion_dry_run_report": {
+                        "type": "object",
+                        "description": "JSON object produced by memory_biocortex_t6_candidate_expansion_dry_run_report. Unknown/raw fields are ignored and never echoed."
+                    },
+                    "reviewer": {
+                        "type": "string",
+                        "description": "Optional reviewer identity or handle."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Optional implementation commit under review."
+                    },
+                    "forum_post_id": {
+                        "type": "string",
+                        "description": "Optional forum post id linking this human-review packet."
+                    },
+                    "memory_key": {
+                        "type": "string",
+                        "description": "Optional memory key linking this human-review packet."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        Ok(ToolResult::json_text(
+            &memory_biocortex_t6_candidate_expansion_human_review_packet_payload(args),
         ))
     }
 }
@@ -43808,6 +44080,10 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // plan plus an already-redacted recall-expansion summary; it never runs
     // search, samples memories, or grants candidate-set authority.
     "memory_biocortex_t6_candidate_expansion_dry_run_report",
+    // Continuity T6 candidate-expansion human-review packet: consumes the
+    // dry-run report and emits a post-dry-run decision surface; it never
+    // grants runtime candidate-set authority.
+    "memory_biocortex_t6_candidate_expansion_human_review_packet",
     // Continuity T7 neural critic shadow eval: read-only offline held-out
     // comparison against deterministic T3/T4 labels; no model/write authority.
     "memory_neural_critic_shadow_eval",
@@ -47394,6 +47670,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Standard,
         Arc::new(MemoryBioCortexT6CandidateExpansionDryRunReportTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryBioCortexT6CandidateExpansionHumanReviewPacketTool::new()),
     );
     reg_if(
         &mut reg,
@@ -53087,6 +53369,10 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             Tier::Standard,
             "memory_biocortex_t6_candidate_expansion_dry_run_report"
         ));
+        assert!(p.includes(
+            Tier::Standard,
+            "memory_biocortex_t6_candidate_expansion_human_review_packet"
+        ));
         assert!(p.includes(Tier::Standard, "memory_neural_critic_shadow_eval"));
         assert!(p.includes(Tier::Standard, "biocortex_retrieval_shadow"));
         assert!(!p.includes(Tier::Standard, "embed_text"));
@@ -53140,9 +53426,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 63 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 64 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-        //      + DIRECT(51: 6 avatar observation/sync/renderer tools
+        //      + DIRECT(52: 6 avatar observation/sync/renderer tools
         //      + xiao_shu_action_request + 14 mobile bridge tools
         //      + memory_graph_topology + memory_retrieval_feedback
         //      + memory_consolidation_queue
@@ -53154,6 +53440,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         //      + memory_biocortex_t6_candidate_expansion_review_packet
         //      + memory_biocortex_t6_candidate_expansion_dry_run_plan
         //      + memory_biocortex_t6_candidate_expansion_dry_run_report
+        //      + memory_biocortex_t6_candidate_expansion_human_review_packet
         //      + memory_neural_critic_shadow_eval
         //      + biocortex_retrieval_shadow
         //      + memory_related_keys_preflight
@@ -53169,7 +53456,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         // forum_digest joined via the FORUM_READ capability group (2026-05-23).
         // Native-overlap probes such as browser_lite_probe stay in broader
         // profiles, not codex-essential direct extras.
-        assert_eq!(extras.len(), 63);
+        assert_eq!(extras.len(), 64);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -53212,6 +53499,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         ));
         assert!(extras.contains(
             &"memory_biocortex_t6_candidate_expansion_dry_run_report"
+        ));
+        assert!(extras.contains(
+            &"memory_biocortex_t6_candidate_expansion_human_review_packet"
         ));
         assert!(extras.contains(&"memory_neural_critic_shadow_eval"));
         assert!(extras.contains(&"biocortex_retrieval_shadow"));
@@ -65197,6 +65487,195 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(!serialized.contains("secret row hash"));
         assert!(!serialized.contains("secret summary content"));
         assert!(!serialized.contains("\"case_rows\""));
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_t6_candidate_expansion_human_review_packet_accepts_ready_report_without_runtime_authority(
+    ) {
+        let tool = MemoryBioCortexT6CandidateExpansionHumanReviewPacketTool::new();
+        let report = json!({
+            "schema": "agent_bridge.memory_biocortex_t6_candidate_expansion_dry_run_report.v0",
+            "read_only": true,
+            "dry_run_report": {
+                "ready": true,
+                "block_reasons": [],
+                "decision": {
+                    "verdict": "dry_run_report_ready_for_human_review",
+                    "next_gate": "post_dry_run_human_decision_before_candidate_set_expansion",
+                    "human_review_required": true,
+                    "candidate_expansion_authority_out_of_scope": true
+                },
+                "sampling_contract": {
+                    "min_dry_run_cases": 30,
+                    "actual_evaluated_count": 30,
+                    "enough_cases": true,
+                    "requires_less_handpicked_baseline_miss_corpus": true,
+                    "requires_negative_controls": true,
+                    "requires_trigger_projection_stratum": true
+                },
+                "metrics": {
+                    "evaluated_count": 30,
+                    "search_error_count": 0,
+                    "baseline_hit_count": 12,
+                    "baseline_miss_count": 18,
+                    "graph_expansion_found_count": 6,
+                    "expanded_hit_count": 18,
+                    "candidate_expansion_added_hit_count": 6,
+                    "candidate_expansion_added_hit_rate": 0.333,
+                    "graph_expansion_found_rate": 0.333
+                },
+                "evidence_strength": {
+                    "tier": "redacted_dry_run_signal_ready",
+                    "caveats": ["aggregate_only_no_case_rows"]
+                }
+            },
+            "experiment_contract": {
+                "candidate_expansion_experiment_approved": false,
+                "may_run_candidate_expansion_dry_run_now": false,
+                "may_expand_candidate_set_now": false,
+                "changes_candidate_set_now": false,
+                "runtime_influence_approved": false,
+                "may_change_search_order_now": false,
+                "requires_post_dry_run_human_decision": true
+            },
+            "input_contract": {
+                "dry_run_plan_included": false,
+                "recall_expansion_summary_included": false,
+                "case_rows_included": false,
+                "raw_query_included": false,
+                "raw_queries_included": false,
+                "raw_keys_included": false,
+                "content_included": false,
+                "raw_error_included": false
+            },
+            "secret_source_report": "secret report source"
+        });
+
+        let out = tool
+            .execute(
+                json!({
+                    "candidate_expansion_dry_run_report": report,
+                    "reviewer": "codex",
+                    "commit": "79d5276",
+                    "forum_post_id": "3695",
+                    "memory_key": "ab_memory_continuity_t6_aggregate_summary_mcp_smoke_script_20260621"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(
+            payload["schema"],
+            json!("agent_bridge.memory_biocortex_t6_candidate_expansion_human_review_packet.v0")
+        );
+        assert_eq!(payload["read_only"], json!(true));
+        assert_eq!(payload["human_review_packet"]["ready"], json!(true));
+        assert_eq!(
+            payload["human_review_packet"]["decision"]["next_gate"],
+            json!("owner_decision_before_candidate_set_expansion_design")
+        );
+        assert_eq!(
+            payload["human_review_packet"]["metrics"]["candidate_expansion_added_hit_count"],
+            json!(6)
+        );
+        assert_eq!(
+            payload["review_contract"]["candidate_expansion_experiment_approved"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["review_contract"]["may_run_candidate_expansion_dry_run_now"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["review_contract"]["may_expand_candidate_set_now"],
+            json!(false)
+        );
+        assert_eq!(payload["links"]["reviewer"], json!("codex"));
+        assert_eq!(payload["input_contract"]["dry_run_report_included"], json!(false));
+
+        let serialized = serde_json::to_string(&payload).expect("serialize");
+        assert!(!serialized.contains("secret report source"));
+        assert!(!serialized.contains("secret_source_report"));
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_t6_candidate_expansion_human_review_packet_blocks_raw_or_authorized_report(
+    ) {
+        let tool = MemoryBioCortexT6CandidateExpansionHumanReviewPacketTool::new();
+        let report = json!({
+            "schema": "agent_bridge.memory_biocortex_t6_candidate_expansion_dry_run_report.v0",
+            "read_only": true,
+            "dry_run_report": {
+                "ready": false,
+                "block_reasons": ["insufficient_dry_run_cases"],
+                "metrics": {
+                    "evaluated_count": 8,
+                    "search_error_count": 1,
+                    "baseline_miss_count": 0,
+                    "candidate_expansion_added_hit_count": 0,
+                    "candidate_expansion_added_hit_rate": 0.0
+                }
+            },
+            "experiment_contract": {
+                "candidate_expansion_experiment_approved": true,
+                "may_run_candidate_expansion_dry_run_now": true,
+                "may_expand_candidate_set_now": true,
+                "changes_candidate_set_now": true,
+                "runtime_influence_approved": true,
+                "may_change_search_order_now": true
+            },
+            "input_contract": {
+                "dry_run_plan_included": true,
+                "recall_expansion_summary_included": false,
+                "case_rows_included": false,
+                "raw_query_included": true,
+                "raw_keys_included": false,
+                "content_included": false
+            },
+            "candidate_expansion_dry_run_plan": {"secret": "source plan"},
+            "raw_query": "secret report query",
+            "content": "secret report content"
+        });
+
+        let out = tool
+            .execute(
+                json!({
+                    "candidate_expansion_dry_run_report": report,
+                    "reviewer": "codex"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(payload["human_review_packet"]["ready"], json!(false));
+        let reasons = payload["human_review_packet"]["block_reasons"]
+            .as_array()
+            .expect("block reasons");
+        assert!(reasons.contains(&json!("source_dry_run_report_not_ready")));
+        assert!(reasons.contains(&json!("source_dry_run_report_claims_runtime_authority")));
+        assert!(reasons.contains(&json!("source_dry_run_report_contains_raw")));
+        assert!(reasons.contains(&json!("insufficient_dry_run_cases")));
+        assert_eq!(
+            payload["review_contract"]["may_run_candidate_expansion_dry_run_now"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["review_contract"]["may_expand_candidate_set_now"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["decision"]["verdict"],
+            json!("blocked_collect_more_dry_run_evidence")
+        );
+
+        let serialized = serde_json::to_string(&payload).expect("serialize");
+        assert!(!serialized.contains("secret report query"));
+        assert!(!serialized.contains("secret report content"));
+        assert!(!serialized.contains("source plan"));
     }
 
     #[tokio::test]
