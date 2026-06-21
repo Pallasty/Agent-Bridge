@@ -504,6 +504,39 @@ Interpretation: this is not a runtime gate. It is the checklist that a later,
 separately approved runtime gate must satisfy before any code path can influence
 candidate expansion.
 
+## T6 Candidate Expansion Runtime-Gate Design Artifact
+
+Date: 2026-06-21
+
+`memory_biocortex_t6_candidate_expansion_runtime_gate_design_artifact` is the
+owner-reviewable design surface after the runtime-gate preflight. It consumes
+only a safe
+`memory_biocortex_t6_candidate_expansion_runtime_gate_preflight`.
+
+The artifact blocks unless the source preflight is ready, read-only, explicitly
+permits only design-artifact preparation, carries the required runtime-gate
+design requirements, and still denies runtime code, dry-run execution,
+candidate-set expansion, runtime influence, and search-order changes.
+
+Even when ready, the artifact only prepares an owner review checklist. It names
+the separate runtime gate, separate owner runtime approval, feature flag default
+off, shadow mode first, deterministic replay, bounded candidate delta, negative
+controls, telemetry fields, and rollback contract that must exist before a
+future implementation path can be considered.
+
+The artifact never echoes the source preflight, owner-decision record,
+human-review packet, dry-run report, dry-run plan, recall-expansion summary,
+`case_rows`, raw queries, raw keys, content, or raw errors. It always forces
+`may_implement_runtime_gate_code_now=false`,
+`candidate_expansion_experiment_approved=false`,
+`may_run_candidate_expansion_dry_run_now=false`,
+`may_expand_candidate_set_now=false`, and
+`this_artifact_approves_runtime_candidate_expansion=false`.
+
+Interpretation: this is still not a runtime gate and not runtime code. It is the
+design artifact that a separate owner runtime approval must review before any
+candidate-expansion implementation can be started.
+
 ## Fixture Diagnostic Example Follow-up
 
 Date: 2026-06-20
