@@ -37252,6 +37252,8 @@ const MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_REVIEW_PACKET_SCHEMA: &str =
     "agent_bridge.memory_biocortex_t6_candidate_expansion_review_packet.v0";
 const MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_DRY_RUN_PLAN_SCHEMA: &str =
     "agent_bridge.memory_biocortex_t6_candidate_expansion_dry_run_plan.v0";
+const MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_DRY_RUN_REPORT_SCHEMA: &str =
+    "agent_bridge.memory_biocortex_t6_candidate_expansion_dry_run_report.v0";
 
 fn memory_biocortex_t6_clamp_label(value: &str, max_bytes: usize) -> String {
     let value = value.trim();
@@ -37798,6 +37800,339 @@ impl McpTool for MemoryBioCortexT6CandidateExpansionDryRunPlanTool {
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
         Ok(ToolResult::json_text(
             &memory_biocortex_t6_candidate_expansion_dry_run_plan_payload(args),
+        ))
+    }
+}
+
+fn memory_biocortex_t6_candidate_expansion_dry_run_report_payload(args: Value) -> Value {
+    let plan = args
+        .get("candidate_expansion_dry_run_plan")
+        .unwrap_or(&Value::Null);
+    let summary = args
+        .get("recall_expansion_summary")
+        .unwrap_or(&Value::Null);
+    let reviewer = args
+        .get("reviewer")
+        .and_then(Value::as_str)
+        .map(|s| memory_biocortex_t6_clamp_label(s, 80))
+        .filter(|s| !s.is_empty());
+    let commit = args
+        .get("commit")
+        .and_then(Value::as_str)
+        .map(|s| memory_biocortex_t6_clamp_label(s, 80))
+        .filter(|s| !s.is_empty());
+    let forum_post_id = args
+        .get("forum_post_id")
+        .and_then(Value::as_str)
+        .map(|s| memory_biocortex_t6_clamp_label(s, 80))
+        .filter(|s| !s.is_empty());
+    let memory_key = args
+        .get("memory_key")
+        .and_then(Value::as_str)
+        .map(|s| memory_biocortex_t6_clamp_label(s, 160))
+        .filter(|s| !s.is_empty());
+
+    let plan_schema_valid = memory_biocortex_t6_string_at(plan, "/schema")
+        == Some(MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_DRY_RUN_PLAN_SCHEMA);
+    let plan_ready = memory_biocortex_t6_bool_at(plan, "/dry_run_plan/ready") == Some(true);
+    let plan_safe_contract = memory_biocortex_t6_bool_at(plan, "/read_only") == Some(true)
+        && memory_biocortex_t6_bool_at(
+            plan,
+            "/experiment_contract/candidate_expansion_experiment_approved",
+        ) == Some(false)
+        && memory_biocortex_t6_bool_at(
+            plan,
+            "/experiment_contract/may_run_candidate_expansion_dry_run_now",
+        ) == Some(false)
+        && memory_biocortex_t6_bool_at(
+            plan,
+            "/experiment_contract/may_expand_candidate_set_now",
+        ) == Some(false)
+        && memory_biocortex_t6_bool_at(plan, "/experiment_contract/changes_candidate_set_now")
+            == Some(false)
+        && memory_biocortex_t6_bool_at(plan, "/experiment_contract/runtime_influence_approved")
+            == Some(false)
+        && memory_biocortex_t6_bool_at(plan, "/experiment_contract/may_change_search_order_now")
+            == Some(false);
+    let plan_claims_authority = memory_biocortex_t6_any_true(
+        plan,
+        &[
+            "/experiment_contract/candidate_expansion_experiment_approved",
+            "/experiment_contract/may_run_candidate_expansion_dry_run_now",
+            "/experiment_contract/may_expand_candidate_set_now",
+            "/experiment_contract/changes_candidate_set_now",
+            "/experiment_contract/runtime_influence_approved",
+            "/experiment_contract/may_change_search_order_now",
+        ],
+    );
+    let plan_flags_raw = memory_biocortex_t6_has_raw_payload_fields(plan)
+        || memory_biocortex_t6_any_true(
+            plan,
+            &[
+                "/input_contract/review_packet_included",
+                "/input_contract/source_gate_included",
+                "/input_contract/recall_expansion_summary_included",
+                "/input_contract/case_rows_included",
+                "/input_contract/raw_query_included",
+                "/input_contract/raw_queries_included",
+                "/input_contract/raw_keys_included",
+                "/input_contract/content_included",
+            ],
+        );
+
+    let summary_schema_valid = memory_biocortex_t6_string_at(summary, "/schema")
+        == Some(MEMORY_BIOCORTEX_RECALL_EXPANSION_SUMMARY_SCHEMA);
+    let summary_safe_contract = memory_biocortex_t6_bool_at(summary, "/read_only") == Some(true)
+        && memory_biocortex_t6_bool_at(summary, "/safety/writes_memory") == Some(false)
+        && memory_biocortex_t6_bool_at(summary, "/safety/writes_state") == Some(false)
+        && memory_biocortex_t6_bool_at(summary, "/safety/runs_biocortex") == Some(false)
+        && memory_biocortex_t6_bool_at(summary, "/safety/changes_search_order") == Some(false)
+        && memory_biocortex_t6_bool_at(summary, "/safety/changes_prod_retrieval_order")
+            == Some(false)
+        && memory_biocortex_t6_bool_at(summary, "/safety/changes_candidate_set_now")
+            == Some(false);
+    let summary_claims_authority = memory_biocortex_t6_any_true(
+        summary,
+        &[
+            "/safety/writes_memory",
+            "/safety/writes_state",
+            "/safety/runs_biocortex",
+            "/safety/changes_search_order",
+            "/safety/changes_prod_retrieval_order",
+            "/safety/changes_candidate_set_now",
+            "/changes_candidate_set_now",
+            "/changes_memory_search_order",
+        ],
+    );
+    let summary_flags_raw = memory_biocortex_t6_has_raw_payload_fields(summary)
+        || summary.get("case_rows").is_some()
+        || memory_biocortex_t6_any_true(
+            summary,
+            &[
+                "/input_contract/raw_query_included",
+                "/input_contract/raw_queries_included",
+                "/input_contract/raw_keys_included",
+                "/input_contract/content_included",
+                "/input_contract/candidate_content_included",
+                "/input_contract/raw_error_included",
+            ],
+        );
+
+    let min_dry_run_cases =
+        memory_biocortex_t6_u64_at(plan, "/dry_run_plan/sampling_contract/min_dry_run_cases")
+            .unwrap_or(30);
+    let evaluated_count = memory_biocortex_t6_u64_at(summary, "/metrics/evaluated_count");
+    let search_error_count = memory_biocortex_t6_u64_at(summary, "/metrics/search_error_count");
+    let baseline_miss_count = memory_biocortex_t6_u64_at(summary, "/metrics/baseline_miss_count");
+    let added_hit_count =
+        memory_biocortex_t6_u64_at(summary, "/metrics/candidate_expansion_added_hit_count");
+    let enough_cases = evaluated_count.unwrap_or(0) >= min_dry_run_cases;
+    let no_search_errors = search_error_count.unwrap_or(u64::MAX) == 0;
+    let has_baseline_misses = baseline_miss_count.unwrap_or(0) > 0;
+
+    let mut block_reasons = BTreeSet::<String>::new();
+    if !plan_schema_valid {
+        memory_biocortex_t6_push_reason(&mut block_reasons, "source_dry_run_plan_schema_invalid");
+    }
+    if !plan_ready {
+        memory_biocortex_t6_push_reason(&mut block_reasons, "source_dry_run_plan_not_ready");
+    }
+    if !plan_safe_contract || plan_claims_authority {
+        memory_biocortex_t6_push_reason(
+            &mut block_reasons,
+            "source_dry_run_plan_claims_runtime_authority",
+        );
+    }
+    if plan_flags_raw {
+        memory_biocortex_t6_push_reason(&mut block_reasons, "source_dry_run_plan_contains_raw");
+    }
+    if !summary_schema_valid {
+        memory_biocortex_t6_push_reason(
+            &mut block_reasons,
+            "recall_expansion_summary_schema_invalid",
+        );
+    }
+    if !summary_safe_contract || summary_claims_authority {
+        memory_biocortex_t6_push_reason(
+            &mut block_reasons,
+            "recall_expansion_summary_claims_runtime_authority",
+        );
+    }
+    if summary_flags_raw {
+        memory_biocortex_t6_push_reason(
+            &mut block_reasons,
+            "recall_expansion_summary_contains_raw_or_case_rows",
+        );
+    }
+    if !enough_cases {
+        memory_biocortex_t6_push_reason(&mut block_reasons, "insufficient_dry_run_cases");
+    }
+    if !no_search_errors {
+        memory_biocortex_t6_push_reason(&mut block_reasons, "recall_expansion_search_errors");
+    }
+    if !has_baseline_misses {
+        memory_biocortex_t6_push_reason(&mut block_reasons, "missing_baseline_miss_stratum");
+    }
+
+    let ready = block_reasons.is_empty();
+    let verdict = if ready {
+        "dry_run_report_ready_for_human_review"
+    } else {
+        "blocked_collect_more_dry_run_evidence"
+    };
+    let next_gate = if ready {
+        "post_dry_run_human_decision_before_candidate_set_expansion"
+    } else {
+        "produce_ready_redacted_candidate_expansion_dry_run"
+    };
+
+    json!({
+        "schema": MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_DRY_RUN_REPORT_SCHEMA,
+        "generated_at": unix_now_secs(),
+        "read_only": true,
+        "purpose": "T6 candidate-expansion dry-run report: consume a ready dry-run plan plus a redacted recall-expansion summary, then report aggregate dry-run evidence without running search, sampling memories, echoing raw rows, or granting runtime candidate-set authority.",
+        "dry_run_report": {
+            "ready": ready,
+            "block_reasons": block_reasons.into_iter().collect::<Vec<_>>(),
+            "decision": {
+                "verdict": verdict,
+                "next_gate": next_gate,
+                "human_review_required": true,
+                "candidate_expansion_authority_out_of_scope": true,
+            },
+            "sampling_contract": {
+                "min_dry_run_cases": min_dry_run_cases,
+                "actual_evaluated_count": evaluated_count,
+                "enough_cases": enough_cases,
+                "requires_less_handpicked_baseline_miss_corpus": memory_biocortex_t6_bool_at(plan, "/dry_run_plan/sampling_contract/requires_less_handpicked_baseline_miss_corpus"),
+                "requires_negative_controls": memory_biocortex_t6_bool_at(plan, "/dry_run_plan/sampling_contract/requires_negative_controls"),
+                "requires_trigger_projection_stratum": memory_biocortex_t6_bool_at(plan, "/dry_run_plan/sampling_contract/requires_trigger_projection_stratum"),
+            },
+            "metrics": {
+                "evaluated_count": evaluated_count,
+                "search_error_count": search_error_count,
+                "baseline_hit_count": memory_biocortex_t6_u64_at(summary, "/metrics/baseline_hit_count"),
+                "baseline_miss_count": baseline_miss_count,
+                "graph_expansion_found_count": memory_biocortex_t6_u64_at(summary, "/metrics/graph_expansion_found_count"),
+                "expanded_hit_count": memory_biocortex_t6_u64_at(summary, "/metrics/expanded_hit_count"),
+                "candidate_expansion_added_hit_count": added_hit_count,
+                "candidate_expansion_added_hit_rate": memory_biocortex_t6_f64_at(summary, "/metrics/candidate_expansion_added_hit_rate"),
+                "graph_expansion_found_rate": memory_biocortex_t6_f64_at(summary, "/metrics/graph_expansion_found_rate"),
+            },
+            "evidence_strength": {
+                "tier": if ready && added_hit_count.unwrap_or(0) > 0 {
+                    "redacted_dry_run_signal_ready"
+                } else if ready {
+                    "redacted_dry_run_no_added_hit"
+                } else {
+                    "blocked"
+                },
+                "caveats": [
+                    "aggregate_only_no_case_rows",
+                    "does_not_score_production_runtime_rank",
+                    "requires_post_dry_run_human_decision"
+                ],
+            },
+        },
+        "experiment_contract": {
+            "candidate_expansion_experiment_approved": false,
+            "may_run_candidate_expansion_dry_run_now": false,
+            "may_expand_candidate_set_now": false,
+            "changes_candidate_set_now": false,
+            "runtime_influence_approved": false,
+            "may_change_search_order_now": false,
+            "requires_post_dry_run_human_decision": true,
+        },
+        "decision": {
+            "verdict": verdict,
+            "next_gate": next_gate,
+            "human_review_required": true,
+            "candidate_expansion_authority_out_of_scope": true,
+        },
+        "links": {
+            "reviewer": reviewer,
+            "commit": commit,
+            "forum_post_id": forum_post_id,
+            "memory_key": memory_key,
+        },
+        "input_contract": {
+            "dry_run_plan_included": false,
+            "recall_expansion_summary_included": false,
+            "case_rows_included": false,
+            "raw_query_included": false,
+            "raw_queries_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "raw_error_included": false,
+        },
+        "non_goals": [
+            "Does not run BioCortex.",
+            "Does not call memory_search or memory_neighbors.",
+            "Does not sample production memories or graph rows.",
+            "Does not echo dry-run plans, recall summaries, case rows, queries, keys, content, or raw errors.",
+            "Does not write memory, graph edges, authorization records, or approval packets.",
+            "Does not approve runtime influence, search-order changes, or candidate-set expansion."
+        ],
+    })
+}
+
+pub struct MemoryBioCortexT6CandidateExpansionDryRunReportTool;
+impl MemoryBioCortexT6CandidateExpansionDryRunReportTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+#[async_trait]
+impl McpTool for MemoryBioCortexT6CandidateExpansionDryRunReportTool {
+    fn name(&self) -> &'static str {
+        "memory_biocortex_t6_candidate_expansion_dry_run_report"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only T6 candidate-expansion dry-run report. \
+                Consumes a dry-run plan and an already-produced redacted \
+                recall-expansion summary, then emits aggregate review evidence. \
+                It never echoes raw inputs, calls search, samples memories, writes \
+                state, approves runtime influence, or expands candidate sets."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["candidate_expansion_dry_run_plan", "recall_expansion_summary"],
+                "properties": {
+                    "candidate_expansion_dry_run_plan": {
+                        "type": "object",
+                        "description": "JSON object produced by memory_biocortex_t6_candidate_expansion_dry_run_plan. Unknown/raw fields are ignored and never echoed."
+                    },
+                    "recall_expansion_summary": {
+                        "type": "object",
+                        "description": "Redacted JSON object produced by memory_biocortex_recall_expansion_summary. case_rows/raw fields are rejected and never echoed."
+                    },
+                    "reviewer": {
+                        "type": "string",
+                        "description": "Optional reviewer identity or handle."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Optional implementation commit under review."
+                    },
+                    "forum_post_id": {
+                        "type": "string",
+                        "description": "Optional forum post id linking this dry-run report."
+                    },
+                    "memory_key": {
+                        "type": "string",
+                        "description": "Optional memory key linking this dry-run report."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        Ok(ToolResult::json_text(
+            &memory_biocortex_t6_candidate_expansion_dry_run_report_payload(args),
         ))
     }
 }
@@ -43452,6 +43787,10 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // packet and emits a sampling contract for a later dry-run executor; it
     // never approves or runs candidate-set expansion.
     "memory_biocortex_t6_candidate_expansion_dry_run_plan",
+    // Continuity T6 candidate-expansion dry-run report: consumes a dry-run
+    // plan plus an already-redacted recall-expansion summary; it never runs
+    // search, samples memories, or grants candidate-set authority.
+    "memory_biocortex_t6_candidate_expansion_dry_run_report",
     // Continuity T7 neural critic shadow eval: read-only offline held-out
     // comparison against deterministic T3/T4 labels; no model/write authority.
     "memory_neural_critic_shadow_eval",
@@ -47032,6 +47371,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Standard,
         Arc::new(MemoryBioCortexT6CandidateExpansionDryRunPlanTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryBioCortexT6CandidateExpansionDryRunReportTool::new()),
     );
     reg_if(
         &mut reg,
@@ -52721,6 +53066,10 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             Tier::Standard,
             "memory_biocortex_t6_candidate_expansion_dry_run_plan"
         ));
+        assert!(p.includes(
+            Tier::Standard,
+            "memory_biocortex_t6_candidate_expansion_dry_run_report"
+        ));
         assert!(p.includes(Tier::Standard, "memory_neural_critic_shadow_eval"));
         assert!(p.includes(Tier::Standard, "biocortex_retrieval_shadow"));
         assert!(!p.includes(Tier::Standard, "embed_text"));
@@ -52774,9 +53123,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 62 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 63 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-        //      + DIRECT(50: 6 avatar observation/sync/renderer tools
+        //      + DIRECT(51: 6 avatar observation/sync/renderer tools
         //      + xiao_shu_action_request + 14 mobile bridge tools
         //      + memory_graph_topology + memory_retrieval_feedback
         //      + memory_consolidation_queue
@@ -52787,6 +53136,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         //      + memory_biocortex_t6_influence_gate
         //      + memory_biocortex_t6_candidate_expansion_review_packet
         //      + memory_biocortex_t6_candidate_expansion_dry_run_plan
+        //      + memory_biocortex_t6_candidate_expansion_dry_run_report
         //      + memory_neural_critic_shadow_eval
         //      + biocortex_retrieval_shadow
         //      + memory_related_keys_preflight
@@ -52802,7 +53152,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         // forum_digest joined via the FORUM_READ capability group (2026-05-23).
         // Native-overlap probes such as browser_lite_probe stay in broader
         // profiles, not codex-essential direct extras.
-        assert_eq!(extras.len(), 62);
+        assert_eq!(extras.len(), 63);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -52842,6 +53192,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         ));
         assert!(extras.contains(
             &"memory_biocortex_t6_candidate_expansion_dry_run_plan"
+        ));
+        assert!(extras.contains(
+            &"memory_biocortex_t6_candidate_expansion_dry_run_report"
         ));
         assert!(extras.contains(&"memory_neural_critic_shadow_eval"));
         assert!(extras.contains(&"biocortex_retrieval_shadow"));
@@ -64454,6 +64807,233 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(!serialized.contains("secret dry run query"));
         assert!(!serialized.contains("secret dry run key"));
         assert!(!serialized.contains("secret dry run content"));
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_t6_candidate_expansion_dry_run_report_accepts_redacted_summary_without_runtime_authority(
+    ) {
+        let tool = MemoryBioCortexT6CandidateExpansionDryRunReportTool::new();
+        let plan = json!({
+            "schema": "agent_bridge.memory_biocortex_t6_candidate_expansion_dry_run_plan.v0",
+            "read_only": true,
+            "dry_run_plan": {
+                "ready": true,
+                "block_reasons": [],
+                "sampling_contract": {
+                    "min_dry_run_cases": 30,
+                    "requires_less_handpicked_baseline_miss_corpus": true,
+                    "requires_negative_controls": true,
+                    "requires_trigger_projection_stratum": true
+                }
+            },
+            "experiment_contract": {
+                "candidate_expansion_experiment_approved": false,
+                "may_run_candidate_expansion_dry_run_now": false,
+                "may_expand_candidate_set_now": false,
+                "changes_candidate_set_now": false,
+                "runtime_influence_approved": false,
+                "may_change_search_order_now": false
+            },
+            "input_contract": {
+                "review_packet_included": false,
+                "source_gate_included": false,
+                "recall_expansion_summary_included": false,
+                "case_rows_included": false,
+                "raw_query_included": false,
+                "raw_queries_included": false,
+                "raw_keys_included": false,
+                "content_included": false
+            },
+            "secret_source_plan": "secret source plan"
+        });
+        let summary = json!({
+            "schema": "agent_bridge.memory_biocortex.recall_expansion_summary.v0",
+            "read_only": true,
+            "sampling": {
+                "query_source": "explicit_cases",
+                "query_cases_count": 30
+            },
+            "metrics": {
+                "evaluated_count": 30,
+                "search_error_count": 0,
+                "baseline_hit_count": 12,
+                "baseline_miss_count": 18,
+                "graph_expansion_found_count": 6,
+                "expanded_hit_count": 18,
+                "candidate_expansion_added_hit_count": 6,
+                "candidate_expansion_added_hit_rate": 0.333,
+                "graph_expansion_found_rate": 0.333
+            },
+            "input_contract": {
+                "raw_query_included": false,
+                "raw_queries_included": false,
+                "raw_keys_included": false,
+                "content_included": false,
+                "candidate_content_included": false,
+                "raw_error_included": false
+            },
+            "safety": {
+                "read_only": true,
+                "calls_memory_search": true,
+                "calls_memory_neighbors": true,
+                "runs_biocortex": false,
+                "writes_memory": false,
+                "writes_state": false,
+                "changes_search_order": false,
+                "changes_prod_retrieval_order": false,
+                "changes_candidate_set_now": false
+            },
+            "secret_summary_payload": "secret summary"
+        });
+
+        let out = tool
+            .execute(
+                json!({
+                    "candidate_expansion_dry_run_plan": plan,
+                    "recall_expansion_summary": summary,
+                    "reviewer": "codex",
+                    "commit": "6cbf3e7",
+                    "forum_post_id": "3672",
+                    "memory_key": "ab_memory_continuity_t6_candidate_expansion_dry_run_plan_deployed_20260621"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(
+            payload["schema"],
+            json!("agent_bridge.memory_biocortex_t6_candidate_expansion_dry_run_report.v0")
+        );
+        assert_eq!(payload["read_only"], json!(true));
+        assert_eq!(payload["dry_run_report"]["ready"], json!(true));
+        assert_eq!(
+            payload["dry_run_report"]["metrics"]["evaluated_count"],
+            json!(30)
+        );
+        assert_eq!(
+            payload["dry_run_report"]["metrics"]["candidate_expansion_added_hit_count"],
+            json!(6)
+        );
+        assert_eq!(
+            payload["experiment_contract"]["may_run_candidate_expansion_dry_run_now"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["experiment_contract"]["may_expand_candidate_set_now"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["experiment_contract"]["changes_candidate_set_now"],
+            json!(false)
+        );
+        assert_eq!(payload["input_contract"]["dry_run_plan_included"], json!(false));
+        assert_eq!(
+            payload["input_contract"]["recall_expansion_summary_included"],
+            json!(false)
+        );
+
+        let serialized = serde_json::to_string(&payload).expect("serialize");
+        assert!(!serialized.contains("secret source plan"));
+        assert!(!serialized.contains("secret source_plan"));
+        assert!(!serialized.contains("secret summary"));
+        assert!(!serialized.contains("secret_summary_payload"));
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_t6_candidate_expansion_dry_run_report_blocks_raw_or_authorized_inputs(
+    ) {
+        let tool = MemoryBioCortexT6CandidateExpansionDryRunReportTool::new();
+        let plan = json!({
+            "schema": "agent_bridge.memory_biocortex_t6_candidate_expansion_dry_run_plan.v0",
+            "read_only": true,
+            "dry_run_plan": {
+                "ready": true,
+                "sampling_contract": {
+                    "min_dry_run_cases": 30
+                }
+            },
+            "experiment_contract": {
+                "candidate_expansion_experiment_approved": true,
+                "may_run_candidate_expansion_dry_run_now": true,
+                "may_expand_candidate_set_now": true,
+                "changes_candidate_set_now": true,
+                "runtime_influence_approved": true,
+                "may_change_search_order_now": true
+            },
+            "input_contract": {
+                "case_rows_included": false,
+                "raw_query_included": true
+            },
+            "raw_query": "secret plan query"
+        });
+        let summary = json!({
+            "schema": "agent_bridge.memory_biocortex.recall_expansion_summary.v0",
+            "read_only": true,
+            "metrics": {
+                "evaluated_count": 8,
+                "search_error_count": 1,
+                "baseline_miss_count": 0,
+                "candidate_expansion_added_hit_count": 0,
+                "candidate_expansion_added_hit_rate": 0.0
+            },
+            "input_contract": {
+                "raw_query_included": true,
+                "raw_keys_included": false,
+                "content_included": false
+            },
+            "safety": {
+                "read_only": true,
+                "writes_memory": true,
+                "writes_state": false,
+                "runs_biocortex": false,
+                "changes_search_order": true,
+                "changes_prod_retrieval_order": false,
+                "changes_candidate_set_now": true
+            },
+            "case_rows": [{"query_hash": "secret row hash"}],
+            "content": "secret summary content"
+        });
+
+        let out = tool
+            .execute(
+                json!({
+                    "candidate_expansion_dry_run_plan": plan,
+                    "recall_expansion_summary": summary,
+                    "reviewer": "codex"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(payload["dry_run_report"]["ready"], json!(false));
+        let reasons = payload["dry_run_report"]["block_reasons"]
+            .as_array()
+            .expect("block reasons");
+        assert!(reasons.contains(&json!("source_dry_run_plan_claims_runtime_authority")));
+        assert!(reasons.contains(&json!("source_dry_run_plan_contains_raw")));
+        assert!(reasons.contains(&json!("recall_expansion_summary_claims_runtime_authority")));
+        assert!(reasons.contains(&json!("recall_expansion_summary_contains_raw_or_case_rows")));
+        assert!(reasons.contains(&json!("insufficient_dry_run_cases")));
+        assert!(reasons.contains(&json!("recall_expansion_search_errors")));
+        assert!(reasons.contains(&json!("missing_baseline_miss_stratum")));
+        assert_eq!(
+            payload["experiment_contract"]["may_run_candidate_expansion_dry_run_now"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["experiment_contract"]["may_expand_candidate_set_now"],
+            json!(false)
+        );
+
+        let serialized = serde_json::to_string(&payload).expect("serialize");
+        assert!(!serialized.contains("secret plan query"));
+        assert!(!serialized.contains("secret row hash"));
+        assert!(!serialized.contains("secret summary content"));
+        assert!(!serialized.contains("\"case_rows\""));
     }
 
     #[tokio::test]

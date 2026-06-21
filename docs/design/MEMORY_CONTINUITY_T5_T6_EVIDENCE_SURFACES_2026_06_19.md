@@ -367,6 +367,40 @@ Interpretation: this is the next handoff after the review packet. It can make a
 future dry-run experiment auditable, but it still does not authorize running that
 dry run or changing the live candidate set.
 
+## Candidate-Expansion Dry-Run Report
+
+Date: 2026-06-21
+
+`memory_biocortex_t6_candidate_expansion_dry_run_report` is the next read-only
+contract layer after the dry-run plan. It consumes a
+`memory_biocortex_t6_candidate_expansion_dry_run_plan` output plus an
+already-produced redacted `memory_biocortex_recall_expansion_summary`, and emits
+aggregate evidence for human review.
+
+The report is deliberately not a sampler or executor:
+
+- it never calls `memory_search`, `memory_neighbors`, or BioCortex;
+- it never samples production memories or graph rows;
+- it never writes memory, graph edges, authorization rows, or approval packets;
+- it never echoes the source dry-run plan, recall-expansion summary, `case_rows`,
+  raw queries, raw keys, content, or raw errors;
+- it blocks source plans or summaries that claim runtime authority or expose raw
+  payload fields;
+- it always forces `candidate_expansion_experiment_approved=false`,
+  `may_run_candidate_expansion_dry_run_now=false`,
+  `may_expand_candidate_set_now=false`, and
+  `changes_candidate_set_now=false`.
+
+The default gate expects the redacted summary to satisfy the plan's minimum
+dry-run case count, contain at least one baseline-miss stratum, and have zero
+search errors. Passing this report only means the dry-run evidence is ready for
+human review. It still requires a separate post-dry-run decision before any
+runtime candidate-set expansion path exists.
+
+Interpretation: this creates a safe place to compare a broader, less-handpicked
+baseline-miss corpus against the existing v36 FTS baseline and graph-neighbor
+candidate expansion evidence. It does not grant candidate-expansion authority.
+
 ## Fixture Diagnostic Example Follow-up
 
 Date: 2026-06-20
