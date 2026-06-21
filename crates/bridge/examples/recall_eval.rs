@@ -333,6 +333,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(PathBuf::from)
         .unwrap_or_else(default_db_path);
 
+    // Action A (#3746 / Goal C U-surface): select the embed model the store was
+    // actually indexed with, so semantic is MEASURED against the right vector
+    // space instead of being silently SKIPPED on a host/model mismatch — a
+    // hard-coded para-ml assumption is wrong for a Mac multilingual-e5-small
+    // store and made the main continuity metric lie by omission. An explicit
+    // caller `AGENT_BRIDGE_ONNX_MODEL` always wins.
+    if std::env::var("AGENT_BRIDGE_ONNX_MODEL").is_err() {
+        if let Some(alias) = detect_store_model_alias(&db_path).await {
+            std::env::set_var("AGENT_BRIDGE_ONNX_MODEL", alias);
+            println!("# auto-selected AGENT_BRIDGE_ONNX_MODEL={alias} (store's dominant embedding_backend)");
+        }
+    }
+
     let store = SqliteStore::open(&db_path).await?;
     let n = CORPUS.len();
 
@@ -347,9 +360,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // ── Embedding backend gate (semantic only) ──────────────────────────────
-    // The live store was indexed with para-ml; query embeddings MUST match. If
-    // the active backend is hash (onnx-embed off, or model dir missing), report
-    // that and skip semantic rather than emit a false R@k=0.
+    // Query embeddings MUST match the model the store was indexed with (auto-
+    // selected above). If the active backend is hash (onnx-embed off, or model
+    // dir missing), report that and skip semantic rather than emit a false R@k=0.
     let backend = ab_store::embedding::default_backend();
     let backend_name = backend.name().to_string();
     let semantic_ready = if backend_name == HASH_BACKEND_NAME {
@@ -786,6 +799,36 @@ fn fmt_idx(idx: &[usize]) -> String {
 /// clearly from an unrelated pair) or a timeout elapses. The hash fallback
 /// gives both pairs a near-zero cosine, so the gap — not an absolute threshold —
 /// is the signal. Returns true only when the real model is confirmed.
+/// Action A: detect the embed model the live store was indexed with so the
+/// query embedder matches the stored vector space. Returns the
+/// `AGENT_BRIDGE_ONNX_MODEL` alias for the dominant *tagged* backend among
+/// active rows, or None when it is the default (all-MiniLM) or unknown.
+/// Read-only; a brief separate connection so it runs before embedder init.
+async fn detect_store_model_alias(db_path: &std::path::Path) -> Option<&'static str> {
+    let conn = tokio_rusqlite::Connection::open(db_path).await.ok()?;
+    let name: Option<String> = conn
+        .call(|c| {
+            let v = c
+                .query_row(
+                    "SELECT embedding_backend FROM memories \
+                     WHERE status='active' AND embedding IS NOT NULL \
+                       AND embedding_backend IS NOT NULL \
+                     GROUP BY embedding_backend ORDER BY COUNT(*) DESC LIMIT 1",
+                    [],
+                    |row| row.get::<_, String>(0),
+                )
+                .ok();
+            Ok::<_, tokio_rusqlite::rusqlite::Error>(v)
+        })
+        .await
+        .ok()?;
+    match name.as_deref() {
+        Some("multilingual-e5-small") => Some("e5-small"),
+        Some("paraphrase-multilingual-MiniLM-L12-v2") => Some("para-ml"),
+        _ => None, // all-MiniLM-L6-v2 is the default; nothing to override
+    }
+}
+
 async fn confirm_real_embedder() -> bool {
     use ab_store::vector::{cosine_similarity, embed_text, warmup};
     warmup();
