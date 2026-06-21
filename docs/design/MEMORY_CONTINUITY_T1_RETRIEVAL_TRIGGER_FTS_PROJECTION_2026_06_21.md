@@ -71,3 +71,26 @@ git diff --check
 The tests cover save-time projection, same-content resave refresh, import-time
 projection, v36 backfill, non-trigger tag exclusion, and existing memory_search
 behavior.
+
+## Offline Copy Check
+
+The first live-shape check used SQLite backups only; the production database
+remained at schema v35 with no `fts_content` column.
+
+Same live snapshot, baseline code at `7af6cf2`:
+
+- schema: v35
+- FTS: R@1 0.222, R@5 0.611, R@10 0.778, MRR 0.386
+- offline FTS+graph: hit 0.889, added 2, added_hit_rate 0.500, MRR 0.391
+
+Same live snapshot, this branch with v36 projection:
+
+- schema: v36 on the copied DB only
+- FTS: R@1 0.222, R@5 0.667, R@10 0.778, MRR 0.389
+- offline FTS+graph: hit 0.889, added 2, added_hit_rate 0.500, MRR 0.394
+
+Interpretation: this is a small but attribution-safe gain. It moved two hard-ish
+cases closer to the head (#4 rank 6 to 5, #14 rank 7 to 6), which raises fixed
+corpus FTS R@5 by one case without changing R@10. It is not enough to claim a
+ranking breakthrough; it is enough to justify the projection as a low-risk
+candidate visibility improvement.
