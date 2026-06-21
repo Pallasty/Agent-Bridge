@@ -377,6 +377,14 @@ contract layer after the dry-run plan. It consumes a
 already-produced redacted `memory_biocortex_recall_expansion_summary`, and emits
 aggregate evidence for human review.
 
+`memory_biocortex_recall_expansion_summary` keeps its detailed default output
+for inspection, but now accepts `include_case_rows=false` to emit an
+aggregate-only summary. That mode keeps metrics, class aggregates, safety flags,
+and input-contract flags while omitting `case_rows`; it exists so the dry-run
+report can consume the summary without ever receiving per-case rows. It does not
+change production retrieval, expand live candidate sets, or grant runtime
+authority.
+
 The report is deliberately not a sampler or executor:
 
 - it never calls `memory_search`, `memory_neighbors`, or BioCortex;

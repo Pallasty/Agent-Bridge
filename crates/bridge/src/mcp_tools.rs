@@ -36013,6 +36013,11 @@ impl McpTool for MemoryBioCortexRecallExpansionSummaryTool {
                         "maximum": 50,
                         "default": 8,
                         "description": "Maximum direct graph-neighbor edges inspected per baseline candidate."
+                    },
+                    "include_case_rows": {
+                        "type": "boolean",
+                        "default": true,
+                        "description": "When false, omit redacted per-case rows and emit aggregate/class metrics only so downstream dry-run reports can consume the summary."
                     }
                 }
             }),
@@ -36060,6 +36065,10 @@ impl McpTool for MemoryBioCortexRecallExpansionSummaryTool {
             .and_then(Value::as_u64)
             .unwrap_or(8)
             .min(50) as usize;
+        let include_case_rows = args
+            .get("include_case_rows")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
 
         let query_source = if cases.is_empty() && sample_graph_holdout {
             cases = memory_biocortex_recall_expansion_graph_holdout_cases(
@@ -36266,7 +36275,7 @@ impl McpTool for MemoryBioCortexRecallExpansionSummaryTool {
             })
             .collect::<Vec<_>>();
 
-        Ok(ToolResult::json_text(&json!({
+        let mut payload = json!({
             "schema": MEMORY_BIOCORTEX_RECALL_EXPANSION_SUMMARY_SCHEMA,
             "generated_at": unix_now_secs(),
             "read_only": true,
@@ -36309,8 +36318,8 @@ impl McpTool for MemoryBioCortexRecallExpansionSummaryTool {
                 },
             },
             "class_aggregates": class_aggregates,
-            "case_rows": case_rows,
             "input_contract": {
+                "case_rows_included": include_case_rows,
                 "raw_query_included": false,
                 "raw_queries_included": false,
                 "raw_keys_included": false,
@@ -36349,7 +36358,14 @@ impl McpTool for MemoryBioCortexRecallExpansionSummaryTool {
             "runs_biocortex": false,
             "writes_memory": false,
             "changes_memory_search_order": false,
-        })))
+        });
+        if include_case_rows {
+            if let Some(payload_obj) = payload.as_object_mut() {
+                payload_obj.insert("case_rows".to_string(), Value::Array(case_rows));
+            }
+        }
+
+        Ok(ToolResult::json_text(&payload))
     }
 }
 
@@ -36729,6 +36745,7 @@ fn memory_biocortex_t6_check_recall_expansion_summary(
         || memory_biocortex_t6_any_true(
             value,
             &[
+                "/input_contract/case_rows_included",
                 "/input_contract/raw_query_included",
                 "/input_contract/raw_queries_included",
                 "/input_contract/raw_keys_included",
@@ -63116,6 +63133,152 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(!serialized.contains("tests:recall_expansion_baseline"));
         assert!(!serialized.contains("tests:recall_expansion_target"));
         assert!(!serialized.contains("omega hidden relevant target"));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_recall_expansion_summary_aggregate_only_feeds_dry_run_report() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        store
+            .memory_save(&t4_memory_record(
+                "tests:recall_expansion_aggregate_baseline",
+                "lesson",
+                "beta baseline retrieval anchor",
+                &[],
+                &[],
+                0,
+                0.8,
+            ))
+            .await
+            .expect("seed baseline");
+        store
+            .memory_save(&t4_memory_record(
+                "tests:recall_expansion_aggregate_target",
+                "lesson",
+                "theta hidden relevant target",
+                &[],
+                &[],
+                0,
+                0.8,
+            ))
+            .await
+            .expect("seed target");
+        store
+            .memory_link(
+                "tests:recall_expansion_aggregate_baseline",
+                "tests:recall_expansion_aggregate_target",
+                "relates",
+                1.0,
+            )
+            .await
+            .expect("seed edge");
+
+        let summary_tool = MemoryBioCortexRecallExpansionSummaryTool::new(hub.clone());
+        let summary_out = summary_tool
+            .execute(
+                json!({
+                    "query_cases": [
+                        {
+                            "query": "beta",
+                            "relevant_keys": ["tests:recall_expansion_aggregate_target"],
+                            "class_label": "graph_recall"
+                        }
+                    ],
+                    "limit": 1,
+                    "neighbor_limit": 8,
+                    "include_case_rows": false
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute summary");
+        let summary = result_text_as_json(&summary_out);
+
+        assert_eq!(summary["metrics"]["evaluated_count"], json!(1));
+        assert_eq!(summary["metrics"]["baseline_miss_count"], json!(1));
+        assert_eq!(
+            summary["metrics"]["candidate_expansion_added_hit_count"],
+            json!(1)
+        );
+        assert!(summary.get("case_rows").is_none());
+        assert_eq!(summary["input_contract"]["case_rows_included"], json!(false));
+        assert_eq!(
+            summary["class_aggregates"][0]["candidate_expansion_added_hit_count"],
+            json!(1)
+        );
+
+        let report_tool = MemoryBioCortexT6CandidateExpansionDryRunReportTool::new();
+        let plan = json!({
+            "schema": "agent_bridge.memory_biocortex_t6_candidate_expansion_dry_run_plan.v0",
+            "read_only": true,
+            "dry_run_plan": {
+                "ready": true,
+                "block_reasons": [],
+                "sampling_contract": {
+                    "min_dry_run_cases": 1,
+                    "requires_less_handpicked_baseline_miss_corpus": true,
+                    "requires_negative_controls": true,
+                    "requires_trigger_projection_stratum": true
+                }
+            },
+            "experiment_contract": {
+                "candidate_expansion_experiment_approved": false,
+                "may_run_candidate_expansion_dry_run_now": false,
+                "may_expand_candidate_set_now": false,
+                "changes_candidate_set_now": false,
+                "runtime_influence_approved": false,
+                "may_change_search_order_now": false
+            },
+            "input_contract": {
+                "review_packet_included": false,
+                "source_gate_included": false,
+                "recall_expansion_summary_included": false,
+                "case_rows_included": false,
+                "raw_query_included": false,
+                "raw_queries_included": false,
+                "raw_keys_included": false,
+                "content_included": false
+            }
+        });
+        let report_out = report_tool
+            .execute(
+                json!({
+                    "candidate_expansion_dry_run_plan": plan,
+                    "recall_expansion_summary": summary,
+                    "reviewer": "codex",
+                    "commit": "pending",
+                    "forum_post_id": "3682",
+                    "memory_key": "ab_memory_continuity_t6_recall_expansion_aggregate_only_summary_20260621"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute report");
+        let report = result_text_as_json(&report_out);
+
+        assert_eq!(report["dry_run_report"]["ready"], json!(true));
+        assert_eq!(
+            report["dry_run_report"]["metrics"]["candidate_expansion_added_hit_count"],
+            json!(1)
+        );
+        assert_eq!(
+            report["input_contract"]["recall_expansion_summary_included"],
+            json!(false)
+        );
+        assert_eq!(report["input_contract"]["case_rows_included"], json!(false));
+        assert_eq!(
+            report["experiment_contract"]["may_expand_candidate_set_now"],
+            json!(false)
+        );
+
+        let serialized = serde_json::to_string(&report).expect("serialize");
+        assert!(!serialized.contains("\"case_rows\""));
+        assert!(!serialized.contains("beta"));
+        assert!(!serialized.contains("tests:recall_expansion_aggregate_baseline"));
+        assert!(!serialized.contains("tests:recall_expansion_aggregate_target"));
+        assert!(!serialized.contains("theta hidden relevant target"));
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
