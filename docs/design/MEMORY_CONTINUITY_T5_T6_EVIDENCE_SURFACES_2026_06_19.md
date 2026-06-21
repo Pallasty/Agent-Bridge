@@ -570,6 +570,37 @@ Interpretation: this is owner approval to prepare an implementation plan only.
 It is still not runtime approval, not runtime code approval, and not
 candidate-expansion approval.
 
+## T6 Candidate Expansion Runtime-Gate Implementation Plan Artifact
+
+Date: 2026-06-21
+
+`memory_biocortex_t6_candidate_expansion_runtime_gate_implementation_plan_artifact`
+is the read-only implementation-plan surface after the runtime-gate
+owner-review record. It consumes only a safe
+`memory_biocortex_t6_candidate_expansion_runtime_gate_owner_review_record` whose
+owner decision is `approve_runtime_gate_implementation_plan_only`.
+
+When ready, the artifact can only open the next code-gate review:
+`author_review_runtime_gate_code_implementation_gate_before_code`. It specifies
+a default-off feature flag, shadow-first contract, deterministic replay
+fixture, bounded candidate delta, negative controls, telemetry fields, and
+rollback contract that a later code gate must review before any runtime code is
+implemented.
+
+The implementation-plan artifact never echoes the owner-review record,
+runtime-gate design artifact, preflight, owner-decision record,
+human-review packet, dry-run report, dry-run plan, recall-expansion summary,
+`case_rows`, raw queries, raw keys, content, or raw errors. It always forces
+`may_implement_runtime_gate_code_now=false`,
+`candidate_expansion_experiment_approved=false`,
+`may_run_candidate_expansion_dry_run_now=false`,
+`may_expand_candidate_set_now=false`, and
+`this_plan_approves_runtime_candidate_expansion=false`.
+
+Interpretation: this is an implementation plan for a future code gate only. It
+is still not runtime code approval, not runtime approval, and not
+candidate-expansion approval.
+
 ## Fixture Diagnostic Example Follow-up
 
 Date: 2026-06-20
