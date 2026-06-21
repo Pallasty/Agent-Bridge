@@ -1133,6 +1133,30 @@ memory graph. Already materialized links are marked with
 are counted in `already_materialized_edge_count`; pending writeable links are
 counted in `pending_materialization_edge_count`.
 
+The T6 candidate-expansion runtime-gate code path now has a default-off shadow
+runtime gate surface:
+
+- MCP tool:
+  `memory_biocortex_t6_candidate_expansion_shadow_runtime_gate`;
+- schema:
+  `agent_bridge.memory_biocortex_t6_candidate_expansion.shadow_runtime_gate.v0`;
+- runtime enable env:
+  `AB_BIOCORTEX_T6_CANDIDATE_EXPANSION_SHADOW`;
+- operator disable env:
+  `AB_BIOCORTEX_T6_CANDIDATE_EXPANSION_DISABLE`.
+
+The tool is a status and contract surface only. It reports redacted counts for
+baseline/expanded/added candidates, checks that deterministic replay,
+candidate-delta bounds, negative controls, telemetry fields, and rollback are
+present, and keeps the feature flag default-off. Even when the runtime env is
+set, the tool reports `blocked_before_shadow_execution_gate` and keeps
+`may_run_shadow_mode_now=false`, `may_expand_candidate_set_now=false`,
+`changes_candidate_set_now=false`, `may_change_search_order_now=false`, and
+`may_write_memory_or_graph_edges=false`. It does not call `memory_search`,
+`memory_neighbors`, or BioCortex, does not echo raw query/key/content/case rows,
+and does not grant runtime enablement or candidate-expansion authority. A
+separate shadow-execution gate is still required before any shadow run.
+
 ## Verification
 
 Targeted validation for this slice after `/Data` space was recovered:
