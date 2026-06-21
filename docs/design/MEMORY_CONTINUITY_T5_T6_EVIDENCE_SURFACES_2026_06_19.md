@@ -537,6 +537,39 @@ Interpretation: this is still not a runtime gate and not runtime code. It is the
 design artifact that a separate owner runtime approval must review before any
 candidate-expansion implementation can be started.
 
+## T6 Candidate Expansion Runtime-Gate Owner Review Record
+
+Date: 2026-06-21
+
+`memory_biocortex_t6_candidate_expansion_runtime_gate_owner_review_record` is
+the explicit owner-review surface after the runtime-gate design artifact. It
+consumes only a safe
+`memory_biocortex_t6_candidate_expansion_runtime_gate_design_artifact` plus an
+external owner decision.
+
+The only positive owner decision accepted by this surface is
+`approve_runtime_gate_implementation_plan_only`. That opens the next
+implementation-plan gate, not runtime code. Requests for design changes,
+rejections, missing owner/source fields, unknown decisions, raw payloads, or any
+source artifact that claims runtime authority all block.
+
+Even when ready, the record only permits preparing an implementation plan. It
+requires a separate implementation-plan artifact and a separate code
+implementation gate before runtime code can be considered.
+
+The owner-review record never echoes the source design artifact, preflight,
+owner-decision record, human-review packet, dry-run report, dry-run plan,
+recall-expansion summary, `case_rows`, raw queries, raw keys, content, or raw
+errors. It always forces `may_implement_runtime_gate_code_now=false`,
+`candidate_expansion_experiment_approved=false`,
+`may_run_candidate_expansion_dry_run_now=false`,
+`may_expand_candidate_set_now=false`, and
+`this_record_approves_runtime_candidate_expansion=false`.
+
+Interpretation: this is owner approval to prepare an implementation plan only.
+It is still not runtime approval, not runtime code approval, and not
+candidate-expansion approval.
+
 ## Fixture Diagnostic Example Follow-up
 
 Date: 2026-06-20

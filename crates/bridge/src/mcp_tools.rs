@@ -37589,6 +37589,8 @@ const MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_GATE_PREFLIGHT_SCHEMA: &st
     "agent_bridge.memory_biocortex_t6_candidate_expansion_runtime_gate_preflight.v0";
 const MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_GATE_DESIGN_ARTIFACT_SCHEMA: &str =
     "agent_bridge.memory_biocortex_t6_candidate_expansion_runtime_gate_design_artifact.v0";
+const MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_GATE_OWNER_REVIEW_RECORD_SCHEMA: &str =
+    "agent_bridge.memory_biocortex_t6_candidate_expansion_runtime_gate_owner_review_record.v0";
 
 fn memory_biocortex_t6_clamp_label(value: &str, max_bytes: usize) -> String {
     let value = value.trim();
@@ -39758,6 +39760,421 @@ impl McpTool for MemoryBioCortexT6CandidateExpansionRuntimeGateDesignArtifactToo
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
         Ok(ToolResult::json_text(
             &memory_biocortex_t6_candidate_expansion_runtime_gate_design_artifact_payload(args),
+        ))
+    }
+}
+
+fn memory_biocortex_t6_candidate_expansion_runtime_gate_owner_review_record_payload(
+    args: Value,
+) -> Value {
+    let artifact = args
+        .get("runtime_gate_design_artifact")
+        .unwrap_or(&Value::Null);
+    let owner = args
+        .get("owner")
+        .and_then(Value::as_str)
+        .map(|s| memory_biocortex_t6_clamp_label(s, 80))
+        .filter(|s| !s.is_empty());
+    let decision_source = args
+        .get("decision_source")
+        .and_then(Value::as_str)
+        .map(|s| memory_biocortex_t6_clamp_label(s, 160))
+        .filter(|s| !s.is_empty());
+    let owner_decision = args
+        .get("owner_decision")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("missing_owner_decision");
+    let reviewer = args
+        .get("reviewer")
+        .and_then(Value::as_str)
+        .map(|s| memory_biocortex_t6_clamp_label(s, 80))
+        .filter(|s| !s.is_empty());
+    let commit = args
+        .get("commit")
+        .and_then(Value::as_str)
+        .map(|s| memory_biocortex_t6_clamp_label(s, 80))
+        .filter(|s| !s.is_empty());
+    let forum_post_id = args
+        .get("forum_post_id")
+        .and_then(Value::as_str)
+        .map(|s| memory_biocortex_t6_clamp_label(s, 80))
+        .filter(|s| !s.is_empty());
+    let memory_key = args
+        .get("memory_key")
+        .and_then(Value::as_str)
+        .map(|s| memory_biocortex_t6_clamp_label(s, 160))
+        .filter(|s| !s.is_empty());
+
+    let artifact_schema_valid = memory_biocortex_t6_string_at(artifact, "/schema")
+        == Some(MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_GATE_DESIGN_ARTIFACT_SCHEMA);
+    let artifact_ready =
+        memory_biocortex_t6_bool_at(artifact, "/runtime_gate_design_artifact/ready") == Some(true);
+    let artifact_safe_contract = memory_biocortex_t6_bool_at(artifact, "/read_only")
+        == Some(true)
+        && memory_biocortex_t6_bool_at(
+            artifact,
+            "/design_contract/may_prepare_runtime_gate_design_artifact",
+        ) == Some(true)
+        && memory_biocortex_t6_bool_at(
+            artifact,
+            "/design_contract/may_implement_runtime_gate_code_now",
+        ) == Some(false)
+        && memory_biocortex_t6_bool_at(
+            artifact,
+            "/design_contract/candidate_expansion_experiment_approved",
+        ) == Some(false)
+        && memory_biocortex_t6_bool_at(
+            artifact,
+            "/design_contract/may_run_candidate_expansion_dry_run_now",
+        ) == Some(false)
+        && memory_biocortex_t6_bool_at(
+            artifact,
+            "/design_contract/may_expand_candidate_set_now",
+        ) == Some(false)
+        && memory_biocortex_t6_bool_at(artifact, "/design_contract/changes_candidate_set_now")
+            == Some(false)
+        && memory_biocortex_t6_bool_at(artifact, "/design_contract/runtime_influence_approved")
+            == Some(false)
+        && memory_biocortex_t6_bool_at(artifact, "/design_contract/may_change_search_order_now")
+            == Some(false)
+        && memory_biocortex_t6_bool_at(
+            artifact,
+            "/design_contract/this_artifact_approves_runtime_candidate_expansion",
+        ) == Some(false)
+        && memory_biocortex_t6_bool_at(
+            artifact,
+            "/design_contract/requires_separate_owner_runtime_approval",
+        ) == Some(true)
+        && memory_biocortex_t6_bool_at(
+            artifact,
+            "/design_contract/requires_separate_runtime_gate_tool",
+        ) == Some(true);
+    let artifact_claims_runtime_authority = memory_biocortex_t6_any_true(
+        artifact,
+        &[
+            "/design_contract/may_implement_runtime_gate_code_now",
+            "/design_contract/candidate_expansion_experiment_approved",
+            "/design_contract/may_run_candidate_expansion_dry_run_now",
+            "/design_contract/may_expand_candidate_set_now",
+            "/design_contract/changes_candidate_set_now",
+            "/design_contract/runtime_influence_approved",
+            "/design_contract/may_change_search_order_now",
+            "/design_contract/this_artifact_approves_runtime_candidate_expansion",
+        ],
+    );
+    let artifact_requirements_ok = [
+        "/runtime_gate_design_artifact/requirements/separate_runtime_gate_tool",
+        "/runtime_gate_design_artifact/requirements/separate_owner_runtime_approval",
+        "/runtime_gate_design_artifact/requirements/feature_flag_default_off",
+        "/runtime_gate_design_artifact/requirements/shadow_mode_first",
+        "/runtime_gate_design_artifact/requirements/deterministic_replay_fixture",
+        "/runtime_gate_design_artifact/requirements/bounded_candidate_delta",
+        "/runtime_gate_design_artifact/requirements/negative_controls",
+        "/runtime_gate_design_artifact/requirements/rollback_plan",
+    ]
+    .iter()
+    .all(|path| memory_biocortex_t6_bool_at(artifact, path) == Some(true))
+        && !memory_biocortex_t6_string_array_at(
+            artifact,
+            "/runtime_gate_design_artifact/requirements/telemetry_fields",
+        )
+        .is_empty();
+    let artifact_flags_raw = memory_biocortex_t6_has_raw_payload_fields(artifact)
+        || artifact.get("runtime_gate_preflight").is_some()
+        || artifact.get("owner_decision_record").is_some()
+        || artifact.get("human_review_packet").is_some()
+        || artifact.get("candidate_expansion_dry_run_report").is_some()
+        || artifact.get("dry_run_report").is_some()
+        || artifact.get("candidate_expansion_dry_run_plan").is_some()
+        || artifact.get("recall_expansion_summary").is_some()
+        || artifact.get("case_rows").is_some()
+        || memory_biocortex_t6_any_true(
+            artifact,
+            &[
+                "/input_contract/runtime_gate_preflight_included",
+                "/input_contract/owner_decision_record_included",
+                "/input_contract/human_review_packet_included",
+                "/input_contract/dry_run_report_included",
+                "/input_contract/dry_run_plan_included",
+                "/input_contract/recall_expansion_summary_included",
+                "/input_contract/case_rows_included",
+                "/input_contract/raw_query_included",
+                "/input_contract/raw_queries_included",
+                "/input_contract/raw_keys_included",
+                "/input_contract/content_included",
+                "/input_contract/raw_error_included",
+            ],
+        );
+    let owner_decision_valid = matches!(
+        owner_decision,
+        "approve_runtime_gate_implementation_plan_only"
+            | "request_runtime_gate_design_changes"
+            | "reject_runtime_gate"
+    );
+    let owner_approves_plan =
+        owner_decision == "approve_runtime_gate_implementation_plan_only";
+
+    let mut block_reasons = BTreeSet::<String>::new();
+    if !artifact_schema_valid {
+        memory_biocortex_t6_push_reason(
+            &mut block_reasons,
+            "source_runtime_gate_design_artifact_schema_invalid",
+        );
+    }
+    if !artifact_ready {
+        memory_biocortex_t6_push_reason(
+            &mut block_reasons,
+            "source_runtime_gate_design_artifact_not_ready",
+        );
+    }
+    if !artifact_safe_contract || artifact_claims_runtime_authority {
+        memory_biocortex_t6_push_reason(
+            &mut block_reasons,
+            "source_runtime_gate_design_artifact_claims_runtime_authority",
+        );
+    }
+    if !artifact_requirements_ok {
+        memory_biocortex_t6_push_reason(
+            &mut block_reasons,
+            "source_runtime_gate_design_artifact_requirements_incomplete",
+        );
+    }
+    if artifact_flags_raw {
+        memory_biocortex_t6_push_reason(
+            &mut block_reasons,
+            "source_runtime_gate_design_artifact_contains_raw",
+        );
+    }
+    if owner.is_none() {
+        memory_biocortex_t6_push_reason(&mut block_reasons, "missing_owner");
+    }
+    if decision_source.is_none() {
+        memory_biocortex_t6_push_reason(&mut block_reasons, "missing_decision_source");
+    }
+    if !owner_decision_valid {
+        memory_biocortex_t6_push_reason(&mut block_reasons, "invalid_owner_decision");
+    }
+    if owner_decision_valid && !owner_approves_plan {
+        memory_biocortex_t6_push_reason(
+            &mut block_reasons,
+            "owner_did_not_approve_runtime_gate_implementation_plan",
+        );
+    }
+    for reason in memory_biocortex_t6_string_array_at(
+        artifact,
+        "/runtime_gate_design_artifact/block_reasons",
+    ) {
+        memory_biocortex_t6_push_reason(&mut block_reasons, &reason);
+    }
+
+    let ready = block_reasons.is_empty();
+    let verdict = if ready {
+        "owner_approved_runtime_gate_implementation_plan_only"
+    } else {
+        "blocked_before_runtime_gate_owner_review_record"
+    };
+    let next_gate = if ready {
+        "prepare_runtime_gate_implementation_plan_before_code"
+    } else {
+        "repair_or_reapprove_runtime_gate_design_artifact"
+    };
+    let telemetry_fields = memory_biocortex_t6_string_array_at(
+        artifact,
+        "/runtime_gate_design_artifact/requirements/telemetry_fields",
+    );
+
+    json!({
+        "schema": MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_GATE_OWNER_REVIEW_RECORD_SCHEMA,
+        "generated_at": unix_now_secs(),
+        "read_only": true,
+        "purpose": "T6 candidate-expansion runtime-gate owner-review record: consume a safe runtime-gate design artifact plus an explicit owner decision and record whether implementation planning may begin without implementing runtime code, running dry-runs, or approving candidate-set expansion.",
+        "runtime_gate_owner_review_record": {
+            "ready": ready,
+            "block_reasons": block_reasons.into_iter().collect::<Vec<_>>(),
+            "owner": owner,
+            "owner_decision": owner_decision,
+            "decision_source": decision_source,
+            "decision": {
+                "verdict": verdict,
+                "next_gate": next_gate,
+                "implementation_plan_only": true,
+                "runtime_code_out_of_scope": true,
+                "runtime_authority_out_of_scope": true,
+                "candidate_expansion_authority_out_of_scope": true,
+            },
+            "source_decision": {
+                "design_artifact_verdict": memory_biocortex_t6_string_at(artifact, "/runtime_gate_design_artifact/decision/verdict"),
+                "design_artifact_next_gate": memory_biocortex_t6_string_at(artifact, "/runtime_gate_design_artifact/decision/next_gate"),
+                "source_owner_decision": memory_biocortex_t6_string_at(artifact, "/runtime_gate_design_artifact/source_decision/owner_decision"),
+                "source_owner": memory_biocortex_t6_string_at(artifact, "/runtime_gate_design_artifact/source_decision/owner"),
+                "source_decision_source": memory_biocortex_t6_string_at(artifact, "/runtime_gate_design_artifact/source_decision/decision_source"),
+            },
+            "source_evidence": {
+                "metrics": {
+                    "evaluated_count": memory_biocortex_t6_u64_at(artifact, "/runtime_gate_design_artifact/source_evidence/metrics/evaluated_count"),
+                    "search_error_count": memory_biocortex_t6_u64_at(artifact, "/runtime_gate_design_artifact/source_evidence/metrics/search_error_count"),
+                    "baseline_miss_count": memory_biocortex_t6_u64_at(artifact, "/runtime_gate_design_artifact/source_evidence/metrics/baseline_miss_count"),
+                    "candidate_expansion_added_hit_count": memory_biocortex_t6_u64_at(artifact, "/runtime_gate_design_artifact/source_evidence/metrics/candidate_expansion_added_hit_count"),
+                    "candidate_expansion_added_hit_rate": memory_biocortex_t6_f64_at(artifact, "/runtime_gate_design_artifact/source_evidence/metrics/candidate_expansion_added_hit_rate"),
+                    "graph_expansion_found_rate": memory_biocortex_t6_f64_at(artifact, "/runtime_gate_design_artifact/source_evidence/metrics/graph_expansion_found_rate"),
+                },
+                "evidence_strength": {
+                    "tier": memory_biocortex_t6_string_at(artifact, "/runtime_gate_design_artifact/source_evidence/evidence_strength/tier"),
+                    "caveats": memory_biocortex_t6_string_array_at(artifact, "/runtime_gate_design_artifact/source_evidence/evidence_strength/caveats"),
+                },
+            },
+            "requirements": {
+                "separate_runtime_gate_tool": true,
+                "separate_owner_runtime_approval": true,
+                "feature_flag_default_off": true,
+                "shadow_mode_first": true,
+                "deterministic_replay_fixture": true,
+                "bounded_candidate_delta": true,
+                "negative_controls": true,
+                "rollback_plan": true,
+                "telemetry_fields": telemetry_fields,
+            },
+        },
+        "review_contract": {
+            "may_prepare_runtime_gate_implementation_plan": ready,
+            "may_implement_runtime_gate_code_now": false,
+            "candidate_expansion_experiment_approved": false,
+            "may_run_candidate_expansion_dry_run_now": false,
+            "may_expand_candidate_set_now": false,
+            "changes_candidate_set_now": false,
+            "runtime_influence_approved": false,
+            "may_change_search_order_now": false,
+            "this_record_approves_runtime_candidate_expansion": false,
+            "requires_separate_implementation_plan_artifact": true,
+            "requires_separate_code_implementation_gate": true,
+        },
+        "implementation_plan_checklist": [
+            "Define a runtime gate entry point that is feature-flagged off by default.",
+            "Keep initial implementation shadow-only and unable to change candidate ordering.",
+            "Define deterministic replay fixtures and acceptance thresholds before coding runtime behavior.",
+            "Define negative controls and regression thresholds before any shadow-mode run.",
+            "Define telemetry for baseline and expanded candidate counts, added candidates, selected source, lift class, and negative-control regressions.",
+            "Define rollback behavior that restores the baseline candidate path with no search-order influence.",
+            "Require a separate code implementation gate after the implementation plan; this owner-review record is not code approval."
+        ],
+        "decision": {
+            "verdict": verdict,
+            "next_gate": next_gate,
+            "implementation_plan_only": true,
+            "runtime_code_out_of_scope": true,
+            "runtime_authority_out_of_scope": true,
+            "candidate_expansion_authority_out_of_scope": true,
+        },
+        "links": {
+            "reviewer": reviewer,
+            "commit": commit,
+            "forum_post_id": forum_post_id,
+            "memory_key": memory_key,
+        },
+        "input_contract": {
+            "runtime_gate_design_artifact_included": false,
+            "runtime_gate_preflight_included": false,
+            "owner_decision_record_included": false,
+            "human_review_packet_included": false,
+            "dry_run_report_included": false,
+            "dry_run_plan_included": false,
+            "recall_expansion_summary_included": false,
+            "case_rows_included": false,
+            "raw_query_included": false,
+            "raw_queries_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "raw_error_included": false,
+        },
+        "non_goals": [
+            "Does not implement a runtime gate.",
+            "Does not run BioCortex.",
+            "Does not call memory_search or memory_neighbors.",
+            "Does not sample production memories or graph rows.",
+            "Does not echo runtime-gate design artifacts, preflights, owner-decision records, human-review packets, dry-run reports, dry-run plans, recall summaries, case rows, queries, keys, content, or raw errors.",
+            "Does not write memory, graph edges, authorization records, or approval packets.",
+            "Does not approve runtime influence, search-order changes, dry-run execution, candidate-set expansion, or runtime-gate code implementation."
+        ],
+    })
+}
+
+pub struct MemoryBioCortexT6CandidateExpansionRuntimeGateOwnerReviewRecordTool;
+impl MemoryBioCortexT6CandidateExpansionRuntimeGateOwnerReviewRecordTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+#[async_trait]
+impl McpTool for MemoryBioCortexT6CandidateExpansionRuntimeGateOwnerReviewRecordTool {
+    fn name(&self) -> &'static str {
+        "memory_biocortex_t6_candidate_expansion_runtime_gate_owner_review_record"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only T6 candidate-expansion runtime-gate owner-review record. \
+                Consumes a safe runtime-gate design artifact plus an explicit \
+                owner decision and records whether implementation planning may \
+                begin without writing state, implementing runtime code, \
+                approving runtime influence, or expanding candidate sets."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": [
+                    "runtime_gate_design_artifact",
+                    "owner",
+                    "owner_decision",
+                    "decision_source"
+                ],
+                "properties": {
+                    "runtime_gate_design_artifact": {
+                        "type": "object",
+                        "description": "JSON object produced by memory_biocortex_t6_candidate_expansion_runtime_gate_design_artifact. Unknown/raw fields are ignored and never echoed."
+                    },
+                    "owner": {
+                        "type": "string",
+                        "description": "Owner identity or handle making the review decision."
+                    },
+                    "owner_decision": {
+                        "type": "string",
+                        "enum": [
+                            "approve_runtime_gate_implementation_plan_only",
+                            "request_runtime_gate_design_changes",
+                            "reject_runtime_gate"
+                        ],
+                        "description": "Explicit owner decision. Only approve_runtime_gate_implementation_plan_only can open the next implementation-plan gate; no value approves runtime code or candidate expansion."
+                    },
+                    "decision_source": {
+                        "type": "string",
+                        "description": "External source for the owner decision, such as forum post id or chat checkpoint."
+                    },
+                    "reviewer": {
+                        "type": "string",
+                        "description": "Optional reviewer identity or handle."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Optional implementation commit under review."
+                    },
+                    "forum_post_id": {
+                        "type": "string",
+                        "description": "Optional forum post id linking this review record."
+                    },
+                    "memory_key": {
+                        "type": "string",
+                        "description": "Optional memory key linking this review record."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        Ok(ToolResult::json_text(
+            &memory_biocortex_t6_candidate_expansion_runtime_gate_owner_review_record_payload(args),
         ))
     }
 }
@@ -45432,6 +45849,10 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // emits an owner-reviewable design checklist; it still grants no runtime
     // candidate-set authority and implements no runtime code.
     "memory_biocortex_t6_candidate_expansion_runtime_gate_design_artifact",
+    // Continuity T6 runtime-gate owner-review record: consumes the design
+    // artifact plus an explicit owner decision and can only open the
+    // implementation-plan gate, never runtime code or candidate expansion.
+    "memory_biocortex_t6_candidate_expansion_runtime_gate_owner_review_record",
     // Continuity T7 neural critic shadow eval: read-only offline held-out
     // comparison against deterministic T3/T4 labels; no model/write authority.
     "memory_neural_critic_shadow_eval",
@@ -49051,6 +49472,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Standard,
         Arc::new(MemoryBioCortexT6CandidateExpansionRuntimeGateDesignArtifactTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryBioCortexT6CandidateExpansionRuntimeGateOwnerReviewRecordTool::new()),
     );
     reg_if(
         &mut reg,
@@ -54853,6 +55280,10 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             Tier::Standard,
             "memory_biocortex_t6_candidate_expansion_runtime_gate_design_artifact"
         ));
+        assert!(p.includes(
+            Tier::Standard,
+            "memory_biocortex_t6_candidate_expansion_runtime_gate_owner_review_record"
+        ));
         assert!(p.includes(Tier::Standard, "memory_neural_critic_shadow_eval"));
         assert!(p.includes(Tier::Standard, "biocortex_retrieval_shadow"));
         assert!(!p.includes(Tier::Standard, "embed_text"));
@@ -54906,9 +55337,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 68 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 69 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-        //      + DIRECT(58: 6 avatar observation/sync/renderer tools
+        //      + DIRECT(59: 6 avatar observation/sync/renderer tools
         //      + xiao_shu_action_request + 14 mobile bridge tools
         //      + memory_graph_topology + memory_retrieval_feedback
         //      + memory_consolidation_queue
@@ -54924,6 +55355,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         //      + memory_biocortex_t6_candidate_expansion_owner_decision_record
         //      + memory_biocortex_t6_candidate_expansion_runtime_gate_preflight
         //      + memory_biocortex_t6_candidate_expansion_runtime_gate_design_artifact
+        //      + memory_biocortex_t6_candidate_expansion_runtime_gate_owner_review_record
         //      + memory_neural_critic_shadow_eval
         //      + biocortex_retrieval_shadow
         //      + memory_related_keys_preflight
@@ -54940,7 +55372,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         // forum_digest joined via the FORUM_READ capability group (2026-05-23).
         // Native-overlap probes such as browser_lite_probe stay in broader
         // profiles, not codex-essential direct extras.
-        assert_eq!(extras.len(), 68);
+        assert_eq!(extras.len(), 69);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -54995,6 +55427,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         ));
         assert!(extras.contains(
             &"memory_biocortex_t6_candidate_expansion_runtime_gate_design_artifact"
+        ));
+        assert!(extras.contains(
+            &"memory_biocortex_t6_candidate_expansion_runtime_gate_owner_review_record"
         ));
         assert!(extras.contains(&"memory_neural_critic_shadow_eval"));
         assert!(extras.contains(&"biocortex_retrieval_shadow"));
@@ -67755,6 +68190,242 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(!serialized.contains("secret design query"));
         assert!(!serialized.contains("secret design content"));
         assert!(!serialized.contains("\"owner_decision_record\""));
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_t6_candidate_expansion_runtime_gate_owner_review_record_accepts_design_artifact(
+    ) {
+        let tool = MemoryBioCortexT6CandidateExpansionRuntimeGateOwnerReviewRecordTool::new();
+        let artifact = json!({
+            "schema": "agent_bridge.memory_biocortex_t6_candidate_expansion_runtime_gate_design_artifact.v0",
+            "read_only": true,
+            "runtime_gate_design_artifact": {
+                "ready": true,
+                "block_reasons": [],
+                "decision": {
+                    "verdict": "runtime_gate_design_artifact_ready_for_owner_review",
+                    "next_gate": "author_review_runtime_gate_design_artifact_before_runtime_code",
+                    "design_only": true,
+                    "runtime_code_out_of_scope": true,
+                    "runtime_authority_out_of_scope": true,
+                    "candidate_expansion_authority_out_of_scope": true
+                },
+                "source_decision": {
+                    "owner_decision": "approve_next_design_gate_only",
+                    "owner": "pallasting",
+                    "decision_source": "forum:#115/post:3791",
+                    "next_design_gate_requested": true
+                },
+                "source_evidence": {
+                    "metrics": {
+                        "evaluated_count": 30,
+                        "search_error_count": 0,
+                        "baseline_miss_count": 18,
+                        "candidate_expansion_added_hit_count": 6,
+                        "candidate_expansion_added_hit_rate": 0.333,
+                        "graph_expansion_found_rate": 0.333
+                    },
+                    "evidence_strength": {
+                        "tier": "redacted_dry_run_signal_ready",
+                        "caveats": ["aggregate_only_no_case_rows"]
+                    }
+                },
+                "requirements": {
+                    "separate_runtime_gate_tool": true,
+                    "separate_owner_runtime_approval": true,
+                    "feature_flag_default_off": true,
+                    "shadow_mode_first": true,
+                    "deterministic_replay_fixture": true,
+                    "bounded_candidate_delta": true,
+                    "negative_controls": true,
+                    "rollback_plan": true,
+                    "telemetry_fields": [
+                        "baseline_candidate_count",
+                        "expanded_candidate_count",
+                        "added_candidate_count",
+                        "selected_candidate_source",
+                        "recall_lift_class",
+                        "negative_control_regression_count"
+                    ]
+                }
+            },
+            "design_contract": {
+                "may_prepare_runtime_gate_design_artifact": true,
+                "may_implement_runtime_gate_code_now": false,
+                "candidate_expansion_experiment_approved": false,
+                "may_run_candidate_expansion_dry_run_now": false,
+                "may_expand_candidate_set_now": false,
+                "changes_candidate_set_now": false,
+                "runtime_influence_approved": false,
+                "may_change_search_order_now": false,
+                "this_artifact_approves_runtime_candidate_expansion": false,
+                "requires_separate_owner_runtime_approval": true,
+                "requires_separate_runtime_gate_tool": true
+            },
+            "input_contract": {
+                "runtime_gate_preflight_included": false,
+                "owner_decision_record_included": false,
+                "human_review_packet_included": false,
+                "dry_run_report_included": false,
+                "dry_run_plan_included": false,
+                "recall_expansion_summary_included": false,
+                "case_rows_included": false,
+                "raw_query_included": false,
+                "raw_queries_included": false,
+                "raw_keys_included": false,
+                "content_included": false,
+                "raw_error_included": false
+            },
+            "secret_source_artifact": "secret artifact source"
+        });
+
+        let out = tool
+            .execute(
+                json!({
+                    "runtime_gate_design_artifact": artifact,
+                    "owner": "pallasting",
+                    "owner_decision": "approve_runtime_gate_implementation_plan_only",
+                    "decision_source": "chat:2026-06-21 continue after design artifact",
+                    "reviewer": "codex",
+                    "commit": "3a4df58",
+                    "forum_post_id": "3791"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(
+            payload["schema"],
+            json!("agent_bridge.memory_biocortex_t6_candidate_expansion_runtime_gate_owner_review_record.v0")
+        );
+        assert_eq!(payload["read_only"], json!(true));
+        assert_eq!(
+            payload["runtime_gate_owner_review_record"]["ready"],
+            json!(true)
+        );
+        assert_eq!(
+            payload["runtime_gate_owner_review_record"]["owner_decision"],
+            json!("approve_runtime_gate_implementation_plan_only")
+        );
+        assert_eq!(
+            payload["review_contract"]["may_prepare_runtime_gate_implementation_plan"],
+            json!(true)
+        );
+        assert_eq!(
+            payload["review_contract"]["may_implement_runtime_gate_code_now"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["review_contract"]["may_run_candidate_expansion_dry_run_now"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["review_contract"]["may_expand_candidate_set_now"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["review_contract"]["runtime_influence_approved"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["review_contract"]["this_record_approves_runtime_candidate_expansion"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["input_contract"]["runtime_gate_design_artifact_included"],
+            json!(false)
+        );
+
+        let serialized = serde_json::to_string(&payload).expect("serialize");
+        assert!(!serialized.contains("secret artifact source"));
+        assert!(!serialized.contains("secret_source_artifact"));
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_t6_candidate_expansion_runtime_gate_owner_review_record_blocks_raw_or_authoritative_artifact(
+    ) {
+        let tool = MemoryBioCortexT6CandidateExpansionRuntimeGateOwnerReviewRecordTool::new();
+        let artifact = json!({
+            "schema": "agent_bridge.memory_biocortex_t6_candidate_expansion_runtime_gate_design_artifact.v0",
+            "read_only": true,
+            "runtime_gate_design_artifact": {
+                "ready": false,
+                "block_reasons": ["source_runtime_gate_preflight_not_ready"],
+                "decision": {
+                    "verdict": "blocked_before_runtime_gate_design_artifact"
+                }
+            },
+            "design_contract": {
+                "may_prepare_runtime_gate_design_artifact": true,
+                "may_implement_runtime_gate_code_now": true,
+                "candidate_expansion_experiment_approved": true,
+                "may_run_candidate_expansion_dry_run_now": true,
+                "may_expand_candidate_set_now": true,
+                "changes_candidate_set_now": true,
+                "runtime_influence_approved": true,
+                "may_change_search_order_now": true,
+                "this_artifact_approves_runtime_candidate_expansion": true,
+                "requires_separate_owner_runtime_approval": true,
+                "requires_separate_runtime_gate_tool": true
+            },
+            "input_contract": {
+                "runtime_gate_preflight_included": true,
+                "raw_query_included": true,
+                "content_included": true
+            },
+            "runtime_gate_preflight": {"secret": "source preflight"},
+            "raw_query": "secret owner query",
+            "content": "secret owner content"
+        });
+
+        let out = tool
+            .execute(
+                json!({
+                    "runtime_gate_design_artifact": artifact,
+                    "owner": "pallasting",
+                    "owner_decision": "approve_runtime_gate_candidate_expansion_now",
+                    "decision_source": "chat:invalid"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(
+            payload["runtime_gate_owner_review_record"]["ready"],
+            json!(false)
+        );
+        let reasons = payload["runtime_gate_owner_review_record"]["block_reasons"]
+            .as_array()
+            .expect("block reasons");
+        assert!(reasons.contains(&json!("source_runtime_gate_design_artifact_not_ready")));
+        assert!(reasons.contains(&json!(
+            "source_runtime_gate_design_artifact_claims_runtime_authority"
+        )));
+        assert!(reasons.contains(&json!("source_runtime_gate_design_artifact_contains_raw")));
+        assert!(reasons.contains(&json!("invalid_owner_decision")));
+        assert!(reasons.contains(&json!("source_runtime_gate_preflight_not_ready")));
+        assert_eq!(
+            payload["review_contract"]["may_prepare_runtime_gate_implementation_plan"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["review_contract"]["may_implement_runtime_gate_code_now"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["review_contract"]["may_expand_candidate_set_now"],
+            json!(false)
+        );
+
+        let serialized = serde_json::to_string(&payload).expect("serialize");
+        assert!(!serialized.contains("source preflight"));
+        assert!(!serialized.contains("secret owner query"));
+        assert!(!serialized.contains("secret owner content"));
+        assert!(!serialized.contains("\"runtime_gate_preflight\""));
     }
 
     #[tokio::test]
