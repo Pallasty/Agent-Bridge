@@ -665,6 +665,34 @@ CREATE INDEX IF NOT EXISTS idx_semantic_events_ts ON semantic_events(ts DESC, id
 CREATE INDEX IF NOT EXISTS idx_semantic_events_source ON semantic_events(source, ts DESC);
 "#;
 
+// v36: memory FTS indexed projection. `memories.content` remains the durable
+// authored body, while `memories.fts_content` is a derived search projection
+// that can include small, whitelisted retrieval hints such as continuity
+// retrieval triggers. The FTS table is content-stored, so rebuilding triggers
+// and rows is enough to preserve read paths.
+const SCHEMA_V36_FTS_TRIGGERS: &str = r#"
+DROP TRIGGER IF EXISTS memories_ai;
+DROP TRIGGER IF EXISTS memories_ad;
+DROP TRIGGER IF EXISTS memories_au;
+
+CREATE TRIGGER memories_ai AFTER INSERT ON memories BEGIN
+    INSERT INTO memories_fts(rowid, key, content)
+    VALUES (new.rowid, new.key, COALESCE(new.fts_content, new.content));
+END;
+CREATE TRIGGER memories_ad AFTER DELETE ON memories BEGIN
+    DELETE FROM memories_fts WHERE rowid = old.rowid;
+END;
+CREATE TRIGGER memories_au AFTER UPDATE ON memories BEGIN
+    DELETE FROM memories_fts WHERE rowid = old.rowid;
+    INSERT INTO memories_fts(rowid, key, content)
+    VALUES (new.rowid, new.key, COALESCE(new.fts_content, new.content));
+END;
+
+DELETE FROM memories_fts;
+INSERT INTO memories_fts(rowid, key, content)
+SELECT rowid, key, COALESCE(fts_content, content) FROM memories;
+"#;
+
 /// Default database path.
 ///
 /// Linux: `$XDG_DATA_HOME/agent-bridge/state.db` → `~/.local/share/agent-bridge/state.db`.
@@ -1405,6 +1433,53 @@ impl SqliteStore {
                 }
                 let _ = c.execute("UPDATE schema_meta SET value='35' WHERE key='version'", []);
             }
+
+            // ── v36: memory FTS indexed projection. Keep authored content
+            // separate from search-only hints so continuity retrieval triggers
+            // can improve hard paraphrase recall without polluting memory bodies
+            // or indexing every tag.
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "35".to_string());
+            if cur.as_str() == "35" {
+                let col_exists: i64 = c
+                    .query_row(
+                        "SELECT COUNT(*) FROM pragma_table_info('memories') \
+                         WHERE name='fts_content'",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .unwrap_or(0);
+                if col_exists == 0 {
+                    c.execute("ALTER TABLE memories ADD COLUMN fts_content TEXT", [])?;
+                }
+                let fts_backfill_rows: Vec<(String, String)> = {
+                    let mut stmt = c.prepare(
+                        "SELECT key, content, tags FROM memories WHERE fts_content IS NULL",
+                    )?;
+                    let rows = stmt.query_map([], |row| {
+                        let key: String = row.get(0)?;
+                        let content: String = row.get(1)?;
+                        let tags_s: String = row.get(2)?;
+                        let tags = parse_str_array(&tags_s);
+                        Ok((key, memory_fts_content(&content, &tags)))
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                    rows
+                };
+                for (key, fts_content) in fts_backfill_rows {
+                    c.execute(
+                        "UPDATE memories SET fts_content = ?1 WHERE key = ?2",
+                        params![fts_content, key],
+                    )?;
+                }
+                c.execute_batch(SCHEMA_V36_FTS_TRIGGERS)?;
+                let _ = c.execute("UPDATE schema_meta SET value='36' WHERE key='version'", []);
+            }
             Ok(())
         })
         .await
@@ -2006,6 +2081,43 @@ fn token_overlap_ratio(
 
 fn parse_str_array(s: &str) -> Vec<String> {
     serde_json::from_str(s).unwrap_or_default()
+}
+
+const CONTINUITY_RETRIEVAL_TRIGGER_TAG_PREFIX: &str = "continuity_retrieval_trigger:";
+const FTS_RETRIEVAL_TRIGGER_CAP: usize = 512;
+
+fn memory_fts_content(content: &str, tags: &[String]) -> String {
+    let mut triggers: Vec<String> = Vec::new();
+    for tag in tags {
+        let Some(trigger) = tag.strip_prefix(CONTINUITY_RETRIEVAL_TRIGGER_TAG_PREFIX) else {
+            continue;
+        };
+        let trigger = trigger.trim();
+        if trigger.is_empty() {
+            continue;
+        }
+        let trigger = clamp(trigger, FTS_RETRIEVAL_TRIGGER_CAP);
+        if !triggers.contains(&trigger) {
+            triggers.push(trigger);
+        }
+    }
+
+    if triggers.is_empty() {
+        return content.to_string();
+    }
+
+    let mut out = String::with_capacity(
+        content.len()
+            + "\n\nretrieval trigger:\n".len()
+            + triggers.iter().map(|s| s.len() + 1).sum::<usize>(),
+    );
+    out.push_str(content);
+    out.push_str("\n\nretrieval trigger:\n");
+    for trigger in triggers {
+        out.push_str(&trigger);
+        out.push('\n');
+    }
+    out
 }
 
 /// Clamp `s` to at most `max` bytes, preserving UTF-8 boundaries.
@@ -2821,6 +2933,7 @@ impl StateStore for SqliteStore {
         let tags = serde_json::to_string(&mem.tags)?;
         let related = serde_json::to_string(&mem.related_keys)?;
         let scope = mem.scope.clone();
+        let fts_content = memory_fts_content(&content, &mem.tags);
         // Use caller-supplied importance if non-default, otherwise auto-assign from kind.
         let importance = if (mem.importance - 0.5).abs() > 1e-9 {
             mem.importance.clamp(0.0, 1.0)
@@ -2952,8 +3065,8 @@ impl StateStore for SqliteStore {
                        (key, kind, content, tags, related_keys, scope,
                         created_at, updated_at, last_accessed_at, access_count,
                         importance, status, trigger_pattern, embedding, dedupe_key,
-                        embedding_backend, version_vector, last_decayed_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?7, 0, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?7)
+                        fts_content, embedding_backend, version_vector, last_decayed_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?7, 0, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?7)
                      ON CONFLICT(key) DO UPDATE SET
                         kind          = excluded.kind,
                         content       = excluded.content,
@@ -2970,6 +3083,7 @@ impl StateStore for SqliteStore {
                         trigger_pattern = excluded.trigger_pattern,
                         embedding     = excluded.embedding,
                         dedupe_key    = excluded.dedupe_key,
+                        fts_content   = excluded.fts_content,
                         embedding_backend = COALESCE(excluded.embedding_backend, memories.embedding_backend),
                         version_vector = excluded.version_vector,
                         -- re-anchor decay: a re-saved row carries a fresh
@@ -2988,6 +3102,7 @@ impl StateStore for SqliteStore {
                         trigger_pattern,
                         embedding_bytes,
                         dedupe_key_storage,
+                        fts_content,
                         fresh_backend_name,
                         new_vv_str,
                     ],
@@ -5352,6 +5467,7 @@ impl StateStore for SqliteStore {
                     let related_s =
                         serde_json::to_string(&r.related_keys).unwrap_or_else(|_| "[]".into());
                     let content = &clamped_for_tx[idx];
+                    let fts_content = memory_fts_content(content, &r.tags);
                     let imp = if (r.importance - 0.5).abs() > 1e-9 {
                         r.importance
                     } else {
@@ -5377,8 +5493,8 @@ impl StateStore for SqliteStore {
                                    (key, kind, content, tags, related_keys, scope,
                                     created_at, updated_at, last_accessed_at, access_count,
                                     importance, status, trigger_pattern, embedding,
-                                    version_vector)
-                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                                    fts_content, version_vector)
+                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
                                 params![
                                     r.key,
                                     r.kind,
@@ -5394,6 +5510,7 @@ impl StateStore for SqliteStore {
                                     stat,
                                     trig,
                                     embedding_bytes,
+                                    fts_content,
                                     vv_for_tx[idx],
                                 ],
                             )?;
@@ -5409,7 +5526,7 @@ impl StateStore for SqliteStore {
                                     scope = ?6, updated_at = ?7, last_accessed_at = ?8,
                                     access_count = ?9, importance = ?10, status = ?11,
                                     trigger_pattern = ?12, embedding = ?13,
-                                    version_vector = ?14
+                                    fts_content = ?14, version_vector = ?15
                                  WHERE key = ?1",
                                 params![
                                     r.key,
@@ -5425,6 +5542,7 @@ impl StateStore for SqliteStore {
                                     stat,
                                     trig,
                                     embedding_bytes,
+                                    fts_content,
                                     vv_for_tx[idx],
                                 ],
                             )?;
@@ -5453,9 +5571,9 @@ impl StateStore for SqliteStore {
                                    (key, kind, content, tags, related_keys, scope,
                                     created_at, updated_at, last_accessed_at, access_count,
                                     importance, status, trigger_pattern, embedding,
-                                    version_vector)
+                                    fts_content, version_vector)
                                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
-                                         'conflict', ?12, ?13, ?14)
+                                         'conflict', ?12, ?13, ?14, ?15)
                                  ON CONFLICT(key) DO NOTHING",
                                 params![
                                     conflict_key,
@@ -5471,6 +5589,7 @@ impl StateStore for SqliteStore {
                                     imp,
                                     trig,
                                     embedding_bytes,
+                                    fts_content,
                                     vv_for_tx[idx],
                                 ],
                             )?;
@@ -10519,6 +10638,197 @@ mod tests {
             .filter(|r| r.payload == serde_json::json!({"c": 1}))
             .count();
         assert_eq!(bucket_c_count, 1);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_save_indexes_continuity_retrieval_trigger_projection() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-fts-trigger-projection-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+
+        let mut rec = mk_record("trigger_projection_key", 1_700_000_000);
+        rec.content = "authoritative body remains unchanged".into();
+        rec.tags = vec![
+            "continuity_retrieval_trigger:future workflow bridge phrase".into(),
+            "continuity_role:do_not_index_role_token".into(),
+        ];
+        store.memory_save(&rec).await.expect("save");
+
+        let hits = store
+            .memory_search("future workflow bridge", &[], 10)
+            .await
+            .expect("search trigger");
+        assert!(
+            hits.iter()
+                .any(|h| h.record.key == "trigger_projection_key"),
+            "retrieval_trigger text should be indexed in the FTS projection"
+        );
+
+        let tag_noise_hits = store
+            .memory_search("do_not_index_role_token", &[], 10)
+            .await
+            .expect("search tag noise");
+        assert!(
+            tag_noise_hits.is_empty(),
+            "non-trigger continuity tags must not be indexed as FTS content"
+        );
+
+        let got = store
+            .memory_get("trigger_projection_key")
+            .await
+            .expect("get")
+            .expect("record");
+        assert_eq!(
+            got.content, "authoritative body remains unchanged",
+            "search projection must not mutate authored memory content"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_save_same_content_resave_refreshes_fts_projection() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-fts-trigger-refresh-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+
+        let mut rec = mk_record("trigger_refresh_key", 1_700_000_000);
+        rec.content = "stable body with no projected wording".into();
+        store.memory_save(&rec).await.expect("first save");
+
+        let before = store
+            .memory_search("ultraviolet quasar anchor", &[], 10)
+            .await
+            .expect("search before");
+        assert!(
+            before.is_empty(),
+            "the trigger query should miss before the tag is added"
+        );
+
+        rec.tags = vec!["continuity_retrieval_trigger:ultraviolet quasar anchor".into()];
+        store
+            .memory_save(&rec)
+            .await
+            .expect("same-content tag resave");
+
+        let after = store
+            .memory_search("ultraviolet quasar anchor", &[], 10)
+            .await
+            .expect("search after");
+        assert!(
+            after.iter().any(|h| h.record.key == "trigger_refresh_key"),
+            "same-content resave must refresh the FTS projection"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_import_indexes_continuity_retrieval_trigger_projection() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-fts-trigger-import-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let src = SqliteStore::open(&temp_dir.join("src.db"))
+            .await
+            .expect("open src");
+        let dst = SqliteStore::open(&temp_dir.join("dst.db"))
+            .await
+            .expect("open dst");
+
+        let mut rec = mk_record("trigger_import_key", 1_700_000_000);
+        rec.content = "portable body".into();
+        rec.tags = vec!["continuity_retrieval_trigger:imported trigger bridge".into()];
+        src.memory_save(&rec).await.expect("source save");
+
+        let out = temp_dir.join("memories.jsonl");
+        src.memory_export(&export_all(), &out)
+            .await
+            .expect("export");
+        let report = dst
+            .memory_import(&out, ImportConflictPolicy::Skip, None)
+            .await
+            .expect("import");
+        assert_eq!(report.inserted, 1);
+
+        let hits = dst
+            .memory_search("imported trigger bridge", &[], 10)
+            .await
+            .expect("search imported trigger");
+        assert!(
+            hits.iter().any(|h| h.record.key == "trigger_import_key"),
+            "imported retrieval_trigger should be indexed in the destination FTS projection"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn fts_projection_migration_backfills_existing_trigger_tags() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-trigger-fts-migrate-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path).await.expect("open store");
+
+        let mut rec = mk_record("trigger_projection_legacy", 1_700_000_000);
+        rec.content = "legacy durable body intentionally lacks the probe phrase".into();
+        rec.tags = vec!["continuity_retrieval_trigger:violet mirror anchor".into()];
+        store.memory_save(&rec).await.expect("save");
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                c.execute(
+                    "UPDATE memories SET fts_content = NULL WHERE key = 'trigger_projection_legacy'",
+                    [],
+                )?;
+                c.execute("UPDATE schema_meta SET value='35' WHERE key='version'", [])?;
+                Ok(())
+            })
+            .await
+            .expect("simulate v35 row");
+        drop(store);
+
+        let reopened = SqliteStore::open(&db_path).await.expect("reopen migrated");
+        let hits = reopened
+            .memory_search("violet mirror anchor", &[], 10)
+            .await
+            .expect("search migrated trigger");
+        assert!(
+            hits.iter()
+                .any(|h| h.record.key == "trigger_projection_legacy"),
+            "v36 migration should backfill existing continuity retrieval triggers; got {:?}",
+            hits.iter()
+                .map(|h| h.record.key.clone())
+                .collect::<Vec<_>>()
+        );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
