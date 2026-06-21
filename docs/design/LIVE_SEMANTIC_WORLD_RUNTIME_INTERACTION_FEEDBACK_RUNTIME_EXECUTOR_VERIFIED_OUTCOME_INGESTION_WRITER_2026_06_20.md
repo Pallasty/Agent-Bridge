@@ -1,12 +1,15 @@
 # Live Semantic World Runtime - Runtime Executor Verified Outcome Ingestion Writer Gate
 
 Date: 2026-06-20
+Updated: 2026-06-21
 
-Status: Draft implementation spec
+Status: Implemented
 
 ## 1. Purpose
 
-G22 adds the next narrow gate after G21:
+G22 adds the next narrow gate after G21. G32 extends it so the writer gate can
+also consume the G31 admission-source apply-gate package without losing the
+admission lineage:
 
 ```text
 verified outcome ingestion apply gate
@@ -37,6 +40,17 @@ The source apply gate must be G21:
 - no write, memory, ingestion, world-verdict persistence, store, or MCP surface
   allowed by the source.
 
+When the source apply gate came from the admission-source path, it must also
+carry:
+
+- `source_verified_outcome_ingestion_admission_preflight_verdict=ready_for_verified_outcome_ingestion_execution`;
+- `source_admission_decision_id`;
+- `source_write_evidence_review_decision_id`;
+- store-write, persistence, prior writer/apply/commit/execution, and source
+  write-evidence ids;
+- `admission_preflight_confirmed=true`;
+- `admission_decision_confirmed=true`.
+
 The explicit writer decision must use:
 
 ```text
@@ -53,6 +67,8 @@ Required decision properties:
 - `apply_package_confirmed=true`;
 - `commit_package_confirmed=true`;
 - `verified_outcome_package_confirmed=true`;
+- for an admission-source apply gate, `admission_preflight_confirmed=true`;
+- for an admission-source apply gate, `admission_decision_confirmed=true`;
 - `writer_payload_confirmed=true`;
 - `writer_destination_confirmed=true`;
 - `writer_idempotency_confirmed=true`;
@@ -77,6 +93,21 @@ The writer decision must exactly match the G21 apply-gate scope for:
 
 Any mismatch blocks the writer gate.
 
+For an admission-source G31 apply gate, the writer decision must additionally
+match:
+
+- source admission decision id;
+- source write-evidence review decision id;
+- store-write execution id;
+- persistence decision id and persistence source execution id;
+- source writer decision id, named `source_writer_decision_id` in the writer
+  decision to avoid conflicting with the writer gate's own
+  `writer_decision_id`;
+- source apply decision id;
+- source commit decision id;
+- source prior execution decision id;
+- source write-evidence id.
+
 ## 4. Ready Output
 
 Ready output:
@@ -87,10 +118,23 @@ Ready output:
   "verified_outcome_ingestion_writer_verdict": "ready_for_verified_outcome_ingestion_writer_execution",
   "status": "ready",
   "reason": "verified_outcome_ingestion_writer_ready_for_execution",
+  "source_verified_outcome_ingestion_admission_preflight_verdict": "ready_for_verified_outcome_ingestion_execution",
   "next_allowed_gate": "verified_outcome_ingestion_writer_execution",
   "verified_outcome_ingestion_writer": {
+    "source_admission_decision_id": "verified_outcome_ingestion_admission_arrival_bath_move_002",
+    "source_write_evidence_review_decision_id": "verified_outcome_ingestion_write_evidence_review_arrival_bath_move_002",
+    "store_write_execution_id": "verified_outcome_ingestion_store_write_execution_arrival_bath_move_002",
+    "persistence_decision_id": "verified_outcome_ingestion_persistence_arrival_bath_move_002",
+    "persistence_source_execution_id": "verified_outcome_ingestion_writer_execution_arrival_bath_move_002",
+    "source_writer_decision_id": "verified_outcome_ingestion_writer_arrival_bath_move_002",
+    "source_apply_decision_id": "verified_outcome_ingestion_apply_arrival_bath_move_002",
+    "source_commit_decision_id": "verified_outcome_ingestion_execution_commit_arrival_bath_move_002",
+    "source_prior_execution_decision_id": "verified_outcome_ingestion_execution_arrival_bath_move_002",
+    "source_write_evidence_id": "durable_outcome_record_write_evidence_arrival_bath_move_002",
     "previous_world_verdict": "not_verified",
     "verified_world_verdict": "verified",
+    "admission_preflight_confirmed": true,
+    "admission_decision_confirmed": true,
     "ready_for_verified_outcome_ingestion_writer_execution": true,
     "verified_outcome_ingestion_writer_output_only": true,
     "verified_outcome_ingestion_writer_execution_allowed_after_gate": true,
@@ -121,6 +165,8 @@ The critical distinction is:
 
 ## 6. Next Slice
 
-The next safe slice is verified outcome ingestion writer execution design. It
-must keep any durable write path isolated behind implementation, audit,
-idempotency, rollback, and post-write verification checks.
+The next safe slice is verified outcome ingestion writer-execution lineage
+propagation. It must consume either the original G22 package or the
+admission-source G32 package while keeping any durable write path isolated
+behind implementation, audit, idempotency, rollback, and post-write
+verification checks.

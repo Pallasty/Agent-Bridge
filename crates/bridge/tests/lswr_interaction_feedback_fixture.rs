@@ -7150,6 +7150,108 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_accep
 }
 
 #[test]
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_accepts_admission_source_decision(
+) {
+    let apply =
+        ready_runtime_executor_verified_outcome_ingestion_apply_gate_from_admission_source_commit();
+    let writer = build_interaction_feedback_runtime_executor_verified_outcome_ingestion_writer(
+        &json!({
+            "verified_outcome_ingestion_apply_gate": apply,
+            "verified_outcome_ingestion_writer_decision":
+                explicit_verified_outcome_ingestion_writer_decision_for_admission_source_apply_gate()
+        }),
+    );
+    let markdown =
+        render_interaction_feedback_runtime_executor_verified_outcome_ingestion_writer(&writer);
+
+    assert_eq!(
+        writer["source_verified_outcome_ingestion_admission_preflight_verdict"],
+        "ready_for_verified_outcome_ingestion_execution"
+    );
+    assert_eq!(
+        writer["verified_outcome_ingestion_writer_verdict"],
+        "ready_for_verified_outcome_ingestion_writer_execution",
+        "failure_reasons={}",
+        writer["failure_reasons"]
+    );
+    assert_eq!(writer["status"], "ready");
+    assert_eq!(writer["failure_reasons"], json!([]));
+    assert_eq!(
+        writer["verified_outcome_ingestion_writer"]["writer_decision_id"],
+        "verified_outcome_ingestion_writer_from_admission_arrival_bath_move_002"
+    );
+    assert_eq!(
+        writer["verified_outcome_ingestion_writer"]["apply_decision_id"],
+        "verified_outcome_ingestion_apply_from_admission_arrival_bath_move_002"
+    );
+    assert_eq!(
+        writer["verified_outcome_ingestion_writer"]["commit_decision_id"],
+        "verified_outcome_ingestion_execution_commit_from_admission_arrival_bath_move_002"
+    );
+    assert_eq!(
+        writer["verified_outcome_ingestion_writer"]["source_admission_decision_id"],
+        "verified_outcome_ingestion_admission_arrival_bath_move_002"
+    );
+    assert_eq!(
+        writer["verified_outcome_ingestion_writer"]["source_write_evidence_review_decision_id"],
+        "verified_outcome_ingestion_write_evidence_review_arrival_bath_move_002"
+    );
+    assert_eq!(
+        writer["verified_outcome_ingestion_writer"]["store_write_execution_id"],
+        "verified_outcome_ingestion_store_write_execution_arrival_bath_move_002"
+    );
+    assert_eq!(
+        writer["verified_outcome_ingestion_writer"]["persistence_decision_id"],
+        "verified_outcome_ingestion_persistence_arrival_bath_move_002"
+    );
+    assert_eq!(
+        writer["verified_outcome_ingestion_writer"]["persistence_source_execution_id"],
+        "verified_outcome_ingestion_writer_execution_arrival_bath_move_002"
+    );
+    assert_eq!(
+        writer["verified_outcome_ingestion_writer"]["source_writer_decision_id"],
+        "verified_outcome_ingestion_writer_arrival_bath_move_002"
+    );
+    assert_eq!(
+        writer["verified_outcome_ingestion_writer"]["source_apply_decision_id"],
+        "verified_outcome_ingestion_apply_arrival_bath_move_002"
+    );
+    assert_eq!(
+        writer["verified_outcome_ingestion_writer"]["source_commit_decision_id"],
+        "verified_outcome_ingestion_execution_commit_arrival_bath_move_002"
+    );
+    assert_eq!(
+        writer["verified_outcome_ingestion_writer"]["source_prior_execution_decision_id"],
+        "verified_outcome_ingestion_execution_arrival_bath_move_002"
+    );
+    assert_eq!(
+        writer["verified_outcome_ingestion_writer"]["source_write_evidence_id"],
+        "durable_outcome_record_write_evidence_arrival_bath_move_002"
+    );
+    assert_eq!(
+        writer["verified_outcome_ingestion_writer"]["admission_preflight_confirmed"],
+        true
+    );
+    assert_eq!(
+        writer["verified_outcome_ingestion_writer"]["admission_decision_confirmed"],
+        true
+    );
+    assert_eq!(
+        writer["verified_outcome_ingestion_writer"]
+            ["ready_for_verified_outcome_ingestion_writer_execution"],
+        true
+    );
+    assert_runtime_executor_verified_outcome_ingestion_writer_output_only(&writer);
+
+    assert!(markdown.contains(
+        "- source_verified_outcome_ingestion_admission_preflight_verdict: `ready_for_verified_outcome_ingestion_execution`"
+    ));
+    assert!(markdown.contains(
+        "- source_writer_decision_id: `verified_outcome_ingestion_writer_arrival_bath_move_002`"
+    ));
+}
+
+#[test]
 fn interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_blocks_bad_decision() {
     let apply = ready_runtime_executor_verified_outcome_ingestion_apply_gate();
     let mut decision = explicit_verified_outcome_ingestion_writer_decision();
@@ -7246,6 +7348,48 @@ fn interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_block
     )));
     assert!(failure_reasons.contains(&json!(
         "verified_outcome_ingestion_writer_digest_scope_mismatch"
+    )));
+    assert_runtime_executor_verified_outcome_ingestion_writer_output_only(&writer);
+}
+
+#[test]
+fn interaction_feedback_runtime_executor_verified_outcome_ingestion_writer_blocks_bad_admission_source_decision(
+) {
+    let apply =
+        ready_runtime_executor_verified_outcome_ingestion_apply_gate_from_admission_source_commit();
+    let mut decision =
+        explicit_verified_outcome_ingestion_writer_decision_for_admission_source_apply_gate();
+    decision["admission_preflight_confirmed"] = json!(false);
+    decision["admission_decision_confirmed"] = json!(false);
+    decision["source_verified_outcome_ingestion_apply_scope"]["source_admission_decision_id"] =
+        json!("other_admission");
+    decision["source_verified_outcome_ingestion_apply_scope"]["store_write_execution_id"] =
+        json!("other_store_write");
+
+    let writer =
+        build_interaction_feedback_runtime_executor_verified_outcome_ingestion_writer(&json!({
+            "verified_outcome_ingestion_apply_gate": apply,
+            "verified_outcome_ingestion_writer_decision": decision
+        }));
+
+    assert_eq!(
+        writer["verified_outcome_ingestion_writer_verdict"],
+        "blocked"
+    );
+    let failure_reasons = writer["failure_reasons"]
+        .as_array()
+        .expect("failure reasons");
+    assert!(failure_reasons.contains(&json!(
+        "verified_outcome_ingestion_writer_requires_admission_preflight_confirmation"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "verified_outcome_ingestion_writer_requires_admission_decision_confirmation"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "verified_outcome_ingestion_writer_admission_decision_scope_mismatch"
+    )));
+    assert!(failure_reasons.contains(&json!(
+        "verified_outcome_ingestion_writer_store_write_scope_mismatch"
     )));
     assert_runtime_executor_verified_outcome_ingestion_writer_output_only(&writer);
 }
@@ -9982,6 +10126,16 @@ fn ready_runtime_executor_verified_outcome_ingestion_apply_gate() -> Value {
     }))
 }
 
+fn ready_runtime_executor_verified_outcome_ingestion_apply_gate_from_admission_source_commit(
+) -> Value {
+    build_interaction_feedback_runtime_executor_verified_outcome_ingestion_apply_gate(&json!({
+        "verified_outcome_ingestion_execution_commit":
+            ready_runtime_executor_verified_outcome_ingestion_execution_commit_from_admission_preflight(),
+        "verified_outcome_ingestion_apply_decision":
+            explicit_verified_outcome_ingestion_apply_decision_for_admission_source_commit()
+    }))
+}
+
 fn explicit_verified_outcome_ingestion_writer_decision() -> Value {
     json!({
         "schema": LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_WRITER_DECISION_SCHEMA,
@@ -10017,6 +10171,66 @@ fn explicit_verified_outcome_ingestion_writer_decision() -> Value {
         "apply_package_confirmed": true,
         "commit_package_confirmed": true,
         "verified_outcome_package_confirmed": true,
+        "writer_payload_confirmed": true,
+        "writer_destination_confirmed": true,
+        "writer_idempotency_confirmed": true,
+        "writer_boundary_acknowledged": true,
+        "rollback_plan_confirmed": true,
+        "outcome_ingestion_allowed_by_this_tool": false,
+        "memory_write_allowed": false,
+        "verified_outcome_ingested_by_this_tool": false,
+        "durable_outcome_record_written_by_this_tool": false,
+        "world_verdict_persisted_by_this_tool": false
+    })
+}
+
+fn explicit_verified_outcome_ingestion_writer_decision_for_admission_source_apply_gate() -> Value {
+    json!({
+        "schema": LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_WRITER_DECISION_SCHEMA,
+        "writer_decision_id": "verified_outcome_ingestion_writer_from_admission_arrival_bath_move_002",
+        "decision_kind": "verified_outcome_ingestion_writer",
+        "source_verified_outcome_ingestion_apply_scope": {
+            "apply_decision_id": "verified_outcome_ingestion_apply_from_admission_arrival_bath_move_002",
+            "commit_decision_id": "verified_outcome_ingestion_execution_commit_from_admission_arrival_bath_move_002",
+            "source_execution_decision_id": "verified_outcome_ingestion_execution_from_admission_arrival_bath_move_002",
+            "source_admission_decision_id": "verified_outcome_ingestion_admission_arrival_bath_move_002",
+            "source_write_evidence_review_decision_id": "verified_outcome_ingestion_write_evidence_review_arrival_bath_move_002",
+            "source_ingestion_decision_id": "verified_outcome_ingestion_arrival_bath_move_002",
+            "source_rewrite_decision_id": "world_verdict_rewrite_arrival_bath_move_002",
+            "source_review_decision_id": "durable_outcome_record_write_evidence_review_arrival_bath_move_002",
+            "write_evidence_id": "verified_outcome_ingestion_write_evidence_arrival_bath_move_002",
+            "store_write_execution_id": "verified_outcome_ingestion_store_write_execution_arrival_bath_move_002",
+            "persistence_decision_id": "verified_outcome_ingestion_persistence_arrival_bath_move_002",
+            "persistence_source_execution_id": "verified_outcome_ingestion_writer_execution_arrival_bath_move_002",
+            "source_writer_decision_id": "verified_outcome_ingestion_writer_arrival_bath_move_002",
+            "source_apply_decision_id": "verified_outcome_ingestion_apply_arrival_bath_move_002",
+            "source_commit_decision_id": "verified_outcome_ingestion_execution_commit_arrival_bath_move_002",
+            "source_prior_execution_decision_id": "verified_outcome_ingestion_execution_arrival_bath_move_002",
+            "source_write_evidence_id": "durable_outcome_record_write_evidence_arrival_bath_move_002",
+            "world_id": "onsen_live_session",
+            "branch_id": "main",
+            "runtime_generation": "runtime_gen_1284",
+            "patch_id": "patch_arrival_bath_move_002",
+            "outcome_record_candidate_id": "outcome_record_candidate_arrival_bath_move_002",
+            "outcome_record_schema": "agent_bridge.lswr.outcome_record_candidate.v0",
+            "idempotency_key": "onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_ingestion_review_arrival_bath_move_002",
+            "outcome_payload_digest": "sha256:arrival-bath-move-002-outcome-payload",
+            "write_destination": "agent_bridge_store_outcome_records",
+            "outcome_record_key": "onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_record_candidate_arrival_bath_move_002",
+            "outcome_record_digest": "sha256:arrival-bath-move-002-outcome-record",
+            "persisted_outcome_record_key": "onsen_live_session/main/runtime_gen_1284/patch_arrival_bath_move_002/outcome_record_candidate_arrival_bath_move_002",
+            "persisted_outcome_record_digest": "sha256:arrival-bath-move-002-outcome-record"
+        },
+        "decision": "approved_for_verified_outcome_ingestion_writer_execution",
+        "writer_reason": "admission_source_verified_outcome_ingestion_apply_gate_is_scoped_and_ready_for_separate_writer_execution",
+        "source_world_verdict": "not_verified",
+        "verified_world_verdict": "verified",
+        "reviewed_verified_outcome_ingestion_apply_verdict": "ready_for_verified_outcome_ingestion_writer",
+        "apply_package_confirmed": true,
+        "commit_package_confirmed": true,
+        "verified_outcome_package_confirmed": true,
+        "admission_preflight_confirmed": true,
+        "admission_decision_confirmed": true,
         "writer_payload_confirmed": true,
         "writer_destination_confirmed": true,
         "writer_idempotency_confirmed": true,
@@ -12566,6 +12780,14 @@ fn assert_runtime_executor_verified_outcome_ingestion_writer_output_only(writer:
     );
     assert_eq!(
         writer["guardrails"]["requires_explicit_verified_outcome_ingestion_writer_decision"],
+        true
+    );
+    assert_eq!(
+        writer["guardrails"]["accepts_admission_source_verified_outcome_ingestion_apply_gate"],
+        true
+    );
+    assert_eq!(
+        writer["guardrails"]["preserves_verified_outcome_ingestion_admission_lineage"],
         true
     );
     assert_eq!(
