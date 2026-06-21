@@ -62,6 +62,9 @@ wayland-client = { version = "0.31", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
+# read-only raw-embedding access for offline retrieval experiments
+# (examples/recall_whiten_probe.rs) — same bundled-SQLite driver ab-store uses.
+tokio-rusqlite.workspace = true
 
 [[bin]]
 name = "agent-bridge"
