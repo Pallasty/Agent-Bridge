@@ -32969,6 +32969,29 @@ impl MemoryRelatedKeysReviewScopeFilter {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MemoryRelatedKeysSelectionStrategy {
+    PreserveOrder,
+    OrphanReduction,
+}
+
+impl MemoryRelatedKeysSelectionStrategy {
+    fn parse(value: Option<&str>) -> Option<Self> {
+        match value {
+            Some("preserve_order") | None => Some(Self::PreserveOrder),
+            Some("orphan_reduction") => Some(Self::OrphanReduction),
+            _ => None,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::PreserveOrder => "preserve_order",
+            Self::OrphanReduction => "orphan_reduction",
+        }
+    }
+}
+
 fn memory_related_key_excluded_reason(
     rec: &MemoryRecord,
     skip_tags: &[String],
@@ -33355,6 +33378,20 @@ struct MemoryRelatedKeysMaterializePlan {
     selected_target_counts: HashMap<String, u64>,
 }
 
+struct MemoryRelatedKeyCandidate<'a> {
+    source: &'a MemoryRecord,
+    target: &'a MemoryRecord,
+    scan_index: usize,
+}
+
+impl MemoryRelatedKeyCandidate<'_> {
+    fn orphan_touch_count(&self, current_orphans: &HashSet<String>) -> u8 {
+        let source = current_orphans.contains(&self.source.key) as u8;
+        let target = current_orphans.contains(&self.target.key) as u8;
+        source + target
+    }
+}
+
 impl MemoryRelatedKeysMaterializePlan {
     fn bucket_rows(&self) -> Vec<Value> {
         self.bucket_pair_counts
@@ -33439,6 +33476,7 @@ fn memory_related_keys_materialize_plan_from_records(
         requested_scope,
         scope_mode,
         MemoryRelatedKeysReviewScopeFilter::Compatible,
+        MemoryRelatedKeysSelectionStrategy::PreserveOrder,
         max_edges,
         max_outbound_per_source,
         max_inbound_per_target,
@@ -33457,6 +33495,7 @@ fn memory_related_keys_materialize_plan_from_records_with_scope_filter(
     requested_scope: Option<&str>,
     scope_mode: MemorySearchScopeMode,
     scope_filter: MemoryRelatedKeysReviewScopeFilter,
+    selection_strategy: MemoryRelatedKeysSelectionStrategy,
     max_edges: usize,
     max_outbound_per_source: u32,
     max_inbound_per_target: u32,
@@ -33513,8 +33552,8 @@ fn memory_related_keys_materialize_plan_from_records_with_scope_filter(
         ..Default::default()
     };
     let mut candidate_pairs_seen: HashSet<(String, String)> = HashSet::new();
-    let mut selected_outbound: HashMap<String, u32> = HashMap::new();
-    let mut selected_inbound: HashMap<String, u32> = HashMap::new();
+    let mut candidates = Vec::new();
+    let mut scan_index = 0_usize;
 
     for source in &visible_records {
         for raw_target in &source.related_keys {
@@ -33582,69 +33621,92 @@ fn memory_related_keys_materialize_plan_from_records_with_scope_filter(
             }
 
             plan.safe_candidate_pairs_before_caps += 1;
-            if plan.selected_edges.len() >= max_edges {
-                memory_related_add_bucket(
-                    &mut plan.bucket_pair_counts,
-                    &mut plan.bucket_source_counts,
-                    "skipped_max_edges",
-                    &source.key,
-                );
-                continue;
-            }
-            let outbound = selected_outbound.get(&source.key).copied().unwrap_or(0);
-            if outbound >= max_outbound_per_source {
-                memory_related_add_bucket(
-                    &mut plan.bucket_pair_counts,
-                    &mut plan.bucket_source_counts,
-                    "skipped_outbound_cap",
-                    &source.key,
-                );
-                continue;
-            }
-            let inbound = selected_inbound.get(&target.key).copied().unwrap_or(0);
-            if inbound >= max_inbound_per_target {
-                memory_related_add_bucket(
-                    &mut plan.bucket_pair_counts,
-                    &mut plan.bucket_source_counts,
-                    "skipped_inbound_cap",
-                    &source.key,
-                );
-                continue;
-            }
+            candidates.push(MemoryRelatedKeyCandidate {
+                source,
+                target,
+                scan_index,
+            });
+            scan_index += 1;
+        }
+    }
 
+    if selection_strategy == MemoryRelatedKeysSelectionStrategy::OrphanReduction {
+        candidates.sort_by(|a, b| {
+            b.orphan_touch_count(&current_orphans)
+                .cmp(&a.orphan_touch_count(&current_orphans))
+                .then_with(|| a.scan_index.cmp(&b.scan_index))
+        });
+    }
+
+    let mut selected_outbound: HashMap<String, u32> = HashMap::new();
+    let mut selected_inbound: HashMap<String, u32> = HashMap::new();
+
+    for candidate in candidates {
+        let source = candidate.source;
+        let target = candidate.target;
+
+        if plan.selected_edges.len() >= max_edges {
             memory_related_add_bucket(
                 &mut plan.bucket_pair_counts,
                 &mut plan.bucket_source_counts,
-                "selected",
+                "skipped_max_edges",
                 &source.key,
             );
-            *selected_outbound.entry(source.key.clone()).or_default() += 1;
-            *selected_inbound.entry(target.key.clone()).or_default() += 1;
-            *plan
-                .selected_source_counts
-                .entry(source.key.clone())
-                .or_default() += 1;
-            *plan
-                .selected_target_counts
-                .entry(target.key.clone())
-                .or_default() += 1;
-            if current_orphans.contains(&source.key) {
-                plan.selected_touched_orphans.insert(source.key.clone());
-            }
-            if current_orphans.contains(&target.key) {
-                plan.selected_touched_orphans.insert(target.key.clone());
-            }
-            plan.selected_edges.push(MemoryRelatedKeyEdgePlan {
-                from_key: source.key.clone(),
-                to_key: target.key.clone(),
-                from_kind: source.kind.clone(),
-                to_kind: target.kind.clone(),
-                from_scope: source.scope.clone(),
-                to_scope: target.scope.clone(),
-                from_preview: memory_related_key_preview(source, preview_chars),
-                to_preview: memory_related_key_preview(target, preview_chars),
-            });
+            continue;
         }
+        let outbound = selected_outbound.get(&source.key).copied().unwrap_or(0);
+        if outbound >= max_outbound_per_source {
+            memory_related_add_bucket(
+                &mut plan.bucket_pair_counts,
+                &mut plan.bucket_source_counts,
+                "skipped_outbound_cap",
+                &source.key,
+            );
+            continue;
+        }
+        let inbound = selected_inbound.get(&target.key).copied().unwrap_or(0);
+        if inbound >= max_inbound_per_target {
+            memory_related_add_bucket(
+                &mut plan.bucket_pair_counts,
+                &mut plan.bucket_source_counts,
+                "skipped_inbound_cap",
+                &source.key,
+            );
+            continue;
+        }
+
+        memory_related_add_bucket(
+            &mut plan.bucket_pair_counts,
+            &mut plan.bucket_source_counts,
+            "selected",
+            &source.key,
+        );
+        *selected_outbound.entry(source.key.clone()).or_default() += 1;
+        *selected_inbound.entry(target.key.clone()).or_default() += 1;
+        *plan
+            .selected_source_counts
+            .entry(source.key.clone())
+            .or_default() += 1;
+        *plan
+            .selected_target_counts
+            .entry(target.key.clone())
+            .or_default() += 1;
+        if current_orphans.contains(&source.key) {
+            plan.selected_touched_orphans.insert(source.key.clone());
+        }
+        if current_orphans.contains(&target.key) {
+            plan.selected_touched_orphans.insert(target.key.clone());
+        }
+        plan.selected_edges.push(MemoryRelatedKeyEdgePlan {
+            from_key: source.key.clone(),
+            to_key: target.key.clone(),
+            from_kind: source.kind.clone(),
+            to_kind: target.kind.clone(),
+            from_scope: source.scope.clone(),
+            to_scope: target.scope.clone(),
+            from_preview: memory_related_key_preview(source, preview_chars),
+            to_preview: memory_related_key_preview(target, preview_chars),
+        });
     }
 
     plan
@@ -33686,6 +33748,7 @@ fn memory_related_keys_review_packet_from_records(
     requested_scope: Option<&str>,
     scope_mode: MemorySearchScopeMode,
     scope_filter: MemoryRelatedKeysReviewScopeFilter,
+    selection_strategy: MemoryRelatedKeysSelectionStrategy,
     max_pairs: usize,
     preview_chars: usize,
 ) -> Value {
@@ -33706,6 +33769,7 @@ fn memory_related_keys_review_packet_from_records(
         requested_scope,
         scope_mode,
         scope_filter,
+        selection_strategy,
         max_edges,
         max_outbound_per_source,
         max_inbound_per_target,
@@ -33751,6 +33815,7 @@ fn memory_related_keys_review_packet_from_records(
             "scope": requested_scope,
             "scope_mode": scope_mode.label(),
             "scope_filter": scope_filter.label(),
+            "selection_strategy": selection_strategy.label(),
             "max_pairs": max_edges,
             "max_outbound_per_source": max_outbound_per_source,
             "max_inbound_per_target": max_inbound_per_target,
@@ -33848,6 +33913,12 @@ impl McpTool for MemoryRelatedKeysReviewPacketTool {
                         "default": "compatible",
                         "description": "compatible preserves scope-mode matching; exact requires source and target memory scope to exactly equal scope."
                     },
+                    "selection_strategy": {
+                        "type": "string",
+                        "enum": ["preserve_order", "orphan_reduction"],
+                        "default": "preserve_order",
+                        "description": "preserve_order keeps the historical scan order; orphan_reduction selects candidates that touch current orphan nodes first while keeping all review caps and filters."
+                    },
                     "max_records": {
                         "type": "integer",
                         "minimum": 100,
@@ -33906,6 +33977,16 @@ impl McpTool for MemoryRelatedKeysReviewPacketTool {
                 "scope_filter=exact requires a non-empty scope",
             ));
         }
+        let Some(selection_strategy) = MemoryRelatedKeysSelectionStrategy::parse(
+            args.get("selection_strategy")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+        ) else {
+            return Ok(ToolResult::error(
+                "selection_strategy must be one of: preserve_order, orphan_reduction",
+            ));
+        };
         let max_records = args
             .get("max_records")
             .and_then(|v| v.as_u64())
@@ -33951,6 +34032,7 @@ impl McpTool for MemoryRelatedKeysReviewPacketTool {
             requested_scope,
             scope_mode,
             scope_filter,
+            selection_strategy,
             max_pairs,
             preview_chars,
         );
@@ -34236,6 +34318,12 @@ impl McpTool for MemoryRelatedKeysMaterializeTool {
                         "default": "compatible",
                         "description": "compatible preserves scope-mode matching; exact requires source and target memory scope to exactly equal scope."
                     },
+                    "selection_strategy": {
+                        "type": "string",
+                        "enum": ["preserve_order", "orphan_reduction"],
+                        "default": "preserve_order",
+                        "description": "preserve_order keeps historical scan order; orphan_reduction selects candidates that touch current orphan nodes first while keeping caps and filters."
+                    },
                     "max_records": {
                         "type": "integer",
                         "minimum": 100,
@@ -34344,6 +34432,16 @@ impl McpTool for MemoryRelatedKeysMaterializeTool {
                 "scope_filter=exact requires a non-empty scope",
             ));
         }
+        let Some(selection_strategy) = MemoryRelatedKeysSelectionStrategy::parse(
+            args.get("selection_strategy")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+        ) else {
+            return Ok(ToolResult::error(
+                "selection_strategy must be one of: preserve_order, orphan_reduction",
+            ));
+        };
         let max_records = args
             .get("max_records")
             .and_then(|v| v.as_u64())
@@ -34402,6 +34500,7 @@ impl McpTool for MemoryRelatedKeysMaterializeTool {
             requested_scope,
             scope_mode,
             scope_filter,
+            selection_strategy,
             max_edges,
             max_outbound_per_source,
             max_inbound_per_target,
@@ -34431,6 +34530,7 @@ impl McpTool for MemoryRelatedKeysMaterializeTool {
                     "scope": requested_scope,
                     "scope_mode": scope_mode.label(),
                     "scope_filter": scope_filter.label(),
+                    "selection_strategy": selection_strategy.label(),
                 }),
             );
         }
@@ -55123,6 +55223,82 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert_eq!(plan.projected_orphans_after_selected(), 1);
     }
 
+    #[test]
+    fn memory_related_keys_orphan_reduction_prioritizes_orphan_touching_pairs() {
+        let mut first_source = mk_mem("first_source", "decision", "first source content", &[]);
+        first_source.related_keys = vec!["first_target".into()];
+        let first_target = mk_mem("first_target", "lesson", "first target content", &[]);
+        let first_source_neighbor =
+            mk_mem("first_source_neighbor", "context", "source neighbor content", &[]);
+        let first_target_neighbor =
+            mk_mem("first_target_neighbor", "context", "target neighbor content", &[]);
+
+        let mut orphan_source = mk_mem("orphan_source", "decision", "orphan source content", &[]);
+        orphan_source.related_keys = vec!["orphan_target".into()];
+        let orphan_target = mk_mem("orphan_target", "lesson", "orphan target content", &[]);
+
+        let all = vec![
+            first_source,
+            first_target,
+            first_source_neighbor,
+            first_target_neighbor,
+            orphan_source,
+            orphan_target,
+        ];
+        let mut edges_by_key = HashMap::new();
+        edges_by_key.insert(
+            "first_source".to_string(),
+            vec![mk_edge("first_source", "first_source_neighbor", "relates")],
+        );
+        edges_by_key.insert(
+            "first_target".to_string(),
+            vec![mk_edge("first_target", "first_target_neighbor", "relates")],
+        );
+
+        let preserve = memory_related_keys_materialize_plan_from_records_with_scope_filter(
+            &all,
+            &edges_by_key,
+            &[],
+            &[],
+            true,
+            true,
+            None,
+            MemorySearchScopeMode::LocalOnly,
+            MemoryRelatedKeysReviewScopeFilter::Compatible,
+            MemoryRelatedKeysSelectionStrategy::PreserveOrder,
+            1,
+            10,
+            10,
+            80,
+        );
+        let orphan_first = memory_related_keys_materialize_plan_from_records_with_scope_filter(
+            &all,
+            &edges_by_key,
+            &[],
+            &[],
+            true,
+            true,
+            None,
+            MemorySearchScopeMode::LocalOnly,
+            MemoryRelatedKeysReviewScopeFilter::Compatible,
+            MemoryRelatedKeysSelectionStrategy::OrphanReduction,
+            1,
+            10,
+            10,
+            80,
+        );
+
+        assert_eq!(preserve.safe_candidate_pairs_before_caps, 2);
+        assert_eq!(preserve.selected_edges[0].from_key, "first_source");
+        assert_eq!(preserve.selected_edges[0].to_key, "first_target");
+        assert_eq!(preserve.projected_orphans_after_selected(), 2);
+
+        assert_eq!(orphan_first.safe_candidate_pairs_before_caps, 2);
+        assert_eq!(orphan_first.selected_edges[0].from_key, "orphan_source");
+        assert_eq!(orphan_first.selected_edges[0].to_key, "orphan_target");
+        assert_eq!(orphan_first.projected_orphans_after_selected(), 0);
+    }
+
     #[tokio::test]
     async fn memory_related_keys_materialize_dry_run_exact_scope_excludes_parent_scope_candidates() {
         let (hub, temp_dir) = mk_test_hub_with_store().await;
@@ -55260,6 +55436,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             Some("project:/repo"),
             MemorySearchScopeMode::LocalPlusGlobal,
             MemoryRelatedKeysReviewScopeFilter::Compatible,
+            MemoryRelatedKeysSelectionStrategy::PreserveOrder,
             20,
             80,
         );
@@ -55338,6 +55515,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             Some("project:/repo/app"),
             MemorySearchScopeMode::LocalOnly,
             MemoryRelatedKeysReviewScopeFilter::Exact,
+            MemoryRelatedKeysSelectionStrategy::PreserveOrder,
             20,
             80,
         );
@@ -55356,6 +55534,106 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         let serialized = serde_json::to_string(&packet).expect("serialize packet");
         assert!(!serialized.contains("parent_source"));
         assert!(!serialized.contains("parent_target"));
+    }
+
+    #[test]
+    fn memory_related_keys_review_packet_can_prioritize_orphan_reduction() {
+        let mut anchored_source = mk_mem_scoped(
+            "anchored_source",
+            "decision",
+            "anchored source content with durable detail",
+            &[],
+            Some("project:/repo"),
+        );
+        anchored_source.related_keys = vec!["anchored_target".into()];
+        let anchored_target = mk_mem_scoped(
+            "anchored_target",
+            "lesson",
+            "anchored target content with durable detail",
+            &[],
+            Some("project:/repo"),
+        );
+        let anchored_neighbor = mk_mem_scoped(
+            "anchored_neighbor",
+            "context",
+            "anchored neighbor content",
+            &[],
+            Some("project:/repo"),
+        );
+
+        let mut orphan_source = mk_mem_scoped(
+            "orphan_source",
+            "decision",
+            "orphan source content with durable detail",
+            &[],
+            Some("project:/repo"),
+        );
+        orphan_source.related_keys = vec!["orphan_target".into()];
+        let orphan_target = mk_mem_scoped(
+            "orphan_target",
+            "lesson",
+            "orphan target content with durable detail",
+            &[],
+            Some("project:/repo"),
+        );
+        let all = vec![
+            anchored_source,
+            anchored_target,
+            anchored_neighbor,
+            orphan_source,
+            orphan_target,
+        ];
+        let mut edges_by_key = HashMap::new();
+        edges_by_key.insert(
+            "anchored_source".to_string(),
+            vec![mk_edge("anchored_source", "anchored_neighbor", "relates")],
+        );
+        edges_by_key.insert(
+            "anchored_target".to_string(),
+            vec![mk_edge("anchored_target", "anchored_neighbor", "relates")],
+        );
+
+        let default_packet = memory_related_keys_review_packet_from_records(
+            &all,
+            &edges_by_key,
+            Some("project:/repo"),
+            MemorySearchScopeMode::LocalOnly,
+            MemoryRelatedKeysReviewScopeFilter::Exact,
+            MemoryRelatedKeysSelectionStrategy::PreserveOrder,
+            1,
+            80,
+        );
+        let orphan_packet = memory_related_keys_review_packet_from_records(
+            &all,
+            &edges_by_key,
+            Some("project:/repo"),
+            MemorySearchScopeMode::LocalOnly,
+            MemoryRelatedKeysReviewScopeFilter::Exact,
+            MemoryRelatedKeysSelectionStrategy::OrphanReduction,
+            1,
+            80,
+        );
+
+        assert_eq!(
+            default_packet["review_packet"]["selected_edges"][0]["from_key"],
+            json!("anchored_source")
+        );
+        assert_eq!(
+            default_packet["review_packet"]["orphans_reduced_by_selected"],
+            json!(0)
+        );
+        assert_eq!(
+            orphan_packet["filters"]["selection_strategy"],
+            json!("orphan_reduction")
+        );
+        assert_eq!(
+            orphan_packet["review_packet"]["selected_edges"][0]["from_key"],
+            json!("orphan_source")
+        );
+        assert_eq!(
+            orphan_packet["review_packet"]["orphans_reduced_by_selected"],
+            json!(2)
+        );
     }
 
     #[test]
