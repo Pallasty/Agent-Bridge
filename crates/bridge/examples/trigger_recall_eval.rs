@@ -612,6 +612,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut intent_projected = Agg::default();
     let mut cjk_shingle_projected = Agg::default();
     let mut projected_plus_cjk_acc = Agg::default();
+    let mut projected_plus_intent_acc = Agg::default();
     let mut exact_projected = Agg::default();
     let gold_keys: BTreeSet<&str> = CORPUS
         .iter()
@@ -643,6 +644,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             projected_plus_keys.err(),
         );
 
+        let projected_intent_keys = fts.search_projected_then_intent_accepted(case.query, TOP_K);
+        projected_plus_intent_acc.record(
+            first_hit_rank(projected_intent_keys.as_deref().unwrap_or(&[]), case.expect),
+            projected_intent_keys.err(),
+        );
+
         let trigger_keys = fts.search(IndexKind::Projected, case.trigger, TOP_K);
         exact_projected.record(
             first_hit_rank(trigger_keys.as_deref().unwrap_or(&[]), case.expect),
@@ -656,6 +663,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut cjk_negative_errors = Vec::new();
     let mut projected_plus_false_hits = Vec::new();
     let mut projected_plus_errors = Vec::new();
+    let mut projected_intent_false_hits = Vec::new();
+    let mut projected_intent_errors = Vec::new();
     for control in NEGATIVE_CONTROLS {
         match fts.search(IndexKind::Projected, control.query, TOP_K) {
             Ok(keys) => {
@@ -692,6 +701,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             Err(err) => projected_plus_errors.push(format!("{}:{err}", control.id)),
         }
+        match fts.search_projected_then_intent_accepted(control.query, TOP_K) {
+            Ok(keys) => {
+                for (idx, key) in keys.iter().enumerate() {
+                    if gold_keys.contains(key.as_str()) {
+                        projected_intent_false_hits.push(format!(
+                            "{}:{}@{}",
+                            control.id,
+                            key,
+                            idx + 1
+                        ));
+                    }
+                }
+            }
+            Err(err) => projected_intent_errors.push(format!("{}:{err}", control.id)),
+        }
     }
 
     let active_total = rows.len();
@@ -722,6 +746,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     print_row("intent_projected", &intent_projected, n);
     print_row("cjk_shingle_proj", &cjk_shingle_projected, n);
     print_row("projected+cjk_acc", &projected_plus_cjk_acc, n);
+    print_row("projected+intent", &projected_plus_intent_acc, n);
     print_row("exact_projected", &exact_projected, n);
     println!();
 
@@ -820,14 +845,55 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     println!();
 
+    println!("## Projected plus explicit exclusion-intent filter");
+    let intent_added = added_hit_indices(&intent_projected, &projected_plus_intent_acc);
+    let intent_improved = improved_rank_indices(&intent_projected, &projected_plus_intent_acc);
+    println!(
+        "  gate: projected+cjk_acc candidates, then reject candidates matching explicit exclusion clauses"
+    );
+    println!(
+        "  added top-{TOP_K} hits over projected: {} case(s){}",
+        intent_added.len(),
+        fmt_idx(&intent_added)
+    );
+    println!(
+        "  improved first-hit rank over projected: {} case(s){}",
+        intent_improved.len(),
+        fmt_idx(&intent_improved)
+    );
+    println!(
+        "  accepted false hits: {}",
+        projected_intent_false_hits.len()
+    );
+    if !projected_intent_false_hits.is_empty() {
+        println!("  false hits: {}", projected_intent_false_hits.join(", "));
+    }
+    println!("  parser errors: {}", projected_intent_errors.len());
+    if !projected_intent_errors.is_empty() {
+        println!("  errors: {}", projected_intent_errors.join(", "));
+    }
+    println!(
+        "  contract: eval-only intent/negation filter; no production acceptance or ranking change"
+    );
+    println!();
+
     println!("## Per-case first-hit rank (- = no hit in top {TOP_K}; ERR = FTS parser error)");
     println!(
-        "  {:<3} {:<34} {:<14} {:>8} {:>10} {:>10} {:>10} {:>10}  {}",
-        "#", "id", "stratum", "content", "projected", "cjk_probe", "plus_acc", "exact", "note"
+        "  {:<3} {:<34} {:<14} {:>8} {:>10} {:>10} {:>10} {:>10} {:>10}  {}",
+        "#",
+        "id",
+        "stratum",
+        "content",
+        "projected",
+        "cjk_probe",
+        "plus_acc",
+        "intent",
+        "exact",
+        "note"
     );
     for (i, case) in CORPUS.iter().enumerate() {
         println!(
-            "  {:<3} {:<34} {:<14} {:>8} {:>10} {:>10} {:>10} {:>10}  {}",
+            "  {:<3} {:<34} {:<14} {:>8} {:>10} {:>10} {:>10} {:>10} {:>10}  {}",
             i + 1,
             case.id,
             case.stratum,
@@ -843,6 +909,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             rank_cell(
                 projected_plus_cjk_acc.ranks[i],
                 projected_plus_cjk_acc.errors[i].as_deref()
+            ),
+            rank_cell(
+                projected_plus_intent_acc.ranks[i],
+                projected_plus_intent_acc.errors[i].as_deref()
             ),
             rank_cell(
                 exact_projected.ranks[i],
@@ -875,6 +945,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         fmt_idx(&miss_indices(&projected_plus_cjk_acc))
     );
     println!(
+        "  projected+intent misses:{} case(s){}",
+        miss_indices(&projected_plus_intent_acc).len(),
+        fmt_idx(&miss_indices(&projected_plus_intent_acc))
+    );
+    println!(
         "  exact_projected errors:  {} case(s){}",
         error_indices(&exact_projected).len(),
         fmt_idx(&error_indices(&exact_projected))
@@ -900,6 +975,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         projected_plus_errors.len()
     );
     println!(
+        "  projected+intent ctrl:   {} false hit(s), {} parser error(s)",
+        projected_intent_false_hits.len(),
+        projected_intent_errors.len()
+    );
+    println!(
         "  caveat: hand-curated corpus, N={n}. This is a broader trigger-cohort \
          falsifier, not a production ranking benchmark."
     );
@@ -919,6 +999,7 @@ fn run_eval_for(
     let mut intent_projected = Agg::default();
     let mut cjk_shingle_projected = Agg::default();
     let mut projected_plus_cjk_acc = Agg::default();
+    let mut projected_plus_intent_acc = Agg::default();
     let mut exact_projected = Agg::default();
     let gold_keys: BTreeSet<&str> = cases
         .iter()
@@ -950,6 +1031,12 @@ fn run_eval_for(
             projected_plus_keys.err(),
         );
 
+        let projected_intent_keys = fts.search_projected_then_intent_accepted(case.query, TOP_K);
+        projected_plus_intent_acc.record(
+            first_hit_rank(projected_intent_keys.as_deref().unwrap_or(&[]), case.expect),
+            projected_intent_keys.err(),
+        );
+
         let trigger_keys = fts.search(IndexKind::Projected, case.trigger, TOP_K);
         exact_projected.record(
             first_hit_rank(trigger_keys.as_deref().unwrap_or(&[]), case.expect),
@@ -963,6 +1050,8 @@ fn run_eval_for(
     let mut cjk_negative_errors = Vec::new();
     let mut projected_plus_false_hits = Vec::new();
     let mut projected_plus_errors = Vec::new();
+    let mut projected_intent_false_hits = Vec::new();
+    let mut projected_intent_errors = Vec::new();
     for control in negative_controls {
         match fts.search(IndexKind::Projected, control.query, TOP_K) {
             Ok(keys) => {
@@ -999,6 +1088,21 @@ fn run_eval_for(
             }
             Err(err) => projected_plus_errors.push(format!("{}:{err}", control.id)),
         }
+        match fts.search_projected_then_intent_accepted(control.query, TOP_K) {
+            Ok(keys) => {
+                for (idx, key) in keys.iter().enumerate() {
+                    if gold_keys.contains(key.as_str()) {
+                        projected_intent_false_hits.push(format!(
+                            "{}:{}@{}",
+                            control.id,
+                            key,
+                            idx + 1
+                        ));
+                    }
+                }
+            }
+            Err(err) => projected_intent_errors.push(format!("{}:{err}", control.id)),
+        }
     }
 
     let active_total = rows.len();
@@ -1029,6 +1133,7 @@ fn run_eval_for(
     print_row("intent_projected", &intent_projected, n);
     print_row("cjk_shingle_proj", &cjk_shingle_projected, n);
     print_row("projected+cjk_acc", &projected_plus_cjk_acc, n);
+    print_row("projected+intent", &projected_plus_intent_acc, n);
     print_row("exact_projected", &exact_projected, n);
     println!();
 
@@ -1075,11 +1180,22 @@ fn run_eval_for(
     if !projected_plus_false_hits.is_empty() {
         println!("  false hits: {}", projected_plus_false_hits.join(", "));
     }
+    println!(
+        "  projected+intent accepted false hits: {}",
+        projected_intent_false_hits.len()
+    );
+    if !projected_intent_false_hits.is_empty() {
+        println!("  false hits: {}", projected_intent_false_hits.join(", "));
+    }
     println!("  projected parser errors: {}", negative_errors.len());
     println!("  cjk parser errors: {}", cjk_negative_errors.len());
     println!(
         "  projected+cjk parser errors: {}",
         projected_plus_errors.len()
+    );
+    println!(
+        "  projected+intent parser errors: {}",
+        projected_intent_errors.len()
     );
     println!("  controls:");
     for control in negative_controls {
@@ -1089,12 +1205,21 @@ fn run_eval_for(
 
     println!("## Per-case first-hit rank (- = no hit in top {TOP_K}; ERR = FTS parser error)");
     println!(
-        "  {:<3} {:<38} {:<14} {:>8} {:>10} {:>10} {:>10} {:>10}  {}",
-        "#", "id", "stratum", "content", "projected", "cjk_probe", "plus_acc", "exact", "note"
+        "  {:<3} {:<38} {:<14} {:>8} {:>10} {:>10} {:>10} {:>10} {:>10}  {}",
+        "#",
+        "id",
+        "stratum",
+        "content",
+        "projected",
+        "cjk_probe",
+        "plus_acc",
+        "intent",
+        "exact",
+        "note"
     );
     for (i, case) in cases.iter().enumerate() {
         println!(
-            "  {:<3} {:<38} {:<14} {:>8} {:>10} {:>10} {:>10} {:>10}  {}",
+            "  {:<3} {:<38} {:<14} {:>8} {:>10} {:>10} {:>10} {:>10} {:>10}  {}",
             i + 1,
             case.id,
             case.stratum,
@@ -1110,6 +1235,10 @@ fn run_eval_for(
             rank_cell(
                 projected_plus_cjk_acc.ranks[i],
                 projected_plus_cjk_acc.errors[i].as_deref()
+            ),
+            rank_cell(
+                projected_plus_intent_acc.ranks[i],
+                projected_plus_intent_acc.errors[i].as_deref()
             ),
             rank_cell(
                 exact_projected.ranks[i],
@@ -1140,6 +1269,11 @@ fn run_eval_for(
         "  projected+cjk misses:   {} case(s){}",
         miss_indices(&projected_plus_cjk_acc).len(),
         fmt_idx(&miss_indices(&projected_plus_cjk_acc))
+    );
+    println!(
+        "  projected+intent misses:{} case(s){}",
+        miss_indices(&projected_plus_intent_acc).len(),
+        fmt_idx(&miss_indices(&projected_plus_intent_acc))
     );
     println!(
         "  exact_projected errors:  {} case(s){}",
@@ -1492,6 +1626,20 @@ impl ScratchFts {
         self.search_projected_cjk_shingles_accepted(query, limit)
     }
 
+    fn search_projected_then_intent_accepted(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<String>, String> {
+        let clauses = explicit_exclusion_clauses(query);
+        let candidates = self.search_projected_then_cjk_accepted(query, limit)?;
+        if clauses.is_empty() {
+            return Ok(candidates);
+        }
+
+        filter_explicit_exclusion_intent(&self.projected_by_key, &clauses, candidates)
+    }
+
     fn search(&self, kind: IndexKind, query: &str, limit: usize) -> Result<Vec<String>, String> {
         let precise = sanitise_fts_query(query);
         let any = sanitise_fts_query_any(query);
@@ -1779,6 +1927,114 @@ fn cjk_shingle_overlap_count(query_terms: &BTreeSet<String>, text: &str) -> usiz
         .into_iter()
         .filter(|term| query_terms.contains(term))
         .count()
+}
+
+fn explicit_exclusion_clauses(query: &str) -> Vec<String> {
+    let markers = ["不要"];
+    let mut clauses = Vec::new();
+    for marker in markers {
+        collect_exclusion_clauses(query, marker, &mut clauses);
+    }
+
+    let lower = query.to_lowercase();
+    for marker in ["without", "not "] {
+        let mut start = 0;
+        while let Some(rel_idx) = lower[start..].find(marker) {
+            let marker_idx = start + rel_idx;
+            let clause_start = marker_idx + marker.len();
+            if let Some(clause) = exclusion_tail(&query[clause_start..]) {
+                clauses.push(clause);
+            }
+            start = clause_start;
+        }
+    }
+
+    clauses
+}
+
+fn collect_exclusion_clauses(query: &str, marker: &str, clauses: &mut Vec<String>) {
+    let mut start = 0;
+    while let Some(rel_idx) = query[start..].find(marker) {
+        let marker_idx = start + rel_idx;
+        let clause_start = marker_idx + marker.len();
+        if let Some(clause) = exclusion_tail(&query[clause_start..]) {
+            clauses.push(clause);
+        }
+        start = clause_start;
+    }
+}
+
+fn exclusion_tail(suffix: &str) -> Option<String> {
+    let trimmed = suffix.trim_start_matches(|ch: char| {
+        ch.is_whitespace() || matches!(ch, ':' | '：' | '-' | '，' | ',')
+    });
+    let clause = trimmed
+        .split(|ch: char| {
+            matches!(
+                ch,
+                '\n' | '\r' | '。' | '！' | '？' | '；' | ';' | '.' | '!' | '?'
+            )
+        })
+        .next()
+        .unwrap_or("")
+        .trim()
+        .trim_matches(|ch: char| matches!(ch, '，' | ',' | '、'));
+
+    if clause.is_empty() {
+        None
+    } else {
+        Some(clause.to_string())
+    }
+}
+
+fn filter_explicit_exclusion_intent(
+    projected_by_key: &HashMap<String, String>,
+    clauses: &[String],
+    candidates: Vec<String>,
+) -> Result<Vec<String>, String> {
+    let mut accepted = Vec::new();
+    for key in candidates {
+        let projected = projected_by_key
+            .get(&key)
+            .ok_or_else(|| format!("candidate key missing from projected map: {key}"))?;
+        if !candidate_matches_exclusion(clauses, projected) {
+            accepted.push(key);
+        }
+    }
+    Ok(accepted)
+}
+
+fn candidate_matches_exclusion(clauses: &[String], projected: &str) -> bool {
+    if clauses.is_empty() {
+        return false;
+    }
+
+    let projected_ascii = ascii_terms(projected);
+    let projected_cjk = cjk_shingle_terms(projected)
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+
+    clauses.iter().any(|clause| {
+        let ascii_hit = ascii_terms(clause)
+            .into_iter()
+            .any(|term| projected_ascii.contains(&term));
+        let cjk_hit_count = cjk_shingle_terms(clause)
+            .into_iter()
+            .filter(|term| projected_cjk.contains(term))
+            .count();
+
+        ascii_hit || cjk_hit_count >= 2
+    })
+}
+
+fn ascii_terms(text: &str) -> BTreeSet<String> {
+    const STOP_WORDS: &[&str] = &["and", "any", "for", "not", "only", "or", "the", "without"];
+
+    text.split(|ch: char| !ch.is_ascii_alphanumeric())
+        .map(str::to_lowercase)
+        .filter(|term| term.len() >= 3)
+        .filter(|term| !STOP_WORDS.contains(&term.as_str()))
+        .collect()
 }
 
 fn push_cjk_trigrams(run: &[char], terms: &mut BTreeSet<String>) {
@@ -2175,6 +2431,81 @@ mod tests {
 
         assert!(cjk_shingle_overlap_count(&query_terms, target) >= MIN_CJK_SHINGLE_ACCEPT_OVERLAP);
         assert!(cjk_shingle_overlap_count(&query_terms, tourism) < MIN_CJK_SHINGLE_ACCEPT_OVERLAP);
+    }
+
+    #[test]
+    fn explicit_exclusion_clauses_extract_chinese_and_english_negation() {
+        assert_eq!(
+            explicit_exclusion_clauses(
+                "只要界面清单 不要召回评测或Goal B决策 without deployment evidence"
+            ),
+            vec![
+                "召回评测或Goal B决策 without deployment evidence".to_string(),
+                "deployment evidence".to_string()
+            ]
+        );
+
+        assert_eq!(
+            explicit_exclusion_clauses("show UI notes, not runtime executor status"),
+            vec!["runtime executor status".to_string()]
+        );
+    }
+
+    #[test]
+    fn explicit_exclusion_intent_matches_ascii_and_cjk_candidates() {
+        let clauses = explicit_exclusion_clauses("只要界面清单 不要召回评测或Goal B决策");
+        assert!(candidate_matches_exclusion(
+            &clauses,
+            "Goal B tool-surface recall_eval decision and cold-start recall measurement"
+        ));
+        assert!(!candidate_matches_exclusion(
+            &clauses,
+            "interface list and cold tool inventory only"
+        ));
+
+        let cjk_clauses = explicit_exclusion_clauses("只要视觉草案 不要数学模型调研");
+        assert!(candidate_matches_exclusion(
+            &cjk_clauses,
+            "五行生克成熟数学模型调研 黄金比例反馈控制网络"
+        ));
+        assert!(!candidate_matches_exclusion(
+            &cjk_clauses,
+            "Nexus 五行 UI 图标 配色 角色皮肤 美术规格"
+        ));
+    }
+
+    #[test]
+    fn projected_then_intent_accepted_filters_excluded_candidates() {
+        let rows = [
+            MemoryRow {
+                key: "goal_b".to_string(),
+                kind: "decision".to_string(),
+                scope: None,
+                content: String::new(),
+                projected: "Goal B 工具面 冷工具 裁剪 召回评测 decision".to_string(),
+                triggers: Vec::new(),
+            },
+            MemoryRow {
+                key: "interface_inventory".to_string(),
+                kind: "context".to_string(),
+                scope: None,
+                content: String::new(),
+                projected: "Agent Bridge essential 工具面 冷工具 裁剪 看板 巡检 界面清单"
+                    .to_string(),
+                triggers: Vec::new(),
+            },
+        ];
+        let fts = ScratchFts::build(&rows).expect("scratch fts");
+
+        let accepted = fts
+            .search_projected_then_intent_accepted(
+                "Agent Bridge essential 工具面 冷工具 裁剪 看板 巡检 只要界面清单 不要召回评测或Goal B决策",
+                TOP_K,
+            )
+            .expect("intent accepted search");
+
+        assert!(!accepted.contains(&"goal_b".to_string()));
+        assert!(accepted.contains(&"interface_inventory".to_string()));
     }
 
     #[test]
