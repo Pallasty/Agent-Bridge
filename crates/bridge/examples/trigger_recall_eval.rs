@@ -320,6 +320,21 @@ const NEGATIVE_CONTROLS: &[NegativeControl] = &[
         query: "prime number crossword watercolor tutorial no agent bridge project state",
         note: "Generic puzzle/art query should not retrieve corpus gold keys",
     },
+    NegativeControl {
+        id: "project_adjacent_cjk_tourism",
+        query: "五行山旅游攻略 黄金比例摄影构图 平衡车购买指南",
+        note: "Shares CJK surface terms with the Wuxing math row but has tourism/shopping intent",
+    },
+    NegativeControl {
+        id: "project_adjacent_cjk_health",
+        query: "五行蔬菜汤 平衡饮食 黄金比例健身计划 控制体重",
+        note: "Shares Wuxing/balance/golden-ratio terms but has health-plan intent",
+    },
+    NegativeControl {
+        id: "project_adjacent_nexus_visual",
+        query: "Nexus 游戏 五行角色皮肤 黄金配色 平衡性吐槽",
+        note: "Shares Nexus and Wuxing vocabulary but asks about visual/balance feedback, not math survey evidence",
+    },
 ];
 
 struct MemoryRow {
