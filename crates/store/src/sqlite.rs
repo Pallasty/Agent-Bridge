@@ -1687,12 +1687,11 @@ fn sanitise_fts_query_joined(q: &str, join: &str) -> String {
     let has_operator = trimmed.contains('"')
         || trimmed.contains('*')
         || trimmed.contains(':')
-        || trimmed.contains('(')
-        || trimmed.contains(')')
         || trimmed.contains(" AND ")
         || trimmed.contains(" OR ")
         || trimmed.contains(" NOT ")
-        || trimmed.contains(" NEAR ");
+        || trimmed.contains(" NEAR ")
+        || trimmed.contains("NEAR(");
     if has_operator {
         return trimmed.to_string();
     }
@@ -9787,6 +9786,19 @@ mod tests {
     }
 
     #[test]
+    fn sanitise_fts_plain_punctuation_does_not_enter_raw_fts_mode() {
+        // Regression: a trigger like `onsen-hd ... cloud(mock) ...` contains
+        // punctuation that is ordinary prose, not FTS grouping syntax. Passing
+        // it through raw made FTS parse `-hd`/nearby punctuation as expression
+        // syntax and fail with errors like `no such column: hd`.
+        let out = sanitise_fts_query("onsen-hd session open; cloud(mock) ADR-015 v4.19.1");
+        assert_eq!(
+            out,
+            "onsen* hd* session* open* cloud* mock* ADR* 015* v4* 19* 1*"
+        );
+    }
+
+    #[test]
     fn sanitise_fts_phrase_fallback_escapes_inner_quotes() {
         // When the phrase-fallback path triggers, internal `"` must be
         // doubled so the wrapping doesn't terminate the phrase early.
@@ -9812,6 +9824,7 @@ mod tests {
             "\"signal exit\" OR sigterm",
             "content:cosine",
             "lens:cosine",
+            "NEAR(signal exit)",
             "foo*",
         ] {
             assert_eq!(

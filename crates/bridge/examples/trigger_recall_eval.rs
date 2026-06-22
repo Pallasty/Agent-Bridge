@@ -582,12 +582,11 @@ fn sanitise_fts_query_joined(q: &str, join: &str) -> String {
     let has_operator = trimmed.contains('"')
         || trimmed.contains('*')
         || trimmed.contains(':')
-        || trimmed.contains('(')
-        || trimmed.contains(')')
         || trimmed.contains(" AND ")
         || trimmed.contains(" OR ")
         || trimmed.contains(" NOT ")
-        || trimmed.contains(" NEAR ");
+        || trimmed.contains(" NEAR ")
+        || trimmed.contains("NEAR(");
     if has_operator {
         return trimmed.to_string();
     }
@@ -675,6 +674,10 @@ mod tests {
         assert_eq!(
             sanitise_fts_query("onsen-hd session open"),
             "onsen* hd* session* open*"
+        );
+        assert_eq!(
+            sanitise_fts_query("onsen-hd session open; cloud(mock) ADR-015 v4.19.1"),
+            "onsen* hd* session* open* cloud* mock* ADR* 015* v4* 19* 1*"
         );
     }
 }

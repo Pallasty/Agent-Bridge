@@ -61,7 +61,7 @@ Results:
 | local rustfmt on new file | pass |
 | example unit tests | pass, 3 passed |
 | live trigger-aware eval | pass, produced report |
-| debug case #10 | pass, confirmed exact-trigger FTS parser error |
+| debug case #10 | pass, confirmed exact-trigger FTS parser recovery |
 
 Existing unrelated warnings still appear during Cargo runs:
 
@@ -90,7 +90,7 @@ read_only:       SELECT + in-memory FTS only; no memory_get, memory_search, writ
   mode                   R@1     R@5    R@10     MRR
   intent_content       0.600   0.800   0.900   0.714
   intent_projected     0.700   1.000   1.000   0.817
-  exact_projected      0.900   0.900   0.900   0.900
+  exact_projected      1.000   1.000   1.000   1.000
 
 ## Projection delta
   added top-10 hits over content-only: 1 case(s) -> #8
@@ -107,12 +107,12 @@ read_only:       SELECT + in-memory FTS only; no memory_get, memory_search, writ
   7   ghp12_scope_filter                  1          1          1  GHP-1.2 exact-scope materialize
   8   goal_c_executor_constraint          -          3          1  Goal C executor non-authorization
   9   goal_c_u_patch_plan                 1          1          1  Goal C U dry-run patch plan
-  10  onsen_handoff                       1          1        ERR  Cross-project Onsen handoff
+  10  onsen_handoff                       1          1          1  Cross-project Onsen handoff
 
 ## Honest read
   intent_content misses:   1 case(s) -> #8
   intent_projected misses: 0 case(s)
-  exact_projected errors:  1 case(s) -> #10
+  exact_projected errors:  0 case(s)
 ```
 
 ## Finding
@@ -131,14 +131,16 @@ This supports the v36 trigger projection as a candidate-visibility improvement
 for its own cohort. It does not authorize production ranking changes: the corpus
 is small, hand-curated, and measures only temporary FTS candidate visibility.
 
-The run also exposed one parser hygiene issue:
+The run also exposed and fixed one parser hygiene issue:
 
 - case #10 `onsen_handoff` ranks #1 for the held-out intent query in both
   content and projected indexes;
-- the exact authored trigger text errors with `no such column: hd`;
-- the trigger contains `onsen-hd` plus operator-like punctuation, so exact
-  trigger replay needs a narrow FTS sanitizer follow-up before it can be used as
-  a robust projection-health metric.
+- before the sanitizer fix, exact authored trigger replay errored with
+  `no such column: hd`;
+- the trigger contains `onsen-hd` plus operator-like punctuation, so the FTS
+  sanitizer now treats ordinary punctuation and parentheses as unicode61
+  tokenization boundaries instead of raw FTS grouping syntax;
+- after the fix, `exact_projected` has `0` errors and ranks #10 at `1`.
 
 ## Non-Authorizations
 
@@ -157,12 +159,5 @@ This report does not authorize:
 ## Next Step
 
 Adopt `trigger_recall_eval` as a companion to `recall_eval` for the trigger-tag
-cohort, then do two narrow follow-ups:
-
-1. Add a regression for exact-trigger FTS parser hygiene using `onsen-hd` /
-   punctuation as the concrete failing pattern.
-2. Expand the trigger-aware corpus from 10 to at least 30 cases with explicit
-   strata: AB continuity, BioCortex, LSWR, Onsen, and negative controls.
-
-The parser regression should come first because it makes `exact_projected`
-usable as a low-level projection-health check.
+cohort, then expand the trigger-aware corpus from 10 to at least 30 cases with
+explicit strata: AB continuity, BioCortex, LSWR, Onsen, and negative controls.
