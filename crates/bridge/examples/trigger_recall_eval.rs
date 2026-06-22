@@ -40,9 +40,16 @@ const TRIGGER_PREFIX: &str = "continuity_retrieval_trigger:";
 
 struct Case {
     id: &'static str,
+    stratum: &'static str,
     query: &'static str,
     trigger: &'static str,
     expect: &'static [&'static str],
+    note: &'static str,
+}
+
+struct NegativeControl {
+    id: &'static str,
+    query: &'static str,
     note: &'static str,
 }
 
@@ -53,6 +60,7 @@ struct Case {
 const CORPUS: &[Case] = &[
     Case {
         id: "s132_handoff",
+        stratum: "biocortex",
         query: "从 S132 继续到 S133 的静态实验设计人工审查,应该找哪条交接记忆",
         trigger: "Retrieve when continuing from S132 toward S133 static experiment-design manual review or board packet.",
         expect: &["biocortex_rs_s132_static_experiment_design_review_preflight_handoff_20260622"],
@@ -60,6 +68,7 @@ const CORPUS: &[Case] = &[
     },
     Case {
         id: "s132_evidence",
+        stratum: "biocortex",
         query: "核对 BioCortex S132 到 S133 静态实验设计预检证据和 staged readiness gate",
         trigger: "Retrieve for biocortex S132/S133 static experiment-design review preflight work or staged readiness gates.",
         expect: &["biocortex_s132_static_experiment_design_review_preflight_20260622"],
@@ -67,6 +76,7 @@ const CORPUS: &[Case] = &[
     },
     Case {
         id: "t6_executor_preflight",
+        stratum: "ab_t6",
         query: "继续 AB memory T6 shadow executor preflight 的部署验证和 stale MCP reconnect 检查",
         trigger: "Continuing AB memory T6 shadow executor preflight, deploy verification, or stale MCP reconnect work",
         expect: &["ab_memory_continuity_t6_shadow_executor_preflight_deployed_20260621"],
@@ -74,6 +84,7 @@ const CORPUS: &[Case] = &[
     },
     Case {
         id: "goal_b_surface_growth",
+        stratum: "goal_b",
         query: "Goal B 工具面膨胀现在应该先限制新增 gate tool 还是清理存量 cold tools",
         trigger: "When continuing Goal B tool-surface deflation, D2 metastasis, or tool-addition gate for Agent-Bridge",
         expect: &["goal_b_surface_growth_gate_engine_finding_20260621"],
@@ -81,6 +92,7 @@ const CORPUS: &[Case] = &[
     },
     Case {
         id: "goal_c_recall_anchor",
+        stratum: "goal_c",
         query: "为什么 Goal C 要把 recall_eval R@k 当成连续性的外部 falsifier 锚点",
         trigger: "When continuing Goal C continuity ledger, recall_eval anchor, or cold-start recall measurement for Agent-Bridge",
         expect: &["goal_c_recall_eval_falsifier_anchor_contribution_20260621"],
@@ -88,6 +100,7 @@ const CORPUS: &[Case] = &[
     },
     Case {
         id: "biocortex_gate_program",
+        stratum: "biocortex",
         query: "准备继续 BioCortex scale gate 或 retrieval gate 时,构建顺序和理论依据看哪条",
         trigger: "biocortex next gate / what to build / scale gate / retrieval gate / s89d / gate program / build order",
         expect: &["biocortex_gate_program_post_research_20260620"],
@@ -95,6 +108,7 @@ const CORPUS: &[Case] = &[
     },
     Case {
         id: "ghp12_scope_filter",
+        stratum: "graph_hygiene",
         query: "GHP related_keys materialize 的 exact scope filter 部署后如何验证和继续",
         trigger: "GHP related_keys materialize exact scope filter deployed or verified",
         expect: &["ab_goal_c_ghp12_exact_scope_materialize_gate_deployed_20260621"],
@@ -102,6 +116,7 @@ const CORPUS: &[Case] = &[
     },
     Case {
         id: "goal_c_executor_constraint",
+        stratum: "goal_c",
         query: "考虑给 Agent-Bridge 加自动自我改进 executor 时有哪些必须阻止的边界",
         trigger: "When considering Agent-Bridge self-improvement executor, new U MCP tool, or automated patch/commit workflow.",
         expect: &["ab_goal_c_gated_executor_decision_20260621"],
@@ -109,6 +124,7 @@ const CORPUS: &[Case] = &[
     },
     Case {
         id: "goal_c_u_patch_plan",
+        stratum: "goal_c",
         query: "规划 Goal C 的 U report generator 或 runbook 下一步时应该参考哪份 dry-run patch plan",
         trigger: "When planning Goal C G3, U report generator/runbook, recall_eval dependency, or G4 executor decision.",
         expect: &["ab_goal_c_u_dry_run_patch_plan_20260621"],
@@ -116,10 +132,189 @@ const CORPUS: &[Case] = &[
     },
     Case {
         id: "onsen_handoff",
+        stratum: "onsen",
         query: "打开 onsen-hd 会话时要恢复 Sprint 6 save/load cloud mock Steam readiness 的状态",
         trigger: "onsen-hd session open; Sprint 6 save/load + cloud(mock) + Steam readiness 全 land; ADR-015 P1/P2/P3a landed P3b pending; ADR-007 vendor target GodotSteam v4.19.1",
         expect: &["session_handoff_onsen_hd_opus_47_20260620"],
         note: "Cross-project Onsen handoff",
+    },
+    Case {
+        id: "s131_handoff",
+        stratum: "biocortex",
+        query: "从 BioCortex S131 切到 S132 的静态实验设计 review-board 预检该接哪条 handoff",
+        trigger: "Retrieve when continuing from S131 toward S132 static experiment-design review or review-board preflight.",
+        expect: &["biocortex_rs_s131_static_experiment_design_packet_handoff_20260622"],
+        note: "BioCortex S131 handoff continuation",
+    },
+    Case {
+        id: "s131_evidence",
+        stratum: "biocortex",
+        query: "检查 S131/S132 static experiment design packet 的 staged gate 证据",
+        trigger: "Retrieve for biocortex S131/S132 static experiment design packet work or staged readiness gates.",
+        expect: &["biocortex_s131_static_experiment_design_packet_20260622"],
+        note: "BioCortex S131 evidence row",
+    },
+    Case {
+        id: "s130_handoff",
+        stratum: "biocortex",
+        query: "S130 static planning packet 完成后,下一段 biocortex-rs stage 应从哪里接",
+        trigger: "Use when starting the next biocortex-rs stage after S130 static planning packet.",
+        expect: &["biocortex_rs_s130_static_planning_packet_handoff_20260621"],
+        note: "BioCortex S130 next-stage handoff",
+    },
+    Case {
+        id: "s130_evidence",
+        stratum: "biocortex",
+        query: "继续 S130 staged-gate 或核对 static planning packet 验证证据时应该召回哪条",
+        trigger: "Use when continuing biocortex-rs staged-gate work after S130 or checking S130 verification evidence.",
+        expect: &["biocortex_s130_static_planning_packet_20260621"],
+        note: "BioCortex S130 verification row",
+    },
+    Case {
+        id: "t6_shadow_executor_next_invocation",
+        stratum: "ab_t6",
+        query: "T6 shadow executor preflight 已部署后,下一层 invocation evidence surface 应该怎么收窄",
+        trigger: "next T6 step after shadow executor preflight is deployed",
+        expect: &["ab_memory_continuity_t6_shadow_executor_invocation_next_20260621"],
+        note: "AB T6 shadow executor next invocation",
+    },
+    Case {
+        id: "t6_shadow_executor_next_gate",
+        stratum: "ab_t6",
+        query: "shadow_execution_gate 之后规划下一个 AB T6 gate 时有哪些边界",
+        trigger: "Retrieve when planning the next AB T6 gate after shadow_execution_gate deployment.",
+        expect: &["ab_memory_continuity_t6_shadow_executor_next_20260621"],
+        note: "AB T6 next-gate procedure",
+    },
+    Case {
+        id: "t6_shadow_execution_gate",
+        stratum: "ab_t6",
+        query: "核验 T6 memory continuity shadow execution gate 的部署和 MCP manifest 时看哪条",
+        trigger: "Retrieve when continuing AB T6 memory continuity shadow execution gate, deployment verification, or MCP manifest checks.",
+        expect: &["ab_memory_continuity_t6_shadow_execution_gate_deployed_20260621"],
+        note: "AB T6 shadow execution gate deployed",
+    },
+    Case {
+        id: "ghp12_reconnect",
+        stratum: "graph_hygiene",
+        query: "GHP-1.2 exact-scope materialize 之后用户重连 MCP,当前工具面和下一关怎么确认",
+        trigger: "After GHP-1.2 exact-scope materialize deploy or MCP reconnect questions, recall verified tool surfaces and next gate.",
+        expect: &["ab_goal_c_ghp12_reconnect_verified_20260621"],
+        note: "GHP-1.2 reconnect verification",
+    },
+    Case {
+        id: "t6_shadow_runtime_gate_deployed",
+        stratum: "ab_t6",
+        query: "T6 candidate expansion shadow runtime gate 已部署时,当前验证状态是哪条",
+        trigger: "AB T6 candidate expansion shadow runtime gate deployed verification",
+        expect: &["ab_memory_continuity_t6_shadow_runtime_gate_deployed_20260621"],
+        note: "AB T6 shadow runtime gate deployed",
+    },
+    Case {
+        id: "t6_shadow_runtime_next",
+        stratum: "ab_t6",
+        query: "shadow runtime gate 之后,下一步是否应该进入 shadow execution gate",
+        trigger: "Next step after T6 candidate expansion shadow runtime gate",
+        expect: &["ab_memory_continuity_t6_shadow_runtime_gate_next_20260621"],
+        note: "AB T6 shadow runtime next step",
+    },
+    Case {
+        id: "ghp1_strict_scope_deployed",
+        stratum: "graph_hygiene",
+        query: "GHP-1.1 strict-scope review packet 已部署后,related_keys 图卫生证据在哪里",
+        trigger: "GHP-1.1 deployed exact scope review packet and related_keys graph hygiene",
+        expect: &["ab_goal_c_ghp1_strict_scope_review_packet_deployed_20260621"],
+        note: "GHP-1.1 strict-scope deployed",
+    },
+    Case {
+        id: "ghp1_live_scope_observation",
+        stratum: "graph_hygiene",
+        query: "live related_keys review packet 选边范围太宽时,strict-scope 下一步应该看哪条 observation",
+        trigger: "GHP-1 live review packet selected edges scope too broad strict-scope next step",
+        expect: &["ab_goal_c_ghp1_live_packet_scope_observation_20260621"],
+        note: "GHP-1 live scope observation",
+    },
+    Case {
+        id: "goal_c_u_surface",
+        stratum: "goal_c",
+        query: "规划 Controlled RSI 的 U surface 报告优先路线时,哪条说明 report-first 而不是新 MCP 工具",
+        trigger: "When planning Goal C U surface, controlled RSI report-first loop, or G3 dry-run patch plan.",
+        expect: &["ab_goal_c_report_first_utility_surface_20260621"],
+        note: "Goal C report-first U surface",
+    },
+    Case {
+        id: "goal_c_honest_ledger",
+        stratum: "goal_c",
+        query: "整理 Goal C continuity honest ledger、LSWR-H1、BioCortex runtime influence 状态时该召回哪条",
+        trigger: "When planning Goal C, continuity honest ledger, LSWR-H1, BioCortex runtime influence, or controlled RSI G2.",
+        expect: &["ab_goal_c_continuity_honest_ledger_inventory_20260621"],
+        note: "Goal C continuity honest ledger",
+    },
+    Case {
+        id: "controlled_rsi_design",
+        stratum: "goal_c",
+        query: "Agent-Bridge 采用 Godel Agent 思路时,为什么是 governed loop 而不是 runtime self-patching",
+        trigger: "When planning AB self-improvement, Goal C dashboard, Godel Agent adaptation, or SEPL overlap.",
+        expect: &["ab_controlled_recursive_self_improvement_design_20260621"],
+        note: "Controlled RSI design constraint",
+    },
+    Case {
+        id: "nexus_wuxing_gdd35",
+        stratum: "nexus",
+        query: "重新审阅 #35 科技树五行生克 v0.2 或 tech-wuxing-sheng-ke 时应该找哪条状态",
+        trigger: "#35 科技五行生克 / tech-wuxing-sheng-ke / 五行研究生克 v0.2 re-review",
+        expect: &["nexus_35_tech_wuxing_shengke_v01_20260620"],
+        note: "Nexus #35 Wuxing design review",
+    },
+    Case {
+        id: "nexus_wuxing_math",
+        stratum: "nexus",
+        query: "五行生克的成熟数学模型、黄金比例控制网络和平衡靶调研结论在哪里",
+        trigger: "五行生克 数学模型 / golden ratio / wuxing_dynamics 平衡靶 / #35 v0.2 / 循环平衡环",
+        expect: &["nexus_wuxing_shengke_golden_ratio_survey_20260621"],
+        note: "Nexus Wuxing math survey",
+    },
+    Case {
+        id: "palace_apply_idempotent",
+        stratum: "palace",
+        query: "Palace materialization approved-plan live apply 和 idempotence 验证结果该看哪条",
+        trigger: "When continuing Palace materialization apply, approved-plan idempotence, or graph edge materialization verification",
+        expect: &["palace_materialization_apply_live_and_idempotent_plan_20260620"],
+        note: "Palace materialization live apply",
+    },
+    Case {
+        id: "palace_apply_operational",
+        stratum: "palace",
+        query: "解释 Palace materialization apply-gate 是否真的写过 live memory_edges 时召回哪条",
+        trigger: "When checking Palace materialization apply-gate operational state or explaining whether a live memory_edges write occurred.",
+        expect: &["palace_materialization_operational_apply_verified_20260620"],
+        note: "Palace materialization operational proof",
+    },
+    Case {
+        id: "t1_trigger_projection_v36",
+        stratum: "ab_t6",
+        query: "AB memory continuity T1 retrieval trigger FTS projection schema v36 部署证据在哪里",
+        trigger: "AB memory continuity retrieval trigger FTS projection deployed schema v36 fts_content",
+        expect: &["ab_memory_continuity_t1_retrieval_trigger_fts_projection_20260621"],
+        note: "AB T1 trigger projection deployment",
+    },
+];
+
+const NEGATIVE_CONTROLS: &[NegativeControl] = &[
+    NegativeControl {
+        id: "unrelated_recipe",
+        query: "banana sourdough crochet tidepool recipe unrelated continuation",
+        note: "Unrelated English nouns should not retrieve corpus gold keys",
+    },
+    NegativeControl {
+        id: "unrelated_weather",
+        query: "明天的天气预报 机场停车 折扣券 完全无关任务",
+        note: "Unrelated Chinese daily-life query should not retrieve corpus gold keys",
+    },
+    NegativeControl {
+        id: "unrelated_math_puzzle",
+        query: "prime number crossword watercolor tutorial no agent bridge project state",
+        note: "Generic puzzle/art query should not retrieve corpus gold keys",
     },
 ];
 
@@ -177,6 +372,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut intent_content = Agg::default();
     let mut intent_projected = Agg::default();
     let mut exact_projected = Agg::default();
+    let gold_keys: BTreeSet<&str> = CORPUS
+        .iter()
+        .flat_map(|case| case.expect.iter().copied())
+        .collect();
 
     for case in CORPUS {
         let content_keys = fts.search(IndexKind::Content, case.query, TOP_K);
@@ -198,6 +397,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
+    let mut negative_false_hits = Vec::new();
+    let mut negative_errors = Vec::new();
+    for control in NEGATIVE_CONTROLS {
+        match fts.search(IndexKind::Projected, control.query, TOP_K) {
+            Ok(keys) => {
+                for (idx, key) in keys.iter().enumerate() {
+                    if gold_keys.contains(key.as_str()) {
+                        negative_false_hits.push(format!("{}:{}@{}", control.id, key, idx + 1));
+                    }
+                }
+            }
+            Err(err) => negative_errors.push(format!("{}:{err}", control.id)),
+        }
+    }
+
     let active_total = rows.len();
     let trigger_rows = rows.iter().filter(|r| !r.triggers.is_empty()).count();
     let projected_rows = rows.iter().filter(|r| r.content != r.projected).count();
@@ -209,6 +423,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("trigger rows:    {trigger_rows}");
     println!("projected rows:  {projected_rows}");
     println!("corpus:          {n} cases (Mac active trigger-tag rows, 2026-06-22)");
+    println!("negative_ctrls:  {} controls", NEGATIVE_CONTROLS.len());
     println!("top_k:           {TOP_K}");
     println!("mode contract:   intent_content vs intent_projected isolates trigger projection");
     println!(
@@ -226,6 +441,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     print_row("exact_projected", &exact_projected, n);
     println!();
 
+    println!("## Corpus strata");
+    for (stratum, count) in stratum_counts() {
+        println!("  {stratum:<14} {count:>3}");
+    }
+    println!();
+
     println!("## Projection delta");
     let added = added_hit_indices(&intent_content, &intent_projected);
     let improved = improved_rank_indices(&intent_content, &intent_projected);
@@ -241,16 +462,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     println!();
 
+    println!("## Negative controls");
+    println!(
+        "  projected false hits against corpus gold keys: {}",
+        negative_false_hits.len()
+    );
+    if !negative_false_hits.is_empty() {
+        println!("  false hits: {}", negative_false_hits.join(", "));
+    }
+    println!("  projected parser errors: {}", negative_errors.len());
+    if !negative_errors.is_empty() {
+        println!("  errors: {}", negative_errors.join(", "));
+    }
+    println!("  controls:");
+    for control in NEGATIVE_CONTROLS {
+        println!("    {:<22} {}", control.id, control.note);
+    }
+    println!();
+
     println!("## Per-case first-hit rank (- = no hit in top {TOP_K}; ERR = FTS parser error)");
     println!(
-        "  {:<3} {:<28} {:>8} {:>10} {:>10}  {}",
-        "#", "id", "content", "projected", "exact", "note"
+        "  {:<3} {:<34} {:<14} {:>8} {:>10} {:>10}  {}",
+        "#", "id", "stratum", "content", "projected", "exact", "note"
     );
     for (i, case) in CORPUS.iter().enumerate() {
         println!(
-            "  {:<3} {:<28} {:>8} {:>10} {:>10}  {}",
+            "  {:<3} {:<34} {:<14} {:>8} {:>10} {:>10}  {}",
             i + 1,
             case.id,
+            case.stratum,
             rank_cell(intent_content.ranks[i], intent_content.errors[i].as_deref()),
             rank_cell(
                 intent_projected.ranks[i],
@@ -287,7 +527,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
          through the FTS query parser."
     );
     println!(
-        "  caveat: hand-curated corpus, N={n}. This is a first trigger-cohort \
+        "  negative controls:       {} false hit(s), {} parser error(s)",
+        negative_false_hits.len(),
+        negative_errors.len()
+    );
+    println!(
+        "  caveat: hand-curated corpus, N={n}. This is a broader trigger-cohort \
          falsifier, not a production ranking benchmark."
     );
 
@@ -341,6 +586,9 @@ fn verify_corpus(rows: &[MemoryRow]) -> Result<(), Box<dyn std::error::Error>> {
         if case.query == case.trigger {
             return Err(format!("{} uses exact trigger text as held-out query", case.id).into());
         }
+        if case.stratum.trim().is_empty() {
+            return Err(format!("{} has no stratum", case.id).into());
+        }
         for expected in case.expect {
             let row = by_key
                 .get(expected)
@@ -348,6 +596,16 @@ fn verify_corpus(rows: &[MemoryRow]) -> Result<(), Box<dyn std::error::Error>> {
             if row.triggers.is_empty() {
                 return Err(format!("{} expected key has no trigger: {expected}", case.id).into());
             }
+        }
+    }
+    let mut seen_negative_ids = BTreeSet::new();
+    let mut seen_negative_queries = BTreeSet::new();
+    for control in NEGATIVE_CONTROLS {
+        if !seen_negative_ids.insert(control.id) {
+            return Err(format!("duplicate negative control id: {}", control.id).into());
+        }
+        if !seen_negative_queries.insert(control.query) {
+            return Err(format!("duplicate negative control query: {}", control.query).into());
         }
     }
     Ok(())
@@ -550,6 +808,16 @@ fn error_indices(agg: &Agg) -> Vec<usize> {
         .collect()
 }
 
+fn stratum_counts() -> Vec<(&'static str, usize)> {
+    let mut counts: HashMap<&'static str, usize> = HashMap::new();
+    for case in CORPUS {
+        *counts.entry(case.stratum).or_default() += 1;
+    }
+    let mut rows = counts.into_iter().collect::<Vec<_>>();
+    rows.sort_by(|(a, _), (b, _)| a.cmp(b));
+    rows
+}
+
 fn fmt_idx(idx: &[usize]) -> String {
     if idx.is_empty() {
         String::new()
@@ -656,6 +924,14 @@ mod tests {
 
     #[test]
     fn corpus_queries_are_not_verbatim_triggers() {
+        assert!(
+            CORPUS.len() >= 30,
+            "trigger-aware corpus should stay at or above 30 cases"
+        );
+        assert!(
+            NEGATIVE_CONTROLS.len() >= 3,
+            "trigger-aware corpus should keep negative controls"
+        );
         for case in CORPUS {
             assert_ne!(
                 case.query, case.trigger,
