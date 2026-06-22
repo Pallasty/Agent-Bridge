@@ -228,6 +228,46 @@ const MIN_CJK_SHINGLE_ACCEPT_OVERLAP: usize = 4;
 const CASE2_TOOL_SURFACE_IDX1: usize = 2;
 const MIN_TOOL_SURFACE_PROJECTION_OVERLAP: usize = 4;
 
+#[derive(Clone, Copy, Debug)]
+struct ToolSurfaceNegativeControl {
+    label: &'static str,
+    query: &'static str,
+    read: &'static str,
+}
+
+const TOOL_SURFACE_NEGATIVE_CONTROLS: &[ToolSurfaceNegativeControl] = &[
+    ToolSurfaceNegativeControl {
+        label: "generic_tool_use",
+        query: "这个工具怎么使用",
+        read: "generic tool-use help should not activate tool-surface taxonomy projection",
+    },
+    ToolSurfaceNegativeControl {
+        label: "tool_latency_sample",
+        query: "某个工具 p95 延迟看着很高但调用样本很少要不要当成异常",
+        read: "tool telemetry/latency triage should stay outside tool-surface taxonomy projection",
+    },
+    ToolSurfaceNegativeControl {
+        label: "mcp_diagnostic_error",
+        query: "mcp tool changes_digest 最近报错是什么原因",
+        read: "MCP/tool diagnostic errors should not become tool-surface taxonomy retrieval",
+    },
+    ToolSurfaceNegativeControl {
+        label: "git_sibling_worktree",
+        query: "怎么查看 sibling 推到远端的文件内容又不影响我的工作树",
+        read: "git/worktree operational lessons should not activate tool-surface taxonomy projection",
+    },
+    ToolSurfaceNegativeControl {
+        label: "memory_search_quality",
+        query: "memory_search 检索结果不准应该调 bm25 还是语义模型",
+        read: "retrieval-quality tuning should not activate tool-surface taxonomy projection",
+    },
+    ToolSurfaceNegativeControl {
+        label: "profile_missing_tool",
+        query: "codex-lean essential profile 里面某个工具没暴露怎么办",
+        read: "single profile/tool vocabulary should remain below the accepted projection threshold",
+    },
+];
+
 /// Per-mode tallies accumulated across the corpus.
 #[derive(Default)]
 struct ModeAgg {
@@ -856,6 +896,25 @@ impl ScratchToolSurfaceProjectionFts {
             .collect())
     }
 
+    fn search_projected_accepted_durable(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<ProjectionHit>, String> {
+        let query_terms = tool_surface_projection_terms("", query);
+        if query_terms.is_empty() {
+            return Ok(Vec::new());
+        }
+        let candidate_limit = limit.saturating_mul(12).max(limit);
+        let hits = self.search_projected(query, candidate_limit)?;
+        Ok(hits
+            .into_iter()
+            .filter(|hit| hit.overlap >= MIN_TOOL_SURFACE_PROJECTION_OVERLAP)
+            .filter(|hit| is_durable_tool_surface_projection_candidate(&hit.key))
+            .take(limit)
+            .collect())
+    }
+
     fn projection_hits_from_keys(
         &self,
         query_terms: &BTreeSet<String>,
@@ -885,11 +944,16 @@ fn print_case2_tool_surface_projection_probe(
     let query_terms = tool_surface_projection_terms("", case.query);
     let projected = scratch.search_projected(case.query, TOP_K)?;
     let accepted = scratch.search_projected_accepted(case.query, TOP_K)?;
+    let accepted_durable = scratch.search_projected_accepted_durable(case.query, TOP_K)?;
     let projected_keys = projected
         .iter()
         .map(|hit| hit.key.clone())
         .collect::<Vec<_>>();
     let accepted_keys = accepted
+        .iter()
+        .map(|hit| hit.key.clone())
+        .collect::<Vec<_>>();
+    let accepted_durable_keys = accepted_durable
         .iter()
         .map(|hit| hit.key.clone())
         .collect::<Vec<_>>();
@@ -904,9 +968,10 @@ fn print_case2_tool_surface_projection_probe(
         }
     );
     println!(
-        "  toolproj hit: {}  toolproj_acc hit: {}",
+        "  toolproj hit: {}  toolproj_acc hit: {}  toolproj_acc_durable hit: {}",
         rank_cell(first_hit_rank(&projected_keys, case.expect)),
         rank_cell(first_hit_rank(&accepted_keys, case.expect)),
+        rank_cell(first_hit_rank(&accepted_durable_keys, case.expect)),
     );
     println!(
         "  gate: read-only in-memory FTS adds canonical tool-surface projection \
@@ -934,6 +999,101 @@ fn print_case2_tool_surface_projection_probe(
     if accepted.is_empty() {
         println!("    none");
     }
+    let accepted_work_memory = accepted
+        .iter()
+        .filter(|hit| is_work_memory_key(&hit.key))
+        .count();
+    let durable_work_memory = accepted_durable
+        .iter()
+        .filter(|hit| is_work_memory_key(&hit.key))
+        .count();
+    println!(
+        "  contamination: accepted_work_memory={accepted_work_memory} \
+         durable_work_memory={durable_work_memory}"
+    );
+    println!("  durable accepted top:");
+    for (i, hit) in accepted_durable.iter().take(TOP_K).enumerate() {
+        let star = if case.expect.iter().any(|e| *e == hit.key) {
+            " <== EXPECTED"
+        } else {
+            ""
+        };
+        println!(
+            "    {:>2}. overlap={} {}{} [{}]",
+            i + 1,
+            hit.overlap,
+            hit.key,
+            star,
+            hit.shared_terms.join(", ")
+        );
+    }
+    if accepted_durable.is_empty() {
+        println!("    none");
+    }
+    println!();
+
+    print_case2_tool_surface_negative_controls(scratch, case.expect)?;
+    Ok(())
+}
+
+fn print_case2_tool_surface_negative_controls(
+    scratch: &ScratchToolSurfaceProjectionFts,
+    target_keys: &[&str],
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("## Case #2 tool-surface negative controls");
+    println!(
+        "  gate: negative controls should produce no accepted projection rows, \
+         no expected-key hits, and no work_memory hits. Non-empty accepted rows \
+         mean the projection is too broad for runtime use."
+    );
+
+    let mut false_target_hits = 0;
+    let mut work_memory_hits = 0;
+    let mut nonempty_accepted = 0;
+    for control in TOOL_SURFACE_NEGATIVE_CONTROLS {
+        let query_terms = tool_surface_projection_terms("", control.query);
+        let accepted = scratch.search_projected_accepted(control.query, TOP_K)?;
+        let durable = scratch.search_projected_accepted_durable(control.query, TOP_K)?;
+        let target_hits = accepted
+            .iter()
+            .filter(|hit| target_keys.iter().any(|target| *target == hit.key))
+            .count();
+        let control_work_memory_hits = accepted
+            .iter()
+            .filter(|hit| is_work_memory_key(&hit.key))
+            .count();
+        false_target_hits += target_hits;
+        work_memory_hits += control_work_memory_hits;
+        if !accepted.is_empty() {
+            nonempty_accepted += 1;
+        }
+        println!(
+            "  {}: terms={} accepted={} durable={} target_hits={} work_memory_hits={} — {}",
+            control.label,
+            projection_terms_label(&query_terms),
+            accepted.len(),
+            durable.len(),
+            target_hits,
+            control_work_memory_hits,
+            control.read
+        );
+        for (i, hit) in accepted.iter().take(3).enumerate() {
+            println!(
+                "      {:>2}. overlap={} {} [{}]",
+                i + 1,
+                hit.overlap,
+                hit.key,
+                hit.shared_terms.join(", ")
+            );
+        }
+    }
+    println!(
+        "  summary: controls={} nonempty_accepted={} false_target_hits={} work_memory_hits={}",
+        TOOL_SURFACE_NEGATIVE_CONTROLS.len(),
+        nonempty_accepted,
+        false_target_hits,
+        work_memory_hits
+    );
     println!();
     Ok(())
 }
@@ -1453,6 +1613,22 @@ fn contains_any(haystack: &str, needles: &[&str]) -> bool {
     needles.iter().any(|needle| haystack.contains(needle))
 }
 
+fn is_work_memory_key(key: &str) -> bool {
+    key.starts_with("work_memory_")
+}
+
+fn is_durable_tool_surface_projection_candidate(key: &str) -> bool {
+    !is_work_memory_key(key) && !key.starts_with("snapshot_") && !key.starts_with("alert_")
+}
+
+fn projection_terms_label(terms: &BTreeSet<String>) -> String {
+    if terms.is_empty() {
+        "none".to_string()
+    } else {
+        terms.iter().cloned().collect::<Vec<_>>().join(",")
+    }
+}
+
 fn cjk_shingle_terms(text: &str) -> Vec<String> {
     let mut terms = BTreeSet::new();
     let mut run = Vec::new();
@@ -1666,6 +1842,27 @@ mod tests {
     }
 
     #[test]
+    fn tool_surface_projection_terms_ignore_latency_and_diagnostic_controls() {
+        let latency = tool_surface_projection_terms(
+            "",
+            "某个工具 p95 延迟看着很高但调用样本很少要不要当成异常",
+        );
+        let diagnostic =
+            tool_surface_projection_terms("", "plan_load 这个 mcp lookup miss 怎么诊断");
+
+        assert!(latency.is_empty());
+        assert!(diagnostic.is_empty());
+    }
+
+    #[test]
+    fn tool_surface_projection_terms_single_profile_control_stays_below_gate() {
+        let terms = tool_surface_projection_terms("", "toolset profile 环境变量怎么配置");
+
+        assert!(terms.contains("projtoolprofiletier"));
+        assert!(terms.len() < MIN_TOOL_SURFACE_PROJECTION_OVERLAP);
+    }
+
+    #[test]
     fn tool_surface_projection_terms_cover_expected_case2_memory() {
         let terms = tool_surface_projection_terms(
             "reference_ab_tool_surface_taxonomy_8class_retier_over_delete_20260618",
@@ -1680,5 +1877,11 @@ mod tests {
         assert!(terms.contains("projtoolretier"));
         assert!(terms.contains("projtoolprofiletier"));
         assert!(terms.contains("projtoolverifyfirst"));
+    }
+
+    #[test]
+    fn work_memory_key_detection_is_prefix_scoped() {
+        assert!(is_work_memory_key("work_memory_3d56857a5eed_shared_active"));
+        assert!(!is_work_memory_key("ab_work_memory_policy_note"));
     }
 }
