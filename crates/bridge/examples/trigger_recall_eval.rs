@@ -31,6 +31,8 @@
 //!   AB_BASELINE_DB=/tmp/state.copy.db cargo run -p ab-bridge --example trigger_recall_eval
 //!   cargo run -p ab-bridge --example trigger_recall_eval -- --check-corpus
 //!   cargo run -p ab-bridge --example trigger_recall_eval -- --list-trigger-rows
+//!   cargo run -p ab-bridge --example trigger_recall_eval -- --check-aio2-native
+//!   cargo run -p ab-bridge --example trigger_recall_eval -- --aio2-native
 //!
 //! Debug one case:
 //!
@@ -343,6 +345,138 @@ const NEGATIVE_CONTROLS: &[NegativeControl] = &[
     },
 ];
 
+/// Cases curated from aio2 active trigger rows on 2026-06-22 after the Mac
+/// corpus preflight showed that the 30-case Mac gold corpus is absent locally.
+/// Keep this explicit and opt-in: it is a host-local evidence line, not a
+/// portable replacement for the broader Mac corpus.
+const AIO2_NATIVE_CORPUS: &[Case] = &[
+    Case {
+        id: "aio2_lswr_g21_g22_apply_writer",
+        stratum: "lswr",
+        query: "LSWR G21 G22 apply writer gates landed status and verification evidence",
+        trigger: "When continuing LSWR verified-outcome ingestion ladder after G21/G22 apply/writer gates.",
+        expect: &["lswr_verified_outcome_ingestion_apply_writer_gates_landed_20260620"],
+        note: "LSWR G21/G22 apply/writer gates",
+    },
+    Case {
+        id: "aio2_lswr_g23_g24_writer_persistence",
+        stratum: "lswr",
+        query: "continue LSWR writer execution persistence gates G23 G24 runtime executor rollout",
+        trigger: "When continuing LSWR verified outcome ingestion gates, BioCortex integration, or Agent-Bridge memory runtime executor rollout.",
+        expect: &[
+            "lswr_verified_outcome_ingestion_writer_execution_and_persistence_gates_landed_20260620",
+        ],
+        note: "LSWR G23/G24 writer execution and persistence",
+    },
+    Case {
+        id: "aio2_lswr_g25_store_write",
+        stratum: "lswr",
+        query: "LSWR G25 store write execution preflight landed output only plan next gate",
+        trigger: "When continuing LSWR verified outcome ingestion gates after G25 store-write execution preflight.",
+        expect: &[
+            "lswr_verified_outcome_ingestion_store_write_execution_preflight_landed_20260620",
+        ],
+        note: "LSWR G25 store-write execution preflight",
+    },
+    Case {
+        id: "aio2_lswr_g26_write_evidence",
+        stratum: "lswr",
+        query: "LSWR BioCortex G26 write evidence preflight deployed and next review gate",
+        trigger: "When continuing LSWR/BioCortex verified outcome ingestion after G26 or planning the next review gate.",
+        expect: &["lswr_verified_outcome_ingestion_write_evidence_preflight_landed_20260620"],
+        note: "LSWR G26 write-evidence preflight",
+    },
+    Case {
+        id: "aio2_lswr_g30_admission_source",
+        stratum: "lswr",
+        query: "LSWR G30 execution commit preserves admission source lineage status",
+        trigger: "LSWR verified-outcome ingestion execution commit admission-source lineage status",
+        expect: &[
+            "lswr_verified_outcome_ingestion_execution_commit_accepts_admission_source_landed_20260621",
+        ],
+        note: "LSWR G30 admission-source lineage",
+    },
+    Case {
+        id: "aio2_lswr_g31_apply_lineage",
+        stratum: "lswr",
+        query: "LSWR G31 apply gate admission lineage and next G32 writer lineage work",
+        trigger: "When continuing LSWR verified-outcome ingestion G32 writer lineage work.",
+        expect: &["decision_lswr_g31_apply_gate_admission_lineage_20260621"],
+        note: "LSWR G31 apply-gate lineage",
+    },
+    Case {
+        id: "aio2_goal_c_boundary",
+        stratum: "goal_c",
+        query: "Controlled RSI Goal C boundary report first governed self improvement constraints",
+        trigger: "Controlled RSI, Goal C, continuity honest ledger, report-first self-improvement, or LSWR expansion decisions",
+        expect: &["controlled_recursive_self_improvement_goal_c_boundary_20260621"],
+        note: "Controlled RSI / Goal C boundary",
+    },
+    Case {
+        id: "aio2_goal_c_local_closure",
+        stratum: "goal_c",
+        query: "Agent Bridge Controlled RSI Goal C local U report run closure executor no executor decision",
+        trigger: "When resuming Agent-Bridge Controlled RSI Goal C, U reports, or executor/no-executor decisions.",
+        expect: &["controlled_rsi_goal_c_local_run_and_closure_20260621"],
+        note: "Controlled RSI Goal C local run closure",
+    },
+    Case {
+        id: "aio2_ghp1_review_packet",
+        stratum: "graph_hygiene",
+        query: "GHP-1 related_keys review packet materialize edges graph hygiene decision",
+        trigger: "When resuming Goal C graph hygiene, GHP-1 related_keys review packets, or deciding whether to materialize related_keys edges.",
+        expect: &["ghp1_related_keys_review_packet_20260622"],
+        note: "GHP-1 related_keys review packet",
+    },
+    Case {
+        id: "aio2_ghp1b_orphan_reduction",
+        stratum: "graph_hygiene",
+        query: "GHP-1b orphan reduction selection strategy deployed MCP reconnect verification",
+        trigger: "When resuming Goal C GHP-1b related_keys review, orphan-reduction packet selection, or MCP reconnect verification.",
+        expect: &["ghp1b_orphan_reduction_selection_deployed_20260622"],
+        note: "GHP-1b orphan-reduction selection",
+    },
+    Case {
+        id: "aio2_ghp1b_dryrun_gate",
+        stratum: "graph_hygiene",
+        query: "GHP-1b materialize dry run verified before tiny related_keys write batch",
+        trigger: "When deciding whether GHP-1b related_keys materialization can move from review/dry-run to a tiny write batch.",
+        expect: &["ghp1b_materialize_dryrun_verified_20260622"],
+        note: "GHP-1b materialize dry-run verified",
+    },
+    Case {
+        id: "aio2_ghp1b_tiny_write_packet",
+        stratum: "graph_hygiene",
+        query: "GHP-1b tiny write review packet gates before dry_run false materialization",
+        trigger: "Before any dry_run=false GHP-1b related_keys materialization, enforce this review packet and gates.",
+        expect: &["ghp1b_tiny_write_review_packet_20260622"],
+        note: "GHP-1b tiny write review packet",
+    },
+];
+
+const AIO2_NATIVE_NEGATIVE_CONTROLS: &[NegativeControl] = &[
+    NegativeControl {
+        id: "aio2_unrelated_desktop",
+        query: "sway wallpaper brightness audio wifi statusbar unrelated desktop maintenance",
+        note: "Linux desktop maintenance should not retrieve trigger-recall gold keys",
+    },
+    NegativeControl {
+        id: "aio2_unrelated_frontend",
+        query: "dashboard card spacing color palette button hover state responsive layout",
+        note: "Frontend styling work is adjacent to reports but not this memory lane",
+    },
+    NegativeControl {
+        id: "aio2_adjacent_write_request",
+        query: "please directly write graph edges and bypass dry run review for related keys",
+        note: "Adjacent GHP vocabulary with forbidden write intent",
+    },
+    NegativeControl {
+        id: "aio2_adjacent_lswr_poetry",
+        query: "write a poem about lineage admission evidence and runtime gates",
+        note: "Shares LSWR vocabulary but asks for creative writing, not project state",
+    },
+];
+
 struct MemoryRow {
     key: String,
     kind: String,
@@ -407,8 +541,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if matches!(arg1.as_deref(), Some("--check-corpus")) {
         return check_corpus(&db_path, &rows);
     }
+    if matches!(arg1.as_deref(), Some("--check-aio2-native")) {
+        return check_corpus_for(&db_path, &rows, AIO2_NATIVE_CORPUS);
+    }
     if matches!(arg1.as_deref(), Some("--list-trigger-rows")) {
         return list_trigger_rows(&db_path, &rows);
+    }
+    if matches!(arg1.as_deref(), Some("--aio2-native")) {
+        verify_corpus_for(&rows, AIO2_NATIVE_CORPUS, AIO2_NATIVE_NEGATIVE_CONTROLS)?;
+        let fts = ScratchFts::build(&rows)?;
+        return run_eval_for(
+            &db_path,
+            &rows,
+            &fts,
+            AIO2_NATIVE_CORPUS,
+            AIO2_NATIVE_NEGATIVE_CONTROLS,
+            "aio2-native active trigger rows, 2026-06-22",
+        );
     }
     verify_corpus(&rows)?;
     let fts = ScratchFts::build(&rows)?;
@@ -718,6 +867,252 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn run_eval_for(
+    db_path: &std::path::Path,
+    rows: &[MemoryRow],
+    fts: &ScratchFts,
+    cases: &[Case],
+    negative_controls: &[NegativeControl],
+    corpus_label: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut intent_content = Agg::default();
+    let mut intent_projected = Agg::default();
+    let mut cjk_shingle_projected = Agg::default();
+    let mut projected_plus_cjk_acc = Agg::default();
+    let mut exact_projected = Agg::default();
+    let gold_keys: BTreeSet<&str> = cases
+        .iter()
+        .flat_map(|case| case.expect.iter().copied())
+        .collect();
+
+    for case in cases {
+        let content_keys = fts.search(IndexKind::Content, case.query, TOP_K);
+        intent_content.record(
+            first_hit_rank(content_keys.as_deref().unwrap_or(&[]), case.expect),
+            content_keys.err(),
+        );
+
+        let projected_keys = fts.search(IndexKind::Projected, case.query, TOP_K);
+        intent_projected.record(
+            first_hit_rank(projected_keys.as_deref().unwrap_or(&[]), case.expect),
+            projected_keys.err(),
+        );
+
+        let cjk_keys = fts.search_projected_cjk_shingles(case.query, TOP_K);
+        cjk_shingle_projected.record(
+            first_hit_rank(cjk_keys.as_deref().unwrap_or(&[]), case.expect),
+            cjk_keys.err(),
+        );
+
+        let projected_plus_keys = fts.search_projected_then_cjk_accepted(case.query, TOP_K);
+        projected_plus_cjk_acc.record(
+            first_hit_rank(projected_plus_keys.as_deref().unwrap_or(&[]), case.expect),
+            projected_plus_keys.err(),
+        );
+
+        let trigger_keys = fts.search(IndexKind::Projected, case.trigger, TOP_K);
+        exact_projected.record(
+            first_hit_rank(trigger_keys.as_deref().unwrap_or(&[]), case.expect),
+            trigger_keys.err(),
+        );
+    }
+
+    let mut negative_false_hits = Vec::new();
+    let mut negative_errors = Vec::new();
+    let mut cjk_negative_false_hits = Vec::new();
+    let mut cjk_negative_errors = Vec::new();
+    let mut projected_plus_false_hits = Vec::new();
+    let mut projected_plus_errors = Vec::new();
+    for control in negative_controls {
+        match fts.search(IndexKind::Projected, control.query, TOP_K) {
+            Ok(keys) => {
+                for (idx, key) in keys.iter().enumerate() {
+                    if gold_keys.contains(key.as_str()) {
+                        negative_false_hits.push(format!("{}:{}@{}", control.id, key, idx + 1));
+                    }
+                }
+            }
+            Err(err) => negative_errors.push(format!("{}:{err}", control.id)),
+        }
+        match fts.search_projected_cjk_shingles(control.query, TOP_K) {
+            Ok(keys) => {
+                for (idx, key) in keys.iter().enumerate() {
+                    if gold_keys.contains(key.as_str()) {
+                        cjk_negative_false_hits.push(format!("{}:{}@{}", control.id, key, idx + 1));
+                    }
+                }
+            }
+            Err(err) => cjk_negative_errors.push(format!("{}:{err}", control.id)),
+        }
+        match fts.search_projected_then_cjk_accepted(control.query, TOP_K) {
+            Ok(keys) => {
+                for (idx, key) in keys.iter().enumerate() {
+                    if gold_keys.contains(key.as_str()) {
+                        projected_plus_false_hits.push(format!(
+                            "{}:{}@{}",
+                            control.id,
+                            key,
+                            idx + 1
+                        ));
+                    }
+                }
+            }
+            Err(err) => projected_plus_errors.push(format!("{}:{err}", control.id)),
+        }
+    }
+
+    let active_total = rows.len();
+    let trigger_rows = rows.iter().filter(|r| !r.triggers.is_empty()).count();
+    let projected_rows = rows.iter().filter(|r| r.content != r.projected).count();
+    let n = cases.len();
+
+    println!("# Trigger-aware recall eval — {corpus_label}");
+    println!("db:              {}", db_path.display());
+    println!("active rows:     {active_total}");
+    println!("trigger rows:    {trigger_rows}");
+    println!("projected rows:  {projected_rows}");
+    println!("corpus:          {n} cases ({corpus_label})");
+    println!("negative_ctrls:  {} controls", negative_controls.len());
+    println!("top_k:           {TOP_K}");
+    println!("mode contract:   intent_content vs intent_projected isolates trigger projection");
+    println!(
+        "read_only:       SELECT + in-memory FTS only; no memory_get, memory_search, writes, or reindex"
+    );
+    println!();
+
+    println!("## Per-mode recall (success@k over {n} cases)");
+    println!(
+        "  {:<18} {:>7} {:>7} {:>7} {:>7}",
+        "mode", "R@1", "R@5", "R@10", "MRR"
+    );
+    print_row("intent_content", &intent_content, n);
+    print_row("intent_projected", &intent_projected, n);
+    print_row("cjk_shingle_proj", &cjk_shingle_projected, n);
+    print_row("projected+cjk_acc", &projected_plus_cjk_acc, n);
+    print_row("exact_projected", &exact_projected, n);
+    println!();
+
+    println!("## Corpus strata");
+    for (stratum, count) in stratum_counts_for(cases) {
+        println!("  {stratum:<14} {count:>3}");
+    }
+    println!();
+
+    println!("## Projection delta");
+    let added = added_hit_indices(&intent_content, &intent_projected);
+    let improved = improved_rank_indices(&intent_content, &intent_projected);
+    println!(
+        "  added top-{TOP_K} hits over content-only: {} case(s){}",
+        added.len(),
+        fmt_idx(&added)
+    );
+    println!(
+        "  improved first-hit rank:              {} case(s){}",
+        improved.len(),
+        fmt_idx(&improved)
+    );
+    println!();
+
+    println!("## Negative controls");
+    println!(
+        "  projected false hits against corpus gold keys: {}",
+        negative_false_hits.len()
+    );
+    if !negative_false_hits.is_empty() {
+        println!("  false hits: {}", negative_false_hits.join(", "));
+    }
+    println!(
+        "  cjk false hits against corpus gold keys: {}",
+        cjk_negative_false_hits.len()
+    );
+    if !cjk_negative_false_hits.is_empty() {
+        println!("  false hits: {}", cjk_negative_false_hits.join(", "));
+    }
+    println!(
+        "  projected+cjk accepted false hits: {}",
+        projected_plus_false_hits.len()
+    );
+    if !projected_plus_false_hits.is_empty() {
+        println!("  false hits: {}", projected_plus_false_hits.join(", "));
+    }
+    println!("  projected parser errors: {}", negative_errors.len());
+    println!("  cjk parser errors: {}", cjk_negative_errors.len());
+    println!(
+        "  projected+cjk parser errors: {}",
+        projected_plus_errors.len()
+    );
+    println!("  controls:");
+    for control in negative_controls {
+        println!("    {:<28} {}", control.id, control.note);
+    }
+    println!();
+
+    println!("## Per-case first-hit rank (- = no hit in top {TOP_K}; ERR = FTS parser error)");
+    println!(
+        "  {:<3} {:<38} {:<14} {:>8} {:>10} {:>10} {:>10} {:>10}  {}",
+        "#", "id", "stratum", "content", "projected", "cjk_probe", "plus_acc", "exact", "note"
+    );
+    for (i, case) in cases.iter().enumerate() {
+        println!(
+            "  {:<3} {:<38} {:<14} {:>8} {:>10} {:>10} {:>10} {:>10}  {}",
+            i + 1,
+            case.id,
+            case.stratum,
+            rank_cell(intent_content.ranks[i], intent_content.errors[i].as_deref()),
+            rank_cell(
+                intent_projected.ranks[i],
+                intent_projected.errors[i].as_deref()
+            ),
+            rank_cell(
+                cjk_shingle_projected.ranks[i],
+                cjk_shingle_projected.errors[i].as_deref()
+            ),
+            rank_cell(
+                projected_plus_cjk_acc.ranks[i],
+                projected_plus_cjk_acc.errors[i].as_deref()
+            ),
+            rank_cell(
+                exact_projected.ranks[i],
+                exact_projected.errors[i].as_deref()
+            ),
+            case.note
+        );
+    }
+    println!();
+
+    println!("## Honest read");
+    println!(
+        "  intent_content misses:   {} case(s){}",
+        miss_indices(&intent_content).len(),
+        fmt_idx(&miss_indices(&intent_content))
+    );
+    println!(
+        "  intent_projected misses: {} case(s){}",
+        miss_indices(&intent_projected).len(),
+        fmt_idx(&miss_indices(&intent_projected))
+    );
+    println!(
+        "  cjk_shingle misses:     {} case(s){}",
+        miss_indices(&cjk_shingle_projected).len(),
+        fmt_idx(&miss_indices(&cjk_shingle_projected))
+    );
+    println!(
+        "  projected+cjk misses:   {} case(s){}",
+        miss_indices(&projected_plus_cjk_acc).len(),
+        fmt_idx(&miss_indices(&projected_plus_cjk_acc))
+    );
+    println!(
+        "  exact_projected errors:  {} case(s){}",
+        error_indices(&exact_projected).len(),
+        fmt_idx(&error_indices(&exact_projected))
+    );
+    println!(
+        "  caveat: hand-curated corpus, N={n}. This is a read-only trigger-cohort falsifier, not a production ranking benchmark."
+    );
+
+    Ok(())
+}
+
 fn load_active_rows(db_path: &std::path::Path) -> SqlResult<Vec<MemoryRow>> {
     let db = RusqliteConnection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     let mut stmt = db.prepare(
@@ -798,13 +1193,21 @@ fn check_corpus(
     db_path: &std::path::Path,
     rows: &[MemoryRow],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let coverage = corpus_coverage(rows);
+    check_corpus_for(db_path, rows, CORPUS)
+}
+
+fn check_corpus_for(
+    db_path: &std::path::Path,
+    rows: &[MemoryRow],
+    cases: &[Case],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let coverage = corpus_coverage_for(rows, cases);
     println!("# Trigger-aware recall corpus check");
     println!("db:                       {}", db_path.display());
     println!("active rows:              {}", coverage.active_total);
     println!("trigger rows:             {}", coverage.trigger_rows);
     println!("projected rows:           {}", coverage.projected_rows);
-    println!("corpus cases:             {}", CORPUS.len());
+    println!("corpus cases:             {}", cases.len());
     println!("expected key refs:        {}", coverage.expected_refs);
     println!("present expected refs:    {}", coverage.present_expected);
     println!(
@@ -840,14 +1243,19 @@ fn check_corpus(
     }
 }
 
+#[cfg(test)]
 fn corpus_coverage(rows: &[MemoryRow]) -> CorpusCoverage {
+    corpus_coverage_for(rows, CORPUS)
+}
+
+fn corpus_coverage_for(rows: &[MemoryRow], cases: &[Case]) -> CorpusCoverage {
     let by_key: HashMap<&str, &MemoryRow> = rows.iter().map(|r| (r.key.as_str(), r)).collect();
     let mut expected_refs = 0_usize;
     let mut present_expected = 0_usize;
     let mut missing_expected = Vec::new();
     let mut expected_without_trigger = Vec::new();
 
-    for case in CORPUS {
+    for case in cases {
         for expected in case.expect {
             expected_refs += 1;
             match by_key.get(expected) {
@@ -876,11 +1284,19 @@ fn corpus_coverage(rows: &[MemoryRow]) -> CorpusCoverage {
 }
 
 fn verify_corpus(rows: &[MemoryRow]) -> Result<(), Box<dyn std::error::Error>> {
+    verify_corpus_for(rows, CORPUS, NEGATIVE_CONTROLS)
+}
+
+fn verify_corpus_for(
+    rows: &[MemoryRow],
+    cases: &[Case],
+    negative_controls: &[NegativeControl],
+) -> Result<(), Box<dyn std::error::Error>> {
     let by_key: HashMap<&str, &MemoryRow> = rows.iter().map(|r| (r.key.as_str(), r)).collect();
     let mut seen_ids = BTreeSet::new();
     let mut seen_queries = BTreeSet::new();
 
-    for case in CORPUS {
+    for case in cases {
         if !seen_ids.insert(case.id) {
             return Err(format!("duplicate case id: {}", case.id).into());
         }
@@ -904,7 +1320,7 @@ fn verify_corpus(rows: &[MemoryRow]) -> Result<(), Box<dyn std::error::Error>> {
     }
     let mut seen_negative_ids = BTreeSet::new();
     let mut seen_negative_queries = BTreeSet::new();
-    for control in NEGATIVE_CONTROLS {
+    for control in negative_controls {
         if !seen_negative_ids.insert(control.id) {
             return Err(format!("duplicate negative control id: {}", control.id).into());
         }
@@ -1303,8 +1719,12 @@ fn error_indices(agg: &Agg) -> Vec<usize> {
 }
 
 fn stratum_counts() -> Vec<(&'static str, usize)> {
+    stratum_counts_for(CORPUS)
+}
+
+fn stratum_counts_for(cases: &[Case]) -> Vec<(&'static str, usize)> {
     let mut counts: HashMap<&'static str, usize> = HashMap::new();
-    for case in CORPUS {
+    for case in cases {
         *counts.entry(case.stratum).or_default() += 1;
     }
     let mut rows = counts.into_iter().collect::<Vec<_>>();
