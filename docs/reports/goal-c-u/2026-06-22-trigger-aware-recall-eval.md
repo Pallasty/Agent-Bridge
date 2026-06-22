@@ -75,9 +75,9 @@ the current repo has broad pre-existing rustfmt drift unrelated to this example.
 ```text
 # Trigger-aware recall eval - continuity_retrieval_trigger cohort
 db:              /Users/pallasting/Library/Application Support/agent-bridge/state.db
-active rows:     2995
-trigger rows:    134
-projected rows:  134
+active rows:     2996
+trigger rows:    135
+projected rows:  135
 corpus:          30 cases (Mac active trigger-tag rows, 2026-06-22)
 negative_ctrls:  3 controls
 top_k:           10
@@ -141,6 +141,30 @@ The useful new miss is #27 `nexus_wuxing_math`:
 - this points to a Chinese paraphrase/tokenization blind spot rather than a
   trigger-projection bug.
 
+Root-cause read:
+
+- the target row's `fts_content` already contains both the original memory body
+  and the authored retrieval trigger:
+  `五行生克 数学模型 / golden ratio / wuxing_dynamics 平衡靶 / #35 v0.2 / 循环平衡环`;
+- the held-out query is semantically aligned but lexically different:
+  `五行生克的成熟数学模型、黄金比例控制网络和平衡靶调研结论在哪里`;
+- the FTS path uses SQLite `unicode61` and the shared sanitizer that splits on
+  non-alphanumeric separators, then applies prefix matching per token;
+- with space-free Chinese prose, this produces long CJK tokens. The query's
+  long tokens do not prefix-match the row's long tokens because of small but
+  meaningful wording changes such as `五行生克的成熟数学模型` vs.
+  `五行生克成熟数学模型调研`, `黄金比例控制网络` vs.
+  `黄金比例反馈控制网络`, and Chinese `黄金比例` vs. trigger English `golden ratio`.
+
+Classification:
+
+- primary: CJK tokenization / long-token prefix matching limitation;
+- secondary: bilingual and paraphrase mismatch between authored trigger and
+  natural Chinese continuation intent;
+- not a projection bug, because exact trigger replay succeeds;
+- not a corpus-gold issue, because the target row is the correct semantic
+  answer and the exact trigger points to it cleanly.
+
 ## Non-Authorizations
 
 This report does not authorize:
@@ -158,6 +182,8 @@ This report does not authorize:
 ## Next Step
 
 Adopt `trigger_recall_eval` as a companion to `recall_eval` for the trigger-tag
-cohort. The next evaluation-only slice should investigate the #27 Chinese
-paraphrase/tokenization miss and add more LSWR-specific cases once fresh
-trigger-tag rows exist. Runtime retrieval authority remains out of scope.
+cohort. The next evaluation-only slice should test one or two read-only
+candidate-recovery probes for CJK/paraphrase misses, for example CJK
+segmentation/shingling or semantic candidate expansion, against this 30-case
+corpus plus stronger negative controls. Runtime retrieval authority remains out
+of scope until a separate gate shows recall lift without false-hit growth.
