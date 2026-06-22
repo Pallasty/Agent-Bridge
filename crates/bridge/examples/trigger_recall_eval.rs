@@ -524,6 +524,22 @@ const AIO2_NATIVE_CORPUS: &[Case] = &[
         note: "Controlled RSI / Goal C boundary",
     },
     Case {
+        id: "aio2_goal_c_dashboard_state_boundary",
+        stratum: "goal_c",
+        query: "Goal C dashboard state for Controlled RSI boundary and report first continuity decisions",
+        trigger: "Controlled RSI, Goal C, continuity honest ledger, report-first self-improvement, or LSWR expansion decisions",
+        expect: &["controlled_recursive_self_improvement_goal_c_boundary_20260621"],
+        note: "Goal C boundary with dashboard/state vocabulary",
+    },
+    Case {
+        id: "aio2_goal_c_dashboard_state_closure",
+        stratum: "goal_c",
+        query: "Agent Bridge Goal C dashboard state U report closure and no executor decision",
+        trigger: "When resuming Agent-Bridge Controlled RSI Goal C, U reports, or executor/no-executor decisions.",
+        expect: &["controlled_rsi_goal_c_local_run_and_closure_20260621"],
+        note: "Goal C closure with dashboard/state vocabulary",
+    },
+    Case {
         id: "aio2_goal_c_local_closure",
         stratum: "goal_c",
         query: "Agent Bridge Controlled RSI Goal C local U report run closure executor no executor decision",
@@ -577,6 +593,18 @@ const AIO2_NATIVE_NEGATIVE_CONTROLS: &[NegativeControl] = &[
         query: "dashboard card spacing color palette button hover state responsive layout",
         bucket: ControlBucket::Unrelated,
         note: "Frontend styling work is adjacent to reports but not this memory lane",
+    },
+    NegativeControl {
+        id: "aio2_unrelated_frontend_goal_c_words",
+        query: "Goal C dashboard state card spacing responsive layout visual design only not continuity ledger work",
+        bucket: ControlBucket::Unrelated,
+        note: "Frontend/dashboard query with Goal C terms but explicit visual-design intent",
+    },
+    NegativeControl {
+        id: "aio2_unrelated_controlled_rsi_health_dashboard",
+        query: "Controlled RSI exercise recovery dashboard state color cards pain tracker layout",
+        bucket: ControlBucket::Unrelated,
+        note: "Controlled RSI as health/workout dashboard vocabulary, not recursive self-improvement",
     },
     NegativeControl {
         id: "aio2_adjacent_write_request",
@@ -3040,7 +3068,7 @@ mod tests {
     fn aio2_native_corpus_stays_host_local_and_not_self_observing() {
         assert_eq!(
             AIO2_NATIVE_CORPUS.len(),
-            12,
+            14,
             "aio2-native corpus should stay intentionally small and explicit"
         );
         assert!(
@@ -3079,13 +3107,53 @@ mod tests {
             .count();
 
         assert_eq!(
-            unrelated, 2,
-            "aio2-native controls should keep unrelated desktop/frontend probes separate"
+            unrelated, 4,
+            "aio2-native controls should keep unrelated desktop/frontend/dashboard probes separate"
         );
         assert_eq!(
             policy_adversarial, 4,
             "aio2-native controls should keep policy/adversarial adjacent probes separate"
         );
+    }
+
+    #[test]
+    fn aio2_goal_c_dashboard_state_contrastives_pair_positive_and_unrelated_intents() {
+        for (case_id, expected_key) in [
+            (
+                "aio2_goal_c_dashboard_state_boundary",
+                "controlled_recursive_self_improvement_goal_c_boundary_20260621",
+            ),
+            (
+                "aio2_goal_c_dashboard_state_closure",
+                "controlled_rsi_goal_c_local_run_and_closure_20260621",
+            ),
+        ] {
+            let case = AIO2_NATIVE_CORPUS
+                .iter()
+                .find(|case| case.id == case_id)
+                .unwrap_or_else(|| panic!("missing positive contrastive case {case_id}"));
+            assert_eq!(case.stratum, "goal_c");
+            assert!(
+                case.expect.contains(&expected_key),
+                "{case_id} should keep the intended Goal C gold key"
+            );
+        }
+
+        for control_id in [
+            "aio2_unrelated_frontend_goal_c_words",
+            "aio2_unrelated_controlled_rsi_health_dashboard",
+        ] {
+            let control = AIO2_NATIVE_NEGATIVE_CONTROLS
+                .iter()
+                .find(|control| control.id == control_id)
+                .unwrap_or_else(|| panic!("missing negative contrastive control {control_id}"));
+            assert_eq!(control.bucket, ControlBucket::Unrelated);
+            assert_eq!(
+                policy_acceptance_reject_reason(control.query),
+                None,
+                "{control_id} must remain a domain-intent contrast, not a policy/adversarial gate"
+            );
+        }
     }
 
     #[test]
