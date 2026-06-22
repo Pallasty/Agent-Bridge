@@ -67,8 +67,11 @@
 //! rather than reporting a false R@k=0.
 
 use ab_store::{MemoryEdge, SqliteStore, StateStore, default_db_path};
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
+use tokio_rusqlite::rusqlite::{
+    Connection as RusqliteConnection, OpenFlags, Result as SqlResult, params,
+};
 
 /// Query difficulty, set by how much lexical signal the paraphrase leaves for
 /// FTS. `Easy` = the query echoes the memory's distinctive tokens (a control /
@@ -221,6 +224,7 @@ const TOP_K: usize = 10;
 const GRAPH_NEIGHBOR_LIMIT: usize = 8;
 const HASH_BACKEND_NAME: &str = "fnv1a-hash-384";
 const REVIEW_GATE_TARGET_CASES: &[usize] = &[1, 2, 5, 9, 14];
+const MIN_CJK_SHINGLE_ACCEPT_OVERLAP: usize = 4;
 
 /// Per-mode tallies accumulated across the corpus.
 #[derive(Default)]
@@ -397,12 +401,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut semantic = ModeAgg::default();
     let mut fts_graph = CandidateExpansionAgg::default();
     let mut fts_candidate_counts = Vec::with_capacity(CORPUS.len());
+    let scratch_cjk = ScratchCjkFts::build(&db_path)?;
+    let mut fts_cjk = ModeAgg::default();
+    let mut fts_cjk_acc = ModeAgg::default();
+    let mut fts_empty_cjk_acc = ModeAgg::default();
 
     for case in CORPUS {
         let fts_keys = keys_of(store.memory_search(case.query, &[], TOP_K as u32).await?);
         let fts_rank = first_hit_rank(&fts_keys, case.expect);
         fts_candidate_counts.push(fts_keys.len());
         fts.record(fts_rank);
+
+        let cjk_keys = scratch_cjk.search_cjk_shingles(case.query, TOP_K)?;
+        fts_cjk.record(first_hit_rank(&cjk_keys, case.expect));
+
+        let cjk_acc_keys = scratch_cjk.search_cjk_shingles_accepted(case.query, TOP_K)?;
+        fts_cjk_acc.record(first_hit_rank(&cjk_acc_keys, case.expect));
+        let fallback_keys = if fts_keys.is_empty() {
+            &cjk_acc_keys
+        } else {
+            &fts_keys
+        };
+        fts_empty_cjk_acc.record(first_hit_rank(fallback_keys, case.expect));
 
         let mut edges_by_fts_key = Vec::with_capacity(fts_keys.len());
         for key in &fts_keys {
@@ -467,6 +487,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     println!();
 
+    println!("## Scratch CJK shingle candidate probe");
+    print_mode_row("fts+cjk", &fts_cjk, n);
+    print_mode_row("fts+cjk_acc", &fts_cjk_acc, n);
+    print_mode_row("fts_empty+cjk", &fts_empty_cjk_acc, n);
+    println!(
+        "  gate: read-only in-memory FTS over COALESCE(fts_content, content) \
+         augmented with generated CJK trigram tokens; accepted mode requires \
+         >= {MIN_CJK_SHINGLE_ACCEPT_OVERLAP} shared CJK trigram terms between \
+         query and candidate text. fts_empty+cjk is the deployable-shape probe: \
+         use baseline FTS unless it returns zero rows, then fall back to accepted \
+         CJK candidates. This does not change live memory_search, tokenizer, \
+         schema, reindex, graph, semantic, or ranking."
+    );
+    println!();
+
     // ── Per-tier breakdown (worst-case paraphrase vs lexically-anchored) ─────
     // The single aggregate above blends pure-paraphrase (hard) and
     // lexical-anchor (moderate/easy) cases. Splitting by tier shows the
@@ -489,6 +524,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         print_tier_row("fts", &fts, &idxs, tier.label());
         print_candidate_expansion_tier_row("fts+graph", &fts_graph, &idxs, tier.label());
+        print_tier_row("fts+cjk", &fts_cjk, &idxs, tier.label());
+        print_tier_row("fts+cjk_acc", &fts_cjk_acc, &idxs, tier.label());
+        print_tier_row("fts_empty+cjk", &fts_empty_cjk_acc, &idxs, tier.label());
         print_tier_row("hybrid", &hybrid, &idxs, tier.label());
         if semantic_ready {
             print_tier_row("semantic", &semantic, &idxs, tier.label());
@@ -501,17 +539,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "## Per-case first-hit rank (— = no hit; fts/hybrid/semantic are top {TOP_K}, fts+graph may be appended)"
     );
     println!(
-        "  {:<4} {:<9} {:>5} {:>9} {:>7} {:>9}  {}",
-        "#", "tier", "fts", "fts+graph", "hybrid", "semantic", "query"
+        "  {:<4} {:<9} {:>5} {:>9} {:>7} {:>7} {:>9} {:>7} {:>9}  {}",
+        "#",
+        "tier",
+        "fts",
+        "fts+graph",
+        "fts+cjk",
+        "cjk_acc",
+        "empty+cjk",
+        "hybrid",
+        "semantic",
+        "query"
     );
     for (i, case) in CORPUS.iter().enumerate() {
         let q: String = case.query.chars().take(34).collect();
         println!(
-            "  {:<4} {:<9} {:>5} {:>9} {:>7} {:>9}  {}",
+            "  {:<4} {:<9} {:>5} {:>9} {:>7} {:>7} {:>9} {:>7} {:>9}  {}",
             i + 1,
             case.tier.label(),
             rank_cell(fts.ranks[i]),
             rank_cell(fts_graph.ranks[i]),
+            rank_cell(fts_cjk.ranks[i]),
+            rank_cell(fts_cjk_acc.ranks[i]),
+            rank_cell(fts_empty_cjk_acc.ranks[i]),
             rank_cell(hybrid.ranks[i]),
             if semantic_ready {
                 rank_cell(semantic.ranks[i])
@@ -542,6 +592,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "  offline fts+graph added hits over fts misses: {} case(s){}",
         fts_graph_added.len(),
         fmt_idx(&fts_graph_added)
+    );
+    let fts_cjk_added = added_hit_indices(&fts, &fts_cjk);
+    let fts_cjk_acc_added = added_hit_indices(&fts, &fts_cjk_acc);
+    println!(
+        "  scratch fts+cjk added hits over fts misses: {} case(s){}",
+        fts_cjk_added.len(),
+        fmt_idx(&fts_cjk_added)
+    );
+    println!(
+        "  scratch fts+cjk_acc added hits over fts misses: {} case(s){}",
+        fts_cjk_acc_added.len(),
+        fmt_idx(&fts_cjk_acc_added)
+    );
+    let fts_empty_cjk_acc_added = added_hit_indices(&fts, &fts_empty_cjk_acc);
+    println!(
+        "  deployable-shape fts_empty+cjk added hits over fts misses: {} case(s){}",
+        fts_empty_cjk_acc_added.len(),
+        fmt_idx(&fts_empty_cjk_acc_added)
     );
     if semantic_ready {
         let sem_miss = miss_indices(&semantic);
@@ -581,6 +649,103 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn keys_of(hits: Vec<ab_store::MemorySearchHit>) -> Vec<String> {
     hits.into_iter().map(|h| h.record.key).collect()
+}
+
+struct ScratchCjkFts {
+    db: RusqliteConnection,
+    text_by_key: HashMap<String, String>,
+}
+
+impl ScratchCjkFts {
+    fn build(db_path: &std::path::Path) -> SqlResult<Self> {
+        let source =
+            RusqliteConnection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let scratch = RusqliteConnection::open_in_memory()?;
+        scratch.execute_batch(
+            "CREATE VIRTUAL TABLE cjk_fts USING fts5(
+                 key UNINDEXED,
+                 body,
+                 tokenize = 'unicode61 remove_diacritics 2'
+             );",
+        )?;
+
+        let mut text_by_key = HashMap::new();
+        {
+            let mut select = source.prepare(
+                "SELECT key, COALESCE(fts_content, content) AS body
+                 FROM memories
+                 WHERE status = 'active'",
+            )?;
+            let rows = select.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            let mut insert = scratch.prepare("INSERT INTO cjk_fts(key, body) VALUES (?1, ?2)")?;
+            for row in rows {
+                let (key, body) = row?;
+                insert.execute(params![key, augment_with_cjk_shingles(&body)])?;
+                text_by_key.insert(key, body);
+            }
+        }
+
+        Ok(Self {
+            db: scratch,
+            text_by_key,
+        })
+    }
+
+    fn search_cjk_shingles(&self, query: &str, limit: usize) -> Result<Vec<String>, String> {
+        let mut parts = Vec::new();
+        let any = sanitise_fts_query_any(query);
+        if !any.is_empty() {
+            parts.push(any);
+        }
+        parts.extend(cjk_shingle_terms(query));
+        if parts.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut stmt = self
+            .db
+            .prepare(
+                "SELECT key FROM cjk_fts
+                 WHERE cjk_fts MATCH ?1
+                 ORDER BY bm25(cjk_fts)
+                 LIMIT ?2",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![parts.join(" OR "), limit as i64], |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<SqlResult<Vec<_>>>()
+            .map_err(|e| e.to_string())?;
+        Ok(rows)
+    }
+
+    fn search_cjk_shingles_accepted(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<String>, String> {
+        let query_terms = cjk_shingle_terms(query);
+        if query_terms.is_empty() {
+            return self.search_cjk_shingles(query, limit);
+        }
+
+        let query_terms = query_terms.into_iter().collect::<BTreeSet<_>>();
+        let mut accepted = Vec::new();
+        for key in self.search_cjk_shingles(query, limit)? {
+            let text = self
+                .text_by_key
+                .get(&key)
+                .ok_or_else(|| format!("candidate key missing from scratch map: {key}"))?;
+            if cjk_shingle_overlap_count(&query_terms, text) >= MIN_CJK_SHINGLE_ACCEPT_OVERLAP {
+                accepted.push(key);
+            }
+        }
+        Ok(accepted)
+    }
 }
 
 /// Falsification dump for one case (1-based): show the top-k of each mode with
@@ -824,6 +989,22 @@ fn miss_indices_for(ranks: &[Option<usize>], idxs: &[usize]) -> Vec<usize> {
         .collect()
 }
 
+fn added_hit_indices(before: &ModeAgg, after: &ModeAgg) -> Vec<usize> {
+    before
+        .ranks
+        .iter()
+        .zip(&after.ranks)
+        .enumerate()
+        .filter_map(|(i, (before, after))| {
+            if before.is_none() && after.is_some() {
+                Some(i + 1)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
 fn hard_zero_fts_miss_indices(fts: &ModeAgg, fts_candidate_counts: &[usize]) -> Vec<usize> {
     tier_indices(Tier::Hard)
         .into_iter()
@@ -924,6 +1105,64 @@ fn fmt_idx(idx: &[usize]) -> String {
                 .join(", #")
         )
     }
+}
+
+fn sanitise_fts_query_any(q: &str) -> String {
+    q.trim()
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .filter(|s| !s.is_empty())
+        .map(|s| format!("{s}*"))
+        .collect::<Vec<_>>()
+        .join(" OR ")
+}
+
+fn augment_with_cjk_shingles(text: &str) -> String {
+    let terms = cjk_shingle_terms(text);
+    if terms.is_empty() {
+        return text.to_string();
+    }
+    format!("{text}\n\ncjk_trigrams:\n{}", terms.join(" "))
+}
+
+fn cjk_shingle_terms(text: &str) -> Vec<String> {
+    let mut terms = BTreeSet::new();
+    let mut run = Vec::new();
+
+    for ch in text.chars() {
+        if is_cjk_unified(ch) {
+            run.push(ch);
+        } else {
+            push_cjk_trigrams(&run, &mut terms);
+            run.clear();
+        }
+    }
+    push_cjk_trigrams(&run, &mut terms);
+
+    terms.into_iter().collect()
+}
+
+fn cjk_shingle_overlap_count(query_terms: &BTreeSet<String>, text: &str) -> usize {
+    cjk_shingle_terms(text)
+        .into_iter()
+        .filter(|term| query_terms.contains(term))
+        .count()
+}
+
+fn push_cjk_trigrams(run: &[char], terms: &mut BTreeSet<String>) {
+    if run.len() < 3 {
+        return;
+    }
+    for window in run.windows(3) {
+        let gram: String = window.iter().collect();
+        terms.insert(format!("cjk_{gram}"));
+    }
+}
+
+fn is_cjk_unified(ch: char) -> bool {
+    matches!(
+        ch as u32,
+        0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF
+    )
 }
 
 /// Kick off model init and poll a paraphrase-cosine probe until the REAL
@@ -1065,5 +1304,14 @@ mod tests {
         let ranks = vec![Some(1), Some(11), None, Some(10)];
         assert_eq!(recall_at_10_for_indices(&ranks, &[0, 1, 2]), 1.0 / 3.0);
         assert_eq!(recall_at_10_for_indices(&ranks, &[3]), 1.0);
+    }
+
+    #[test]
+    fn cjk_shingle_terms_index_space_free_chinese_runs() {
+        let terms = cjk_shingle_terms("记忆系统应该恢复正确状态");
+
+        assert!(terms.contains(&"cjk_记忆系".to_string()));
+        assert!(terms.contains(&"cjk_恢复正".to_string()));
+        assert!(terms.contains(&"cjk_确状态".to_string()));
     }
 }
