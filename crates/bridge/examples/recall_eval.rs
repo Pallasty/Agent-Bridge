@@ -66,7 +66,7 @@
 //! + a paraphrase-cosine readiness probe) and SKIPS semantic with a clear note
 //! rather than reporting a false R@k=0.
 
-use ab_store::{default_db_path, MemoryEdge, SqliteStore, StateStore};
+use ab_store::{MemoryEdge, SqliteStore, StateStore, default_db_path};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
@@ -75,7 +75,7 @@ use std::path::PathBuf;
 /// ceiling: proves the harness CAN retrieve when overlap exists). `Moderate` =
 /// a partial lexical anchor survives. `Hard` = pure cross-vocabulary paraphrase,
 /// no token echo — the LEVER-3 worst case.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Tier {
     Easy,
     Moderate,
@@ -220,6 +220,7 @@ const CORPUS: &[Case] = &[
 const TOP_K: usize = 10;
 const GRAPH_NEIGHBOR_LIMIT: usize = 8;
 const HASH_BACKEND_NAME: &str = "fnv1a-hash-384";
+const REVIEW_GATE_TARGET_CASES: &[usize] = &[1, 2, 5, 9, 14];
 
 /// Per-mode tallies accumulated across the corpus.
 #[derive(Default)]
@@ -342,7 +343,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::var("AGENT_BRIDGE_ONNX_MODEL").is_err() {
         if let Some(alias) = detect_store_model_alias(&db_path).await {
             std::env::set_var("AGENT_BRIDGE_ONNX_MODEL", alias);
-            println!("# auto-selected AGENT_BRIDGE_ONNX_MODEL={alias} (store's dominant embedding_backend)");
+            println!(
+                "# auto-selected AGENT_BRIDGE_ONNX_MODEL={alias} (store's dominant embedding_backend)"
+            );
         }
     }
 
@@ -393,10 +396,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut hybrid = ModeAgg::default();
     let mut semantic = ModeAgg::default();
     let mut fts_graph = CandidateExpansionAgg::default();
+    let mut fts_candidate_counts = Vec::with_capacity(CORPUS.len());
 
     for case in CORPUS {
         let fts_keys = keys_of(store.memory_search(case.query, &[], TOP_K as u32).await?);
         let fts_rank = first_hit_rank(&fts_keys, case.expect);
+        fts_candidate_counts.push(fts_keys.len());
         fts.record(fts_rank);
 
         let mut edges_by_fts_key = Vec::with_capacity(fts_keys.len());
@@ -556,6 +561,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
          same-domain answer-wrong memories, and #8's designated key has \
          importance=0.122 and is buried by the importance/recency blend (LEVER-3). \
          So the headroom is real, not a scoring artifact."
+    );
+    print_runtime_gate_anchor(
+        &fts,
+        &fts_graph,
+        &hybrid,
+        &semantic,
+        semantic_ready,
+        &fts_candidate_counts,
     );
     println!(
         "  caveat: hand-curated corpus, N={n}. The hard tier is the worst case \
@@ -780,6 +793,125 @@ fn candidate_expansion_added_indices(agg: &CandidateExpansionAgg) -> Vec<usize> 
         .collect()
 }
 
+fn tier_indices(tier: Tier) -> Vec<usize> {
+    CORPUS
+        .iter()
+        .enumerate()
+        .filter_map(|(i, case)| if case.tier == tier { Some(i) } else { None })
+        .collect()
+}
+
+fn recall_at_10_for_indices(ranks: &[Option<usize>], idxs: &[usize]) -> f64 {
+    if idxs.is_empty() {
+        return 0.0;
+    }
+    let hits = idxs
+        .iter()
+        .filter(|&&i| ranks.get(i).and_then(|rank| *rank).is_some_and(|r| r <= 10))
+        .count();
+    hits as f64 / idxs.len() as f64
+}
+
+fn miss_indices_for(ranks: &[Option<usize>], idxs: &[usize]) -> Vec<usize> {
+    idxs.iter()
+        .filter_map(|&i| {
+            if ranks.get(i).is_some_and(|rank| rank.is_none()) {
+                Some(i + 1)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn hard_zero_fts_miss_indices(fts: &ModeAgg, fts_candidate_counts: &[usize]) -> Vec<usize> {
+    tier_indices(Tier::Hard)
+        .into_iter()
+        .filter_map(|i| {
+            if fts.ranks.get(i).is_some_and(|rank| rank.is_none())
+                && fts_candidate_counts.get(i) == Some(&0)
+            {
+                Some(i + 1)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn print_runtime_gate_anchor(
+    fts: &ModeAgg,
+    fts_graph: &CandidateExpansionAgg,
+    hybrid: &ModeAgg,
+    semantic: &ModeAgg,
+    semantic_ready: bool,
+    fts_candidate_counts: &[usize],
+) {
+    let hard_idxs = tier_indices(Tier::Hard);
+    let hard_fts_misses = miss_indices_for(&fts.ranks, &hard_idxs);
+    let hard_graph_added = miss_indices_for(&fts.ranks, &hard_idxs)
+        .into_iter()
+        .filter(|idx1| fts_graph.ranks[*idx1 - 1].is_some())
+        .collect::<Vec<_>>();
+    let hard_zero_rows = hard_zero_fts_miss_indices(fts, fts_candidate_counts);
+
+    println!();
+    println!("## Runtime gate anchor (main recall_eval hard tier)");
+    println!(
+        "  contract: future runtime retrieval changes can claim continuity lift \
+         only if this main hard-tier anchor moves; trigger-cohort-only \
+         improvement is decorative."
+    );
+    println!(
+        "  hard-tier R@10: fts={:.3} fts+graph={:.3} hybrid={:.3} semantic={}",
+        recall_at_10_for_indices(&fts.ranks, &hard_idxs),
+        recall_at_10_for_indices(&fts_graph.ranks, &hard_idxs),
+        recall_at_10_for_indices(&hybrid.ranks, &hard_idxs),
+        if semantic_ready {
+            format!(
+                "{:.3}",
+                recall_at_10_for_indices(&semantic.ranks, &hard_idxs)
+            )
+        } else {
+            "n/a".to_string()
+        }
+    );
+    println!(
+        "  hard fts misses: {} case(s){}",
+        hard_fts_misses.len(),
+        fmt_idx(&hard_fts_misses)
+    );
+    println!(
+        "  hard zero-row fts misses: {} case(s){}",
+        hard_zero_rows.len(),
+        fmt_idx(&hard_zero_rows)
+    );
+    println!(
+        "  hard fts+graph added hits over fts misses: {} case(s){}",
+        hard_graph_added.len(),
+        fmt_idx(&hard_graph_added)
+    );
+    println!("  review gate targets (#3897):");
+    for &idx1 in REVIEW_GATE_TARGET_CASES {
+        let i = idx1 - 1;
+        let q: String = CORPUS[i].query.chars().take(30).collect();
+        println!(
+            "    #{:<2} fts={:<3} rows={:<2} fts+graph={:<3} hybrid={:<3} semantic={:<3} {}",
+            idx1,
+            rank_cell(fts.ranks[i]),
+            fts_candidate_counts.get(i).copied().unwrap_or_default(),
+            rank_cell(fts_graph.ranks[i]),
+            rank_cell(hybrid.ranks[i]),
+            if semantic_ready {
+                rank_cell(semantic.ranks[i])
+            } else {
+                "n/a".to_string()
+            },
+            q,
+        );
+    }
+}
+
 fn fmt_idx(idx: &[usize]) -> String {
     if idx.is_empty() {
         String::new()
@@ -900,5 +1032,38 @@ mod tests {
             vec!["source", "already_baseline", "target", "later"]
         );
         assert_eq!(expanded.graph_neighbor_row_count, 4);
+    }
+
+    #[test]
+    fn review_gate_targets_are_hard_cases() {
+        for &idx1 in REVIEW_GATE_TARGET_CASES {
+            let case = CORPUS.get(idx1 - 1).expect("target case exists");
+            assert_eq!(case.tier, Tier::Hard);
+        }
+    }
+
+    #[test]
+    fn hard_zero_fts_miss_indices_reports_only_hard_zero_row_misses() {
+        let mut fts = ModeAgg {
+            ranks: vec![Some(1); CORPUS.len()],
+            ..ModeAgg::default()
+        };
+        let mut counts = vec![10; CORPUS.len()];
+
+        fts.ranks[0] = None; // hard, zero rows
+        counts[0] = 0;
+        fts.ranks[1] = None; // hard, but has rows
+        counts[1] = 2;
+        fts.ranks[2] = None; // moderate, zero rows
+        counts[2] = 0;
+
+        assert_eq!(hard_zero_fts_miss_indices(&fts, &counts), vec![1]);
+    }
+
+    #[test]
+    fn recall_at_10_for_indices_counts_only_requested_cases() {
+        let ranks = vec![Some(1), Some(11), None, Some(10)];
+        assert_eq!(recall_at_10_for_indices(&ranks, &[0, 1, 2]), 1.0 / 3.0);
+        assert_eq!(recall_at_10_for_indices(&ranks, &[3]), 1.0);
     }
 }
