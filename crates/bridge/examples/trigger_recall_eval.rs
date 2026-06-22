@@ -123,7 +123,6 @@ const CORPUS: &[Case] = &[
     },
 ];
 
-#[derive(Clone)]
 struct MemoryRow {
     key: String,
     content: String,
@@ -575,7 +574,6 @@ fn sanitise_fts_query_any(q: &str) -> String {
 
 fn sanitise_fts_query_joined(q: &str, join: &str) -> String {
     let trimmed = q.trim();
-
     if has_invalid_fts_column_prefix(trimmed) {
         let escaped = trimmed.replace('"', "\"\"");
         return format!("\"{escaped}\"");
@@ -650,6 +648,7 @@ mod tests {
             "expected_b".to_string(),
             "expected_a".to_string(),
         ];
+
         assert_eq!(
             first_hit_rank(&keys, &["expected_a", "expected_b"]),
             Some(2)
@@ -673,5 +672,9 @@ mod tests {
         assert_eq!(sanitise_fts_query("warp ipc"), "warp* ipc*");
         assert_eq!(sanitise_fts_query_any("warp ipc"), "warp* OR ipc*");
         assert_eq!(sanitise_fts_query("lens:cosine"), "\"lens:cosine\"");
+        assert_eq!(
+            sanitise_fts_query("onsen-hd session open"),
+            "onsen* hd* session* open*"
+        );
     }
 }
