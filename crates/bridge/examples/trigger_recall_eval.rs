@@ -15,6 +15,8 @@
 //!   index augmented with generated CJK character trigrams;
 //! - `projected_plus_cjk_acc`: existing projected search plus a conservative
 //!   CJK trigram-overlap fallback for projected misses;
+//! - `projected_plus_intent`: the accepted CJK fallback plus an explicit
+//!   exclusion/contrast clause filter;
 //! - `exact_projected`: authored trigger text over `fts_content`.
 //!
 //! The first two isolate trigger projection from production ranking. They do
@@ -371,8 +373,28 @@ const NEGATIVE_CONTROLS: &[NegativeControl] = &[
     },
     NegativeControl {
         id: "hard_nexus_wuxing_art_cjk",
-        query: "Nexus 五行 UI 图标 配色 角色皮肤 美术规格 只要视觉草案 不要数学模型调研",
-        note: "Hard Wuxing-adjacent art query separated from the math-model survey intent",
+        query: "Nexus 五行 UI 图标 配色 角色皮肤 美术规格 只要视觉草案 不要数学模型调研或设计review",
+        note: "Hard Wuxing-adjacent art query separated from math survey and design-review intent",
+    },
+    NegativeControl {
+        id: "contrastive_goal_c_not_executor",
+        query: "Controlled RSI reading list and governance glossary, not recall eval or runtime executor patch authority",
+        note: "English not-clause should reject Goal C recall/evaluator and executor authorization memories",
+    },
+    NegativeControl {
+        id: "contrastive_graph_rather_than_packet",
+        query: "GHP related keys terminology map rather than review packet deployment evidence",
+        note: "English rather-than clause should reject graph-hygiene packet/deploy evidence",
+    },
+    NegativeControl {
+        id: "contrastive_onsen_instead_handoff",
+        query: "Onsen save cloud player README instead of Sprint handoff or session memory",
+        note: "English instead-of clause should reject Onsen project handoff memories",
+    },
+    NegativeControl {
+        id: "contrastive_nexus_instead_review",
+        query: "Nexus Wuxing icon palette and art board instead of GDD review or math survey",
+        note: "English instead-of clause should reject Nexus design-review/math survey memories",
     },
 ];
 
@@ -2138,7 +2160,7 @@ fn explicit_exclusion_clauses(query: &str) -> Vec<String> {
     }
 
     let lower = query.to_lowercase();
-    for marker in ["without", "not "] {
+    for marker in ["rather than", "instead of", "without", "not "] {
         let mut start = 0;
         while let Some(rel_idx) = lower[start..].find(marker) {
             let marker_idx = start + rel_idx;
@@ -2229,7 +2251,9 @@ fn candidate_matches_exclusion(clauses: &[String], projected: &str) -> bool {
 }
 
 fn ascii_terms(text: &str) -> BTreeSet<String> {
-    const STOP_WORDS: &[&str] = &["and", "any", "for", "not", "only", "or", "the", "without"];
+    const STOP_WORDS: &[&str] = &[
+        "and", "any", "for", "instead", "not", "only", "or", "than", "the", "without",
+    ];
 
     text.split(|ch: char| !ch.is_ascii_alphanumeric())
         .map(str::to_lowercase)
@@ -2682,6 +2706,15 @@ mod tests {
         assert_eq!(
             explicit_exclusion_clauses("show UI notes, not runtime executor status"),
             vec!["runtime executor status".to_string()]
+        );
+        assert_eq!(
+            explicit_exclusion_clauses(
+                "show UI notes rather than runtime executor status instead of deployment evidence"
+            ),
+            vec![
+                "runtime executor status instead of deployment evidence".to_string(),
+                "deployment evidence".to_string()
+            ]
         );
     }
 
