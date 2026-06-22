@@ -183,10 +183,11 @@ This validates the intended behavior: `preserve_order` remains the stable
 compatibility baseline, while `orphan_reduction` produces a materially better
 first 20-edge review packet for graph hygiene.
 
-The next safe step would be a guarded `memory_related_keys_materialize` dry-run,
-not a write. In this compact MCP tool profile, that materialize tool is not
-currently exposed, so this session stopped at the read-only comparison and did
-not run a dry-run writer.
+The next safe step from this live comparison was a guarded
+`memory_related_keys_materialize` dry-run, not a write. In the active compact
+MCP tool profile, that materialize tool is intentionally not exposed; the later
+section below records a one-shot all-profile subprocess dry-run that kept
+`dry_run=true` and did not change the active Codex MCP surface.
 
 The exact `orphan_reduction` invocation used:
 
@@ -201,6 +202,76 @@ The exact `orphan_reduction` invocation used:
   "preview_chars": 80
 }
 ```
+
+## Guarded Materialize Dry-Run
+
+After a later Codex restart and repository sync, the local checkout was updated
+to `origin/master @ 9a0e3d5` for the materialize dry-run. Before committing this
+report update, the checkout was fast-forwarded again to `origin/master @
+bb587b6`. Those remote advances were report/example work for trigger-aware
+recall diagnostics, not runtime behavior changes to the GHP-1b MCP tool
+implementation. Verification after the final sync:
+
+```bash
+cargo check -p ab-bridge --examples
+~/.local/bin/agent-bridge.real doctor --json
+```
+
+Result:
+
+| Check | Result |
+|---|---|
+| examples compile | pass |
+| doctor | `ok=true`, `fails=0`, `warns=0` |
+| final base before this report commit | `HEAD == origin/master == bb587b6` |
+
+The compact Codex MCP profile intentionally does not expose
+`memory_related_keys_materialize`, because it is write-capable when
+`dry_run=false`. To validate the next step without changing the active MCP
+surface, a one-shot local MCP stdio subprocess was launched with
+`AGENT_BRIDGE_TOOL_PROFILE=all`, then called with `dry_run=true` only.
+
+Common materialize dry-run inputs:
+
+```json
+{
+  "dry_run": true,
+  "scope": "project:/Data/CascadeProjects/agent-bridge",
+  "scope_mode": "local_only",
+  "scope_filter": "exact",
+  "max_records": 1000,
+  "max_edges": 20,
+  "max_outbound_per_source": 3,
+  "max_inbound_per_target": 3,
+  "preview_chars": 0
+}
+```
+
+Result under the materializer's real default skip set, which excludes
+`session_handoff` rows:
+
+| Metric | `preserve_order` | `orphan_reduction` |
+|---|---:|---:|
+| dry run | true | true |
+| blocked | false | false |
+| linked | 0 | 0 |
+| loaded records | 438 | 438 |
+| safe candidates before caps | 90 | 90 |
+| current orphans | 32 | 32 |
+| selected edges | 20 | 20 |
+| orphan candidate nodes selected | 1 | 22 |
+| orphans reduced by selected | 1 | 22 |
+| projected orphans after selected | 31 | 10 |
+
+This confirms the reviewed ordering still matters under the actual guarded
+writer plan: with the same 20-edge cap and no writes, `orphan_reduction` picks a
+materially better first batch than the compatibility baseline.
+
+Post-dry-run topology was unchanged at the durable read-only preflight level:
+`non_skill_active_total=140`, `orphan_count=45`, `orphan_fraction=0.321`,
+`p4_evolved_coverage=95`, and `pagerank_readiness=hub_risk_cap_centrality_boost`.
+No graph edge, memory row, ranking, search-order, or candidate-set write was
+performed.
 
 ## Non-Authorizations
 
