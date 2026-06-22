@@ -30,6 +30,7 @@
 //!   cargo run -p ab-bridge --example trigger_recall_eval
 //!   AB_BASELINE_DB=/tmp/state.copy.db cargo run -p ab-bridge --example trigger_recall_eval
 //!   cargo run -p ab-bridge --example trigger_recall_eval -- --check-corpus
+//!   cargo run -p ab-bridge --example trigger_recall_eval -- --list-trigger-rows
 //!
 //! Debug one case:
 //!
@@ -344,6 +345,8 @@ const NEGATIVE_CONTROLS: &[NegativeControl] = &[
 
 struct MemoryRow {
     key: String,
+    kind: String,
+    scope: Option<String>,
     content: String,
     projected: String,
     triggers: Vec<String>,
@@ -403,6 +406,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let arg1 = std::env::args().nth(1);
     if matches!(arg1.as_deref(), Some("--check-corpus")) {
         return check_corpus(&db_path, &rows);
+    }
+    if matches!(arg1.as_deref(), Some("--list-trigger-rows")) {
+        return list_trigger_rows(&db_path, &rows);
     }
     verify_corpus(&rows)?;
     let fts = ScratchFts::build(&rows)?;
@@ -715,7 +721,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn load_active_rows(db_path: &std::path::Path) -> SqlResult<Vec<MemoryRow>> {
     let db = RusqliteConnection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     let mut stmt = db.prepare(
-        "SELECT key, content, COALESCE(fts_content, content), tags
+        "SELECT key, kind, scope, content, COALESCE(fts_content, content), tags
          FROM memories
          WHERE status = 'active'
          ORDER BY rowid",
@@ -723,9 +729,11 @@ fn load_active_rows(db_path: &std::path::Path) -> SqlResult<Vec<MemoryRow>> {
     let rows = stmt
         .query_map([], |row| {
             let key: String = row.get(0)?;
-            let content: String = row.get(1)?;
-            let projected: String = row.get(2)?;
-            let tags_s: String = row.get(3)?;
+            let kind: String = row.get(1)?;
+            let scope: Option<String> = row.get(2)?;
+            let content: String = row.get(3)?;
+            let projected: String = row.get(4)?;
+            let tags_s: String = row.get(5)?;
             let tags = parse_str_array(&tags_s);
             let triggers = tags
                 .iter()
@@ -735,6 +743,8 @@ fn load_active_rows(db_path: &std::path::Path) -> SqlResult<Vec<MemoryRow>> {
                 .collect();
             Ok(MemoryRow {
                 key,
+                kind,
+                scope,
                 content,
                 projected,
                 triggers,
@@ -742,6 +752,46 @@ fn load_active_rows(db_path: &std::path::Path) -> SqlResult<Vec<MemoryRow>> {
         })?
         .collect::<SqlResult<Vec<_>>>()?;
     Ok(rows)
+}
+
+fn list_trigger_rows(
+    db_path: &std::path::Path,
+    rows: &[MemoryRow],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let trigger_rows = rows
+        .iter()
+        .filter(|row| !row.triggers.is_empty())
+        .collect::<Vec<_>>();
+    println!("# Trigger-aware recall active trigger rows");
+    println!("db:              {}", db_path.display());
+    println!("active rows:     {}", rows.len());
+    println!("trigger rows:    {}", trigger_rows.len());
+    println!(
+        "projected rows:  {}",
+        rows.iter().filter(|r| r.content != r.projected).count()
+    );
+    println!("read_only:       SELECT only; no memory_get, memory_search, writes, or reindex");
+    println!();
+
+    for (idx, row) in trigger_rows.iter().enumerate() {
+        println!("[{}] key={}", idx + 1, row.key);
+        println!("    kind={}", row.kind);
+        println!("    scope={}", row.scope.as_deref().unwrap_or(""));
+        println!("    content_chars={}", row.content.chars().count());
+        println!("    projected_chars={}", row.projected.chars().count());
+        for trigger in &row.triggers {
+            println!("    trigger={trigger}");
+        }
+        let preview = row
+            .content
+            .split_whitespace()
+            .take(28)
+            .collect::<Vec<_>>()
+            .join(" ");
+        println!("    preview={preview}");
+    }
+
+    Ok(())
 }
 
 fn check_corpus(
@@ -1402,6 +1452,8 @@ mod tests {
         let first = &CORPUS[0];
         let row = MemoryRow {
             key: first.expect[0].to_string(),
+            kind: "decision".to_string(),
+            scope: None,
             content: "plain content".to_string(),
             projected: "plain content".to_string(),
             triggers: Vec::new(),
@@ -1458,6 +1510,8 @@ mod tests {
         let query = "五行生克的成熟数学模型、黄金比例控制网络和平衡靶调研结论在哪里";
         let row = MemoryRow {
             key: "target".to_string(),
+            kind: "decision".to_string(),
+            scope: None,
             content: String::new(),
             projected:
                 "五行生克成熟数学模型调研 黄金比例反馈控制网络 黄金比例五行控制网络 平衡靶 循环平衡环"
@@ -1502,12 +1556,16 @@ mod tests {
         let rows = [
             MemoryRow {
                 key: "projected_hit".to_string(),
+                kind: "decision".to_string(),
+                scope: None,
                 content: String::new(),
                 projected: "ordinary projected anchor".to_string(),
                 triggers: Vec::new(),
             },
             MemoryRow {
                 key: "cjk_fallback".to_string(),
+                kind: "decision".to_string(),
+                scope: None,
                 content: String::new(),
                 projected:
                     "五行生克成熟数学模型调研 黄金比例反馈控制网络 黄金比例五行控制网络 平衡靶"
