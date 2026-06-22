@@ -16,11 +16,12 @@ materialize dry-runs. Not an authorization to write graph edges.
 |---|---|
 | source commit | `6a177340906035f945bd88ee54a4c7fffaecc8a6` |
 | source subject | `feat(memory): prioritize orphan reduction in related keys review` |
+| deployed HEAD | `eef4de7` |
 | deployed binary | `/home/pallasting/.local/bin/agent-bridge.real` |
-| deployed sha256 | `5d3d6c3082763d5b776c79e6b97c327684f83ec852bdbacb14352d53a08b1cac` |
+| deployed sha256 | `798f58951d76c86a302883e93d1ad3531f180f8da3944c7f999199cc2000cfbb` |
 | deployed version | `ab-bridge 0.1.0` |
-| deployed source | `origin/master @ 6a17734` |
-| rollback binary | `/home/pallasting/.local/bin/agent-bridge.real.bak-deploy-6a17734-20260622T031626` |
+| deployed source | `origin/master @ eef4de7` |
+| rollback binary | `/home/pallasting/.local/bin/agent-bridge.real.bak-deploy-eef4de7-20260622T032539` |
 
 ## What Changed
 
@@ -88,7 +89,7 @@ scripts/deploy_from_master.sh --yes
 
 Result:
 
-- release build completed in `4m49s`;
+- release build completed in `6m48s`;
 - feature gate passed;
 - binary deployed to `/home/pallasting/.local/bin/agent-bridge.real`;
 - user services were restarted:
@@ -197,7 +198,7 @@ Rollback for the code:
 
 ```bash
 git revert 6a177340906035f945bd88ee54a4c7fffaecc8a6
-cp /home/pallasting/.local/bin/agent-bridge.real.bak-deploy-6a17734-20260622T031626 /home/pallasting/.local/bin/agent-bridge.real
+cp /home/pallasting/.local/bin/agent-bridge.real.bak-deploy-eef4de7-20260622T032539 /home/pallasting/.local/bin/agent-bridge.real
 ```
 
 Then reconnect MCP clients.
