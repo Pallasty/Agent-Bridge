@@ -15,8 +15,8 @@ falsifier. Not actionable for runtime ranking changes.
 |---|---|
 | base commit | `232cf69847923e6a0f23a1a3e98537c4ed3932bd` |
 | base subject | `docs: add mac goal c u refresh report` |
-| new harness | `crates/bridge/examples/trigger_recall_eval.rs` |
-| live db | `/Users/pallasting/Library/Application Support/agent-bridge/state.db` |
+| harness | `crates/bridge/examples/trigger_recall_eval.rs` |
+| live DB | `/Users/pallasting/Library/Application Support/agent-bridge/state.db` |
 | corpus | 10 active Mac rows with `continuity_retrieval_trigger` tags |
 
 ## Why
@@ -26,32 +26,29 @@ projection is mechanically populated, but the fixed 18-case `recall_eval` corpus
 does not include gold keys from the trigger-tag cohort. That means it cannot
 measure whether trigger projection helps the rows it was designed for.
 
-This slice adds a separate read-only example over trigger-tag rows. It opens the
-live store read-only, copies active rows into two temporary in-memory FTS tables,
-and compares authored `content` against projected `fts_content`. Each case has:
+This slice adds a separate read-only example over trigger-tag rows. Each case
+has:
 
 - `expect`: the memory key carrying the trigger tag;
 - `trigger`: the authored `continuity_retrieval_trigger` text;
 - `query`: a separate held-out continuation intent, not the exact trigger text.
 
-The harness reports three modes:
+The harness compares three modes:
 
 - `intent_content`: held-out query over authored `memories.content`;
-- `intent_projected`: the same held-out query over `memories.fts_content`;
-- `exact_projected`: authored trigger text over `memories.fts_content`.
+- `intent_projected`: the same held-out query over `COALESCE(fts_content, content)`;
+- `exact_projected`: authored trigger text over `COALESCE(fts_content, content)`.
 
-`intent_projected` is the useful continuity metric. The delta between
-`intent_content` and `intent_projected` isolates the retrieval-trigger
-projection effect without production ranking, recency, access-count, graph, or
-semantic embedding factors. `exact_projected` mainly verifies whether the
-authored trigger text itself is replayable through the FTS parser.
+`intent_content` vs `intent_projected` isolates the projection itself. It does
+not use `memory_get`, `memory_search`, access count, importance, recency, graph
+expansion, or semantic embeddings.
 
 ## Verification
 
 Commands:
 
 ```bash
-rustfmt --edition 2024 --check crates/bridge/examples/trigger_recall_eval.rs
+rustfmt --edition 2024 crates/bridge/examples/trigger_recall_eval.rs
 cargo test -p ab-bridge --example trigger_recall_eval -- --nocapture
 cargo run -p ab-bridge --example trigger_recall_eval
 cargo run -p ab-bridge --example trigger_recall_eval -- 10
@@ -64,12 +61,14 @@ Results:
 | local rustfmt on new file | pass |
 | example unit tests | pass, 3 passed |
 | live trigger-aware eval | pass, produced report |
-| debug case #10 | pass, exposed exact-trigger FTS parser error |
+| debug case #10 | pass, confirmed exact-trigger FTS parser error |
 
 Existing unrelated warnings still appear during Cargo runs:
 
-- `mixed_script_confusables` for the existing `β` test name in `crates/store/src/sqlite.rs`;
-- existing `ab-bridge` warnings around private interface and unused Option-E helpers.
+- `mixed_script_confusables` for the existing `beta` test name in
+  `crates/store/src/sqlite.rs`;
+- existing `ab-bridge` warnings around private interface and unused Option-E
+  helpers.
 
 Global `cargo fmt --check` was intentionally not used as a gate for this slice:
 the current repo has broad pre-existing rustfmt drift unrelated to this file.
@@ -118,30 +117,28 @@ read_only:       SELECT + in-memory FTS only; no memory_get, memory_search, writ
 
 ## Finding
 
-The first trigger-aware held-out cohort is strong on this Mac store and shows a
-measurable projection effect:
+The first trigger-aware held-out cohort shows a real, narrow projection gain:
 
-- `intent_content` R@10 = `0.900`, MRR = `0.714`;
-- `intent_projected` R@10 = `1.000`, MRR = `0.817`;
-- projection added 1 top-10 hit over content-only, case #8
+- `intent_projected` improves R@10 from `0.900` to `1.000`;
+- `intent_projected` improves R@5 from `0.800` to `1.000`;
+- `intent_projected` improves R@1 from `0.600` to `0.700`;
+- `intent_projected` improves MRR from `0.714` to `0.817`;
+- projection adds one top-10 hit over content-only, case #8
   `goal_c_executor_constraint`;
-- projection improved first-hit rank for 3 cases: #2, #6, and #8.
+- projection improves first-hit rank for cases #2, #6, and #8.
 
-That means the current trigger-tag cohort is recoverable from natural
-continuation-intent queries in this sample, and the projection makes at least one
-otherwise-missed case visible. This does not prove broad production lift,
-because the corpus is small and hand-curated, but it gives Goal C a real
-falsifier for trigger-projection cohorts.
+This supports the v36 trigger projection as a candidate-visibility improvement
+for its own cohort. It does not authorize production ranking changes: the corpus
+is small, hand-curated, and measures only temporary FTS candidate visibility.
 
-The run also exposed one hygiene issue:
+The run also exposed one parser hygiene issue:
 
-- case #10 `onsen_handoff` ranks #1 for both `intent_content` and
-  `intent_projected`;
-- the exact authored trigger text errors with
-  `backend: memory_search: Error("no such column: hd")`;
-- the trigger contains `onsen-hd`, so FTS query sanitization around hyphenated
-  trigger text needs a narrow follow-up if exact-trigger replay is meant to be
-  robust.
+- case #10 `onsen_handoff` ranks #1 for the held-out intent query in both
+  content and projected indexes;
+- the exact authored trigger text errors with `no such column: hd`;
+- the trigger contains `onsen-hd` plus operator-like punctuation, so exact
+  trigger replay needs a narrow FTS sanitizer follow-up before it can be used as
+  a robust projection-health metric.
 
 ## Non-Authorizations
 
@@ -159,13 +156,13 @@ This report does not authorize:
 
 ## Next Step
 
-Adopt `trigger_recall_eval` as a small companion to `recall_eval` for the
-trigger-tag cohort, then do one of two narrow follow-ups:
+Adopt `trigger_recall_eval` as a companion to `recall_eval` for the trigger-tag
+cohort, then do two narrow follow-ups:
 
-1. Add a regression for hyphenated trigger query sanitization, using `onsen-hd`
-   as the concrete failing pattern.
+1. Add a regression for exact-trigger FTS parser hygiene using `onsen-hd` /
+   punctuation as the concrete failing pattern.
 2. Expand the trigger-aware corpus from 10 to at least 30 cases with explicit
    strata: AB continuity, BioCortex, LSWR, Onsen, and negative controls.
 
-The first follow-up is smaller and should come before interpreting
-`exact_trigger` as a reliable projection health metric.
+The parser regression should come first because it makes `exact_projected`
+usable as a low-level projection-health check.

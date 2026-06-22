@@ -1,14 +1,25 @@
-//! Goal C trigger-aware recall eval over memories with `continuity_retrieval_trigger`.
+//! Goal C — read-only trigger-aware FTS projection recall probe.
 //!
-//! This is the missing held-out cohort for the v36 retrieval-trigger FTS
-//! projection: the store tests prove trigger text is indexed; this example asks
-//! whether rows that carry retrieval triggers are actually recoverable from
-//! continuation-intent queries that do not simply repeat the authored trigger.
+//! Store tests prove `continuity_retrieval_trigger:*` is projected into
+//! `memories.fts_content`; the fixed 18-case `recall_eval` corpus does not
+//! overlap that trigger-tag cohort. This example asks the missing question:
+//! does the projection make trigger rows more visible to continuation-intent
+//! queries?
 //!
-//! Surface-free + read-only: only SELECT-side store calls (`memory_get` and
-//! `memory_search`). NO new MCP tool, NO ranking change, NO writes, NO reindex.
+//! Method. Open the live store read-only, copy active rows into two temporary
+//! in-memory FTS5 tables, then compare:
 //!
-//! Running:
+//! - `intent_content`: held-out query over authored `memories.content`;
+//! - `intent_projected`: same held-out query over `fts_content`;
+//! - `exact_projected`: authored trigger text over `fts_content`.
+//!
+//! The first two isolate trigger projection from production ranking. They do
+//! not use access_count, importance, recency, graph expansion, semantic
+//! embeddings, `memory_get`, or `memory_search`. The third mode is a projection
+//! health probe and can expose FTS parser problems in trigger text.
+//!
+//! Surface-free + read-only: SELECT from the real DB, write only to an in-memory
+//! scratch DB. No MCP tool, no runtime retrieval change, no memory write.
 //!
 //!   cargo run -p ab-bridge --example trigger_recall_eval
 //!   AB_BASELINE_DB=/tmp/state.copy.db cargo run -p ab-bridge --example trigger_recall_eval
@@ -17,10 +28,15 @@
 //!
 //!   cargo run -p ab-bridge --example trigger_recall_eval -- 4
 
-use ab_store::{MemorySearchHit, SqliteStore, StateStore, default_db_path};
+use ab_store::default_db_path;
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
+use tokio_rusqlite::rusqlite::{
+    Connection as RusqliteConnection, OpenFlags, Result as SqlResult, params,
+};
 
 const TOP_K: usize = 10;
+const TRIGGER_PREFIX: &str = "continuity_retrieval_trigger:";
 
 struct Case {
     id: &'static str,
@@ -30,10 +46,10 @@ struct Case {
     note: &'static str,
 }
 
-/// Cases were selected from active Mac store rows carrying
-/// `continuity_retrieval_trigger` tags on 2026-06-22. `trigger` is the authored
-/// retrieval-trigger text; `query` is a held-out continuation intent authored
-/// separately so the eval does not pass by echoing the exact projection string.
+/// Cases selected from active Mac rows carrying `continuity_retrieval_trigger`
+/// tags on 2026-06-22. `trigger` is the authored metadata. `query` is a
+/// separate held-out continuation intent so the eval does not pass by exact
+/// trigger echo.
 const CORPUS: &[Case] = &[
     Case {
         id: "s132_handoff",
@@ -107,6 +123,14 @@ const CORPUS: &[Case] = &[
     },
 ];
 
+#[derive(Clone)]
+struct MemoryRow {
+    key: String,
+    content: String,
+    projected: String,
+    triggers: Vec<String>,
+}
+
 #[derive(Default)]
 struct Agg {
     r_at_1: u32,
@@ -136,138 +160,283 @@ impl Agg {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let db_path: PathBuf = std::env::var("AB_BASELINE_DB")
         .ok()
         .map(PathBuf::from)
         .unwrap_or_else(default_db_path);
-    let store = SqliteStore::open(&db_path).await?;
+    let rows = load_active_rows(&db_path)?;
+    verify_corpus(&rows)?;
+    let fts = ScratchFts::build(&rows)?;
 
     if let Some(arg) = std::env::args().nth(1) {
         if let Ok(idx1) = arg.parse::<usize>() {
-            return debug_case(&store, idx1).await;
+            return debug_case(&fts, idx1);
         }
     }
 
-    let mut missing_expected = Vec::new();
-    for case in CORPUS {
-        for key in case.expect {
-            if store.memory_get(key).await?.is_none() {
-                missing_expected.push(*key);
-            }
-        }
-    }
-
-    let mut intent = Agg::default();
-    let mut exact_trigger = Agg::default();
+    let mut intent_content = Agg::default();
+    let mut intent_projected = Agg::default();
+    let mut exact_projected = Agg::default();
 
     for case in CORPUS {
-        let (intent_keys, intent_error) = search_keys(&store, case.query).await;
-        intent.record(first_hit_rank(&intent_keys, case.expect), intent_error);
+        let content_keys = fts.search(IndexKind::Content, case.query, TOP_K);
+        intent_content.record(
+            first_hit_rank(content_keys.as_deref().unwrap_or(&[]), case.expect),
+            content_keys.err(),
+        );
 
-        let (trigger_keys, trigger_error) = search_keys(&store, case.trigger).await;
-        exact_trigger.record(first_hit_rank(&trigger_keys, case.expect), trigger_error);
+        let projected_keys = fts.search(IndexKind::Projected, case.query, TOP_K);
+        intent_projected.record(
+            first_hit_rank(projected_keys.as_deref().unwrap_or(&[]), case.expect),
+            projected_keys.err(),
+        );
+
+        let trigger_keys = fts.search(IndexKind::Projected, case.trigger, TOP_K);
+        exact_projected.record(
+            first_hit_rank(trigger_keys.as_deref().unwrap_or(&[]), case.expect),
+            trigger_keys.err(),
+        );
     }
 
+    let active_total = rows.len();
+    let trigger_rows = rows.iter().filter(|r| !r.triggers.is_empty()).count();
+    let projected_rows = rows.iter().filter(|r| r.content != r.projected).count();
     let n = CORPUS.len();
+
     println!("# Trigger-aware recall eval — continuity_retrieval_trigger cohort");
     println!("db:              {}", db_path.display());
+    println!("active rows:     {active_total}");
+    println!("trigger rows:    {trigger_rows}");
+    println!("projected rows:  {projected_rows}");
     println!("corpus:          {n} cases (Mac active trigger-tag rows, 2026-06-22)");
     println!("top_k:           {TOP_K}");
+    println!("mode contract:   intent_content vs intent_projected isolates trigger projection");
     println!(
-        "mode contract:   exact_trigger = authored tag text; intent = held-out continuation query"
+        "read_only:       SELECT + in-memory FTS only; no memory_get, memory_search, writes, or reindex"
     );
-    println!(
-        "read_only:       memory_get + memory_search only; no writes, no reindex, no runtime path change"
-    );
-    if !missing_expected.is_empty() {
-        println!("missing expect:  {}", missing_expected.join(", "));
-    }
     println!();
 
     println!("## Per-mode recall (success@k over {n} cases)");
     println!(
-        "  {:<14} {:>7} {:>7} {:>7} {:>7}",
+        "  {:<18} {:>7} {:>7} {:>7} {:>7}",
         "mode", "R@1", "R@5", "R@10", "MRR"
     );
-    print_row("intent", &intent, n);
-    print_row("exact_trigger", &exact_trigger, n);
+    print_row("intent_content", &intent_content, n);
+    print_row("intent_projected", &intent_projected, n);
+    print_row("exact_projected", &exact_projected, n);
     println!();
 
-    println!("## Per-case first-hit rank (— = no hit in top {TOP_K})");
+    println!("## Projection delta");
+    let added = added_hit_indices(&intent_content, &intent_projected);
+    let improved = improved_rank_indices(&intent_content, &intent_projected);
     println!(
-        "  {:<3} {:<28} {:>7} {:>13}  {}",
-        "#", "id", "intent", "exact_trigger", "note"
+        "  added top-{TOP_K} hits over content-only: {} case(s){}",
+        added.len(),
+        fmt_idx(&added)
+    );
+    println!(
+        "  improved first-hit rank:              {} case(s){}",
+        improved.len(),
+        fmt_idx(&improved)
+    );
+    println!();
+
+    println!("## Per-case first-hit rank (- = no hit in top {TOP_K}; ERR = FTS parser error)");
+    println!(
+        "  {:<3} {:<28} {:>8} {:>10} {:>10}  {}",
+        "#", "id", "content", "projected", "exact", "note"
     );
     for (i, case) in CORPUS.iter().enumerate() {
         println!(
-            "  {:<3} {:<28} {:>7} {:>13}  {}",
+            "  {:<3} {:<28} {:>8} {:>10} {:>10}  {}",
             i + 1,
             case.id,
-            rank_cell(intent.ranks[i], intent.errors[i].as_deref()),
-            rank_cell(exact_trigger.ranks[i], exact_trigger.errors[i].as_deref()),
+            rank_cell(intent_content.ranks[i], intent_content.errors[i].as_deref()),
+            rank_cell(
+                intent_projected.ranks[i],
+                intent_projected.errors[i].as_deref()
+            ),
+            rank_cell(
+                exact_projected.ranks[i],
+                exact_projected.errors[i].as_deref()
+            ),
             case.note
         );
     }
     println!();
 
-    let intent_misses = miss_indices(&intent);
-    let exact_misses = miss_indices(&exact_trigger);
-    let intent_errors = error_indices(&intent);
-    let exact_errors = error_indices(&exact_trigger);
     println!("## Honest read");
     println!(
-        "  intent misses:        {} case(s){}",
-        intent_misses.len(),
-        fmt_idx(&intent_misses)
+        "  intent_content misses:   {} case(s){}",
+        miss_indices(&intent_content).len(),
+        fmt_idx(&miss_indices(&intent_content))
     );
     println!(
-        "  exact_trigger misses: {} case(s){}",
-        exact_misses.len(),
-        fmt_idx(&exact_misses)
+        "  intent_projected misses: {} case(s){}",
+        miss_indices(&intent_projected).len(),
+        fmt_idx(&miss_indices(&intent_projected))
     );
     println!(
-        "  intent errors:        {} case(s){}",
-        intent_errors.len(),
-        fmt_idx(&intent_errors)
+        "  exact_projected errors:  {} case(s){}",
+        error_indices(&exact_projected).len(),
+        fmt_idx(&error_indices(&exact_projected))
     );
     println!(
-        "  exact_trigger errors: {} case(s){}",
-        exact_errors.len(),
-        fmt_idx(&exact_errors)
+        "  interpretation: intent_projected is the useful continuity metric. \
+         exact_projected mainly checks that authored trigger text can be replayed \
+         through the FTS query parser."
     );
     println!(
-        "  interpretation: exact_trigger mainly verifies that v36 projected trigger text is searchable. \
-         intent is the useful continuity metric because it asks whether a future session's natural \
-         continuation query finds the triggered row without verbatim tag echo."
-    );
-    println!(
-        "  caveat: hand-curated corpus, N={n}. Treat this as the first trigger-aware falsifier, \
-         not a production ranking benchmark."
+        "  caveat: hand-curated corpus, N={n}. This is a first trigger-cohort \
+         falsifier, not a production ranking benchmark."
     );
 
     Ok(())
 }
 
-fn keys_of(hits: Vec<MemorySearchHit>) -> Vec<String> {
-    hits.into_iter().map(|h| h.record.key).collect()
+fn load_active_rows(db_path: &std::path::Path) -> SqlResult<Vec<MemoryRow>> {
+    let db = RusqliteConnection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let mut stmt = db.prepare(
+        "SELECT key, content, COALESCE(fts_content, content), tags
+         FROM memories
+         WHERE status = 'active'
+         ORDER BY rowid",
+    )?;
+    let rows = stmt
+        .query_map([], |row| {
+            let key: String = row.get(0)?;
+            let content: String = row.get(1)?;
+            let projected: String = row.get(2)?;
+            let tags_s: String = row.get(3)?;
+            let tags = parse_str_array(&tags_s);
+            let triggers = tags
+                .iter()
+                .filter_map(|t| t.strip_prefix(TRIGGER_PREFIX).map(str::trim))
+                .filter(|t| !t.is_empty())
+                .map(ToString::to_string)
+                .collect();
+            Ok(MemoryRow {
+                key,
+                content,
+                projected,
+                triggers,
+            })
+        })?
+        .collect::<SqlResult<Vec<_>>>()?;
+    Ok(rows)
 }
 
-async fn search_keys(store: &SqliteStore, query: &str) -> (Vec<String>, Option<String>) {
-    match store.memory_search(query, &[], TOP_K as u32).await {
-        Ok(hits) => (keys_of(hits), None),
-        Err(err) => (Vec::new(), Some(err.to_string())),
+fn verify_corpus(rows: &[MemoryRow]) -> Result<(), Box<dyn std::error::Error>> {
+    let by_key: HashMap<&str, &MemoryRow> = rows.iter().map(|r| (r.key.as_str(), r)).collect();
+    let mut seen_ids = BTreeSet::new();
+    let mut seen_queries = BTreeSet::new();
+
+    for case in CORPUS {
+        if !seen_ids.insert(case.id) {
+            return Err(format!("duplicate case id: {}", case.id).into());
+        }
+        if !seen_queries.insert(case.query) {
+            return Err(format!("duplicate query: {}", case.query).into());
+        }
+        if case.query == case.trigger {
+            return Err(format!("{} uses exact trigger text as held-out query", case.id).into());
+        }
+        for expected in case.expect {
+            let row = by_key
+                .get(expected)
+                .ok_or_else(|| format!("{} expected key missing: {expected}", case.id))?;
+            if row.triggers.is_empty() {
+                return Err(format!("{} expected key has no trigger: {expected}", case.id).into());
+            }
+        }
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum IndexKind {
+    Content,
+    Projected,
+}
+
+struct ScratchFts {
+    db: RusqliteConnection,
+}
+
+impl ScratchFts {
+    fn build(rows: &[MemoryRow]) -> SqlResult<Self> {
+        let db = RusqliteConnection::open_in_memory()?;
+        db.execute_batch(
+            "CREATE VIRTUAL TABLE content_fts USING fts5(
+                 key UNINDEXED,
+                 body,
+                 tokenize = 'unicode61 remove_diacritics 2'
+             );
+             CREATE VIRTUAL TABLE projected_fts USING fts5(
+                 key UNINDEXED,
+                 body,
+                 tokenize = 'unicode61 remove_diacritics 2'
+             );",
+        )?;
+
+        {
+            let mut content_stmt =
+                db.prepare("INSERT INTO content_fts(key, body) VALUES (?1, ?2)")?;
+            let mut projected_stmt =
+                db.prepare("INSERT INTO projected_fts(key, body) VALUES (?1, ?2)")?;
+            for row in rows {
+                content_stmt.execute(params![row.key, row.content])?;
+                projected_stmt.execute(params![row.key, row.projected])?;
+            }
+        }
+
+        Ok(Self { db })
+    }
+
+    fn search(&self, kind: IndexKind, query: &str, limit: usize) -> Result<Vec<String>, String> {
+        let precise = sanitise_fts_query(query);
+        let any = sanitise_fts_query_any(query);
+        let mut rows = self.search_once(kind, &precise, limit)?;
+        if rows.is_empty() && any != precise {
+            rows = self.search_once(kind, &any, limit)?;
+        }
+        Ok(rows)
+    }
+
+    fn search_once(
+        &self,
+        kind: IndexKind,
+        match_expr: &str,
+        limit: usize,
+    ) -> Result<Vec<String>, String> {
+        let sql = match kind {
+            IndexKind::Content => {
+                "SELECT key FROM content_fts
+                 WHERE content_fts MATCH ?1
+                 ORDER BY bm25(content_fts)
+                 LIMIT ?2"
+            }
+            IndexKind::Projected => {
+                "SELECT key FROM projected_fts
+                 WHERE projected_fts MATCH ?1
+                 ORDER BY bm25(projected_fts)
+                 LIMIT ?2"
+            }
+        };
+        let mut stmt = self.db.prepare(sql).map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params![match_expr, limit as i64], |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<SqlResult<Vec<_>>>()
+            .map_err(|e| e.to_string())?;
+        Ok(rows)
     }
 }
 
-fn first_hit_rank(keys: &[String], expect: &[&str]) -> Option<usize> {
-    keys.iter()
-        .position(|k| expect.iter().any(|e| e == k))
-        .map(|i| i + 1)
-}
-
-async fn debug_case(store: &SqliteStore, idx1: usize) -> Result<(), Box<dyn std::error::Error>> {
+fn debug_case(fts: &ScratchFts, idx1: usize) -> Result<(), Box<dyn std::error::Error>> {
     let case = CORPUS
         .get(idx1.saturating_sub(1))
         .ok_or("case index out of range")?;
@@ -277,56 +446,47 @@ async fn debug_case(store: &SqliteStore, idx1: usize) -> Result<(), Box<dyn std:
     println!("trigger: {}", case.trigger);
     println!("expect:  {:?}\n", case.expect);
 
-    dump_result(
-        "intent",
-        case.expect,
-        store.memory_search(case.query, &[], TOP_K as u32).await,
-    );
-    dump_result(
-        "exact_trigger",
-        case.expect,
-        store.memory_search(case.trigger, &[], TOP_K as u32).await,
-    );
+    for (label, kind, query) in [
+        ("intent_content", IndexKind::Content, case.query),
+        ("intent_projected", IndexKind::Projected, case.query),
+        ("exact_projected", IndexKind::Projected, case.trigger),
+    ] {
+        println!("## {label}");
+        match fts.search(kind, query, TOP_K) {
+            Ok(keys) => dump_keys(case.expect, &keys),
+            Err(err) => println!("  ERROR: {err}"),
+        }
+        println!();
+    }
+
     Ok(())
 }
 
-fn dump_result<E: std::fmt::Display>(
-    label: &str,
-    expect: &[&str],
-    result: Result<Vec<MemorySearchHit>, E>,
-) {
-    match result {
-        Ok(hits) => dump(label, expect, &hits),
-        Err(err) => {
-            println!("## {label} — ERROR");
-            println!("  {err}\n");
-        }
-    }
-}
-
-fn dump(label: &str, expect: &[&str], hits: &[MemorySearchHit]) {
-    println!("## {label} (top {})", hits.len());
-    for (i, h) in hits.iter().enumerate() {
-        let star = if expect.iter().any(|e| *e == h.record.key) {
+fn dump_keys(expect: &[&str], keys: &[String]) {
+    for (i, key) in keys.iter().enumerate() {
+        let star = if expect.iter().any(|e| e == key) {
             " <== EXPECTED"
         } else {
             ""
         };
-        println!(
-            "  {:>2}. score={:>7.3} {}{}",
-            i + 1,
-            h.score,
-            h.record.key,
-            star
-        );
+        println!("  {:>2}. {}{}", i + 1, key, star);
     }
-    println!();
+}
+
+fn parse_str_array(s: &str) -> Vec<String> {
+    serde_json::from_str(s).unwrap_or_default()
+}
+
+fn first_hit_rank(keys: &[String], expect: &[&str]) -> Option<usize> {
+    keys.iter()
+        .position(|k| expect.iter().any(|e| e == k))
+        .map(|i| i + 1)
 }
 
 fn print_row(label: &str, agg: &Agg, n: usize) {
     let nf = n as f64;
     println!(
-        "  {:<14} {:>7.3} {:>7.3} {:>7.3} {:>7.3}",
+        "  {:<18} {:>7.3} {:>7.3} {:>7.3} {:>7.3}",
         label,
         agg.r_at_1 as f64 / nf,
         agg.r_at_5 as f64 / nf,
@@ -335,13 +495,43 @@ fn print_row(label: &str, agg: &Agg, n: usize) {
     );
 }
 
+fn added_hit_indices(before: &Agg, after: &Agg) -> Vec<usize> {
+    before
+        .ranks
+        .iter()
+        .zip(&after.ranks)
+        .enumerate()
+        .filter_map(|(i, (b, a))| {
+            if b.is_none() && a.is_some() {
+                Some(i + 1)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn improved_rank_indices(before: &Agg, after: &Agg) -> Vec<usize> {
+    before
+        .ranks
+        .iter()
+        .zip(&after.ranks)
+        .enumerate()
+        .filter_map(|(i, (b, a))| match (b, a) {
+            (Some(b), Some(a)) if a < b => Some(i + 1),
+            (None, Some(_)) => Some(i + 1),
+            _ => None,
+        })
+        .collect()
+}
+
 fn rank_cell(rank: Option<usize>, error: Option<&str>) -> String {
     if error.is_some() {
         return "ERR".to_string();
     }
     match rank {
         Some(r) => r.to_string(),
-        None => "—".to_string(),
+        None => "-".to_string(),
     }
 }
 
@@ -375,6 +565,80 @@ fn fmt_idx(idx: &[usize]) -> String {
     }
 }
 
+fn sanitise_fts_query(q: &str) -> String {
+    sanitise_fts_query_joined(q, " ")
+}
+
+fn sanitise_fts_query_any(q: &str) -> String {
+    sanitise_fts_query_joined(q, " OR ")
+}
+
+fn sanitise_fts_query_joined(q: &str, join: &str) -> String {
+    let trimmed = q.trim();
+
+    if has_invalid_fts_column_prefix(trimmed) {
+        let escaped = trimmed.replace('"', "\"\"");
+        return format!("\"{escaped}\"");
+    }
+
+    let has_operator = trimmed.contains('"')
+        || trimmed.contains('*')
+        || trimmed.contains(':')
+        || trimmed.contains('(')
+        || trimmed.contains(')')
+        || trimmed.contains(" AND ")
+        || trimmed.contains(" OR ")
+        || trimmed.contains(" NOT ")
+        || trimmed.contains(" NEAR ");
+    if has_operator {
+        return trimmed.to_string();
+    }
+
+    trimmed
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .filter(|s| !s.is_empty())
+        .map(|s| format!("{s}*"))
+        .collect::<Vec<_>>()
+        .join(join)
+}
+
+fn has_invalid_fts_column_prefix(s: &str) -> bool {
+    let mut in_quote = false;
+    for (idx, ch) in s.char_indices() {
+        if ch == '"' {
+            in_quote = !in_quote;
+            continue;
+        }
+        if ch != ':' || in_quote {
+            continue;
+        }
+        if !has_valid_fts_column_prefix_before_colon(&s[..idx]) {
+            return true;
+        }
+    }
+    false
+}
+
+fn has_valid_fts_column_prefix_before_colon(before_colon: &str) -> bool {
+    let before = before_colon.trim_end();
+    if before.is_empty() {
+        return false;
+    }
+
+    if let Some(stripped) = before.strip_suffix('}') {
+        if let Some(open_idx) = stripped.rfind('{') {
+            let inner = stripped[open_idx + 1..].trim();
+            return !inner.is_empty() && inner.split_whitespace().all(|col| col == "content");
+        }
+    }
+
+    let col = before
+        .rsplit(|c: char| !c.is_alphanumeric() && c != '_')
+        .next()
+        .unwrap_or("");
+    col == "content"
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -386,7 +650,6 @@ mod tests {
             "expected_b".to_string(),
             "expected_a".to_string(),
         ];
-
         assert_eq!(
             first_hit_rank(&keys, &["expected_a", "expected_b"]),
             Some(2)
@@ -403,5 +666,12 @@ mod tests {
             );
             assert!(!case.expect.is_empty(), "{} has no accept set", case.id);
         }
+    }
+
+    #[test]
+    fn fts_query_sanitizer_matches_memory_search_plain_text_contract() {
+        assert_eq!(sanitise_fts_query("warp ipc"), "warp* ipc*");
+        assert_eq!(sanitise_fts_query_any("warp ipc"), "warp* OR ipc*");
+        assert_eq!(sanitise_fts_query("lens:cosine"), "\"lens:cosine\"");
     }
 }
