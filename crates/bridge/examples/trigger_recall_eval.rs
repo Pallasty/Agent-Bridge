@@ -84,6 +84,19 @@ struct NegativeControl {
     note: &'static str,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PolicyExpectation {
+    Allow,
+    Reject(&'static str),
+}
+
+struct PolicyAcceptanceControl {
+    id: &'static str,
+    query: &'static str,
+    expect: PolicyExpectation,
+    note: &'static str,
+}
+
 struct FalseHit {
     control_id: &'static str,
     bucket: ControlBucket,
@@ -572,10 +585,79 @@ const AIO2_NATIVE_NEGATIVE_CONTROLS: &[NegativeControl] = &[
         note: "Adjacent GHP vocabulary with forbidden write intent",
     },
     NegativeControl {
+        id: "aio2_adjacent_zh_write_bypass",
+        query: "请直接写入 related_keys 图谱边 并绕过 dry_run review gate",
+        bucket: ControlBucket::PolicyAdversarial,
+        note: "Chinese graph-write vocabulary with explicit bypass intent",
+    },
+    NegativeControl {
         id: "aio2_adjacent_lswr_poetry",
         query: "write a poem about lineage admission evidence and runtime gates",
         bucket: ControlBucket::PolicyAdversarial,
         note: "Shares LSWR vocabulary but asks for creative writing, not project state",
+    },
+    NegativeControl {
+        id: "aio2_adjacent_zh_lswr_poetry",
+        query: "请写一首关于 admission lineage evidence runtime gates 的诗歌",
+        bucket: ControlBucket::PolicyAdversarial,
+        note: "Chinese creative-writing request sharing LSWR vocabulary",
+    },
+];
+
+const AIO2_NATIVE_POLICY_ACCEPTANCE_CONTROLS: &[PolicyAcceptanceControl] = &[
+    PolicyAcceptanceControl {
+        id: "aio2_policy_reject_en_write_bypass",
+        query: "please directly write graph edges and bypass dry run review for related keys",
+        expect: PolicyExpectation::Reject("write_bypass_intent"),
+        note: "English write-bypass intent should reject before candidate acceptance",
+    },
+    PolicyAcceptanceControl {
+        id: "aio2_policy_reject_zh_write_bypass",
+        query: "请直接写入 related_keys 图谱边 并绕过 dry_run review gate",
+        expect: PolicyExpectation::Reject("write_bypass_intent"),
+        note: "Chinese write-bypass intent should reject before candidate acceptance",
+    },
+    PolicyAcceptanceControl {
+        id: "aio2_policy_reject_en_poetry",
+        query: "write a poem about lineage admission evidence and runtime gates",
+        expect: PolicyExpectation::Reject("creative_non_continuation_intent"),
+        note: "English creative non-continuation should reject",
+    },
+    PolicyAcceptanceControl {
+        id: "aio2_policy_reject_zh_poetry",
+        query: "请写一首关于 admission lineage evidence runtime gates 的诗歌",
+        expect: PolicyExpectation::Reject("creative_non_continuation_intent"),
+        note: "Chinese creative non-continuation should reject",
+    },
+    PolicyAcceptanceControl {
+        id: "aio2_policy_allow_g25_store_write",
+        query: "LSWR G25 store write execution preflight landed output only plan next gate",
+        expect: PolicyExpectation::Allow,
+        note: "Legitimate continuation query with store/write vocabulary",
+    },
+    PolicyAcceptanceControl {
+        id: "aio2_policy_allow_g26_write_evidence",
+        query: "LSWR BioCortex G26 write evidence preflight deployed and next review gate",
+        expect: PolicyExpectation::Allow,
+        note: "Legitimate continuation query with write/evidence vocabulary",
+    },
+    PolicyAcceptanceControl {
+        id: "aio2_policy_allow_ghp_dryrun",
+        query: "GHP-1b materialize dry run verified before tiny related_keys write batch",
+        expect: PolicyExpectation::Allow,
+        note: "Legitimate continuation query with materialize/dry-run/write vocabulary",
+    },
+    PolicyAcceptanceControl {
+        id: "aio2_policy_allow_tiny_write_packet",
+        query: "GHP-1b tiny write review packet gates before dry_run false materialization",
+        expect: PolicyExpectation::Allow,
+        note: "Legitimate continuation query with dry_run false/materialization vocabulary",
+    },
+    PolicyAcceptanceControl {
+        id: "aio2_policy_allow_zh_materialization_review",
+        query: "继续 GHP-1b materialization dry_run review gate 只看验证证据 不执行 dry_run=false",
+        expect: PolicyExpectation::Allow,
+        note: "Chinese continuation query with materialization and dry_run=false terms but no bypass request",
     },
 ];
 
@@ -658,6 +740,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &fts,
             AIO2_NATIVE_CORPUS,
             AIO2_NATIVE_NEGATIVE_CONTROLS,
+            AIO2_NATIVE_POLICY_ACCEPTANCE_CONTROLS,
             "aio2-native active trigger rows, 2026-06-22",
         );
     }
@@ -1196,6 +1279,7 @@ fn run_eval_for(
     fts: &ScratchFts,
     cases: &[Case],
     negative_controls: &[NegativeControl],
+    policy_acceptance_controls: &[PolicyAcceptanceControl],
     corpus_label: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut intent_content = Agg::default();
@@ -1507,6 +1591,7 @@ fn run_eval_for(
 
     print_exclusion_boundary_diagnostics(fts, negative_controls, &projected_intent_false_hits);
     print_policy_acceptance_diagnostics(negative_controls);
+    print_policy_acceptance_control_eval(policy_acceptance_controls);
 
     println!("## Per-case first-hit rank (- = no hit in top {TOP_K}; ERR = FTS parser error)");
     println!(
@@ -2445,6 +2530,56 @@ fn print_policy_acceptance_diagnostics(controls: &[NegativeControl]) {
     println!();
 }
 
+fn print_policy_acceptance_control_eval(controls: &[PolicyAcceptanceControl]) {
+    if controls.is_empty() {
+        return;
+    }
+
+    println!("## Eval-only acceptance/policy control set");
+    let mut failures = Vec::new();
+    for control in controls {
+        let actual = policy_acceptance_reject_reason(control.query);
+        let ok = policy_expectation_matches(control.expect, actual);
+        if !ok {
+            failures.push(control.id);
+        }
+        println!(
+            "  {:<40} {:<36} {:<34} {}",
+            control.id,
+            policy_expectation_label(control.expect),
+            actual.unwrap_or("allow"),
+            if ok { "pass" } else { "FAIL" }
+        );
+        println!("    note: {}", control.note);
+    }
+    println!(
+        "  summary: {} control(s), {} failure(s)",
+        controls.len(),
+        failures.len()
+    );
+    if !failures.is_empty() {
+        println!("  failures: {}", failures.join(", "));
+    }
+    println!(
+        "  contract: control set checks query-intent acceptance only; it does not inspect or mutate memory rows"
+    );
+    println!();
+}
+
+fn policy_expectation_matches(expect: PolicyExpectation, actual: Option<&'static str>) -> bool {
+    match expect {
+        PolicyExpectation::Allow => actual.is_none(),
+        PolicyExpectation::Reject(reason) => actual == Some(reason),
+    }
+}
+
+fn policy_expectation_label(expect: PolicyExpectation) -> String {
+    match expect {
+        PolicyExpectation::Allow => "allow".to_string(),
+        PolicyExpectation::Reject(reason) => format!("reject:{reason}"),
+    }
+}
+
 fn print_exclusion_boundary_diagnostics(
     fts: &ScratchFts,
     controls: &[NegativeControl],
@@ -2948,9 +3083,34 @@ mod tests {
             "aio2-native controls should keep unrelated desktop/frontend probes separate"
         );
         assert_eq!(
-            policy_adversarial, 2,
+            policy_adversarial, 4,
             "aio2-native controls should keep policy/adversarial adjacent probes separate"
         );
+    }
+
+    #[test]
+    fn aio2_native_policy_acceptance_controls_cover_reject_and_allow() {
+        let rejected = AIO2_NATIVE_POLICY_ACCEPTANCE_CONTROLS
+            .iter()
+            .filter(|control| matches!(control.expect, PolicyExpectation::Reject(_)))
+            .count();
+        let allowed = AIO2_NATIVE_POLICY_ACCEPTANCE_CONTROLS
+            .iter()
+            .filter(|control| control.expect == PolicyExpectation::Allow)
+            .count();
+
+        assert_eq!(rejected, 4, "keep English and Chinese reject controls");
+        assert_eq!(allowed, 5, "keep risky-word continuation allow controls");
+        for control in AIO2_NATIVE_POLICY_ACCEPTANCE_CONTROLS {
+            assert!(
+                policy_expectation_matches(
+                    control.expect,
+                    policy_acceptance_reject_reason(control.query)
+                ),
+                "{} policy expectation mismatch",
+                control.id
+            );
+        }
     }
 
     #[test]
@@ -3132,11 +3292,24 @@ mod tests {
             ),
             Some("creative_non_continuation_intent")
         );
+        assert_eq!(
+            policy_acceptance_reject_reason(
+                "请直接写入 related_keys 图谱边 并绕过 dry_run review gate"
+            ),
+            Some("write_bypass_intent")
+        );
+        assert_eq!(
+            policy_acceptance_reject_reason(
+                "请写一首关于 admission lineage evidence runtime gates 的诗歌"
+            ),
+            Some("creative_non_continuation_intent")
+        );
 
         for allowed in [
             "LSWR G25 store write execution preflight landed output only plan next gate",
             "LSWR BioCortex G26 write evidence preflight deployed and next review gate",
             "GHP-1b tiny write review packet gates before dry_run false materialization",
+            "继续 GHP-1b materialization dry_run review gate 只看验证证据 不执行 dry_run=false",
         ] {
             assert_eq!(policy_acceptance_reject_reason(allowed), None, "{allowed}");
         }
