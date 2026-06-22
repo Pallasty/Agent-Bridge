@@ -37,6 +37,10 @@ Added two unrelated negative controls:
 | `aio2_unrelated_frontend_goal_c_words` | frontend/dashboard visual design with Goal C wording |
 | `aio2_unrelated_controlled_rsi_health_dashboard` | health/workout Controlled RSI dashboard wording |
 
+Added a role-locking unit test:
+
+- `aio2_goal_c_dashboard_state_contrastives_pair_positive_and_unrelated_intents`
+
 This remains scratch-only and read-only: SELECT from the live DB plus in-memory
 FTS tables. It does not call `memory_get`, `memory_search`, reindex, write, or
 change production ranking.
@@ -145,7 +149,7 @@ self-improvement context when dashboard/state/Controlled-RSI terms appear.
 Commands:
 
 ```bash
-rustfmt --edition 2024 crates/bridge/examples/trigger_recall_eval.rs
+rustfmt --edition 2024 --check crates/bridge/examples/trigger_recall_eval.rs
 cargo test -p ab-bridge --example trigger_recall_eval -- --nocapture
 cargo run -p ab-bridge --example trigger_recall_eval -- --check-aio2-native
 cargo run -p ab-bridge --example trigger_recall_eval -- --aio2-native
@@ -157,7 +161,8 @@ Results:
 
 | Check | Result |
 |---|---|
-| example tests | pass, 19 passed |
+| rustfmt | pass |
+| example tests | pass, 20 passed |
 | corpus preflight | pass, ready=true |
 | aio2-native eval | pass, metrics above |
 | examples check | pass |
