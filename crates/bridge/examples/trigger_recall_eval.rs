@@ -343,6 +343,36 @@ const NEGATIVE_CONTROLS: &[NegativeControl] = &[
         query: "Nexus 游戏 五行角色皮肤 黄金配色 平衡性吐槽",
         note: "Shares Nexus and Wuxing vocabulary but asks about visual/balance feedback, not math survey evidence",
     },
+    NegativeControl {
+        id: "hard_ab_tool_profile_cjk",
+        query: "Agent Bridge essential 工具面 冷工具 裁剪 看板 巡检 只要界面清单 不要召回评测或Goal B决策",
+        note: "Agent-Bridge operations vocabulary with explicit exclusion of recall/Goal B intent",
+    },
+    NegativeControl {
+        id: "hard_ab_graph_materialize_cjk",
+        query: "GHP 图谱孤点 related keys 干跑 审核包 只问术语含义 不要GHP部署证据或review packet",
+        note: "Graph-hygiene vocabulary with explicit exclusion of deployment/review-packet intent",
+    },
+    NegativeControl {
+        id: "hard_onsen_save_cloud_cjk",
+        query: "温泉乡 存档 云同步 Steam readiness 只要玩家说明文案 不要Sprint交接或会话handoff",
+        note: "Onsen save/cloud vocabulary with explicit exclusion of handoff/project-state intent",
+    },
+    NegativeControl {
+        id: "hard_onsen_visual_decor_cjk",
+        query: "温泉乡 庭院 装饰 阴影 锦鲤 视觉层级 只要美术灵感 不要工程验证或交接记忆",
+        note: "Onsen visual-art vocabulary with explicit exclusion of engineering/handoff intent",
+    },
+    NegativeControl {
+        id: "hard_nexus_battle_readability_cjk",
+        query: "Nexus 战斗 编队 可读性 骑兵 阵型 安卓模拟器 只要玩法吐槽 不要设计review或五行数学",
+        note: "Nexus battle-readability vocabulary with explicit exclusion of design-review/math intent",
+    },
+    NegativeControl {
+        id: "hard_nexus_wuxing_art_cjk",
+        query: "Nexus 五行 UI 图标 配色 角色皮肤 美术规格 只要视觉草案 不要数学模型调研",
+        note: "Hard Wuxing-adjacent art query separated from the math-model survey intent",
+    },
 ];
 
 /// Cases curated from aio2 active trigger rows on 2026-06-22 after the Mac
