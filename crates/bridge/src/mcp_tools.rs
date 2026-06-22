@@ -57396,6 +57396,84 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     }
 
     #[test]
+    fn gate_ceremony_tools_stay_niche_out_of_eager_profile() {
+        // Goal B / iron-law anti-bloat (RFC #1238). D1 gate-chain work tends to
+        // mint one MCP tool per gate (preflight / acceptance / review-packet /
+        // decision-record / runtime-gate / admission / persistence-chain …).
+        // Left unchecked that grows the per-request schema of the EAGER profiles.
+        // The rule: gate tools default to Tier::Niche (all-only, reachable via
+        // the `all` profile / deferred), so the Standard eager profile stays
+        // bounded. This guard fails if a gate-ceremony-named tool is exposed in
+        // Standard without a justified allowlist entry — it forces "earn eager
+        // exposure" over "one tool per gate". See memory
+        // `project_goal_b_surface_per_request_bounded_keep_gate_tools_niche_20260622`.
+        let policy = ToolPolicy::from_values(None, None, None, Some("standard"));
+        let exposed: Vec<String> = build_registry_with_policy(Hub::builder().build(), policy)
+            .list()
+            .into_iter()
+            .map(|schema| schema.name)
+            .collect();
+
+        const GATE_PATTERNS: &[&str] = &[
+            "_preflight",
+            "_review_packet",
+            "_acceptance",
+            "_dry_run",
+            "_decision_record",
+            "_runtime_gate",
+            "_human_review",
+            "_admission",
+            "_persistence_chain",
+            "_write_evidence",
+        ];
+        // Gate-named tools currently exposed in the eager Standard profile.
+        // This list is the documented DEBT, not an endorsement — the guard's
+        // job from here is to stop NEW gate tools leaking in. Two categories:
+        //
+        //  (a) legitimately eager safety/diagnostic tools (not D1 ceremony):
+        //        git_topology_preflight       — pre-push safety check, organic use
+        //        biocortex_retrieval_opt_in_dry_run — opt-in preview, safety gate
+        //  (b) FLAGGED FOR OWNER DEMOTION → Tier::Niche (D1 T6/related_keys gate
+        //      chain leaked into eager; see forum #120 + memory
+        //      `project_goal_b_surface_per_request_bounded_keep_gate_tools_niche_20260622`).
+        //      Owner (memory-continuity lane) should re-tier these to Niche;
+        //      remove from this list as that lands.
+        const EAGER_ALLOWLIST: &[&str] = &[
+            // (a) legit eager
+            "git_topology_preflight",
+            "biocortex_retrieval_opt_in_dry_run",
+            // (b) flagged for demotion to Niche
+            "memory_related_keys_preflight",
+            "memory_related_keys_review_packet",
+            "memory_biocortex_t6_candidate_expansion_dry_run_plan",
+            "memory_biocortex_t6_candidate_expansion_dry_run_report",
+            "memory_biocortex_t6_candidate_expansion_human_review_packet",
+            "memory_biocortex_t6_candidate_expansion_owner_decision_record",
+            "memory_biocortex_t6_candidate_expansion_review_packet",
+            "memory_biocortex_t6_candidate_expansion_runtime_gate_code_implementation_gate",
+            "memory_biocortex_t6_candidate_expansion_runtime_gate_design_artifact",
+            "memory_biocortex_t6_candidate_expansion_runtime_gate_implementation_plan_artifact",
+            "memory_biocortex_t6_candidate_expansion_runtime_gate_owner_review_record",
+            "memory_biocortex_t6_candidate_expansion_runtime_gate_preflight",
+            "memory_biocortex_t6_candidate_expansion_shadow_executor_preflight",
+            "memory_biocortex_t6_candidate_expansion_shadow_runtime_gate",
+        ];
+
+        let leaked: Vec<&str> = exposed
+            .iter()
+            .map(|s| s.as_str())
+            .filter(|n| GATE_PATTERNS.iter().any(|p| n.contains(p)))
+            .filter(|n| !EAGER_ALLOWLIST.contains(n))
+            .collect();
+
+        assert!(
+            leaked.is_empty(),
+            "gate-ceremony tools leaked into the eager Standard profile — keep them \
+             Tier::Niche (all-only) or add a justified EAGER_ALLOWLIST entry: {leaked:?}"
+        );
+    }
+
+    #[test]
     fn tool_policy_preserves_legacy_profile_mode() {
         let p = ToolPolicy::from_values(None, None, None, Some("all"));
 
