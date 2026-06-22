@@ -321,6 +321,17 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Standing continuity `U` report (Goal C): the store-side embedding-space
+    /// health — backend mix, stale-vector fraction, host-correct anisotropy —
+    /// each row tagged with its external anchor, falsifier, and owner. Read-only,
+    /// adds NO new MCP tool; pair with the `/continuity` skill. Recall R@k stays
+    /// owned by the `recall_eval` harness (the held-out anchor); this surface
+    /// aggregates the store-derivable signals around it.
+    ContinuityReport {
+        /// Emit the machine-readable JSON snapshot instead of the report.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -6784,6 +6795,11 @@ async fn real_main() -> Result<()> {
         return run_rescue_snapshot(*canonical, *ttl_secs, *pid, *json).await;
     }
 
+    // Standing continuity U report: opens the store read-only, no Hub/daemon.
+    if let Cmd::ContinuityReport { json } = &cmd {
+        return run_continuity_report(*json).await;
+    }
+
     // Palace viewer: short-lived HTTP server, opens store directly (no Hub).
     if let Cmd::Palace { op } = &cmd {
         return match op {
@@ -7086,8 +7102,28 @@ async fn real_main() -> Result<()> {
         | Cmd::RescueSnapshot { .. }
         | Cmd::Doctor { .. }
         | Cmd::Walkthrough { .. }
+        | Cmd::ContinuityReport { .. }
         | Cmd::Instinct { .. } => unreachable!(),
     }
+}
+
+/// Goal C standing continuity `U` report: build the store-side embedding-space
+/// health snapshot via `ab_bridge::continuity` and print the human report (or
+/// `--json`). Read-only; no Hub/daemon.
+async fn run_continuity_report(as_json: bool) -> Result<()> {
+    let db_path = std::env::var("AB_BASELINE_DB")
+        .ok()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(ab_store::default_db_path);
+    let report = ab_bridge::continuity::build_report(&db_path)
+        .await
+        .context("building continuity report")?;
+    if as_json {
+        println!("{}", report.to_json());
+    } else {
+        print!("{}", report.render_markdown());
+    }
+    Ok(())
 }
 
 /// Daily-wire mechanism for the evidence-anchored session walkthrough: read a

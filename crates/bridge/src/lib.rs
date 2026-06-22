@@ -22,6 +22,7 @@ pub mod browser_lite;
 pub mod c3_self_check;
 pub mod cloudflare_api;
 pub mod context_budget;
+pub mod continuity;
 pub mod creds;
 pub mod curate;
 pub mod daemon_http;
