@@ -13,6 +13,8 @@
 //! - `intent_projected`: same held-out query over `fts_content`;
 //! - `cjk_shingle_projected`: same held-out query over a scratch-only projected
 //!   index augmented with generated CJK character trigrams;
+//! - `projected_plus_cjk_acc`: existing projected search plus a conservative
+//!   CJK trigram-overlap fallback for projected misses;
 //! - `exact_projected`: authored trigger text over `fts_content`.
 //!
 //! The first two isolate trigger projection from production ranking. They do
@@ -40,6 +42,7 @@ use tokio_rusqlite::rusqlite::{
 };
 
 const TOP_K: usize = 10;
+const MIN_CJK_SHINGLE_ACCEPT_OVERLAP: usize = 4;
 const TRIGGER_PREFIX: &str = "continuity_retrieval_trigger:";
 
 struct Case {
@@ -391,6 +394,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut intent_content = Agg::default();
     let mut intent_projected = Agg::default();
     let mut cjk_shingle_projected = Agg::default();
+    let mut projected_plus_cjk_acc = Agg::default();
     let mut exact_projected = Agg::default();
     let gold_keys: BTreeSet<&str> = CORPUS
         .iter()
@@ -416,6 +420,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             cjk_keys.err(),
         );
 
+        let projected_plus_keys = fts.search_projected_then_cjk_accepted(case.query, TOP_K);
+        projected_plus_cjk_acc.record(
+            first_hit_rank(projected_plus_keys.as_deref().unwrap_or(&[]), case.expect),
+            projected_plus_keys.err(),
+        );
+
         let trigger_keys = fts.search(IndexKind::Projected, case.trigger, TOP_K);
         exact_projected.record(
             first_hit_rank(trigger_keys.as_deref().unwrap_or(&[]), case.expect),
@@ -427,6 +437,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut negative_errors = Vec::new();
     let mut cjk_negative_false_hits = Vec::new();
     let mut cjk_negative_errors = Vec::new();
+    let mut projected_plus_false_hits = Vec::new();
+    let mut projected_plus_errors = Vec::new();
     for control in NEGATIVE_CONTROLS {
         match fts.search(IndexKind::Projected, control.query, TOP_K) {
             Ok(keys) => {
@@ -447,6 +459,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             Err(err) => cjk_negative_errors.push(format!("{}:{err}", control.id)),
+        }
+        match fts.search_projected_then_cjk_accepted(control.query, TOP_K) {
+            Ok(keys) => {
+                for (idx, key) in keys.iter().enumerate() {
+                    if gold_keys.contains(key.as_str()) {
+                        projected_plus_false_hits.push(format!(
+                            "{}:{}@{}",
+                            control.id,
+                            key,
+                            idx + 1
+                        ));
+                    }
+                }
+            }
+            Err(err) => projected_plus_errors.push(format!("{}:{err}", control.id)),
         }
     }
 
@@ -477,6 +504,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     print_row("intent_content", &intent_content, n);
     print_row("intent_projected", &intent_projected, n);
     print_row("cjk_shingle_proj", &cjk_shingle_projected, n);
+    print_row("projected+cjk_acc", &projected_plus_cjk_acc, n);
     print_row("exact_projected", &exact_projected, n);
     println!();
 
@@ -545,14 +573,44 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     println!();
 
+    println!("## Projected plus CJK accepted-candidate fallback");
+    let accepted_added = added_hit_indices(&intent_projected, &projected_plus_cjk_acc);
+    let accepted_improved = improved_rank_indices(&intent_projected, &projected_plus_cjk_acc);
+    println!("  gate: use projected search first; only projected misses may use CJK fallback");
+    println!(
+        "  fallback: require >= {MIN_CJK_SHINGLE_ACCEPT_OVERLAP} shared CJK trigram terms between query and candidate projected text"
+    );
+    println!(
+        "  added top-{TOP_K} hits over projected: {} case(s){}",
+        accepted_added.len(),
+        fmt_idx(&accepted_added)
+    );
+    println!(
+        "  improved first-hit rank over projected: {} case(s){}",
+        accepted_improved.len(),
+        fmt_idx(&accepted_improved)
+    );
+    println!("  accepted false hits: {}", projected_plus_false_hits.len());
+    if !projected_plus_false_hits.is_empty() {
+        println!("  false hits: {}", projected_plus_false_hits.join(", "));
+    }
+    println!("  parser errors: {}", projected_plus_errors.len());
+    if !projected_plus_errors.is_empty() {
+        println!("  errors: {}", projected_plus_errors.join(", "));
+    }
+    println!(
+        "  contract: eval-only post-candidate filter; no production acceptance or ranking change"
+    );
+    println!();
+
     println!("## Per-case first-hit rank (- = no hit in top {TOP_K}; ERR = FTS parser error)");
     println!(
-        "  {:<3} {:<34} {:<14} {:>8} {:>10} {:>10} {:>10}  {}",
-        "#", "id", "stratum", "content", "projected", "cjk_probe", "exact", "note"
+        "  {:<3} {:<34} {:<14} {:>8} {:>10} {:>10} {:>10} {:>10}  {}",
+        "#", "id", "stratum", "content", "projected", "cjk_probe", "plus_acc", "exact", "note"
     );
     for (i, case) in CORPUS.iter().enumerate() {
         println!(
-            "  {:<3} {:<34} {:<14} {:>8} {:>10} {:>10} {:>10}  {}",
+            "  {:<3} {:<34} {:<14} {:>8} {:>10} {:>10} {:>10} {:>10}  {}",
             i + 1,
             case.id,
             case.stratum,
@@ -564,6 +622,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             rank_cell(
                 cjk_shingle_projected.ranks[i],
                 cjk_shingle_projected.errors[i].as_deref()
+            ),
+            rank_cell(
+                projected_plus_cjk_acc.ranks[i],
+                projected_plus_cjk_acc.errors[i].as_deref()
             ),
             rank_cell(
                 exact_projected.ranks[i],
@@ -591,6 +653,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         fmt_idx(&miss_indices(&cjk_shingle_projected))
     );
     println!(
+        "  projected+cjk misses:   {} case(s){}",
+        miss_indices(&projected_plus_cjk_acc).len(),
+        fmt_idx(&miss_indices(&projected_plus_cjk_acc))
+    );
+    println!(
         "  exact_projected errors:  {} case(s){}",
         error_indices(&exact_projected).len(),
         fmt_idx(&error_indices(&exact_projected))
@@ -609,6 +676,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "  cjk negative controls:   {} false hit(s), {} parser error(s)",
         cjk_negative_false_hits.len(),
         cjk_negative_errors.len()
+    );
+    println!(
+        "  projected+cjk controls:  {} false hit(s), {} parser error(s)",
+        projected_plus_false_hits.len(),
+        projected_plus_errors.len()
     );
     println!(
         "  caveat: hand-curated corpus, N={n}. This is a broader trigger-cohort \
@@ -699,6 +771,7 @@ enum IndexKind {
 
 struct ScratchFts {
     db: RusqliteConnection,
+    projected_by_key: HashMap<String, String>,
 }
 
 impl ScratchFts {
@@ -722,6 +795,7 @@ impl ScratchFts {
              );",
         )?;
 
+        let mut projected_by_key = HashMap::new();
         {
             let mut content_stmt =
                 db.prepare("INSERT INTO content_fts(key, body) VALUES (?1, ?2)")?;
@@ -734,10 +808,14 @@ impl ScratchFts {
                 projected_stmt.execute(params![row.key, row.projected])?;
                 let cjk_augmented = augment_with_cjk_shingles(&row.projected);
                 projected_cjk_stmt.execute(params![row.key, cjk_augmented])?;
+                projected_by_key.insert(row.key.clone(), row.projected.clone());
             }
         }
 
-        Ok(Self { db })
+        Ok(Self {
+            db,
+            projected_by_key,
+        })
     }
 
     fn search_projected_cjk_shingles(
@@ -762,6 +840,43 @@ impl ScratchFts {
         parts.extend(terms);
 
         self.search_once(IndexKind::ProjectedCjkShingle, &parts.join(" OR "), limit)
+    }
+
+    fn search_projected_cjk_shingles_accepted(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<String>, String> {
+        let query_terms = cjk_shingle_terms(query);
+        if query_terms.is_empty() {
+            return self.search_projected_cjk_shingles(query, limit);
+        }
+
+        let query_terms = query_terms.into_iter().collect::<BTreeSet<_>>();
+        let mut accepted = Vec::new();
+        for key in self.search_projected_cjk_shingles(query, limit)? {
+            let projected = self
+                .projected_by_key
+                .get(&key)
+                .ok_or_else(|| format!("candidate key missing from projected map: {key}"))?;
+            if cjk_shingle_overlap_count(&query_terms, projected) >= MIN_CJK_SHINGLE_ACCEPT_OVERLAP
+            {
+                accepted.push(key);
+            }
+        }
+        Ok(accepted)
+    }
+
+    fn search_projected_then_cjk_accepted(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<String>, String> {
+        let projected = self.search(IndexKind::Projected, query, limit)?;
+        if !projected.is_empty() {
+            return Ok(projected);
+        }
+        self.search_projected_cjk_shingles_accepted(query, limit)
     }
 
     fn search(&self, kind: IndexKind, query: &str, limit: usize) -> Result<Vec<String>, String> {
@@ -847,6 +962,13 @@ fn debug_case(fts: &ScratchFts, idx1: usize) -> Result<(), Box<dyn std::error::E
     }
     println!();
 
+    println!("## projected_plus_cjk_accepted");
+    match fts.search_projected_then_cjk_accepted(case.query, TOP_K) {
+        Ok(keys) => dump_keys(case.expect, &keys),
+        Err(err) => println!("  ERROR: {err}"),
+    }
+    println!();
+
     Ok(())
 }
 
@@ -906,6 +1028,13 @@ fn cjk_shingle_terms(text: &str) -> Vec<String> {
     push_cjk_trigrams(&run, &mut terms);
 
     terms.into_iter().collect()
+}
+
+fn cjk_shingle_overlap_count(query_terms: &BTreeSet<String>, text: &str) -> usize {
+    cjk_shingle_terms(text)
+        .into_iter()
+        .filter(|term| query_terms.contains(term))
+        .count()
 }
 
 fn push_cjk_trigrams(run: &[char], terms: &mut BTreeSet<String>) {
@@ -1219,5 +1348,56 @@ mod tests {
         assert!(terms.contains(&"cjk_五行生".to_string()));
         assert!(terms.contains(&"cjk_成熟数".to_string()));
         assert!(terms.contains(&"cjk_控制网".to_string()));
+    }
+
+    #[test]
+    fn cjk_shingle_acceptance_gate_separates_surface_overlap_from_specific_overlap() {
+        let query = "五行生克的成熟数学模型、黄金比例控制网络和平衡靶调研结论在哪里";
+        let query_terms = cjk_shingle_terms(query)
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+
+        let target =
+            "五行生克成熟数学模型调研 黄金比例反馈控制网络 黄金比例五行控制网络 平衡靶 循环平衡环";
+        let tourism = "五行山旅游攻略 黄金比例摄影构图 平衡车购买指南";
+
+        assert!(cjk_shingle_overlap_count(&query_terms, target) >= MIN_CJK_SHINGLE_ACCEPT_OVERLAP);
+        assert!(cjk_shingle_overlap_count(&query_terms, tourism) < MIN_CJK_SHINGLE_ACCEPT_OVERLAP);
+    }
+
+    #[test]
+    fn projected_then_cjk_accepted_uses_cjk_only_as_miss_fallback() {
+        let rows = [
+            MemoryRow {
+                key: "projected_hit".to_string(),
+                content: String::new(),
+                projected: "ordinary projected anchor".to_string(),
+                triggers: Vec::new(),
+            },
+            MemoryRow {
+                key: "cjk_fallback".to_string(),
+                content: String::new(),
+                projected:
+                    "五行生克成熟数学模型调研 黄金比例反馈控制网络 黄金比例五行控制网络 平衡靶"
+                        .to_string(),
+                triggers: Vec::new(),
+            },
+        ];
+        let fts = ScratchFts::build(&rows).expect("scratch fts");
+
+        assert_eq!(
+            fts.search_projected_then_cjk_accepted("ordinary anchor", TOP_K)
+                .expect("projected first"),
+            vec!["projected_hit".to_string()]
+        );
+
+        assert_eq!(
+            fts.search_projected_then_cjk_accepted(
+                "五行生克的成熟数学模型、黄金比例控制网络和平衡靶调研结论在哪里",
+                TOP_K
+            )
+            .expect("cjk fallback"),
+            vec!["cjk_fallback".to_string()]
+        );
     }
 }
