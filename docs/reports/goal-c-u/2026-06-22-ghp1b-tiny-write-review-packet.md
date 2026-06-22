@@ -7,11 +7,12 @@ Host: Linux/Aio2 (`pallasting-ThinkBook-14-G5-IRH`)
 Scope: review the first tiny explicit `related_keys` graph materialization batch
 suggested by GHP-1b.
 
-Verdict: `ready_for_decision`, not `authorized_to_write`.
+Verdict: `approved_write_applied`.
 
-This packet is the decision surface for a later `dry_run=false` call. It does
-not perform a write and does not authorize search ranking, PageRank, centrality,
-candidate-set expansion, or automatic orphan linking.
+This packet began as the decision surface for a later `dry_run=false` call. It
+now also records the owner-approved tiny write that materialized exactly the
+hash-locked 20-edge batch. The write did not authorize search ranking,
+PageRank, centrality, candidate-set expansion, or automatic orphan linking.
 
 ## Source Anchors
 
@@ -292,10 +293,40 @@ Gate verdict: `hash_gate_repaired_and_reproducible`, still
 No `dry_run=false` call was made. No graph edge, memory row, ranking,
 search-order, candidate-set, or automatic orphan-linking change was performed.
 
-## Apply Shape If Later Approved
+## Approved Write Applied
 
-If and only if the above gates pass and the batch is explicitly approved, the
-write call should be identical to the dry-run call except:
+The owner explicitly approved the tiny write on 2026-06-22 with:
+`批准执行 GHP-1b 20-edge 写入`.
+
+Final pre-write gates:
+
+| Check | Result |
+|---|---|
+| primary checkout | clean and aligned with `origin/master` |
+| deployed binary | `/home/pallasting/.local/bin/agent-bridge.real` |
+| deployed binary SHA-256 | `38e981234ea1ec718d642f4d85b6526df11d68deb3172dfdc91e9ac90ff5366e` |
+| doctor | `ok=true`, `fails=0`, `warns=1` |
+| doctor warning | one separate stale old Codex MCP process; current session was on current `.real` |
+| SQLite `PRAGMA quick_check` | `ok` |
+| rescue snapshot | `/home/pallasting/.cache/agent-bridge/recovery/2026-06-22T1306` |
+| rescue marker | `fnv1a16:09f66f35910cda1e` |
+
+Immediately before the write, the materializer was rerun with `dry_run=true`
+and the same exact scope/caps. The canonical selected-edge hash still matched
+`selected_edge_hash_v1`.
+
+| Metric | Pre-Write Dry-Run |
+|---|---:|
+| loaded records | 447 |
+| safe candidate pairs before caps | 94 |
+| current orphans | 32 |
+| selected edges | 20 |
+| orphan candidate nodes selected | 22 |
+| orphans reduced by selected | 22 |
+| projected orphans after selected | 10 |
+| selected-edge hash v1 | `4868930845e953281e1bef2c30613c18cb0d42c91a886443b6c36bf8f030e9c0` |
+
+The approved write call used the same arguments as the dry-run plus:
 
 ```json
 {
@@ -304,43 +335,97 @@ write call should be identical to the dry-run call except:
 }
 ```
 
-Expected immediate write result:
+Write result:
+
+| Metric | Result |
+|---|---:|
+| dry run | false |
+| blocked | false |
+| linked | 20 |
+| write errors | `[]` |
+| selected edges | 20 |
+| selected-edge hash v1 | `4868930845e953281e1bef2c30613c18cb0d42c91a886443b6c36bf8f030e9c0` |
+
+Immediate post-write dry-run, using the same exact scope/caps:
+
+| Metric | Post-Write Dry-Run |
+|---|---:|
+| loaded records | 447 |
+| safe candidate pairs before caps | 74 |
+| current orphans | 10 |
+| selected edges | 20 |
+| orphan candidate nodes selected | 3 |
+| orphans reduced by selected | 3 |
+| projected orphans after selected | 7 |
+| next-batch selected-edge hash v1 | `49ce7fafd74fed3b2479d8da979883c2484929b570c59b3fa26ee3c7639a7576` |
+
+SQLite read-only verification:
+
+| Check | Result |
+|---|---|
+| `PRAGMA quick_check` after write | `ok` |
+| latest `memory_edges.created_at` | `1782133636` (`2026-06-22T13:07:16+00:00`) |
+| latest batch type/count | `relates`: `20` |
+| total `memory_edges` rows after write | `546` |
+
+Read-only topology note: the broad durable `memory_graph_topology` and
+`memory_orphan_inventory` tools use a wider denominator than the materializer's
+exact-scope orphan-reduction gate. They reported `eligible_orphans=23` after
+the write. The materializer gate metric for this approved exact-scope batch
+moved from `current_orphans=32` to `current_orphans=10`.
+
+## Applied Write Shape
+
+The approved write call was identical to the hash-locked dry-run call except:
+
+```json
+{
+  "dry_run": false,
+  "apply_confirmation": "materialize_related_keys"
+}
+```
+
+Observed immediate write result:
 
 - `blocked=false`;
 - `linked=20`;
 - `write_errors=[]`.
 
-Any mismatch blocks the run and requires rollback/review.
+No mismatch was observed.
 
-## Post-Write Verification If Later Approved
+## Post-Write Verification Completed
 
-Immediately after a future approved write:
+Immediately after the approved write:
 
-1. run `agent-bridge.real doctor --json`;
-2. run read-only `PRAGMA quick_check`;
-3. rerun `memory_related_keys_preflight` or `memory_related_keys_review_packet`
-   with exact project scope;
-4. rerun `memory_graph_topology` with the same durable skip set;
-5. record whether materializer-current orphans moved from `32` toward `10`;
-6. record whether topology orphan count changed and whether hub risk remains
-   capped;
-7. post the result to forum thread #105 and save durable memory.
+1. `agent-bridge.real doctor --json` was run before the write;
+2. read-only `PRAGMA quick_check` was run before and after the write;
+3. `memory_related_keys_materialize` was rerun in dry-run mode with exact
+   project scope after the write;
+4. `memory_graph_topology` and `memory_orphan_inventory` were run with the same
+   durable skip set;
+5. materializer-current orphans moved from `32` to `10`;
+6. topology/orphan inventory used a broader denominator and reported
+   `eligible_orphans=23`;
+7. the result was posted to forum thread #105.
 
-## Rollback If Later Approved
+## Rollback Anchor
 
 Preferred rollback is restoring the rescue snapshot captured immediately before
-the write. If restoration is not appropriate, delete only the reviewed
-`relates` edge batch listed above, then rerun `PRAGMA quick_check` and topology.
+the write:
+`/home/pallasting/.cache/agent-bridge/recovery/2026-06-22T1306`
+(`fnv1a16:09f66f35910cda1e`). If restoration is not appropriate, delete only
+the reviewed `relates` edge batch with `created_at=1782133636`, then rerun
+`PRAGMA quick_check` and topology.
 
 Rollback must not delete memory rows, alter `related_keys`, change retrieval
 ranking, or run automatic orphan linking.
 
 ## Non-Authorizations
 
-This packet does not authorize:
+This packet records the approved 20-edge write only. It does not authorize:
 
-- running `dry_run=false`;
-- graph edge writes;
+- additional `dry_run=false` calls;
+- additional graph edge writes;
 - memory row writes;
 - search-order or production retrieval-order changes;
 - PageRank, centrality, or graph-neighbor rank priors;
