@@ -11,12 +11,16 @@
 //!
 //! - `intent_content`: held-out query over authored `memories.content`;
 //! - `intent_projected`: same held-out query over `fts_content`;
+//! - `cjk_shingle_projected`: same held-out query over a scratch-only projected
+//!   index augmented with generated CJK character trigrams;
 //! - `exact_projected`: authored trigger text over `fts_content`.
 //!
 //! The first two isolate trigger projection from production ranking. They do
 //! not use access_count, importance, recency, graph expansion, semantic
-//! embeddings, `memory_get`, or `memory_search`. The third mode is a projection
-//! health probe and can expose FTS parser problems in trigger text.
+//! embeddings, `memory_get`, or `memory_search`. The CJK shingle mode is an
+//! eval-only recovery probe for Chinese paraphrase/tokenization misses. The
+//! exact mode is a projection health probe and can expose FTS parser problems in
+//! trigger text.
 //!
 //! Surface-free + read-only: SELECT from the real DB, write only to an in-memory
 //! scratch DB. No MCP tool, no runtime retrieval change, no memory write.
@@ -371,6 +375,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut intent_content = Agg::default();
     let mut intent_projected = Agg::default();
+    let mut cjk_shingle_projected = Agg::default();
     let mut exact_projected = Agg::default();
     let gold_keys: BTreeSet<&str> = CORPUS
         .iter()
@@ -390,6 +395,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             projected_keys.err(),
         );
 
+        let cjk_keys = fts.search_projected_cjk_shingles(case.query, TOP_K);
+        cjk_shingle_projected.record(
+            first_hit_rank(cjk_keys.as_deref().unwrap_or(&[]), case.expect),
+            cjk_keys.err(),
+        );
+
         let trigger_keys = fts.search(IndexKind::Projected, case.trigger, TOP_K);
         exact_projected.record(
             first_hit_rank(trigger_keys.as_deref().unwrap_or(&[]), case.expect),
@@ -399,6 +410,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut negative_false_hits = Vec::new();
     let mut negative_errors = Vec::new();
+    let mut cjk_negative_false_hits = Vec::new();
+    let mut cjk_negative_errors = Vec::new();
     for control in NEGATIVE_CONTROLS {
         match fts.search(IndexKind::Projected, control.query, TOP_K) {
             Ok(keys) => {
@@ -409,6 +422,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             Err(err) => negative_errors.push(format!("{}:{err}", control.id)),
+        }
+        match fts.search_projected_cjk_shingles(control.query, TOP_K) {
+            Ok(keys) => {
+                for (idx, key) in keys.iter().enumerate() {
+                    if gold_keys.contains(key.as_str()) {
+                        cjk_negative_false_hits.push(format!("{}:{}@{}", control.id, key, idx + 1));
+                    }
+                }
+            }
+            Err(err) => cjk_negative_errors.push(format!("{}:{err}", control.id)),
         }
     }
 
@@ -438,6 +461,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     print_row("intent_content", &intent_content, n);
     print_row("intent_projected", &intent_projected, n);
+    print_row("cjk_shingle_proj", &cjk_shingle_projected, n);
     print_row("exact_projected", &exact_projected, n);
     println!();
 
@@ -480,14 +504,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     println!();
 
+    println!("## CJK shingle recovery probe");
+    let cjk_added = added_hit_indices(&intent_projected, &cjk_shingle_projected);
+    let cjk_improved = improved_rank_indices(&intent_projected, &cjk_shingle_projected);
+    println!(
+        "  added top-{TOP_K} hits over projected: {} case(s){}",
+        cjk_added.len(),
+        fmt_idx(&cjk_added)
+    );
+    println!(
+        "  improved first-hit rank over projected: {} case(s){}",
+        cjk_improved.len(),
+        fmt_idx(&cjk_improved)
+    );
+    println!("  negative false hits: {}", cjk_negative_false_hits.len());
+    if !cjk_negative_false_hits.is_empty() {
+        println!("  false hits: {}", cjk_negative_false_hits.join(", "));
+    }
+    println!("  parser errors: {}", cjk_negative_errors.len());
+    if !cjk_negative_errors.is_empty() {
+        println!("  errors: {}", cjk_negative_errors.join(", "));
+    }
+    println!(
+        "  contract: scratch-only generated CJK trigrams over projected text; no production tokenizer, schema, reindex, or ranking change"
+    );
+    println!();
+
     println!("## Per-case first-hit rank (- = no hit in top {TOP_K}; ERR = FTS parser error)");
     println!(
-        "  {:<3} {:<34} {:<14} {:>8} {:>10} {:>10}  {}",
-        "#", "id", "stratum", "content", "projected", "exact", "note"
+        "  {:<3} {:<34} {:<14} {:>8} {:>10} {:>10} {:>10}  {}",
+        "#", "id", "stratum", "content", "projected", "cjk_probe", "exact", "note"
     );
     for (i, case) in CORPUS.iter().enumerate() {
         println!(
-            "  {:<3} {:<34} {:<14} {:>8} {:>10} {:>10}  {}",
+            "  {:<3} {:<34} {:<14} {:>8} {:>10} {:>10} {:>10}  {}",
             i + 1,
             case.id,
             case.stratum,
@@ -495,6 +545,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             rank_cell(
                 intent_projected.ranks[i],
                 intent_projected.errors[i].as_deref()
+            ),
+            rank_cell(
+                cjk_shingle_projected.ranks[i],
+                cjk_shingle_projected.errors[i].as_deref()
             ),
             rank_cell(
                 exact_projected.ranks[i],
@@ -517,6 +571,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         fmt_idx(&miss_indices(&intent_projected))
     );
     println!(
+        "  cjk_shingle misses:     {} case(s){}",
+        miss_indices(&cjk_shingle_projected).len(),
+        fmt_idx(&miss_indices(&cjk_shingle_projected))
+    );
+    println!(
         "  exact_projected errors:  {} case(s){}",
         error_indices(&exact_projected).len(),
         fmt_idx(&error_indices(&exact_projected))
@@ -530,6 +589,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "  negative controls:       {} false hit(s), {} parser error(s)",
         negative_false_hits.len(),
         negative_errors.len()
+    );
+    println!(
+        "  cjk negative controls:   {} false hit(s), {} parser error(s)",
+        cjk_negative_false_hits.len(),
+        cjk_negative_errors.len()
     );
     println!(
         "  caveat: hand-curated corpus, N={n}. This is a broader trigger-cohort \
@@ -615,6 +679,7 @@ fn verify_corpus(rows: &[MemoryRow]) -> Result<(), Box<dyn std::error::Error>> {
 enum IndexKind {
     Content,
     Projected,
+    ProjectedCjkShingle,
 }
 
 struct ScratchFts {
@@ -634,6 +699,11 @@ impl ScratchFts {
                  key UNINDEXED,
                  body,
                  tokenize = 'unicode61 remove_diacritics 2'
+             );
+             CREATE VIRTUAL TABLE projected_cjk_fts USING fts5(
+                 key UNINDEXED,
+                 body,
+                 tokenize = 'unicode61 remove_diacritics 2'
              );",
         )?;
 
@@ -642,13 +712,41 @@ impl ScratchFts {
                 db.prepare("INSERT INTO content_fts(key, body) VALUES (?1, ?2)")?;
             let mut projected_stmt =
                 db.prepare("INSERT INTO projected_fts(key, body) VALUES (?1, ?2)")?;
+            let mut projected_cjk_stmt =
+                db.prepare("INSERT INTO projected_cjk_fts(key, body) VALUES (?1, ?2)")?;
             for row in rows {
                 content_stmt.execute(params![row.key, row.content])?;
                 projected_stmt.execute(params![row.key, row.projected])?;
+                let cjk_augmented = augment_with_cjk_shingles(&row.projected);
+                projected_cjk_stmt.execute(params![row.key, cjk_augmented])?;
             }
         }
 
         Ok(Self { db })
+    }
+
+    fn search_projected_cjk_shingles(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<String>, String> {
+        let mut terms = BTreeSet::new();
+        for term in cjk_shingle_terms(query) {
+            terms.insert(term);
+        }
+
+        if terms.is_empty() {
+            return self.search(IndexKind::Projected, query, limit);
+        }
+
+        let mut parts = Vec::new();
+        let any = sanitise_fts_query_any(query);
+        if !any.is_empty() {
+            parts.push(any);
+        }
+        parts.extend(terms);
+
+        self.search_once(IndexKind::ProjectedCjkShingle, &parts.join(" OR "), limit)
     }
 
     fn search(&self, kind: IndexKind, query: &str, limit: usize) -> Result<Vec<String>, String> {
@@ -678,6 +776,12 @@ impl ScratchFts {
                 "SELECT key FROM projected_fts
                  WHERE projected_fts MATCH ?1
                  ORDER BY bm25(projected_fts)
+                 LIMIT ?2"
+            }
+            IndexKind::ProjectedCjkShingle => {
+                "SELECT key FROM projected_cjk_fts
+                 WHERE projected_cjk_fts MATCH ?1
+                 ORDER BY bm25(projected_cjk_fts)
                  LIMIT ?2"
             }
         };
@@ -721,6 +825,13 @@ fn debug_case(fts: &ScratchFts, idx1: usize) -> Result<(), Box<dyn std::error::E
         println!();
     }
 
+    println!("## cjk_shingle_projected");
+    match fts.search_projected_cjk_shingles(case.query, TOP_K) {
+        Ok(keys) => dump_keys(case.expect, &keys),
+        Err(err) => println!("  ERROR: {err}"),
+    }
+    println!();
+
     Ok(())
 }
 
@@ -755,6 +866,54 @@ fn fts_terms(text: &str) -> Result<Vec<String>, String> {
         .collect::<SqlResult<Vec<_>>>()
         .map_err(|e| e.to_string())?;
     Ok(terms)
+}
+
+fn augment_with_cjk_shingles(text: &str) -> String {
+    let terms = cjk_shingle_terms(text);
+    if terms.is_empty() {
+        return text.to_string();
+    }
+    format!("{text}\n\ncjk_trigrams:\n{}", terms.join(" "))
+}
+
+fn cjk_shingle_terms(text: &str) -> Vec<String> {
+    let mut terms = BTreeSet::new();
+    let mut run = Vec::new();
+
+    for ch in text.chars() {
+        if is_cjk_unified(ch) {
+            run.push(ch);
+        } else {
+            push_cjk_trigrams(&run, &mut terms);
+            run.clear();
+        }
+    }
+    push_cjk_trigrams(&run, &mut terms);
+
+    terms.into_iter().collect()
+}
+
+fn push_cjk_trigrams(run: &[char], terms: &mut BTreeSet<String>) {
+    if run.len() < 3 {
+        return;
+    }
+    for window in run.windows(3) {
+        let gram = window.iter().collect::<String>();
+        terms.insert(format!("cjk_{gram}"));
+    }
+}
+
+fn is_cjk_unified(ch: char) -> bool {
+    matches!(
+        ch,
+        '\u{3400}'..='\u{4DBF}'
+            | '\u{4E00}'..='\u{9FFF}'
+            | '\u{F900}'..='\u{FAFF}'
+            | '\u{20000}'..='\u{2A6DF}'
+            | '\u{2A700}'..='\u{2B73F}'
+            | '\u{2B740}'..='\u{2B81F}'
+            | '\u{2B820}'..='\u{2CEAF}'
+    )
 }
 
 fn dump_keys(expect: &[&str], keys: &[String]) {
@@ -1016,5 +1175,34 @@ mod tests {
         assert!(content_terms.contains(&"黄金比例五行控制网络".to_string()));
         assert!(!content_terms.contains(&query_terms[0]));
         assert!(!content_terms.contains(&query_terms[1]));
+    }
+
+    #[test]
+    fn cjk_shingle_probe_recovers_paraphrase_overlap_without_changing_projected_fts() {
+        let query = "五行生克的成熟数学模型、黄金比例控制网络和平衡靶调研结论在哪里";
+        let row = MemoryRow {
+            key: "target".to_string(),
+            content: String::new(),
+            projected:
+                "五行生克成熟数学模型调研 黄金比例反馈控制网络 黄金比例五行控制网络 平衡靶 循环平衡环"
+                    .to_string(),
+            triggers: Vec::new(),
+        };
+        let fts = ScratchFts::build(&[row]).expect("scratch fts");
+
+        let projected = fts
+            .search(IndexKind::Projected, query, TOP_K)
+            .expect("projected search");
+        assert!(projected.is_empty(), "baseline unicode61 path should miss");
+
+        let recovered = fts
+            .search_projected_cjk_shingles(query, TOP_K)
+            .expect("cjk shingle search");
+        assert_eq!(recovered, vec!["target".to_string()]);
+
+        let terms = cjk_shingle_terms(query);
+        assert!(terms.contains(&"cjk_五行生".to_string()));
+        assert!(terms.contains(&"cjk_成熟数".to_string()));
+        assert!(terms.contains(&"cjk_控制网".to_string()));
     }
 }
