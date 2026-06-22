@@ -225,6 +225,8 @@ const GRAPH_NEIGHBOR_LIMIT: usize = 8;
 const HASH_BACKEND_NAME: &str = "fnv1a-hash-384";
 const REVIEW_GATE_TARGET_CASES: &[usize] = &[1, 2, 5, 9, 14];
 const MIN_CJK_SHINGLE_ACCEPT_OVERLAP: usize = 4;
+const CASE2_TOOL_SURFACE_IDX1: usize = 2;
+const MIN_TOOL_SURFACE_PROJECTION_OVERLAP: usize = 4;
 
 /// Per-mode tallies accumulated across the corpus.
 #[derive(Default)]
@@ -402,6 +404,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut fts_graph = CandidateExpansionAgg::default();
     let mut fts_candidate_counts = Vec::with_capacity(CORPUS.len());
     let scratch_cjk = ScratchCjkFts::build(&db_path)?;
+    let scratch_tool_surface = ScratchToolSurfaceProjectionFts::build(&db_path)?;
     let mut fts_cjk = ModeAgg::default();
     let mut fts_cjk_acc = ModeAgg::default();
     let mut fts_empty_cjk_acc = ModeAgg::default();
@@ -501,6 +504,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
          schema, reindex, graph, semantic, or ranking."
     );
     println!();
+
+    print_case2_tool_surface_projection_probe(&scratch_tool_surface)?;
 
     // ── Per-tier breakdown (worst-case paraphrase vs lexically-anchored) ─────
     // The single aggregate above blends pure-paraphrase (hard) and
@@ -746,6 +751,191 @@ impl ScratchCjkFts {
         }
         Ok(accepted)
     }
+}
+
+#[derive(Clone, Debug)]
+struct ProjectionHit {
+    key: String,
+    overlap: usize,
+    shared_terms: Vec<String>,
+}
+
+struct ScratchToolSurfaceProjectionFts {
+    db: RusqliteConnection,
+    terms_by_key: HashMap<String, BTreeSet<String>>,
+}
+
+impl ScratchToolSurfaceProjectionFts {
+    fn build(db_path: &std::path::Path) -> SqlResult<Self> {
+        let source =
+            RusqliteConnection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let scratch = RusqliteConnection::open_in_memory()?;
+        scratch.execute_batch(
+            "CREATE VIRTUAL TABLE tool_surface_fts USING fts5(
+                 key UNINDEXED,
+                 body,
+                 tokenize = 'unicode61 remove_diacritics 2'
+             );",
+        )?;
+
+        let mut terms_by_key = HashMap::new();
+        {
+            let mut select = source.prepare(
+                "SELECT key, COALESCE(fts_content, content) AS body
+                 FROM memories
+                 WHERE status = 'active'",
+            )?;
+            let rows = select.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            let mut insert =
+                scratch.prepare("INSERT INTO tool_surface_fts(key, body) VALUES (?1, ?2)")?;
+            for row in rows {
+                let (key, body) = row?;
+                let terms = tool_surface_projection_terms(&key, &body);
+                insert.execute(params![
+                    key,
+                    augment_with_tool_surface_projection_terms(&body, &terms)
+                ])?;
+                terms_by_key.insert(key, terms);
+            }
+        }
+
+        Ok(Self {
+            db: scratch,
+            terms_by_key,
+        })
+    }
+
+    fn search_projected(&self, query: &str, limit: usize) -> Result<Vec<ProjectionHit>, String> {
+        let query_terms = tool_surface_projection_terms("", query);
+        let mut parts = Vec::new();
+        let any = sanitise_fts_query_any(query);
+        if !any.is_empty() {
+            parts.push(any);
+        }
+        parts.extend(query_terms.iter().cloned());
+        if parts.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut stmt = self
+            .db
+            .prepare(
+                "SELECT key FROM tool_surface_fts
+                 WHERE tool_surface_fts MATCH ?1
+                 ORDER BY bm25(tool_surface_fts)
+                 LIMIT ?2",
+            )
+            .map_err(|e| e.to_string())?;
+        let keys = stmt
+            .query_map(params![parts.join(" OR "), limit as i64], |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<SqlResult<Vec<_>>>()
+            .map_err(|e| e.to_string())?;
+        Ok(self.projection_hits_from_keys(&query_terms, keys))
+    }
+
+    fn search_projected_accepted(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<ProjectionHit>, String> {
+        let query_terms = tool_surface_projection_terms("", query);
+        if query_terms.is_empty() {
+            return Ok(Vec::new());
+        }
+        let candidate_limit = limit.saturating_mul(8).max(limit);
+        let hits = self.search_projected(query, candidate_limit)?;
+        Ok(hits
+            .into_iter()
+            .filter(|hit| hit.overlap >= MIN_TOOL_SURFACE_PROJECTION_OVERLAP)
+            .take(limit)
+            .collect())
+    }
+
+    fn projection_hits_from_keys(
+        &self,
+        query_terms: &BTreeSet<String>,
+        keys: Vec<String>,
+    ) -> Vec<ProjectionHit> {
+        keys.into_iter()
+            .map(|key| {
+                let shared_terms = self
+                    .terms_by_key
+                    .get(&key)
+                    .map(|terms| query_terms.intersection(terms).cloned().collect::<Vec<_>>())
+                    .unwrap_or_default();
+                ProjectionHit {
+                    key,
+                    overlap: shared_terms.len(),
+                    shared_terms,
+                }
+            })
+            .collect()
+    }
+}
+
+fn print_case2_tool_surface_projection_probe(
+    scratch: &ScratchToolSurfaceProjectionFts,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let case = &CORPUS[CASE2_TOOL_SURFACE_IDX1 - 1];
+    let query_terms = tool_surface_projection_terms("", case.query);
+    let projected = scratch.search_projected(case.query, TOP_K)?;
+    let accepted = scratch.search_projected_accepted(case.query, TOP_K)?;
+    let projected_keys = projected
+        .iter()
+        .map(|hit| hit.key.clone())
+        .collect::<Vec<_>>();
+    let accepted_keys = accepted
+        .iter()
+        .map(|hit| hit.key.clone())
+        .collect::<Vec<_>>();
+
+    println!("## Case #2 tool-surface projection probe");
+    println!(
+        "  query terms: {}",
+        if query_terms.is_empty() {
+            "none".to_string()
+        } else {
+            query_terms.iter().cloned().collect::<Vec<_>>().join(", ")
+        }
+    );
+    println!(
+        "  toolproj hit: {}  toolproj_acc hit: {}",
+        rank_cell(first_hit_rank(&projected_keys, case.expect)),
+        rank_cell(first_hit_rank(&accepted_keys, case.expect)),
+    );
+    println!(
+        "  gate: read-only in-memory FTS adds canonical tool-surface projection \
+         terms to candidates and query. Accepted mode requires >= \
+         {MIN_TOOL_SURFACE_PROJECTION_OVERLAP} shared projection terms. This \
+         does not change live memory_search, tokenizer, schema, reindex, \
+         graph, semantic, or ranking."
+    );
+    println!("  accepted top:");
+    for (i, hit) in accepted.iter().take(TOP_K).enumerate() {
+        let star = if case.expect.iter().any(|e| *e == hit.key) {
+            " <== EXPECTED"
+        } else {
+            ""
+        };
+        println!(
+            "    {:>2}. overlap={} {}{} [{}]",
+            i + 1,
+            hit.overlap,
+            hit.key,
+            star,
+            hit.shared_terms.join(", ")
+        );
+    }
+    if accepted.is_empty() {
+        println!("    none");
+    }
+    println!();
+    Ok(())
 }
 
 /// Falsification dump for one case (1-based): show the top-k of each mode with
@@ -1124,6 +1314,145 @@ fn augment_with_cjk_shingles(text: &str) -> String {
     format!("{text}\n\ncjk_trigrams:\n{}", terms.join(" "))
 }
 
+fn augment_with_tool_surface_projection_terms(text: &str, terms: &BTreeSet<String>) -> String {
+    if terms.is_empty() {
+        return text.to_string();
+    }
+    format!(
+        "{text}\n\ntool_surface_projection:\n{}",
+        terms.iter().cloned().collect::<Vec<_>>().join(" ")
+    )
+}
+
+fn tool_surface_projection_terms(key: &str, text: &str) -> BTreeSet<String> {
+    let hay = format!("{key}\n{text}").to_lowercase();
+    let mut terms = BTreeSet::new();
+    let toolish = contains_any(
+        &hay,
+        &[
+            "工具面",
+            "工具",
+            "tool-surface",
+            "tool_surface",
+            "tool surface",
+            "toolsurface",
+            "toolset",
+            "mcp tool",
+            "mcp_tool",
+        ],
+    );
+    let surface = contains_any(
+        &hay,
+        &[
+            "工具面",
+            "tool-surface",
+            "tool_surface",
+            "tool surface",
+            "toolsurface",
+        ],
+    );
+    if surface {
+        terms.insert("projtoolsurface".to_string());
+    }
+    if toolish
+        && contains_any(
+            &hay,
+            &[
+                "维度",
+                "归类",
+                "分类",
+                "类别",
+                "触发方式",
+                "8 类",
+                "八类",
+                "8class",
+                "8 class",
+                "taxonomy",
+                "class",
+            ],
+        )
+    {
+        terms.insert("projtooltaxonomy".to_string());
+    }
+    if toolish
+        && contains_any(
+            &hay,
+            &[
+                "收口",
+                "通缩",
+                "压缩",
+                "bloat",
+                "contraction",
+                "cleanup",
+                "clean up",
+                "surface growth",
+            ],
+        )
+    {
+        terms.insert("projtoolcontraction".to_string());
+    }
+    if toolish
+        && contains_any(
+            &hay,
+            &[
+                "分级",
+                "重新分级",
+                "tier",
+                "re-tier",
+                "retier",
+                "essential",
+                "standard",
+                "niche",
+            ],
+        )
+    {
+        terms.insert("projtoolretier".to_string());
+    }
+    if toolish
+        && contains_any(
+            &hay,
+            &["删", "删除", "清冗余", "delete", "remove", "retire", "冗余"],
+        )
+    {
+        terms.insert("projtooldelete".to_string());
+    }
+    if toolish
+        && contains_any(
+            &hay,
+            &["profile", "allowlist", "essential", "standard", "niche"],
+        )
+    {
+        terms.insert("projtoolprofiletier".to_string());
+    }
+    if toolish
+        && contains_any(
+            &hay,
+            &[
+                "verify-first",
+                "ground-truth",
+                "ground truth",
+                "验证",
+                "动手前",
+            ],
+        )
+    {
+        terms.insert("projtoolverifyfirst".to_string());
+    }
+    if toolish
+        && contains_any(
+            &hay,
+            &["调用频率", "低调用", "call_count", "calls", "hot", "cold"],
+        )
+    {
+        terms.insert("projtoolfrequency".to_string());
+    }
+    terms
+}
+
+fn contains_any(haystack: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| haystack.contains(needle))
+}
+
 fn cjk_shingle_terms(text: &str) -> Vec<String> {
     let mut terms = BTreeSet::new();
     let mut run = Vec::new();
@@ -1313,5 +1642,43 @@ mod tests {
         assert!(terms.contains(&"cjk_记忆系".to_string()));
         assert!(terms.contains(&"cjk_恢复正".to_string()));
         assert!(terms.contains(&"cjk_确状态".to_string()));
+    }
+
+    #[test]
+    fn tool_surface_projection_terms_bridge_case2_query() {
+        let terms = tool_surface_projection_terms(
+            "",
+            "工具面太多了应该按什么维度归类收口,是直接删还是重新分级",
+        );
+
+        assert!(terms.contains("projtoolsurface"));
+        assert!(terms.contains("projtooltaxonomy"));
+        assert!(terms.contains("projtoolcontraction"));
+        assert!(terms.contains("projtooldelete"));
+        assert!(terms.contains("projtoolretier"));
+    }
+
+    #[test]
+    fn tool_surface_projection_terms_ignore_generic_tool_use() {
+        let terms = tool_surface_projection_terms("", "这个工具怎么使用");
+
+        assert!(terms.is_empty());
+    }
+
+    #[test]
+    fn tool_surface_projection_terms_cover_expected_case2_memory() {
+        let terms = tool_surface_projection_terms(
+            "reference_ab_tool_surface_taxonomy_8class_retier_over_delete_20260618",
+            "AB 工具面功能学审计 + 收口。把工具按触发方式分 8 类。\
+             re-tier over delete, profile allowlist, verify-first.",
+        );
+
+        assert!(terms.contains("projtoolsurface"));
+        assert!(terms.contains("projtooltaxonomy"));
+        assert!(terms.contains("projtoolcontraction"));
+        assert!(terms.contains("projtooldelete"));
+        assert!(terms.contains("projtoolretier"));
+        assert!(terms.contains("projtoolprofiletier"));
+        assert!(terms.contains("projtoolverifyfirst"));
     }
 }
