@@ -39,6 +39,7 @@ Commands:
 rustfmt --edition 2024 --check crates/bridge/examples/recall_eval.rs
 cargo test -p ab-bridge --example recall_eval -- --nocapture
 cargo run -p ab-bridge --example recall_eval
+cargo check -p ab-bridge --all-targets
 ```
 
 Results on the Mac store:
@@ -50,7 +51,7 @@ Results on the Mac store:
 | fts+cjk | 0.111 | 0.500 | 0.667 | 0.309 |
 | fts+cjk_acc | 0.056 | 0.111 | 0.167 | 0.090 |
 | fts_empty+cjk | 0.333 | 0.611 | 0.667 | 0.416 |
-| hybrid | 0.111 | 0.444 | 0.500 | 0.226 |
+| hybrid | 0.111 | 0.500 | 0.500 | 0.237 |
 | semantic | 0.000 | 0.111 | 0.111 | 0.056 |
 
 Hard-tier result:
