@@ -504,6 +504,137 @@ Interpretation: this is not a runtime gate. It is the checklist that a later,
 separately approved runtime gate must satisfy before any code path can influence
 candidate expansion.
 
+## T6 Candidate Expansion Runtime-Gate Design Artifact
+
+Date: 2026-06-21
+
+`memory_biocortex_t6_candidate_expansion_runtime_gate_design_artifact` is the
+owner-reviewable design surface after the runtime-gate preflight. It consumes
+only a safe
+`memory_biocortex_t6_candidate_expansion_runtime_gate_preflight`.
+
+The artifact blocks unless the source preflight is ready, read-only, explicitly
+permits only design-artifact preparation, carries the required runtime-gate
+design requirements, and still denies runtime code, dry-run execution,
+candidate-set expansion, runtime influence, and search-order changes.
+
+Even when ready, the artifact only prepares an owner review checklist. It names
+the separate runtime gate, separate owner runtime approval, feature flag default
+off, shadow mode first, deterministic replay, bounded candidate delta, negative
+controls, telemetry fields, and rollback contract that must exist before a
+future implementation path can be considered.
+
+The artifact never echoes the source preflight, owner-decision record,
+human-review packet, dry-run report, dry-run plan, recall-expansion summary,
+`case_rows`, raw queries, raw keys, content, or raw errors. It always forces
+`may_implement_runtime_gate_code_now=false`,
+`candidate_expansion_experiment_approved=false`,
+`may_run_candidate_expansion_dry_run_now=false`,
+`may_expand_candidate_set_now=false`, and
+`this_artifact_approves_runtime_candidate_expansion=false`.
+
+Interpretation: this is still not a runtime gate and not runtime code. It is the
+design artifact that a separate owner runtime approval must review before any
+candidate-expansion implementation can be started.
+
+## T6 Candidate Expansion Runtime-Gate Owner Review Record
+
+Date: 2026-06-21
+
+`memory_biocortex_t6_candidate_expansion_runtime_gate_owner_review_record` is
+the explicit owner-review surface after the runtime-gate design artifact. It
+consumes only a safe
+`memory_biocortex_t6_candidate_expansion_runtime_gate_design_artifact` plus an
+external owner decision.
+
+The only positive owner decision accepted by this surface is
+`approve_runtime_gate_implementation_plan_only`. That opens the next
+implementation-plan gate, not runtime code. Requests for design changes,
+rejections, missing owner/source fields, unknown decisions, raw payloads, or any
+source artifact that claims runtime authority all block.
+
+Even when ready, the record only permits preparing an implementation plan. It
+requires a separate implementation-plan artifact and a separate code
+implementation gate before runtime code can be considered.
+
+The owner-review record never echoes the source design artifact, preflight,
+owner-decision record, human-review packet, dry-run report, dry-run plan,
+recall-expansion summary, `case_rows`, raw queries, raw keys, content, or raw
+errors. It always forces `may_implement_runtime_gate_code_now=false`,
+`candidate_expansion_experiment_approved=false`,
+`may_run_candidate_expansion_dry_run_now=false`,
+`may_expand_candidate_set_now=false`, and
+`this_record_approves_runtime_candidate_expansion=false`.
+
+Interpretation: this is owner approval to prepare an implementation plan only.
+It is still not runtime approval, not runtime code approval, and not
+candidate-expansion approval.
+
+## T6 Candidate Expansion Runtime-Gate Implementation Plan Artifact
+
+Date: 2026-06-21
+
+`memory_biocortex_t6_candidate_expansion_runtime_gate_implementation_plan_artifact`
+is the read-only implementation-plan surface after the runtime-gate
+owner-review record. It consumes only a safe
+`memory_biocortex_t6_candidate_expansion_runtime_gate_owner_review_record` whose
+owner decision is `approve_runtime_gate_implementation_plan_only`.
+
+When ready, the artifact can only open the next code-gate review:
+`author_review_runtime_gate_code_implementation_gate_before_code`. It specifies
+a default-off feature flag, shadow-first contract, deterministic replay
+fixture, bounded candidate delta, negative controls, telemetry fields, and
+rollback contract that a later code gate must review before any runtime code is
+implemented.
+
+The implementation-plan artifact never echoes the owner-review record,
+runtime-gate design artifact, preflight, owner-decision record,
+human-review packet, dry-run report, dry-run plan, recall-expansion summary,
+`case_rows`, raw queries, raw keys, content, or raw errors. It always forces
+`may_implement_runtime_gate_code_now=false`,
+`candidate_expansion_experiment_approved=false`,
+`may_run_candidate_expansion_dry_run_now=false`,
+`may_expand_candidate_set_now=false`, and
+`this_plan_approves_runtime_candidate_expansion=false`.
+
+Interpretation: this is an implementation plan for a future code gate only. It
+is still not runtime code approval, not runtime approval, and not
+candidate-expansion approval.
+
+## T6 Candidate Expansion Runtime-Gate Code Implementation Gate
+
+Date: 2026-06-21
+
+`memory_biocortex_t6_candidate_expansion_runtime_gate_code_implementation_gate`
+is the explicit code-gate surface after the implementation-plan artifact. It
+consumes only a safe
+`memory_biocortex_t6_candidate_expansion_runtime_gate_implementation_plan_artifact`
+plus an external code-gate decision.
+
+The only positive code-gate decision accepted by this surface is
+`approve_shadow_runtime_gate_code_implementation_only`. That can authorize
+implementing default-off, shadow-only runtime-gate code. It does not authorize
+enabling that code, running shadow mode, running dry-runs, changing search
+order, writing memory or graph edges, or expanding candidate sets.
+
+Even when ready, the code implementation contract only sets
+`may_implement_shadow_runtime_gate_code=true`. It always forces
+`may_enable_runtime_gate_now=false`, `may_run_shadow_mode_now=false`,
+`may_run_candidate_expansion_dry_run_now=false`,
+`may_expand_candidate_set_now=false`,
+`runtime_influence_approved=false`, and
+`this_gate_approves_runtime_candidate_expansion=false`.
+
+The code gate never echoes the implementation-plan artifact,
+owner-review record, runtime-gate design artifact, preflight,
+owner-decision record, human-review packet, dry-run report, dry-run plan,
+recall-expansion summary, `case_rows`, raw queries, raw keys, content, or raw
+errors. Separate shadow-execution and runtime-enable gates remain required.
+
+Interpretation: this is approval to implement a default-off shadow code path
+only. It is not approval to run the code, enable runtime influence, or expand
+candidate sets.
+
 ## Fixture Diagnostic Example Follow-up
 
 Date: 2026-06-20
@@ -1001,6 +1132,81 @@ memory graph. Already materialized links are marked with
 `already_materialized=true`, `materialization_status=already_materialized`, and
 are counted in `already_materialized_edge_count`; pending writeable links are
 counted in `pending_materialization_edge_count`.
+
+The T6 candidate-expansion runtime-gate code path now has a default-off shadow
+runtime gate surface:
+
+- MCP tool:
+  `memory_biocortex_t6_candidate_expansion_shadow_runtime_gate`;
+- schema:
+  `agent_bridge.memory_biocortex_t6_candidate_expansion.shadow_runtime_gate.v0`;
+- runtime enable env:
+  `AB_BIOCORTEX_T6_CANDIDATE_EXPANSION_SHADOW`;
+- operator disable env:
+  `AB_BIOCORTEX_T6_CANDIDATE_EXPANSION_DISABLE`.
+
+The tool is a status and contract surface only. It reports redacted counts for
+baseline/expanded/added candidates, checks that deterministic replay,
+candidate-delta bounds, negative controls, telemetry fields, and rollback are
+present, and keeps the feature flag default-off. Even when the runtime env is
+set, the tool reports `blocked_before_shadow_execution_gate` and keeps
+`may_run_shadow_mode_now=false`, `may_expand_candidate_set_now=false`,
+`changes_candidate_set_now=false`, `may_change_search_order_now=false`, and
+`may_write_memory_or_graph_edges=false`. It does not call `memory_search`,
+`memory_neighbors`, or BioCortex, does not echo raw query/key/content/case rows,
+and does not grant runtime enablement or candidate-expansion authority. A
+separate shadow-execution gate is still required before any shadow run.
+
+The next T6 candidate-expansion gate is the author-reviewed shadow-execution
+gate:
+
+- MCP tool:
+  `memory_biocortex_t6_candidate_expansion_shadow_execution_gate`;
+- schema:
+  `agent_bridge.memory_biocortex_t6_candidate_expansion.shadow_execution_gate.v0`;
+- required source:
+  the redacted JSON object from
+  `memory_biocortex_t6_candidate_expansion_shadow_runtime_gate`;
+- author decision:
+  `approve_shadow_execution_only`.
+
+This tool can only report whether a later shadow-only executor is allowed to
+run against a redacted deterministic replay fixture with append-only telemetry.
+It never runs shadow mode itself, never calls `memory_search`,
+`memory_neighbors`, or BioCortex, never writes memory or graph edges, and never
+approves production runtime influence. The gate blocks if the source shadow
+runtime gate is not `blocked_before_shadow_execution_gate`, if the source
+contains raw query/key/content/case rows, if deterministic replay, candidate
+delta bounds, negative controls, rollback, or telemetry requirements are
+incomplete, or if the source claims runtime candidate-set authority. Even when
+ready, the contract keeps runtime candidate expansion, runtime search-order
+changes, memory/edge writes, and runtime enablement as non-claims for later
+gates.
+
+The following T6 candidate-expansion surface is the shadow-only executor
+preflight:
+
+- MCP tool:
+  `memory_biocortex_t6_candidate_expansion_shadow_executor_preflight`;
+- schema:
+  `agent_bridge.memory_biocortex_t6_candidate_expansion.shadow_executor_preflight.v0`;
+- required source:
+  the redacted JSON object from
+  `memory_biocortex_t6_candidate_expansion_shadow_execution_gate`;
+- scope:
+  redacted deterministic replay fixture only, with bounded case count and
+  append-only shadow telemetry.
+
+The preflight only reports whether a later shadow-only executor invocation is
+allowed. It never invokes the executor, never calls `memory_search`,
+`memory_neighbors`, or BioCortex, never writes memory or graph edges, and never
+approves production runtime influence. It blocks if the source shadow-execution
+gate is not `ready_for_shadow_execution_only`, if the source or request includes
+raw query/key/content/case rows, if the source claims runtime authority, if the
+executor id, redacted fixture id, or telemetry sink is missing, or if the bounded
+shadow-case count exceeds the preflight limit. Even when ready, production
+candidate-set mutation, search-order changes, runtime enablement, memory writes,
+and graph-edge writes remain non-claims for later gates.
 
 ## Verification
 
