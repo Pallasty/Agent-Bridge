@@ -41891,6 +41891,286 @@ impl McpTool for MemoryBioCortexT6CandidateExpansionShadowExecutionGateTool {
     }
 }
 
+const MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_SHADOW_EXECUTOR_PREFLIGHT_SCHEMA: &str =
+    "agent_bridge.memory_biocortex_t6_candidate_expansion.shadow_executor_preflight.v0";
+
+fn memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_u64(
+    args: &Value,
+    key: &str,
+    default: u64,
+) -> u64 {
+    args.get(key).and_then(Value::as_u64).unwrap_or(default)
+}
+
+fn memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_source_claims_runtime_authority(
+    report: &Value,
+) -> bool {
+    [
+        "/shadow_execution_contract/this_tool_runs_shadow_mode",
+        "/shadow_execution_contract/this_tool_calls_memory_search",
+        "/shadow_execution_contract/this_tool_calls_memory_neighbors",
+        "/shadow_execution_contract/this_tool_runs_biocortex",
+        "/shadow_execution_contract/may_expand_runtime_candidate_set_now",
+        "/shadow_execution_contract/changes_runtime_candidate_set_now",
+        "/shadow_execution_contract/may_change_runtime_search_order_now",
+        "/shadow_execution_contract/runtime_influence_approved",
+        "/shadow_execution_contract/may_enable_runtime_gate_now",
+        "/shadow_execution_contract/may_write_memory_or_graph_edges",
+        "/shadow_run_bounds/raw_queries_allowed",
+        "/shadow_run_bounds/raw_keys_allowed",
+        "/shadow_run_bounds/content_allowed",
+        "/shadow_run_bounds/case_rows_allowed",
+    ]
+    .iter()
+    .any(|pointer| {
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(report, pointer)
+    })
+}
+
+fn memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_source_ready(
+    report: &Value,
+) -> bool {
+    report.get("schema").and_then(Value::as_str)
+        == Some(MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_SHADOW_EXECUTION_GATE_SCHEMA)
+        && report.get("read_only").and_then(Value::as_bool) == Some(true)
+        && memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            report,
+            "/shadow_execution_gate/ready",
+        )
+        && report
+            .pointer("/shadow_execution_gate/status")
+            .and_then(Value::as_str)
+            == Some("ready_for_shadow_execution_only")
+        && memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            report,
+            "/shadow_execution_contract/may_run_shadow_executor_now",
+        )
+        && !memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_source_claims_runtime_authority(report)
+        && memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            report,
+            "/shadow_run_bounds/replay_fixture_id_present",
+        )
+        && memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            report,
+            "/shadow_run_bounds/telemetry_sink_present",
+        )
+        && !memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            report,
+            "/input_contract/shadow_runtime_gate_report_included",
+        )
+        && !memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            report,
+            "/input_contract/raw_query_included",
+        )
+        && !memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            report,
+            "/input_contract/raw_queries_included",
+        )
+        && !memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            report,
+            "/input_contract/raw_keys_included",
+        )
+        && !memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            report,
+            "/input_contract/content_included",
+        )
+        && !memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            report,
+            "/input_contract/case_rows_included",
+        )
+}
+
+fn memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_payload(args: Value) -> Value {
+    let report = args
+        .get("shadow_execution_gate_report")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let executor_id =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(&args, "executor_id");
+    let replay_fixture_id = memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(
+        &args,
+        "replay_fixture_id",
+    );
+    let telemetry_sink =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(&args, "telemetry_sink");
+    let max_shadow_cases =
+        memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_u64(
+            &args,
+            "max_shadow_cases",
+            0,
+        );
+    let max_shadow_case_bound = 100_u64;
+
+    let mut block_reasons = BTreeSet::<String>::new();
+    if !memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_source_ready(&report) {
+        block_reasons.insert("source_shadow_execution_gate_not_ready".to_string());
+    }
+    if memory_biocortex_t6_candidate_expansion_shadow_execution_gate_contains_raw(&report) {
+        block_reasons.insert("source_shadow_execution_gate_contains_raw".to_string());
+    }
+    if memory_biocortex_t6_candidate_expansion_shadow_execution_gate_contains_raw(&args) {
+        block_reasons.insert("input_contains_raw_or_source_fields".to_string());
+    }
+    if memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_source_claims_runtime_authority(&report) {
+        block_reasons.insert("source_shadow_execution_gate_claims_runtime_authority".to_string());
+    }
+    if executor_id.is_empty() {
+        block_reasons.insert("executor_id_missing".to_string());
+    }
+    if replay_fixture_id.is_empty() {
+        block_reasons.insert("replay_fixture_id_missing".to_string());
+    }
+    if telemetry_sink.is_empty() {
+        block_reasons.insert("telemetry_sink_missing".to_string());
+    }
+    if max_shadow_cases == 0 {
+        block_reasons.insert("max_shadow_cases_missing".to_string());
+    }
+    if max_shadow_cases > max_shadow_case_bound {
+        block_reasons.insert("max_shadow_cases_exceeds_bound".to_string());
+    }
+
+    let block_reasons: Vec<String> = block_reasons.into_iter().collect();
+    let ready = block_reasons.is_empty();
+    let status = if ready {
+        "ready_for_shadow_only_executor_invocation"
+    } else {
+        "blocked_before_shadow_only_executor_invocation"
+    };
+
+    json!({
+        "schema": MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_SHADOW_EXECUTOR_PREFLIGHT_SCHEMA,
+        "generated_at": unix_now_secs(),
+        "read_only": true,
+        "shadow_executor_preflight": {
+            "ready": ready,
+            "status": status,
+            "block_reasons": block_reasons,
+            "executor_id_present": !executor_id.is_empty(),
+            "replay_fixture_id_present": !replay_fixture_id.is_empty(),
+            "telemetry_sink_present": !telemetry_sink.is_empty(),
+            "max_shadow_cases": max_shadow_cases,
+            "max_shadow_case_bound": max_shadow_case_bound,
+        },
+        "shadow_executor_contract": {
+            "may_invoke_shadow_only_executor_now": ready,
+            "this_tool_invokes_executor": false,
+            "this_tool_runs_shadow_mode": false,
+            "this_tool_calls_memory_search": false,
+            "this_tool_calls_memory_neighbors": false,
+            "this_tool_runs_biocortex": false,
+            "may_mutate_runtime_candidate_set": false,
+            "changes_runtime_candidate_set": false,
+            "may_change_runtime_search_order": false,
+            "runtime_influence_approved": false,
+            "may_enable_runtime_gate_now": false,
+            "may_write_memory_or_graph_edges": false,
+            "requires_later_runtime_enablement_gate": true,
+            "requires_later_candidate_expansion_enablement_gate": true,
+        },
+        "bounded_invocation": {
+            "redacted_replay_fixture_required": true,
+            "append_only_telemetry_required": true,
+            "max_shadow_cases": max_shadow_cases,
+            "max_shadow_case_bound": max_shadow_case_bound,
+            "raw_queries_allowed": false,
+            "raw_keys_allowed": false,
+            "content_allowed": false,
+            "case_rows_allowed": false,
+        },
+        "input_contract": {
+            "shadow_execution_gate_report_included": false,
+            "raw_query_included": false,
+            "raw_queries_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "case_rows_included": false,
+            "unknown_fields_ignored": true,
+        },
+        "non_goals": [
+            "This tool does not invoke a shadow executor or run shadow mode.",
+            "This tool does not call BioCortex, memory_search, or memory_neighbors.",
+            "This tool does not mutate runtime candidate sets, search order, memory, graph edges, feature flags, approvals, or telemetry.",
+            "This tool does not approve production runtime influence or runtime enablement."
+        ],
+    })
+}
+
+pub struct MemoryBioCortexT6CandidateExpansionShadowExecutorPreflightTool;
+impl MemoryBioCortexT6CandidateExpansionShadowExecutorPreflightTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for MemoryBioCortexT6CandidateExpansionShadowExecutorPreflightTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for MemoryBioCortexT6CandidateExpansionShadowExecutorPreflightTool {
+    fn name(&self) -> &'static str {
+        "memory_biocortex_t6_candidate_expansion_shadow_executor_preflight"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only T6 candidate-expansion shadow executor preflight. \
+                Consumes a safe shadow execution gate report and bounded fixture \
+                invocation metadata, then reports whether a later shadow-only \
+                executor may be invoked. It never invokes the executor, runs \
+                shadow mode, calls BioCortex or memory tools, writes, mutates \
+                runtime candidates, changes search order, or approves runtime \
+                influence."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": [
+                    "shadow_execution_gate_report",
+                    "executor_id",
+                    "replay_fixture_id",
+                    "telemetry_sink",
+                    "max_shadow_cases"
+                ],
+                "properties": {
+                    "shadow_execution_gate_report": {
+                        "type": "object",
+                        "description": "JSON object produced by memory_biocortex_t6_candidate_expansion_shadow_execution_gate. It is inspected but never echoed."
+                    },
+                    "executor_id": {
+                        "type": "string",
+                        "description": "Identifier for the later shadow-only executor. This tool does not invoke it."
+                    },
+                    "replay_fixture_id": {
+                        "type": "string",
+                        "description": "Redacted deterministic replay fixture id. Raw cases must not be supplied."
+                    },
+                    "telemetry_sink": {
+                        "type": "string",
+                        "description": "Append-only telemetry sink identifier. This tool does not write telemetry."
+                    },
+                    "max_shadow_cases": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100,
+                        "default": 25,
+                        "description": "Upper bound for a later shadow-only invocation."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        Ok(ToolResult::json_text(
+            &memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_payload(args),
+        ))
+    }
+}
+
 const MEMORY_NEURAL_CRITIC_SHADOW_EVAL_SCHEMA: &str =
     "agent_bridge.memory_neural_critic_shadow_eval.v0";
 const MEMORY_NEURAL_CRITIC_LABELS: [&str; 5] =
@@ -47581,6 +47861,10 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // surface for a later shadow-only executor; it never runs shadow mode or
     // grants production runtime influence.
     "memory_biocortex_t6_candidate_expansion_shadow_execution_gate",
+    // Continuity T6 candidate-expansion shadow executor preflight: validates
+    // fixture/telemetry bounds before a later shadow-only executor invocation;
+    // it never invokes the executor or grants production runtime influence.
+    "memory_biocortex_t6_candidate_expansion_shadow_executor_preflight",
     // Continuity T7 neural critic shadow eval: read-only offline held-out
     // comparison against deterministic T3/T4 labels; no model/write authority.
     "memory_neural_critic_shadow_eval",
@@ -51232,6 +51516,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Standard,
         Arc::new(MemoryBioCortexT6CandidateExpansionShadowExecutionGateTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(MemoryBioCortexT6CandidateExpansionShadowExecutorPreflightTool::new()),
     );
     reg_if(
         &mut reg,
@@ -57208,6 +57498,10 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             Tier::Standard,
             "memory_biocortex_t6_candidate_expansion_shadow_execution_gate"
         ));
+        assert!(p.includes(
+            Tier::Standard,
+            "memory_biocortex_t6_candidate_expansion_shadow_executor_preflight"
+        ));
         assert!(p.includes(Tier::Standard, "memory_neural_critic_shadow_eval"));
         assert!(p.includes(Tier::Standard, "biocortex_retrieval_shadow"));
         assert!(!p.includes(Tier::Standard, "embed_text"));
@@ -57261,9 +57555,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 73 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 74 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-        //      + DIRECT(63: 6 avatar observation/sync/renderer tools
+        //      + DIRECT(64: 6 avatar observation/sync/renderer tools
         //      + xiao_shu_action_request + 14 mobile bridge tools
         //      + memory_graph_topology + memory_retrieval_feedback
         //      + memory_consolidation_queue
@@ -57284,6 +57578,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         //      + memory_biocortex_t6_candidate_expansion_runtime_gate_code_implementation_gate
         //      + memory_biocortex_t6_candidate_expansion_shadow_runtime_gate
         //      + memory_biocortex_t6_candidate_expansion_shadow_execution_gate
+        //      + memory_biocortex_t6_candidate_expansion_shadow_executor_preflight
         //      + memory_neural_critic_shadow_eval
         //      + biocortex_retrieval_shadow
         //      + memory_related_keys_preflight
@@ -57300,7 +57595,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         // forum_digest joined via the FORUM_READ capability group (2026-05-23).
         // Native-overlap probes such as browser_lite_probe stay in broader
         // profiles, not codex-essential direct extras.
-        assert_eq!(extras.len(), 73);
+        assert_eq!(extras.len(), 74);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -57370,6 +57665,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         ));
         assert!(extras.contains(
             &"memory_biocortex_t6_candidate_expansion_shadow_execution_gate"
+        ));
+        assert!(extras.contains(
+            &"memory_biocortex_t6_candidate_expansion_shadow_executor_preflight"
         ));
         assert!(extras.contains(&"memory_neural_critic_shadow_eval"));
         assert!(extras.contains(&"biocortex_retrieval_shadow"));
@@ -71295,6 +71593,198 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(!serialized.contains("secret shadow execution query"));
         assert!(!serialized.contains("secret shadow execution content"));
         assert!(!serialized.contains("\"shadow_runtime_gate_report\""));
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_allows_fixture_bound_invocation(
+    ) {
+        let _env_lock = T6_CANDIDATE_EXPANSION_SHADOW_RUNTIME_GATE_ENV_LOCK
+            .lock()
+            .expect("t6 shadow env lock");
+        let prior_enable =
+            std::env::var("AB_BIOCORTEX_T6_CANDIDATE_EXPANSION_SHADOW").ok();
+        let prior_disable =
+            std::env::var("AB_BIOCORTEX_T6_CANDIDATE_EXPANSION_DISABLE").ok();
+        std::env::set_var("AB_BIOCORTEX_T6_CANDIDATE_EXPANSION_SHADOW", "1");
+        std::env::remove_var("AB_BIOCORTEX_T6_CANDIDATE_EXPANSION_DISABLE");
+
+        let runtime_tool = MemoryBioCortexT6CandidateExpansionShadowRuntimeGateTool::new();
+        let runtime_out = runtime_tool
+            .execute(
+                json!({
+                    "baseline_candidate_count": 10,
+                    "expanded_candidate_count": 12,
+                    "added_candidate_count": 2,
+                    "max_added_candidates": 3,
+                    "negative_control_regression_count": 0,
+                    "deterministic_replay_fixture_present": true,
+                    "bounded_candidate_delta": true,
+                    "rollback_plan_present": true
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("runtime execute");
+        let runtime_payload = result_text_as_json(&runtime_out);
+
+        restore_env_var(
+            "AB_BIOCORTEX_T6_CANDIDATE_EXPANSION_SHADOW",
+            prior_enable,
+        );
+        restore_env_var(
+            "AB_BIOCORTEX_T6_CANDIDATE_EXPANSION_DISABLE",
+            prior_disable,
+        );
+
+        let execution_tool = MemoryBioCortexT6CandidateExpansionShadowExecutionGateTool::new();
+        let execution_out = execution_tool
+            .execute(
+                json!({
+                    "shadow_runtime_gate_report": runtime_payload,
+                    "reviewer": "codex",
+                    "shadow_execution_decision": "approve_shadow_execution_only",
+                    "decision_source": "forum:#115/post:3823",
+                    "replay_fixture_id": "redacted-fixture:t6-shadow-smoke",
+                    "telemetry_sink": "append-only-shadow-telemetry"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execution execute");
+        let execution_payload = result_text_as_json(&execution_out);
+
+        let tool = MemoryBioCortexT6CandidateExpansionShadowExecutorPreflightTool::new();
+        let out = tool
+            .execute(
+                json!({
+                    "shadow_execution_gate_report": execution_payload,
+                    "executor_id": "shadow-only-executor:t6-candidate-expansion",
+                    "replay_fixture_id": "redacted-fixture:t6-shadow-smoke",
+                    "telemetry_sink": "append-only-shadow-telemetry",
+                    "max_shadow_cases": 25
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(
+            payload["schema"],
+            json!("agent_bridge.memory_biocortex_t6_candidate_expansion.shadow_executor_preflight.v0")
+        );
+        assert_eq!(payload["read_only"], json!(true));
+        assert_eq!(
+            payload["shadow_executor_preflight"]["ready"],
+            json!(true)
+        );
+        assert_eq!(
+            payload["shadow_executor_preflight"]["status"],
+            json!("ready_for_shadow_only_executor_invocation")
+        );
+        assert_eq!(
+            payload["shadow_executor_contract"]["may_invoke_shadow_only_executor_now"],
+            json!(true)
+        );
+        assert_eq!(
+            payload["shadow_executor_contract"]["this_tool_invokes_executor"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["shadow_executor_contract"]["may_mutate_runtime_candidate_set"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["shadow_executor_contract"]["runtime_influence_approved"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["shadow_executor_contract"]["may_write_memory_or_graph_edges"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["input_contract"]["shadow_execution_gate_report_included"],
+            json!(false)
+        );
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_blocks_raw_or_unbounded_invocation(
+    ) {
+        let execution_payload = json!({
+            "schema": "agent_bridge.memory_biocortex_t6_candidate_expansion.shadow_execution_gate.v0",
+            "read_only": true,
+            "shadow_execution_gate": {
+                "ready": false,
+                "status": "blocked_before_shadow_execution",
+                "block_reasons": ["source_shadow_runtime_gate_not_ready"]
+            },
+            "shadow_execution_contract": {
+                "may_run_shadow_executor_now": true,
+                "may_expand_runtime_candidate_set_now": true,
+                "runtime_influence_approved": true,
+                "may_write_memory_or_graph_edges": true
+            },
+            "shadow_run_bounds": {
+                "replay_fixture_id_present": false,
+                "telemetry_sink_present": false,
+                "raw_queries_allowed": true,
+                "raw_keys_allowed": true,
+                "content_allowed": true,
+                "case_rows_allowed": true
+            },
+            "raw_query": "secret preflight query",
+            "content": "secret preflight content"
+        });
+
+        let tool = MemoryBioCortexT6CandidateExpansionShadowExecutorPreflightTool::new();
+        let out = tool
+            .execute(
+                json!({
+                    "shadow_execution_gate_report": execution_payload,
+                    "executor_id": "",
+                    "replay_fixture_id": "",
+                    "telemetry_sink": "",
+                    "max_shadow_cases": 10_000,
+                    "raw_query": "secret top-level preflight query"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(
+            payload["shadow_executor_preflight"]["ready"],
+            json!(false)
+        );
+        let reasons = payload["shadow_executor_preflight"]["block_reasons"]
+            .as_array()
+            .expect("block reasons");
+        assert!(reasons.contains(&json!("source_shadow_execution_gate_not_ready")));
+        assert!(reasons.contains(&json!("source_shadow_execution_gate_contains_raw")));
+        assert!(reasons.contains(&json!(
+            "source_shadow_execution_gate_claims_runtime_authority"
+        )));
+        assert!(reasons.contains(&json!("input_contains_raw_or_source_fields")));
+        assert!(reasons.contains(&json!("executor_id_missing")));
+        assert!(reasons.contains(&json!("replay_fixture_id_missing")));
+        assert!(reasons.contains(&json!("telemetry_sink_missing")));
+        assert!(reasons.contains(&json!("max_shadow_cases_exceeds_bound")));
+        assert_eq!(
+            payload["shadow_executor_contract"]["may_invoke_shadow_only_executor_now"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["input_contract"]["shadow_execution_gate_report_included"],
+            json!(false)
+        );
+
+        let serialized = serde_json::to_string(&payload).expect("serialize");
+        assert!(!serialized.contains("secret preflight query"));
+        assert!(!serialized.contains("secret preflight content"));
+        assert!(!serialized.contains("secret top-level preflight query"));
+        assert!(!serialized.contains("\"shadow_execution_gate_report\""));
     }
 
     #[tokio::test]

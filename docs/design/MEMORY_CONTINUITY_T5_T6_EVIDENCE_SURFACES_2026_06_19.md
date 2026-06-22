@@ -1183,6 +1183,31 @@ ready, the contract keeps runtime candidate expansion, runtime search-order
 changes, memory/edge writes, and runtime enablement as non-claims for later
 gates.
 
+The following T6 candidate-expansion surface is the shadow-only executor
+preflight:
+
+- MCP tool:
+  `memory_biocortex_t6_candidate_expansion_shadow_executor_preflight`;
+- schema:
+  `agent_bridge.memory_biocortex_t6_candidate_expansion.shadow_executor_preflight.v0`;
+- required source:
+  the redacted JSON object from
+  `memory_biocortex_t6_candidate_expansion_shadow_execution_gate`;
+- scope:
+  redacted deterministic replay fixture only, with bounded case count and
+  append-only shadow telemetry.
+
+The preflight only reports whether a later shadow-only executor invocation is
+allowed. It never invokes the executor, never calls `memory_search`,
+`memory_neighbors`, or BioCortex, never writes memory or graph edges, and never
+approves production runtime influence. It blocks if the source shadow-execution
+gate is not `ready_for_shadow_execution_only`, if the source or request includes
+raw query/key/content/case rows, if the source claims runtime authority, if the
+executor id, redacted fixture id, or telemetry sink is missing, or if the bounded
+shadow-case count exceeds the preflight limit. Even when ready, production
+candidate-set mutation, search-order changes, runtime enablement, memory writes,
+and graph-edge writes remain non-claims for later gates.
+
 ## Verification
 
 Targeted validation for this slice after `/Data` space was recovered:
