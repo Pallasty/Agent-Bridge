@@ -142,9 +142,12 @@ found a better first review batch:
 That result is the reason for making the strategy explicit in the MCP tool
 instead of treating it as an ad hoc report-only calculation.
 
-## Next MCP Reconnect Check
+## Live MCP Reconnect Check
 
-After MCP reconnect, run the live read-only comparison:
+After MCP reconnect, this session ran the live read-only comparison with the
+new `selection_strategy` field visible in the MCP schema.
+
+Common inputs:
 
 ```json
 {
@@ -158,7 +161,34 @@ After MCP reconnect, run the live read-only comparison:
 }
 ```
 
-and:
+Result:
+
+| Metric | `preserve_order` | `orphan_reduction` |
+|---|---:|---:|
+| loaded records | 438 | 438 |
+| visible total | 140 | 140 |
+| current edge pairs | 288 | 288 |
+| current orphans | 35 | 35 |
+| safe candidates before caps | 101 | 101 |
+| selected edges | 20 | 20 |
+| orphan candidate nodes selected | 0 | 22 |
+| orphans reduced by selected | 0 | 22 |
+| projected orphans after selected | 35 | 13 |
+
+Safety flags from both live packets remained read-only: no memory writes, no
+graph-edge writes, no search-order change, no production retrieval-order change,
+no PageRank/centrality rank prior, and no automatic orphan linking.
+
+This validates the intended behavior: `preserve_order` remains the stable
+compatibility baseline, while `orphan_reduction` produces a materially better
+first 20-edge review packet for graph hygiene.
+
+The next safe step would be a guarded `memory_related_keys_materialize` dry-run,
+not a write. In this compact MCP tool profile, that materialize tool is not
+currently exposed, so this session stopped at the read-only comparison and did
+not run a dry-run writer.
+
+The exact `orphan_reduction` invocation used:
 
 ```json
 {
@@ -171,14 +201,6 @@ and:
   "preview_chars": 80
 }
 ```
-
-Expected read:
-
-- `preserve_order` remains a stable compatibility baseline;
-- `orphan_reduction` should select a 20-edge review packet with materially
-  higher `orphans_reduced_by_selected`;
-- if live output matches expectation, the next safe step is a guarded
-  `memory_related_keys_materialize` dry-run, not a write.
 
 ## Non-Authorizations
 
