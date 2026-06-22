@@ -703,6 +703,11 @@ fn debug_case(fts: &ScratchFts, idx1: usize) -> Result<(), Box<dyn std::error::E
     println!("trigger: {}", case.trigger);
     println!("expect:  {:?}\n", case.expect);
 
+    println!("## query diagnostics");
+    dump_query_diagnostics("intent", case.query);
+    dump_query_diagnostics("trigger", case.trigger);
+    println!();
+
     for (label, kind, query) in [
         ("intent_content", IndexKind::Content, case.query),
         ("intent_projected", IndexKind::Projected, case.query),
@@ -717,6 +722,39 @@ fn debug_case(fts: &ScratchFts, idx1: usize) -> Result<(), Box<dyn std::error::E
     }
 
     Ok(())
+}
+
+fn dump_query_diagnostics(label: &str, text: &str) {
+    println!("### {label}");
+    println!("  precise: {}", sanitise_fts_query(text));
+    println!("  any:     {}", sanitise_fts_query_any(text));
+    match fts_terms(text) {
+        Ok(terms) => println!("  terms:   {}", terms.join(" | ")),
+        Err(err) => println!("  terms:   ERROR: {err}"),
+    }
+}
+
+fn fts_terms(text: &str) -> Result<Vec<String>, String> {
+    let db = RusqliteConnection::open_in_memory().map_err(|e| e.to_string())?;
+    db.execute_batch(
+        "CREATE VIRTUAL TABLE term_probe USING fts5(
+             body,
+             tokenize = 'unicode61 remove_diacritics 2'
+         );
+         CREATE VIRTUAL TABLE term_vocab USING fts5vocab(term_probe, 'row');",
+    )
+    .map_err(|e| e.to_string())?;
+    db.execute("INSERT INTO term_probe(body) VALUES (?1)", params![text])
+        .map_err(|e| e.to_string())?;
+    let mut stmt = db
+        .prepare("SELECT term FROM term_vocab ORDER BY term")
+        .map_err(|e| e.to_string())?;
+    let terms = stmt
+        .query_map([], |row| row.get::<_, String>(0))
+        .map_err(|e| e.to_string())?
+        .collect::<SqlResult<Vec<_>>>()
+        .map_err(|e| e.to_string())?;
+    Ok(terms)
 }
 
 fn dump_keys(expect: &[&str], keys: &[String]) {
@@ -955,5 +993,28 @@ mod tests {
             sanitise_fts_query("onsen-hd session open; cloud(mock) ADR-015 v4.19.1"),
             "onsen* hd* session* open* cloud* mock* ADR* 015* v4* 19* 1*"
         );
+    }
+
+    #[test]
+    fn unicode61_keeps_cjk_runs_as_long_terms() {
+        let query_terms =
+            fts_terms("五行生克的成熟数学模型、黄金比例控制网络和平衡靶调研结论在哪里")
+                .expect("query terms");
+        assert_eq!(
+            query_terms,
+            vec![
+                "五行生克的成熟数学模型".to_string(),
+                "黄金比例控制网络和平衡靶调研结论在哪里".to_string(),
+            ]
+        );
+
+        let content_terms = fts_terms(
+            "五行生克成熟数学模型调研 黄金比例反馈控制网络 黄金比例五行控制网络 平衡靶 循环平衡环",
+        )
+        .expect("content terms");
+        assert!(content_terms.contains(&"五行生克成熟数学模型调研".to_string()));
+        assert!(content_terms.contains(&"黄金比例五行控制网络".to_string()));
+        assert!(!content_terms.contains(&query_terms[0]));
+        assert!(!content_terms.contains(&query_terms[1]));
     }
 }
