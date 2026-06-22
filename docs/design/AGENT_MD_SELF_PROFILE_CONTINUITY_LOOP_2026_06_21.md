@@ -34,6 +34,11 @@ On 2026-06-21, the local Mac Codex lane verified:
   `covered=0` / `proposed=221`. This means the current token-overlap drift
   detector is too noisy for short-profile-to-long-lesson acceptance decisions.
   Treat it as candidate pressure, not as an auto-apply signal.
+- Drift triage v1 now adds a deterministic self-profile candidate gate before
+  proposal writes. On the same live 14-day window it reduced `proposed` from
+  221 to 2 and reported 219 skipped lessons by reason:
+  `transient_operational=129`, `no_stable_posture_signal=35`,
+  `low_signal=23`, `domain_specific=22`, and `implementation_specific=10`.
 
 ## Layer Boundaries
 
@@ -88,8 +93,9 @@ V0 uses existing primitives and does not add a new MCP tool.
 1. Read current `AGENT.md`.
 2. Run `agent-bridge dream agent-md-drift --dry-run --json` for candidate
    pressure, but do not blindly apply proposals.
-3. Triage proposals manually by the agent using the self-evaluation gate. Do
-   not use raw proposal count as acceptance evidence.
+3. Let drift triage v1 split uncovered lessons into stable posture candidates
+   and skipped lessons. Inspect `skipped_by_triage` before trusting proposal
+   volume.
 4. Synthesize a compact candidate profile.
 5. Apply the self-evaluation gate above.
 6. Write with `session_finalize(agent_profile=...)`.
@@ -110,8 +116,9 @@ Minimum acceptance for v0:
 
 - `AGENT.md` is non-empty and injected in `session_bootstrap`.
 - The profile remains compact and stable.
-- Raw drift dry-runs are not used as auto-apply evidence until the detector is
-  improved or paired with a stricter triage layer.
+- Raw token-overlap drift is not used as auto-apply evidence; drift triage v1
+  must first reject transient, domain-specific, implementation-specific, and
+  low-signal rows.
 - The agent more reliably checks AB memory, work memory, and board state before
   planning Agent-Bridge work.
 - The profile does not cause stale branch/commit claims or broader automatic
@@ -119,8 +126,10 @@ Minimum acceptance for v0:
 
 Follow-up acceptance for a later detector slice:
 
-- Future drift dry-runs stop treating every recent lesson as uncovered, or
-  clearly separate stable posture candidates from transient operational noise.
+- Replace marker heuristics with a measured held-out triage set if proposal
+  quality becomes a blocker.
+- Measure whether accepted profile updates reduce future correction rate or
+  improve cold-start continuity decisions.
 
 ## Non-Goals
 
