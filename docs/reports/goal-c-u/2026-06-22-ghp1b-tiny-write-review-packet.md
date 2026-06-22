@@ -195,6 +195,49 @@ python3 -c 'import sqlite3; p="/home/pallasting/.local/share/agent-bridge/state.
 
 Observed result: `ok`.
 
+## Pre-Write Gate Attempt After MCP Restart
+
+After the remaining stale Codex/Cursor MCP session was restarted, the pre-write
+gates were rerun on 2026-06-22 before any `dry_run=false` call.
+
+Result:
+
+| Gate | Observed Result |
+|---|---|
+| repo status | clean; `HEAD == origin/master == b84a9794a13e9ce711a6c279a47d2057951dbb13` |
+| service health | `agent-bridge.real doctor --json`: `ok=true`, `fails=0`, `warns=0` |
+| SQLite integrity | read-only `PRAGMA quick_check`: `ok` |
+| rescue snapshot | succeeded; recovery dir `/home/pallasting/.cache/agent-bridge/recovery/2026-06-22T1136` |
+| profile isolation | one-shot all-profile MCP subprocess; compact Codex profile still does not expose `memory_related_keys_materialize` |
+| fresh dry-run | `dry_run=true`, `blocked=false`, `linked=0`, `write_errors=[]` |
+| write cap | `max_edges=20`, inbound/outbound caps `3` |
+| selected edge sequence | same ordered 20 edges as this packet |
+| selected-edge hash | blocked: packet hash algorithm was not recorded and could not be reproduced from common normalizations |
+
+Fresh dry-run metrics:
+
+| Metric | Value |
+|---|---:|
+| loaded records | 441 |
+| safe candidate pairs before caps | 94 |
+| current orphans | 33 |
+| selected edges | 20 |
+| orphan candidate nodes selected | 22 |
+| orphans reduced by selected | 22 |
+| projected orphans after selected | 11 |
+
+The ordered selected edge list matched this packet exactly, but the published
+hash `940c584a45386ba13f59dae136488a1b1c81861a6e92693a5008cf55375fb5ea` lacks a
+recorded canonicalization rule. Recomputed hashes over common formats
+(`from -> to`, `from -> to (kind)`, tab/pipe-delimited rows, compact JSON pair
+arrays, compact JSON objects, and the Markdown selected-batch block) did not
+match it.
+
+Gate verdict: `blocked_before_write_due_to_unreproducible_hash_gate`.
+
+No `dry_run=false` call was made. No graph edge, memory row, ranking,
+search-order, candidate-set, or automatic orphan-linking change was performed.
+
 ## Apply Shape If Later Approved
 
 If and only if the above gates pass and the batch is explicitly approved, the
