@@ -134,6 +134,44 @@ Selected edge list SHA-256:
     `lesson_macos_atomic_deploy_running_binary_20260530`
     (`decision -> lesson`)
 
+## Manual Semantic Review
+
+This review checks only whether the 20 proposed `relates` edges are reasonable
+same-project links from already-explicit `related_keys`. It does not reinterpret
+the edge type as causality, dependency, approval, ranking authority, or runtime
+influence.
+
+Result:
+
+| Check | Result |
+|---|---:|
+| selected edges reviewed | 20 |
+| semantic pass | 20 |
+| semantic reject | 0 |
+| needs split or reclassify before tiny write | 0 |
+
+Reviewed groups:
+
+| Edges | Assessment |
+|---|---|
+| 1 | Deployment-to-deployment lineage; the runtime executor design preflight deploy is directly related to the latest deployed Agent-Bridge state. |
+| 2-11 | BioCortex post-runtime evidence/readiness chain; the records form a tightly scoped progression from live-candidate runner/fixtures through evidence-backed readiness, review request, and authorization decision. |
+| 12-13 | BioCortex opt-in runtime-readiness packet chain; MCP surface, readiness packet, and downstream aggregate decision packet are directly adjacent artifacts. |
+| 14 | SEPL P0 resource-version implementation is linked to the earlier three-resource value-mapping proposal that motivated the SEPL/RSPL lane. |
+| 15-18 | Linux Codex avatar renderer chain; live probe, v26 renderer decision, transparent backend, and native sprite rendering are same-lane implementation/decision records. |
+| 19-20 | Remote-session steering chain; Kilo CLI availability supports the remote steering gap lane, and that delivered remote-control lane is related to the atomic deploy running-binary lesson. |
+
+Cautions retained:
+
+- all edges must remain `relates`;
+- the BioCortex cluster is dense, so the 20-edge cap and inbound/outbound caps
+  should not be relaxed for this batch;
+- this semantic pass is only for the listed hash-locked tiny batch and does not
+  approve later candidate-set expansion.
+
+Manual review verdict: `semantic_review_passed_for_tiny_batch`, still
+`not_authorized_to_write`.
+
 ## Pre-Write Gates
 
 These checks must all pass immediately before any future `dry_run=false` call:
