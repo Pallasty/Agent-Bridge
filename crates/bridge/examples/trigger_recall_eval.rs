@@ -62,14 +62,31 @@ struct Case {
     note: &'static str,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ControlBucket {
+    Unrelated,
+    PolicyAdversarial,
+}
+
+impl ControlBucket {
+    fn label(self) -> &'static str {
+        match self {
+            ControlBucket::Unrelated => "unrelated",
+            ControlBucket::PolicyAdversarial => "policy_adversarial",
+        }
+    }
+}
+
 struct NegativeControl {
     id: &'static str,
     query: &'static str,
+    bucket: ControlBucket,
     note: &'static str,
 }
 
 struct FalseHit {
-    control_id: String,
+    control_id: &'static str,
+    bucket: ControlBucket,
     key: String,
     rank: usize,
 }
@@ -331,81 +348,97 @@ const NEGATIVE_CONTROLS: &[NegativeControl] = &[
     NegativeControl {
         id: "unrelated_recipe",
         query: "banana sourdough crochet tidepool recipe unrelated continuation",
+        bucket: ControlBucket::Unrelated,
         note: "Unrelated English nouns should not retrieve corpus gold keys",
     },
     NegativeControl {
         id: "unrelated_weather",
         query: "明天的天气预报 机场停车 折扣券 完全无关任务",
+        bucket: ControlBucket::Unrelated,
         note: "Unrelated Chinese daily-life query should not retrieve corpus gold keys",
     },
     NegativeControl {
         id: "unrelated_math_puzzle",
         query: "prime number crossword watercolor tutorial no agent bridge project state",
+        bucket: ControlBucket::Unrelated,
         note: "Generic puzzle/art query should not retrieve corpus gold keys",
     },
     NegativeControl {
         id: "project_adjacent_cjk_tourism",
         query: "五行山旅游攻略 黄金比例摄影构图 平衡车购买指南",
+        bucket: ControlBucket::Unrelated,
         note: "Shares CJK surface terms with the Wuxing math row but has tourism/shopping intent",
     },
     NegativeControl {
         id: "project_adjacent_cjk_health",
         query: "五行蔬菜汤 平衡饮食 黄金比例健身计划 控制体重",
+        bucket: ControlBucket::Unrelated,
         note: "Shares Wuxing/balance/golden-ratio terms but has health-plan intent",
     },
     NegativeControl {
         id: "project_adjacent_nexus_visual",
         query: "Nexus 游戏 五行角色皮肤 黄金配色 平衡性吐槽",
+        bucket: ControlBucket::Unrelated,
         note: "Shares Nexus and Wuxing vocabulary but asks about visual/balance feedback, not math survey evidence",
     },
     NegativeControl {
         id: "hard_ab_tool_profile_cjk",
         query: "Agent Bridge essential 工具面 冷工具 裁剪 看板 巡检 只要界面清单 不要召回评测或Goal B决策",
+        bucket: ControlBucket::Unrelated,
         note: "Agent-Bridge operations vocabulary with explicit exclusion of recall/Goal B intent",
     },
     NegativeControl {
         id: "hard_ab_graph_materialize_cjk",
         query: "GHP 图谱孤点 related keys 干跑 审核包 只问术语含义 不要GHP部署证据或review packet",
+        bucket: ControlBucket::Unrelated,
         note: "Graph-hygiene vocabulary with explicit exclusion of deployment/review-packet intent",
     },
     NegativeControl {
         id: "hard_onsen_save_cloud_cjk",
         query: "温泉乡 存档 云同步 Steam readiness 只要玩家说明文案 不要Sprint交接或会话handoff",
+        bucket: ControlBucket::Unrelated,
         note: "Onsen save/cloud vocabulary with explicit exclusion of handoff/project-state intent",
     },
     NegativeControl {
         id: "hard_onsen_visual_decor_cjk",
         query: "温泉乡 庭院 装饰 阴影 锦鲤 视觉层级 只要美术灵感 不要工程验证或交接记忆",
+        bucket: ControlBucket::Unrelated,
         note: "Onsen visual-art vocabulary with explicit exclusion of engineering/handoff intent",
     },
     NegativeControl {
         id: "hard_nexus_battle_readability_cjk",
         query: "Nexus 战斗 编队 可读性 骑兵 阵型 安卓模拟器 只要玩法吐槽 不要设计review或五行数学",
+        bucket: ControlBucket::Unrelated,
         note: "Nexus battle-readability vocabulary with explicit exclusion of design-review/math intent",
     },
     NegativeControl {
         id: "hard_nexus_wuxing_art_cjk",
         query: "Nexus 五行 UI 图标 配色 角色皮肤 美术规格 只要视觉草案 不要数学模型调研或设计review",
+        bucket: ControlBucket::Unrelated,
         note: "Hard Wuxing-adjacent art query separated from math survey and design-review intent",
     },
     NegativeControl {
         id: "contrastive_goal_c_not_executor",
         query: "Controlled RSI reading list and governance glossary, not recall eval or runtime executor patch authority",
+        bucket: ControlBucket::Unrelated,
         note: "English not-clause should reject Goal C recall/evaluator and executor authorization memories",
     },
     NegativeControl {
         id: "contrastive_graph_rather_than_packet",
         query: "GHP related keys terminology map rather than review packet deployment evidence",
+        bucket: ControlBucket::Unrelated,
         note: "English rather-than clause should reject graph-hygiene packet/deploy evidence",
     },
     NegativeControl {
         id: "contrastive_onsen_instead_handoff",
         query: "Onsen save cloud player README instead of Sprint handoff or session memory",
+        bucket: ControlBucket::Unrelated,
         note: "English instead-of clause should reject Onsen project handoff memories",
     },
     NegativeControl {
         id: "contrastive_nexus_instead_review",
         query: "Nexus Wuxing icon palette and art board instead of GDD review or math survey",
+        bucket: ControlBucket::Unrelated,
         note: "English instead-of clause should reject Nexus design-review/math survey memories",
     },
 ];
@@ -523,21 +556,25 @@ const AIO2_NATIVE_NEGATIVE_CONTROLS: &[NegativeControl] = &[
     NegativeControl {
         id: "aio2_unrelated_desktop",
         query: "sway wallpaper brightness audio wifi statusbar unrelated desktop maintenance",
+        bucket: ControlBucket::Unrelated,
         note: "Linux desktop maintenance should not retrieve trigger-recall gold keys",
     },
     NegativeControl {
         id: "aio2_unrelated_frontend",
         query: "dashboard card spacing color palette button hover state responsive layout",
+        bucket: ControlBucket::Unrelated,
         note: "Frontend styling work is adjacent to reports but not this memory lane",
     },
     NegativeControl {
         id: "aio2_adjacent_write_request",
         query: "please directly write graph edges and bypass dry run review for related keys",
+        bucket: ControlBucket::PolicyAdversarial,
         note: "Adjacent GHP vocabulary with forbidden write intent",
     },
     NegativeControl {
         id: "aio2_adjacent_lswr_poetry",
         query: "write a poem about lineage admission evidence and runtime gates",
+        bucket: ControlBucket::PolicyAdversarial,
         note: "Shares LSWR vocabulary but asks for creative writing, not project state",
     },
 ];
@@ -719,66 +756,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut projected_union_errors = Vec::new();
     for control in NEGATIVE_CONTROLS {
         match fts.search(IndexKind::Projected, control.query, TOP_K) {
-            Ok(keys) => {
-                for (idx, key) in keys.iter().enumerate() {
-                    if gold_keys.contains(key.as_str()) {
-                        negative_false_hits.push(format!("{}:{}@{}", control.id, key, idx + 1));
-                    }
-                }
-            }
+            Ok(keys) => push_false_hits(&mut negative_false_hits, control, &keys, &gold_keys),
             Err(err) => negative_errors.push(format!("{}:{err}", control.id)),
         }
         match fts.search_projected_cjk_shingles(control.query, TOP_K) {
-            Ok(keys) => {
-                for (idx, key) in keys.iter().enumerate() {
-                    if gold_keys.contains(key.as_str()) {
-                        cjk_negative_false_hits.push(format!("{}:{}@{}", control.id, key, idx + 1));
-                    }
-                }
-            }
+            Ok(keys) => push_false_hits(&mut cjk_negative_false_hits, control, &keys, &gold_keys),
             Err(err) => cjk_negative_errors.push(format!("{}:{err}", control.id)),
         }
         match fts.search_projected_then_cjk_accepted(control.query, TOP_K) {
-            Ok(keys) => {
-                for (idx, key) in keys.iter().enumerate() {
-                    if gold_keys.contains(key.as_str()) {
-                        projected_plus_false_hits.push(format!(
-                            "{}:{}@{}",
-                            control.id,
-                            key,
-                            idx + 1
-                        ));
-                    }
-                }
-            }
+            Ok(keys) => push_false_hits(&mut projected_plus_false_hits, control, &keys, &gold_keys),
             Err(err) => projected_plus_errors.push(format!("{}:{err}", control.id)),
         }
         match fts.search_projected_then_intent_accepted(control.query, TOP_K) {
             Ok(keys) => {
-                for (idx, key) in keys.iter().enumerate() {
-                    if gold_keys.contains(key.as_str()) {
-                        projected_intent_false_hits.push(FalseHit {
-                            control_id: control.id.to_string(),
-                            key: key.clone(),
-                            rank: idx + 1,
-                        });
-                    }
-                }
+                push_false_hits(&mut projected_intent_false_hits, control, &keys, &gold_keys);
             }
             Err(err) => projected_intent_errors.push(format!("{}:{err}", control.id)),
         }
         match fts.search_precise_plus_or_union(IndexKind::Projected, control.query, TOP_K) {
             Ok(keys) => {
-                for (idx, key) in keys.iter().enumerate() {
-                    if gold_keys.contains(key.as_str()) {
-                        projected_union_false_hits.push(format!(
-                            "{}:{}@{}",
-                            control.id,
-                            key,
-                            idx + 1
-                        ));
-                    }
-                }
+                push_false_hits(&mut projected_union_false_hits, control, &keys, &gold_keys)
             }
             Err(err) => projected_union_errors.push(format!("{}:{err}", control.id)),
         }
@@ -876,15 +873,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         negative_false_hits.len()
     );
     if !negative_false_hits.is_empty() {
-        println!("  false hits: {}", negative_false_hits.join(", "));
+        println!("  false hits: {}", fmt_false_hits(&negative_false_hits));
     }
+    print_false_hit_bucket_summary("projected", &negative_false_hits);
     println!("  projected parser errors: {}", negative_errors.len());
     if !negative_errors.is_empty() {
         println!("  errors: {}", negative_errors.join(", "));
     }
     println!("  controls:");
     for control in NEGATIVE_CONTROLS {
-        println!("    {:<22} {}", control.id, control.note);
+        println!(
+            "    {:<34} {:<20} {}",
+            control.id,
+            control.bucket.label(),
+            control.note
+        );
     }
     println!();
 
@@ -903,8 +906,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     println!("  negative false hits: {}", cjk_negative_false_hits.len());
     if !cjk_negative_false_hits.is_empty() {
-        println!("  false hits: {}", cjk_negative_false_hits.join(", "));
+        println!("  false hits: {}", fmt_false_hits(&cjk_negative_false_hits));
     }
+    print_false_hit_bucket_summary("cjk", &cjk_negative_false_hits);
     println!("  parser errors: {}", cjk_negative_errors.len());
     if !cjk_negative_errors.is_empty() {
         println!("  errors: {}", cjk_negative_errors.join(", "));
@@ -933,8 +937,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     println!("  accepted false hits: {}", projected_plus_false_hits.len());
     if !projected_plus_false_hits.is_empty() {
-        println!("  false hits: {}", projected_plus_false_hits.join(", "));
+        println!(
+            "  false hits: {}",
+            fmt_false_hits(&projected_plus_false_hits)
+        );
     }
+    print_false_hit_bucket_summary("projected+cjk", &projected_plus_false_hits);
     println!("  parser errors: {}", projected_plus_errors.len());
     if !projected_plus_errors.is_empty() {
         println!("  errors: {}", projected_plus_errors.join(", "));
@@ -967,9 +975,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !projected_intent_false_hits.is_empty() {
         println!(
             "  false hits: {}",
-            false_hit_labels(&projected_intent_false_hits)
+            fmt_false_hits(&projected_intent_false_hits)
         );
     }
+    print_false_hit_bucket_summary("projected+intent", &projected_intent_false_hits);
     println!("  parser errors: {}", projected_intent_errors.len());
     if !projected_intent_errors.is_empty() {
         println!("  errors: {}", projected_intent_errors.join(", "));
@@ -980,6 +989,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     print_exclusion_boundary_diagnostics(&fts, NEGATIVE_CONTROLS, &projected_intent_false_hits);
+
+    println!("## Projected precise+OR union negative-control probe");
+    println!("  false hits: {}", projected_union_false_hits.len());
+    if !projected_union_false_hits.is_empty() {
+        println!(
+            "  false hits: {}",
+            fmt_false_hits(&projected_union_false_hits)
+        );
+    }
+    print_false_hit_bucket_summary("projected_union", &projected_union_false_hits);
+    println!("  parser errors: {}", projected_union_errors.len());
+    if !projected_union_errors.is_empty() {
+        println!("  errors: {}", projected_union_errors.join(", "));
+    }
+    println!("  contract: candidate-assembly diagnostic only; no production query strategy change");
+    println!();
 
     println!("## Per-case first-hit rank (- = no hit in top {TOP_K}; ERR = FTS parser error)");
     println!(
@@ -1094,6 +1119,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         projected_intent_errors.len()
     );
     println!(
+        "  projected_union ctrl:    {} false hit(s), {} parser error(s)",
+        projected_union_false_hits.len(),
+        projected_union_errors.len()
+    );
+    println!(
         "  caveat: hand-curated corpus, N={n}. This is a broader trigger-cohort \
          falsifier, not a production ranking benchmark."
     );
@@ -1186,66 +1216,26 @@ fn run_eval_for(
     let mut projected_union_errors = Vec::new();
     for control in negative_controls {
         match fts.search(IndexKind::Projected, control.query, TOP_K) {
-            Ok(keys) => {
-                for (idx, key) in keys.iter().enumerate() {
-                    if gold_keys.contains(key.as_str()) {
-                        negative_false_hits.push(format!("{}:{}@{}", control.id, key, idx + 1));
-                    }
-                }
-            }
+            Ok(keys) => push_false_hits(&mut negative_false_hits, control, &keys, &gold_keys),
             Err(err) => negative_errors.push(format!("{}:{err}", control.id)),
         }
         match fts.search_projected_cjk_shingles(control.query, TOP_K) {
-            Ok(keys) => {
-                for (idx, key) in keys.iter().enumerate() {
-                    if gold_keys.contains(key.as_str()) {
-                        cjk_negative_false_hits.push(format!("{}:{}@{}", control.id, key, idx + 1));
-                    }
-                }
-            }
+            Ok(keys) => push_false_hits(&mut cjk_negative_false_hits, control, &keys, &gold_keys),
             Err(err) => cjk_negative_errors.push(format!("{}:{err}", control.id)),
         }
         match fts.search_projected_then_cjk_accepted(control.query, TOP_K) {
-            Ok(keys) => {
-                for (idx, key) in keys.iter().enumerate() {
-                    if gold_keys.contains(key.as_str()) {
-                        projected_plus_false_hits.push(format!(
-                            "{}:{}@{}",
-                            control.id,
-                            key,
-                            idx + 1
-                        ));
-                    }
-                }
-            }
+            Ok(keys) => push_false_hits(&mut projected_plus_false_hits, control, &keys, &gold_keys),
             Err(err) => projected_plus_errors.push(format!("{}:{err}", control.id)),
         }
         match fts.search_projected_then_intent_accepted(control.query, TOP_K) {
             Ok(keys) => {
-                for (idx, key) in keys.iter().enumerate() {
-                    if gold_keys.contains(key.as_str()) {
-                        projected_intent_false_hits.push(FalseHit {
-                            control_id: control.id.to_string(),
-                            key: key.clone(),
-                            rank: idx + 1,
-                        });
-                    }
-                }
+                push_false_hits(&mut projected_intent_false_hits, control, &keys, &gold_keys);
             }
             Err(err) => projected_intent_errors.push(format!("{}:{err}", control.id)),
         }
         match fts.search_precise_plus_or_union(IndexKind::Projected, control.query, TOP_K) {
             Ok(keys) => {
-                for (idx, key) in keys.iter().enumerate() {
-                    if gold_keys.contains(key.as_str()) {
-                        projected_union_false_hits.push(format!(
-                            "{}:{}@{}",
-                            control.id,
-                            key,
-                            idx + 1
-                        ));
-                    }
-                }
+                push_false_hits(&mut projected_union_false_hits, control, &keys, &gold_keys)
             }
             Err(err) => projected_union_errors.push(format!("{}:{err}", control.id)),
         }
@@ -1343,22 +1333,28 @@ fn run_eval_for(
         negative_false_hits.len()
     );
     if !negative_false_hits.is_empty() {
-        println!("  false hits: {}", negative_false_hits.join(", "));
+        println!("  false hits: {}", fmt_false_hits(&negative_false_hits));
     }
+    print_false_hit_bucket_summary("projected", &negative_false_hits);
     println!(
         "  cjk false hits against corpus gold keys: {}",
         cjk_negative_false_hits.len()
     );
     if !cjk_negative_false_hits.is_empty() {
-        println!("  false hits: {}", cjk_negative_false_hits.join(", "));
+        println!("  false hits: {}", fmt_false_hits(&cjk_negative_false_hits));
     }
+    print_false_hit_bucket_summary("cjk", &cjk_negative_false_hits);
     println!(
         "  projected+cjk accepted false hits: {}",
         projected_plus_false_hits.len()
     );
     if !projected_plus_false_hits.is_empty() {
-        println!("  false hits: {}", projected_plus_false_hits.join(", "));
+        println!(
+            "  false hits: {}",
+            fmt_false_hits(&projected_plus_false_hits)
+        );
     }
+    print_false_hit_bucket_summary("projected+cjk", &projected_plus_false_hits);
     println!(
         "  projected+intent accepted false hits: {}",
         projected_intent_false_hits.len()
@@ -1366,16 +1362,21 @@ fn run_eval_for(
     if !projected_intent_false_hits.is_empty() {
         println!(
             "  false hits: {}",
-            false_hit_labels(&projected_intent_false_hits)
+            fmt_false_hits(&projected_intent_false_hits)
         );
     }
+    print_false_hit_bucket_summary("projected+intent", &projected_intent_false_hits);
     println!(
         "  projected precise+OR union false hits: {}",
         projected_union_false_hits.len()
     );
     if !projected_union_false_hits.is_empty() {
-        println!("  false hits: {}", projected_union_false_hits.join(", "));
+        println!(
+            "  false hits: {}",
+            fmt_false_hits(&projected_union_false_hits)
+        );
     }
+    print_false_hit_bucket_summary("projected_union", &projected_union_false_hits);
     println!("  projected parser errors: {}", negative_errors.len());
     println!("  cjk parser errors: {}", cjk_negative_errors.len());
     println!(
@@ -1392,7 +1393,12 @@ fn run_eval_for(
     );
     println!("  controls:");
     for control in negative_controls {
-        println!("    {:<28} {}", control.id, control.note);
+        println!(
+            "    {:<28} {:<20} {}",
+            control.id,
+            control.bucket.label(),
+            control.note
+        );
     }
     println!();
 
@@ -2438,6 +2444,40 @@ where
     out
 }
 
+fn push_false_hits(
+    hits: &mut Vec<FalseHit>,
+    control: &NegativeControl,
+    keys: &[String],
+    gold_keys: &BTreeSet<&str>,
+) {
+    for (idx, key) in keys.iter().enumerate() {
+        if gold_keys.contains(key.as_str()) {
+            hits.push(FalseHit {
+                control_id: control.id,
+                bucket: control.bucket,
+                key: key.clone(),
+                rank: idx + 1,
+            });
+        }
+    }
+}
+
+fn fmt_false_hits(hits: &[FalseHit]) -> String {
+    false_hit_labels(hits)
+}
+
+fn false_hit_bucket_count(hits: &[FalseHit], bucket: ControlBucket) -> usize {
+    hits.iter().filter(|hit| hit.bucket == bucket).count()
+}
+
+fn print_false_hit_bucket_summary(label: &str, hits: &[FalseHit]) {
+    println!(
+        "  {label} false-hit buckets: unrelated={}, policy_adversarial={}",
+        false_hit_bucket_count(hits, ControlBucket::Unrelated),
+        false_hit_bucket_count(hits, ControlBucket::PolicyAdversarial)
+    );
+}
+
 fn print_row(label: &str, agg: &Agg, n: usize) {
     let nf = n as f64;
     println!(
@@ -2689,6 +2729,27 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn aio2_native_negative_controls_keep_bucket_balance() {
+        let unrelated = AIO2_NATIVE_NEGATIVE_CONTROLS
+            .iter()
+            .filter(|control| control.bucket == ControlBucket::Unrelated)
+            .count();
+        let policy_adversarial = AIO2_NATIVE_NEGATIVE_CONTROLS
+            .iter()
+            .filter(|control| control.bucket == ControlBucket::PolicyAdversarial)
+            .count();
+
+        assert_eq!(
+            unrelated, 2,
+            "aio2-native controls should keep unrelated desktop/frontend probes separate"
+        );
+        assert_eq!(
+            policy_adversarial, 2,
+            "aio2-native controls should keep policy/adversarial adjacent probes separate"
+        );
     }
 
     #[test]
