@@ -613,6 +613,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut cjk_shingle_projected = Agg::default();
     let mut projected_plus_cjk_acc = Agg::default();
     let mut projected_plus_intent_acc = Agg::default();
+    let mut projected_precise_plus_or = Agg::default();
+    let mut projected_oracle_or = Agg::default();
     let mut exact_projected = Agg::default();
     let gold_keys: BTreeSet<&str> = CORPUS
         .iter()
@@ -650,6 +652,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             projected_intent_keys.err(),
         );
 
+        let projected_union_keys =
+            fts.search_precise_plus_or_union(IndexKind::Projected, case.query, TOP_K);
+        projected_precise_plus_or.record(
+            first_hit_rank(projected_union_keys.as_deref().unwrap_or(&[]), case.expect),
+            projected_union_keys.err(),
+        );
+
+        let projected_oracle_keys =
+            fts.search_precise_then_or_if_expected_missing(case.query, case.expect, TOP_K);
+        projected_oracle_or.record(
+            first_hit_rank(projected_oracle_keys.as_deref().unwrap_or(&[]), case.expect),
+            projected_oracle_keys.err(),
+        );
+
         let trigger_keys = fts.search(IndexKind::Projected, case.trigger, TOP_K);
         exact_projected.record(
             first_hit_rank(trigger_keys.as_deref().unwrap_or(&[]), case.expect),
@@ -665,6 +681,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut projected_plus_errors = Vec::new();
     let mut projected_intent_false_hits = Vec::new();
     let mut projected_intent_errors = Vec::new();
+    let mut projected_union_false_hits = Vec::new();
+    let mut projected_union_errors = Vec::new();
     for control in NEGATIVE_CONTROLS {
         match fts.search(IndexKind::Projected, control.query, TOP_K) {
             Ok(keys) => {
@@ -716,6 +734,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             Err(err) => projected_intent_errors.push(format!("{}:{err}", control.id)),
         }
+        match fts.search_precise_plus_or_union(IndexKind::Projected, control.query, TOP_K) {
+            Ok(keys) => {
+                for (idx, key) in keys.iter().enumerate() {
+                    if gold_keys.contains(key.as_str()) {
+                        projected_union_false_hits.push(format!(
+                            "{}:{}@{}",
+                            control.id,
+                            key,
+                            idx + 1
+                        ));
+                    }
+                }
+            }
+            Err(err) => projected_union_errors.push(format!("{}:{err}", control.id)),
+        }
     }
 
     let active_total = rows.len();
@@ -747,6 +780,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     print_row("cjk_shingle_proj", &cjk_shingle_projected, n);
     print_row("projected+cjk_acc", &projected_plus_cjk_acc, n);
     print_row("projected+intent", &projected_plus_intent_acc, n);
+    print_row("projected_union", &projected_precise_plus_or, n);
+    print_row("projected_oracle", &projected_oracle_or, n);
     print_row("exact_projected", &exact_projected, n);
     println!();
 
@@ -768,6 +803,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "  improved first-hit rank:              {} case(s){}",
         improved.len(),
         fmt_idx(&improved)
+    );
+    println!();
+
+    println!("## Candidate assembly probes");
+    let union_added = added_hit_indices(&intent_projected, &projected_precise_plus_or);
+    let union_improved = improved_rank_indices(&intent_projected, &projected_precise_plus_or);
+    let oracle_added = added_hit_indices(&intent_projected, &projected_oracle_or);
+    let oracle_improved = improved_rank_indices(&intent_projected, &projected_oracle_or);
+    println!("  current: precise_else_OR (OR only when precise returns zero rows)");
+    println!(
+        "  precise+OR union added top-{TOP_K} hits: {} case(s){}",
+        union_added.len(),
+        fmt_idx(&union_added)
+    );
+    println!(
+        "  precise+OR union improved rank:        {} case(s){}",
+        union_improved.len(),
+        fmt_idx(&union_improved)
+    );
+    println!(
+        "  projected_oracle added top-{TOP_K} hits: {} case(s){}",
+        oracle_added.len(),
+        fmt_idx(&oracle_added)
+    );
+    println!(
+        "  projected_oracle improved rank:        {} case(s){}",
+        oracle_improved.len(),
+        fmt_idx(&oracle_improved)
+    );
+    println!(
+        "  contract: projected_oracle uses gold labels and is diagnostic-only, never a deployable strategy"
     );
     println!();
 
@@ -950,6 +1016,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         fmt_idx(&miss_indices(&projected_plus_intent_acc))
     );
     println!(
+        "  projected_union misses: {} case(s){}",
+        miss_indices(&projected_precise_plus_or).len(),
+        fmt_idx(&miss_indices(&projected_precise_plus_or))
+    );
+    println!(
+        "  projected_oracle misses: {} case(s){}",
+        miss_indices(&projected_oracle_or).len(),
+        fmt_idx(&miss_indices(&projected_oracle_or))
+    );
+    println!(
         "  exact_projected errors:  {} case(s){}",
         error_indices(&exact_projected).len(),
         fmt_idx(&error_indices(&exact_projected))
@@ -1000,6 +1076,8 @@ fn run_eval_for(
     let mut cjk_shingle_projected = Agg::default();
     let mut projected_plus_cjk_acc = Agg::default();
     let mut projected_plus_intent_acc = Agg::default();
+    let mut projected_precise_plus_or = Agg::default();
+    let mut projected_oracle_or = Agg::default();
     let mut exact_projected = Agg::default();
     let gold_keys: BTreeSet<&str> = cases
         .iter()
@@ -1037,6 +1115,20 @@ fn run_eval_for(
             projected_intent_keys.err(),
         );
 
+        let projected_union_keys =
+            fts.search_precise_plus_or_union(IndexKind::Projected, case.query, TOP_K);
+        projected_precise_plus_or.record(
+            first_hit_rank(projected_union_keys.as_deref().unwrap_or(&[]), case.expect),
+            projected_union_keys.err(),
+        );
+
+        let projected_oracle_keys =
+            fts.search_precise_then_or_if_expected_missing(case.query, case.expect, TOP_K);
+        projected_oracle_or.record(
+            first_hit_rank(projected_oracle_keys.as_deref().unwrap_or(&[]), case.expect),
+            projected_oracle_keys.err(),
+        );
+
         let trigger_keys = fts.search(IndexKind::Projected, case.trigger, TOP_K);
         exact_projected.record(
             first_hit_rank(trigger_keys.as_deref().unwrap_or(&[]), case.expect),
@@ -1052,6 +1144,8 @@ fn run_eval_for(
     let mut projected_plus_errors = Vec::new();
     let mut projected_intent_false_hits = Vec::new();
     let mut projected_intent_errors = Vec::new();
+    let mut projected_union_false_hits = Vec::new();
+    let mut projected_union_errors = Vec::new();
     for control in negative_controls {
         match fts.search(IndexKind::Projected, control.query, TOP_K) {
             Ok(keys) => {
@@ -1103,6 +1197,21 @@ fn run_eval_for(
             }
             Err(err) => projected_intent_errors.push(format!("{}:{err}", control.id)),
         }
+        match fts.search_precise_plus_or_union(IndexKind::Projected, control.query, TOP_K) {
+            Ok(keys) => {
+                for (idx, key) in keys.iter().enumerate() {
+                    if gold_keys.contains(key.as_str()) {
+                        projected_union_false_hits.push(format!(
+                            "{}:{}@{}",
+                            control.id,
+                            key,
+                            idx + 1
+                        ));
+                    }
+                }
+            }
+            Err(err) => projected_union_errors.push(format!("{}:{err}", control.id)),
+        }
     }
 
     let active_total = rows.len();
@@ -1134,6 +1243,8 @@ fn run_eval_for(
     print_row("cjk_shingle_proj", &cjk_shingle_projected, n);
     print_row("projected+cjk_acc", &projected_plus_cjk_acc, n);
     print_row("projected+intent", &projected_plus_intent_acc, n);
+    print_row("projected_union", &projected_precise_plus_or, n);
+    print_row("projected_oracle", &projected_oracle_or, n);
     print_row("exact_projected", &exact_projected, n);
     println!();
 
@@ -1155,6 +1266,37 @@ fn run_eval_for(
         "  improved first-hit rank:              {} case(s){}",
         improved.len(),
         fmt_idx(&improved)
+    );
+    println!();
+
+    println!("## Candidate assembly probes");
+    let union_added = added_hit_indices(&intent_projected, &projected_precise_plus_or);
+    let union_improved = improved_rank_indices(&intent_projected, &projected_precise_plus_or);
+    let oracle_added = added_hit_indices(&intent_projected, &projected_oracle_or);
+    let oracle_improved = improved_rank_indices(&intent_projected, &projected_oracle_or);
+    println!("  current: precise_else_OR (OR only when precise returns zero rows)");
+    println!(
+        "  precise+OR union added top-{TOP_K} hits: {} case(s){}",
+        union_added.len(),
+        fmt_idx(&union_added)
+    );
+    println!(
+        "  precise+OR union improved rank:        {} case(s){}",
+        union_improved.len(),
+        fmt_idx(&union_improved)
+    );
+    println!(
+        "  projected_oracle added top-{TOP_K} hits: {} case(s){}",
+        oracle_added.len(),
+        fmt_idx(&oracle_added)
+    );
+    println!(
+        "  projected_oracle improved rank:        {} case(s){}",
+        oracle_improved.len(),
+        fmt_idx(&oracle_improved)
+    );
+    println!(
+        "  contract: projected_oracle uses gold labels and is diagnostic-only, never a deployable strategy"
     );
     println!();
 
@@ -1187,6 +1329,13 @@ fn run_eval_for(
     if !projected_intent_false_hits.is_empty() {
         println!("  false hits: {}", projected_intent_false_hits.join(", "));
     }
+    println!(
+        "  projected precise+OR union false hits: {}",
+        projected_union_false_hits.len()
+    );
+    if !projected_union_false_hits.is_empty() {
+        println!("  false hits: {}", projected_union_false_hits.join(", "));
+    }
     println!("  projected parser errors: {}", negative_errors.len());
     println!("  cjk parser errors: {}", cjk_negative_errors.len());
     println!(
@@ -1196,6 +1345,10 @@ fn run_eval_for(
     println!(
         "  projected+intent parser errors: {}",
         projected_intent_errors.len()
+    );
+    println!(
+        "  projected precise+OR union parser errors: {}",
+        projected_union_errors.len()
     );
     println!("  controls:");
     for control in negative_controls {
@@ -1274,6 +1427,16 @@ fn run_eval_for(
         "  projected+intent misses:{} case(s){}",
         miss_indices(&projected_plus_intent_acc).len(),
         fmt_idx(&miss_indices(&projected_plus_intent_acc))
+    );
+    println!(
+        "  projected_union misses: {} case(s){}",
+        miss_indices(&projected_precise_plus_or).len(),
+        fmt_idx(&miss_indices(&projected_precise_plus_or))
+    );
+    println!(
+        "  projected_oracle misses: {} case(s){}",
+        miss_indices(&projected_oracle_or).len(),
+        fmt_idx(&miss_indices(&projected_oracle_or))
     );
     println!(
         "  exact_projected errors:  {} case(s){}",
@@ -1638,6 +1801,44 @@ impl ScratchFts {
         }
 
         filter_explicit_exclusion_intent(&self.projected_by_key, &clauses, candidates)
+    }
+
+    fn search_precise_plus_or_union(
+        &self,
+        kind: IndexKind,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<String>, String> {
+        let precise = sanitise_fts_query(query);
+        let any = sanitise_fts_query_any(query);
+        let precise_rows = self.search_once(kind, &precise, limit)?;
+        if any == precise {
+            return Ok(precise_rows);
+        }
+        let any_rows = self.search_once(kind, &any, limit)?;
+        Ok(dedupe_limit(
+            precise_rows.into_iter().chain(any_rows),
+            limit,
+        ))
+    }
+
+    fn search_precise_then_or_if_expected_missing(
+        &self,
+        query: &str,
+        expect: &[&str],
+        limit: usize,
+    ) -> Result<Vec<String>, String> {
+        let precise = sanitise_fts_query(query);
+        let any = sanitise_fts_query_any(query);
+        let precise_rows = self.search_once(IndexKind::Projected, &precise, limit)?;
+        if first_hit_rank(&precise_rows, expect).is_some() || any == precise {
+            return Ok(precise_rows);
+        }
+        let any_rows = self.search_once(IndexKind::Projected, &any, limit)?;
+        Ok(dedupe_limit(
+            precise_rows.into_iter().chain(any_rows),
+            limit,
+        ))
     }
 
     fn search(&self, kind: IndexKind, query: &str, limit: usize) -> Result<Vec<String>, String> {
@@ -2081,6 +2282,23 @@ fn first_hit_rank(keys: &[String], expect: &[&str]) -> Option<usize> {
         .map(|i| i + 1)
 }
 
+fn dedupe_limit<I>(keys: I, limit: usize) -> Vec<String>
+where
+    I: IntoIterator<Item = String>,
+{
+    let mut seen = BTreeSet::new();
+    let mut out = Vec::new();
+    for key in keys {
+        if seen.insert(key.clone()) {
+            out.push(key);
+            if out.len() >= limit {
+                break;
+            }
+        }
+    }
+    out
+}
+
 fn print_row(label: &str, agg: &Agg, n: usize) {
     let nf = n as f64;
     println!(
@@ -2264,6 +2482,22 @@ mod tests {
         assert_eq!(
             first_hit_rank(&keys, &["expected_a", "expected_b"]),
             Some(2)
+        );
+    }
+
+    #[test]
+    fn dedupe_limit_preserves_first_seen_order() {
+        let keys = vec![
+            "a".to_string(),
+            "b".to_string(),
+            "a".to_string(),
+            "c".to_string(),
+            "d".to_string(),
+        ];
+
+        assert_eq!(
+            dedupe_limit(keys, 3),
+            vec!["a".to_string(), "b".to_string(), "c".to_string()]
         );
     }
 
