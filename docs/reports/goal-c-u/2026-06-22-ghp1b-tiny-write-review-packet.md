@@ -66,11 +66,28 @@ Note: safe candidate count was `90` before this session saved the durable
 dry-run memory, and `91` afterward. The selected 20-edge batch and orphan
 reduction stayed stable.
 
-Selected edge list SHA-256:
+Selected edge list SHA-256, canonical v1:
 
 ```text
-940c584a45386ba13f59dae136488a1b1c81861a6e92693a5008cf55375fb5ea
+4868930845e953281e1bef2c30613c18cb0d42c91a886443b6c36bf8f030e9c0
 ```
+
+Canonicalization rule v1:
+
+1. Preserve selected edge order exactly as returned by
+   `memory_related_keys_materialize`.
+2. For each selected edge, keep only `from_key`, `kind_pair`, and `to_key`.
+3. Serialize as a JSON array of objects with lexicographically sorted object
+   keys.
+4. Use compact JSON separators: comma `,` and colon `:`, with no extra
+   whitespace.
+5. Compute SHA-256 over the resulting UTF-8 bytes.
+
+The earlier packet hash
+`940c584a45386ba13f59dae136488a1b1c81861a6e92693a5008cf55375fb5ea` is retained
+only as historical evidence from the first packet draft; its canonicalization
+rule was not recorded and later could not be reproduced, so it must not be used
+as a write gate.
 
 ## Selected Batch
 
@@ -182,7 +199,7 @@ These checks must all pass immediately before any future `dry_run=false` call:
 | service health | `agent-bridge.real doctor --json` has `ok=true`, `fails=0`, `warns=0` |
 | SQLite integrity | read-only `PRAGMA quick_check` returns `ok` |
 | rescue snapshot | `agent-bridge.real rescue-snapshot --canonical --json` succeeds and artifact path is recorded |
-| fresh dry-run | selected-edge hash matches `940c584a45386ba13f59dae136488a1b1c81861a6e92693a5008cf55375fb5ea` |
+| fresh dry-run | selected-edge hash v1 matches `4868930845e953281e1bef2c30613c18cb0d42c91a886443b6c36bf8f030e9c0` |
 | write cap | `max_edges` remains `20`; inbound/outbound caps remain `3` |
 | profile isolation | use a one-shot all-profile MCP subprocess; do not expose materializer in compact Codex profile |
 
@@ -234,6 +251,43 @@ arrays, compact JSON objects, and the Markdown selected-batch block) did not
 match it.
 
 Gate verdict: `blocked_before_write_due_to_unreproducible_hash_gate`.
+
+No `dry_run=false` call was made. No graph edge, memory row, ranking,
+search-order, candidate-set, or automatic orphan-linking change was performed.
+
+## Canonical Hash Gate Repair
+
+The selected-edge hash gate was repaired by defining `selected_edge_hash_v1`
+with the canonicalization rule above. A fresh all-profile MCP materialize
+dry-run was run with `dry_run=true` only and the same exact scope/caps.
+
+Result:
+
+| Check | Observed Result |
+|---|---|
+| materializer visibility | available only in one-shot `AGENT_BRIDGE_TOOL_PROFILE=all` MCP subprocess |
+| dry run | `true` |
+| blocked | `false` |
+| linked | `0` |
+| write errors | `[]` |
+| selected edge sequence | same ordered 20 edges as this packet |
+| canonical JSON bytes | `3385` |
+| selected-edge hash v1 | `4868930845e953281e1bef2c30613c18cb0d42c91a886443b6c36bf8f030e9c0` |
+
+Fresh dry-run metrics after the hash-gate repair:
+
+| Metric | Value |
+|---|---:|
+| loaded records | 443 |
+| safe candidate pairs before caps | 94 |
+| current orphans | 32 |
+| selected edges | 20 |
+| orphan candidate nodes selected | 22 |
+| orphans reduced by selected | 22 |
+| projected orphans after selected | 10 |
+
+Gate verdict: `hash_gate_repaired_and_reproducible`, still
+`not_authorized_to_write`.
 
 No `dry_run=false` call was made. No graph edge, memory row, ranking,
 search-order, candidate-set, or automatic orphan-linking change was performed.
