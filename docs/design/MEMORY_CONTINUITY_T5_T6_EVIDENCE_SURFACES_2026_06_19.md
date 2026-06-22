@@ -1157,6 +1157,32 @@ set, the tool reports `blocked_before_shadow_execution_gate` and keeps
 and does not grant runtime enablement or candidate-expansion authority. A
 separate shadow-execution gate is still required before any shadow run.
 
+The next T6 candidate-expansion gate is the author-reviewed shadow-execution
+gate:
+
+- MCP tool:
+  `memory_biocortex_t6_candidate_expansion_shadow_execution_gate`;
+- schema:
+  `agent_bridge.memory_biocortex_t6_candidate_expansion.shadow_execution_gate.v0`;
+- required source:
+  the redacted JSON object from
+  `memory_biocortex_t6_candidate_expansion_shadow_runtime_gate`;
+- author decision:
+  `approve_shadow_execution_only`.
+
+This tool can only report whether a later shadow-only executor is allowed to
+run against a redacted deterministic replay fixture with append-only telemetry.
+It never runs shadow mode itself, never calls `memory_search`,
+`memory_neighbors`, or BioCortex, never writes memory or graph edges, and never
+approves production runtime influence. The gate blocks if the source shadow
+runtime gate is not `blocked_before_shadow_execution_gate`, if the source
+contains raw query/key/content/case rows, if deterministic replay, candidate
+delta bounds, negative controls, rollback, or telemetry requirements are
+incomplete, or if the source claims runtime candidate-set authority. Even when
+ready, the contract keeps runtime candidate expansion, runtime search-order
+changes, memory/edge writes, and runtime enablement as non-claims for later
+gates.
+
 ## Verification
 
 Targeted validation for this slice after `/Data` space was recovered:
