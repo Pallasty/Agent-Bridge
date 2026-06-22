@@ -33,6 +33,7 @@
 //!   cargo run -p ab-bridge --example trigger_recall_eval -- --list-trigger-rows
 //!   cargo run -p ab-bridge --example trigger_recall_eval -- --check-aio2-native
 //!   cargo run -p ab-bridge --example trigger_recall_eval -- --aio2-native
+//!   cargo run -p ab-bridge --example trigger_recall_eval -- --debug-aio2-native 3
 //!
 //! Debug one case:
 //!
@@ -588,6 +589,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             AIO2_NATIVE_NEGATIVE_CONTROLS,
             "aio2-native active trigger rows, 2026-06-22",
         );
+    }
+    if matches!(arg1.as_deref(), Some("--debug-aio2-native")) {
+        verify_corpus_for(&rows, AIO2_NATIVE_CORPUS, AIO2_NATIVE_NEGATIVE_CONTROLS)?;
+        let idx1 = std::env::args()
+            .nth(2)
+            .ok_or("--debug-aio2-native requires a 1-based case index")?
+            .parse::<usize>()?;
+        let fts = ScratchFts::build(&rows)?;
+        return debug_case_for(&fts, AIO2_NATIVE_CORPUS, idx1, "aio2-native");
     }
     verify_corpus(&rows)?;
     let fts = ScratchFts::build(&rows)?;
@@ -1370,6 +1380,7 @@ enum IndexKind {
 
 struct ScratchFts {
     db: RusqliteConnection,
+    content_by_key: HashMap<String, String>,
     projected_by_key: HashMap<String, String>,
 }
 
@@ -1394,6 +1405,7 @@ impl ScratchFts {
              );",
         )?;
 
+        let mut content_by_key = HashMap::new();
         let mut projected_by_key = HashMap::new();
         {
             let mut content_stmt =
@@ -1407,12 +1419,14 @@ impl ScratchFts {
                 projected_stmt.execute(params![row.key, row.projected])?;
                 let cjk_augmented = augment_with_cjk_shingles(&row.projected);
                 projected_cjk_stmt.execute(params![row.key, cjk_augmented])?;
+                content_by_key.insert(row.key.clone(), row.content.clone());
                 projected_by_key.insert(row.key.clone(), row.projected.clone());
             }
         }
 
         Ok(Self {
             db,
+            content_by_key,
             projected_by_key,
         })
     }
@@ -1527,11 +1541,21 @@ impl ScratchFts {
 }
 
 fn debug_case(fts: &ScratchFts, idx1: usize) -> Result<(), Box<dyn std::error::Error>> {
-    let case = CORPUS
+    debug_case_for(fts, CORPUS, idx1, "Mac trigger-aware")
+}
+
+fn debug_case_for(
+    fts: &ScratchFts,
+    cases: &[Case],
+    idx1: usize,
+    label: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let case = cases
         .get(idx1.saturating_sub(1))
         .ok_or("case index out of range")?;
-    println!("# debug trigger-aware case #{idx1}");
+    println!("# debug {label} trigger-aware case #{idx1}");
     println!("id:      {}", case.id);
+    println!("stratum: {}", case.stratum);
     println!("query:   {}", case.query);
     println!("trigger: {}", case.trigger);
     println!("expect:  {:?}\n", case.expect);
@@ -1539,6 +1563,72 @@ fn debug_case(fts: &ScratchFts, idx1: usize) -> Result<(), Box<dyn std::error::E
     println!("## query diagnostics");
     dump_query_diagnostics("intent", case.query);
     dump_query_diagnostics("trigger", case.trigger);
+    println!();
+
+    println!("## precise/OR search matrix");
+    println!(
+        "contract: search() uses the precise expression when it returns any rows; OR is only an empty-result fallback."
+    );
+    let intent_precise = sanitise_fts_query(case.query);
+    let intent_any = sanitise_fts_query_any(case.query);
+    let trigger_precise = sanitise_fts_query(case.trigger);
+    let trigger_any = sanitise_fts_query_any(case.trigger);
+    dump_search_variant(
+        fts,
+        "content intent precise",
+        IndexKind::Content,
+        &intent_precise,
+        case.expect,
+    );
+    dump_search_variant(
+        fts,
+        "content intent OR",
+        IndexKind::Content,
+        &intent_any,
+        case.expect,
+    );
+    dump_search_variant(
+        fts,
+        "projected intent precise",
+        IndexKind::Projected,
+        &intent_precise,
+        case.expect,
+    );
+    dump_search_variant(
+        fts,
+        "projected intent OR",
+        IndexKind::Projected,
+        &intent_any,
+        case.expect,
+    );
+    dump_search_variant(
+        fts,
+        "projected trigger precise",
+        IndexKind::Projected,
+        &trigger_precise,
+        case.expect,
+    );
+    dump_search_variant(
+        fts,
+        "projected trigger OR",
+        IndexKind::Projected,
+        &trigger_any,
+        case.expect,
+    );
+    println!();
+
+    println!("## expected row query-term overlap");
+    for expected in case.expect {
+        println!("### {expected}");
+        match fts.content_by_key.get(*expected) {
+            Some(content) => dump_body_term_overlap("content", case.query, content),
+            None => println!("  content: missing from scratch map"),
+        }
+        match fts.projected_by_key.get(*expected) {
+            Some(projected) => dump_body_term_overlap("projected", case.query, projected),
+            None => println!("  projected: missing from scratch map"),
+        }
+    }
     println!();
 
     for (label, kind, query) in [
@@ -1569,6 +1659,61 @@ fn debug_case(fts: &ScratchFts, idx1: usize) -> Result<(), Box<dyn std::error::E
     println!();
 
     Ok(())
+}
+
+fn dump_search_variant(
+    fts: &ScratchFts,
+    label: &str,
+    kind: IndexKind,
+    match_expr: &str,
+    expect: &[&str],
+) {
+    println!("### {label}");
+    println!("  match: {match_expr}");
+    match fts.search_once(kind, match_expr, TOP_K) {
+        Ok(keys) => {
+            println!(
+                "  first_hit_rank: {}",
+                rank_cell(first_hit_rank(&keys, expect), None)
+            );
+            dump_keys(expect, &keys);
+        }
+        Err(err) => println!("  ERROR: {err}"),
+    }
+}
+
+fn dump_body_term_overlap(label: &str, query: &str, body: &str) {
+    let query_terms = match fts_terms(query) {
+        Ok(terms) => terms,
+        Err(err) => {
+            println!("  {label}: query term probe ERROR: {err}");
+            return;
+        }
+    };
+    let body_terms = match fts_terms(body) {
+        Ok(terms) => terms.into_iter().collect::<BTreeSet<_>>(),
+        Err(err) => {
+            println!("  {label}: body term probe ERROR: {err}");
+            return;
+        }
+    };
+    let present = query_terms
+        .iter()
+        .filter(|term| body_terms.contains(*term))
+        .cloned()
+        .collect::<Vec<_>>();
+    let missing = query_terms
+        .iter()
+        .filter(|term| !body_terms.contains(*term))
+        .cloned()
+        .collect::<Vec<_>>();
+    println!(
+        "  {label}: chars={}, query_terms_present={}/{}, missing=[{}]",
+        body.chars().count(),
+        present.len(),
+        query_terms.len(),
+        missing.join(", ")
+    );
 }
 
 fn dump_query_diagnostics(label: &str, text: &str) {
@@ -1883,6 +2028,37 @@ mod tests {
                 case.id
             );
             assert!(!case.expect.is_empty(), "{} has no accept set", case.id);
+        }
+    }
+
+    #[test]
+    fn aio2_native_corpus_stays_host_local_and_not_self_observing() {
+        assert_eq!(
+            AIO2_NATIVE_CORPUS.len(),
+            12,
+            "aio2-native corpus should stay intentionally small and explicit"
+        );
+        assert!(
+            AIO2_NATIVE_NEGATIVE_CONTROLS.len() >= 4,
+            "aio2-native corpus should keep unrelated and adversarial controls"
+        );
+        for case in AIO2_NATIVE_CORPUS {
+            assert_ne!(
+                case.query, case.trigger,
+                "{} must use a held-out intent query, not exact trigger text",
+                case.id
+            );
+            assert!(
+                !case.id.contains("trigger_recall"),
+                "{} should not make trigger-recall self-observation part of the first aio2 corpus",
+                case.id
+            );
+            for expected in case.expect {
+                assert!(
+                    !expected.contains("trigger_recall"),
+                    "{expected} should not make trigger-recall self-observation part of the first aio2 corpus"
+                );
+            }
         }
     }
 
