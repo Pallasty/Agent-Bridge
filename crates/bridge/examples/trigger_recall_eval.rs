@@ -29,6 +29,7 @@
 //!
 //!   cargo run -p ab-bridge --example trigger_recall_eval
 //!   AB_BASELINE_DB=/tmp/state.copy.db cargo run -p ab-bridge --example trigger_recall_eval
+//!   cargo run -p ab-bridge --example trigger_recall_eval -- --check-corpus
 //!
 //! Debug one case:
 //!
@@ -36,6 +37,7 @@
 
 use ab_store::default_db_path;
 use std::collections::{BTreeSet, HashMap};
+use std::io::Write as _;
 use std::path::PathBuf;
 use tokio_rusqlite::rusqlite::{
     Connection as RusqliteConnection, OpenFlags, Result as SqlResult, params,
@@ -347,6 +349,22 @@ struct MemoryRow {
     triggers: Vec<String>,
 }
 
+struct CorpusCoverage {
+    active_total: usize,
+    trigger_rows: usize,
+    projected_rows: usize,
+    expected_refs: usize,
+    present_expected: usize,
+    missing_expected: Vec<(String, String)>,
+    expected_without_trigger: Vec<(String, String)>,
+}
+
+impl CorpusCoverage {
+    fn ready(&self) -> bool {
+        self.missing_expected.is_empty() && self.expected_without_trigger.is_empty()
+    }
+}
+
 #[derive(Default)]
 struct Agg {
     r_at_1: u32,
@@ -382,10 +400,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(PathBuf::from)
         .unwrap_or_else(default_db_path);
     let rows = load_active_rows(&db_path)?;
+    let arg1 = std::env::args().nth(1);
+    if matches!(arg1.as_deref(), Some("--check-corpus")) {
+        return check_corpus(&db_path, &rows);
+    }
     verify_corpus(&rows)?;
     let fts = ScratchFts::build(&rows)?;
 
-    if let Some(arg) = std::env::args().nth(1) {
+    if let Some(arg) = arg1 {
         if let Ok(idx1) = arg.parse::<usize>() {
             return debug_case(&fts, idx1);
         }
@@ -720,6 +742,87 @@ fn load_active_rows(db_path: &std::path::Path) -> SqlResult<Vec<MemoryRow>> {
         })?
         .collect::<SqlResult<Vec<_>>>()?;
     Ok(rows)
+}
+
+fn check_corpus(
+    db_path: &std::path::Path,
+    rows: &[MemoryRow],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let coverage = corpus_coverage(rows);
+    println!("# Trigger-aware recall corpus check");
+    println!("db:                       {}", db_path.display());
+    println!("active rows:              {}", coverage.active_total);
+    println!("trigger rows:             {}", coverage.trigger_rows);
+    println!("projected rows:           {}", coverage.projected_rows);
+    println!("corpus cases:             {}", CORPUS.len());
+    println!("expected key refs:        {}", coverage.expected_refs);
+    println!("present expected refs:    {}", coverage.present_expected);
+    println!(
+        "missing expected refs:    {}",
+        coverage.missing_expected.len()
+    );
+    println!(
+        "expected without trigger: {}",
+        coverage.expected_without_trigger.len()
+    );
+    println!("ready:                    {}", coverage.ready());
+
+    if !coverage.missing_expected.is_empty() {
+        println!();
+        println!("## Missing Expected Keys");
+        for (case_id, key) in &coverage.missing_expected {
+            println!("  {case_id}: {key}");
+        }
+    }
+    if !coverage.expected_without_trigger.is_empty() {
+        println!();
+        println!("## Expected Keys Without Trigger Tags");
+        for (case_id, key) in &coverage.expected_without_trigger {
+            println!("  {case_id}: {key}");
+        }
+    }
+
+    if coverage.ready() {
+        Ok(())
+    } else {
+        std::io::stdout().flush()?;
+        Err("trigger recall corpus is not runnable against this DB".into())
+    }
+}
+
+fn corpus_coverage(rows: &[MemoryRow]) -> CorpusCoverage {
+    let by_key: HashMap<&str, &MemoryRow> = rows.iter().map(|r| (r.key.as_str(), r)).collect();
+    let mut expected_refs = 0_usize;
+    let mut present_expected = 0_usize;
+    let mut missing_expected = Vec::new();
+    let mut expected_without_trigger = Vec::new();
+
+    for case in CORPUS {
+        for expected in case.expect {
+            expected_refs += 1;
+            match by_key.get(expected) {
+                Some(row) if row.triggers.is_empty() => {
+                    expected_without_trigger.push((case.id.to_string(), (*expected).to_string()));
+                }
+                Some(_) => {
+                    present_expected += 1;
+                }
+                None => {
+                    missing_expected.push((case.id.to_string(), (*expected).to_string()));
+                }
+            }
+        }
+    }
+
+    CorpusCoverage {
+        active_total: rows.len(),
+        trigger_rows: rows.iter().filter(|r| !r.triggers.is_empty()).count(),
+        projected_rows: rows.iter().filter(|r| r.content != r.projected).count(),
+        expected_refs,
+        present_expected,
+        missing_expected,
+        expected_without_trigger,
+    }
 }
 
 fn verify_corpus(rows: &[MemoryRow]) -> Result<(), Box<dyn std::error::Error>> {
@@ -1281,6 +1384,35 @@ mod tests {
             );
             assert!(!case.expect.is_empty(), "{} has no accept set", case.id);
         }
+    }
+
+    #[test]
+    fn corpus_coverage_reports_missing_gold_keys() {
+        let coverage = corpus_coverage(&[]);
+        let expected_refs = CORPUS.iter().map(|case| case.expect.len()).sum::<usize>();
+
+        assert_eq!(coverage.expected_refs, expected_refs);
+        assert_eq!(coverage.present_expected, 0);
+        assert_eq!(coverage.missing_expected.len(), expected_refs);
+        assert!(!coverage.ready());
+    }
+
+    #[test]
+    fn corpus_coverage_requires_trigger_on_expected_rows() {
+        let first = &CORPUS[0];
+        let row = MemoryRow {
+            key: first.expect[0].to_string(),
+            content: "plain content".to_string(),
+            projected: "plain content".to_string(),
+            triggers: Vec::new(),
+        };
+
+        let coverage = corpus_coverage(&[row]);
+
+        assert_eq!(coverage.present_expected, 0);
+        assert_eq!(coverage.expected_without_trigger.len(), 1);
+        assert_eq!(coverage.missing_expected.len(), coverage.expected_refs - 1);
+        assert!(!coverage.ready());
     }
 
     #[test]
