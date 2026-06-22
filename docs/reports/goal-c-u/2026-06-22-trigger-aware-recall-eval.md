@@ -26,20 +26,25 @@ projection is mechanically populated, but the fixed 18-case `recall_eval` corpus
 does not include gold keys from the trigger-tag cohort. That means it cannot
 measure whether trigger projection helps the rows it was designed for.
 
-This slice adds a separate read-only example over trigger-tag rows. Each case
-has:
+This slice adds a separate read-only example over trigger-tag rows. It opens the
+live store read-only, copies active rows into two temporary in-memory FTS tables,
+and compares authored `content` against projected `fts_content`. Each case has:
 
 - `expect`: the memory key carrying the trigger tag;
 - `trigger`: the authored `continuity_retrieval_trigger` text;
 - `query`: a separate held-out continuation intent, not the exact trigger text.
 
-The harness reports two modes:
+The harness reports three modes:
 
-- `intent`: search with the held-out continuation query;
-- `exact_trigger`: search with the authored trigger text.
+- `intent_content`: held-out query over authored `memories.content`;
+- `intent_projected`: the same held-out query over `memories.fts_content`;
+- `exact_projected`: authored trigger text over `memories.fts_content`.
 
-`intent` is the useful continuity metric. `exact_trigger` mainly verifies
-whether the projected trigger text is searchable without parser failures.
+`intent_projected` is the useful continuity metric. The delta between
+`intent_content` and `intent_projected` isolates the retrieval-trigger
+projection effect without production ranking, recency, access-count, graph, or
+semantic embedding factors. `exact_projected` mainly verifies whether the
+authored trigger text itself is replayable through the FTS parser.
 
 ## Verification
 
@@ -57,7 +62,7 @@ Results:
 | Check | Result |
 |---|---|
 | local rustfmt on new file | pass |
-| example unit tests | pass, 2 passed |
+| example unit tests | pass, 3 passed |
 | live trigger-aware eval | pass, produced report |
 | debug case #10 | pass, exposed exact-trigger FTS parser error |
 
@@ -74,53 +79,64 @@ the current repo has broad pre-existing rustfmt drift unrelated to this file.
 ```text
 # Trigger-aware recall eval - continuity_retrieval_trigger cohort
 db:              /Users/pallasting/Library/Application Support/agent-bridge/state.db
+active rows:     2995
+trigger rows:    134
+projected rows:  134
 corpus:          10 cases (Mac active trigger-tag rows, 2026-06-22)
 top_k:           10
-mode contract:   exact_trigger = authored tag text; intent = held-out continuation query
-read_only:       memory_get + memory_search only; no writes, no reindex, no runtime path change
+mode contract:   intent_content vs intent_projected isolates trigger projection
+read_only:       SELECT + in-memory FTS only; no memory_get, memory_search, writes, or reindex
 
 ## Per-mode recall (success@k over 10 cases)
-  mode               R@1     R@5    R@10     MRR
-  intent           0.700   1.000   1.000   0.833
-  exact_trigger    0.900   0.900   0.900   0.900
+  mode                   R@1     R@5    R@10     MRR
+  intent_content       0.600   0.800   0.900   0.714
+  intent_projected     0.700   1.000   1.000   0.817
+  exact_projected      0.900   0.900   0.900   0.900
 
-## Per-case first-hit rank (- = no hit in top 10)
-  #   id                            intent exact_trigger  note
-  1   s132_handoff                       1             1  BioCortex S132 handoff continuation
-  2   s132_evidence                      1             1  BioCortex S132 evidence row
-  3   t6_executor_preflight              2             1  AB T6 shadow executor preflight
-  4   goal_b_surface_growth              1             1  Goal B tool-surface direction
-  5   goal_c_recall_anchor               1             1  Goal C recall anchor
-  6   biocortex_gate_program             2             1  BioCortex gate program
-  7   ghp12_scope_filter                 1             1  GHP-1.2 exact-scope materialize
-  8   goal_c_executor_constraint         3             1  Goal C executor non-authorization
-  9   goal_c_u_patch_plan                1             1  Goal C U dry-run patch plan
-  10  onsen_handoff                      1           ERR  Cross-project Onsen handoff
+## Projection delta
+  added top-10 hits over content-only: 1 case(s) -> #8
+  improved first-hit rank:              3 case(s) -> #2, #6, #8
+
+## Per-case first-hit rank (- = no hit in top 10; ERR = FTS parser error)
+  #   id                            content  projected      exact  note
+  1   s132_handoff                        1          1          1  BioCortex S132 handoff continuation
+  2   s132_evidence                       2          1          1  BioCortex S132 evidence row
+  3   t6_executor_preflight               2          2          1  AB T6 shadow executor preflight
+  4   goal_b_surface_growth               1          1          1  Goal B tool-surface direction
+  5   goal_c_recall_anchor                1          1          1  Goal C recall anchor
+  6   biocortex_gate_program              7          3          1  BioCortex gate program
+  7   ghp12_scope_filter                  1          1          1  GHP-1.2 exact-scope materialize
+  8   goal_c_executor_constraint          -          3          1  Goal C executor non-authorization
+  9   goal_c_u_patch_plan                 1          1          1  Goal C U dry-run patch plan
+  10  onsen_handoff                       1          1        ERR  Cross-project Onsen handoff
 
 ## Honest read
-  intent misses:        0 case(s)
-  exact_trigger misses: 1 case(s) -> #10
-  intent errors:        0 case(s)
-  exact_trigger errors: 1 case(s) -> #10
+  intent_content misses:   1 case(s) -> #8
+  intent_projected misses: 0 case(s)
+  exact_projected errors:  1 case(s) -> #10
 ```
 
 ## Finding
 
-The first trigger-aware held-out cohort is strong on this Mac store:
+The first trigger-aware held-out cohort is strong on this Mac store and shows a
+measurable projection effect:
 
-- `intent` R@10 = `1.000`;
-- `intent` R@5 = `1.000`;
-- `intent` R@1 = `0.700`;
-- `intent` MRR = `0.833`.
+- `intent_content` R@10 = `0.900`, MRR = `0.714`;
+- `intent_projected` R@10 = `1.000`, MRR = `0.817`;
+- projection added 1 top-10 hit over content-only, case #8
+  `goal_c_executor_constraint`;
+- projection improved first-hit rank for 3 cases: #2, #6, and #8.
 
 That means the current trigger-tag cohort is recoverable from natural
-continuation-intent queries in this sample. This does not prove broad production
-lift, because the corpus is small and hand-curated, but it gives Goal C a real
+continuation-intent queries in this sample, and the projection makes at least one
+otherwise-missed case visible. This does not prove broad production lift,
+because the corpus is small and hand-curated, but it gives Goal C a real
 falsifier for trigger-projection cohorts.
 
 The run also exposed one hygiene issue:
 
-- case #10 `onsen_handoff` ranks #1 for the held-out intent query;
+- case #10 `onsen_handoff` ranks #1 for both `intent_content` and
+  `intent_projected`;
 - the exact authored trigger text errors with
   `backend: memory_search: Error("no such column: hd")`;
 - the trigger contains `onsen-hd`, so FTS query sanitization around hyphenated
