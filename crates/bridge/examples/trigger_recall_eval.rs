@@ -68,6 +68,18 @@ struct NegativeControl {
     note: &'static str,
 }
 
+struct FalseHit {
+    control_id: String,
+    key: String,
+    rank: usize,
+}
+
+impl FalseHit {
+    fn label(&self) -> String {
+        format!("{}:{}@{}", self.control_id, self.key, self.rank)
+    }
+}
+
 /// Cases selected from active Mac rows carrying `continuity_retrieval_trigger`
 /// tags on 2026-06-22. `trigger` is the authored metadata. `query` is a
 /// separate held-out continuation intent so the eval does not pass by exact
@@ -745,12 +757,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Ok(keys) => {
                 for (idx, key) in keys.iter().enumerate() {
                     if gold_keys.contains(key.as_str()) {
-                        projected_intent_false_hits.push(format!(
-                            "{}:{}@{}",
-                            control.id,
-                            key,
-                            idx + 1
-                        ));
+                        projected_intent_false_hits.push(FalseHit {
+                            control_id: control.id.to_string(),
+                            key: key.clone(),
+                            rank: idx + 1,
+                        });
                     }
                 }
             }
@@ -954,7 +965,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         projected_intent_false_hits.len()
     );
     if !projected_intent_false_hits.is_empty() {
-        println!("  false hits: {}", projected_intent_false_hits.join(", "));
+        println!(
+            "  false hits: {}",
+            false_hit_labels(&projected_intent_false_hits)
+        );
     }
     println!("  parser errors: {}", projected_intent_errors.len());
     if !projected_intent_errors.is_empty() {
@@ -964,6 +978,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "  contract: eval-only intent/negation filter; no production acceptance or ranking change"
     );
     println!();
+
+    print_exclusion_boundary_diagnostics(&fts, NEGATIVE_CONTROLS, &projected_intent_false_hits);
 
     println!("## Per-case first-hit rank (- = no hit in top {TOP_K}; ERR = FTS parser error)");
     println!(
@@ -1208,12 +1224,11 @@ fn run_eval_for(
             Ok(keys) => {
                 for (idx, key) in keys.iter().enumerate() {
                     if gold_keys.contains(key.as_str()) {
-                        projected_intent_false_hits.push(format!(
-                            "{}:{}@{}",
-                            control.id,
-                            key,
-                            idx + 1
-                        ));
+                        projected_intent_false_hits.push(FalseHit {
+                            control_id: control.id.to_string(),
+                            key: key.clone(),
+                            rank: idx + 1,
+                        });
                     }
                 }
             }
@@ -1349,7 +1364,10 @@ fn run_eval_for(
         projected_intent_false_hits.len()
     );
     if !projected_intent_false_hits.is_empty() {
-        println!("  false hits: {}", projected_intent_false_hits.join(", "));
+        println!(
+            "  false hits: {}",
+            false_hit_labels(&projected_intent_false_hits)
+        );
     }
     println!(
         "  projected precise+OR union false hits: {}",
@@ -1377,6 +1395,8 @@ fn run_eval_for(
         println!("    {:<28} {}", control.id, control.note);
     }
     println!();
+
+    print_exclusion_boundary_diagnostics(fts, negative_controls, &projected_intent_false_hits);
 
     println!("## Per-case first-hit rank (- = no hit in top {TOP_K}; ERR = FTS parser error)");
     println!(
@@ -2227,6 +2247,89 @@ fn filter_explicit_exclusion_intent(
     Ok(accepted)
 }
 
+fn false_hit_labels(hits: &[FalseHit]) -> String {
+    hits.iter()
+        .map(FalseHit::label)
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn print_exclusion_boundary_diagnostics(
+    fts: &ScratchFts,
+    controls: &[NegativeControl],
+    hits: &[FalseHit],
+) {
+    println!("## Explicit exclusion boundary diagnostics");
+    if hits.is_empty() {
+        println!("  no projected+intent false hits to diagnose");
+        println!();
+        return;
+    }
+
+    for hit in hits {
+        let Some(control) = controls.iter().find(|control| control.id == hit.control_id) else {
+            println!("  {}: missing negative control definition", hit.label());
+            continue;
+        };
+        let Some(projected) = fts.projected_by_key.get(&hit.key) else {
+            println!("  {}: missing projected text", hit.label());
+            continue;
+        };
+
+        let clauses = explicit_exclusion_clauses(control.query);
+        let query_cjk_terms = cjk_shingle_terms(control.query)
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        let query_ascii = ascii_terms(control.query);
+        let projected_ascii = ascii_terms(projected);
+        let query_ascii_overlap = ascii_overlap_terms(&query_ascii, &projected_ascii);
+        let exclusion_matches = candidate_matches_exclusion(&clauses, projected);
+
+        println!("  hit: {}", hit.label());
+        println!("    note: {}", control.note);
+        println!("    query: {}", control.query);
+        println!(
+            "    clauses: {}",
+            if clauses.is_empty() {
+                "-".to_string()
+            } else {
+                clauses.join(" | ")
+            }
+        );
+        println!("    exclusion_match: {exclusion_matches}");
+        println!(
+            "    query_cjk_overlap: {}",
+            cjk_shingle_overlap_count(&query_cjk_terms, projected)
+        );
+        println!(
+            "    query_ascii_overlap: {}",
+            if query_ascii_overlap.is_empty() {
+                "-".to_string()
+            } else {
+                query_ascii_overlap.join(",")
+            }
+        );
+        for clause in &clauses {
+            let clause_cjk_terms = cjk_shingle_terms(clause)
+                .into_iter()
+                .collect::<BTreeSet<_>>();
+            let clause_ascii_overlap = ascii_overlap_terms(&ascii_terms(clause), &projected_ascii);
+            println!(
+                "    clause_diag: cjk_overlap={} ascii_overlap={} clause={}",
+                cjk_shingle_overlap_count(&clause_cjk_terms, projected),
+                if clause_ascii_overlap.is_empty() {
+                    "-".to_string()
+                } else {
+                    clause_ascii_overlap.join(",")
+                },
+                clause
+            );
+        }
+        println!("    projected_preview: {}", preview_text(projected, 180));
+    }
+    println!();
+}
+
 fn candidate_matches_exclusion(clauses: &[String], projected: &str) -> bool {
     if clauses.is_empty() {
         return false;
@@ -2260,6 +2363,18 @@ fn ascii_terms(text: &str) -> BTreeSet<String> {
         .filter(|term| term.len() >= 3)
         .filter(|term| !STOP_WORDS.contains(&term.as_str()))
         .collect()
+}
+
+fn ascii_overlap_terms(left: &BTreeSet<String>, right: &BTreeSet<String>) -> Vec<String> {
+    left.intersection(right).cloned().collect()
+}
+
+fn preview_text(text: &str, max_chars: usize) -> String {
+    let mut preview = text.chars().take(max_chars).collect::<String>();
+    if text.chars().count() > max_chars {
+        preview.push_str("...");
+    }
+    preview.replace('\n', " ")
 }
 
 fn push_cjk_trigrams(run: &[char], terms: &mut BTreeSet<String>) {
@@ -2739,6 +2854,23 @@ mod tests {
             &cjk_clauses,
             "Nexus 五行 UI 图标 配色 角色皮肤 美术规格"
         ));
+    }
+
+    #[test]
+    fn wuxing_art_remaining_false_hit_is_query_overlap_not_exclusion_clause_overlap() {
+        let query = "Nexus 五行 UI 图标 配色 角色皮肤 美术规格 只要视觉草案 不要数学模型调研";
+        let projected =
+            "Nexus #35 科技五行生克 / tech-wuxing-sheng-ke / 五行研究生克 v0.2 re-review";
+        let clauses = explicit_exclusion_clauses(query);
+        let query_ascii = ascii_terms(query);
+        let projected_ascii = ascii_terms(projected);
+
+        assert_eq!(clauses, vec!["数学模型调研".to_string()]);
+        assert!(!candidate_matches_exclusion(&clauses, projected));
+        assert_eq!(
+            ascii_overlap_terms(&query_ascii, &projected_ascii),
+            vec!["nexus".to_string()]
+        );
     }
 
     #[test]
