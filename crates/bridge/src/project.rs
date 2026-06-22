@@ -3,7 +3,7 @@
 //! See `docs/DESIGN-warp-first-agent-shell.md` — no tree-sitter (D10).
 
 use ab_core::{Error, Result};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -310,16 +310,18 @@ pub fn changes_digest(cwd: &Path, scope: &str) -> Result<Value> {
         )));
     }
 
+    let mut warnings: Vec<String> = Vec::new();
     let branch_range: Option<String> = if scope == "branch_vs_main" {
-        Some(
-            merge_base_main(cwd)
-                .map(|b| format!("{b}..HEAD"))
-                .ok_or_else(|| {
-                    Error::Backend(
-                        "branch_vs_main: could not resolve merge-base with main/master".into(),
-                    )
-                })?,
-        )
+        match merge_base_main(cwd) {
+            Some(base) => Some(format!("{base}..HEAD")),
+            None => {
+                warnings.push(
+                    "branch_vs_main: could not resolve merge-base with main/master; diff omitted"
+                        .to_string(),
+                );
+                None
+            }
+        }
     } else {
         None
     };
@@ -329,8 +331,11 @@ pub fn changes_digest(cwd: &Path, scope: &str) -> Result<Value> {
         "staged" => git_output_joined(cwd, &["diff", "--cached", "--numstat"], &[])?,
         "last_commit" => git_output_joined(cwd, &["show", "--numstat", "--pretty=format:"], &[])?,
         "branch_vs_main" => {
-            let range = branch_range.as_ref().map(|s| s.as_str()).unwrap_or("");
-            git_output_joined(cwd, &["diff", "--numstat"], &[range])?
+            if let Some(range) = branch_range.as_ref().map(|s| s.as_str()) {
+                git_output_joined(cwd, &["diff", "--numstat"], &[range])?
+            } else {
+                String::new()
+            }
         }
         other => {
             return Err(Error::InvalidArgument(format!(
@@ -346,8 +351,11 @@ pub fn changes_digest(cwd: &Path, scope: &str) -> Result<Value> {
             git_output_joined(cwd, &["show", "--name-status", "--pretty=format:"], &[])?
         }
         "branch_vs_main" => {
-            let range = branch_range.as_ref().map(|s| s.as_str()).unwrap_or("");
-            git_output_joined(cwd, &["diff", "--name-status"], &[range])?
+            if let Some(range) = branch_range.as_ref().map(|s| s.as_str()) {
+                git_output_joined(cwd, &["diff", "--name-status"], &[range])?
+            } else {
+                String::new()
+            }
         }
         other => {
             return Err(Error::InvalidArgument(format!(
@@ -384,8 +392,11 @@ pub fn changes_digest(cwd: &Path, scope: &str) -> Result<Value> {
         "staged" => git_output_joined(cwd, &["diff", "--cached"], &[])?,
         "last_commit" => git_output_joined(cwd, &["show", "--pretty=format:"], &[])?,
         "branch_vs_main" => {
-            let range = branch_range.as_ref().map(|s| s.as_str()).unwrap_or("");
-            git_output_joined(cwd, &["diff"], &[range])?
+            if let Some(range) = branch_range.as_ref().map(|s| s.as_str()) {
+                git_output_joined(cwd, &["diff"], &[range])?
+            } else {
+                String::new()
+            }
         }
         other => {
             return Err(Error::InvalidArgument(format!(
@@ -416,6 +427,9 @@ pub fn changes_digest(cwd: &Path, scope: &str) -> Result<Value> {
         "name_status": name_status,
         "patches": patches,
         "patch_truncated": patch_truncated,
+        "warnings": warnings,
+        "merge_base_found": scope != "branch_vs_main" || branch_range.is_some(),
+        "branch_range": branch_range,
     }))
 }
 
@@ -678,10 +692,7 @@ fn truncate_patch_lines(text: &str, max_lines: usize) -> (String, bool) {
     } else {
         let omitted = lines.len() - max_lines;
         let kept = lines[..max_lines].join("\n");
-        (
-            format!("{kept}\n… ({omitted} more lines truncated)"),
-            true,
-        )
+        (format!("{kept}\n… ({omitted} more lines truncated)"), true)
     }
 }
 
@@ -786,10 +797,12 @@ mod tests {
         );
         let first = &patches[0];
         assert!(first["file"].is_string());
-        assert!(first["patch"]
-            .as_str()
-            .unwrap_or_default()
-            .contains("diff --git"));
+        assert!(
+            first["patch"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("diff --git")
+        );
         assert!(first["truncated"].is_boolean());
         assert!(v["patch_truncated"].is_boolean());
     }
@@ -850,6 +863,34 @@ mod tests {
     }
 
     #[test]
+    fn changes_digest_branch_vs_main_without_merge_base_warns_instead_of_error() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        init_git_repo(tmp.path());
+        write_file(tmp.path().join("README.md"), "base\n");
+        git_ok(tmp.path(), &["add", "README.md"]);
+        git_ok(tmp.path(), &["commit", "-m", "base"]);
+        git_ok(tmp.path(), &["checkout", "--orphan", "source"]);
+        write_file(tmp.path().join("README.md"), "source\n");
+        git_ok(tmp.path(), &["add", "README.md"]);
+        git_ok(tmp.path(), &["commit", "-m", "source"]);
+
+        let v = changes_digest(tmp.path(), "branch_vs_main").expect("digest");
+
+        assert_eq!(v["scope"], "branch_vs_main");
+        assert_eq!(v["merge_base_found"], false);
+        assert!(v["branch_range"].is_null());
+        assert_eq!(v["files_changed"], 0);
+        assert_eq!(v["insertions"], 0);
+        assert_eq!(v["deletions"], 0);
+        assert_eq!(v["patches"].as_array().expect("patches").len(), 0);
+        assert!(v["warnings"].as_array().expect("warnings").iter().any(|w| {
+            w.as_str()
+                .unwrap_or_default()
+                .contains("could not resolve merge-base")
+        }));
+    }
+
+    #[test]
     fn git_topology_preflight_blocks_unrelated_target() {
         let tmp = tempfile::tempdir().expect("tmp");
         init_git_repo(tmp.path());
@@ -866,11 +907,13 @@ mod tests {
 
         assert_eq!(v["status"], "blocked");
         assert_eq!(v["merge_base_found"], false);
-        assert!(v["warnings"]
-            .as_array()
-            .expect("warnings")
-            .iter()
-            .any(|w| w.as_str().unwrap_or("").contains("no merge-base")));
+        assert!(
+            v["warnings"]
+                .as_array()
+                .expect("warnings")
+                .iter()
+                .any(|w| w.as_str().unwrap_or("").contains("no merge-base"))
+        );
     }
 
     #[test]
