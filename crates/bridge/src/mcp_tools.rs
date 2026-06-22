@@ -47910,61 +47910,9 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // Continuity T6 lift summary: runs the relevance-lift yardstick but strips
     // per-sample rows and raw adapter errors before the T6 gate consumes it.
     "memory_biocortex_relevance_lift_summary",
-    // Continuity T6 influence gate: read-only evidence threshold for entering
-    // opt-in experiment review; it never approves runtime influence.
-    "memory_biocortex_t6_influence_gate",
-    // Continuity T6 candidate-expansion review packet: consumes only the T6
-    // gate aggregate and emits a human-review contract; it never expands the
-    // runtime candidate set.
-    "memory_biocortex_t6_candidate_expansion_review_packet",
-    // Continuity T6 candidate-expansion dry-run plan: consumes the review
-    // packet and emits a sampling contract for a later dry-run executor; it
-    // never approves or runs candidate-set expansion.
-    "memory_biocortex_t6_candidate_expansion_dry_run_plan",
-    // Continuity T6 candidate-expansion dry-run report: consumes a dry-run
-    // plan plus an already-redacted recall-expansion summary; it never runs
-    // search, samples memories, or grants candidate-set authority.
-    "memory_biocortex_t6_candidate_expansion_dry_run_report",
-    // Continuity T6 candidate-expansion human-review packet: consumes the
-    // dry-run report and emits a post-dry-run decision surface; it never
-    // grants runtime candidate-set authority.
-    "memory_biocortex_t6_candidate_expansion_human_review_packet",
-    // Continuity T6 candidate-expansion owner-decision record: records an
-    // explicit external owner decision for the next design-only gate; it still
-    // grants no runtime candidate-set authority.
-    "memory_biocortex_t6_candidate_expansion_owner_decision_record",
-    // Continuity T6 runtime-gate preflight: consumes the owner-decision record
-    // and emits design-only runtime-gate requirements; it still grants no
-    // runtime candidate-set authority.
-    "memory_biocortex_t6_candidate_expansion_runtime_gate_preflight",
-    // Continuity T6 runtime-gate design artifact: consumes the preflight and
-    // emits an owner-reviewable design checklist; it still grants no runtime
-    // candidate-set authority and implements no runtime code.
-    "memory_biocortex_t6_candidate_expansion_runtime_gate_design_artifact",
-    // Continuity T6 runtime-gate owner-review record: consumes the design
-    // artifact plus an explicit owner decision and can only open the
-    // implementation-plan gate, never runtime code or candidate expansion.
-    "memory_biocortex_t6_candidate_expansion_runtime_gate_owner_review_record",
-    // Continuity T6 runtime-gate implementation-plan artifact: consumes the
-    // owner-review record and can only open a later code-gate review, never
-    // runtime code or candidate expansion.
-    "memory_biocortex_t6_candidate_expansion_runtime_gate_implementation_plan_artifact",
-    // Continuity T6 runtime-gate code-implementation gate: consumes the
-    // implementation-plan artifact plus an explicit code-gate decision and can
-    // only authorize default-off shadow code, never runtime execution.
-    "memory_biocortex_t6_candidate_expansion_runtime_gate_code_implementation_gate",
-    // Continuity T6 candidate-expansion shadow runtime gate: default-off
-    // status/contract surface for later shadow execution; it never runs shadow
-    // mode, expands candidates, changes order, or writes memory/graph edges.
-    "memory_biocortex_t6_candidate_expansion_shadow_runtime_gate",
-    // Continuity T6 candidate-expansion shadow execution gate: author-review
-    // surface for a later shadow-only executor; it never runs shadow mode or
-    // grants production runtime influence.
-    "memory_biocortex_t6_candidate_expansion_shadow_execution_gate",
-    // Continuity T6 candidate-expansion shadow executor preflight: validates
-    // fixture/telemetry bounds before a later shadow-only executor invocation;
-    // it never invokes the executor or grants production runtime influence.
-    "memory_biocortex_t6_candidate_expansion_shadow_executor_preflight",
+    // T6 influence/candidate-expansion gate ceremony surfaces are intentionally
+    // Niche/all-only. Keep the aggregate evidence summaries above available,
+    // but avoid loading the long review chain into Codex's eager surface.
     // Continuity T7 neural critic shadow eval: read-only offline held-out
     // comparison against deterministic T3/T4 labels; no model/write authority.
     "memory_neural_critic_shadow_eval",
@@ -51540,61 +51488,61 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(MemoryBioCortexT6InfluenceGateTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(MemoryBioCortexT6CandidateExpansionReviewPacketTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(MemoryBioCortexT6CandidateExpansionDryRunPlanTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(MemoryBioCortexT6CandidateExpansionDryRunReportTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(MemoryBioCortexT6CandidateExpansionHumanReviewPacketTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(MemoryBioCortexT6CandidateExpansionOwnerDecisionRecordTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(MemoryBioCortexT6CandidateExpansionRuntimeGatePreflightTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(MemoryBioCortexT6CandidateExpansionRuntimeGateDesignArtifactTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(MemoryBioCortexT6CandidateExpansionRuntimeGateOwnerReviewRecordTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(
             MemoryBioCortexT6CandidateExpansionRuntimeGateImplementationPlanArtifactTool::new(),
         ),
@@ -51602,25 +51550,25 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(MemoryBioCortexT6CandidateExpansionRuntimeGateCodeImplementationGateTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(MemoryBioCortexT6CandidateExpansionShadowRuntimeGateTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(MemoryBioCortexT6CandidateExpansionShadowExecutionGateTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(MemoryBioCortexT6CandidateExpansionShadowExecutorPreflightTool::new()),
     );
     reg_if(
@@ -53356,6 +53304,23 @@ fn unescape_keys(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const T6_GATE_CEREMONY_TOOLS: &[&str] = &[
+        "memory_biocortex_t6_influence_gate",
+        "memory_biocortex_t6_candidate_expansion_review_packet",
+        "memory_biocortex_t6_candidate_expansion_dry_run_plan",
+        "memory_biocortex_t6_candidate_expansion_dry_run_report",
+        "memory_biocortex_t6_candidate_expansion_human_review_packet",
+        "memory_biocortex_t6_candidate_expansion_owner_decision_record",
+        "memory_biocortex_t6_candidate_expansion_runtime_gate_preflight",
+        "memory_biocortex_t6_candidate_expansion_runtime_gate_design_artifact",
+        "memory_biocortex_t6_candidate_expansion_runtime_gate_owner_review_record",
+        "memory_biocortex_t6_candidate_expansion_runtime_gate_implementation_plan_artifact",
+        "memory_biocortex_t6_candidate_expansion_runtime_gate_code_implementation_gate",
+        "memory_biocortex_t6_candidate_expansion_shadow_runtime_gate",
+        "memory_biocortex_t6_candidate_expansion_shadow_execution_gate",
+        "memory_biocortex_t6_candidate_expansion_shadow_executor_preflight",
+    ];
 
     fn result_text(res: &ToolResult) -> String {
         match res.content.first() {
@@ -57704,37 +57669,16 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             "_persistence_chain",
             "_write_evidence",
         ];
-        // Gate-named tools currently exposed in the eager Standard profile.
-        // This list is the documented DEBT, not an endorsement — the guard's
-        // job from here is to stop NEW gate tools leaking in. Two categories:
-        //
-        //  (a) legitimately eager safety/diagnostic tools (not D1 ceremony):
-        //        git_topology_preflight       — pre-push safety check, organic use
-        //        biocortex_retrieval_opt_in_dry_run — opt-in preview, safety gate
-        //  (b) FLAGGED FOR OWNER DEMOTION → Tier::Niche (D1 T6/related_keys gate
-        //      chain leaked into eager; see forum #120 + memory
-        //      `project_goal_b_surface_per_request_bounded_keep_gate_tools_niche_20260622`).
-        //      Owner (memory-continuity lane) should re-tier these to Niche;
-        //      remove from this list as that lands.
+        // Gate-named tools still justified in the eager Standard profile.
+        // The T6 candidate-expansion gate chain is now Tier::Niche/all-only;
+        // this allowlist should stay small and explicit.
         const EAGER_ALLOWLIST: &[&str] = &[
-            // (a) legit eager
             "git_topology_preflight",
             "biocortex_retrieval_opt_in_dry_run",
-            // (b) flagged for demotion to Niche
+            // Explicit-link diagnostics remain Standard for graph-hygiene
+            // review lanes; write-capable materialize stays outside Essential.
             "memory_related_keys_preflight",
             "memory_related_keys_review_packet",
-            "memory_biocortex_t6_candidate_expansion_dry_run_plan",
-            "memory_biocortex_t6_candidate_expansion_dry_run_report",
-            "memory_biocortex_t6_candidate_expansion_human_review_packet",
-            "memory_biocortex_t6_candidate_expansion_owner_decision_record",
-            "memory_biocortex_t6_candidate_expansion_review_packet",
-            "memory_biocortex_t6_candidate_expansion_runtime_gate_code_implementation_gate",
-            "memory_biocortex_t6_candidate_expansion_runtime_gate_design_artifact",
-            "memory_biocortex_t6_candidate_expansion_runtime_gate_implementation_plan_artifact",
-            "memory_biocortex_t6_candidate_expansion_runtime_gate_owner_review_record",
-            "memory_biocortex_t6_candidate_expansion_runtime_gate_preflight",
-            "memory_biocortex_t6_candidate_expansion_shadow_executor_preflight",
-            "memory_biocortex_t6_candidate_expansion_shadow_runtime_gate",
         ];
 
         let leaked: Vec<&str> = exposed
@@ -57809,59 +57753,57 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             Tier::Standard,
             "memory_biocortex_relevance_lift_summary"
         ));
-        assert!(p.includes(Tier::Standard, "memory_biocortex_t6_influence_gate"));
-        assert!(p.includes(
-            Tier::Standard,
-            "memory_biocortex_t6_candidate_expansion_review_packet"
-        ));
-        assert!(p.includes(
-            Tier::Standard,
-            "memory_biocortex_t6_candidate_expansion_dry_run_plan"
-        ));
-        assert!(p.includes(
-            Tier::Standard,
-            "memory_biocortex_t6_candidate_expansion_dry_run_report"
-        ));
-        assert!(p.includes(
-            Tier::Standard,
-            "memory_biocortex_t6_candidate_expansion_human_review_packet"
-        ));
-        assert!(p.includes(
-            Tier::Standard,
-            "memory_biocortex_t6_candidate_expansion_owner_decision_record"
-        ));
-        assert!(p.includes(
-            Tier::Standard,
-            "memory_biocortex_t6_candidate_expansion_runtime_gate_preflight"
-        ));
-        assert!(p.includes(
-            Tier::Standard,
-            "memory_biocortex_t6_candidate_expansion_runtime_gate_design_artifact"
-        ));
-        assert!(p.includes(
-            Tier::Standard,
-            "memory_biocortex_t6_candidate_expansion_runtime_gate_owner_review_record"
-        ));
-        assert!(p.includes(
-            Tier::Standard,
-            "memory_biocortex_t6_candidate_expansion_runtime_gate_implementation_plan_artifact"
-        ));
-        assert!(p.includes(
-            Tier::Standard,
-            "memory_biocortex_t6_candidate_expansion_runtime_gate_code_implementation_gate"
-        ));
-        assert!(p.includes(
-            Tier::Standard,
-            "memory_biocortex_t6_candidate_expansion_shadow_execution_gate"
-        ));
-        assert!(p.includes(
-            Tier::Standard,
-            "memory_biocortex_t6_candidate_expansion_shadow_executor_preflight"
-        ));
+        for tool_name in T6_GATE_CEREMONY_TOOLS {
+            assert!(
+                !p.includes(Tier::Standard, tool_name),
+                "{tool_name} should not be in codex-essential"
+            );
+            assert!(
+                !p.includes(Tier::Niche, tool_name),
+                "{tool_name} should not be in codex-essential direct extras"
+            );
+        }
         assert!(p.includes(Tier::Standard, "memory_neural_critic_shadow_eval"));
         assert!(p.includes(Tier::Standard, "biocortex_retrieval_shadow"));
         assert!(!p.includes(Tier::Standard, "embed_text"));
         assert!(!p.includes(Tier::Niche, "browser_navigate"));
+    }
+
+    #[test]
+    fn t6_gate_ceremony_tools_are_all_only() {
+        let standard = ToolPolicy::from_values(None, None, None, Some("standard"));
+        let all = ToolPolicy::from_values(None, None, None, Some("all"));
+
+        let standard_names: Vec<String> =
+            build_registry_with_policy(Hub::builder().build(), standard)
+                .list()
+                .into_iter()
+                .map(|s| s.name)
+                .collect();
+        let all_names: Vec<String> = build_registry_with_policy(Hub::builder().build(), all)
+            .list()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+
+        for tool_name in T6_GATE_CEREMONY_TOOLS {
+            assert!(
+                !standard.includes(Tier::Niche, tool_name),
+                "{tool_name} should be demoted out of Standard"
+            );
+            assert!(
+                !standard_names.iter().any(|n| n == tool_name),
+                "{tool_name} schema should be absent from Standard"
+            );
+            assert!(
+                all.includes(Tier::Niche, tool_name),
+                "{tool_name} should remain available in all/Niche"
+            );
+            assert!(
+                all_names.iter().any(|n| n == tool_name),
+                "{tool_name} schema should remain available in all/Niche"
+            );
+        }
     }
 
     #[test]
@@ -57911,9 +57853,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 74 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 60 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-        //      + DIRECT(64: 6 avatar observation/sync/renderer tools
+        //      + DIRECT(50: 6 avatar observation/sync/renderer tools
         //      + xiao_shu_action_request + 14 mobile bridge tools
         //      + memory_graph_topology + memory_retrieval_feedback
         //      + memory_consolidation_queue
@@ -57921,20 +57863,6 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         //      + memory_biocortex_redacted_evidence_aggregate
         //      + memory_biocortex_recall_expansion_summary
         //      + memory_biocortex_relevance_lift_summary
-        //      + memory_biocortex_t6_influence_gate
-        //      + memory_biocortex_t6_candidate_expansion_review_packet
-        //      + memory_biocortex_t6_candidate_expansion_dry_run_plan
-        //      + memory_biocortex_t6_candidate_expansion_dry_run_report
-        //      + memory_biocortex_t6_candidate_expansion_human_review_packet
-        //      + memory_biocortex_t6_candidate_expansion_owner_decision_record
-        //      + memory_biocortex_t6_candidate_expansion_runtime_gate_preflight
-        //      + memory_biocortex_t6_candidate_expansion_runtime_gate_design_artifact
-        //      + memory_biocortex_t6_candidate_expansion_runtime_gate_owner_review_record
-        //      + memory_biocortex_t6_candidate_expansion_runtime_gate_implementation_plan_artifact
-        //      + memory_biocortex_t6_candidate_expansion_runtime_gate_code_implementation_gate
-        //      + memory_biocortex_t6_candidate_expansion_shadow_runtime_gate
-        //      + memory_biocortex_t6_candidate_expansion_shadow_execution_gate
-        //      + memory_biocortex_t6_candidate_expansion_shadow_executor_preflight
         //      + memory_neural_critic_shadow_eval
         //      + biocortex_retrieval_shadow
         //      + memory_related_keys_preflight
@@ -57951,7 +57879,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         // forum_digest joined via the FORUM_READ capability group (2026-05-23).
         // Native-overlap probes such as browser_lite_probe stay in broader
         // profiles, not codex-essential direct extras.
-        assert_eq!(extras.len(), 74);
+        // T6 candidate-expansion gate ceremony tools are all/Niche only and
+        // must not re-enter Codex's eager direct extras.
+        assert_eq!(extras.len(), 60);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -57985,46 +57915,12 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(extras.contains(&"memory_biocortex_redacted_evidence_aggregate"));
         assert!(extras.contains(&"memory_biocortex_recall_expansion_summary"));
         assert!(extras.contains(&"memory_biocortex_relevance_lift_summary"));
-        assert!(extras.contains(&"memory_biocortex_t6_influence_gate"));
-        assert!(extras.contains(
-            &"memory_biocortex_t6_candidate_expansion_review_packet"
-        ));
-        assert!(extras.contains(
-            &"memory_biocortex_t6_candidate_expansion_dry_run_plan"
-        ));
-        assert!(extras.contains(
-            &"memory_biocortex_t6_candidate_expansion_dry_run_report"
-        ));
-        assert!(extras.contains(
-            &"memory_biocortex_t6_candidate_expansion_human_review_packet"
-        ));
-        assert!(extras.contains(
-            &"memory_biocortex_t6_candidate_expansion_owner_decision_record"
-        ));
-        assert!(extras.contains(
-            &"memory_biocortex_t6_candidate_expansion_runtime_gate_preflight"
-        ));
-        assert!(extras.contains(
-            &"memory_biocortex_t6_candidate_expansion_runtime_gate_design_artifact"
-        ));
-        assert!(extras.contains(
-            &"memory_biocortex_t6_candidate_expansion_runtime_gate_owner_review_record"
-        ));
-        assert!(extras.contains(
-            &"memory_biocortex_t6_candidate_expansion_runtime_gate_implementation_plan_artifact"
-        ));
-        assert!(extras.contains(
-            &"memory_biocortex_t6_candidate_expansion_runtime_gate_code_implementation_gate"
-        ));
-        assert!(extras.contains(
-            &"memory_biocortex_t6_candidate_expansion_shadow_runtime_gate"
-        ));
-        assert!(extras.contains(
-            &"memory_biocortex_t6_candidate_expansion_shadow_execution_gate"
-        ));
-        assert!(extras.contains(
-            &"memory_biocortex_t6_candidate_expansion_shadow_executor_preflight"
-        ));
+        for tool_name in T6_GATE_CEREMONY_TOOLS {
+            assert!(
+                !extras.contains(tool_name),
+                "{tool_name} should be all/Niche only, not codex-essential"
+            );
+        }
         assert!(extras.contains(&"memory_neural_critic_shadow_eval"));
         assert!(extras.contains(&"biocortex_retrieval_shadow"));
         assert!(extras.contains(&"memory_related_keys_preflight"));
