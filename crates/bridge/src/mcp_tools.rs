@@ -2,6 +2,11 @@
 //! Claude Code (or any MCP client) over the `tools/call` channel.
 
 use crate::tool_diagnostics::{classify_tool_error, ToolErrorDiagnosticClass};
+use crate::trigger_recall_opt_in::{
+    trigger_recall_opt_in_runtime_transition_gate, trigger_recall_opt_in_status,
+    trigger_recall_value_contains_raw, TriggerRecallOptInRuntimeTransitionGateOptions,
+    TriggerRecallOptInStatusOptions, TRIGGER_RECALL_DISABLE_ENV, TRIGGER_RECALL_OPT_IN_ENABLE_ENV,
+};
 use crate::warp_scheme::{
     dispatch_url as dispatch_warp_scheme_uri,
     scheme_launch_configuration as warp_scheme_launch_configuration,
@@ -28563,6 +28568,230 @@ impl McpTool for BioCortexRetrievalOptInStatusTool {
 }
 
 // ===========================================================================
+//  trigger_recall_opt_in_status - read-only trigger recall opt-in gate status
+// ===========================================================================
+
+/// Read-only trigger-recall opt-in status surface. Reports runtime env,
+/// per-call opt-in, local FTS scope, regression anchor, and redacted eval
+/// metric readiness before any transition gate. It does not call
+/// `memory_search`, inspect memory rows, record coactivation, or authorize
+/// hold/enforcement behavior.
+pub struct TriggerRecallOptInStatusTool;
+
+impl TriggerRecallOptInStatusTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for TriggerRecallOptInStatusTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn trigger_recall_mcp_arg_u64(args: &Value, key: &str) -> Option<u64> {
+    args.get(key).and_then(Value::as_u64)
+}
+
+#[async_trait]
+impl McpTool for TriggerRecallOptInStatusTool {
+    fn name(&self) -> &'static str {
+        "trigger_recall_opt_in_status"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only trigger recall opt-in status surface. \
+                 Reports runtime env, per-call opt-in, fts/local scope, \
+                 regression-anchor, and redacted eval-metric readiness before \
+                 any runtime transition gate. Does not call memory_search, \
+                 inspect memory rows, return raw query/keys/content, record \
+                 coactivation, write memory, change default search, or \
+                 authorize enforce_hold."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "mode": { "type": "string", "enum": ["fts", "hybrid", "semantic"], "default": "fts" },
+                    "per_call_opt_in": { "type": "boolean", "default": false },
+                    "scope": { "type": "string", "description": "Exact local project scope, e.g. project:/abs/path. Output includes only a hash." },
+                    "scope_mode": {
+                        "type": "string",
+                        "enum": ["local_only", "local_plus_global", "exploratory"],
+                        "default": "local_only"
+                    },
+                    "regression_anchor": { "type": "string" },
+                    "aio2_corpus_ready": { "type": "boolean" },
+                    "union_cont_misses": { "type": "integer", "minimum": 0 },
+                    "union_cont_false_hits": { "type": "integer", "minimum": 0 },
+                    "baseline_shadow_true_hits_lost": { "type": "integer", "minimum": 0 },
+                    "baseline_shadow_positive_cases_held": { "type": "integer", "minimum": 0 },
+                    "baseline_shadow_false_hits_after_gate": { "type": "integer", "minimum": 0 },
+                    "metric_captured_at": { "type": "string" },
+                    "operator_disabled": { "type": "boolean", "default": false }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let operator_disabled = args
+            .get("operator_disabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            || mcp_env_truthy(TRIGGER_RECALL_DISABLE_ENV);
+        let payload = trigger_recall_opt_in_status(TriggerRecallOptInStatusOptions {
+            mode: args.get("mode").and_then(Value::as_str).unwrap_or("fts").to_string(),
+            per_call_opt_in: args
+                .get("per_call_opt_in")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            scope: args.get("scope").and_then(Value::as_str).map(str::to_string),
+            scope_mode: args
+                .get("scope_mode")
+                .and_then(Value::as_str)
+                .unwrap_or("local_only")
+                .to_string(),
+            regression_anchor: args
+                .get("regression_anchor")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            aio2_corpus_ready: args.get("aio2_corpus_ready").and_then(Value::as_bool),
+            union_cont_misses: trigger_recall_mcp_arg_u64(&args, "union_cont_misses"),
+            union_cont_false_hits: trigger_recall_mcp_arg_u64(&args, "union_cont_false_hits"),
+            baseline_shadow_true_hits_lost: trigger_recall_mcp_arg_u64(
+                &args,
+                "baseline_shadow_true_hits_lost",
+            ),
+            baseline_shadow_positive_cases_held: trigger_recall_mcp_arg_u64(
+                &args,
+                "baseline_shadow_positive_cases_held",
+            ),
+            baseline_shadow_false_hits_after_gate: trigger_recall_mcp_arg_u64(
+                &args,
+                "baseline_shadow_false_hits_after_gate",
+            ),
+            metric_captured_at: args
+                .get("metric_captured_at")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            runtime_enabled: mcp_env_truthy(TRIGGER_RECALL_OPT_IN_ENABLE_ENV),
+            operator_disabled,
+            raw_payload_fields_present: trigger_recall_value_contains_raw(&args),
+        });
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
+//  trigger_recall_opt_in_runtime_transition_gate - read-only gate
+// ===========================================================================
+
+/// Read-only trigger-recall opt-in runtime transition gate. Consumes a status
+/// packet plus requested transition shape and reports whether a later gated
+/// baseline trial may be called. It never calls `memory_search` and never
+/// authorizes `enforce_hold`.
+pub struct TriggerRecallOptInRuntimeTransitionGateTool;
+
+impl TriggerRecallOptInRuntimeTransitionGateTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for TriggerRecallOptInRuntimeTransitionGateTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for TriggerRecallOptInRuntimeTransitionGateTool {
+    fn name(&self) -> &'static str {
+        "trigger_recall_opt_in_runtime_transition_gate"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only trigger recall opt-in runtime-transition \
+                 gate. Consumes a trigger_recall_opt_in_status packet and \
+                 decides whether a later gated baseline trial may be called. \
+                 Does not call memory_search, inspect memory rows, echo the \
+                 status packet, return raw query/keys/content, record \
+                 coactivation, write memory, change default search, or \
+                 authorize enforce_hold."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["status_packet"],
+                "properties": {
+                    "status_packet": { "type": "object", "description": "JSON object produced by trigger_recall_opt_in_status. The gate consumes only safe summary fields and does not echo the packet." },
+                    "mode": { "type": "string", "enum": ["fts", "hybrid", "semantic"], "default": "fts" },
+                    "per_call_opt_in": { "type": "boolean", "default": false },
+                    "scope": { "type": "string", "description": "Exact local project scope, e.g. project:/abs/path. Output includes only a hash." },
+                    "scope_mode": {
+                        "type": "string",
+                        "enum": ["local_only", "local_plus_global", "exploratory"],
+                        "default": "local_only"
+                    },
+                    "regression_anchor": { "type": "string" },
+                    "operator_disabled": { "type": "boolean", "default": false },
+                    "reviewer": { "type": "string" },
+                    "commit": { "type": "string" },
+                    "forum_post_id": { "type": "string" },
+                    "memory_key": { "type": "string" }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let operator_disabled = args
+            .get("operator_disabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            || mcp_env_truthy(TRIGGER_RECALL_DISABLE_ENV);
+        let payload = trigger_recall_opt_in_runtime_transition_gate(
+            TriggerRecallOptInRuntimeTransitionGateOptions {
+                status_packet: args.get("status_packet").cloned().unwrap_or(Value::Null),
+                mode: args.get("mode").and_then(Value::as_str).unwrap_or("fts").to_string(),
+                per_call_opt_in: args
+                    .get("per_call_opt_in")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                scope: args.get("scope").and_then(Value::as_str).map(str::to_string),
+                scope_mode: args
+                    .get("scope_mode")
+                    .and_then(Value::as_str)
+                    .unwrap_or("local_only")
+                    .to_string(),
+                regression_anchor: args
+                    .get("regression_anchor")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                runtime_enabled: mcp_env_truthy(TRIGGER_RECALL_OPT_IN_ENABLE_ENV),
+                operator_disabled,
+                reviewer: args.get("reviewer").and_then(Value::as_str).map(str::to_string),
+                commit: args.get("commit").and_then(Value::as_str).map(str::to_string),
+                forum_post_id: args
+                    .get("forum_post_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                memory_key: args
+                    .get("memory_key")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                raw_payload_fields_present: trigger_recall_value_contains_raw(&args),
+            },
+        );
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
 //  biocortex_retrieval_opt_in_dry_run — read-only future-path planner
 // ===========================================================================
 
@@ -51794,6 +52023,18 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         &mut reg,
         policy,
         Tier::Niche,
+        Arc::new(TriggerRecallOptInStatusTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(TriggerRecallOptInRuntimeTransitionGateTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
         Arc::new(BioCortexRetrievalOptInGatedStoreTrialTool::new(hub.clone())),
     );
     reg_if(
@@ -64164,6 +64405,104 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
     }
 
     #[test]
+    fn trigger_recall_opt_in_status_schema_is_readonly() {
+        let tool = TriggerRecallOptInStatusTool::new();
+        let schema = tool.schema();
+        assert_eq!(schema.name, "trigger_recall_opt_in_status");
+        assert!(schema.description.contains("Read-only"));
+        assert!(schema.description.contains("Does not call memory_search"));
+        assert!(schema.description.contains("authorize enforce_hold"));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("mode").is_some());
+        assert!(props.get("per_call_opt_in").is_some());
+        assert!(props.get("scope").is_some());
+        assert!(props.get("aio2_corpus_ready").is_some());
+        assert!(props.get("union_cont_misses").is_some());
+        assert!(props.get("baseline_shadow_false_hits_after_gate").is_some());
+        assert!(props.get("query").is_none());
+        assert!(props.get("baseline_keys").is_none());
+        assert!(props.get("memory_search").is_none());
+        assert!(props.get("raw_content").is_none());
+
+        let names: Vec<String> = build_registry_with_policy(
+            Hub::builder().build(),
+            ToolPolicy {
+                set: ToolSet::Profile,
+                profile: ToolProfile::All,
+            },
+        )
+        .list()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
+        assert!(names.contains(&schema.name));
+    }
+
+    #[tokio::test]
+    async fn trigger_recall_opt_in_status_does_not_echo_query_or_raw_fields() {
+        let _lock = frontend_env_test_setup();
+        let prior_enable = std::env::var("AB_TRIGGER_RECALL_OPT_IN").ok();
+        let prior_disable = std::env::var("AB_TRIGGER_RECALL_DISABLE").ok();
+        std::env::set_var("AB_TRIGGER_RECALL_OPT_IN", "1");
+        std::env::remove_var("AB_TRIGGER_RECALL_DISABLE");
+
+        let tool = TriggerRecallOptInStatusTool::new();
+        let out = tool
+            .execute(
+                json!({
+                    "mode": "fts",
+                    "per_call_opt_in": true,
+                    "scope": "project:/secret/trigger/status/path",
+                    "scope_mode": "local_only",
+                    "query": "secret trigger status query",
+                    "content": "secret trigger status content",
+                    "raw_key": "secret_trigger_status_key",
+                    "aio2_corpus_ready": true,
+                    "union_cont_misses": 0,
+                    "union_cont_false_hits": 0,
+                    "baseline_shadow_true_hits_lost": 0,
+                    "baseline_shadow_positive_cases_held": 0,
+                    "baseline_shadow_false_hits_after_gate": 0,
+                    "regression_anchor": crate::trigger_recall_opt_in::TRIGGER_RECALL_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        restore_env_var("AB_TRIGGER_RECALL_OPT_IN", prior_enable);
+        restore_env_var("AB_TRIGGER_RECALL_DISABLE", prior_disable);
+
+        let text = match out.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains("secret trigger status query"));
+        assert!(!text.contains("secret trigger status content"));
+        assert!(!text.contains("secret_trigger_status_key"));
+        assert!(!text.contains("/secret/trigger/status/path"));
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.memory.trigger_recall.opt_in_status.v0")
+        );
+        assert_eq!(v["read_only"], json!(true));
+        assert_eq!(v["audit_shape"]["raw_query_included"], json!(false));
+        assert_eq!(v["audit_shape"]["raw_keys_included"], json!(false));
+        assert_eq!(v["audit_shape"]["content_included"], json!(false));
+        assert_eq!(v["input_contract"]["raw_payload_fields_present"], json!(true));
+        assert_eq!(v["side_effects"]["calls_memory_search"], json!(false));
+        assert_eq!(v["side_effects"]["may_enforce_hold_now"], json!(false));
+        let blockers = v["boundary_check"]["blockers"]
+            .as_array()
+            .expect("blockers");
+        assert!(blockers.contains(&json!("raw_payload_fields_present")));
+    }
+
+    #[test]
     fn biocortex_retrieval_opt_in_dry_run_schema_is_readonly() {
         let tool = BioCortexRetrievalOptInDryRunTool::new();
         let schema = tool.schema();
@@ -66915,6 +67254,196 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert_eq!(v["runs_biocortex"], json!(false));
         assert_eq!(v["changes_memory_search_order"], json!(false));
         assert_eq!(v["default_search_order_change_allowed"], json!(false));
+    }
+
+    fn trigger_recall_ready_status_packet_fixture() -> Value {
+        trigger_recall_opt_in_status(TriggerRecallOptInStatusOptions {
+            mode: "fts".to_string(),
+            per_call_opt_in: true,
+            scope: Some("project:/Data/CascadeProjects/agent-bridge".to_string()),
+            scope_mode: "local_only".to_string(),
+            regression_anchor: Some(
+                crate::trigger_recall_opt_in::TRIGGER_RECALL_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR
+                    .to_string(),
+            ),
+            aio2_corpus_ready: Some(true),
+            union_cont_misses: Some(0),
+            union_cont_false_hits: Some(0),
+            baseline_shadow_true_hits_lost: Some(0),
+            baseline_shadow_positive_cases_held: Some(0),
+            baseline_shadow_false_hits_after_gate: Some(0),
+            metric_captured_at: Some("2026-06-23T11:07:56Z".to_string()),
+            runtime_enabled: true,
+            operator_disabled: false,
+            raw_payload_fields_present: false,
+        })
+    }
+
+    #[test]
+    fn trigger_recall_opt_in_runtime_transition_gate_schema_is_readonly() {
+        let tool = TriggerRecallOptInRuntimeTransitionGateTool::new();
+        let schema = tool.schema();
+        assert_eq!(schema.name, "trigger_recall_opt_in_runtime_transition_gate");
+        assert!(schema.description.contains("Read-only"));
+        assert!(schema.description.contains("Does not call memory_search"));
+        assert!(schema.description.contains("authorize enforce_hold"));
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required");
+        assert!(required.contains(&json!("status_packet")));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("status_packet").is_some());
+        assert!(props.get("mode").is_some());
+        assert!(props.get("per_call_opt_in").is_some());
+        assert!(props.get("scope").is_some());
+        assert!(props.get("query").is_none());
+        assert!(props.get("baseline_keys").is_none());
+        assert!(props.get("memory_search").is_none());
+        assert!(props.get("raw_content").is_none());
+
+        let names: Vec<String> = build_registry_with_policy(
+            Hub::builder().build(),
+            ToolPolicy {
+                set: ToolSet::Profile,
+                profile: ToolProfile::All,
+            },
+        )
+        .list()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
+        assert!(names.contains(&schema.name));
+    }
+
+    #[tokio::test]
+    async fn trigger_recall_opt_in_runtime_transition_gate_allows_ready_status_packet() {
+        let _lock = frontend_env_test_setup();
+        let prior_enable = std::env::var("AB_TRIGGER_RECALL_OPT_IN").ok();
+        let prior_disable = std::env::var("AB_TRIGGER_RECALL_DISABLE").ok();
+        std::env::set_var("AB_TRIGGER_RECALL_OPT_IN", "1");
+        std::env::remove_var("AB_TRIGGER_RECALL_DISABLE");
+
+        let tool = TriggerRecallOptInRuntimeTransitionGateTool::new();
+        let out = tool
+            .execute(
+                json!({
+                    "status_packet": trigger_recall_ready_status_packet_fixture(),
+                    "mode": "fts",
+                    "per_call_opt_in": true,
+                    "scope": "project:/Data/CascadeProjects/agent-bridge",
+                    "scope_mode": "local_only",
+                    "regression_anchor": crate::trigger_recall_opt_in::TRIGGER_RECALL_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR,
+                    "reviewer": "codex",
+                    "commit": "trigger-transition-commit",
+                    "forum_post_id": "2502",
+                    "memory_key": "trigger-transition-memory"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        restore_env_var("AB_TRIGGER_RECALL_OPT_IN", prior_enable);
+        restore_env_var("AB_TRIGGER_RECALL_DISABLE", prior_disable);
+
+        let text = match out.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(v["status"], json!("transition_allowed"));
+        assert_eq!(v["transition"]["transition_allowed"], json!(true));
+        assert_eq!(
+            v["transition"]["may_call_gated_baseline_trial"],
+            json!(true)
+        );
+        assert_eq!(v["transition"]["may_enforce_hold"], json!(false));
+        assert_eq!(v["side_effects"]["calls_memory_search"], json!(false));
+        assert_eq!(
+            v["side_effects"]["changes_memory_search_order"],
+            json!(false)
+        );
+        assert_eq!(v["boundary_check"]["blockers"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn trigger_recall_opt_in_runtime_transition_gate_sanitizes_status_packet() {
+        let _lock = frontend_env_test_setup();
+        let prior_enable = std::env::var("AB_TRIGGER_RECALL_OPT_IN").ok();
+        let prior_disable = std::env::var("AB_TRIGGER_RECALL_DISABLE").ok();
+        std::env::set_var("AB_TRIGGER_RECALL_OPT_IN", "1");
+        std::env::remove_var("AB_TRIGGER_RECALL_DISABLE");
+
+        let mut status_packet = trigger_recall_ready_status_packet_fixture();
+        status_packet["raw_query"] = json!("secret transition query");
+        status_packet["raw_key"] = json!("secret_transition_key");
+        status_packet["content"] = json!("secret transition content");
+        let tool = TriggerRecallOptInRuntimeTransitionGateTool::new();
+        let out = tool
+            .execute(
+                json!({
+                    "status_packet": status_packet,
+                    "mode": "semantic",
+                    "per_call_opt_in": false,
+                    "scope": "project:/secret/trigger/transition/path",
+                    "scope_mode": "local_only",
+                    "regression_anchor": "wrong-anchor",
+                    "operator_disabled": true,
+                    "reviewer": "codex",
+                    "commit": "trigger-transition-commit",
+                    "forum_post_id": "2502",
+                    "memory_key": "trigger-transition-memory",
+                    "query": "secret outer transition query"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        restore_env_var("AB_TRIGGER_RECALL_OPT_IN", prior_enable);
+        restore_env_var("AB_TRIGGER_RECALL_DISABLE", prior_disable);
+
+        let text = match out.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains("secret transition query"));
+        assert!(!text.contains("secret_transition_key"));
+        assert!(!text.contains("secret transition content"));
+        assert!(!text.contains("secret outer transition query"));
+        assert!(!text.contains("/secret/trigger/transition/path"));
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.memory.trigger_recall.opt_in_runtime_transition_gate.v0")
+        );
+        assert_eq!(v["read_only"], json!(true));
+        assert_eq!(v["runtime_transition_gate"], json!(true));
+        assert_eq!(v["status"], json!("blocked"));
+        assert_eq!(v["requested_transition"]["mode"], json!("semantic"));
+        assert_eq!(v["requested_transition"]["mode_authorized"], json!(false));
+        assert_eq!(v["requested_transition"]["per_call_opt_in"], json!(false));
+        assert_eq!(v["transition"]["transition_allowed"], json!(false));
+        assert_eq!(v["transition"]["may_call_gated_baseline_trial"], json!(false));
+        assert_eq!(v["transition"]["may_enforce_hold"], json!(false));
+        assert_eq!(v["input_contract"]["status_packet_included"], json!(false));
+        assert_eq!(v["input_contract"]["raw_query_included"], json!(false));
+        assert_eq!(v["input_contract"]["raw_keys_included"], json!(false));
+        assert_eq!(v["input_contract"]["content_included"], json!(false));
+        assert_eq!(v["side_effects"]["calls_memory_search"], json!(false));
+        assert_eq!(v["side_effects"]["records_coactivation"], json!(false));
+        let blockers = v["boundary_check"]["blockers"]
+            .as_array()
+            .expect("blockers");
+        assert!(blockers.contains(&json!("status_packet_contains_raw_payload")));
+        assert!(blockers.contains(&json!("requested_mode_not_authorized")));
+        assert!(blockers.contains(&json!("per_call_opt_in_missing")));
+        assert!(blockers.contains(&json!("operator_disabled")));
+        assert!(blockers.contains(&json!("regression_anchor_mismatch")));
     }
 
     #[test]
