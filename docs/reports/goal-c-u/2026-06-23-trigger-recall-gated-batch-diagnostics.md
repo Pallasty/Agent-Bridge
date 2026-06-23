@@ -75,6 +75,29 @@ Existing warnings observed:
 - Existing unused Option E helpers and related helper functions in
   `crates/bridge/src/mcp_tools.rs`.
 
+## Local Sync Verification
+
+After fast-forwarding to `ee48804`, Codex reran the trigger slice verification
+locally on 2026-06-23:
+
+- `cargo test -p ab-bridge --lib trigger_recall_opt_in -- --nocapture`
+  - 21 passed.
+- `cargo check -p ab-bridge --lib`
+  - Passed with existing warnings only.
+- `cargo run -p ab-bridge --example trigger_recall_eval -- --aio2-baseline-acceptance-audit`
+  - Active rows: 457; trigger rows: 29; projected rows: 28.
+  - Corpus: 14 cases; negative controls: 8.
+  - Baseline FTS and baseline shadow both remain R@10 0.857, MRR 0.786.
+  - True hits lost by shadow gate: 0.
+  - Positive cases held: 0.
+  - Baseline false hits before shadow gate: 21; after shadow gate: 0.
+  - Held controls by reason: creative_non_continuation_intent=2,
+    frontend_dashboard_intent=2, health_dashboard_intent=1,
+    write_bypass_intent=2.
+  - Decision remains eval-only: production `memory_search`, ranking, schema,
+    indexing, graph, semantic retrieval, MCP surfaces, and memory rows are
+    unchanged by the audit.
+
 ## Next Gate
 
 Use the new surface to summarize a redacted accepted/held/blocked trial batch.

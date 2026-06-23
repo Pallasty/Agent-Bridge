@@ -122,6 +122,7 @@ daemon background tick(30s)跑 `c3_self_check`,异常按 class 选 channel(`crat
 6. **弧闭合后别陷入只读核对循环找活** —— 那本身就是卡。要么落子,要么一次性问 owner。
 
 **额外**:`cargo fmt` 是 workspace-wide,会扫到 protected/别人的文件 → fmt 后**必 verify diff**,no-touch 协议优先(`feedback_cargo_fmt_sweeps_protected_files`)。
+**额外**:`rustfmt --check` 在超大 Rust 文件存在未格式化 diff 时可能走 `rustfmt_diff::make_diff` 并尝试分配 20GB+ 内存,在 Cursor/Codex 进程树里会触发 OOM 杀掉 IDE。对 `mcp_tools.rs` 这类文件先跑受限/定点格式化,再 `--check`;必要时用 `ulimit -v 2500000` 包裹检查(`lesson_rustfmt_check_large_diff_oom_20260623`)。
 
 ---
 
