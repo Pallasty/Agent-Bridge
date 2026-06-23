@@ -356,14 +356,21 @@ This proposal does not authorize:
 
 ## Next Gate
 
-The next safe action is a separate approval packet for an implementation
-commit. That packet must name:
+Closed by
+`docs/reports/goal-c-u/2026-06-23-trigger-recall-pre-policy-hold-implementation-proposal-review.md`,
+`docs/reports/goal-c-u/2026-06-23-trigger-recall-pre-policy-hold-stage1-candidate-authorization.md`,
+and
+`docs/reports/goal-c-u/2026-06-23-trigger-recall-pre-policy-hold-stage2-acceptance-checklist.md`.
 
-- exact implementation commit;
-- exact approved mode: `pre_policy_hold_simulation`;
-- reviewer;
-- forum post id;
-- regression results;
-- rollback path.
+Current safe actions:
 
-Until that packet exists, runtime work remains `IMPLEMENTATION-NO-GO`.
+- use the Stage-1 authorized `/Users/...` worktree if operating on that host;
+- or write a Stage-1 amendment naming an exact Aio2 `/Data/...` worktree before
+  producing candidate code in this environment;
+- after an exact candidate commit exists, run the Stage-2 checklist and require
+  a separate Stage-2 approval packet naming that commit before merge/runtime
+  use.
+
+Until a checkout-specific Stage-1 authorization applies, candidate work in that
+checkout remains blocked. Until a Stage-2 exact-commit packet exists,
+merge/runtime work remains `IMPLEMENTATION-NO-GO`.
