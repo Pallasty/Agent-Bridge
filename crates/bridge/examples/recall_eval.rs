@@ -15,7 +15,9 @@
 //! without that drift, you need a FIXED query set with KNOWN ground truth, run
 //! against the live store right now — reproducible before/after any T1-T7
 //! ranking change, and the ground truth a BioCortex shadow-trial needs to
-//! measure lift against.
+//! measure lift against. For runtime-lift claims, pin `AB_BASELINE_DB` to a
+//! frozen copy of the store so live memory writes cannot move the baseline
+//! underneath the proposal being measured.
 //!
 //! WHAT it does. For a hand-curated corpus of `(query, expected_keys)` cases it
 //! runs each of the three real retrieval modes (`fts` / `hybrid` / `semantic`)
@@ -68,7 +70,8 @@
 
 use ab_store::{MemoryEdge, SqliteStore, StateStore, default_db_path};
 use std::collections::{BTreeSet, HashMap};
-use std::path::PathBuf;
+use std::fs;
+use std::path::{Path, PathBuf};
 use tokio_rusqlite::rusqlite::{
     Connection as RusqliteConnection, OpenFlags, Result as SqlResult, params,
 };
@@ -93,6 +96,43 @@ impl Tier {
             Tier::Hard => "hard",
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BaselineDbSource {
+    LiveDefault,
+    EnvOverride,
+}
+
+impl BaselineDbSource {
+    fn is_pinned(self) -> bool {
+        matches!(self, Self::EnvOverride)
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::LiveDefault => "default_db_path (live local store)",
+            Self::EnvOverride => "AB_BASELINE_DB (caller-pinned DB)",
+        }
+    }
+
+    fn note(self) -> &'static str {
+        match self {
+            Self::LiveDefault => {
+                "live store is drift-prone; use AB_BASELINE_DB for before/after runtime gates"
+            }
+            Self::EnvOverride => {
+                "caller controls DB contents; compare before/after against the same snapshot"
+            }
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct BaselineDbFingerprint {
+    active_memories: i64,
+    memory_edges: i64,
+    newest_created_at: Option<i64>,
 }
 
 /// One held-out recall case. `expect` is the ACCEPT-SET of memory keys that
@@ -223,7 +263,7 @@ const CORPUS: &[Case] = &[
 const TOP_K: usize = 10;
 const GRAPH_NEIGHBOR_LIMIT: usize = 8;
 const HASH_BACKEND_NAME: &str = "fnv1a-hash-384";
-const REVIEW_GATE_TARGET_CASES: &[usize] = &[1, 2, 5, 9, 14];
+const REVIEW_GATE_TARGET_CASES: &[usize] = &[1, 2, 8, 9, 14];
 const MIN_CJK_SHINGLE_ACCEPT_OVERLAP: usize = 4;
 const CASE2_TOOL_SURFACE_IDX1: usize = 2;
 const MIN_TOOL_SURFACE_PROJECTION_OVERLAP: usize = 4;
@@ -443,12 +483,67 @@ fn expand_baseline_with_graph_neighbors(
     }
 }
 
+fn resolve_baseline_db_path() -> (PathBuf, BaselineDbSource) {
+    if let Ok(db_path) = std::env::var("AB_BASELINE_DB") {
+        (PathBuf::from(db_path), BaselineDbSource::EnvOverride)
+    } else {
+        (default_db_path(), BaselineDbSource::LiveDefault)
+    }
+}
+
+fn baseline_db_fingerprint(db_path: &Path) -> SqlResult<BaselineDbFingerprint> {
+    let conn = RusqliteConnection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let active_memories = conn.query_row(
+        "SELECT COUNT(*) FROM memories WHERE status='active'",
+        [],
+        |row| row.get(0),
+    )?;
+    let memory_edges = conn.query_row("SELECT COUNT(*) FROM memory_edges", [], |row| row.get(0))?;
+    let newest_created_at = conn.query_row(
+        "SELECT MAX(created_at) FROM memories WHERE status='active'",
+        [],
+        |row| row.get(0),
+    )?;
+
+    Ok(BaselineDbFingerprint {
+        active_memories,
+        memory_edges,
+        newest_created_at,
+    })
+}
+
+fn print_baseline_db_context(db_path: &Path, source: BaselineDbSource) -> SqlResult<()> {
+    let display_path = fs::canonicalize(db_path).unwrap_or_else(|_| db_path.to_path_buf());
+    let fingerprint = baseline_db_fingerprint(db_path)?;
+
+    println!("# baseline db source: {}", source.label());
+    println!("# baseline db path: {}", display_path.display());
+    if let Ok(metadata) = fs::metadata(db_path) {
+        println!("# baseline db bytes: {}", metadata.len());
+    }
+    println!(
+        "# store fingerprint: pinned={} active={} edges={} newest={} path={}",
+        source.is_pinned(),
+        fingerprint.active_memories,
+        fingerprint.memory_edges,
+        fingerprint
+            .newest_created_at
+            .map_or_else(|| "none".to_string(), |ts| ts.to_string()),
+        display_path.display()
+    );
+    if !source.is_pinned() {
+        println!(
+            "# WARNING: live store baseline is drift-prone; set AB_BASELINE_DB=<frozen snapshot> for canonical runtime-gate comparisons"
+        );
+    }
+    println!("# baseline db note: {}", source.note());
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let db_path: PathBuf = std::env::var("AB_BASELINE_DB")
-        .ok()
-        .map(PathBuf::from)
-        .unwrap_or_else(default_db_path);
+    let (db_path, db_source) = resolve_baseline_db_path();
+    print_baseline_db_context(&db_path, db_source)?;
 
     // Action A (#3746 / Goal C U-surface): select the embed model the store was
     // actually indexed with, so semantic is MEASURED against the right vector
@@ -1932,6 +2027,24 @@ mod tests {
     }
 
     #[test]
+    fn baseline_db_source_labels_distinguish_live_and_pinned_store() {
+        assert!(!BaselineDbSource::LiveDefault.is_pinned());
+        assert!(BaselineDbSource::EnvOverride.is_pinned());
+        assert!(BaselineDbSource::LiveDefault.label().contains("live"));
+        assert!(BaselineDbSource::LiveDefault.note().contains("drift-prone"));
+        assert!(
+            BaselineDbSource::EnvOverride
+                .label()
+                .contains("AB_BASELINE_DB")
+        );
+        assert!(
+            BaselineDbSource::EnvOverride
+                .note()
+                .contains("same snapshot")
+        );
+    }
+
+    #[test]
     fn offline_candidate_expansion_appends_direct_graph_neighbors_after_baseline() {
         let baseline = vec!["source".to_string()];
         let edges = vec![vec![edge("source", "target", 1.0)]];
@@ -1974,6 +2087,11 @@ mod tests {
             let case = CORPUS.get(idx1 - 1).expect("target case exists");
             assert_eq!(case.tier, Tier::Hard);
         }
+    }
+
+    #[test]
+    fn review_gate_targets_track_pinned_hard_miss_set() {
+        assert_eq!(REVIEW_GATE_TARGET_CASES, &[1, 2, 8, 9, 14]);
     }
 
     #[test]
