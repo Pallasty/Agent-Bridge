@@ -494,6 +494,17 @@ impl ModeAgg {
     }
 }
 
+fn mode_agg_from_ranks<I>(ranks: I) -> ModeAgg
+where
+    I: IntoIterator<Item = Option<usize>>,
+{
+    let mut agg = ModeAgg::default();
+    for rank in ranks {
+        agg.record(rank);
+    }
+    agg
+}
+
 /// Offline candidate-set expansion: keep baseline FTS candidates in their
 /// original order, then append direct graph neighbors that were not already
 /// present. This is a yardstick for recall headroom, not a production ranker.
@@ -800,6 +811,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     print_case2_tool_surface_projection_probe(&scratch_tool_surface)?;
     print_case8_remote_session_projection_probe(&scratch_remote_session)?;
+    print_role_aware_hard_family_aggregate(&scratch_tool_surface, &scratch_remote_session)?;
 
     // ── Per-tier breakdown (worst-case paraphrase vs lexically-anchored) ─────
     // The single aggregate above blends pure-paraphrase (hard) and
@@ -1498,6 +1510,10 @@ fn classify_tool_surface_candidate(query: &str, hit: &ProjectionHit) -> ToolSurf
         || key.contains("recall_eval")
         || key.contains("falsifier")
         || key.contains("goal_c")
+        || key.contains("main_recall")
+        || key.contains("eval_assembler")
+        || key.contains("production_review")
+        || key.contains("review_packet")
     {
         return ToolSurfaceCandidateRole::DiagnosticOrMeta;
     }
@@ -1612,6 +1628,10 @@ fn classify_remote_session_candidate(
         || key.contains("falsifier")
         || key.contains("audit")
         || key.contains("goal_c")
+        || key.contains("main_recall")
+        || key.contains("eval_assembler")
+        || key.contains("production_review")
+        || key.contains("review_packet")
     {
         return RemoteSessionCandidateRole::DiagnosticOrMeta;
     }
@@ -2292,6 +2312,112 @@ fn print_case8_remote_session_positive_controls(
     Ok(())
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RoleAwareHardFamilyRank {
+    idx1: usize,
+    family: &'static str,
+    strict_rank: Option<usize>,
+    role_aware_rank: Option<usize>,
+    strict_candidates: usize,
+    role_aware_candidates: usize,
+}
+
+fn print_role_aware_hard_family_aggregate(
+    scratch_tool_surface: &ScratchToolSurfaceProjectionFts,
+    scratch_remote_session: &ScratchRemoteSessionProjectionFts,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let rows = role_aware_hard_family_ranks(scratch_tool_surface, scratch_remote_session)?;
+    let strict_agg = mode_agg_from_ranks(rows.iter().map(|row| row.strict_rank));
+    let role_aware_agg = mode_agg_from_ranks(rows.iter().map(|row| row.role_aware_rank));
+    let n = rows.len();
+
+    println!("## Eval-only role-aware hard-family aggregate");
+    println!(
+        "  {:<30} {:>4} {:>7} {:>7} {:>7} {:>7}",
+        "mode", "n", "R@1", "R@5", "R@10", "MRR"
+    );
+    print_eval_mode_row("strict_projected_families", &strict_agg, n);
+    print_eval_mode_row("role_aware_hard_families", &role_aware_agg, n);
+    println!(
+        "  gate: aggregate denominator is only implemented eval-only role-aware \
+         hard families (#2 tool-surface, #8 remote-session). This row is a \
+         measurement contract, not a default retrieval mode."
+    );
+    println!("  family ranks:");
+    for row in &rows {
+        let case = &CORPUS[row.idx1 - 1];
+        let q: String = case.query.chars().take(34).collect();
+        println!(
+            "    #{:<2} {:<18} strict={} role_aware={} strict_candidates={} role_candidates={} {}",
+            row.idx1,
+            row.family,
+            rank_cell(row.strict_rank),
+            rank_cell(row.role_aware_rank),
+            row.strict_candidates,
+            row.role_aware_candidates,
+            q
+        );
+    }
+    println!(
+        "  caveat: on drift-prone live stores, a miss can mean the target/family \
+         row is absent from that local baseline. Use AB_BASELINE_DB with the \
+         frozen Mac snapshot for canonical production-gate comparisons."
+    );
+    println!();
+    Ok(())
+}
+
+fn role_aware_hard_family_ranks(
+    scratch_tool_surface: &ScratchToolSurfaceProjectionFts,
+    scratch_remote_session: &ScratchRemoteSessionProjectionFts,
+) -> Result<Vec<RoleAwareHardFamilyRank>, String> {
+    let case2 = &CORPUS[CASE2_TOOL_SURFACE_IDX1 - 1];
+    let case2_strict =
+        scratch_tool_surface.search_projected_accepted_strict_durable(case2.query, TOP_K)?;
+    let case2_role_aware = scratch_tool_surface.search_projected_role_aware(case2.query, TOP_K)?;
+    let case2_strict_keys = case2_strict
+        .iter()
+        .map(|hit| hit.key.clone())
+        .collect::<Vec<_>>();
+    let case2_role_aware_keys = case2_role_aware
+        .iter()
+        .map(|hit| hit.hit.key.clone())
+        .collect::<Vec<_>>();
+
+    let case8 = &CORPUS[CASE8_REMOTE_SESSION_IDX1 - 1];
+    let case8_strict =
+        scratch_remote_session.search_projected_accepted_strict_durable(case8.query, TOP_K)?;
+    let case8_role_aware =
+        scratch_remote_session.search_projected_role_aware(case8.query, TOP_K)?;
+    let case8_strict_keys = case8_strict
+        .iter()
+        .map(|hit| hit.key.clone())
+        .collect::<Vec<_>>();
+    let case8_role_aware_keys = case8_role_aware
+        .iter()
+        .map(|hit| hit.hit.key.clone())
+        .collect::<Vec<_>>();
+
+    Ok(vec![
+        RoleAwareHardFamilyRank {
+            idx1: CASE2_TOOL_SURFACE_IDX1,
+            family: "tool-surface",
+            strict_rank: first_hit_rank(&case2_strict_keys, case2.expect),
+            role_aware_rank: first_hit_rank(&case2_role_aware_keys, case2.expect),
+            strict_candidates: case2_strict.len(),
+            role_aware_candidates: case2_role_aware.len(),
+        },
+        RoleAwareHardFamilyRank {
+            idx1: CASE8_REMOTE_SESSION_IDX1,
+            family: "remote-session",
+            strict_rank: first_hit_rank(&case8_strict_keys, case8.expect),
+            role_aware_rank: first_hit_rank(&case8_role_aware_keys, case8.expect),
+            strict_candidates: case8_strict.len(),
+            role_aware_candidates: case8_role_aware.len(),
+        },
+    ])
+}
+
 /// Falsification dump for one case (1-based): show the top-k of each mode with
 /// score + cosine, and mark the expected key(s).
 async fn debug_case(store: &SqliteStore, idx1: usize) -> Result<(), Box<dyn std::error::Error>> {
@@ -2358,6 +2484,19 @@ fn print_mode_row(label: &str, agg: &ModeAgg, n: usize) {
     println!(
         "  {:<10} {:>7.3} {:>7.3} {:>7.3} {:>7.3}",
         label,
+        agg.r_at_1 as f64 / nf,
+        agg.r_at_5 as f64 / nf,
+        agg.r_at_10 as f64 / nf,
+        agg.rr_sum / nf,
+    );
+}
+
+fn print_eval_mode_row(label: &str, agg: &ModeAgg, n: usize) {
+    let nf = n as f64;
+    println!(
+        "  {:<30} {:>4} {:>7.3} {:>7.3} {:>7.3} {:>7.3}",
+        label,
+        n,
         agg.r_at_1 as f64 / nf,
         agg.r_at_5 as f64 / nf,
         agg.r_at_10 as f64 / nf,
@@ -3198,6 +3337,17 @@ mod tests {
     }
 
     #[test]
+    fn mode_agg_from_ranks_scores_role_aware_family_rows() {
+        let agg = mode_agg_from_ranks([Some(2), Some(8)]);
+
+        assert_eq!(agg.r_at_1, 0);
+        assert_eq!(agg.r_at_5, 1);
+        assert_eq!(agg.r_at_10, 2);
+        assert_eq!(agg.ranks, vec![Some(2), Some(8)]);
+        assert!((agg.rr_sum - 0.625).abs() < 1e-9);
+    }
+
+    #[test]
     fn cjk_shingle_terms_index_space_free_chinese_runs() {
         let terms = cjk_shingle_terms("记忆系统应该恢复正确状态");
 
@@ -3473,6 +3623,7 @@ mod tests {
                 "goal_c_recall_eval_falsifier_anchor_contribution_20260621",
                 &shared[..4],
             ),
+            projection_hit_for_role("main_recall_case2_eval_assembler_20260623", &shared),
             projection_hit_for_role(
                 "reference_ab_tool_surface_taxonomy_8class_retier_over_delete_20260618",
                 &shared,
@@ -3555,6 +3706,10 @@ mod tests {
         let hits = vec![
             projection_hit_for_role(
                 "goal_c_remote_session_recall_eval_diagnostic_20260623",
+                &shared,
+            ),
+            projection_hit_for_role(
+                "main_recall_case8_remote_session_eval_assembler_20260623",
                 &shared,
             ),
             projection_hit_for_role("agentbridge_remote_session_steer_gap_20260529", &shared),
