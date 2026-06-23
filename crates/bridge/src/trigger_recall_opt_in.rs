@@ -15,8 +15,16 @@ pub const TRIGGER_RECALL_ENFORCE_HOLD_APPROVAL_PACKET_SCHEMA: &str =
     "agent_bridge.memory.trigger_recall.enforce_hold_approval_packet.v0";
 pub const TRIGGER_RECALL_ENFORCE_HOLD_APPROVAL_PACKET_VALIDATOR_SCHEMA: &str =
     "agent_bridge.memory.trigger_recall.enforce_hold_approval_packet_validator.v0";
+pub const TRIGGER_RECALL_PRE_POLICY_HOLD_APPROVAL_PACKET_SCHEMA: &str =
+    "agent_bridge.memory.trigger_recall.pre_policy_hold_approval_packet.v0";
+pub const TRIGGER_RECALL_PRE_POLICY_HOLD_SIMULATION_SCHEMA: &str =
+    "agent_bridge.memory.trigger_recall.pre_policy_hold_simulation.v0";
 pub const TRIGGER_RECALL_OPT_IN_ENABLE_ENV: &str = "AB_TRIGGER_RECALL_OPT_IN";
 pub const TRIGGER_RECALL_DISABLE_ENV: &str = "AB_TRIGGER_RECALL_DISABLE";
+pub const TRIGGER_RECALL_PRE_POLICY_HOLD_OPT_IN_ENV: &str =
+    "AB_TRIGGER_RECALL_PRE_POLICY_HOLD_OPT_IN";
+pub const TRIGGER_RECALL_PRE_POLICY_HOLD_DISABLE_ENV: &str =
+    "AB_TRIGGER_RECALL_PRE_POLICY_HOLD_DISABLE";
 pub const TRIGGER_RECALL_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR: &str =
     "aio2_trigger_recall_baseline_acceptance_shadow_20260623";
 pub const TRIGGER_RECALL_UNION_CONT_REGRESSION_ANCHOR: &str =
@@ -79,6 +87,27 @@ pub struct TriggerRecallOptInGatedBaselineTrialOptions {
     pub per_call_opt_in: bool,
     pub scope: Option<String>,
     pub scope_mode: String,
+    pub runtime_enabled: bool,
+    pub operator_disabled: bool,
+    pub raw_payload_fields_present: bool,
+    pub baseline_search_called: bool,
+    pub baseline_hits: Option<Vec<TriggerRecallOptInGatedBaselineTrialHit>>,
+    pub baseline_search_error: Option<String>,
+    pub attempt_id: Option<String>,
+    pub commit: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TriggerRecallPrePolicyHoldSimulationOptions {
+    pub approval_packet: Value,
+    pub query: String,
+    pub tags_count: usize,
+    pub limit: u64,
+    pub mode: String,
+    pub per_call_opt_in: bool,
+    pub scope: Option<String>,
+    pub scope_mode: String,
+    pub include_baseline_counts: bool,
     pub runtime_enabled: bool,
     pub operator_disabled: bool,
     pub raw_payload_fields_present: bool,
@@ -851,6 +880,107 @@ fn transition_gate_blockers(
     blockers
 }
 
+fn pre_policy_hold_approval_blockers(
+    approval_packet: &Value,
+    implementation_commit: Option<&str>,
+) -> BTreeSet<String> {
+    let schema = approval_packet
+        .get("schema")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let packet_status = approval_packet
+        .get("packet_status")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let approved_mode = approval_packet
+        .get("approved_mode")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let packet_commit = approval_packet
+        .get("implementation_commit")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .unwrap_or("");
+    let requested_commit = implementation_commit.map(str::trim).unwrap_or("");
+    let rollback_present = match approval_packet.get("rollback") {
+        Some(Value::String(value)) => !value.trim().is_empty(),
+        Some(Value::Array(values)) => !values.is_empty(),
+        Some(Value::Object(values)) => !values.is_empty(),
+        _ => false,
+    };
+
+    let mut blockers = BTreeSet::<String>::new();
+    push_if(
+        &mut blockers,
+        schema != TRIGGER_RECALL_PRE_POLICY_HOLD_APPROVAL_PACKET_SCHEMA,
+        "approval_packet_schema_mismatch",
+    );
+    push_if(
+        &mut blockers,
+        packet_status != "approved_for_pre_policy_hold_simulation",
+        "approval_packet_status_not_approved",
+    );
+    push_if(
+        &mut blockers,
+        approved_mode != "pre_policy_hold_simulation",
+        "approved_mode_mismatch",
+    );
+    push_if(
+        &mut blockers,
+        packet_commit.is_empty(),
+        "implementation_commit_missing",
+    );
+    push_if(
+        &mut blockers,
+        requested_commit.is_empty(),
+        "implementation_commit_context_missing",
+    );
+    push_if(
+        &mut blockers,
+        !packet_commit.is_empty() && !requested_commit.is_empty() && packet_commit != requested_commit,
+        "implementation_commit_mismatch",
+    );
+    push_if(
+        &mut blockers,
+        approval_packet
+            .get("regression_anchor")
+            .and_then(Value::as_str)
+            != Some(TRIGGER_RECALL_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR),
+        "regression_anchor_mismatch",
+    );
+    push_if(
+        &mut blockers,
+        approval_packet
+            .get("default_memory_search_unchanged")
+            .and_then(Value::as_bool)
+            != Some(true),
+        "default_memory_search_not_unchanged",
+    );
+    push_if(
+        &mut blockers,
+        !bool_false_at(approval_packet, "/raw_query_included"),
+        "raw_query_included",
+    );
+    push_if(
+        &mut blockers,
+        !bool_false_at(approval_packet, "/raw_keys_included"),
+        "raw_keys_included",
+    );
+    push_if(
+        &mut blockers,
+        !bool_false_at(approval_packet, "/content_included"),
+        "content_included",
+    );
+    push_if(&mut blockers, !rollback_present, "rollback_missing");
+    push_if(
+        &mut blockers,
+        trigger_recall_value_contains_raw(approval_packet),
+        "approval_packet_contains_raw_payload",
+    );
+
+    blockers
+}
+
 fn baseline_order_hash(hits: &[TriggerRecallOptInGatedBaselineTrialHit]) -> String {
     let joined = hits
         .iter()
@@ -871,6 +1001,250 @@ fn redacted_hit_summary(hit: &TriggerRecallOptInGatedBaselineTrialHit, rank: usi
         "created_at": hit.created_at,
         "updated_at": hit.updated_at,
         "tags_count": hit.tags_count
+    })
+}
+
+pub fn trigger_recall_opt_in_pre_policy_hold_simulation(
+    options: TriggerRecallPrePolicyHoldSimulationOptions,
+) -> Value {
+    let mode = normalize_mode(&options.mode);
+    let scope_mode = normalize_scope_mode(&options.scope_mode);
+    let scope = normalized_scope(options.scope);
+    let exact_scope = exact_local_project_scope(scope.as_deref(), &scope_mode);
+    let query = options.query.trim().to_string();
+    let query_present = !query.is_empty();
+    let commit = options.commit.as_deref().map(str::trim).unwrap_or("");
+    let mut blockers =
+        pre_policy_hold_approval_blockers(&options.approval_packet, options.commit.as_deref());
+    push_if(
+        &mut blockers,
+        mode != "fts",
+        "requested_mode_not_authorized",
+    );
+    push_if(
+        &mut blockers,
+        !options.per_call_opt_in,
+        "per_call_opt_in_missing",
+    );
+    push_if(
+        &mut blockers,
+        !exact_scope,
+        "exact_local_project_scope_missing",
+    );
+    push_if(&mut blockers, !options.runtime_enabled, "runtime_disabled");
+    push_if(
+        &mut blockers,
+        options.operator_disabled,
+        "operator_disabled",
+    );
+    push_if(
+        &mut blockers,
+        options.raw_payload_fields_present,
+        "raw_payload_fields_present",
+    );
+    push_if(&mut blockers, !query_present, "query_missing");
+
+    let gates_blocked = !blockers.is_empty();
+    let reject_reason = if gates_blocked {
+        None
+    } else {
+        trigger_recall_baseline_acceptance_reject_reason(&query)
+    };
+    let would_hold = !gates_blocked && reject_reason.is_some();
+    let accepted = !gates_blocked && reject_reason.is_none() && query_present;
+    let baseline_search_supplied = options.baseline_hits.is_some();
+    let baseline_hits = options.baseline_hits.unwrap_or_default();
+    let store_search_called = options.baseline_search_called || baseline_search_supplied;
+    let baseline_search_error = options.baseline_search_error.unwrap_or_default();
+    let baseline_error_present = !baseline_search_error.is_empty();
+    let store_search_required = if gates_blocked {
+        true
+    } else if would_hold {
+        options.include_baseline_counts
+    } else {
+        accepted
+    };
+    let baseline_result_available = store_search_called || baseline_error_present;
+    let visible_hits = if baseline_error_present || would_hold {
+        Vec::new()
+    } else if gates_blocked || (accepted && baseline_result_available) {
+        baseline_hits
+            .iter()
+            .enumerate()
+            .map(|(idx, hit)| redacted_hit_summary(hit, idx + 1))
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    let baseline_candidate_count = if store_search_called {
+        json!(baseline_hits.len())
+    } else {
+        Value::Null
+    };
+    let baseline_order_hash_value = if store_search_called {
+        json!(baseline_order_hash(&baseline_hits))
+    } else {
+        Value::Null
+    };
+    let status = if baseline_error_present && store_search_required {
+        "baseline_search_error"
+    } else if options.operator_disabled {
+        "operator_disabled"
+    } else if gates_blocked {
+        "blocked_to_baseline"
+    } else if would_hold {
+        "held_by_query_intent"
+    } else if accepted && baseline_result_available {
+        "returned_accepted"
+    } else {
+        "baseline_search_pending"
+    };
+    let visible_behavior = if baseline_error_present && store_search_required {
+        "baseline_search_error"
+    } else if options.operator_disabled {
+        "baseline_fail_open_operator_disabled"
+    } else if gates_blocked {
+        "baseline_fail_open"
+    } else if would_hold {
+        "held_by_query_intent"
+    } else if accepted && baseline_result_available {
+        "baseline_fts_visible"
+    } else {
+        "baseline_search_pending"
+    };
+    let baseline_count_status = if baseline_error_present && store_search_required {
+        "baseline_search_error"
+    } else if gates_blocked {
+        if store_search_called {
+            "baseline_fail_open"
+        } else {
+            "baseline_fail_open_pending"
+        }
+    } else if would_hold && options.include_baseline_counts {
+        if store_search_called {
+            "count_audit_requested"
+        } else {
+            "count_audit_pending"
+        }
+    } else if would_hold {
+        "not_requested_pre_policy_hold"
+    } else if accepted && store_search_called {
+        "baseline_visible"
+    } else {
+        "baseline_pending"
+    };
+    let query_intent_decision = if gates_blocked {
+        "not_evaluated"
+    } else if would_hold {
+        "hold"
+    } else if accepted {
+        "allow"
+    } else {
+        "not_evaluated"
+    };
+
+    json!({
+        "schema": TRIGGER_RECALL_PRE_POLICY_HOLD_SIMULATION_SCHEMA,
+        "generated_at": unix_now_secs(),
+        "read_only": true,
+        "control_surface": "trigger_recall_opt_in_pre_policy_hold_simulation",
+        "mode": "pre_policy_hold_simulation",
+        "status": status,
+        "default_memory_search_unchanged": true,
+        "changes_this_opt_in_call": would_hold,
+        "approval": {
+            "approved": !gates_blocked,
+            "blockers": blockers.into_iter().collect::<Vec<_>>(),
+            "schema": options.approval_packet.get("schema").and_then(Value::as_str).unwrap_or(""),
+            "packet_status": options.approval_packet.get("packet_status").and_then(Value::as_str).unwrap_or(""),
+            "approved_mode": options.approval_packet.get("approved_mode").and_then(Value::as_str).unwrap_or(""),
+            "implementation_commit_hash": redacted_external_hash(options.approval_packet.get("implementation_commit").and_then(Value::as_str)),
+            "request_commit_hash": redacted_external_hash(if commit.is_empty() { None } else { Some(commit) }),
+            "regression_anchor_matches": options.approval_packet.get("regression_anchor").and_then(Value::as_str) == Some(TRIGGER_RECALL_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR),
+            "default_memory_search_unchanged": options.approval_packet.get("default_memory_search_unchanged").and_then(Value::as_bool).unwrap_or(false)
+        },
+        "request": {
+            "query_hash": if query_present { json!(sha256_hex(&query)) } else { Value::Null },
+            "raw_query_included": false,
+            "tags_count": options.tags_count,
+            "limit": options.limit,
+            "scope_present": scope.is_some(),
+            "scope_hash": scope.as_ref().map(|value| sha256_hex(value)),
+            "scope_mode": scope_mode,
+            "exact_local_project_scope": exact_scope,
+            "include_baseline_counts": options.include_baseline_counts,
+            "per_call_opt_in": options.per_call_opt_in,
+            "runtime_enabled": options.runtime_enabled,
+            "operator_disabled": options.operator_disabled,
+            "attempt_id_hash": redacted_external_hash(options.attempt_id.as_deref())
+        },
+        "query_intent": {
+            "decision": query_intent_decision,
+            "reject_reason": reject_reason
+        },
+        "baseline": {
+            "store_search_required": store_search_required,
+            "store_search_called": store_search_called,
+            "memory_search_mcp_called": false,
+            "baseline_count_status": baseline_count_status,
+            "baseline_candidate_count": baseline_candidate_count,
+            "baseline_order_hash": baseline_order_hash_value,
+            "baseline_search_error": baseline_search_error
+        },
+        "visible_behavior": visible_behavior,
+        "fallback_behavior": if options.operator_disabled {
+            "operator_disabled_baseline_fail_open"
+        } else if gates_blocked {
+            "baseline_fail_open"
+        } else if would_hold {
+            "hold_packet_not_empty_search"
+        } else if accepted {
+            "baseline_fts_visible"
+        } else {
+            "baseline_search_pending"
+        },
+        "visible_hits": visible_hits,
+        "decision": {
+            "may_change_default_memory_search_now": false,
+            "may_implement_enforce_hold_now": false,
+            "stage2_approval_required_before_merge_or_deploy": true,
+            "candidate_only": true
+        },
+        "audit": {
+            "regression_anchor": TRIGGER_RECALL_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR,
+            "approval_packet_schema_required": TRIGGER_RECALL_PRE_POLICY_HOLD_APPROVAL_PACKET_SCHEMA,
+            "query_hash_required": true,
+            "baseline_order_hash_required_when_store_search_called": store_search_called,
+            "raw_query_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "held_queries_use_status_not_empty_array": true
+        },
+        "input_contract": {
+            "approval_packet_included": false,
+            "raw_payload_fields_present": options.raw_payload_fields_present,
+            "raw_query_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "unknown_fields_ignored": true
+        },
+        "side_effects": {
+            "calls_store_fts": store_search_called,
+            "calls_memory_search": false,
+            "calls_memory_search_mcp": false,
+            "calls_memory_neighbors": false,
+            "records_coactivation": false,
+            "bumps_access_count": false,
+            "writes_memory": false,
+            "writes_graph_edges": false,
+            "writes_approval": false,
+            "changes_memory_search_order": false,
+            "changes_default_memory_search_schema": false,
+            "changes_production_retrieval_default": false,
+            "runs_semantic_retrieval": false,
+            "runs_graph_retrieval": false,
+            "may_enforce_hold": false
+        }
     })
 }
 
@@ -1932,6 +2306,38 @@ mod tests {
         )
     }
 
+    fn ready_pre_policy_hold_approval_packet(commit: &str) -> Value {
+        json!({
+            "schema": TRIGGER_RECALL_PRE_POLICY_HOLD_APPROVAL_PACKET_SCHEMA,
+            "packet_status": "approved_for_pre_policy_hold_simulation",
+            "approved_mode": "pre_policy_hold_simulation",
+            "implementation_commit": commit,
+            "regression_anchor": TRIGGER_RECALL_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR,
+            "default_memory_search_unchanged": true,
+            "raw_query_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "rollback": "remove candidate branch/worktree before merge"
+        })
+    }
+
+    fn ready_pre_policy_hold_options(
+        query: &str,
+    ) -> TriggerRecallPrePolicyHoldSimulationOptions {
+        TriggerRecallPrePolicyHoldSimulationOptions {
+            approval_packet: ready_pre_policy_hold_approval_packet("candidate-commit"),
+            query: query.to_string(),
+            mode: "fts".to_string(),
+            per_call_opt_in: true,
+            scope: Some(PROJECT_SCOPE.to_string()),
+            scope_mode: "local_only".to_string(),
+            runtime_enabled: true,
+            limit: 5,
+            commit: Some("candidate-commit".to_string()),
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn baseline_trial_blocks_before_search_and_redacts_query() {
         let query = "secret frontend dashboard query";
@@ -2054,6 +2460,230 @@ mod tests {
         assert_eq!(
             trial["baseline"]["baseline_candidate_count_after_gate"],
             json!(0)
+        );
+    }
+
+    #[test]
+    fn pre_policy_hold_blocks_before_store_search_by_default() {
+        let query = "Goal C dashboard state card spacing responsive layout visual design only";
+        let packet = trigger_recall_opt_in_pre_policy_hold_simulation(
+            ready_pre_policy_hold_options(query),
+        );
+        let serialized = serde_json::to_string(&packet).expect("serialize");
+        assert!(!serialized.contains(query));
+        assert_eq!(
+            packet["schema"],
+            json!(TRIGGER_RECALL_PRE_POLICY_HOLD_SIMULATION_SCHEMA)
+        );
+        assert_eq!(packet["status"], json!("held_by_query_intent"));
+        assert_eq!(packet["changes_this_opt_in_call"], json!(true));
+        assert_eq!(packet["visible_hits"], json!([]));
+        assert_eq!(packet["baseline"]["store_search_required"], json!(false));
+        assert_eq!(packet["baseline"]["store_search_called"], json!(false));
+        assert_eq!(
+            packet["baseline"]["baseline_count_status"],
+            json!("not_requested_pre_policy_hold")
+        );
+        assert_eq!(packet["side_effects"]["calls_store_fts"], json!(false));
+        assert_eq!(packet["side_effects"]["calls_memory_search"], json!(false));
+        assert_eq!(
+            packet["decision"]["may_implement_enforce_hold_now"],
+            json!(false)
+        );
+    }
+
+    #[test]
+    fn pre_policy_hold_count_audit_calls_store_without_visible_hits() {
+        let mut options = ready_pre_policy_hold_options(
+            "Goal C dashboard state card spacing responsive layout visual design only",
+        );
+        options.include_baseline_counts = true;
+        options.baseline_search_called = true;
+        options.baseline_hits = Some(vec![TriggerRecallOptInGatedBaselineTrialHit {
+            key: "secret_count_audit_key".to_string(),
+            kind: "decision".to_string(),
+            score: 7.0,
+            scope: Some(PROJECT_SCOPE.to_string()),
+            created_at: 1,
+            updated_at: 2,
+            tags_count: 0,
+        }]);
+        let packet = trigger_recall_opt_in_pre_policy_hold_simulation(options);
+        let serialized = serde_json::to_string(&packet).expect("serialize");
+        assert!(!serialized.contains("secret_count_audit_key"));
+        assert_eq!(packet["status"], json!("held_by_query_intent"));
+        assert_eq!(packet["visible_hits"], json!([]));
+        assert_eq!(packet["baseline"]["store_search_required"], json!(true));
+        assert_eq!(packet["baseline"]["store_search_called"], json!(true));
+        assert_eq!(
+            packet["baseline"]["baseline_count_status"],
+            json!("count_audit_requested")
+        );
+        assert_eq!(packet["baseline"]["baseline_candidate_count"], json!(1));
+        assert!(
+            packet["baseline"]["baseline_order_hash"]
+                .as_str()
+                .unwrap_or("")
+                .starts_with("sha256:")
+        );
+        assert_eq!(packet["side_effects"]["calls_store_fts"], json!(true));
+        assert_eq!(packet["side_effects"]["calls_memory_search"], json!(false));
+    }
+
+    #[test]
+    fn pre_policy_hold_accepts_and_preserves_baseline_order() {
+        let mut options = ready_pre_policy_hold_options(
+            "LSWR G25 store write execution preflight landed output only plan next gate",
+        );
+        let hits = vec![
+            TriggerRecallOptInGatedBaselineTrialHit {
+                key: "secret_accept_key_a".to_string(),
+                kind: "decision".to_string(),
+                score: 42.0,
+                scope: Some(PROJECT_SCOPE.to_string()),
+                created_at: 1,
+                updated_at: 2,
+                tags_count: 0,
+            },
+            TriggerRecallOptInGatedBaselineTrialHit {
+                key: "secret_accept_key_b".to_string(),
+                kind: "lesson".to_string(),
+                score: 41.0,
+                scope: Some(PROJECT_SCOPE.to_string()),
+                created_at: 3,
+                updated_at: 4,
+                tags_count: 1,
+            },
+        ];
+        let expected_order_hash = baseline_order_hash(&hits);
+        let first_key_hash = sha256_hex(&hits[0].key);
+        options.baseline_search_called = true;
+        options.baseline_hits = Some(hits);
+        let packet = trigger_recall_opt_in_pre_policy_hold_simulation(options);
+        let serialized = serde_json::to_string(&packet).expect("serialize");
+        assert!(!serialized.contains("secret_accept_key_a"));
+        assert!(!serialized.contains("secret_accept_key_b"));
+        assert_eq!(packet["status"], json!("returned_accepted"));
+        assert_eq!(packet["visible_behavior"], json!("baseline_fts_visible"));
+        assert_eq!(packet["baseline"]["store_search_called"], json!(true));
+        assert_eq!(
+            packet["baseline"]["baseline_order_hash"],
+            json!(expected_order_hash)
+        );
+        assert_eq!(packet["visible_hits"].as_array().expect("hits").len(), 2);
+        assert_eq!(packet["visible_hits"][0]["key_hash"], json!(first_key_hash));
+        assert_eq!(packet["side_effects"]["calls_memory_search"], json!(false));
+        assert_eq!(
+            packet["side_effects"]["changes_default_memory_search_schema"],
+            json!(false)
+        );
+    }
+
+    #[test]
+    fn pre_policy_hold_missing_approval_fails_open() {
+        let mut options = ready_pre_policy_hold_options(
+            "LSWR G25 store write execution preflight landed output only plan next gate",
+        );
+        options.approval_packet = Value::Null;
+        options.baseline_search_called = true;
+        options.baseline_hits = Some(vec![TriggerRecallOptInGatedBaselineTrialHit {
+            key: "secret_fail_open_key".to_string(),
+            kind: "decision".to_string(),
+            score: 10.0,
+            scope: None,
+            created_at: 1,
+            updated_at: 2,
+            tags_count: 0,
+        }]);
+        let packet = trigger_recall_opt_in_pre_policy_hold_simulation(options);
+        let serialized = serde_json::to_string(&packet).expect("serialize");
+        assert!(!serialized.contains("secret_fail_open_key"));
+        assert_eq!(packet["status"], json!("blocked_to_baseline"));
+        assert_eq!(packet["fallback_behavior"], json!("baseline_fail_open"));
+        assert_eq!(packet["visible_hits"].as_array().expect("hits").len(), 1);
+        assert_eq!(packet["baseline"]["store_search_required"], json!(true));
+        assert_eq!(packet["baseline"]["store_search_called"], json!(true));
+        let blockers = packet["approval"]["blockers"].as_array().expect("blockers");
+        assert!(blockers.contains(&json!("approval_packet_schema_mismatch")));
+        assert_eq!(packet["side_effects"]["calls_memory_search"], json!(false));
+    }
+
+    #[test]
+    fn pre_policy_hold_operator_disable_fails_open() {
+        let mut options = ready_pre_policy_hold_options(
+            "LSWR G25 store write execution preflight landed output only plan next gate",
+        );
+        options.operator_disabled = true;
+        options.baseline_search_called = true;
+        options.baseline_hits = Some(vec![TriggerRecallOptInGatedBaselineTrialHit {
+            key: "secret_disabled_key".to_string(),
+            kind: "decision".to_string(),
+            score: 10.0,
+            scope: None,
+            created_at: 1,
+            updated_at: 2,
+            tags_count: 0,
+        }]);
+        let packet = trigger_recall_opt_in_pre_policy_hold_simulation(options);
+        let serialized = serde_json::to_string(&packet).expect("serialize");
+        assert!(!serialized.contains("secret_disabled_key"));
+        assert_eq!(packet["status"], json!("operator_disabled"));
+        assert_eq!(
+            packet["fallback_behavior"],
+            json!("operator_disabled_baseline_fail_open")
+        );
+        assert_eq!(packet["visible_hits"].as_array().expect("hits").len(), 1);
+        assert_eq!(packet["side_effects"]["calls_memory_search"], json!(false));
+    }
+
+    #[test]
+    fn pre_policy_hold_rejects_raw_payload_without_echoing() {
+        let secret_query = "secret frontend dashboard query";
+        let mut options = ready_pre_policy_hold_options(secret_query);
+        options.raw_payload_fields_present = true;
+        options.approval_packet["raw_key"] = json!("secret raw approval key");
+        options.approval_packet["content"] = json!("secret raw approval content");
+        let packet = trigger_recall_opt_in_pre_policy_hold_simulation(options);
+        let serialized = serde_json::to_string(&packet).expect("serialize");
+        assert!(!serialized.contains(secret_query));
+        assert!(!serialized.contains("secret raw approval key"));
+        assert!(!serialized.contains("secret raw approval content"));
+        assert_eq!(packet["status"], json!("blocked_to_baseline"));
+        let blockers = packet["approval"]["blockers"].as_array().expect("blockers");
+        assert!(blockers.contains(&json!("approval_packet_contains_raw_payload")));
+        assert!(blockers.contains(&json!("raw_payload_fields_present")));
+        assert_eq!(packet["side_effects"]["calls_memory_search"], json!(false));
+    }
+
+    #[test]
+    fn pre_policy_hold_non_fts_blocks() {
+        let mut options = ready_pre_policy_hold_options(
+            "LSWR G25 store write execution preflight landed output only plan next gate",
+        );
+        options.mode = "semantic".to_string();
+        let packet = trigger_recall_opt_in_pre_policy_hold_simulation(options);
+        assert_eq!(packet["status"], json!("blocked_to_baseline"));
+        let blockers = packet["approval"]["blockers"].as_array().expect("blockers");
+        assert!(blockers.contains(&json!("requested_mode_not_authorized")));
+        assert_eq!(
+            packet["decision"]["may_change_default_memory_search_now"],
+            json!(false)
+        );
+    }
+
+    #[test]
+    fn pre_policy_hold_non_local_scope_blocks() {
+        let mut options = ready_pre_policy_hold_options(
+            "LSWR G25 store write execution preflight landed output only plan next gate",
+        );
+        options.scope = Some("project:relative-agent-bridge".to_string());
+        let packet = trigger_recall_opt_in_pre_policy_hold_simulation(options);
+        assert_eq!(packet["status"], json!("blocked_to_baseline"));
+        let blockers = packet["approval"]["blockers"].as_array().expect("blockers");
+        assert!(blockers.contains(&json!("exact_local_project_scope_missing")));
+        assert_eq!(
+            packet["request"]["exact_local_project_scope"],
+            json!(false)
         );
     }
 

@@ -5,14 +5,17 @@ use crate::tool_diagnostics::{classify_tool_error, ToolErrorDiagnosticClass};
 use crate::trigger_recall_opt_in::{
     trigger_recall_enforce_hold_approval_packet_validator,
     trigger_recall_opt_in_gated_baseline_trial, trigger_recall_opt_in_gated_batch_diagnostics,
+    trigger_recall_opt_in_pre_policy_hold_simulation,
     trigger_recall_opt_in_runtime_transition_gate, trigger_recall_opt_in_status,
     trigger_recall_value_contains_raw, TriggerRecallEnforceHoldApprovalPacketValidatorOptions,
+    TriggerRecallOptInGatedBaselineTrialHit, TriggerRecallOptInGatedBaselineTrialOptions,
     TriggerRecallOptInGatedBatchDiagnosticsOptions, TriggerRecallOptInGatedBatchDiagnosticsPacket,
     TriggerRecallOptInRuntimeTransitionGateOptions,
-    TriggerRecallOptInGatedBaselineTrialHit, TriggerRecallOptInGatedBaselineTrialOptions,
-    TriggerRecallOptInStatusOptions, TRIGGER_RECALL_DISABLE_ENV,
+    TriggerRecallOptInStatusOptions, TriggerRecallPrePolicyHoldSimulationOptions,
+    TRIGGER_RECALL_DISABLE_ENV,
     TRIGGER_RECALL_ENFORCE_HOLD_APPROVAL_PACKET_SCHEMA,
     TRIGGER_RECALL_OPT_IN_ENABLE_ENV,
+    TRIGGER_RECALL_PRE_POLICY_HOLD_DISABLE_ENV, TRIGGER_RECALL_PRE_POLICY_HOLD_OPT_IN_ENV,
 };
 use crate::warp_scheme::{
     dispatch_url as dispatch_warp_scheme_uri,
@@ -29035,6 +29038,247 @@ impl McpTool for TriggerRecallOptInGatedBaselineTrialTool {
 }
 
 // ===========================================================================
+//  trigger_recall_opt_in_pre_policy_hold_simulation - candidate-only surface
+// ===========================================================================
+
+/// Candidate-only pre-policy hold simulation. This surface requires a separate
+/// approval packet, stays in Tier::Niche, never calls the MCP memory_search
+/// tool, and never changes default memory_search behavior.
+pub struct TriggerRecallOptInPrePolicyHoldSimulationTool {
+    hub: Hub,
+}
+
+impl TriggerRecallOptInPrePolicyHoldSimulationTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+fn trigger_recall_pre_policy_hold_unexpected_raw_fields(args: &Value) -> bool {
+    let mut redacted_boundary = args.clone();
+    if let Some(obj) = redacted_boundary.as_object_mut() {
+        obj.remove("query");
+        obj.remove("approval_packet");
+    }
+    trigger_recall_value_contains_raw(&redacted_boundary)
+        || args.get("mutate").is_some()
+        || args.get("write").is_some()
+        || args.get("dry_run").is_some()
+}
+
+#[async_trait]
+impl McpTool for TriggerRecallOptInPrePolicyHoldSimulationTool {
+    fn name(&self) -> &'static str {
+        "trigger_recall_opt_in_pre_policy_hold_simulation"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Candidate-only trigger recall pre-policy hold \
+                 simulation. Requires an exact approval packet plus explicit \
+                 per-call opt-in. Held queries return an object status and do \
+                 not call store FTS unless count audit is requested. Accepted \
+                 or fail-open paths may call store FTS directly, but never the \
+                 MCP memory_search tool, never record coactivation, never echo \
+                 raw query/keys/content, never change default memory_search, \
+                 and never authorize production enforce_hold."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": [
+                    "approval_packet",
+                    "query",
+                    "per_call_opt_in"
+                ],
+                "properties": {
+                    "approval_packet": {
+                        "type": "object",
+                        "description": "Approval packet for pre_policy_hold_simulation. The tool consumes only safe summary fields and does not echo the packet."
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "FTS query for this opt-in simulation. Output includes only a query hash."
+                    },
+                    "tags_any": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Optional tag filter forwarded to store FTS when baseline lookup is required. Output includes only the filter count."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100,
+                        "default": 10
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["fts", "hybrid", "semantic"],
+                        "default": "fts"
+                    },
+                    "scope": {
+                        "type": "string",
+                        "description": "Exact local project scope, e.g. project:/abs/path. Output includes only a hash."
+                    },
+                    "scope_mode": {
+                        "type": "string",
+                        "enum": ["local_only", "local_plus_global", "exploratory"],
+                        "default": "local_only"
+                    },
+                    "include_baseline_counts": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "When true, held queries may call store FTS only for count/order-hash audit while still returning no visible hits."
+                    },
+                    "per_call_opt_in": {
+                        "type": "boolean",
+                        "description": "Required explicit per-call opt-in bit."
+                    },
+                    "operator_disabled": {
+                        "type": "boolean",
+                        "default": false
+                    },
+                    "attempt_id": {
+                        "type": "string",
+                        "description": "Optional attempt id for redacted audit correlation."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Candidate implementation commit named by the approval packet."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let query = args
+            .get("query")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let tags_any = args
+            .get("tags_any")
+            .cloned()
+            .map(serde_json::from_value::<Vec<String>>)
+            .transpose()
+            .map_err(|e| ab_core::Error::Backend(format!("parse tags_any: {e}")))?
+            .unwrap_or_default();
+        let limit = args
+            .get("limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(10)
+            .clamp(1, 100);
+        let mode = args
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("fts")
+            .to_string();
+        let scope = args.get("scope").and_then(Value::as_str).map(str::to_string);
+        let scope_mode = args
+            .get("scope_mode")
+            .and_then(Value::as_str)
+            .unwrap_or("local_only")
+            .to_string();
+        let include_baseline_counts = args
+            .get("include_baseline_counts")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let per_call_opt_in = args
+            .get("per_call_opt_in")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let operator_disabled = args
+            .get("operator_disabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            || mcp_env_truthy(TRIGGER_RECALL_PRE_POLICY_HOLD_DISABLE_ENV);
+        let attempt_id = args.get("attempt_id").and_then(Value::as_str).map(str::to_string);
+        let commit = args.get("commit").and_then(Value::as_str).map(str::to_string);
+
+        let base_options = TriggerRecallPrePolicyHoldSimulationOptions {
+            approval_packet: args
+                .get("approval_packet")
+                .cloned()
+                .unwrap_or(Value::Null),
+            query,
+            tags_count: tags_any.len(),
+            limit,
+            mode,
+            per_call_opt_in,
+            scope,
+            scope_mode,
+            include_baseline_counts,
+            runtime_enabled: mcp_env_truthy(TRIGGER_RECALL_PRE_POLICY_HOLD_OPT_IN_ENV),
+            operator_disabled,
+            raw_payload_fields_present: trigger_recall_pre_policy_hold_unexpected_raw_fields(&args),
+            attempt_id,
+            commit,
+            ..Default::default()
+        };
+
+        let preflight = trigger_recall_opt_in_pre_policy_hold_simulation(base_options.clone());
+        let store_search_required = preflight
+            .pointer("/baseline/store_search_required")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if !store_search_required {
+            return Ok(ToolResult::json_text(&preflight));
+        }
+
+        let store = match self.hub.store.as_ref() {
+            Some(store) => store,
+            None => {
+                let mut options = base_options;
+                options.baseline_search_error = Some("store_unavailable".to_string());
+                return Ok(ToolResult::json_text(
+                    &trigger_recall_opt_in_pre_policy_hold_simulation(options),
+                ));
+            }
+        };
+
+        let mut options = base_options;
+        let exact_local_scope = preflight
+            .pointer("/request/exact_local_project_scope")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let search_limit = if exact_local_scope {
+            (limit.saturating_mul(5)).min(200)
+        } else {
+            limit
+        } as u32;
+        match store.memory_search(&options.query, &tags_any, search_limit).await {
+            Ok(mut hits) => {
+                if exact_local_scope {
+                    if let Some(scope) = options.scope.as_deref() {
+                        hits = memory_search_apply_scope_mode(
+                            hits,
+                            scope,
+                            MemorySearchScopeMode::LocalOnly,
+                        );
+                    }
+                }
+                hits.truncate(limit as usize);
+                options.baseline_search_called = true;
+                options.baseline_hits = Some(
+                    hits.iter()
+                        .map(trigger_recall_baseline_trial_hit)
+                        .collect(),
+                );
+            }
+            Err(_) => {
+                options.baseline_search_called = true;
+                options.baseline_search_error = Some("memory_search_failed".to_string());
+            }
+        }
+
+        Ok(ToolResult::json_text(
+            &trigger_recall_opt_in_pre_policy_hold_simulation(options),
+        ))
+    }
+}
+
+// ===========================================================================
 //  trigger_recall_opt_in_gated_batch_diagnostics - gated trial batch review
 // ===========================================================================
 
@@ -52515,6 +52759,14 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         &mut reg,
         policy,
         Tier::Niche,
+        Arc::new(TriggerRecallOptInPrePolicyHoldSimulationTool::new(
+            hub.clone(),
+        )),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
         Arc::new(TriggerRecallOptInGatedBatchDiagnosticsTool::new()),
     );
     reg_if(
@@ -67822,6 +68074,21 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         )
     }
 
+    fn trigger_recall_pre_policy_hold_approval_packet_fixture(commit: &str) -> Value {
+        json!({
+            "schema": crate::trigger_recall_opt_in::TRIGGER_RECALL_PRE_POLICY_HOLD_APPROVAL_PACKET_SCHEMA,
+            "packet_status": "approved_for_pre_policy_hold_simulation",
+            "approved_mode": "pre_policy_hold_simulation",
+            "implementation_commit": commit,
+            "regression_anchor": crate::trigger_recall_opt_in::TRIGGER_RECALL_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR,
+            "default_memory_search_unchanged": true,
+            "raw_query_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "rollback": "remove candidate branch/worktree before merge"
+        })
+    }
+
     #[test]
     fn trigger_recall_opt_in_runtime_transition_gate_schema_is_readonly() {
         let tool = TriggerRecallOptInRuntimeTransitionGateTool::new();
@@ -68248,6 +68515,262 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             json!(true)
         );
         assert_eq!(v["side_effects"]["records_coactivation"], json!(false));
+
+        let _ = tokio::fs::remove_dir_all(temp_dir).await;
+    }
+
+    #[test]
+    fn trigger_recall_opt_in_pre_policy_hold_simulation_schema_is_registered() {
+        let tool =
+            TriggerRecallOptInPrePolicyHoldSimulationTool::new(Hub::builder().build());
+        let schema = tool.schema();
+        assert_eq!(
+            schema.name,
+            "trigger_recall_opt_in_pre_policy_hold_simulation"
+        );
+        assert!(schema.description.contains("Candidate-only"));
+        assert!(schema.description.contains("approval packet"));
+        assert!(schema.description.contains("MCP memory_search"));
+        assert!(schema.description.contains("default memory_search"));
+        assert!(schema.description.contains("production enforce_hold"));
+
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required");
+        assert!(required.contains(&json!("approval_packet")));
+        assert!(required.contains(&json!("query")));
+        assert!(required.contains(&json!("per_call_opt_in")));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("approval_packet").is_some());
+        assert!(props.get("query").is_some());
+        assert!(props.get("include_baseline_counts").is_some());
+        assert!(props.get("baseline_keys").is_none());
+        assert!(props.get("raw_content").is_none());
+        assert!(props.get("mutate").is_none());
+
+        let all_names: Vec<String> = build_registry_with_policy(
+            Hub::builder().build(),
+            ToolPolicy::from_values(None, None, None, Some("all")),
+        )
+        .list()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
+        assert!(all_names.contains(&schema.name));
+
+        let codex_essential_names: Vec<String> = build_registry_with_policy(
+            Hub::builder().build(),
+            ToolPolicy::from_values(Some("codex-essential"), None, None, None),
+        )
+        .list()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
+        assert!(!codex_essential_names.contains(&schema.name));
+    }
+
+    #[tokio::test]
+    async fn trigger_recall_opt_in_pre_policy_hold_simulation_missing_approval_fails_open() {
+        let _lock = frontend_env_test_setup();
+        let prior_enable = std::env::var("AB_TRIGGER_RECALL_PRE_POLICY_HOLD_OPT_IN").ok();
+        let prior_disable = std::env::var("AB_TRIGGER_RECALL_PRE_POLICY_HOLD_DISABLE").ok();
+        std::env::set_var("AB_TRIGGER_RECALL_PRE_POLICY_HOLD_OPT_IN", "1");
+        std::env::remove_var("AB_TRIGGER_RECALL_PRE_POLICY_HOLD_DISABLE");
+
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let query = "LSWR G25 store write execution preflight landed output only plan next gate";
+        let secret_key = "secret_pre_policy_fail_open_key";
+        let secret_content =
+            "LSWR G25 store write execution preflight landed output only plan next gate";
+        save_trigger_trial_memory(
+            &hub,
+            secret_key,
+            secret_content,
+            Some("project:/Data/CascadeProjects/agent-bridge"),
+        )
+        .await;
+
+        let tool = TriggerRecallOptInPrePolicyHoldSimulationTool::new(hub);
+        let out = tool
+            .execute(
+                json!({
+                    "approval_packet": Value::Null,
+                    "query": query,
+                    "mode": "fts",
+                    "scope": "project:/Data/CascadeProjects/agent-bridge",
+                    "scope_mode": "local_only",
+                    "per_call_opt_in": true,
+                    "limit": 5,
+                    "commit": "candidate-commit"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        restore_env_var("AB_TRIGGER_RECALL_PRE_POLICY_HOLD_OPT_IN", prior_enable);
+        restore_env_var("AB_TRIGGER_RECALL_PRE_POLICY_HOLD_DISABLE", prior_disable);
+
+        let text = match out.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains(query));
+        assert!(!text.contains(secret_key));
+        assert!(!text.contains(secret_content));
+        assert!(!text.contains("/Data/CascadeProjects/agent-bridge"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.memory.trigger_recall.pre_policy_hold_simulation.v0")
+        );
+        assert_eq!(v["status"], json!("blocked_to_baseline"));
+        assert_eq!(v["fallback_behavior"], json!("baseline_fail_open"));
+        assert_eq!(v["baseline"]["store_search_called"], json!(true));
+        assert_eq!(v["baseline"]["memory_search_mcp_called"], json!(false));
+        assert_eq!(v["side_effects"]["calls_memory_search"], json!(false));
+        assert_eq!(v["visible_hits"].as_array().expect("visible hits").len(), 1);
+
+        let _ = tokio::fs::remove_dir_all(temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn trigger_recall_opt_in_pre_policy_hold_simulation_held_skips_store_by_default() {
+        let _lock = frontend_env_test_setup();
+        let prior_enable = std::env::var("AB_TRIGGER_RECALL_PRE_POLICY_HOLD_OPT_IN").ok();
+        let prior_disable = std::env::var("AB_TRIGGER_RECALL_PRE_POLICY_HOLD_DISABLE").ok();
+        std::env::set_var("AB_TRIGGER_RECALL_PRE_POLICY_HOLD_OPT_IN", "1");
+        std::env::remove_var("AB_TRIGGER_RECALL_PRE_POLICY_HOLD_DISABLE");
+
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let query =
+            "Goal C dashboard state card spacing responsive layout visual design only";
+        let secret_key = "secret_pre_policy_held_key";
+        let secret_content =
+            "Goal C dashboard state card spacing responsive layout visual design only";
+        save_trigger_trial_memory(
+            &hub,
+            secret_key,
+            secret_content,
+            Some("project:/Data/CascadeProjects/agent-bridge"),
+        )
+        .await;
+
+        let tool = TriggerRecallOptInPrePolicyHoldSimulationTool::new(hub);
+        let out = tool
+            .execute(
+                json!({
+                    "approval_packet": trigger_recall_pre_policy_hold_approval_packet_fixture("candidate-commit"),
+                    "query": query,
+                    "mode": "fts",
+                    "scope": "project:/Data/CascadeProjects/agent-bridge",
+                    "scope_mode": "local_only",
+                    "per_call_opt_in": true,
+                    "limit": 5,
+                    "commit": "candidate-commit"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        restore_env_var("AB_TRIGGER_RECALL_PRE_POLICY_HOLD_OPT_IN", prior_enable);
+        restore_env_var("AB_TRIGGER_RECALL_PRE_POLICY_HOLD_DISABLE", prior_disable);
+
+        let text = match out.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains(query));
+        assert!(!text.contains(secret_key));
+        assert!(!text.contains(secret_content));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(v["status"], json!("held_by_query_intent"));
+        assert_eq!(v["visible_hits"], json!([]));
+        assert_eq!(v["baseline"]["store_search_required"], json!(false));
+        assert_eq!(v["baseline"]["store_search_called"], json!(false));
+        assert_eq!(
+            v["baseline"]["baseline_count_status"],
+            json!("not_requested_pre_policy_hold")
+        );
+        assert_eq!(v["side_effects"]["calls_store_fts"], json!(false));
+        assert_eq!(v["side_effects"]["calls_memory_search"], json!(false));
+
+        let _ = tokio::fs::remove_dir_all(temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn trigger_recall_opt_in_pre_policy_hold_simulation_returns_redacted_accept() {
+        let _lock = frontend_env_test_setup();
+        let prior_enable = std::env::var("AB_TRIGGER_RECALL_PRE_POLICY_HOLD_OPT_IN").ok();
+        let prior_disable = std::env::var("AB_TRIGGER_RECALL_PRE_POLICY_HOLD_DISABLE").ok();
+        std::env::set_var("AB_TRIGGER_RECALL_PRE_POLICY_HOLD_OPT_IN", "1");
+        std::env::remove_var("AB_TRIGGER_RECALL_PRE_POLICY_HOLD_DISABLE");
+
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let query = "LSWR G25 store write execution preflight landed output only plan next gate";
+        let secret_key = "secret_pre_policy_accept_key";
+        let secret_content =
+            "LSWR G25 store write execution preflight landed output only plan next gate";
+        save_trigger_trial_memory(
+            &hub,
+            secret_key,
+            secret_content,
+            Some("project:/Data/CascadeProjects/agent-bridge"),
+        )
+        .await;
+
+        let tool = TriggerRecallOptInPrePolicyHoldSimulationTool::new(hub);
+        let out = tool
+            .execute(
+                json!({
+                    "approval_packet": trigger_recall_pre_policy_hold_approval_packet_fixture("candidate-commit"),
+                    "query": query,
+                    "mode": "fts",
+                    "scope": "project:/Data/CascadeProjects/agent-bridge",
+                    "scope_mode": "local_only",
+                    "per_call_opt_in": true,
+                    "limit": 5,
+                    "attempt_id": "pre-policy-accept-attempt",
+                    "commit": "candidate-commit"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        restore_env_var("AB_TRIGGER_RECALL_PRE_POLICY_HOLD_OPT_IN", prior_enable);
+        restore_env_var("AB_TRIGGER_RECALL_PRE_POLICY_HOLD_DISABLE", prior_disable);
+
+        let text = match out.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains(query));
+        assert!(!text.contains(secret_key));
+        assert!(!text.contains(secret_content));
+        assert!(!text.contains("/Data/CascadeProjects/agent-bridge"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(v["status"], json!("returned_accepted"));
+        assert_eq!(v["visible_behavior"], json!("baseline_fts_visible"));
+        assert_eq!(v["query_intent"]["decision"], json!("allow"));
+        assert_eq!(v["baseline"]["store_search_called"], json!(true));
+        assert_eq!(v["baseline"]["memory_search_mcp_called"], json!(false));
+        assert_eq!(v["visible_hits"].as_array().expect("visible hits").len(), 1);
+        assert_eq!(v["audit"]["raw_keys_included"], json!(false));
+        assert_eq!(v["audit"]["content_included"], json!(false));
+        assert_eq!(v["side_effects"]["calls_memory_search"], json!(false));
+        assert_eq!(v["side_effects"]["records_coactivation"], json!(false));
+        assert_eq!(
+            v["decision"]["stage2_approval_required_before_merge_or_deploy"],
+            json!(true)
+        );
 
         let _ = tokio::fs::remove_dir_all(temp_dir).await;
     }
