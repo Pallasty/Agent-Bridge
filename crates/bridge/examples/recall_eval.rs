@@ -658,7 +658,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    let store = SqliteStore::open(&db_path).await?;
+    let store = open_baseline_store(&db_path, db_source).await?;
     let n = CORPUS.len();
 
     // ── Debug dump: `recall_eval <case#>` prints the top-k of each mode (key,
@@ -2477,6 +2477,20 @@ async fn debug_case(store: &SqliteStore, idx1: usize) -> Result<(), Box<dyn std:
         );
     }
     Ok(())
+}
+
+async fn open_baseline_store(
+    db_path: &std::path::Path,
+    source: BaselineDbSource,
+) -> Result<SqliteStore, Box<dyn std::error::Error>> {
+    let store = if source.is_pinned() {
+        println!("# baseline db open mode: read-only pinned snapshot (no migration/WAL init)");
+        SqliteStore::open_read_only(db_path).await?
+    } else {
+        println!("# baseline db open mode: writable live default (legacy store init)");
+        SqliteStore::open(db_path).await?
+    };
+    Ok(store)
 }
 
 fn print_mode_row(label: &str, agg: &ModeAgg, n: usize) {

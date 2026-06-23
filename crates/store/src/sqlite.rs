@@ -1492,6 +1492,26 @@ impl SqliteStore {
         })
     }
 
+    pub async fn open_read_only(path: &Path) -> Result<Self> {
+        let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .await
+            .map_err(|e| Error::Backend(format!("sqlite open read-only {path:?}: {e}")))?;
+
+        conn.call(|c| -> RusqliteResult<()> {
+            c.busy_timeout(std::time::Duration::from_secs(5))?;
+            c.execute_batch("PRAGMA query_only=ON; PRAGMA foreign_keys=ON;")?;
+            Ok(())
+        })
+        .await
+        .map_err(|e| Error::Backend(format!("sqlite read-only init: {e}")))?;
+
+        info!(path = %path.display(), "SqliteStore ready (read-only)");
+        Ok(Self {
+            conn,
+            node_id: crate::version_vector::node_id_from_env(),
+        })
+    }
+
     /// Write [`MemoryEdgeExport`] JSONL for edges whose endpoints are both in `keys`.
     async fn export_edges_for_key_set(
         &self,
@@ -9993,6 +10013,27 @@ mod tests {
             ImportConflictPolicy::VersionVectorMerge,
         );
         assert_eq!(actions, vec![ImportAction::ConflictCopy]);
+    }
+
+    #[tokio::test]
+    async fn read_only_open_does_not_create_missing_parent_dir() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-read-only-open-missing-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let db_path = temp_dir.join("missing").join("state.db");
+
+        let result = SqliteStore::open_read_only(&db_path).await;
+
+        assert!(result.is_err());
+        assert!(
+            !db_path.parent().expect("db parent").exists(),
+            "read-only open must not create snapshot parent directories"
+        );
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
     #[tokio::test]
