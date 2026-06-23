@@ -39,6 +39,7 @@
 //!   cargo run -p ab-bridge --example trigger_recall_eval -- --aio2-baseline-acceptance-audit
 //!   cargo run -p ab-bridge --example trigger_recall_eval -- --portable-stage2-fixture
 //!   cargo run -p ab-bridge --example trigger_recall_eval -- --policy-benefit-fixture
+//!   cargo run -p ab-bridge --example trigger_recall_eval -- --policy-benefit-live-mac
 //!   cargo run -p ab-bridge --example trigger_recall_eval -- --debug-aio2-native 3
 //!
 //! Debug one case:
@@ -69,6 +70,8 @@ const TRIGGER_POLICY_BENEFIT_EVAL_SCHEMA: &str =
 const PORTABLE_STAGE2_FIXTURE_LABEL: &str = "portable Stage-2 fixture (repo-local, no live DB)";
 const POLICY_BENEFIT_FIXTURE_LABEL: &str =
     "portable policy-benefit fixture (repo-local contract, not production evidence)";
+const POLICY_BENEFIT_LIVE_MAC_LABEL: &str =
+    "current live Mac held-out corpus (e5/384, pre-GTE-cutover)";
 const AIO2_BASELINE_ACCEPTANCE_TELEMETRY_LABEL: &str =
     "legacy aio2-native active trigger rows, 2026-06-22 (telemetry only; not a Stage-2 hard gate)";
 
@@ -1044,6 +1047,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rows = load_active_rows(&db_path)?;
     if matches!(arg1.as_deref(), Some("--check-corpus")) {
         return check_corpus(&db_path, &rows);
+    }
+    if matches!(arg1.as_deref(), Some("--policy-benefit-live-mac")) {
+        verify_corpus_for(&rows, CORPUS, NEGATIVE_CONTROLS)?;
+        let fts = ScratchFts::build(&rows)?;
+        return run_policy_benefit_eval_for(
+            &rows,
+            &fts,
+            CORPUS,
+            NEGATIVE_CONTROLS,
+            POLICY_BENEFIT_LIVE_MAC_LABEL,
+            true,
+        );
     }
     if matches!(arg1.as_deref(), Some("--check-aio2-native")) {
         return check_corpus_for(&db_path, &rows, AIO2_NATIVE_CORPUS);
@@ -4624,6 +4639,38 @@ mod tests {
             json!(false)
         );
         assert_eq!(payload["calls_memory_search"], json!(false));
+    }
+
+    #[test]
+    fn policy_benefit_summary_requires_evidence_authority_for_review_ready() {
+        let rows = portable_stage2_fixture_rows();
+        let fts = ScratchFts::build(&rows).expect("scratch fts");
+        let summary = policy_benefit_eval_summary(
+            &fts,
+            PORTABLE_STAGE2_CORPUS,
+            PORTABLE_STAGE2_NEGATIVE_CONTROLS,
+            "authority-enabled test corpus",
+            true,
+        )
+        .expect("policy benefit summary");
+
+        assert!(summary.contract_passed());
+        assert!(summary.ready_for_production_review());
+        assert_eq!(
+            summary.next_required_gate(),
+            "board_visible_production_review_packet_with_exact_commit"
+        );
+
+        let payload = summary.to_json();
+        assert_eq!(payload["production_evidence_authority"], json!(true));
+        assert_eq!(
+            payload["decision"]["ready_for_production_review"],
+            json!(true)
+        );
+        assert_eq!(
+            payload["decision"]["production_enforce_hold_authorized"],
+            json!(false)
+        );
     }
 
     #[test]
