@@ -223,10 +223,15 @@ This proposal does not authorize:
 
 ## Recommended Next Step
 
-Closed by
-`docs/reports/goal-c-u/2026-06-23-trigger-recall-enforce-hold-approval-packet-schema.md`.
+Closed by:
 
-Next safe slice: implement a read-only approval-packet validator for
-`audit_only` or `pre_policy_hold` only. Do not implement `enforce_hold`, and do
-not modify default `memory_search`, until a later approval packet names an exact
-implementation commit.
+- `docs/reports/goal-c-u/2026-06-23-trigger-recall-enforce-hold-approval-packet-schema.md`
+  for the generic approval-packet validator contract.
+- `docs/reports/goal-c-u/2026-06-23-trigger-recall-pre-policy-hold-approval-packet-schema.md`
+  for the concrete `pre_policy_hold_simulation` approval packet.
+
+Next safe action: review those schemas or propose an implementation plan that
+names exact files and tests while still stopping at `pre_policy_hold_simulation`.
+Do not implement production `enforce_hold`, and do not modify default
+`memory_search`, until a later approval packet names the exact implementation
+commit.
