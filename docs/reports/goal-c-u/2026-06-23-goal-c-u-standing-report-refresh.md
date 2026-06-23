@@ -37,7 +37,10 @@ change ranking, reindex vectors, write graph edges, or authorize an executor.
 
 ## Board Window
 
-Thread #120 had no new posts after #3961 during this refresh.
+Thread #120 had no new posts after #3961 at the start of this refresh. During
+final verification, #3966 added a new paper-grounded embedder-upgrade finding.
+That finding does not invalidate this report; it adds a separate candidate input
+for the memory-continuity lane.
 
 Current board direction consumed:
 
@@ -47,6 +50,8 @@ Current board direction consumed:
 - The next useful slice is consuming the new report evidence into either a
   production-facing opt-in design review or a smaller Codex telemetry
   failure-mode fix, not another projection family.
+- #3966 argues that Chinese hard misses may require a Chinese in-domain
+  embedding model candidate test, not only anisotropy/whitening work.
 
 ## Runtime And Lifecycle
 
@@ -328,6 +333,7 @@ Read:
 | B. Keep `continuity-report` plus pinned `recall_eval` as the standing U pair | Goal C U lane | this report plus CLI output | reports stop producing adopted actions or hard-tier R@k remains unchanged after proposed runtime changes | docs/report only; no MCP surface |
 | C. Fix Codex telemetry failure modes | Codex integration lane | `changes_digest` and `memory_save` errors in seven-day audit | errors are stale or disappear under exact current model/profile filters | small patches with focused tests; no profile mutation first |
 | D. Graph hygiene before centrality prior | memory graph lane | Palace `497/712` orphan nodes and connected ratio `0.302` | safe scope-compatible links are absent or improve no held-out recall anchor | read-only candidate/review first; no PageRank production prior |
+| E. Run read-only Chinese in-domain embedder feasibility compare | memory-continuity lane | #3966 and `cjk_embed_compare.rs` | candidate only wins a small CJK pool but fails to move pinned hard-tier `recall_eval` R@10 | compare-only first; no vector schema migration or re-embed |
 
 ## Decision
 
@@ -343,8 +349,11 @@ This refresh marks the current Mac Goal C U slice as report-ready:
 The recommended next implementation is **not** another Mac-side U report. If
 work continues on aio2, review a production-facing opt-in design for baseline
 acceptance using the new audit as the regression gate. If work stays on this
-Mac, take the smaller Codex telemetry failure-mode fix (`changes_digest` or
-`memory_save`) before touching retrieval.
+Mac and the lane remains recall-focused, first do the read-only Chinese
+in-domain embedder feasibility comparison from #3966; only consider vector
+schema migration or re-embed after the pinned hard-tier `recall_eval` anchor
+moves. If staying on Codex integration instead, take the smaller telemetry
+failure-mode fix (`changes_digest` or `memory_save`) before touching retrieval.
 
 ## Verification
 
