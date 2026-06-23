@@ -83,6 +83,10 @@ behind another design/review step.
 
 ## Next Gate
 
-Next safe step: design a separate production `enforce_hold` proposal with
-pre-policy gating semantics and an explicit operator/reviewer approval packet.
-Do not modify default `memory_search` as part of the batch diagnostics slice.
+Closed by
+`docs/reports/goal-c-u/2026-06-23-trigger-recall-enforce-hold-production-proposal.md`.
+
+Next safe step: write a separate approval-packet schema/review document for
+either `audit_only` or `pre_policy_hold` simulation. Do not implement
+`enforce_hold`, and do not modify default `memory_search`, until that approval
+packet exists and names an exact implementation commit.
