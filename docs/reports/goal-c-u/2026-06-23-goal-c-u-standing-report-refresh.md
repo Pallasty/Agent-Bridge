@@ -4,7 +4,7 @@ Host: macOS `maxiaodeMac-Pro.local`
 
 Report timestamp: `2026-06-23T11:01:40Z`
 
-Source commit: `53ad6e1` (`test(memory): harden recall eval snapshot open`)
+Source commit: `a13164d` (`Merge remote-tracking branch 'github/master'`)
 
 Scope: report-first refresh; no runtime implementation
 
@@ -15,7 +15,8 @@ Scope: report-first refresh; no runtime implementation
 - store-side embedding health is available through `agent-bridge
   continuity-report`;
 - held-out recall remains owned by `crates/bridge/examples/recall_eval.rs`;
-- trigger-recall runtime-shaped evidence remains an eval-only aio2 lane;
+- trigger-recall runtime-shaped and baseline-shadow evidence remain eval-only
+  aio2 lanes;
 - Palace graph health is observable but still too sparse for PageRank or
   centrality to become a continuity prior.
 
@@ -27,8 +28,8 @@ change ranking, reindex vectors, write graph edges, or authorize an executor.
 | Anchor | Value |
 |---|---|
 | repo worktree | `/Users/pallasting/Projects/agent-bridge` |
-| source commit | `53ad6e1` |
-| source subject | `test(memory): harden recall eval snapshot open` |
+| source commit | `a13164d` |
+| source subject | merge of `9a557df` report refresh and `7e6e731` baseline acceptance audit |
 | deployed CLI | `agent-bridge continuity-report` |
 | active profile | Codex Desktop, `gpt-5.5`, `xhigh`, `essential`, `codex-lean` |
 | controlling thread | forum #120 |
@@ -43,8 +44,9 @@ Current board direction consumed:
 - #3961 closes the second hard-family eval slice after another process landed
   the canonical implementation on GitHub.
 - The case #8 remote-session family is now replayed on the Mac pinned snapshot.
-- The next useful slice is report-first aggregation, not another projection
-  family or production retrieval change.
+- The next useful slice is consuming the new report evidence into either a
+  production-facing opt-in design review or a smaller Codex telemetry
+  failure-mode fix, not another projection family.
 
 ## Runtime And Lifecycle
 
@@ -218,6 +220,7 @@ Current relevant reports:
 
 - `docs/reports/goal-c-u/2026-06-23-trigger-recall-runtime-shaped-audit.md`
 - `docs/reports/goal-c-u/2026-06-23-trigger-recall-baseline-acceptance-design.md`
+- `docs/reports/goal-c-u/2026-06-23-trigger-recall-baseline-acceptance-audit.md`
 
 Runtime-shaped audit result on aio2:
 
@@ -231,14 +234,26 @@ Runtime-shaped audit result on aio2:
 | supplemental false hits after gate | 0 |
 | baseline false hits retained | 23 |
 
+Baseline acceptance shadow audit result on aio2:
+
+| Metric | Value |
+|---|---:|
+| baseline-shadow R@10 | 0.857 |
+| true hits lost by shadow gate | 0 |
+| positive cases held | 0 |
+| baseline false hits before shadow gate | 23 |
+| baseline false hits after shadow gate | 0 |
+| false hits removed by shadow gate | 23 |
+
 Read:
 
 - supplemental projected candidates can be made safer with query-intent gating;
-- this does not solve false hits already emitted by baseline FTS;
-- the correct next trigger slice is the eval-only baseline acceptance shadow
-  audit described in the design report;
-- because the corpus is aio2-native, that slice is best run on aio2 unless a
-  frozen aio2 snapshot is intentionally brought to this Mac.
+- the new baseline-shadow audit cleanly separates false-hit reduction from
+  supplemental recall expansion on the current aio2 corpus;
+- this is strong eval evidence, but still not production authorization;
+- the next trigger step is a separate production-facing opt-in design review:
+  runtime flag/mode, user-visible fallback semantics for held baseline queries,
+  and this audit as a regression gate.
 
 ## Palace Graph Health
 
@@ -309,7 +324,7 @@ Read:
 
 | Candidate | Owner | Anchor | Falsifier | Rollback / Boundary |
 |---|---|---|---|---|
-| A. Implement aio2 baseline acceptance shadow audit | aio2 trigger-recall lane | `2026-06-23-trigger-recall-baseline-acceptance-design.md` | true hits lost on accepted continuation queries, or false-hit reduction is only achieved by hiding valid baseline results | eval-only flag in `trigger_recall_eval`; no production `memory_search` change |
+| A. Review production-facing opt-in design for baseline acceptance | aio2 trigger-recall lane | `2026-06-23-trigger-recall-baseline-acceptance-audit.md` | user-visible hold semantics are unclear, or held baseline queries would hide legitimate work | design/review only first; no default `memory_search` change |
 | B. Keep `continuity-report` plus pinned `recall_eval` as the standing U pair | Goal C U lane | this report plus CLI output | reports stop producing adopted actions or hard-tier R@k remains unchanged after proposed runtime changes | docs/report only; no MCP surface |
 | C. Fix Codex telemetry failure modes | Codex integration lane | `changes_digest` and `memory_save` errors in seven-day audit | errors are stale or disappear under exact current model/profile filters | small patches with focused tests; no profile mutation first |
 | D. Graph hygiene before centrality prior | memory graph lane | Palace `497/712` orphan nodes and connected ratio `0.302` | safe scope-compatible links are absent or improve no held-out recall anchor | read-only candidate/review first; no PageRank production prior |
@@ -321,13 +336,15 @@ This refresh marks the current Mac Goal C U slice as report-ready:
 - the standing `continuity-report` CLI is present and working;
 - Mac pinned `recall_eval` replay is read-only and host-correct;
 - case #8 role-aware evidence is replayed on the canonical snapshot;
-- trigger-recall has a clear aio2-next eval-only task;
+- trigger-recall has a landed aio2 eval-only baseline-shadow audit;
 - graph and tool-surface pressure are visible but not authorized as production
   ranking/profile changes.
 
-The recommended next implementation is **not** another Mac-side U report. It is
-the aio2-native baseline acceptance shadow audit, or a small Codex telemetry
-failure-mode fix if work stays on this Mac.
+The recommended next implementation is **not** another Mac-side U report. If
+work continues on aio2, review a production-facing opt-in design for baseline
+acceptance using the new audit as the regression gate. If work stays on this
+Mac, take the smaller Codex telemetry failure-mode fix (`changes_digest` or
+`memory_save`) before touching retrieval.
 
 ## Verification
 
@@ -355,7 +372,7 @@ Results:
 | `recall_eval` example tests | pass, 29 passed |
 | pinned recall replay | pass, metrics above |
 | `continuity_report` example test target | pass, 0 tests |
-| `trigger_recall_eval` example tests | pass, 23 passed |
+| `trigger_recall_eval` example tests | pass, 27 passed |
 | whitespace check after report edit | pass |
 
 Expected existing warnings remained:
