@@ -54,7 +54,10 @@ schema, and does not authorize production `enforce_hold`.
 
 ## Next Gate
 
-The next safe slice is a redacted batch diagnostic through the gated trial over
-the Aio2 trigger corpus positives and negative controls, followed by a review
-packet comparing default baseline FTS, gated accepted calls, gated held calls,
-and eval-only `union+cont`.
+Closed by `ee48804` and
+`docs/reports/goal-c-u/2026-06-23-trigger-recall-gated-batch-diagnostics.md`,
+with post-review note in
+`docs/reports/goal-c-u/2026-06-23-trigger-recall-batch-diagnostics-review-packet.md`.
+
+The next safe slice is a separate production `enforce_hold` proposal/review
+gate. Default `memory_search` remains unchanged.
