@@ -176,8 +176,8 @@ Still not authorized:
 
 ## Next Gate
 
-Next safe action: docs-only implementation proposal for
-`pre_policy_hold_simulation`.
+Closed by
+`docs/reports/goal-c-u/2026-06-23-trigger-recall-pre-policy-hold-implementation-proposal.md`.
 
-After that proposal exists, a separate approval packet must name an exact
-implementation commit before any runtime code is written or merged.
+Next safe action: a separate approval packet must name an exact implementation
+commit before any runtime code is written or merged.
