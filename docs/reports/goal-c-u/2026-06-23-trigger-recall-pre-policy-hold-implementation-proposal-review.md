@@ -33,6 +33,7 @@ regression results, and rollback path.
 - `docs/reports/goal-c-u/2026-06-23-trigger-recall-enforce-hold-approval-packet-schema.md`
 - `docs/reports/goal-c-u/2026-06-23-trigger-recall-pre-policy-hold-approval-readiness.md`
 - `docs/reports/goal-c-u/2026-06-23-trigger-recall-pre-policy-hold-stage1-candidate-authorization.md`
+- `docs/reports/goal-c-u/2026-06-23-trigger-recall-pre-policy-hold-stage1-aio2-data-worktree-amendment.md`
 - `docs/reports/goal-c-u/2026-06-23-trigger-recall-pre-policy-hold-stage2-acceptance-checklist.md`
 - Forum thread 105 through post `#2511`
 - Current repo state before this review: `master...origin/master`, rev-list
@@ -188,11 +189,9 @@ Still not authorized:
 ## Next Gate
 
 Next safe action: use the Stage-1 authorized `/Users/...` worktree if operating
-on that host, or write a Stage-1 amendment for an Aio2 `/Data/...` worktree
-before producing candidate code here. The amendment should name an exact path,
-for example
-`/Data/CascadeProjects/agent-bridge-trigger-pre-policy-hold-simulation-candidate`,
-if that is the intended candidate worktree.
+on that host, or use the Stage-1 Aio2 `/Data/...` amendment if operating in
+this environment. The Aio2 amendment names the exact worktree:
+`/Data/CascadeProjects/agent-bridge-trigger-pre-policy-hold-simulation-candidate`.
 
 Candidate code may be produced only in a named isolated branch/worktree.
 Merge/runtime use still requires a separate Stage-2 approval packet that names

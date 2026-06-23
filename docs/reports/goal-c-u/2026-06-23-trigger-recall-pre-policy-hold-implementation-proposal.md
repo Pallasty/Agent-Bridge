@@ -359,18 +359,19 @@ This proposal does not authorize:
 Closed by
 `docs/reports/goal-c-u/2026-06-23-trigger-recall-pre-policy-hold-implementation-proposal-review.md`,
 `docs/reports/goal-c-u/2026-06-23-trigger-recall-pre-policy-hold-stage1-candidate-authorization.md`,
+`docs/reports/goal-c-u/2026-06-23-trigger-recall-pre-policy-hold-stage1-aio2-data-worktree-amendment.md`,
 and
 `docs/reports/goal-c-u/2026-06-23-trigger-recall-pre-policy-hold-stage2-acceptance-checklist.md`.
 
 Current safe actions:
 
 - use the Stage-1 authorized `/Users/...` worktree if operating on that host;
-- or write a Stage-1 amendment naming an exact Aio2 `/Data/...` worktree before
-  producing candidate code in this environment;
+- or use the Stage-1 Aio2 `/Data/...` amendment and create candidate code only
+  in `/Data/CascadeProjects/agent-bridge-trigger-pre-policy-hold-simulation-candidate`;
 - after an exact candidate commit exists, run the Stage-2 checklist and require
   a separate Stage-2 approval packet naming that commit before merge/runtime
   use.
 
-Until a checkout-specific Stage-1 authorization applies, candidate work in that
-checkout remains blocked. Until a Stage-2 exact-commit packet exists,
-merge/runtime work remains `IMPLEMENTATION-NO-GO`.
+Candidate work outside a checkout-specific Stage-1 authorization remains
+blocked. Until a Stage-2 exact-commit packet exists, merge/runtime work remains
+`IMPLEMENTATION-NO-GO`.
