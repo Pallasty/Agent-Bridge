@@ -36,6 +36,7 @@
 //!   cargo run -p ab-bridge --example trigger_recall_eval -- --check-aio2-native
 //!   cargo run -p ab-bridge --example trigger_recall_eval -- --aio2-native
 //!   cargo run -p ab-bridge --example trigger_recall_eval -- --aio2-runtime-audit
+//!   cargo run -p ab-bridge --example trigger_recall_eval -- --aio2-baseline-acceptance-audit
 //!   cargo run -p ab-bridge --example trigger_recall_eval -- --debug-aio2-native 3
 //!
 //! Debug one case:
@@ -45,7 +46,7 @@
 use ab_store::default_db_path;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::Write as _;
 use std::path::PathBuf;
 use tokio_rusqlite::rusqlite::{
@@ -57,6 +58,10 @@ const MIN_CJK_SHINGLE_ACCEPT_OVERLAP: usize = 4;
 const TRIGGER_PREFIX: &str = "continuity_retrieval_trigger:";
 const TRIGGER_RUNTIME_AUDIT_SCHEMA: &str = "agent_bridge.memory.trigger_query_intent_acceptance.v0";
 const TRIGGER_RUNTIME_REGRESSION_ANCHOR: &str = "aio2_trigger_recall_union_cont_20260623";
+const TRIGGER_BASELINE_ACCEPTANCE_SCHEMA: &str =
+    "agent_bridge.memory.trigger_baseline_acceptance_shadow.v0";
+const TRIGGER_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR: &str =
+    "aio2_trigger_recall_baseline_acceptance_shadow_20260623";
 
 struct Case {
     id: &'static str,
@@ -164,6 +169,53 @@ impl RuntimeShapedAudit {
     }
 }
 
+#[derive(Clone, Debug)]
+struct BaselineAcceptanceAudit {
+    query_hash: String,
+    query_intent_reject_reason: Option<&'static str>,
+    baseline_keys_before_gate: Vec<String>,
+    baseline_keys_after_shadow_gate: Vec<String>,
+}
+
+impl BaselineAcceptanceAudit {
+    fn query_intent_decision(&self) -> &'static str {
+        if self.query_intent_reject_reason.is_some() {
+            "hold"
+        } else {
+            "allow"
+        }
+    }
+
+    fn visible_behavior_if_production(&self) -> &'static str {
+        if self.query_intent_reject_reason.is_some() {
+            "not_authorized_shadow_only"
+        } else {
+            "baseline_fts_visible"
+        }
+    }
+
+    fn to_json(&self) -> Value {
+        json!({
+            "schema": TRIGGER_BASELINE_ACCEPTANCE_SCHEMA,
+            "read_only": true,
+            "mode": "fts",
+            "default_memory_search_unchanged": true,
+            "query_hash": &self.query_hash,
+            "baseline_candidates_before_gate": self.baseline_keys_before_gate.len(),
+            "baseline_candidates_after_shadow_gate": self.baseline_keys_after_shadow_gate.len(),
+            "query_intent": {
+                "decision": self.query_intent_decision(),
+                "reject_reason": self.query_intent_reject_reason,
+            },
+            "visible_behavior_if_production": self.visible_behavior_if_production(),
+            "regression_anchor": TRIGGER_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR,
+            "changes_default_memory_search_order": false,
+            "changes_production_retrieval": false,
+        })
+    }
+}
+
+#[derive(Clone)]
 struct FalseHit {
     control_id: &'static str,
     bucket: ControlBucket,
@@ -843,6 +895,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         verify_corpus_for(&rows, AIO2_NATIVE_CORPUS, AIO2_NATIVE_NEGATIVE_CONTROLS)?;
         let fts = ScratchFts::build(&rows)?;
         return run_runtime_audit_for(
+            &db_path,
+            &rows,
+            &fts,
+            AIO2_NATIVE_CORPUS,
+            AIO2_NATIVE_NEGATIVE_CONTROLS,
+            "aio2-native active trigger rows, 2026-06-22",
+        );
+    }
+    if matches!(arg1.as_deref(), Some("--aio2-baseline-acceptance-audit")) {
+        verify_corpus_for(&rows, AIO2_NATIVE_CORPUS, AIO2_NATIVE_NEGATIVE_CONTROLS)?;
+        let fts = ScratchFts::build(&rows)?;
+        return run_baseline_acceptance_audit_for(
             &db_path,
             &rows,
             &fts,
@@ -2090,6 +2154,175 @@ fn run_runtime_audit_for(
     Ok(())
 }
 
+fn run_baseline_acceptance_audit_for(
+    db_path: &std::path::Path,
+    rows: &[MemoryRow],
+    fts: &ScratchFts,
+    cases: &[Case],
+    negative_controls: &[NegativeControl],
+    corpus_label: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut baseline_acc = Agg::default();
+    let mut shadow_accept_acc = Agg::default();
+    let mut lost_true_hit_indices = Vec::new();
+    let mut rejected_positive_audits = Vec::new();
+    let gold_keys: BTreeSet<&str> = cases
+        .iter()
+        .flat_map(|case| case.expect.iter().copied())
+        .collect();
+
+    for (idx, case) in cases.iter().enumerate() {
+        let audit = baseline_acceptance_audit(fts, case.query, TOP_K)?;
+        let baseline_rank = first_hit_rank(&audit.baseline_keys_before_gate, case.expect);
+        let shadow_rank = first_hit_rank(&audit.baseline_keys_after_shadow_gate, case.expect);
+        baseline_acc.record(baseline_rank, None);
+        shadow_accept_acc.record(shadow_rank, None);
+
+        if baseline_rank.is_some() && shadow_rank.is_none() {
+            lost_true_hit_indices.push(idx + 1);
+        }
+        if audit.query_intent_reject_reason.is_some() {
+            rejected_positive_audits.push((idx + 1, case.id, audit));
+        }
+    }
+
+    let mut baseline_false_hits = Vec::new();
+    let mut shadow_false_hits = Vec::new();
+    let mut rejected_control_audits = Vec::new();
+    let mut held_controls_by_reason = BTreeMap::<&'static str, usize>::new();
+    for control in negative_controls {
+        let audit = baseline_acceptance_audit(fts, control.query, TOP_K)?;
+        push_false_hits(
+            &mut baseline_false_hits,
+            control,
+            &audit.baseline_keys_before_gate,
+            &gold_keys,
+        );
+        push_false_hits(
+            &mut shadow_false_hits,
+            control,
+            &audit.baseline_keys_after_shadow_gate,
+            &gold_keys,
+        );
+        if let Some(reason) = audit.query_intent_reject_reason {
+            *held_controls_by_reason.entry(reason).or_insert(0) += 1;
+            rejected_control_audits.push((control.id, audit));
+        }
+    }
+
+    let removed_false_hits = removed_false_hits(&baseline_false_hits, &shadow_false_hits);
+
+    println!("# Trigger baseline acceptance shadow audit - {corpus_label}");
+    println!("db:              {}", db_path.display());
+    println!("active rows:     {}", rows.len());
+    println!(
+        "trigger rows:    {}",
+        rows.iter().filter(|r| !r.triggers.is_empty()).count()
+    );
+    println!(
+        "projected rows:  {}",
+        rows.iter().filter(|r| r.content != r.projected).count()
+    );
+    println!("corpus:          {} cases", cases.len());
+    println!("negative_ctrls:  {} controls", negative_controls.len());
+    println!("top_k:           {TOP_K}");
+    println!("schema:          {TRIGGER_BASELINE_ACCEPTANCE_SCHEMA}");
+    println!("regression:      {TRIGGER_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR}");
+    println!(
+        "read_only:       SELECT + in-memory FTS only; no memory_get, memory_search, writes, or reindex"
+    );
+    println!(
+        "contract:        eval-only shadow hold for baseline FTS query intent; default memory_search unchanged"
+    );
+    println!();
+
+    println!("## Baseline acceptance recall");
+    println!("  mode                   R@1     R@5    R@10     MRR");
+    print_row("baseline_fts", &baseline_acc, cases.len());
+    print_row("baseline_shadow", &shadow_accept_acc, cases.len());
+    println!(
+        "  true hits lost by shadow gate: {} case(s){}",
+        lost_true_hit_indices.len(),
+        fmt_idx(&lost_true_hit_indices)
+    );
+    println!(
+        "  positive cases held:          {} case(s)",
+        rejected_positive_audits.len()
+    );
+    println!();
+
+    println!("## Negative controls");
+    println!(
+        "  baseline false hits before shadow gate: {}",
+        baseline_false_hits.len()
+    );
+    if !baseline_false_hits.is_empty() {
+        println!(
+            "  baseline false hits: {}",
+            fmt_false_hits(&baseline_false_hits)
+        );
+    }
+    println!(
+        "  baseline false hits after shadow gate:  {}",
+        shadow_false_hits.len()
+    );
+    if !shadow_false_hits.is_empty() {
+        println!(
+            "  shadow false hits: {}",
+            fmt_false_hits(&shadow_false_hits)
+        );
+    }
+    println!(
+        "  false hits removed by shadow gate:      {}",
+        removed_false_hits.len()
+    );
+    if !removed_false_hits.is_empty() {
+        println!(
+            "  removed false hits: {}",
+            fmt_false_hits(&removed_false_hits)
+        );
+    }
+    print_false_hit_bucket_summary("baseline", &baseline_false_hits);
+    print_false_hit_bucket_summary("shadow", &shadow_false_hits);
+    print_false_hit_bucket_summary("removed", &removed_false_hits);
+    if held_controls_by_reason.is_empty() {
+        println!("  held controls by reason: none");
+    } else {
+        println!(
+            "  held controls by reason: {}",
+            held_reason_summary(&held_controls_by_reason)
+        );
+    }
+    println!();
+
+    println!("## Rejected positive audit samples");
+    if rejected_positive_audits.is_empty() {
+        println!("  no positive cases held by the baseline shadow gate");
+    }
+    for (idx, case_id, audit) in rejected_positive_audits {
+        println!("case #{idx} {case_id}");
+        println!("{}", serde_json::to_string_pretty(&audit.to_json())?);
+    }
+    println!();
+
+    println!("## Rejected control audit samples");
+    if rejected_control_audits.is_empty() {
+        println!("  no controls held by query-intent gate");
+    }
+    for (control_id, audit) in rejected_control_audits {
+        println!("control {control_id}");
+        println!("{}", serde_json::to_string_pretty(&audit.to_json())?);
+    }
+    println!();
+
+    println!("## Decision");
+    println!(
+        "  eval_only: true; baseline shadow hold is measurement-only. Production memory_search, ranking, schema, indexing, graph, semantic retrieval, MCP surfaces, and memory rows are unchanged."
+    );
+
+    Ok(())
+}
+
 fn runtime_shaped_audit(
     fts: &ScratchFts,
     query: &str,
@@ -2143,6 +2376,39 @@ fn runtime_shaped_audit(
         final_keys,
         fallback_behavior,
     })
+}
+
+fn baseline_acceptance_audit(
+    fts: &ScratchFts,
+    query: &str,
+    limit: usize,
+) -> Result<BaselineAcceptanceAudit, String> {
+    let baseline_keys = fts.search(IndexKind::Projected, query, limit)?;
+    let query_intent_reject_reason = baseline_acceptance_reject_reason(query);
+    let baseline_keys_after_shadow_gate =
+        shadow_visible_baseline_keys(&baseline_keys, query_intent_reject_reason);
+
+    Ok(BaselineAcceptanceAudit {
+        query_hash: query_hash(query),
+        query_intent_reject_reason,
+        baseline_keys_before_gate: baseline_keys,
+        baseline_keys_after_shadow_gate,
+    })
+}
+
+fn baseline_acceptance_reject_reason(query: &str) -> Option<&'static str> {
+    continuation_acceptance_reject_reason(query)
+}
+
+fn shadow_visible_baseline_keys(
+    baseline_keys: &[String],
+    reject_reason: Option<&'static str>,
+) -> Vec<String> {
+    if reject_reason.is_some() {
+        Vec::new()
+    } else {
+        baseline_keys.to_vec()
+    }
 }
 
 fn load_active_rows(db_path: &std::path::Path) -> SqlResult<Vec<MemoryRow>> {
@@ -3324,6 +3590,15 @@ fn fmt_false_hits(hits: &[FalseHit]) -> String {
     false_hit_labels(hits)
 }
 
+fn removed_false_hits(before: &[FalseHit], after: &[FalseHit]) -> Vec<FalseHit> {
+    let after_labels = after.iter().map(FalseHit::label).collect::<BTreeSet<_>>();
+    before
+        .iter()
+        .filter(|hit| !after_labels.contains(&hit.label()))
+        .cloned()
+        .collect()
+}
+
 fn false_hit_bucket_count(hits: &[FalseHit], bucket: ControlBucket) -> usize {
     hits.iter().filter(|hit| hit.bucket == bucket).count()
 }
@@ -3334,6 +3609,14 @@ fn print_false_hit_bucket_summary(label: &str, hits: &[FalseHit]) {
         false_hit_bucket_count(hits, ControlBucket::Unrelated),
         false_hit_bucket_count(hits, ControlBucket::PolicyAdversarial)
     );
+}
+
+fn held_reason_summary(counts: &BTreeMap<&'static str, usize>) -> String {
+    counts
+        .iter()
+        .map(|(reason, count)| format!("{reason}={count}"))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn print_row(label: &str, agg: &Agg, n: usize) {
@@ -3704,6 +3987,48 @@ mod tests {
                 "{} policy expectation mismatch",
                 control.id
             );
+        }
+    }
+
+    #[test]
+    fn baseline_shadow_accept_keeps_allowed_continuation_candidates() {
+        let allowed = AIO2_NATIVE_POLICY_ACCEPTANCE_CONTROLS
+            .iter()
+            .find(|control| control.id == "aio2_policy_allow_g25_store_write")
+            .expect("allow control exists");
+        let keys = vec!["g25".to_string(), "g26".to_string()];
+        let reason = baseline_acceptance_reject_reason(allowed.query);
+
+        assert_eq!(reason, None);
+        assert_eq!(shadow_visible_baseline_keys(&keys, reason), keys);
+    }
+
+    #[test]
+    fn baseline_shadow_holds_rejected_controls_without_empty_production_claim() {
+        for (control_id, expected_reason) in [
+            (
+                "aio2_unrelated_frontend_goal_c_words",
+                "frontend_dashboard_intent",
+            ),
+            (
+                "aio2_unrelated_controlled_rsi_health_dashboard",
+                "health_dashboard_intent",
+            ),
+            ("aio2_adjacent_write_request", "write_bypass_intent"),
+            (
+                "aio2_adjacent_lswr_poetry",
+                "creative_non_continuation_intent",
+            ),
+        ] {
+            let control = AIO2_NATIVE_NEGATIVE_CONTROLS
+                .iter()
+                .find(|control| control.id == control_id)
+                .unwrap_or_else(|| panic!("missing control {control_id}"));
+            let keys = vec!["gold".to_string()];
+            let reason = baseline_acceptance_reject_reason(control.query);
+
+            assert_eq!(reason, Some(expected_reason), "{control_id}");
+            assert!(shadow_visible_baseline_keys(&keys, reason).is_empty());
         }
     }
 
@@ -4143,6 +4468,113 @@ mod tests {
             json!(0),
             "gate must affect supplemental candidates only"
         );
+    }
+
+    #[test]
+    fn baseline_acceptance_audit_allows_continuation_and_preserves_baseline_hit() {
+        let query = "LSWR G25 store write execution preflight landed output only plan next gate";
+        let rows = [MemoryRow {
+            key: "g25_target".to_string(),
+            kind: "decision".to_string(),
+            scope: None,
+            content: String::new(),
+            projected: "LSWR G25 store write execution preflight landed output only plan next gate"
+                .to_string(),
+            triggers: Vec::new(),
+        }];
+        let fts = ScratchFts::build(&rows).expect("scratch fts");
+        let audit = baseline_acceptance_audit(&fts, query, TOP_K).expect("baseline audit");
+
+        assert_eq!(audit.query_intent_reject_reason, None);
+        assert_eq!(audit.query_intent_decision(), "allow");
+        assert_eq!(
+            audit.baseline_keys_before_gate,
+            vec!["g25_target".to_string()]
+        );
+        assert_eq!(
+            audit.baseline_keys_after_shadow_gate,
+            vec!["g25_target".to_string()]
+        );
+
+        let payload = audit.to_json();
+        assert_eq!(
+            payload["schema"],
+            json!("agent_bridge.memory.trigger_baseline_acceptance_shadow.v0")
+        );
+        assert_eq!(payload["query_intent"]["decision"], json!("allow"));
+        assert_eq!(payload["default_memory_search_unchanged"], json!(true));
+        assert_eq!(payload["changes_production_retrieval"], json!(false));
+        assert!(
+            !payload.to_string().contains(query),
+            "baseline audit payload should not echo the raw query"
+        );
+    }
+
+    #[test]
+    fn baseline_acceptance_audit_holds_rejected_query_without_runtime_authority() {
+        let write_query =
+            "please directly write graph edges and bypass dry run review for related keys";
+        let frontend_query = "Goal C dashboard state card spacing responsive layout visual design only not continuity ledger work";
+        let rows = [
+            MemoryRow {
+                key: "write_false_hit".to_string(),
+                kind: "decision".to_string(),
+                scope: None,
+                content: String::new(),
+                projected:
+                    "please directly write graph edges and bypass dry run review for related keys"
+                        .to_string(),
+                triggers: Vec::new(),
+            },
+            MemoryRow {
+                key: "frontend_false_hit".to_string(),
+                kind: "decision".to_string(),
+                scope: None,
+                content: String::new(),
+                projected:
+                    "Goal C dashboard state card spacing responsive layout visual design only not continuity ledger work"
+                        .to_string(),
+                triggers: Vec::new(),
+            },
+        ];
+        let fts = ScratchFts::build(&rows).expect("scratch fts");
+
+        let write_audit = baseline_acceptance_audit(&fts, write_query, TOP_K).expect("write audit");
+        assert_eq!(
+            write_audit.query_intent_reject_reason,
+            Some("write_bypass_intent")
+        );
+        assert_eq!(
+            write_audit.baseline_keys_before_gate,
+            vec!["write_false_hit".to_string()]
+        );
+        assert!(write_audit.baseline_keys_after_shadow_gate.is_empty());
+        assert_eq!(write_audit.query_intent_decision(), "hold");
+
+        let frontend_audit =
+            baseline_acceptance_audit(&fts, frontend_query, TOP_K).expect("frontend audit");
+        assert_eq!(
+            frontend_audit.query_intent_reject_reason,
+            Some("frontend_dashboard_intent")
+        );
+        assert_eq!(
+            frontend_audit.baseline_keys_before_gate,
+            vec!["frontend_false_hit".to_string()]
+        );
+        assert!(frontend_audit.baseline_keys_after_shadow_gate.is_empty());
+
+        let payload = frontend_audit.to_json();
+        assert_eq!(payload["query_intent"]["decision"], json!("hold"));
+        assert_eq!(
+            payload["query_intent"]["reject_reason"],
+            json!("frontend_dashboard_intent")
+        );
+        assert_eq!(
+            payload["visible_behavior_if_production"],
+            json!("not_authorized_shadow_only")
+        );
+        assert_eq!(payload["baseline_candidates_before_gate"], json!(1));
+        assert_eq!(payload["baseline_candidates_after_shadow_gate"], json!(0));
     }
 
     #[test]
