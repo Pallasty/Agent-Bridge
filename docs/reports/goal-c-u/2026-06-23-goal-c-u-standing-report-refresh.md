@@ -2,7 +2,7 @@
 
 Host: macOS `maxiaodeMac-Pro.local`
 
-Report timestamp: `2026-06-23T10:59:28Z`
+Report timestamp: `2026-06-23T11:01:40Z`
 
 Source commit: `53ad6e1` (`test(memory): harden recall eval snapshot open`)
 
@@ -83,7 +83,7 @@ reported:
 Chain head:
 
 ```text
-ccca4e16d5d09549b1e3674ca3ac20c3652c7904be09f256e25aa722340f5535
+81df620c5a8a640eb8d368ff288f88b32efdf26823a686e648a675d4762a28ae
 ```
 
 This is report replayability evidence only.
@@ -248,15 +248,15 @@ Current Palace semantic-events graph stats:
 
 | Metric | Value |
 |---|---:|
-| nodes | 711 |
+| nodes | 712 |
 | edges | 321 |
-| orphan nodes | 496 |
+| orphan nodes | 497 |
 | connected ratio | 0.302 |
 | explicit edges | 292 |
 | coactivation edges | 29 |
 | hub nodes | 12 |
 | stale nodes | 0 |
-| markdown nodes | 211 |
+| markdown nodes | 212 |
 | sqlite nodes | 500 |
 
 Read:
@@ -312,7 +312,7 @@ Read:
 | A. Implement aio2 baseline acceptance shadow audit | aio2 trigger-recall lane | `2026-06-23-trigger-recall-baseline-acceptance-design.md` | true hits lost on accepted continuation queries, or false-hit reduction is only achieved by hiding valid baseline results | eval-only flag in `trigger_recall_eval`; no production `memory_search` change |
 | B. Keep `continuity-report` plus pinned `recall_eval` as the standing U pair | Goal C U lane | this report plus CLI output | reports stop producing adopted actions or hard-tier R@k remains unchanged after proposed runtime changes | docs/report only; no MCP surface |
 | C. Fix Codex telemetry failure modes | Codex integration lane | `changes_digest` and `memory_save` errors in seven-day audit | errors are stale or disappear under exact current model/profile filters | small patches with focused tests; no profile mutation first |
-| D. Graph hygiene before centrality prior | memory graph lane | Palace `496/711` orphan nodes and connected ratio `0.302` | safe scope-compatible links are absent or improve no held-out recall anchor | read-only candidate/review first; no PageRank production prior |
+| D. Graph hygiene before centrality prior | memory graph lane | Palace `497/712` orphan nodes and connected ratio `0.302` | safe scope-compatible links are absent or improve no held-out recall anchor | read-only candidate/review first; no PageRank production prior |
 
 ## Decision
 
