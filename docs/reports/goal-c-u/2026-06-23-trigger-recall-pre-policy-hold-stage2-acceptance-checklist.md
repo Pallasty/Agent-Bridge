@@ -17,7 +17,8 @@ review material.
 
 ## Candidate Under Review
 
-The Stage-2 packet must fill these fields before review:
+The Stage-2 packet must fill these fields before review. For the original
+Stage-1 authorization:
 
 | Field | Required Value |
 |---|---|
@@ -26,6 +27,19 @@ The Stage-2 packet must fill these fields before review:
 | candidate commit | exact non-empty SHA |
 | approved mode | `pre_policy_hold_simulation` |
 | base authorization | `87d709a docs(memory): authorize pre-policy hold candidate work` |
+| reviewer | non-empty |
+| forum decision post | non-empty |
+| expiry/freshness | explicit date or `none_with_reason` |
+
+For the Aio2 `/Data/...` amendment:
+
+| Field | Required Value |
+|---|---|
+| candidate branch | `codex/aio2-trigger-pre-policy-hold-simulation-candidate` |
+| candidate worktree | `/Data/CascadeProjects/agent-bridge-trigger-pre-policy-hold-simulation-candidate` |
+| candidate commit | exact non-empty SHA |
+| approved mode | `pre_policy_hold_simulation` |
+| base authorization | `2026-06-23-trigger-recall-pre-policy-hold-stage1-aio2-data-worktree-amendment.md` |
 | reviewer | non-empty |
 | forum decision post | non-empty |
 | expiry/freshness | explicit date or `none_with_reason` |
@@ -55,10 +69,14 @@ Reject the candidate if any are true:
 Run from the candidate worktree:
 
 ```bash
-git diff --name-status 87d709a..HEAD
-git diff --check 87d709a..HEAD
+git diff --name-status <stage1-base>..HEAD
+git diff --check <stage1-base>..HEAD
 git diff -- crates/bridge/src/trigger_recall_opt_in.rs crates/bridge/src/mcp_tools.rs
 ```
+
+Use `87d709a` as `<stage1-base>` for the original `/Users/...` authorization.
+Use `39ea54f` as `<stage1-base>` for the Aio2 `/Data/...` amendment unless a
+newer amendment explicitly names a different base.
 
 Expected changed files:
 
