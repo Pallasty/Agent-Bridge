@@ -7,14 +7,34 @@
 //! 2. **Hash fallback**: FNV-1a feature hashing (unigrams + bigrams). 384-dim,
 //!    no external deps, deterministic.
 //!
-//! Both paths produce 384-dim unit vectors so cosine similarity is consistent
-//! regardless of which path ran. `VECTOR_DIM = 384` is the canonical dimension.
+//! Both paths produce unit vectors so cosine similarity is consistent
+//! regardless of which path ran. The canonical dimension is **model-aware**:
+//! 384 for e5/MiniLM/para-ml, 768 for gte-multilingual-base — resolved at
+//! runtime by [`vector_dim`] from the active model name.
 //!
 //! Pluggable backend selection (e.g. swapping in AIoT Rust Seed) lives in
 //! [`crate::embedding`]. The free function [`embed_text`] is a compatibility
 //! shim that delegates to `embedding::default_backend()`.
 
-pub const VECTOR_DIM: usize = 384;
+/// Canonical embedding dimension for the active model (model-aware, runtime).
+///
+/// 768 for `gte-multilingual-base`, else 384 (e5 / MiniLM / para-ml). The
+/// active model name is memoised via [`active_model_name`], so repeated calls
+/// are cheap. e5/MiniLM stores stay byte-for-byte 384-dim — this only widens
+/// to 768 when gte is the active model.
+pub fn vector_dim() -> usize {
+    #[cfg(feature = "onnx-embed")]
+    {
+        match onnx::active_model_name() {
+            "gte-multilingual-base" => 768,
+            _ => 384,
+        }
+    }
+    #[cfg(not(feature = "onnx-embed"))]
+    {
+        384
+    }
+}
 
 // ── ONNX backend (optional) ───────────────────────────────────────────────
 
@@ -73,6 +93,16 @@ pub(crate) mod onnx {
             | Some("paraphrase-multilingual-MiniLM-L12-v2") => (
                 EmbeddingModel::ParaphraseMLMiniLML12V2,
                 "paraphrase-multilingual-MiniLM-L12-v2",
+                false,
+            ),
+            // gte-multilingual-base — 768-dim multilingual (model-aware VECTOR_DIM
+            // widens to 768 via `vector_dim()`). The EmbeddingModel here is a
+            // placeholder enum: gte always loads via `try_load_local` from a local
+            // ONNX dir (the enum is only consulted by the broken hf-hub download
+            // fallback, which can't fetch gte anyway). No task prefix.
+            Some("gte") | Some("gte-ml") | Some("gte-multilingual-base") => (
+                EmbeddingModel::MultilingualE5Small,
+                "gte-multilingual-base",
                 false,
             ),
             _ => (EmbeddingModel::AllMiniLML6V2, "all-MiniLM-L6-v2", false),
@@ -331,15 +361,16 @@ pub fn decode_embedding(bytes: &[u8]) -> Vec<f32> {
 /// Used when the ONNX backend is unavailable.
 pub fn embed_text_hash(text: &str) -> Vec<f32> {
     let tokens = tokenize(text);
-    let mut vec = vec![0.0f32; VECTOR_DIM];
+    let dim = vector_dim();
+    let mut vec = vec![0.0f32; dim];
 
     for tok in &tokens {
-        let idx = fnv1a(tok.as_bytes()) % VECTOR_DIM;
+        let idx = fnv1a(tok.as_bytes()) % dim;
         vec[idx] += 1.0;
     }
     for pair in tokens.windows(2) {
         let bigram = format!("{}\x00{}", pair[0], pair[1]);
-        let idx = fnv1a(bigram.as_bytes()) % VECTOR_DIM;
+        let idx = fnv1a(bigram.as_bytes()) % dim;
         vec[idx] += 0.5;
     }
 
@@ -463,9 +494,11 @@ mod tests {
 
     #[test]
     fn hash_dim_is_384() {
+        // Tests run with the default model (no AGENT_BRIDGE_ONNX_MODEL set),
+        // so the e5/MiniLM/default path must stay 384-dim.
         let v = embed_text_hash("hello world");
-        assert_eq!(v.len(), VECTOR_DIM);
-        assert_eq!(VECTOR_DIM, 384);
+        assert_eq!(v.len(), vector_dim());
+        assert_eq!(vector_dim(), 384);
     }
 
     #[test]

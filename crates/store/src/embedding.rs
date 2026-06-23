@@ -31,7 +31,7 @@
 
 use std::sync::{Arc, OnceLock};
 
-use crate::vector::{embed_text_hash, VECTOR_DIM};
+use crate::vector::{embed_text_hash, vector_dim};
 
 /// Common trait for any text → fixed-dim vector encoder.
 ///
@@ -96,7 +96,7 @@ impl EmbeddingBackend for HashBackend {
         "fnv1a-hash-384"
     }
     fn dim(&self) -> usize {
-        VECTOR_DIM
+        vector_dim()
     }
     fn embed(&self, text: &str) -> Vec<f32> {
         embed_text_hash(text)
@@ -123,7 +123,7 @@ impl EmbeddingBackend for OnnxBackend {
         }
     }
     fn dim(&self) -> usize {
-        VECTOR_DIM
+        vector_dim()
     }
     fn embed(&self, text: &str) -> Vec<f32> {
         #[cfg(feature = "onnx-embed")]

@@ -28,7 +28,7 @@
 //!     cargo run -p ab-bridge --example recall_whiten_probe --release
 
 use ab_store::default_db_path;
-use ab_store::vector::{cosine_similarity, decode_embedding, embed_text, warmup, VECTOR_DIM};
+use ab_store::vector::{cosine_similarity, decode_embedding, embed_text, vector_dim, warmup};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 use tokio_rusqlite::Connection;
@@ -101,13 +101,13 @@ fn top_k_pcs(centered: &[Vec<f32>], k: usize) -> Vec<Vec<f32>> {
     let mut residual: Vec<Vec<f32>> = centered.to_vec();
     let mut pcs: Vec<Vec<f32>> = Vec::with_capacity(k);
     for j in 0..k {
-        let mut u = vec![0f32; VECTOR_DIM];
+        let mut u = vec![0f32; vector_dim()];
         for (d, slot) in u.iter_mut().enumerate() {
             *slot = (d as f32 * 0.1 + j as f32 * 1.7).sin();
         }
         norm_in_place(&mut u);
         for _ in 0..POWER_ITERS {
-            let mut w = vec![0f32; VECTOR_DIM];
+            let mut w = vec![0f32; vector_dim()];
             for x in &residual {
                 let d = dot(x, &u);
                 for (wi, xi) in w.iter_mut().zip(x) {
@@ -224,7 +224,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let corpus_raw: Vec<(String, Vec<f32>)> = rows
         .into_iter()
         .map(|(k, b)| (k, decode_embedding(&b)))
-        .filter(|(_, v)| v.len() == VECTOR_DIM)
+        .filter(|(_, v)| v.len() == vector_dim())
         .collect();
     let n_corpus = corpus_raw.len();
     let e5_keys: BTreeSet<&str> = corpus_raw.iter().map(|(k, _)| k.as_str()).collect();
@@ -235,7 +235,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // ── estimate μ and top-k principal directions on the centered corpus ─────
-    let mut mu = vec![0f32; VECTOR_DIM];
+    let mut mu = vec![0f32; vector_dim()];
     for (_, v) in &corpus_raw {
         for (m, x) in mu.iter_mut().zip(v) {
             *m += x;

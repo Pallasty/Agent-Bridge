@@ -2976,7 +2976,7 @@ impl StateStore for SqliteStore {
         // (mirrors the memory_import preflight in this same file). Same-content
         // re-saves are common — session_curate re-extracts identical lessons,
         // and users may update tags/importance without touching content.
-        const EXPECTED_EMBED_BYTES: usize = crate::vector::VECTOR_DIM * 4;
+        let expected_embed_bytes: usize = crate::vector::vector_dim() * 4;
         let key_for_preflight = key.clone();
         let existing: Option<(String, Vec<u8>, String)> = self
             .conn
@@ -3026,7 +3026,7 @@ impl StateStore for SqliteStore {
         // embeddings keep their prior tag (None signals "leave").
         let (embedding_bytes, fresh_backend_name): (Vec<u8>, Option<String>) = match existing {
             Some((existing_content, existing_emb, _))
-                if existing_content == content && existing_emb.len() == EXPECTED_EMBED_BYTES =>
+                if existing_content == content && existing_emb.len() == expected_embed_bytes =>
             {
                 (existing_emb, None)
             }
@@ -10340,7 +10340,7 @@ mod tests {
         rec.content = "stable content".into();
         store.memory_save(&rec).await.expect("first save");
 
-        let sentinel = vec![0x42u8; crate::vector::VECTOR_DIM * 4];
+        let sentinel = vec![0x42u8; crate::vector::vector_dim() * 4];
         let sentinel_for_write = sentinel.clone();
         store
             .conn
@@ -10393,7 +10393,7 @@ mod tests {
             recomputed, sentinel,
             "sentinel must be replaced on content change"
         );
-        assert_eq!(recomputed.len(), crate::vector::VECTOR_DIM * 4);
+        assert_eq!(recomputed.len(), crate::vector::vector_dim() * 4);
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
@@ -15882,9 +15882,9 @@ mod tests {
                 .expect("save");
         }
 
-        let mut v1 = vec![0.0_f32; crate::vector::VECTOR_DIM];
+        let mut v1 = vec![0.0_f32; crate::vector::vector_dim()];
         v1[0] = 1.0;
-        let mut v2 = vec![0.0_f32; crate::vector::VECTOR_DIM];
+        let mut v2 = vec![0.0_f32; crate::vector::vector_dim()];
         v2[0] = 3.0;
 
         store
@@ -16850,7 +16850,7 @@ mod tests {
             })
             .await
             .expect("read lengths");
-        let expected = (crate::vector::VECTOR_DIM * 4) as i64;
+        let expected = (crate::vector::vector_dim() * 4) as i64;
         for len in &lengths {
             assert_eq!(*len, expected);
         }

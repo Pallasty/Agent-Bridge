@@ -17,7 +17,7 @@
 //! ranking change, no MCP tool. Exposed via the `agent-bridge continuity-report`
 //! CLI subcommand and reused by `examples/continuity_report.rs`.
 
-use ab_store::vector::{VECTOR_DIM, decode_embedding};
+use ab_store::vector::{decode_embedding, vector_dim};
 use anyhow::Result;
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -51,7 +51,7 @@ fn anisotropy_ratio(vecs: &[Vec<f32>]) -> f32 {
     if vecs.is_empty() {
         return 0.0;
     }
-    let mut mu = vec![0f32; VECTOR_DIM];
+    let mut mu = vec![0f32; vector_dim()];
     for v in vecs {
         for (m, x) in mu.iter_mut().zip(v) {
             *m += x;
@@ -107,7 +107,7 @@ pub async fn build_report(db_path: &Path) -> Result<ContinuityReport> {
     for (be, bytes) in raw {
         let name = be.unwrap_or_else(|| NULL_BACKEND_LABEL.to_string());
         let v = decode_embedding(&bytes);
-        if v.len() != VECTOR_DIM {
+        if v.len() != vector_dim() {
             continue;
         }
         by_backend.entry(name).or_default().push(v);
