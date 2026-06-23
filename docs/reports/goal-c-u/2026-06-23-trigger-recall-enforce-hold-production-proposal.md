@@ -223,6 +223,10 @@ This proposal does not authorize:
 
 ## Recommended Next Step
 
-Write a separate approval-packet schema/review document for either
-`audit_only` or `pre_policy_hold` simulation. Do not implement
-`enforce_hold` until that approval packet exists and names an exact commit.
+Closed by
+`docs/reports/goal-c-u/2026-06-23-trigger-recall-pre-policy-hold-approval-packet-schema.md`.
+
+Next safe action: review that schema or propose an implementation plan that
+names exact files and tests while still stopping at `pre_policy_hold_simulation`.
+Do not implement production `enforce_hold` until a later approval packet names
+the exact implementation commit.
