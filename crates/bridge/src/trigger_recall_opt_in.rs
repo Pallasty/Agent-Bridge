@@ -7,6 +7,8 @@ pub const TRIGGER_RECALL_OPT_IN_STATUS_SCHEMA: &str =
     "agent_bridge.memory.trigger_recall.opt_in_status.v0";
 pub const TRIGGER_RECALL_OPT_IN_RUNTIME_TRANSITION_GATE_SCHEMA: &str =
     "agent_bridge.memory.trigger_recall.opt_in_runtime_transition_gate.v0";
+pub const TRIGGER_RECALL_OPT_IN_BASELINE_TRIAL_SCHEMA: &str =
+    "agent_bridge.memory.trigger_recall.opt_in_baseline_trial.v0";
 pub const TRIGGER_RECALL_OPT_IN_ENABLE_ENV: &str = "AB_TRIGGER_RECALL_OPT_IN";
 pub const TRIGGER_RECALL_DISABLE_ENV: &str = "AB_TRIGGER_RECALL_DISABLE";
 pub const TRIGGER_RECALL_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR: &str =
@@ -48,6 +50,37 @@ pub struct TriggerRecallOptInRuntimeTransitionGateOptions {
     pub forum_post_id: Option<String>,
     pub memory_key: Option<String>,
     pub raw_payload_fields_present: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TriggerRecallOptInGatedBaselineTrialHit {
+    pub key: String,
+    pub kind: String,
+    pub score: f64,
+    pub scope: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+    pub tags_count: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TriggerRecallOptInGatedBaselineTrialOptions {
+    pub runtime_transition_gate: Value,
+    pub query: String,
+    pub tags_count: usize,
+    pub limit: u64,
+    pub mode: String,
+    pub per_call_opt_in: bool,
+    pub scope: Option<String>,
+    pub scope_mode: String,
+    pub runtime_enabled: bool,
+    pub operator_disabled: bool,
+    pub raw_payload_fields_present: bool,
+    pub baseline_search_called: bool,
+    pub baseline_hits: Option<Vec<TriggerRecallOptInGatedBaselineTrialHit>>,
+    pub baseline_search_error: Option<String>,
+    pub attempt_id: Option<String>,
+    pub commit: Option<String>,
 }
 
 fn unix_now_secs() -> i64 {
@@ -108,6 +141,81 @@ fn push_if(reasons: &mut BTreeSet<String>, condition: bool, reason: &str) {
     if condition {
         reasons.insert(reason.to_string());
     }
+}
+
+fn contains_any(haystack: &str, needles: &[&str]) -> bool {
+    needles.iter().any(|needle| haystack.contains(needle))
+}
+
+pub fn trigger_recall_baseline_acceptance_reject_reason(query: &str) -> Option<&'static str> {
+    let lower = query.to_lowercase();
+    let has_bypass = contains_any(&lower, &["bypass", "绕过"]);
+    let has_direct_write = contains_any(
+        &lower,
+        &[
+            "directly write",
+            "write graph edges",
+            "write memory_edges",
+            "直接写",
+        ],
+    );
+    let has_graph_write_surface = contains_any(
+        &lower,
+        &[
+            "graph edges",
+            "memory_edges",
+            "related keys",
+            "materialize",
+            "materialization",
+            "dry run",
+            "dry_run",
+            "图谱",
+        ],
+    );
+
+    if (has_bypass || has_direct_write) && has_graph_write_surface {
+        return Some("write_bypass_intent");
+    }
+
+    if contains_any(
+        &lower,
+        &["write a poem", "poem", "poetry", "写诗", "诗歌", "写一首诗"],
+    ) {
+        return Some("creative_non_continuation_intent");
+    }
+
+    let has_dashboard_or_state = contains_any(&lower, &["dashboard", "state"]);
+    if !has_dashboard_or_state {
+        return None;
+    }
+
+    if contains_any(
+        &lower,
+        &[
+            "exercise", "recovery", "pain", "tracker", "workout", "health", "fitness",
+        ],
+    ) {
+        return Some("health_dashboard_intent");
+    }
+
+    if contains_any(
+        &lower,
+        &[
+            "card spacing",
+            "color palette",
+            "button hover",
+            "responsive layout",
+            "visual design",
+            "visual-design",
+            "styling",
+            "layout",
+            "frontend",
+        ],
+    ) {
+        return Some("frontend_dashboard_intent");
+    }
+
+    None
 }
 
 pub fn trigger_recall_value_contains_raw(value: &Value) -> bool {
@@ -505,6 +613,317 @@ pub fn trigger_recall_opt_in_runtime_transition_gate(
     })
 }
 
+fn transition_gate_blockers(
+    gate: &Value,
+    mode: &str,
+    per_call_opt_in: bool,
+    exact_scope: bool,
+    runtime_enabled: bool,
+    operator_disabled: bool,
+    raw_payload_fields_present: bool,
+    query_present: bool,
+) -> BTreeSet<String> {
+    let gate_schema = gate.get("schema").and_then(Value::as_str).unwrap_or("");
+    let gate_read_only = gate
+        .get("read_only")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let gate_marker = gate
+        .get("runtime_transition_gate")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let gate_status = gate.get("status").and_then(Value::as_str).unwrap_or("");
+    let gate_transition_allowed = gate
+        .pointer("/transition/transition_allowed")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let gate_may_call_trial = gate
+        .pointer("/transition/may_call_gated_baseline_trial")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let gate_may_enforce_hold = gate
+        .pointer("/transition/may_enforce_hold")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let gate_boundary_allowed = gate
+        .pointer("/boundary_check/runtime_transition_allowed")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let gate_contains_raw = trigger_recall_value_contains_raw(gate);
+    let gate_side_effects_safe = gate
+        .pointer("/side_effects/calls_memory_search")
+        .and_then(Value::as_bool)
+        == Some(false)
+        && gate
+            .pointer("/side_effects/changes_memory_search_order")
+            .and_then(Value::as_bool)
+            == Some(false)
+        && gate
+            .pointer("/side_effects/changes_default_memory_search_schema")
+            .and_then(Value::as_bool)
+            == Some(false)
+        && gate
+            .pointer("/side_effects/writes_memory")
+            .and_then(Value::as_bool)
+            == Some(false);
+
+    let mut blockers = BTreeSet::<String>::new();
+    push_if(
+        &mut blockers,
+        gate_schema != TRIGGER_RECALL_OPT_IN_RUNTIME_TRANSITION_GATE_SCHEMA,
+        "transition_gate_schema_mismatch",
+    );
+    push_if(&mut blockers, !gate_read_only, "transition_gate_not_read_only");
+    push_if(
+        &mut blockers,
+        !gate_marker,
+        "transition_gate_marker_missing",
+    );
+    push_if(
+        &mut blockers,
+        gate_status != "transition_allowed",
+        "transition_gate_status_not_allowed",
+    );
+    push_if(
+        &mut blockers,
+        !gate_transition_allowed,
+        "transition_gate_transition_not_allowed",
+    );
+    push_if(
+        &mut blockers,
+        !gate_may_call_trial,
+        "transition_gate_may_not_call_baseline_trial",
+    );
+    push_if(
+        &mut blockers,
+        gate_may_enforce_hold,
+        "transition_gate_may_enforce_hold",
+    );
+    push_if(
+        &mut blockers,
+        !gate_boundary_allowed,
+        "transition_gate_boundary_not_allowed",
+    );
+    push_if(
+        &mut blockers,
+        gate_contains_raw,
+        "transition_gate_contains_raw_payload",
+    );
+    push_if(
+        &mut blockers,
+        !gate_side_effects_safe,
+        "transition_gate_side_effect_contract_invalid",
+    );
+    if let Some(source_blockers) = gate
+        .pointer("/boundary_check/blockers")
+        .and_then(Value::as_array)
+    {
+        for blocker in source_blockers {
+            if let Some(blocker) = blocker.as_str() {
+                blockers.insert(format!("transition_gate_{blocker}"));
+            }
+        }
+    }
+
+    push_if(
+        &mut blockers,
+        mode != "fts",
+        "requested_mode_not_authorized",
+    );
+    push_if(&mut blockers, !per_call_opt_in, "per_call_opt_in_missing");
+    push_if(
+        &mut blockers,
+        !exact_scope,
+        "exact_local_project_scope_missing",
+    );
+    push_if(&mut blockers, !runtime_enabled, "runtime_disabled");
+    push_if(&mut blockers, operator_disabled, "operator_disabled");
+    push_if(
+        &mut blockers,
+        raw_payload_fields_present,
+        "raw_payload_fields_present",
+    );
+    push_if(&mut blockers, !query_present, "query_missing");
+
+    blockers
+}
+
+fn baseline_order_hash(hits: &[TriggerRecallOptInGatedBaselineTrialHit]) -> String {
+    let joined = hits
+        .iter()
+        .map(|hit| hit.key.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    sha256_hex(&joined)
+}
+
+fn redacted_hit_summary(hit: &TriggerRecallOptInGatedBaselineTrialHit, rank: usize) -> Value {
+    json!({
+        "rank": rank,
+        "key_hash": sha256_hex(&hit.key),
+        "kind": hit.kind,
+        "score": hit.score,
+        "scope_present": hit.scope.is_some(),
+        "scope_hash": hit.scope.as_ref().map(|scope| sha256_hex(scope)),
+        "created_at": hit.created_at,
+        "updated_at": hit.updated_at,
+        "tags_count": hit.tags_count
+    })
+}
+
+pub fn trigger_recall_opt_in_gated_baseline_trial(
+    options: TriggerRecallOptInGatedBaselineTrialOptions,
+) -> Value {
+    let mode = normalize_mode(&options.mode);
+    let scope_mode = normalize_scope_mode(&options.scope_mode);
+    let scope = normalized_scope(options.scope);
+    let exact_scope = exact_local_project_scope(scope.as_deref(), &scope_mode);
+    let query = options.query.trim().to_string();
+    let query_present = !query.is_empty();
+    let blockers = transition_gate_blockers(
+        &options.runtime_transition_gate,
+        &mode,
+        options.per_call_opt_in,
+        exact_scope,
+        options.runtime_enabled,
+        options.operator_disabled,
+        options.raw_payload_fields_present,
+        query_present,
+    );
+    let transition_allowed = blockers.is_empty();
+    let reject_reason = if transition_allowed {
+        trigger_recall_baseline_acceptance_reject_reason(&query)
+    } else {
+        None
+    };
+
+    let baseline_search_supplied = options.baseline_hits.is_some();
+    let baseline_hits = options.baseline_hits.unwrap_or_default();
+    let baseline_count_before = baseline_hits.len();
+    let baseline_result_available = options.baseline_search_called
+        || baseline_search_supplied
+        || options.baseline_search_error.is_some();
+    let accepted = transition_allowed
+        && baseline_result_available
+        && reject_reason.is_none()
+        && options.baseline_search_error.is_none();
+    let held = transition_allowed
+        && baseline_result_available
+        && reject_reason.is_some()
+        && options.baseline_search_error.is_none();
+    let visible_hits = if accepted {
+        baseline_hits
+            .iter()
+            .enumerate()
+            .map(|(idx, hit)| redacted_hit_summary(hit, idx + 1))
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    let baseline_count_after = if accepted { baseline_count_before } else { 0 };
+    let status = if !transition_allowed {
+        "transition_gate_blocked"
+    } else if options.baseline_search_error.is_some() {
+        "baseline_search_error"
+    } else if held {
+        "held_by_query_intent"
+    } else if accepted {
+        "returned_accepted"
+    } else {
+        "baseline_search_pending"
+    };
+    let visible_behavior = if !transition_allowed {
+        "transition_gate_blocked"
+    } else if options.baseline_search_error.is_some() {
+        "baseline_search_error"
+    } else if held {
+        "held_by_query_intent"
+    } else if accepted {
+        "baseline_fts_visible"
+    } else {
+        "baseline_search_pending"
+    };
+    let calls_memory_search =
+        transition_allowed && (options.baseline_search_called || baseline_search_supplied);
+    let query_intent_decision = if accepted {
+        "allow"
+    } else if held {
+        "hold"
+    } else {
+        "not_evaluated"
+    };
+
+    json!({
+        "schema": TRIGGER_RECALL_OPT_IN_BASELINE_TRIAL_SCHEMA,
+        "generated_at": unix_now_secs(),
+        "read_only": true,
+        "status": status,
+        "mode": mode,
+        "per_call_opt_in": options.per_call_opt_in,
+        "default_memory_search_unchanged": true,
+        "runtime_transition_preflight": {
+            "transition_gate_allowed": transition_allowed,
+            "transition_gate_included": false,
+            "blockers": blockers.into_iter().collect::<Vec<_>>()
+        },
+        "request": {
+            "query_hash": if query_present { json!(sha256_hex(&query)) } else { Value::Null },
+            "raw_query_included": false,
+            "tags_count": options.tags_count,
+            "limit": options.limit,
+            "scope_present": scope.is_some(),
+            "scope_hash": scope.as_ref().map(|value| sha256_hex(value)),
+            "scope_mode": scope_mode,
+            "exact_local_project_scope": exact_scope,
+            "attempt_id_hash": options.attempt_id.as_ref().map(|value| sha256_hex(value)),
+            "commit": options.commit.unwrap_or_default()
+        },
+        "baseline": {
+            "memory_search_called": calls_memory_search,
+            "baseline_candidate_count_before_gate": baseline_count_before,
+            "baseline_candidate_count_after_gate": baseline_count_after,
+            "baseline_order_hash_before_gate": if calls_memory_search { json!(baseline_order_hash(&baseline_hits)) } else { Value::Null },
+            "baseline_search_error": options.baseline_search_error.as_deref().unwrap_or("")
+        },
+        "query_intent": {
+            "decision": query_intent_decision,
+            "reject_reason": reject_reason
+        },
+        "visible_behavior": visible_behavior,
+        "fallback_behavior": if held { "hold_packet_not_empty_search" } else if accepted { "baseline_fts_visible" } else { "no_trial_result" },
+        "visible_hits": visible_hits,
+        "audit": {
+            "regression_anchor": TRIGGER_RECALL_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR,
+            "query_hash_required": true,
+            "baseline_order_hash_required": calls_memory_search,
+            "raw_query_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "held_queries_use_status_not_empty_array": true
+        },
+        "side_effects": {
+            "calls_memory_search": calls_memory_search,
+            "calls_memory_neighbors": false,
+            "records_coactivation": false,
+            "writes_memory": false,
+            "writes_graph_edges": false,
+            "changes_memory_search_order": false,
+            "changes_default_memory_search_schema": false,
+            "changes_production_retrieval_default": false,
+            "runs_semantic_retrieval": false,
+            "runs_graph_retrieval": false
+        },
+        "input_contract": {
+            "runtime_transition_gate_included": false,
+            "raw_payload_fields_present": options.raw_payload_fields_present,
+            "raw_query_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "unknown_fields_ignored": true
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -574,5 +993,152 @@ mod tests {
             .expect("blockers");
         assert!(blockers.contains(&json!("status_packet_contains_raw_payload")));
         assert_eq!(gate["transition"]["transition_allowed"], json!(false));
+    }
+
+    fn ready_transition_gate_fixture() -> Value {
+        let status = trigger_recall_opt_in_status(TriggerRecallOptInStatusOptions {
+            mode: "fts".to_string(),
+            per_call_opt_in: true,
+            scope: Some("project:/Data/CascadeProjects/agent-bridge".to_string()),
+            scope_mode: "local_only".to_string(),
+            regression_anchor: Some(
+                TRIGGER_RECALL_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR.to_string(),
+            ),
+            aio2_corpus_ready: Some(true),
+            union_cont_misses: Some(0),
+            union_cont_false_hits: Some(0),
+            baseline_shadow_true_hits_lost: Some(0),
+            baseline_shadow_positive_cases_held: Some(0),
+            baseline_shadow_false_hits_after_gate: Some(0),
+            runtime_enabled: true,
+            ..Default::default()
+        });
+        trigger_recall_opt_in_runtime_transition_gate(
+            TriggerRecallOptInRuntimeTransitionGateOptions {
+                status_packet: status,
+                mode: "fts".to_string(),
+                per_call_opt_in: true,
+                scope: Some("project:/Data/CascadeProjects/agent-bridge".to_string()),
+                scope_mode: "local_only".to_string(),
+                regression_anchor: Some(
+                    TRIGGER_RECALL_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR.to_string(),
+                ),
+                runtime_enabled: true,
+                ..Default::default()
+            },
+        )
+    }
+
+    #[test]
+    fn baseline_trial_blocks_before_search_and_redacts_query() {
+        let query = "secret frontend dashboard query";
+        let trial = trigger_recall_opt_in_gated_baseline_trial(
+            TriggerRecallOptInGatedBaselineTrialOptions {
+                runtime_transition_gate: Value::Null,
+                query: query.to_string(),
+                mode: "semantic".to_string(),
+                per_call_opt_in: false,
+                scope: Some("project:/secret/path".to_string()),
+                scope_mode: "local_only".to_string(),
+                runtime_enabled: true,
+                raw_payload_fields_present: true,
+                limit: 5,
+                ..Default::default()
+            },
+        );
+        let serialized = serde_json::to_string(&trial).expect("serialize");
+        assert!(!serialized.contains(query));
+        assert!(!serialized.contains("/secret/path"));
+        assert_eq!(trial["status"], json!("transition_gate_blocked"));
+        assert_eq!(trial["side_effects"]["calls_memory_search"], json!(false));
+        let blockers = trial["runtime_transition_preflight"]["blockers"]
+            .as_array()
+            .expect("blockers");
+        assert!(blockers.contains(&json!("transition_gate_schema_mismatch")));
+        assert!(blockers.contains(&json!("requested_mode_not_authorized")));
+        assert!(blockers.contains(&json!("per_call_opt_in_missing")));
+        assert!(blockers.contains(&json!("raw_payload_fields_present")));
+    }
+
+    #[test]
+    fn baseline_trial_returns_accepted_redacted_hits() {
+        let trial = trigger_recall_opt_in_gated_baseline_trial(
+            TriggerRecallOptInGatedBaselineTrialOptions {
+                runtime_transition_gate: ready_transition_gate_fixture(),
+                query: "LSWR G25 store write execution preflight landed output only plan next gate"
+                    .to_string(),
+                mode: "fts".to_string(),
+                per_call_opt_in: true,
+                scope: Some("project:/Data/CascadeProjects/agent-bridge".to_string()),
+                scope_mode: "local_only".to_string(),
+                runtime_enabled: true,
+                limit: 5,
+                baseline_hits: Some(vec![TriggerRecallOptInGatedBaselineTrialHit {
+                    key: "secret_g25_key".to_string(),
+                    kind: "decision".to_string(),
+                    score: 42.0,
+                    scope: Some("project:/Data/CascadeProjects/agent-bridge".to_string()),
+                    created_at: 1,
+                    updated_at: 2,
+                    tags_count: 0,
+                }]),
+                baseline_search_called: true,
+                ..Default::default()
+            },
+        );
+        let serialized = serde_json::to_string(&trial).expect("serialize");
+        assert!(!serialized.contains("secret_g25_key"));
+        assert_eq!(trial["status"], json!("returned_accepted"));
+        assert_eq!(trial["query_intent"]["decision"], json!("allow"));
+        assert_eq!(trial["baseline"]["baseline_candidate_count_before_gate"], json!(1));
+        assert_eq!(trial["baseline"]["baseline_candidate_count_after_gate"], json!(1));
+        assert_eq!(trial["visible_hits"].as_array().expect("hits").len(), 1);
+        assert_eq!(trial["side_effects"]["calls_memory_search"], json!(true));
+        assert_eq!(trial["side_effects"]["records_coactivation"], json!(false));
+    }
+
+    #[test]
+    fn baseline_trial_holds_rejected_query_with_explicit_status() {
+        let query = "Goal C dashboard state card spacing responsive layout visual design only";
+        let trial = trigger_recall_opt_in_gated_baseline_trial(
+            TriggerRecallOptInGatedBaselineTrialOptions {
+                runtime_transition_gate: ready_transition_gate_fixture(),
+                query: query.to_string(),
+                mode: "fts".to_string(),
+                per_call_opt_in: true,
+                scope: Some("project:/Data/CascadeProjects/agent-bridge".to_string()),
+                scope_mode: "local_only".to_string(),
+                runtime_enabled: true,
+                limit: 5,
+                baseline_hits: Some(vec![TriggerRecallOptInGatedBaselineTrialHit {
+                    key: "secret_frontend_key".to_string(),
+                    kind: "decision".to_string(),
+                    score: 7.0,
+                    scope: None,
+                    created_at: 1,
+                    updated_at: 2,
+                    tags_count: 0,
+                }]),
+                baseline_search_called: true,
+                ..Default::default()
+            },
+        );
+        let serialized = serde_json::to_string(&trial).expect("serialize");
+        assert!(!serialized.contains(query));
+        assert!(!serialized.contains("secret_frontend_key"));
+        assert_eq!(trial["status"], json!("held_by_query_intent"));
+        assert_eq!(trial["visible_behavior"], json!("held_by_query_intent"));
+        assert_eq!(
+            trial["fallback_behavior"],
+            json!("hold_packet_not_empty_search")
+        );
+        assert_eq!(trial["query_intent"]["decision"], json!("hold"));
+        assert_eq!(
+            trial["query_intent"]["reject_reason"],
+            json!("frontend_dashboard_intent")
+        );
+        assert_eq!(trial["visible_hits"], json!([]));
+        assert_eq!(trial["baseline"]["baseline_candidate_count_before_gate"], json!(1));
+        assert_eq!(trial["baseline"]["baseline_candidate_count_after_gate"], json!(0));
     }
 }

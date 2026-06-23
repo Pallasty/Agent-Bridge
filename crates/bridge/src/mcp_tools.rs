@@ -3,8 +3,10 @@
 
 use crate::tool_diagnostics::{classify_tool_error, ToolErrorDiagnosticClass};
 use crate::trigger_recall_opt_in::{
+    trigger_recall_opt_in_gated_baseline_trial,
     trigger_recall_opt_in_runtime_transition_gate, trigger_recall_opt_in_status,
     trigger_recall_value_contains_raw, TriggerRecallOptInRuntimeTransitionGateOptions,
+    TriggerRecallOptInGatedBaselineTrialHit, TriggerRecallOptInGatedBaselineTrialOptions,
     TriggerRecallOptInStatusOptions, TRIGGER_RECALL_DISABLE_ENV, TRIGGER_RECALL_OPT_IN_ENABLE_ENV,
 };
 use crate::warp_scheme::{
@@ -28594,6 +28596,29 @@ fn trigger_recall_mcp_arg_u64(args: &Value, key: &str) -> Option<u64> {
     args.get(key).and_then(Value::as_u64)
 }
 
+fn trigger_recall_trial_unexpected_raw_fields(args: &Value) -> bool {
+    let mut redacted_boundary = args.clone();
+    if let Some(obj) = redacted_boundary.as_object_mut() {
+        obj.remove("query");
+        obj.remove("runtime_transition_gate");
+    }
+    trigger_recall_value_contains_raw(&redacted_boundary)
+}
+
+fn trigger_recall_baseline_trial_hit(
+    hit: &MemorySearchHit,
+) -> TriggerRecallOptInGatedBaselineTrialHit {
+    TriggerRecallOptInGatedBaselineTrialHit {
+        key: hit.record.key.clone(),
+        kind: hit.record.kind.clone(),
+        score: hit.score,
+        scope: hit.record.scope.clone(),
+        created_at: hit.record.created_at,
+        updated_at: hit.record.updated_at,
+        tags_count: hit.record.tags.len(),
+    }
+}
+
 #[async_trait]
 impl McpTool for TriggerRecallOptInStatusTool {
     fn name(&self) -> &'static str {
@@ -28788,6 +28813,219 @@ impl McpTool for TriggerRecallOptInRuntimeTransitionGateTool {
             },
         );
         Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
+//  trigger_recall_opt_in_gated_baseline_trial - transition-gated trial
+// ===========================================================================
+
+/// Transition-gated trigger-recall baseline acceptance trial. This is a
+/// separate opt-in diagnostic surface: it refuses to call store FTS until the
+/// runtime transition gate allows it, never calls the MCP `memory_search` tool,
+/// never records coactivation, and never changes default search behavior.
+pub struct TriggerRecallOptInGatedBaselineTrialTool {
+    hub: Hub,
+}
+
+impl TriggerRecallOptInGatedBaselineTrialTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for TriggerRecallOptInGatedBaselineTrialTool {
+    fn name(&self) -> &'static str {
+        "trigger_recall_opt_in_gated_baseline_trial"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Transition-gated trigger recall baseline acceptance \
+                 trial. Consumes trigger_recall_opt_in_runtime_transition_gate \
+                 and refuses to call store FTS unless that gate allows the \
+                 explicit FTS per-call opt-in. Returns a redacted response \
+                 contract with accepted or held_by_query_intent status; does \
+                 not call the MCP memory_search tool, record coactivation, \
+                 expose raw keys/content, change default memory_search, or \
+                 authorize enforce_hold outside this opt-in trial."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": [
+                    "runtime_transition_gate",
+                    "query",
+                    "per_call_opt_in"
+                ],
+                "properties": {
+                    "runtime_transition_gate": {
+                        "type": "object",
+                        "description": "JSON object produced by trigger_recall_opt_in_runtime_transition_gate. The tool consumes only safe summary fields and does not echo the gate."
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "FTS query for the gated baseline trial. Output includes only a query hash."
+                    },
+                    "tags_any": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Optional tag filter forwarded to store FTS. Output includes only the filter count."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100,
+                        "default": 10
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["fts", "hybrid", "semantic"],
+                        "default": "fts"
+                    },
+                    "scope": {
+                        "type": "string",
+                        "description": "Exact local project scope, e.g. project:/abs/path. Output includes only a hash."
+                    },
+                    "scope_mode": {
+                        "type": "string",
+                        "enum": ["local_only", "local_plus_global", "exploratory"],
+                        "default": "local_only"
+                    },
+                    "per_call_opt_in": {
+                        "type": "boolean",
+                        "description": "Required explicit per-call opt-in bit."
+                    },
+                    "operator_disabled": {
+                        "type": "boolean",
+                        "default": false
+                    },
+                    "attempt_id": {
+                        "type": "string",
+                        "description": "Optional attempt id for redacted audit correlation."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Optional implementation commit under review."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let runtime_transition_gate = args
+            .get("runtime_transition_gate")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let query = args
+            .get("query")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let tags_any = args
+            .get("tags_any")
+            .cloned()
+            .map(serde_json::from_value::<Vec<String>>)
+            .transpose()
+            .map_err(|e| ab_core::Error::Backend(format!("parse tags_any: {e}")))?
+            .unwrap_or_default();
+        let limit = args
+            .get("limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(10)
+            .clamp(1, 100);
+        let mode = args
+            .get("mode")
+            .and_then(Value::as_str)
+            .unwrap_or("fts")
+            .to_string();
+        let scope = args.get("scope").and_then(Value::as_str).map(str::to_string);
+        let scope_mode = args
+            .get("scope_mode")
+            .and_then(Value::as_str)
+            .unwrap_or("local_only")
+            .to_string();
+        let per_call_opt_in = args
+            .get("per_call_opt_in")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let operator_disabled = args
+            .get("operator_disabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            || mcp_env_truthy(TRIGGER_RECALL_DISABLE_ENV);
+        let raw_payload_fields_present = trigger_recall_trial_unexpected_raw_fields(&args);
+        let attempt_id = args.get("attempt_id").and_then(Value::as_str).map(str::to_string);
+        let commit = args.get("commit").and_then(Value::as_str).map(str::to_string);
+
+        let base_options = TriggerRecallOptInGatedBaselineTrialOptions {
+            runtime_transition_gate,
+            query,
+            tags_count: tags_any.len(),
+            limit,
+            mode,
+            per_call_opt_in,
+            scope,
+            scope_mode,
+            runtime_enabled: mcp_env_truthy(TRIGGER_RECALL_OPT_IN_ENABLE_ENV),
+            operator_disabled,
+            raw_payload_fields_present,
+            attempt_id,
+            commit,
+            ..Default::default()
+        };
+
+        let preflight = trigger_recall_opt_in_gated_baseline_trial(base_options.clone());
+        let transition_allowed = preflight
+            .pointer("/runtime_transition_preflight/transition_gate_allowed")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if !transition_allowed {
+            return Ok(ToolResult::json_text(&preflight));
+        }
+
+        let store = match self.hub.store.as_ref() {
+            Some(store) => store,
+            None => {
+                let mut options = base_options;
+                options.baseline_search_error = Some("store_unavailable".to_string());
+                return Ok(ToolResult::json_text(
+                    &trigger_recall_opt_in_gated_baseline_trial(options),
+                ));
+            }
+        };
+
+        let mut options = base_options;
+        let search_limit = if options.scope.is_some() {
+            (limit.saturating_mul(5)).min(200)
+        } else {
+            limit
+        } as u32;
+        match store.memory_search(&options.query, &tags_any, search_limit).await {
+            Ok(mut hits) => {
+                if let Some(scope) = options.scope.as_deref() {
+                    hits =
+                        memory_search_apply_scope_mode(hits, scope, MemorySearchScopeMode::LocalOnly);
+                }
+                hits.truncate(limit as usize);
+                options.baseline_search_called = true;
+                options.baseline_hits = Some(
+                    hits.iter()
+                        .map(trigger_recall_baseline_trial_hit)
+                        .collect(),
+                );
+            }
+            Err(_) => {
+                options.baseline_search_called = true;
+                options.baseline_search_error = Some("memory_search_failed".to_string());
+            }
+        }
+
+        Ok(ToolResult::json_text(
+            &trigger_recall_opt_in_gated_baseline_trial(options),
+        ))
     }
 }
 
@@ -52035,6 +52273,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         &mut reg,
         policy,
         Tier::Niche,
+        Arc::new(TriggerRecallOptInGatedBaselineTrialTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
         Arc::new(BioCortexRetrievalOptInGatedStoreTrialTool::new(hub.clone())),
     );
     reg_if(
@@ -66457,6 +66701,34 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             .expect("save memory");
     }
 
+    async fn save_trigger_trial_memory(
+        hub: &Hub,
+        key: &str,
+        content: &str,
+        scope: Option<&str>,
+    ) {
+        let store = hub.store.as_ref().expect("store");
+        store
+            .memory_save(&ab_store::MemoryRecord {
+                key: key.to_string(),
+                kind: "decision".to_string(),
+                content: content.to_string(),
+                tags: vec![],
+                related_keys: vec![],
+                scope: scope.map(str::to_string),
+                created_at: 0,
+                updated_at: 0,
+                last_accessed_at: 0,
+                access_count: 0,
+                importance: 0.9,
+                status: String::new(),
+                trigger_pattern: None,
+                superseded_by: None,
+            })
+            .await
+            .expect("save trigger trial memory");
+    }
+
     #[test]
     fn biocortex_retrieval_opt_in_store_trial_schema_requires_runtime_decision() {
         let tool = BioCortexRetrievalOptInStoreTrialTool::new(Hub::builder().build());
@@ -67279,6 +67551,29 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         })
     }
 
+    fn trigger_recall_ready_transition_gate_fixture() -> Value {
+        trigger_recall_opt_in_runtime_transition_gate(
+            TriggerRecallOptInRuntimeTransitionGateOptions {
+                status_packet: trigger_recall_ready_status_packet_fixture(),
+                mode: "fts".to_string(),
+                per_call_opt_in: true,
+                scope: Some("project:/Data/CascadeProjects/agent-bridge".to_string()),
+                scope_mode: "local_only".to_string(),
+                regression_anchor: Some(
+                    crate::trigger_recall_opt_in::TRIGGER_RECALL_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR
+                        .to_string(),
+                ),
+                runtime_enabled: true,
+                operator_disabled: false,
+                reviewer: Some("codex".to_string()),
+                commit: Some("trigger-transition-commit".to_string()),
+                forum_post_id: Some("2503".to_string()),
+                memory_key: Some("trigger-transition-memory".to_string()),
+                raw_payload_fields_present: false,
+            },
+        )
+    }
+
     #[test]
     fn trigger_recall_opt_in_runtime_transition_gate_schema_is_readonly() {
         let tool = TriggerRecallOptInRuntimeTransitionGateTool::new();
@@ -67444,6 +67739,269 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(blockers.contains(&json!("per_call_opt_in_missing")));
         assert!(blockers.contains(&json!("operator_disabled")));
         assert!(blockers.contains(&json!("regression_anchor_mismatch")));
+    }
+
+    #[test]
+    fn trigger_recall_opt_in_gated_baseline_trial_schema_is_registered() {
+        let tool = TriggerRecallOptInGatedBaselineTrialTool::new(Hub::builder().build());
+        let schema = tool.schema();
+        assert_eq!(schema.name, "trigger_recall_opt_in_gated_baseline_trial");
+        assert!(schema.description.contains("Transition-gated"));
+        assert!(schema.description.contains("refuses to call store FTS"));
+        assert!(schema.description.contains("held_by_query_intent"));
+        assert!(schema.description.contains("record coactivation"));
+        assert!(schema.description.contains("change default memory_search"));
+
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required");
+        assert!(required.contains(&json!("runtime_transition_gate")));
+        assert!(required.contains(&json!("query")));
+        assert!(required.contains(&json!("per_call_opt_in")));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("runtime_transition_gate").is_some());
+        assert!(props.get("query").is_some());
+        assert!(props.get("tags_any").is_some());
+        assert!(props.get("scope").is_some());
+        assert!(props.get("scope_mode").is_some());
+        assert!(props.get("baseline_keys").is_none());
+        assert!(props.get("raw_content").is_none());
+        assert!(props.get("mutate").is_none());
+
+        let names: Vec<String> = build_registry_with_policy(
+            Hub::builder().build(),
+            ToolPolicy {
+                set: ToolSet::Profile,
+                profile: ToolProfile::All,
+            },
+        )
+        .list()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
+        assert!(names.contains(&schema.name));
+    }
+
+    #[tokio::test]
+    async fn trigger_recall_opt_in_gated_baseline_trial_blocks_before_search() {
+        let _lock = frontend_env_test_setup();
+        let prior_enable = std::env::var("AB_TRIGGER_RECALL_OPT_IN").ok();
+        let prior_disable = std::env::var("AB_TRIGGER_RECALL_DISABLE").ok();
+        std::env::set_var("AB_TRIGGER_RECALL_OPT_IN", "1");
+        std::env::remove_var("AB_TRIGGER_RECALL_DISABLE");
+
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let secret_query = "secret trigger blocked query";
+        let secret_key = "secret_trigger_blocked_key";
+        let secret_content = "secret trigger blocked query content should not leak";
+        save_trigger_trial_memory(
+            &hub,
+            secret_key,
+            secret_content,
+            Some("project:/Data/CascadeProjects/agent-bridge"),
+        )
+        .await;
+
+        let tool = TriggerRecallOptInGatedBaselineTrialTool::new(hub);
+        let out = tool
+            .execute(
+                json!({
+                    "runtime_transition_gate": Value::Null,
+                    "query": secret_query,
+                    "mode": "fts",
+                    "scope": "project:/Data/CascadeProjects/agent-bridge",
+                    "scope_mode": "local_only",
+                    "per_call_opt_in": true,
+                    "limit": 5,
+                    "raw_key": secret_key,
+                    "content": secret_content
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        restore_env_var("AB_TRIGGER_RECALL_OPT_IN", prior_enable);
+        restore_env_var("AB_TRIGGER_RECALL_DISABLE", prior_disable);
+
+        let text = match out.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains(secret_query));
+        assert!(!text.contains(secret_key));
+        assert!(!text.contains(secret_content));
+        assert!(!text.contains("/Data/CascadeProjects/agent-bridge"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.memory.trigger_recall.opt_in_baseline_trial.v0")
+        );
+        assert_eq!(v["status"], json!("transition_gate_blocked"));
+        assert_eq!(
+            v["runtime_transition_preflight"]["transition_gate_allowed"],
+            json!(false)
+        );
+        assert_eq!(v["baseline"]["memory_search_called"], json!(false));
+        assert_eq!(v["side_effects"]["calls_memory_search"], json!(false));
+        assert_eq!(v["side_effects"]["records_coactivation"], json!(false));
+        let blockers = v["runtime_transition_preflight"]["blockers"]
+            .as_array()
+            .expect("blockers");
+        assert!(blockers.contains(&json!("transition_gate_schema_mismatch")));
+        assert!(blockers.contains(&json!("raw_payload_fields_present")));
+
+        let _ = tokio::fs::remove_dir_all(temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn trigger_recall_opt_in_gated_baseline_trial_returns_redacted_accept() {
+        let _lock = frontend_env_test_setup();
+        let prior_enable = std::env::var("AB_TRIGGER_RECALL_OPT_IN").ok();
+        let prior_disable = std::env::var("AB_TRIGGER_RECALL_DISABLE").ok();
+        std::env::set_var("AB_TRIGGER_RECALL_OPT_IN", "1");
+        std::env::remove_var("AB_TRIGGER_RECALL_DISABLE");
+
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let query = "LSWR G25 store write execution preflight landed output only plan next gate";
+        let secret_key = "secret_trigger_accept_key";
+        let secret_content =
+            "LSWR G25 store write execution preflight landed output only plan next gate";
+        save_trigger_trial_memory(
+            &hub,
+            secret_key,
+            secret_content,
+            Some("project:/Data/CascadeProjects/agent-bridge"),
+        )
+        .await;
+
+        let tool = TriggerRecallOptInGatedBaselineTrialTool::new(hub);
+        let out = tool
+            .execute(
+                json!({
+                    "runtime_transition_gate": trigger_recall_ready_transition_gate_fixture(),
+                    "query": query,
+                    "mode": "fts",
+                    "scope": "project:/Data/CascadeProjects/agent-bridge",
+                    "scope_mode": "local_only",
+                    "per_call_opt_in": true,
+                    "limit": 5,
+                    "attempt_id": "accept-attempt",
+                    "commit": "trigger-baseline-trial-commit"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        restore_env_var("AB_TRIGGER_RECALL_OPT_IN", prior_enable);
+        restore_env_var("AB_TRIGGER_RECALL_DISABLE", prior_disable);
+
+        let text = match out.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains(query));
+        assert!(!text.contains(secret_key));
+        assert!(!text.contains(secret_content));
+        assert!(!text.contains("/Data/CascadeProjects/agent-bridge"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(v["status"], json!("returned_accepted"));
+        assert_eq!(v["visible_behavior"], json!("baseline_fts_visible"));
+        assert_eq!(v["query_intent"]["decision"], json!("allow"));
+        assert_eq!(v["baseline"]["memory_search_called"], json!(true));
+        assert_eq!(v["baseline"]["baseline_candidate_count_before_gate"], json!(1));
+        assert_eq!(v["baseline"]["baseline_candidate_count_after_gate"], json!(1));
+        assert_eq!(v["visible_hits"].as_array().expect("visible hits").len(), 1);
+        assert_eq!(v["audit"]["raw_keys_included"], json!(false));
+        assert_eq!(v["audit"]["content_included"], json!(false));
+        assert_eq!(v["side_effects"]["records_coactivation"], json!(false));
+        assert_eq!(
+            v["side_effects"]["changes_default_memory_search_schema"],
+            json!(false)
+        );
+
+        let _ = tokio::fs::remove_dir_all(temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn trigger_recall_opt_in_gated_baseline_trial_holds_with_status_not_empty_search() {
+        let _lock = frontend_env_test_setup();
+        let prior_enable = std::env::var("AB_TRIGGER_RECALL_OPT_IN").ok();
+        let prior_disable = std::env::var("AB_TRIGGER_RECALL_DISABLE").ok();
+        std::env::set_var("AB_TRIGGER_RECALL_OPT_IN", "1");
+        std::env::remove_var("AB_TRIGGER_RECALL_DISABLE");
+
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let query =
+            "Goal C dashboard state card spacing responsive layout visual design only not continuity ledger work";
+        let secret_key = "secret_trigger_hold_key";
+        let secret_content =
+            "Goal C dashboard state card spacing responsive layout visual design only not continuity ledger work";
+        save_trigger_trial_memory(
+            &hub,
+            secret_key,
+            secret_content,
+            Some("project:/Data/CascadeProjects/agent-bridge"),
+        )
+        .await;
+
+        let tool = TriggerRecallOptInGatedBaselineTrialTool::new(hub);
+        let out = tool
+            .execute(
+                json!({
+                    "runtime_transition_gate": trigger_recall_ready_transition_gate_fixture(),
+                    "query": query,
+                    "mode": "fts",
+                    "scope": "project:/Data/CascadeProjects/agent-bridge",
+                    "scope_mode": "local_only",
+                    "per_call_opt_in": true,
+                    "limit": 5
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        restore_env_var("AB_TRIGGER_RECALL_OPT_IN", prior_enable);
+        restore_env_var("AB_TRIGGER_RECALL_DISABLE", prior_disable);
+
+        let text = match out.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains(query));
+        assert!(!text.contains(secret_key));
+        assert!(!text.contains(secret_content));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(v["status"], json!("held_by_query_intent"));
+        assert_eq!(v["visible_behavior"], json!("held_by_query_intent"));
+        assert_eq!(
+            v["fallback_behavior"],
+            json!("hold_packet_not_empty_search")
+        );
+        assert_eq!(v["query_intent"]["decision"], json!("hold"));
+        assert_eq!(
+            v["query_intent"]["reject_reason"],
+            json!("frontend_dashboard_intent")
+        );
+        assert_eq!(v["visible_hits"], json!([]));
+        assert_eq!(v["baseline"]["memory_search_called"], json!(true));
+        assert_eq!(v["baseline"]["baseline_candidate_count_before_gate"], json!(1));
+        assert_eq!(v["baseline"]["baseline_candidate_count_after_gate"], json!(0));
+        assert_eq!(
+            v["audit"]["held_queries_use_status_not_empty_array"],
+            json!(true)
+        );
+        assert_eq!(v["side_effects"]["records_coactivation"], json!(false));
+
+        let _ = tokio::fs::remove_dir_all(temp_dir).await;
     }
 
     #[test]
