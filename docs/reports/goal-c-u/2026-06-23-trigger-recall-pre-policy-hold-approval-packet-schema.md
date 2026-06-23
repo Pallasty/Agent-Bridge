@@ -305,9 +305,11 @@ Without this exact decision shape, implementation remains `NO-GO`.
 
 ## Next Gate
 
-The next safe action is a docs-only review of this schema, or an implementation
-proposal that names exact files and tests while still stopping at
-`pre_policy_hold_simulation`.
+Closed by
+`docs/reports/goal-c-u/2026-06-23-trigger-recall-pre-policy-hold-schema-review.md`.
+
+The next safe action is a docs-only implementation proposal that names exact
+files and tests while still stopping at `pre_policy_hold_simulation`.
 
 Do not implement production `enforce_hold`, and do not modify default
 `memory_search`.
