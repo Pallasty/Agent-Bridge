@@ -38,6 +38,7 @@
 //!   cargo run -p ab-bridge --example trigger_recall_eval -- --aio2-runtime-audit
 //!   cargo run -p ab-bridge --example trigger_recall_eval -- --aio2-baseline-acceptance-audit
 //!   cargo run -p ab-bridge --example trigger_recall_eval -- --portable-stage2-fixture
+//!   cargo run -p ab-bridge --example trigger_recall_eval -- --policy-benefit-fixture
 //!   cargo run -p ab-bridge --example trigger_recall_eval -- --debug-aio2-native 3
 //!
 //! Debug one case:
@@ -63,7 +64,11 @@ const TRIGGER_BASELINE_ACCEPTANCE_SCHEMA: &str =
     "agent_bridge.memory.trigger_baseline_acceptance_shadow.v0";
 const TRIGGER_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR: &str =
     "aio2_trigger_recall_baseline_acceptance_shadow_20260623";
+const TRIGGER_POLICY_BENEFIT_EVAL_SCHEMA: &str =
+    "agent_bridge.memory.trigger_recall.policy_benefit_eval.v0";
 const PORTABLE_STAGE2_FIXTURE_LABEL: &str = "portable Stage-2 fixture (repo-local, no live DB)";
+const POLICY_BENEFIT_FIXTURE_LABEL: &str =
+    "portable policy-benefit fixture (repo-local contract, not production evidence)";
 const AIO2_BASELINE_ACCEPTANCE_TELEMETRY_LABEL: &str =
     "legacy aio2-native active trigger rows, 2026-06-22 (telemetry only; not a Stage-2 hard gate)";
 
@@ -215,6 +220,81 @@ impl BaselineAcceptanceAudit {
             "regression_anchor": TRIGGER_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR,
             "changes_default_memory_search_order": false,
             "changes_production_retrieval": false,
+        })
+    }
+}
+
+#[derive(Clone, Debug)]
+struct PolicyBenefitEvalSummary {
+    corpus_label: String,
+    production_evidence_authority: bool,
+    positive_cases: usize,
+    negative_controls: usize,
+    positive_baseline_hits: usize,
+    positive_cases_held: usize,
+    true_hits_lost_by_shadow_gate: usize,
+    accepted_order_drift: usize,
+    baseline_false_hits_before_gate: usize,
+    baseline_false_hits_after_gate: usize,
+    false_hits_removed_by_shadow_gate: usize,
+    held_controls_by_reason: BTreeMap<&'static str, usize>,
+}
+
+impl PolicyBenefitEvalSummary {
+    fn contract_passed(&self) -> bool {
+        self.positive_baseline_hits == self.positive_cases
+            && self.positive_cases_held == 0
+            && self.true_hits_lost_by_shadow_gate == 0
+            && self.accepted_order_drift == 0
+            && self.baseline_false_hits_before_gate > 0
+            && self.baseline_false_hits_after_gate == 0
+            && self.false_hits_removed_by_shadow_gate > 0
+    }
+
+    fn ready_for_production_review(&self) -> bool {
+        self.contract_passed() && self.production_evidence_authority
+    }
+
+    fn next_required_gate(&self) -> &'static str {
+        if self.ready_for_production_review() {
+            "board_visible_production_review_packet_with_exact_commit"
+        } else if self.contract_passed() {
+            "run_same_contract_on_real_non_phantom_heldout_corpus"
+        } else {
+            "repair_policy_benefit_eval_contract_or_corpus"
+        }
+    }
+
+    fn to_json(&self) -> Value {
+        json!({
+            "schema": TRIGGER_POLICY_BENEFIT_EVAL_SCHEMA,
+            "read_only": true,
+            "mode": "fts",
+            "corpus_label": &self.corpus_label,
+            "production_evidence_authority": self.production_evidence_authority,
+            "default_memory_search_unchanged": true,
+            "changes_production_retrieval": false,
+            "changes_schema_or_indexing": false,
+            "calls_memory_search": false,
+            "writes_memory_or_graph": false,
+            "metrics": {
+                "positive_cases": self.positive_cases,
+                "negative_controls": self.negative_controls,
+                "positive_baseline_hits": self.positive_baseline_hits,
+                "positive_cases_held": self.positive_cases_held,
+                "true_hits_lost_by_shadow_gate": self.true_hits_lost_by_shadow_gate,
+                "accepted_order_drift": self.accepted_order_drift,
+                "baseline_false_hits_before_gate": self.baseline_false_hits_before_gate,
+                "baseline_false_hits_after_gate": self.baseline_false_hits_after_gate,
+                "false_hits_removed_by_shadow_gate": self.false_hits_removed_by_shadow_gate,
+                "held_controls_by_reason": &self.held_controls_by_reason,
+            },
+            "decision": {
+                "contract_passed": self.contract_passed(),
+                "ready_for_production_review": self.ready_for_production_review(),
+                "production_enforce_hold_authorized": false,
+                "next_required_gate": self.next_required_gate(),
+            }
         })
     }
 }
@@ -937,6 +1017,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             PORTABLE_STAGE2_CORPUS,
             PORTABLE_STAGE2_NEGATIVE_CONTROLS,
             PORTABLE_STAGE2_FIXTURE_LABEL,
+        );
+    }
+    if matches!(arg1.as_deref(), Some("--policy-benefit-fixture")) {
+        let rows = portable_stage2_fixture_rows();
+        verify_corpus_for(
+            &rows,
+            PORTABLE_STAGE2_CORPUS,
+            PORTABLE_STAGE2_NEGATIVE_CONTROLS,
+        )?;
+        let fts = ScratchFts::build(&rows)?;
+        return run_policy_benefit_eval_for(
+            &rows,
+            &fts,
+            PORTABLE_STAGE2_CORPUS,
+            PORTABLE_STAGE2_NEGATIVE_CONTROLS,
+            POLICY_BENEFIT_FIXTURE_LABEL,
+            false,
         );
     }
 
@@ -2401,6 +2498,174 @@ fn run_baseline_acceptance_audit_for(
     );
 
     Ok(())
+}
+
+fn run_policy_benefit_eval_for(
+    rows: &[MemoryRow],
+    fts: &ScratchFts,
+    cases: &[Case],
+    negative_controls: &[NegativeControl],
+    corpus_label: &str,
+    production_evidence_authority: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let summary = policy_benefit_eval_summary(
+        fts,
+        cases,
+        negative_controls,
+        corpus_label,
+        production_evidence_authority,
+    )?;
+
+    println!("# Trigger recall policy-benefit eval - {corpus_label}");
+    println!("active rows:                    {}", rows.len());
+    println!("corpus cases:                   {}", cases.len());
+    println!(
+        "negative controls:              {}",
+        negative_controls.len()
+    );
+    println!("top_k:                          {TOP_K}");
+    println!("schema:                         {TRIGGER_POLICY_BENEFIT_EVAL_SCHEMA}");
+    println!("read_only:                      in-memory FTS only; no memory_get, memory_search, writes, or reindex");
+    println!("production_evidence_authority:  {production_evidence_authority}");
+    println!();
+
+    println!("## Benefit Contract");
+    println!(
+        "  positive baseline hits:        {}/{}",
+        summary.positive_baseline_hits, summary.positive_cases
+    );
+    println!(
+        "  positive cases held:           {}",
+        summary.positive_cases_held
+    );
+    println!(
+        "  true hits lost by shadow gate: {}",
+        summary.true_hits_lost_by_shadow_gate
+    );
+    println!(
+        "  accepted order drift:          {}",
+        summary.accepted_order_drift
+    );
+    println!(
+        "  baseline false hits before:    {}",
+        summary.baseline_false_hits_before_gate
+    );
+    println!(
+        "  baseline false hits after:     {}",
+        summary.baseline_false_hits_after_gate
+    );
+    println!(
+        "  false hits removed:            {}",
+        summary.false_hits_removed_by_shadow_gate
+    );
+    if summary.held_controls_by_reason.is_empty() {
+        println!("  held controls by reason:       none");
+    } else {
+        println!(
+            "  held controls by reason:       {}",
+            held_reason_summary(&summary.held_controls_by_reason)
+        );
+    }
+    println!();
+
+    println!("## Machine-Readable Summary");
+    println!("{}", serde_json::to_string_pretty(&summary.to_json())?);
+    println!();
+
+    println!("## Decision");
+    println!(
+        "  contract_passed:               {}",
+        summary.contract_passed()
+    );
+    println!(
+        "  ready_for_production_review:   {}",
+        summary.ready_for_production_review()
+    );
+    println!("  production_enforce_hold_authorized: false");
+    println!(
+        "  next_required_gate:            {}",
+        summary.next_required_gate()
+    );
+
+    Ok(())
+}
+
+fn policy_benefit_eval_summary(
+    fts: &ScratchFts,
+    cases: &[Case],
+    negative_controls: &[NegativeControl],
+    corpus_label: &str,
+    production_evidence_authority: bool,
+) -> Result<PolicyBenefitEvalSummary, String> {
+    let gold_keys: BTreeSet<&str> = cases
+        .iter()
+        .flat_map(|case| case.expect.iter().copied())
+        .collect();
+
+    let mut positive_baseline_hits = 0_usize;
+    let mut positive_cases_held = 0_usize;
+    let mut true_hits_lost_by_shadow_gate = 0_usize;
+    let mut accepted_order_drift = 0_usize;
+
+    for case in cases {
+        let audit = baseline_acceptance_audit(fts, case.query, TOP_K)?;
+        let baseline_rank = first_hit_rank(&audit.baseline_keys_before_gate, case.expect);
+        let shadow_rank = first_hit_rank(&audit.baseline_keys_after_shadow_gate, case.expect);
+        if baseline_rank.is_some() {
+            positive_baseline_hits += 1;
+        }
+        if audit.query_intent_reject_reason.is_some() {
+            positive_cases_held += 1;
+        }
+        if baseline_rank.is_some() && shadow_rank.is_none() {
+            true_hits_lost_by_shadow_gate += 1;
+        }
+        if audit.query_intent_reject_reason.is_none()
+            && audit.baseline_keys_before_gate != audit.baseline_keys_after_shadow_gate
+        {
+            accepted_order_drift += 1;
+        }
+    }
+
+    let mut baseline_false_hits = Vec::new();
+    let mut shadow_false_hits = Vec::new();
+    let mut held_controls_by_reason = BTreeMap::<&'static str, usize>::new();
+
+    for control in negative_controls {
+        let audit = baseline_acceptance_audit(fts, control.query, TOP_K)?;
+        push_false_hits(
+            &mut baseline_false_hits,
+            control,
+            &audit.baseline_keys_before_gate,
+            &gold_keys,
+        );
+        push_false_hits(
+            &mut shadow_false_hits,
+            control,
+            &audit.baseline_keys_after_shadow_gate,
+            &gold_keys,
+        );
+        if let Some(reason) = audit.query_intent_reject_reason {
+            *held_controls_by_reason.entry(reason).or_insert(0) += 1;
+        }
+    }
+
+    let removed_false_hits = removed_false_hits(&baseline_false_hits, &shadow_false_hits);
+
+    Ok(PolicyBenefitEvalSummary {
+        corpus_label: corpus_label.to_string(),
+        production_evidence_authority,
+        positive_cases: cases.len(),
+        negative_controls: negative_controls.len(),
+        positive_baseline_hits,
+        positive_cases_held,
+        true_hits_lost_by_shadow_gate,
+        accepted_order_drift,
+        baseline_false_hits_before_gate: baseline_false_hits.len(),
+        baseline_false_hits_after_gate: shadow_false_hits.len(),
+        false_hits_removed_by_shadow_gate: removed_false_hits.len(),
+        held_controls_by_reason,
+    })
 }
 
 fn report_stale_aio2_baseline_acceptance_audit(
@@ -4320,6 +4585,67 @@ mod tests {
                 .iter()
                 .any(|key| gold_keys.contains(key.as_str())),
             "unrelated no-hit control should not retrieve fixture gold keys"
+        );
+    }
+
+    #[test]
+    fn policy_benefit_fixture_contract_passes_without_production_authority() {
+        let rows = portable_stage2_fixture_rows();
+        let fts = ScratchFts::build(&rows).expect("scratch fts");
+        let summary = policy_benefit_eval_summary(
+            &fts,
+            PORTABLE_STAGE2_CORPUS,
+            PORTABLE_STAGE2_NEGATIVE_CONTROLS,
+            POLICY_BENEFIT_FIXTURE_LABEL,
+            false,
+        )
+        .expect("policy benefit fixture summary");
+
+        assert!(summary.contract_passed());
+        assert!(!summary.ready_for_production_review());
+        assert_eq!(summary.positive_cases_held, 0);
+        assert_eq!(summary.true_hits_lost_by_shadow_gate, 0);
+        assert_eq!(summary.accepted_order_drift, 0);
+        assert!(summary.false_hits_removed_by_shadow_gate > 0);
+        assert_eq!(summary.baseline_false_hits_after_gate, 0);
+
+        let payload = summary.to_json();
+        assert_eq!(
+            payload["schema"],
+            json!("agent_bridge.memory.trigger_recall.policy_benefit_eval.v0")
+        );
+        assert_eq!(payload["production_evidence_authority"], json!(false));
+        assert_eq!(
+            payload["decision"]["next_required_gate"],
+            json!("run_same_contract_on_real_non_phantom_heldout_corpus")
+        );
+        assert_eq!(
+            payload["decision"]["production_enforce_hold_authorized"],
+            json!(false)
+        );
+        assert_eq!(payload["calls_memory_search"], json!(false));
+    }
+
+    #[test]
+    fn policy_benefit_contract_requires_false_hit_reduction() {
+        let rows = portable_stage2_fixture_rows();
+        let fts = ScratchFts::build(&rows).expect("scratch fts");
+        let summary = policy_benefit_eval_summary(
+            &fts,
+            PORTABLE_STAGE2_CORPUS,
+            &[],
+            "no-control fixture",
+            true,
+        )
+        .expect("policy benefit summary");
+
+        assert_eq!(summary.baseline_false_hits_before_gate, 0);
+        assert_eq!(summary.false_hits_removed_by_shadow_gate, 0);
+        assert!(!summary.contract_passed());
+        assert!(!summary.ready_for_production_review());
+        assert_eq!(
+            summary.next_required_gate(),
+            "repair_policy_benefit_eval_contract_or_corpus"
         );
     }
 
