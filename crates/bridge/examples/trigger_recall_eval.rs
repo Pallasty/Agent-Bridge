@@ -64,6 +64,8 @@ const TRIGGER_BASELINE_ACCEPTANCE_SCHEMA: &str =
 const TRIGGER_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR: &str =
     "aio2_trigger_recall_baseline_acceptance_shadow_20260623";
 const PORTABLE_STAGE2_FIXTURE_LABEL: &str = "portable Stage-2 fixture (repo-local, no live DB)";
+const AIO2_BASELINE_ACCEPTANCE_TELEMETRY_LABEL: &str =
+    "legacy aio2-native active trigger rows, 2026-06-22 (telemetry only; not a Stage-2 hard gate)";
 
 struct Case {
     id: &'static str,
@@ -978,7 +980,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     if matches!(arg1.as_deref(), Some("--aio2-baseline-acceptance-audit")) {
-        verify_corpus_for(&rows, AIO2_NATIVE_CORPUS, AIO2_NATIVE_NEGATIVE_CONTROLS)?;
+        if let Err(err) =
+            verify_corpus_for(&rows, AIO2_NATIVE_CORPUS, AIO2_NATIVE_NEGATIVE_CONTROLS)
+        {
+            return report_stale_aio2_baseline_acceptance_audit(&db_path, &rows, &err.to_string());
+        }
         let fts = ScratchFts::build(&rows)?;
         return run_baseline_acceptance_audit_for(
             &db_path,
@@ -986,7 +992,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &fts,
             AIO2_NATIVE_CORPUS,
             AIO2_NATIVE_NEGATIVE_CONTROLS,
-            "aio2-native active trigger rows, 2026-06-22",
+            AIO2_BASELINE_ACCEPTANCE_TELEMETRY_LABEL,
         );
     }
     if matches!(arg1.as_deref(), Some("--debug-aio2-native")) {
@@ -2395,6 +2401,76 @@ fn run_baseline_acceptance_audit_for(
     );
 
     Ok(())
+}
+
+fn report_stale_aio2_baseline_acceptance_audit(
+    db_path: &std::path::Path,
+    rows: &[MemoryRow],
+    error: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (status, hard_gate_authority, coverage) = aio2_baseline_acceptance_telemetry_status(rows);
+
+    println!("# Trigger baseline acceptance shadow audit - aio2 live telemetry");
+    println!("db:                       {}", db_path.display());
+    println!("status:                   {status}");
+    println!("hard_gate_authority:      {hard_gate_authority}");
+    println!("active rows:              {}", coverage.active_total);
+    println!("trigger rows:             {}", coverage.trigger_rows);
+    println!("projected rows:           {}", coverage.projected_rows);
+    println!("corpus cases:             {}", AIO2_NATIVE_CORPUS.len());
+    println!("expected key refs:        {}", coverage.expected_refs);
+    println!("present expected refs:    {}", coverage.present_expected);
+    println!(
+        "missing expected refs:    {}",
+        coverage.missing_expected.len()
+    );
+    println!(
+        "expected without trigger: {}",
+        coverage.expected_without_trigger.len()
+    );
+    println!("schema:                   {TRIGGER_BASELINE_ACCEPTANCE_SCHEMA}");
+    println!("regression:               {TRIGGER_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR}");
+    println!(
+        "read_only:                SELECT + corpus coverage only; no memory_get, memory_search, writes, or reindex"
+    );
+    println!("error:                    {error}");
+    println!();
+
+    if !coverage.missing_expected.is_empty() {
+        println!("## Missing Expected Keys");
+        for (case_id, key) in &coverage.missing_expected {
+            println!("  {case_id}: {key}");
+        }
+        println!();
+    }
+    if !coverage.expected_without_trigger.is_empty() {
+        println!("## Expected Keys Without Trigger Tags");
+        for (case_id, key) in &coverage.expected_without_trigger {
+            println!("  {case_id}: {key}");
+        }
+        println!();
+    }
+
+    println!("## Decision");
+    println!(
+        "  eval_only: true; aio2 baseline acceptance audit is stale telemetry, not a Stage-2 hard gate or production approval."
+    );
+    println!(
+        "  required_gate: use --portable-stage2-fixture for deterministic code-regression proof, or repair aio2 live corpus with provenance before using live telemetry for policy claims."
+    );
+
+    Ok(())
+}
+
+fn aio2_baseline_acceptance_telemetry_status(
+    rows: &[MemoryRow],
+) -> (&'static str, bool, CorpusCoverage) {
+    let coverage = corpus_coverage_for(rows, AIO2_NATIVE_CORPUS);
+    if coverage.ready() {
+        ("ready_live_telemetry_not_gate", false, coverage)
+    } else {
+        ("stale_corpus_not_gate", false, coverage)
+    }
 }
 
 fn runtime_shaped_audit(
@@ -4248,6 +4324,34 @@ mod tests {
     }
 
     #[test]
+    fn aio2_baseline_acceptance_missing_corpus_is_stale_telemetry_not_gate() {
+        let (status, hard_gate_authority, coverage) =
+            aio2_baseline_acceptance_telemetry_status(&[]);
+
+        assert_eq!(status, "stale_corpus_not_gate");
+        assert!(!hard_gate_authority);
+        assert_eq!(coverage.present_expected, 0);
+        assert_eq!(coverage.missing_expected.len(), coverage.expected_refs);
+        assert!(
+            !coverage.ready(),
+            "empty live rows must not look like ready aio2 telemetry"
+        );
+    }
+
+    #[test]
+    fn aio2_baseline_acceptance_ready_corpus_is_still_not_hard_gate() {
+        let rows = rows_for_cases(AIO2_NATIVE_CORPUS);
+        let (status, hard_gate_authority, coverage) =
+            aio2_baseline_acceptance_telemetry_status(&rows);
+
+        assert_eq!(status, "ready_live_telemetry_not_gate");
+        assert!(!hard_gate_authority);
+        assert!(coverage.ready());
+        assert_eq!(coverage.missing_expected.len(), 0);
+        assert_eq!(coverage.expected_without_trigger.len(), 0);
+    }
+
+    #[test]
     fn corpus_coverage_reports_missing_gold_keys() {
         let coverage = corpus_coverage(&[]);
         let expected_refs = CORPUS.iter().map(|case| case.expect.len()).sum::<usize>();
@@ -4873,5 +4977,29 @@ mod tests {
             .expect("cjk fallback"),
             vec!["cjk_fallback".to_string()]
         );
+    }
+
+    fn rows_for_cases(cases: &[Case]) -> Vec<MemoryRow> {
+        let mut rows = Vec::new();
+        let mut seen = BTreeSet::new();
+        for case in cases {
+            for expected in case.expect {
+                if !seen.insert(*expected) {
+                    continue;
+                }
+                rows.push(MemoryRow {
+                    key: (*expected).to_string(),
+                    kind: "fixture".to_string(),
+                    scope: Some("project:/test-aio2-telemetry".to_string()),
+                    content: format!("Test fixture row for {}.", case.id),
+                    projected: format!(
+                        "{}\n{}\n{}\n{}",
+                        case.query, case.trigger, case.note, expected
+                    ),
+                    triggers: vec![case.trigger.to_string()],
+                });
+            }
+        }
+        rows
     }
 }
