@@ -6,7 +6,9 @@ Report timestamp: `2026-06-23T11:07:56Z`
 
 Worktree: `/Data/CascadeProjects/agent-bridge`
 
-Base: `12edee8` (`docs(memory): sync u report with trigger audit`)
+Verification base: `12edee8` (`docs(memory): sync u report with trigger audit`)
+
+Landing base: `f71c1f9` (`docs(memory): design trigger baseline opt-in runtime`)
 
 Scope: verification plus production-facing design plan; no runtime implementation
 
@@ -31,8 +33,9 @@ Repository:
 | Check | Value |
 |---|---|
 | local branch | `master` |
-| remote sync | fast-forwarded to `origin/master` |
-| HEAD | `12edee8` |
+| remote sync at verification | fast-forwarded to `origin/master` |
+| verification HEAD | `12edee8` |
+| landing parent | `f71c1f9` |
 | worktree before design edit | clean |
 
 Board:
@@ -48,6 +51,17 @@ Latest standing U read:
 - next aio2 action is a production-facing opt-in design review, not another
   trigger eval family;
 - graph/PageRank/centrality remains diagnostic only.
+
+Related baseline design:
+
+- `docs/reports/goal-c-u/2026-06-23-trigger-recall-baseline-acceptance-optin-runtime-design.md`
+  defines the baseline-acceptance wrapper, response contract, `audit_only` vs
+  `enforce_hold` semantics, and held-query status vocabulary.
+- This report is the companion control-plane plan: status/transition gate first,
+  then a gated baseline trial, then review before any `enforce_hold` behavior.
+- If the two reports appear to differ, prefer the stricter boundary: no default
+  `memory_search` change, no bare empty array for held queries, and no
+  implementation beyond read-only gates before review.
 
 ## Evidence Replayed
 
