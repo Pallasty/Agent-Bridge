@@ -3,12 +3,16 @@
 
 use crate::tool_diagnostics::{classify_tool_error, ToolErrorDiagnosticClass};
 use crate::trigger_recall_opt_in::{
+    trigger_recall_enforce_hold_approval_packet_validator,
     trigger_recall_opt_in_gated_baseline_trial, trigger_recall_opt_in_gated_batch_diagnostics,
     trigger_recall_opt_in_runtime_transition_gate, trigger_recall_opt_in_status,
-    trigger_recall_value_contains_raw, TriggerRecallOptInGatedBatchDiagnosticsOptions,
-    TriggerRecallOptInGatedBatchDiagnosticsPacket, TriggerRecallOptInRuntimeTransitionGateOptions,
+    trigger_recall_value_contains_raw, TriggerRecallEnforceHoldApprovalPacketValidatorOptions,
+    TriggerRecallOptInGatedBatchDiagnosticsOptions, TriggerRecallOptInGatedBatchDiagnosticsPacket,
+    TriggerRecallOptInRuntimeTransitionGateOptions,
     TriggerRecallOptInGatedBaselineTrialHit, TriggerRecallOptInGatedBaselineTrialOptions,
-    TriggerRecallOptInStatusOptions, TRIGGER_RECALL_DISABLE_ENV, TRIGGER_RECALL_OPT_IN_ENABLE_ENV,
+    TriggerRecallOptInStatusOptions, TRIGGER_RECALL_DISABLE_ENV,
+    TRIGGER_RECALL_ENFORCE_HOLD_APPROVAL_PACKET_SCHEMA,
+    TRIGGER_RECALL_OPT_IN_ENABLE_ENV,
 };
 use crate::warp_scheme::{
     dispatch_url as dispatch_warp_scheme_uri,
@@ -29191,6 +29195,77 @@ impl McpTool for TriggerRecallOptInGatedBatchDiagnosticsTool {
 }
 
 // ===========================================================================
+//  trigger_recall_enforce_hold_approval_packet_validator - read-only packet gate
+// ===========================================================================
+
+/// Read-only validator for trigger-recall enforce-hold approval packets. This
+/// tool never calls search; it only reports whether a packet can authorize a
+/// later audit-only or pre-policy-hold implementation slice.
+pub struct TriggerRecallEnforceHoldApprovalPacketValidatorTool;
+
+impl TriggerRecallEnforceHoldApprovalPacketValidatorTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for TriggerRecallEnforceHoldApprovalPacketValidatorTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for TriggerRecallEnforceHoldApprovalPacketValidatorTool {
+    fn name(&self) -> &'static str {
+        "trigger_recall_enforce_hold_approval_packet_validator"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: format!(
+                "Read-only validator for `{}` approval packets. Returns a \
+                 redacted readiness result for audit_only or pre_policy_hold \
+                 implementation slices. Does not call memory_search or store \
+                 FTS, echo the approval packet, return raw query/keys/content, \
+                 record coactivation, write memory, write graph edges, change \
+                 default memory_search, or authorize production enforce_hold.",
+                TRIGGER_RECALL_ENFORCE_HOLD_APPROVAL_PACKET_SCHEMA
+            ),
+            input_schema: json!({
+                "type": "object",
+                "required": ["approval_packet"],
+                "properties": {
+                    "approval_packet": {
+                        "type": "object",
+                        "description": "Approval packet using the enforce-hold approval schema. The packet is validated but never echoed."
+                    },
+                    "raw_payload_fields_present": {
+                        "type": "boolean",
+                        "description": "Optional caller-side redaction preflight. If true, the validator blocks without echoing raw fields."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let payload = trigger_recall_enforce_hold_approval_packet_validator(
+            TriggerRecallEnforceHoldApprovalPacketValidatorOptions {
+                approval_packet: args.get("approval_packet").cloned().unwrap_or(Value::Null),
+                raw_payload_fields_present: args
+                    .get("raw_payload_fields_present")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                    || trigger_recall_value_contains_raw(&args),
+            },
+        );
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
 //  biocortex_retrieval_opt_in_dry_run — read-only future-path planner
 // ===========================================================================
 
@@ -52446,6 +52521,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         &mut reg,
         policy,
         Tier::Niche,
+        Arc::new(TriggerRecallEnforceHoldApprovalPacketValidatorTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
         Arc::new(BioCortexRetrievalOptInGatedStoreTrialTool::new(hub.clone())),
     );
     reg_if(
@@ -68336,6 +68417,180 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert_eq!(v["raw_queries_included"], json!(false));
         assert_eq!(v["raw_keys_included"], json!(false));
         assert_eq!(v["content_included"], json!(false));
+    }
+
+    fn trigger_recall_ready_enforce_hold_approval_packet_fixture(approved_mode: &str) -> Value {
+        json!({
+            "schema": TRIGGER_RECALL_ENFORCE_HOLD_APPROVAL_PACKET_SCHEMA,
+            "generated_at": "2026-06-23T00:00:00Z",
+            "read_only": true,
+            "approval_packet": true,
+            "approval_kind": "implementation_slice_approval",
+            "approved_mode": approved_mode,
+            "implementation_commit": "0123456789abcdef0123456789abcdef01234567",
+            "reviewer": "codex-reviewer",
+            "author": "codex-implementation-owner",
+            "forum_post_id": "3983",
+            "memory_key": "trigger_recall_gated_batch_installed_review_20260623",
+            "expires_at": "2999-12-31T00:00:00Z",
+            "scope": "project:/Data/CascadeProjects/agent-bridge",
+            "scope_mode": "local_only",
+            "mode": "fts",
+            "per_call_opt_in_required": true,
+            "default_memory_search_unchanged": true,
+            "evidence": {
+                "batch_diagnostics_status": "ready_for_enforce_hold_review_packet",
+                "regression_anchor": crate::trigger_recall_opt_in::TRIGGER_RECALL_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR,
+                "baseline_false_hits_after_shadow_gate": 0,
+                "true_hits_lost_by_shadow_gate": 0,
+                "positive_cases_held": 0,
+                "raw_payload_leaks": 0,
+                "held_bare_empty_arrays": 0
+            },
+            "rollback": {
+                "disable_env": "AB_TRIGGER_RECALL_ENFORCE_HOLD_DISABLE=1",
+                "expected_behavior": "fail_open_to_baseline"
+            }
+        })
+    }
+
+    #[test]
+    fn trigger_recall_enforce_hold_approval_packet_validator_schema_is_registered_niche() {
+        let tool = TriggerRecallEnforceHoldApprovalPacketValidatorTool::new();
+        let schema = tool.schema();
+        assert_eq!(
+            schema.name,
+            "trigger_recall_enforce_hold_approval_packet_validator"
+        );
+        assert!(schema.description.contains("Read-only validator"));
+        assert!(schema.description.contains("Does not call memory_search"));
+        assert!(schema.description.contains("production enforce_hold"));
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required");
+        assert!(required.contains(&json!("approval_packet")));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("approval_packet").is_some());
+        assert!(props.get("raw_payload_fields_present").is_some());
+        assert!(props.get("query").is_none());
+        assert!(props.get("baseline_keys").is_none());
+        assert!(props.get("raw_content").is_none());
+        assert!(props.get("mutate").is_none());
+
+        let all_names: Vec<String> = build_registry_with_policy(
+            Hub::builder().build(),
+            ToolPolicy {
+                set: ToolSet::Profile,
+                profile: ToolProfile::All,
+            },
+        )
+        .list()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
+        let standard_names: Vec<String> = build_registry_with_policy(
+            Hub::builder().build(),
+            ToolPolicy {
+                set: ToolSet::Profile,
+                profile: ToolProfile::Standard,
+            },
+        )
+        .list()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
+        assert!(all_names.contains(&schema.name));
+        assert!(!standard_names.contains(&schema.name));
+    }
+
+    #[tokio::test]
+    async fn trigger_recall_enforce_hold_approval_packet_validator_allows_ready_packet() {
+        let tool = TriggerRecallEnforceHoldApprovalPacketValidatorTool::new();
+        let out = tool
+            .execute(
+                json!({
+                    "approval_packet": trigger_recall_ready_enforce_hold_approval_packet_fixture("pre_policy_hold")
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let text = match out.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!(
+                crate::trigger_recall_opt_in::TRIGGER_RECALL_ENFORCE_HOLD_APPROVAL_PACKET_VALIDATOR_SCHEMA
+            )
+        );
+        assert_eq!(v["status"], json!("approval_packet_ready"));
+        assert_eq!(v["canonical_mode"], json!("pre_policy_hold_simulation"));
+        assert_eq!(
+            v["decision"]["may_implement_pre_policy_hold"],
+            json!(true)
+        );
+        assert_eq!(
+            v["decision"]["may_implement_enforce_hold"],
+            json!(false)
+        );
+        assert_eq!(v["side_effects"]["calls_memory_search"], json!(false));
+    }
+
+    #[tokio::test]
+    async fn trigger_recall_enforce_hold_approval_packet_validator_redacts_raw_packet() {
+        let mut packet = trigger_recall_ready_enforce_hold_approval_packet_fixture("audit_only");
+        packet["raw_query"] = json!("secret mcp validator raw query");
+        packet["content"] = json!("secret mcp validator content");
+        packet["evidence"]["batch_diagnostics_summary"] = json!({
+            "raw_key": "secret mcp validator raw key"
+        });
+        let tool = TriggerRecallEnforceHoldApprovalPacketValidatorTool::new();
+        let out = tool
+            .execute(
+                json!({
+                    "approval_packet": packet,
+                    "query": "secret outer mcp validator query"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let text = match out.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains("secret mcp validator raw query"));
+        assert!(!text.contains("secret mcp validator content"));
+        assert!(!text.contains("secret mcp validator raw key"));
+        assert!(!text.contains("secret outer mcp validator query"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!(
+                crate::trigger_recall_opt_in::TRIGGER_RECALL_ENFORCE_HOLD_APPROVAL_PACKET_VALIDATOR_SCHEMA
+            )
+        );
+        assert_eq!(v["status"], json!("blocked"));
+        assert_eq!(v["approval_packet_included"], json!(false));
+        assert_eq!(v["safety"]["raw_queries_included"], json!(false));
+        assert_eq!(v["safety"]["raw_keys_included"], json!(false));
+        assert_eq!(v["safety"]["content_included"], json!(false));
+        let blockers = v["boundary_check"]["blockers"]
+            .as_array()
+            .expect("blockers");
+        assert!(blockers.contains(&json!("blocked_raw_payload_or_empty_hold_leak")));
+        assert_eq!(v["side_effects"]["calls_memory_search"], json!(false));
+        assert_eq!(v["side_effects"]["may_enforce_hold"], json!(false));
     }
 
     #[test]
