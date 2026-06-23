@@ -73,6 +73,14 @@ tests: 20 passed
 
 ## Review Decision
 
+Options reviewed:
+
+| option | decision | reason |
+|---|---|---|
+| Reject as too narrow | Not chosen | The eval evidence is real: the role-aware assembler fixes the case #2 rank failure and keeps controls clean. Discarding it would lose a useful hard-miss recovery pattern. |
+| Keep eval-only until more hard cases | Chosen | The evidence is strong but still one projection family. A default runtime path needs at least one more hard-miss family or an explicit owner decision to ship a case #2-only opt-in. |
+| Implement behind a narrow opt-in flag | Conditional later | Plausible only after the next gate. It must remain disabled by default and report trigger/candidate/rank evidence when it fires. |
+
 Verdict:
 
 ```text
@@ -106,6 +114,41 @@ case-specific projection directly into default recall from a single hard case.
 5. **Safety surface**: default `memory_search` is broad; injecting a projection
    path into it can alter unrelated queries unless the trigger, role policy, and
    observability are stricter than the current proof requires.
+
+## Production Blast Radius
+
+There are two possible implementation boundaries, and they do not carry the
+same risk.
+
+### Store-Level Default Path
+
+Changing `SqliteStore::memory_search` would affect more than one user-visible
+surface:
+
+- MCP `memory_search` with default/FTS mode calls the store path directly;
+- MCP hybrid search uses the store FTS path as one of its baseline inputs;
+- scope filtering, Seed boost, coactivation rerank, trace writing, and
+  caller-side kind filtering run after the initial result set is chosen;
+- exact-key fallback and OR fallback are shared behavior, not case #2-specific
+  behavior.
+
+That is too wide for the current evidence. A store-level default change should
+wait until the mechanism has at least two hard-miss families, a stable
+before/after gate, and a rollback switch.
+
+### MCP or Eval-Approved Opt-In Path
+
+A narrower path can contain the blast radius:
+
+- expose it only through an explicit mode/flag or eval-approved cohort;
+- run it only after baseline FTS misses or after a known hard-miss gate selects
+  the cohort;
+- report the projection terms, accepted candidates, role labels, and final
+  ranks;
+- leave default store ordering untouched.
+
+This is the only implementation boundary that is plausible from current
+evidence.
 
 ### Why Narrow Opt-In Remains Plausible
 
