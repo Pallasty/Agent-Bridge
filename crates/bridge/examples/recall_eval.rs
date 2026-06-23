@@ -272,6 +272,13 @@ const CASE2_TOOL_SURFACE_POLICY_CLUSTER: &[&str] = &[
     "goal_b_surface_growth_gate_engine_finding_20260621",
     "reference_ab_tool_surface_taxonomy_8class_retier_over_delete_20260618",
 ];
+const CASE8_REMOTE_SESSION_IDX1: usize = 8;
+const MIN_REMOTE_SESSION_PROJECTION_OVERLAP: usize = 4;
+const STRICT_REMOTE_SESSION_REQUIRED_TERM: &str = "projremotesession";
+const CASE8_REMOTE_SESSION_STEERING_CHAIN: &[&str] = &[
+    "agentbridge_remote_session_steer_gap_20260529",
+    "session_handoff_agent_spawn_remote_steer_retry_to_aio2_20260531",
+];
 
 #[derive(Clone, Copy, Debug)]
 struct ToolSurfaceNegativeControl {
@@ -375,6 +382,86 @@ const TOOL_SURFACE_POSITIVE_CONTROLS: &[ToolSurfacePositiveControl] = &[
         label: "profile_tier_allowlist_policy",
         query: "tool surface profile tier policy: essential standard niche allowlist should retier tools before delete",
         read: "near-positive profile/tier policy query that still names the tool surface",
+    },
+];
+
+#[derive(Clone, Copy, Debug)]
+struct RemoteSessionNegativeControl {
+    label: &'static str,
+    query: &'static str,
+    read: &'static str,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct RemoteSessionPositiveControl {
+    label: &'static str,
+    query: &'static str,
+    read: &'static str,
+}
+
+const REMOTE_SESSION_NEGATIVE_CONTROLS: &[RemoteSessionNegativeControl] = &[
+    RemoteSessionNegativeControl {
+        label: "generic_ssh_login",
+        query: "怎么通过 ssh 远程登录服务器",
+        read: "plain SSH access should not activate agent-session steering",
+    },
+    RemoteSessionNegativeControl {
+        label: "git_remote_branch",
+        query: "git remote branch 推送失败怎么处理",
+        read: "git remote vocabulary should stay outside remote-session steering",
+    },
+    RemoteSessionNegativeControl {
+        label: "generic_agent_chat",
+        query: "agent 会话上下文太长要怎么总结",
+        read: "generic agent/session text without remote steering should stay below the gate",
+    },
+    RemoteSessionNegativeControl {
+        label: "process_signal",
+        query: "怎么给正在运行的后台进程发送 kill 信号",
+        read: "process-control wording without agent session or remote steering should not pass",
+    },
+    RemoteSessionNegativeControl {
+        label: "remote_database_migration",
+        query: "远程数据库迁移脚本运行中怎么查看日志",
+        read: "remote operations that are not agent sessions should be rejected",
+    },
+    RemoteSessionNegativeControl {
+        label: "memory_search_quality",
+        query: "memory_search 检索结果不准应该调 bm25 还是语义模型",
+        read: "retrieval-quality tuning should not activate remote-session steering",
+    },
+];
+
+const REMOTE_SESSION_POSITIVE_CONTROLS: &[RemoteSessionPositiveControl] = &[
+    RemoteSessionPositiveControl {
+        label: "zh_long_running_agent_inject",
+        query: "怎么向远端正在运行的长驻 agent 会话发送新的指令",
+        read: "Chinese paraphrase of remote long-running agent session instruction injection",
+    },
+    RemoteSessionPositiveControl {
+        label: "zh_tmux_agent_steer",
+        query: "远程 tmux 里的 agent 会话卡住了,要用 agent_steer_drive 注入下一步",
+        read: "tmux plus agent_steer_drive should stay inside the steering family",
+    },
+    RemoteSessionPositiveControl {
+        label: "en_remote_steer_running_agent",
+        query: "remote steer a running agent session by sending instructions to the tmux pane",
+        read: "English remote-steer variant with running session and instruction-send terms",
+    },
+    RemoteSessionPositiveControl {
+        label: "en_agent_steer_drive",
+        query: "agent_steer_drive should send input to a detached remote agent session and handle gates",
+        read: "tool-name variant for the shipped remote steering control plane",
+    },
+    RemoteSessionPositiveControl {
+        label: "en_ab_session_handle",
+        query: "ab remote session steering uses a long-lived agent handle and tmux send-keys",
+        read: "SOP wording around AB-owned handles, long-lived sessions, and tmux send-keys",
+    },
+    RemoteSessionPositiveControl {
+        label: "zh_remote_steer_gap",
+        query: "Agent-Bridge 当初远程控制长驻 agent 会话的缺口是什么,怎么补",
+        read: "decision-gap wording should still identify the original remote-session memory",
     },
 ];
 
@@ -610,6 +697,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut fts_candidate_counts = Vec::with_capacity(CORPUS.len());
     let scratch_cjk = ScratchCjkFts::build(&db_path)?;
     let scratch_tool_surface = ScratchToolSurfaceProjectionFts::build(&db_path)?;
+    let scratch_remote_session = ScratchRemoteSessionProjectionFts::build(&db_path)?;
     let mut fts_cjk = ModeAgg::default();
     let mut fts_cjk_acc = ModeAgg::default();
     let mut fts_empty_cjk_acc = ModeAgg::default();
@@ -711,6 +799,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     print_case2_tool_surface_projection_probe(&scratch_tool_surface)?;
+    print_case8_remote_session_projection_probe(&scratch_remote_session)?;
 
     // ── Per-tier breakdown (worst-case paraphrase vs lexically-anchored) ─────
     // The single aggregate above blends pure-paraphrase (hard) and
@@ -996,10 +1085,47 @@ impl ToolSurfaceCandidateRole {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RemoteSessionCandidateRole {
+    PrimaryAnswer,
+    DeliveredCapability,
+    AdjacentHandoff,
+    DiagnosticOrMeta,
+    Other,
+}
+
+impl RemoteSessionCandidateRole {
+    fn label(self) -> &'static str {
+        match self {
+            Self::PrimaryAnswer => "primary",
+            Self::DeliveredCapability => "delivered-capability",
+            Self::AdjacentHandoff => "adjacent-handoff",
+            Self::DiagnosticOrMeta => "diagnostic-meta",
+            Self::Other => "other",
+        }
+    }
+
+    fn sort_rank(self) -> u8 {
+        match self {
+            Self::PrimaryAnswer => 0,
+            Self::DeliveredCapability => 1,
+            Self::AdjacentHandoff => 2,
+            Self::Other => 3,
+            Self::DiagnosticOrMeta => 4,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 struct RoleAwareProjectionHit {
     hit: ProjectionHit,
     role: ToolSurfaceCandidateRole,
+}
+
+#[derive(Clone, Debug)]
+struct RoleAwareRemoteSessionProjectionHit {
+    hit: ProjectionHit,
+    role: RemoteSessionCandidateRole,
 }
 
 struct ScratchToolSurfaceProjectionFts {
@@ -1168,6 +1294,172 @@ impl ScratchToolSurfaceProjectionFts {
     }
 }
 
+struct ScratchRemoteSessionProjectionFts {
+    db: RusqliteConnection,
+    terms_by_key: HashMap<String, BTreeSet<String>>,
+}
+
+impl ScratchRemoteSessionProjectionFts {
+    fn build(db_path: &std::path::Path) -> SqlResult<Self> {
+        let source =
+            RusqliteConnection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let scratch = RusqliteConnection::open_in_memory()?;
+        scratch.execute_batch(
+            "CREATE VIRTUAL TABLE remote_session_fts USING fts5(
+                 key UNINDEXED,
+                 body,
+                 tokenize = 'unicode61 remove_diacritics 2'
+             );",
+        )?;
+
+        let mut terms_by_key = HashMap::new();
+        {
+            let mut select = source.prepare(
+                "SELECT key, COALESCE(fts_content, content) AS body
+                 FROM memories
+                 WHERE status = 'active'",
+            )?;
+            let rows = select.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            let mut insert =
+                scratch.prepare("INSERT INTO remote_session_fts(key, body) VALUES (?1, ?2)")?;
+            for row in rows {
+                let (key, body) = row?;
+                let terms = remote_session_projection_terms(&key, &body);
+                insert.execute(params![
+                    key,
+                    augment_with_remote_session_projection_terms(&body, &terms)
+                ])?;
+                terms_by_key.insert(key, terms);
+            }
+        }
+
+        Ok(Self {
+            db: scratch,
+            terms_by_key,
+        })
+    }
+
+    fn search_projected(&self, query: &str, limit: usize) -> Result<Vec<ProjectionHit>, String> {
+        let query_terms = remote_session_projection_terms("", query);
+        let mut parts = Vec::new();
+        let any = sanitise_fts_query_any(query);
+        if !any.is_empty() {
+            parts.push(any);
+        }
+        parts.extend(query_terms.iter().cloned());
+        if parts.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut stmt = self
+            .db
+            .prepare(
+                "SELECT key FROM remote_session_fts
+                 WHERE remote_session_fts MATCH ?1
+                 ORDER BY bm25(remote_session_fts)
+                 LIMIT ?2",
+            )
+            .map_err(|e| e.to_string())?;
+        let keys = stmt
+            .query_map(params![parts.join(" OR "), limit as i64], |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<SqlResult<Vec<_>>>()
+            .map_err(|e| e.to_string())?;
+        Ok(self.projection_hits_from_keys(&query_terms, keys))
+    }
+
+    fn search_projected_accepted(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<ProjectionHit>, String> {
+        let query_terms = remote_session_projection_terms("", query);
+        if query_terms.is_empty() {
+            return Ok(Vec::new());
+        }
+        let candidate_limit = limit.saturating_mul(8).max(limit);
+        let hits = self.search_projected(query, candidate_limit)?;
+        Ok(hits
+            .into_iter()
+            .filter(|hit| hit.overlap >= MIN_REMOTE_SESSION_PROJECTION_OVERLAP)
+            .take(limit)
+            .collect())
+    }
+
+    fn search_projected_accepted_durable(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<ProjectionHit>, String> {
+        let query_terms = remote_session_projection_terms("", query);
+        if query_terms.is_empty() {
+            return Ok(Vec::new());
+        }
+        let candidate_limit = limit.saturating_mul(12).max(limit);
+        let hits = self.search_projected(query, candidate_limit)?;
+        Ok(hits
+            .into_iter()
+            .filter(|hit| hit.overlap >= MIN_REMOTE_SESSION_PROJECTION_OVERLAP)
+            .filter(|hit| is_durable_remote_session_projection_candidate(&hit.key))
+            .take(limit)
+            .collect())
+    }
+
+    fn search_projected_accepted_strict_durable(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<ProjectionHit>, String> {
+        let query_terms = remote_session_projection_terms("", query);
+        if query_terms.is_empty() {
+            return Ok(Vec::new());
+        }
+        let candidate_limit = limit.saturating_mul(12).max(limit);
+        let hits = self.search_projected(query, candidate_limit)?;
+        Ok(hits
+            .into_iter()
+            .filter(|hit| hit.overlap >= MIN_REMOTE_SESSION_PROJECTION_OVERLAP)
+            .filter(|hit| is_durable_remote_session_projection_candidate(&hit.key))
+            .filter(|hit| has_strict_remote_session_steering_terms(&hit.shared_terms))
+            .take(limit)
+            .collect())
+    }
+
+    fn search_projected_role_aware(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<RoleAwareRemoteSessionProjectionHit>, String> {
+        let strict = self.search_projected_accepted_strict_durable(query, limit)?;
+        Ok(role_aware_remote_session_candidates(query, strict, limit))
+    }
+
+    fn projection_hits_from_keys(
+        &self,
+        query_terms: &BTreeSet<String>,
+        keys: Vec<String>,
+    ) -> Vec<ProjectionHit> {
+        keys.into_iter()
+            .map(|key| {
+                let shared_terms = self
+                    .terms_by_key
+                    .get(&key)
+                    .map(|terms| query_terms.intersection(terms).cloned().collect::<Vec<_>>())
+                    .unwrap_or_default();
+                ProjectionHit {
+                    key,
+                    overlap: shared_terms.len(),
+                    shared_terms,
+                }
+            })
+            .collect()
+    }
+}
+
 fn role_aware_tool_surface_candidates(
     query: &str,
     hits: Vec<ProjectionHit>,
@@ -1270,6 +1562,116 @@ fn query_mentions_tool_surface_diagnostic_or_meta(query: &str) -> bool {
             "plan_load",
             "lookup",
             "miss",
+            "recall_eval",
+            "falsifier",
+            "goal c",
+            "goal-c",
+            "评估",
+        ],
+    )
+}
+
+fn role_aware_remote_session_candidates(
+    query: &str,
+    hits: Vec<ProjectionHit>,
+    limit: usize,
+) -> Vec<RoleAwareRemoteSessionProjectionHit> {
+    let diagnostic_or_meta_requested = query_mentions_remote_session_diagnostic_or_meta(query);
+    let mut out = hits
+        .into_iter()
+        .filter_map(|hit| {
+            let role = classify_remote_session_candidate(query, &hit);
+            if role == RemoteSessionCandidateRole::DiagnosticOrMeta && !diagnostic_or_meta_requested
+            {
+                return None;
+            }
+            Some(RoleAwareRemoteSessionProjectionHit { hit, role })
+        })
+        .collect::<Vec<_>>();
+
+    out.sort_by(|a, b| {
+        a.role
+            .sort_rank()
+            .cmp(&b.role.sort_rank())
+            .then_with(|| b.hit.overlap.cmp(&a.hit.overlap))
+            .then_with(|| a.hit.key.cmp(&b.hit.key))
+    });
+    out.truncate(limit);
+    out
+}
+
+fn classify_remote_session_candidate(
+    query: &str,
+    hit: &ProjectionHit,
+) -> RemoteSessionCandidateRole {
+    let key = hit.key.to_lowercase();
+    let query_has_delivered_anchor = query_mentions_remote_session_delivered_capability(query);
+
+    if key.contains("diagnostic")
+        || key.contains("recall_eval")
+        || key.contains("falsifier")
+        || key.contains("audit")
+        || key.contains("goal_c")
+    {
+        return RemoteSessionCandidateRole::DiagnosticOrMeta;
+    }
+    if key.contains("agentbridge_remote_session_steer_gap") {
+        return RemoteSessionCandidateRole::PrimaryAnswer;
+    }
+    if key.contains("session_handoff")
+        || key.contains("agent_spawn")
+        || key.contains("remote_steer_retry")
+        || key.contains("handoff")
+        || key.contains("setup")
+        || key.contains("launch")
+    {
+        return RemoteSessionCandidateRole::AdjacentHandoff;
+    }
+    if key.contains("remote_session_steering")
+        || key.contains("remote_steer")
+        || key.contains("agent_steer")
+        || key.contains("agent_orchestrate_scan")
+        || key.contains("steer_presence")
+        || (key.contains("mux") && key.contains("steer"))
+        || (query_has_delivered_anchor
+            && key.contains("tmux")
+            && hit.shared_terms.iter().any(|t| t == "projagentsteering"))
+    {
+        return RemoteSessionCandidateRole::DeliveredCapability;
+    }
+
+    RemoteSessionCandidateRole::Other
+}
+
+fn query_mentions_remote_session_delivered_capability(query: &str) -> bool {
+    let q = query.to_lowercase();
+    contains_any(
+        &q,
+        &[
+            "remote_steer",
+            "agent_steer",
+            "agent_steer_drive",
+            "agent_steer_launch",
+            "agent_orchestrate_scan",
+            "tmux",
+            "send-keys",
+            "send keys",
+            "mux",
+            "presence",
+        ],
+    )
+}
+
+fn query_mentions_remote_session_diagnostic_or_meta(query: &str) -> bool {
+    let q = query.to_lowercase();
+    contains_any(
+        &q,
+        &[
+            "diagnostic",
+            "diagnostics",
+            "诊断",
+            "audit",
+            "审计",
             "recall_eval",
             "falsifier",
             "goal c",
@@ -1573,6 +1975,315 @@ fn print_case2_tool_surface_positive_controls(
         durable_hits,
         strict_hits,
         strict_cluster_hits,
+        strict_empty,
+        role_aware_hits,
+        role_aware_rank1_hits
+    );
+    println!();
+    Ok(())
+}
+
+fn print_case8_remote_session_projection_probe(
+    scratch: &ScratchRemoteSessionProjectionFts,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let case = &CORPUS[CASE8_REMOTE_SESSION_IDX1 - 1];
+    let query_terms = remote_session_projection_terms("", case.query);
+    let projected = scratch.search_projected(case.query, TOP_K)?;
+    let accepted = scratch.search_projected_accepted(case.query, TOP_K)?;
+    let accepted_durable = scratch.search_projected_accepted_durable(case.query, TOP_K)?;
+    let strict_durable = scratch.search_projected_accepted_strict_durable(case.query, TOP_K)?;
+    let role_aware = scratch.search_projected_role_aware(case.query, TOP_K)?;
+    let projected_keys = projected
+        .iter()
+        .map(|hit| hit.key.clone())
+        .collect::<Vec<_>>();
+    let accepted_keys = accepted
+        .iter()
+        .map(|hit| hit.key.clone())
+        .collect::<Vec<_>>();
+    let accepted_durable_keys = accepted_durable
+        .iter()
+        .map(|hit| hit.key.clone())
+        .collect::<Vec<_>>();
+    let strict_durable_keys = strict_durable
+        .iter()
+        .map(|hit| hit.key.clone())
+        .collect::<Vec<_>>();
+    let role_aware_keys = role_aware
+        .iter()
+        .map(|hit| hit.hit.key.clone())
+        .collect::<Vec<_>>();
+
+    println!("## Case #8 remote-session projection probe");
+    println!(
+        "  query terms: {}",
+        if query_terms.is_empty() {
+            "none".to_string()
+        } else {
+            query_terms.iter().cloned().collect::<Vec<_>>().join(", ")
+        }
+    );
+    println!(
+        "  remoteproj hit: {}  remoteproj_acc hit: {}  remoteproj_acc_durable hit: {}  remoteproj_strict hit: {}  role_aware hit: {}",
+        rank_cell(first_hit_rank(&projected_keys, case.expect)),
+        rank_cell(first_hit_rank(&accepted_keys, case.expect)),
+        rank_cell(first_hit_rank(&accepted_durable_keys, case.expect)),
+        rank_cell(first_hit_rank(&strict_durable_keys, case.expect)),
+        rank_cell(first_hit_rank(&role_aware_keys, case.expect)),
+    );
+    println!(
+        "  gate: read-only in-memory FTS adds canonical remote-session steering \
+         projection terms to candidates and query. Accepted mode requires >= \
+         {MIN_REMOTE_SESSION_PROJECTION_OVERLAP} shared projection terms; \
+         strict mode requires {STRICT_REMOTE_SESSION_REQUIRED_TERM} plus \
+         steering/session anchors. This does not change live memory_search, \
+         tokenizer, schema, reindex, graph, semantic, or ranking."
+    );
+    println!("  accepted top:");
+    for (i, hit) in accepted.iter().take(TOP_K).enumerate() {
+        let star = if case.expect.iter().any(|e| *e == hit.key) {
+            " <== EXPECTED"
+        } else {
+            ""
+        };
+        println!(
+            "    {:>2}. overlap={} {}{} [{}]",
+            i + 1,
+            hit.overlap,
+            hit.key,
+            star,
+            hit.shared_terms.join(", ")
+        );
+    }
+    if accepted.is_empty() {
+        println!("    none");
+    }
+    let accepted_work_memory = accepted
+        .iter()
+        .filter(|hit| is_work_memory_key(&hit.key))
+        .count();
+    let durable_work_memory = accepted_durable
+        .iter()
+        .filter(|hit| is_work_memory_key(&hit.key))
+        .count();
+    println!(
+        "  contamination: accepted_work_memory={accepted_work_memory} \
+         durable_work_memory={durable_work_memory}"
+    );
+    println!("  strict durable top:");
+    for (i, hit) in strict_durable.iter().take(TOP_K).enumerate() {
+        let star = if case.expect.iter().any(|e| *e == hit.key) {
+            " <== EXPECTED"
+        } else {
+            ""
+        };
+        println!(
+            "    {:>2}. overlap={} {}{} [{}]",
+            i + 1,
+            hit.overlap,
+            hit.key,
+            star,
+            hit.shared_terms.join(", ")
+        );
+    }
+    if strict_durable.is_empty() {
+        println!("    none");
+    }
+    println!("  role-aware strict durable top:");
+    for (i, hit) in role_aware.iter().take(TOP_K).enumerate() {
+        let star = if case.expect.iter().any(|e| *e == hit.hit.key) {
+            " <== EXPECTED"
+        } else {
+            ""
+        };
+        println!(
+            "    {:>2}. role={} overlap={} {}{} [{}]",
+            i + 1,
+            hit.role.label(),
+            hit.hit.overlap,
+            hit.hit.key,
+            star,
+            hit.hit.shared_terms.join(", ")
+        );
+    }
+    if role_aware.is_empty() {
+        println!("    none");
+    }
+    println!();
+
+    print_case8_remote_session_negative_controls(scratch, case.expect)?;
+    print_case8_remote_session_positive_controls(scratch, case.expect)?;
+    Ok(())
+}
+
+fn print_case8_remote_session_negative_controls(
+    scratch: &ScratchRemoteSessionProjectionFts,
+    target_keys: &[&str],
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("## Case #8 remote-session negative controls");
+    println!(
+        "  gate: negative controls should produce no accepted projection rows, \
+         no expected-key hits, and no work_memory hits. Non-empty accepted rows \
+         mean the remote-session projection is too broad for runtime use."
+    );
+
+    let mut false_target_hits = 0;
+    let mut work_memory_hits = 0;
+    let mut nonempty_accepted = 0;
+    for control in REMOTE_SESSION_NEGATIVE_CONTROLS {
+        let query_terms = remote_session_projection_terms("", control.query);
+        let accepted = scratch.search_projected_accepted(control.query, TOP_K)?;
+        let durable = scratch.search_projected_accepted_durable(control.query, TOP_K)?;
+        let target_hits = accepted
+            .iter()
+            .filter(|hit| target_keys.iter().any(|target| *target == hit.key))
+            .count();
+        let control_work_memory_hits = accepted
+            .iter()
+            .filter(|hit| is_work_memory_key(&hit.key))
+            .count();
+        false_target_hits += target_hits;
+        work_memory_hits += control_work_memory_hits;
+        if !accepted.is_empty() {
+            nonempty_accepted += 1;
+        }
+        println!(
+            "  {}: terms={} accepted={} durable={} target_hits={} work_memory_hits={} - {}",
+            control.label,
+            projection_terms_label(&query_terms),
+            accepted.len(),
+            durable.len(),
+            target_hits,
+            control_work_memory_hits,
+            control.read
+        );
+        for (i, hit) in accepted.iter().take(3).enumerate() {
+            println!(
+                "      {:>2}. overlap={} {} [{}]",
+                i + 1,
+                hit.overlap,
+                hit.key,
+                hit.shared_terms.join(", ")
+            );
+        }
+    }
+    println!(
+        "  summary: controls={} nonempty_accepted={} false_target_hits={} work_memory_hits={}",
+        REMOTE_SESSION_NEGATIVE_CONTROLS.len(),
+        nonempty_accepted,
+        false_target_hits,
+        work_memory_hits
+    );
+    println!();
+    Ok(())
+}
+
+fn print_case8_remote_session_positive_controls(
+    scratch: &ScratchRemoteSessionProjectionFts,
+    target_keys: &[&str],
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("## Case #8 remote-session positive controls");
+    println!(
+        "  gate: positive controls should recover the expected remote-session \
+         memory or its steering-chain family in durable and strict-durable \
+         accepted candidates. Strict mode requires {STRICT_REMOTE_SESSION_REQUIRED_TERM} \
+         plus steering/session anchors."
+    );
+
+    let mut durable_hits = 0;
+    let mut strict_hits = 0;
+    let mut strict_chain_hits = 0;
+    let mut strict_empty = 0;
+    let mut role_aware_rank1_hits = 0;
+    let mut role_aware_hits = 0;
+    for control in REMOTE_SESSION_POSITIVE_CONTROLS {
+        let query_terms = remote_session_projection_terms("", control.query);
+        let durable = scratch.search_projected_accepted_durable(control.query, TOP_K)?;
+        let strict = scratch.search_projected_accepted_strict_durable(control.query, TOP_K)?;
+        let role_aware = scratch.search_projected_role_aware(control.query, TOP_K)?;
+        let durable_keys = durable
+            .iter()
+            .map(|hit| hit.key.clone())
+            .collect::<Vec<_>>();
+        let strict_keys = strict.iter().map(|hit| hit.key.clone()).collect::<Vec<_>>();
+        let role_aware_keys = role_aware
+            .iter()
+            .map(|hit| hit.hit.key.clone())
+            .collect::<Vec<_>>();
+        let durable_rank = first_hit_rank(&durable_keys, target_keys);
+        let strict_rank = first_hit_rank(&strict_keys, target_keys);
+        let strict_chain_rank = first_hit_rank(&strict_keys, CASE8_REMOTE_SESSION_STEERING_CHAIN);
+        let role_aware_rank = first_hit_rank(&role_aware_keys, target_keys);
+        if durable_rank.is_some() {
+            durable_hits += 1;
+        }
+        if strict_rank.is_some() {
+            strict_hits += 1;
+        }
+        if strict_chain_rank.is_some() {
+            strict_chain_hits += 1;
+        }
+        if strict.is_empty() {
+            strict_empty += 1;
+        }
+        if role_aware_rank.is_some() {
+            role_aware_hits += 1;
+        }
+        if role_aware_rank == Some(1) {
+            role_aware_rank1_hits += 1;
+        }
+        println!(
+            "  {}: terms={} durable_hit={} strict_hit={} strict_chain={} role_aware_hit={} durable={} strict={} role_aware={} - {}",
+            control.label,
+            projection_terms_label(&query_terms),
+            rank_cell(durable_rank),
+            rank_cell(strict_rank),
+            rank_cell(strict_chain_rank),
+            rank_cell(role_aware_rank),
+            durable.len(),
+            strict.len(),
+            role_aware.len(),
+            control.read
+        );
+        for (i, hit) in strict.iter().take(3).enumerate() {
+            let star = if target_keys.iter().any(|target| *target == hit.key) {
+                " <== EXPECTED"
+            } else {
+                ""
+            };
+            println!(
+                "      {:>2}. overlap={} {}{} [{}]",
+                i + 1,
+                hit.overlap,
+                hit.key,
+                star,
+                hit.shared_terms.join(", ")
+            );
+        }
+        println!("      role-aware top:");
+        for (i, hit) in role_aware.iter().take(3).enumerate() {
+            let star = if target_keys.iter().any(|target| *target == hit.hit.key) {
+                " <== EXPECTED"
+            } else {
+                ""
+            };
+            println!(
+                "      {:>2}. role={} overlap={} {}{} [{}]",
+                i + 1,
+                hit.role.label(),
+                hit.hit.overlap,
+                hit.hit.key,
+                star,
+                hit.hit.shared_terms.join(", ")
+            );
+        }
+    }
+    println!(
+        "  summary: controls={} durable_hits={} strict_hits={} strict_chain_hits={} strict_empty={} role_aware_hits={} role_aware_rank1_hits={}",
+        REMOTE_SESSION_POSITIVE_CONTROLS.len(),
+        durable_hits,
+        strict_hits,
+        strict_chain_hits,
         strict_empty,
         role_aware_hits,
         role_aware_rank1_hits
@@ -1967,6 +2678,16 @@ fn augment_with_tool_surface_projection_terms(text: &str, terms: &BTreeSet<Strin
     )
 }
 
+fn augment_with_remote_session_projection_terms(text: &str, terms: &BTreeSet<String>) -> String {
+    if terms.is_empty() {
+        return text.to_string();
+    }
+    format!(
+        "{text}\n\nremote_session_projection:\n{}",
+        terms.iter().cloned().collect::<Vec<_>>().join(" ")
+    )
+}
+
 fn tool_surface_projection_terms(key: &str, text: &str) -> BTreeSet<String> {
     let hay = format!("{key}\n{text}").to_lowercase();
     let mut terms = BTreeSet::new();
@@ -2099,6 +2820,126 @@ fn tool_surface_projection_terms(key: &str, text: &str) -> BTreeSet<String> {
     terms
 }
 
+fn remote_session_projection_terms(key: &str, text: &str) -> BTreeSet<String> {
+    let hay = format!("{key}\n{text}").to_lowercase();
+    let mut terms = BTreeSet::new();
+    let agentish = contains_any(
+        &hay,
+        &[
+            "agent",
+            "agentbridge",
+            "agent-bridge",
+            "codex",
+            "claude",
+            "kilo",
+            "aio2",
+        ],
+    );
+    let remote = contains_any(
+        &hay,
+        &[
+            "远程",
+            "远端",
+            "remote",
+            "ssh",
+            "node",
+            "tailnet",
+            "aio2",
+            "远程控制",
+        ],
+    );
+    let session = contains_any(
+        &hay,
+        &[
+            "会话",
+            "session",
+            "tmux",
+            "mux",
+            "pane",
+            "长驻",
+            "long-lived",
+            "long running",
+            "long-running",
+            "detached",
+            "presence",
+            "handle",
+        ],
+    );
+    let steering = contains_any(
+        &hay,
+        &[
+            "注入指令",
+            "指令",
+            "输入",
+            "发送",
+            "控制",
+            "steer",
+            "steering",
+            "remote_steer",
+            "agent_steer",
+            "agent_steer_drive",
+            "send-keys",
+            "send keys",
+            "send input",
+            "drive",
+        ],
+    );
+    let running = contains_any(
+        &hay,
+        &[
+            "正在运行",
+            "running",
+            "long-lived",
+            "long running",
+            "long-running",
+            "长驻",
+            "detached",
+            "alive",
+            "live",
+        ],
+    );
+    let gate_or_gap = contains_any(
+        &hay,
+        &[
+            "gap",
+            "缺口",
+            "decision",
+            "sop",
+            "gate",
+            "needs_human",
+            "auto-answer",
+            "approval",
+        ],
+    );
+
+    if remote && session {
+        terms.insert("projremotesession".to_string());
+    }
+    if agentish && remote {
+        terms.insert("projremoteagent".to_string());
+    }
+    if agentish && session {
+        terms.insert("projagentsession".to_string());
+    }
+    if agentish && steering {
+        terms.insert("projagentsteering".to_string());
+    }
+    if session && steering {
+        terms.insert("projsessioninjection".to_string());
+    }
+    if session && running {
+        terms.insert("projlongrunning".to_string());
+    }
+    if agentish && remote && session && steering {
+        terms.insert("projabsteercontrol".to_string());
+    }
+    if gate_or_gap && agentish && (remote || session || steering) {
+        terms.insert("projsteergapgate".to_string());
+    }
+
+    terms
+}
+
 fn contains_any(haystack: &str, needles: &[&str]) -> bool {
     needles.iter().any(|needle| haystack.contains(needle))
 }
@@ -2114,12 +2955,31 @@ fn is_durable_tool_surface_projection_candidate(key: &str) -> bool {
         && !key.starts_with("skill:")
 }
 
+fn is_durable_remote_session_projection_candidate(key: &str) -> bool {
+    !is_work_memory_key(key)
+        && !key.starts_with("snapshot_")
+        && !key.starts_with("alert_")
+        && !key.starts_with("skill:")
+}
+
 fn has_strict_tool_surface_policy_terms(terms: &[String]) -> bool {
     let terms = terms.iter().map(String::as_str).collect::<BTreeSet<_>>();
     terms.contains(STRICT_TOOL_SURFACE_REQUIRED_TERM)
         && terms
             .iter()
             .filter(|term| **term != STRICT_TOOL_SURFACE_REQUIRED_TERM)
+            .count()
+            >= 3
+}
+
+fn has_strict_remote_session_steering_terms(terms: &[String]) -> bool {
+    let terms = terms.iter().map(String::as_str).collect::<BTreeSet<_>>();
+    terms.contains(STRICT_REMOTE_SESSION_REQUIRED_TERM)
+        && terms.contains("projagentsteering")
+        && terms.contains("projsessioninjection")
+        && terms
+            .iter()
+            .filter(|term| **term != STRICT_REMOTE_SESSION_REQUIRED_TERM)
             .count()
             >= 3
 }
@@ -2460,6 +3320,96 @@ mod tests {
         }
     }
 
+    #[test]
+    fn remote_session_projection_terms_bridge_case8_query() {
+        let terms =
+            remote_session_projection_terms("", "怎么远程给一个正在运行的长驻 agent 会话注入指令");
+
+        assert!(terms.contains("projremotesession"));
+        assert!(terms.contains("projremoteagent"));
+        assert!(terms.contains("projagentsession"));
+        assert!(terms.contains("projagentsteering"));
+        assert!(terms.contains("projsessioninjection"));
+        assert!(terms.contains("projlongrunning"));
+        assert!(terms.contains("projabsteercontrol"));
+    }
+
+    #[test]
+    fn remote_session_projection_terms_ignore_generic_remote_controls() {
+        let ssh = remote_session_projection_terms("", "怎么通过 ssh 远程登录服务器");
+        let git = remote_session_projection_terms("", "git remote branch 推送失败怎么处理");
+        let generic_agent = remote_session_projection_terms("", "agent 会话上下文太长要怎么总结");
+        let process = remote_session_projection_terms("", "怎么给正在运行的后台进程发送 kill 信号");
+
+        assert!(ssh.is_empty());
+        assert!(git.is_empty());
+        assert!(generic_agent.len() < MIN_REMOTE_SESSION_PROJECTION_OVERLAP);
+        assert!(process.is_empty());
+    }
+
+    #[test]
+    fn remote_session_projection_terms_cover_expected_case8_memory() {
+        let terms = remote_session_projection_terms(
+            "agentbridge_remote_session_steer_gap_20260529",
+            "Agent-Bridge remote session steering gap: long-lived named tmux \
+             session, remote_steer, agent_steer_drive, tmux send-keys, \
+             running agent session, gate-aware instruction injection.",
+        );
+
+        assert!(terms.contains("projremotesession"));
+        assert!(terms.contains("projremoteagent"));
+        assert!(terms.contains("projagentsession"));
+        assert!(terms.contains("projagentsteering"));
+        assert!(terms.contains("projsessioninjection"));
+        assert!(terms.contains("projlongrunning"));
+        assert!(terms.contains("projabsteercontrol"));
+        assert!(terms.contains("projsteergapgate"));
+    }
+
+    #[test]
+    fn strict_remote_session_steering_terms_require_session_plus_steering() {
+        assert!(has_strict_remote_session_steering_terms(&[
+            "projremotesession".to_string(),
+            "projremoteagent".to_string(),
+            "projagentsession".to_string(),
+            "projagentsteering".to_string(),
+            "projsessioninjection".to_string(),
+        ]));
+        assert!(!has_strict_remote_session_steering_terms(&[
+            "projremoteagent".to_string(),
+            "projagentsession".to_string(),
+            "projagentsteering".to_string(),
+            "projsessioninjection".to_string(),
+        ]));
+        assert!(!has_strict_remote_session_steering_terms(&[
+            "projremotesession".to_string(),
+            "projremoteagent".to_string(),
+            "projagentsession".to_string(),
+            "projlongrunning".to_string(),
+        ]));
+    }
+
+    #[test]
+    fn remote_session_positive_controls_cover_session_and_steering_terms() {
+        for control in REMOTE_SESSION_POSITIVE_CONTROLS {
+            let terms = remote_session_projection_terms("", control.query);
+            assert!(
+                terms.contains("projremotesession"),
+                "{} should include remote-session anchor: {:?}",
+                control.label,
+                terms
+            );
+            assert!(
+                has_strict_remote_session_steering_terms(
+                    &terms.iter().cloned().collect::<Vec<_>>()
+                ),
+                "{} should satisfy strict remote-session steering gate: {:?}",
+                control.label,
+                terms
+            );
+        }
+    }
+
     fn projection_hit_for_role(key: &str, terms: &[&str]) -> ProjectionHit {
         ProjectionHit {
             key: key.to_string(),
@@ -2559,5 +3509,83 @@ mod tests {
 
         assert_eq!(ranked.len(), 1);
         assert_eq!(ranked[0].role, ToolSurfaceCandidateRole::DiagnosticOrMeta);
+    }
+
+    #[test]
+    fn role_aware_remote_session_candidates_prioritize_primary_answer() {
+        let query = CORPUS[CASE8_REMOTE_SESSION_IDX1 - 1].query;
+        let shared = [
+            "projabsteercontrol",
+            "projagentsteering",
+            "projremotesession",
+            "projsessioninjection",
+        ];
+        let hits = vec![
+            projection_hit_for_role("docs_remote_session_steering_sop_20260601", &shared),
+            projection_hit_for_role("agentbridge_remote_session_steer_gap_20260529", &shared),
+            projection_hit_for_role(
+                "session_handoff_agent_spawn_remote_steer_retry_to_aio2_20260531",
+                &shared[..3],
+            ),
+        ];
+
+        let ranked = role_aware_remote_session_candidates(query, hits, TOP_K);
+
+        assert_eq!(
+            ranked[0].hit.key,
+            "agentbridge_remote_session_steer_gap_20260529"
+        );
+        assert_eq!(ranked[0].role, RemoteSessionCandidateRole::PrimaryAnswer);
+        assert_eq!(
+            ranked[1].role,
+            RemoteSessionCandidateRole::DeliveredCapability
+        );
+        assert_eq!(ranked[2].role, RemoteSessionCandidateRole::AdjacentHandoff);
+    }
+
+    #[test]
+    fn role_aware_remote_session_candidates_exclude_diagnostic_meta_by_default() {
+        let query = CORPUS[CASE8_REMOTE_SESSION_IDX1 - 1].query;
+        let shared = [
+            "projabsteercontrol",
+            "projagentsteering",
+            "projremotesession",
+            "projsessioninjection",
+        ];
+        let hits = vec![
+            projection_hit_for_role(
+                "goal_c_remote_session_recall_eval_diagnostic_20260623",
+                &shared,
+            ),
+            projection_hit_for_role("agentbridge_remote_session_steer_gap_20260529", &shared),
+        ];
+
+        let ranked = role_aware_remote_session_candidates(query, hits, TOP_K);
+        let keys = ranked
+            .iter()
+            .map(|hit| hit.hit.key.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(keys, vec!["agentbridge_remote_session_steer_gap_20260529"]);
+    }
+
+    #[test]
+    fn role_aware_remote_session_candidates_allow_diagnostic_meta_when_requested() {
+        let query = "remote session steering recall_eval diagnostic 为什么命中";
+        let shared = [
+            "projabsteercontrol",
+            "projagentsteering",
+            "projremotesession",
+            "projsessioninjection",
+        ];
+        let hits = vec![projection_hit_for_role(
+            "goal_c_remote_session_recall_eval_diagnostic_20260623",
+            &shared,
+        )];
+
+        let ranked = role_aware_remote_session_candidates(query, hits, TOP_K);
+
+        assert_eq!(ranked.len(), 1);
+        assert_eq!(ranked[0].role, RemoteSessionCandidateRole::DiagnosticOrMeta);
     }
 }
