@@ -26,7 +26,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime};
 
-use ab_oob_alert::{write_alert, Alert, AlertKind, ProcessFd};
+use ab_oob_alert::{Alert, AlertKind, ProcessFd, write_alert};
 use ab_store::S234Counts;
 
 /// Window between consecutive S2-S4 anchor snapshots (per §3.4.2 "5min").
@@ -382,6 +382,11 @@ pub struct S234DropEvent {
     /// lifecycle evidence that was available at firing time.
     pub retired_before: u64,
     pub retired_after: u64,
+    /// Benign-transition retired tiers (`archived` + `superseded`) used as
+    /// S2's conservation credit. This intentionally differs from total
+    /// retired because tombstoned rows can move in the same hygiene window.
+    pub archived_superseded_before: u64,
+    pub archived_superseded_after: u64,
     /// Fraction of `before` lost (0.0..=1.0). For S3 the threshold is
     /// "any drop" but we still report the percentage for the alert body.
     pub drop_pct: f64,
@@ -417,7 +422,6 @@ pub fn compute_s234_drops(prev: S234Counts, current: S234Counts) -> Vec<S234Drop
     if prev.memories_active > 0 && current.memories_active < prev.memories_active {
         let drop = prev.memories_active - current.memories_active;
         // Conservation credit (thread 27 #813, hardened #110): a benign
-        // active→retired transition lands the rows in the archived/superseded
         // tiers, so credit the drop ONLY against the rise there — NOT against
         // `memories_retired`, which also counts tombstoned. `purge-tombstones`
         // hard-removes aged tombstoned rows in the SAME daily-hygiene window,
@@ -438,6 +442,8 @@ pub fn compute_s234_drops(prev: S234Counts, current: S234Counts) -> Vec<S234Drop
                 after: current.memories_active,
                 retired_before: prev.memories_retired,
                 retired_after: current.memories_retired,
+                archived_superseded_before: prev.memories_archived_superseded,
+                archived_superseded_after: current.memories_archived_superseded,
                 drop_pct: pct,
                 unexplained_drop: unexplained,
             });
@@ -457,6 +463,8 @@ pub fn compute_s234_drops(prev: S234Counts, current: S234Counts) -> Vec<S234Drop
             after: current.forum_threads,
             retired_before: prev.memories_retired,
             retired_after: current.memories_retired,
+            archived_superseded_before: prev.memories_archived_superseded,
+            archived_superseded_after: current.memories_archived_superseded,
             drop_pct: pct,
             unexplained_drop: drop,
         });
@@ -472,6 +480,8 @@ pub fn compute_s234_drops(prev: S234Counts, current: S234Counts) -> Vec<S234Drop
                 after: current.memory_edges,
                 retired_before: prev.memories_retired,
                 retired_after: current.memories_retired,
+                archived_superseded_before: prev.memories_archived_superseded,
+                archived_superseded_after: current.memories_archived_superseded,
                 drop_pct: pct,
                 unexplained_drop: drop,
             });
@@ -589,10 +599,18 @@ pub fn format_s234_alert_body_for_node(
 ) -> String {
     let raw_drop = ev.before.saturating_sub(ev.after);
     let retired_delta = ev.retired_after as i128 - ev.retired_before as i128;
-    let retired_line = if ev.signal == S234Signal::S2Memories {
+    let archived_superseded_delta =
+        ev.archived_superseded_after as i128 - ev.archived_superseded_before as i128;
+    let s2_lines = if ev.signal == S234Signal::S2Memories {
         format!(
-            "\n[retired] {} → {} ({retired_delta:+})",
-            ev.retired_before, ev.retired_after,
+            "\n[retired] {} → {} ({retired_delta:+})\n\
+             [retired_credit] archived+superseded {} → {} ({archived_superseded_delta:+}); \
+             unexplained_drop={} of raw_drop={raw_drop}",
+            ev.retired_before,
+            ev.retired_after,
+            ev.archived_superseded_before,
+            ev.archived_superseded_after,
+            ev.unexplained_drop,
         )
     } else {
         String::new()
@@ -625,7 +643,7 @@ pub fn format_s234_alert_body_for_node(
         ev.after,
         ev.drop_pct * 100.0,
         S234_WINDOW_SECS,
-        retired_line,
+        s2_lines,
         lifecycle_line,
     )
 }
@@ -920,8 +938,8 @@ mod tests {
         _reset_s234_snapshot_for_tests();
         let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
         let _ = s234_check_against_snapshot(mk_counts(100, 5, 200), t0); // seed
-                                                                         // 60s later (well within the 5-min window); even with a clear
-                                                                         // drop, the helper must wait for the window to elapse.
+        // 60s later (well within the 5-min window); even with a clear
+        // drop, the helper must wait for the window to elapse.
         let t1 = t0 + Duration::from_secs(60);
         let out = s234_check_against_snapshot(mk_counts(50, 5, 200), t1);
         assert!(out.is_empty(), "within-window must not fire (got {out:?})");
@@ -952,6 +970,8 @@ mod tests {
             after: 400,
             retired_before: 10,
             retired_after: 10,
+            archived_superseded_before: 5,
+            archived_superseded_after: 5,
             drop_pct: 0.20,
             unexplained_drop: 100,
         };
@@ -968,6 +988,10 @@ mod tests {
         assert!(
             !body.contains("[lifecycle]"),
             "no lifecycle line when fully unexplained"
+        );
+        assert!(
+            !body.contains("[retired_credit]"),
+            "S4 should not print S2 credit details"
         );
     }
 
@@ -1015,6 +1039,10 @@ mod tests {
         assert!(
             body.contains("[retired] 50 → 70 (+20)"),
             "retired evidence in body"
+        );
+        assert!(
+            body.contains("[retired_credit] archived+superseded 50 → 70 (+20); unexplained_drop=10 of raw_drop=30"),
+            "S2 body shows the actual conservation-credit input"
         );
         assert!(
             body.contains("[lifecycle]"),
@@ -1089,6 +1117,41 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].signal, S234Signal::S2Memories);
         assert_eq!(events[0].unexplained_drop, 56);
+    }
+
+    #[test]
+    fn format_s234_alert_body_s2_distinguishes_total_retired_from_credit() {
+        // #122 shape: active drops and total retired rises, but the actual
+        // conservation-credit tier (archived+superseded) does not rise. The
+        // alert should still fire and explain why total retired did not
+        // suppress it.
+        let prev = S234Counts {
+            memories_active: 1277,
+            forum_threads: 50,
+            memory_edges: 1000,
+            memories_retired: 2316,
+            memories_archived_superseded: 200,
+        };
+        let cur = S234Counts {
+            memories_active: 1178,
+            forum_threads: 50,
+            memory_edges: 1000,
+            memories_retired: 2419,
+            memories_archived_superseded: 200,
+        };
+        let events = compute_s234_drops(prev, cur);
+        assert_eq!(events.len(), 1);
+        let body = format_s234_alert_body_for_node(&events[0], 1_782_199_317, "aio2");
+
+        assert!(body.contains("[retired] 2316 → 2419 (+103)"));
+        assert!(
+            body.contains("[retired_credit] archived+superseded 200 → 200 (+0); unexplained_drop=99 of raw_drop=99"),
+            "body must show why total retired rise did not suppress the alert"
+        );
+        assert!(
+            !body.contains("[lifecycle]"),
+            "no benign lifecycle credit exists in this shape"
+        );
     }
 
     // ---- #110: Fix B (§3.4.4 hygiene-run suppression marker) ----
