@@ -1208,6 +1208,33 @@ shadow-case count exceeds the preflight limit. Even when ready, production
 candidate-set mutation, search-order changes, runtime enablement, memory writes,
 and graph-edge writes remain non-claims for later gates.
 
+The next surface is the shadow-only invocation report:
+
+- MCP tool:
+  `memory_biocortex_t6_candidate_expansion_shadow_executor_invocation_report`;
+- schema:
+  `agent_bridge.memory_biocortex_t6_candidate_expansion.shadow_executor_invocation_report.v0`;
+- required source:
+  the redacted JSON object from
+  `memory_biocortex_t6_candidate_expansion_shadow_executor_preflight`;
+- scope:
+  redacted invocation summary only: run id presence, fixture id presence,
+  append-only telemetry sink presence, bounded case counts, failed-case count,
+  candidate-delta count, and negative-control regression count.
+
+The report does not invoke the executor and does not run shadow mode. It only
+validates that an external shadow-only invocation summary is bounded,
+append-only, redacted, and sourced from a ready preflight report. It blocks if
+the source preflight is not ready, if either the source or request includes raw
+query/key/content/case rows, if the source claims runtime authority, if run
+metadata is missing, if case counts exceed the preflight bound, if completed and
+failed case counts do not sum to the shadow case count, if any executor failures
+or negative-control regressions are present, or if the caller cannot assert
+append-only telemetry and redacted-summary-only handling. Even when ready, the
+only opened follow-up is shadow telemetry review; runtime influence, candidate
+mutation, search-order changes, memory writes, graph-edge writes, and production
+enablement remain later-gated non-claims.
+
 ## Verification
 
 Targeted validation for this slice after `/Data` space was recovered:
