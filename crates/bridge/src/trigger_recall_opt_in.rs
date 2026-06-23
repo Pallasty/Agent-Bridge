@@ -11,6 +11,10 @@ pub const TRIGGER_RECALL_OPT_IN_BASELINE_TRIAL_SCHEMA: &str =
     "agent_bridge.memory.trigger_recall.opt_in_baseline_trial.v0";
 pub const TRIGGER_RECALL_OPT_IN_GATED_BATCH_DIAGNOSTICS_SCHEMA: &str =
     "agent_bridge.memory.trigger_recall.opt_in_gated_batch_diagnostics.v0";
+pub const TRIGGER_RECALL_ENFORCE_HOLD_APPROVAL_PACKET_SCHEMA: &str =
+    "agent_bridge.memory.trigger_recall.enforce_hold_approval_packet.v0";
+pub const TRIGGER_RECALL_ENFORCE_HOLD_APPROVAL_PACKET_VALIDATOR_SCHEMA: &str =
+    "agent_bridge.memory.trigger_recall.enforce_hold_approval_packet_validator.v0";
 pub const TRIGGER_RECALL_OPT_IN_ENABLE_ENV: &str = "AB_TRIGGER_RECALL_OPT_IN";
 pub const TRIGGER_RECALL_DISABLE_ENV: &str = "AB_TRIGGER_RECALL_DISABLE";
 pub const TRIGGER_RECALL_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR: &str =
@@ -101,6 +105,12 @@ pub struct TriggerRecallOptInGatedBatchDiagnosticsOptions {
     pub reviewer: Option<String>,
     pub commit: Option<String>,
     pub forum_post_id: Option<String>,
+    pub raw_payload_fields_present: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TriggerRecallEnforceHoldApprovalPacketValidatorOptions {
+    pub approval_packet: Value,
     pub raw_payload_fields_present: bool,
 }
 
@@ -272,12 +282,55 @@ fn bool_false_at(value: &Value, pointer: &str) -> bool {
     value.pointer(pointer).and_then(Value::as_bool) == Some(false)
 }
 
+fn bool_at(value: &Value, pointer: &str) -> bool {
+    value.pointer(pointer).and_then(Value::as_bool) == Some(true)
+}
+
 fn string_at<'a>(value: &'a Value, pointer: &str) -> &'a str {
     value.pointer(pointer).and_then(Value::as_str).unwrap_or("")
 }
 
 fn u64_at(value: &Value, pointer: &str) -> u64 {
     value.pointer(pointer).and_then(Value::as_u64).unwrap_or(0)
+}
+
+fn iso_date_days_since_unix_epoch(value: &str) -> Option<i64> {
+    let value = value.trim();
+    let year = value.get(0..4)?.parse::<i32>().ok()?;
+    let month = value.get(5..7)?.parse::<u32>().ok()?;
+    let day = value.get(8..10)?.parse::<u32>().ok()?;
+    if value.get(4..5) != Some("-") || value.get(7..8) != Some("-") {
+        return None;
+    }
+    if !(1..=12).contains(&month) {
+        return None;
+    }
+    let leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+    let max_day = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return None,
+    };
+    if day == 0 || day > max_day {
+        return None;
+    }
+
+    let y = year - if month <= 2 { 1 } else { 0 };
+    let era = if y >= 0 { y } else { y - 399 } / 400;
+    let yoe = y - era * 400;
+    let mp = month as i32 + if month > 2 { -3 } else { 9 };
+    let doy = (153 * mp + 2) / 5 + day as i32 - 1;
+    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    Some((era * 146097 + doe - 719468) as i64)
+}
+
+fn approval_packet_expired_or_invalid(expires_at: &str) -> bool {
+    let Some(expiry_day) = iso_date_days_since_unix_epoch(expires_at) else {
+        return true;
+    };
+    expiry_day < unix_now_secs() / 86_400
 }
 
 fn redacted_external_hash(value: Option<&str>) -> Option<String> {
@@ -1238,6 +1291,239 @@ pub fn trigger_recall_opt_in_gated_batch_diagnostics(
     })
 }
 
+pub fn trigger_recall_enforce_hold_approval_packet_validator(
+    options: TriggerRecallEnforceHoldApprovalPacketValidatorOptions,
+) -> Value {
+    let packet = options.approval_packet;
+    let schema = string_at(&packet, "/schema");
+    let read_only = bool_at(&packet, "/read_only");
+    let approved_mode = string_at(&packet, "/approved_mode");
+    let implementation_commit = string_at(&packet, "/implementation_commit");
+    let reviewer = string_at(&packet, "/reviewer");
+    let author = string_at(&packet, "/author");
+    let forum_post_id = string_at(&packet, "/forum_post_id");
+    let memory_key = string_at(&packet, "/memory_key");
+    let expires_at = string_at(&packet, "/expires_at");
+    let scope = string_at(&packet, "/scope");
+    let scope_mode = normalize_scope_mode(string_at(&packet, "/scope_mode"));
+    let mode = normalize_mode(string_at(&packet, "/mode"));
+    let default_memory_search_unchanged = bool_at(&packet, "/default_memory_search_unchanged");
+    let per_call_opt_in_required = bool_at(&packet, "/per_call_opt_in_required");
+    let batch_status = string_at(&packet, "/evidence/batch_diagnostics_status");
+    let regression_anchor = string_at(&packet, "/evidence/regression_anchor");
+    let baseline_false_hits_after_shadow_gate =
+        u64_at(&packet, "/evidence/baseline_false_hits_after_shadow_gate");
+    let true_hits_lost_by_shadow_gate =
+        u64_at(&packet, "/evidence/true_hits_lost_by_shadow_gate");
+    let positive_cases_held = u64_at(&packet, "/evidence/positive_cases_held");
+    let raw_payload_leaks = u64_at(&packet, "/evidence/raw_payload_leaks");
+    let held_bare_empty_arrays = u64_at(&packet, "/evidence/held_bare_empty_arrays");
+    let rollback_disable_env = string_at(&packet, "/rollback/disable_env");
+    let rollback_expected_behavior = string_at(&packet, "/rollback/expected_behavior");
+    let raw_payload_present =
+        options.raw_payload_fields_present || trigger_recall_value_contains_raw(&packet);
+    let exact_scope = exact_local_project_scope(Some(scope), &scope_mode);
+    let mode_allowed = matches!(approved_mode, "audit_only" | "pre_policy_hold");
+    let batch_status_ready = batch_status == "ready_for_enforce_hold_review_packet";
+    let regression_anchor_ok =
+        regression_anchor == TRIGGER_RECALL_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR;
+
+    let mut blockers = BTreeSet::<String>::new();
+    push_if(
+        &mut blockers,
+        schema != TRIGGER_RECALL_ENFORCE_HOLD_APPROVAL_PACKET_SCHEMA,
+        "blocked_schema_mismatch",
+    );
+    push_if(&mut blockers, !read_only, "blocked_not_read_only");
+    push_if(&mut blockers, !mode_allowed, "blocked_mode_not_allowed");
+    push_if(
+        &mut blockers,
+        implementation_commit.trim().is_empty(),
+        "blocked_missing_implementation_commit",
+    );
+    push_if(
+        &mut blockers,
+        reviewer.trim().is_empty(),
+        "blocked_missing_reviewer",
+    );
+    push_if(
+        &mut blockers,
+        author.trim().is_empty(),
+        "blocked_missing_author",
+    );
+    push_if(
+        &mut blockers,
+        forum_post_id.trim().is_empty(),
+        "blocked_missing_forum_post",
+    );
+    push_if(
+        &mut blockers,
+        memory_key.trim().is_empty(),
+        "blocked_missing_memory_key",
+    );
+    push_if(
+        &mut blockers,
+        approval_packet_expired_or_invalid(expires_at),
+        "blocked_expired_packet",
+    );
+    push_if(
+        &mut blockers,
+        !exact_scope,
+        "blocked_scope_not_exact_local_project",
+    );
+    push_if(
+        &mut blockers,
+        scope_mode != "local_only",
+        "blocked_scope_mode_not_local_only",
+    );
+    push_if(
+        &mut blockers,
+        mode != "fts",
+        "blocked_retrieval_mode_not_fts",
+    );
+    push_if(
+        &mut blockers,
+        !per_call_opt_in_required,
+        "blocked_per_call_opt_in_not_required",
+    );
+    push_if(
+        &mut blockers,
+        !default_memory_search_unchanged,
+        "blocked_default_memory_search_change",
+    );
+    push_if(
+        &mut blockers,
+        !batch_status_ready,
+        "blocked_batch_diagnostics_not_ready",
+    );
+    push_if(
+        &mut blockers,
+        !regression_anchor_ok,
+        "blocked_regression_anchor_mismatch",
+    );
+    push_if(
+        &mut blockers,
+        baseline_false_hits_after_shadow_gate > 0
+            || true_hits_lost_by_shadow_gate > 0
+            || positive_cases_held > 0,
+        "blocked_metric_threshold_failed",
+    );
+    push_if(
+        &mut blockers,
+        raw_payload_leaks > 0 || held_bare_empty_arrays > 0 || raw_payload_present,
+        "blocked_raw_payload_or_empty_hold_leak",
+    );
+    push_if(
+        &mut blockers,
+        rollback_disable_env.trim().is_empty()
+            || rollback_expected_behavior != "fail_open_to_baseline",
+        "blocked_rollback_missing",
+    );
+
+    let ready = blockers.is_empty();
+    let status = if ready {
+        "approval_packet_ready"
+    } else if schema != TRIGGER_RECALL_ENFORCE_HOLD_APPROVAL_PACKET_SCHEMA {
+        "blocked_schema_mismatch"
+    } else if !mode_allowed {
+        "blocked_mode_not_allowed"
+    } else {
+        "blocked"
+    };
+    let approved_mode_public = if mode_allowed {
+        approved_mode
+    } else if approved_mode.trim().is_empty() {
+        ""
+    } else {
+        "invalid"
+    };
+    let canonical_mode = match approved_mode {
+        "audit_only" => "audit_only",
+        "pre_policy_hold" => "pre_policy_hold_simulation",
+        _ => "invalid",
+    };
+    let batch_status_public = if batch_status_ready {
+        batch_status
+    } else if batch_status.trim().is_empty() {
+        ""
+    } else {
+        "invalid"
+    };
+    let regression_anchor_public = if regression_anchor_ok {
+        regression_anchor
+    } else if regression_anchor.trim().is_empty() {
+        ""
+    } else {
+        "invalid"
+    };
+
+    json!({
+        "schema": TRIGGER_RECALL_ENFORCE_HOLD_APPROVAL_PACKET_VALIDATOR_SCHEMA,
+        "generated_at": unix_now_secs(),
+        "read_only": true,
+        "status": status,
+        "approval_packet_included": false,
+        "approved_mode": approved_mode_public,
+        "canonical_mode": canonical_mode,
+        "approval_refs": {
+            "implementation_commit_hash": redacted_external_hash(Some(implementation_commit)),
+            "reviewer_present": !reviewer.trim().is_empty(),
+            "author_present": !author.trim().is_empty(),
+            "forum_post_id_hash": redacted_external_hash(Some(forum_post_id)),
+            "memory_key_hash": redacted_external_hash(Some(memory_key)),
+            "expires_at_present": !expires_at.trim().is_empty(),
+            "scope_hash": redacted_external_hash(Some(scope)),
+            "scope_mode": scope_mode,
+            "exact_local_project_scope": exact_scope
+        },
+        "evidence": {
+            "batch_diagnostics_status": batch_status_public,
+            "regression_anchor": regression_anchor_public,
+            "baseline_false_hits_after_shadow_gate": baseline_false_hits_after_shadow_gate,
+            "true_hits_lost_by_shadow_gate": true_hits_lost_by_shadow_gate,
+            "positive_cases_held": positive_cases_held,
+            "raw_payload_leaks": raw_payload_leaks,
+            "held_bare_empty_arrays": held_bare_empty_arrays
+        },
+        "boundary_check": {
+            "approval_packet_ready": ready,
+            "blockers": blockers.into_iter().collect::<Vec<_>>()
+        },
+        "decision": {
+            "may_implement_audit_only": ready && approved_mode == "audit_only",
+            "may_implement_pre_policy_hold": ready && approved_mode == "pre_policy_hold",
+            "may_implement_enforce_hold": false,
+            "may_change_default_memory_search": false
+        },
+        "safety": {
+            "approval_packet_included": false,
+            "raw_queries_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "scope_path_included": false,
+            "calls_memory_search": false,
+            "records_coactivation": false,
+            "writes_memory": false,
+            "writes_graph_edges": false,
+            "changes_memory_search_order": false,
+            "changes_default_memory_search_schema": false
+        },
+        "side_effects": {
+            "calls_memory_search": false,
+            "calls_memory_neighbors": false,
+            "records_coactivation": false,
+            "writes_memory": false,
+            "writes_graph_edges": false,
+            "changes_memory_search_order": false,
+            "changes_default_memory_search_schema": false,
+            "changes_production_retrieval_default": false,
+            "runs_semantic_retrieval": false,
+            "runs_graph_retrieval": false,
+            "may_enforce_hold": false
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1293,6 +1579,143 @@ mod tests {
                 "missing blocker {expected}; blockers={blockers:?}"
             );
         }
+    }
+
+    fn ready_enforce_hold_approval_packet(approved_mode: &str) -> Value {
+        json!({
+            "schema": TRIGGER_RECALL_ENFORCE_HOLD_APPROVAL_PACKET_SCHEMA,
+            "generated_at": "2026-06-23T00:00:00Z",
+            "read_only": true,
+            "approval_packet": true,
+            "approval_kind": "implementation_slice_approval",
+            "approved_mode": approved_mode,
+            "implementation_commit": "0123456789abcdef0123456789abcdef01234567",
+            "reviewer": "codex-reviewer",
+            "author": "codex-implementation-owner",
+            "forum_post_id": "3983",
+            "memory_key": "trigger_recall_gated_batch_installed_review_20260623",
+            "expires_at": "2999-12-31T00:00:00Z",
+            "scope": PROJECT_SCOPE,
+            "scope_mode": "local_only",
+            "mode": "fts",
+            "per_call_opt_in_required": true,
+            "default_memory_search_unchanged": true,
+            "runtime_env": {
+                "enable": "AB_TRIGGER_RECALL_ENFORCE_HOLD_OPT_IN=1",
+                "disable": "AB_TRIGGER_RECALL_ENFORCE_HOLD_DISABLE=1"
+            },
+            "evidence": {
+                "batch_diagnostics_status": "ready_for_enforce_hold_review_packet",
+                "regression_anchor": TRIGGER_RECALL_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR,
+                "baseline_false_hits_after_shadow_gate": 0,
+                "true_hits_lost_by_shadow_gate": 0,
+                "positive_cases_held": 0,
+                "raw_payload_leaks": 0,
+                "held_bare_empty_arrays": 0
+            },
+            "rollback": {
+                "disable_env": "AB_TRIGGER_RECALL_ENFORCE_HOLD_DISABLE=1",
+                "expected_behavior": "fail_open_to_baseline"
+            }
+        })
+    }
+
+    #[test]
+    fn trigger_recall_enforce_hold_approval_packet_validator_allows_pre_policy_mode() {
+        let result = trigger_recall_enforce_hold_approval_packet_validator(
+            TriggerRecallEnforceHoldApprovalPacketValidatorOptions {
+                approval_packet: ready_enforce_hold_approval_packet("pre_policy_hold"),
+                raw_payload_fields_present: false,
+            },
+        );
+
+        assert_eq!(
+            result["schema"],
+            json!(TRIGGER_RECALL_ENFORCE_HOLD_APPROVAL_PACKET_VALIDATOR_SCHEMA)
+        );
+        assert_eq!(result["status"], json!("approval_packet_ready"));
+        assert_eq!(result["approved_mode"], json!("pre_policy_hold"));
+        assert_eq!(result["canonical_mode"], json!("pre_policy_hold_simulation"));
+        assert_eq!(result["boundary_check"]["approval_packet_ready"], json!(true));
+        assert_eq!(result["boundary_check"]["blockers"], json!([]));
+        assert_eq!(
+            result["decision"]["may_implement_pre_policy_hold"],
+            json!(true)
+        );
+        assert_eq!(result["decision"]["may_implement_audit_only"], json!(false));
+        assert_eq!(
+            result["decision"]["may_implement_enforce_hold"],
+            json!(false)
+        );
+        assert_eq!(
+            result["decision"]["may_change_default_memory_search"],
+            json!(false)
+        );
+        assert_eq!(result["approval_packet_included"], json!(false));
+        assert_eq!(result["safety"]["approval_packet_included"], json!(false));
+        assert_eq!(result["safety"]["scope_path_included"], json!(false));
+        assert_eq!(result["side_effects"]["calls_memory_search"], json!(false));
+        assert_eq!(result["side_effects"]["may_enforce_hold"], json!(false));
+    }
+
+    #[test]
+    fn trigger_recall_enforce_hold_approval_packet_validator_blocks_bad_mode() {
+        let mut packet = ready_enforce_hold_approval_packet("enforce_hold");
+        packet["implementation_commit"] = json!("");
+        let result = trigger_recall_enforce_hold_approval_packet_validator(
+            TriggerRecallEnforceHoldApprovalPacketValidatorOptions {
+                approval_packet: packet,
+                raw_payload_fields_present: false,
+            },
+        );
+
+        assert_eq!(result["status"], json!("blocked_mode_not_allowed"));
+        assert_eq!(result["approved_mode"], json!("invalid"));
+        assert_eq!(result["canonical_mode"], json!("invalid"));
+        assert_has_blockers(
+            &result,
+            &[
+                "blocked_mode_not_allowed",
+                "blocked_missing_implementation_commit",
+            ],
+        );
+        assert_eq!(result["decision"]["may_implement_audit_only"], json!(false));
+        assert_eq!(
+            result["decision"]["may_implement_pre_policy_hold"],
+            json!(false)
+        );
+        assert_eq!(
+            result["decision"]["may_implement_enforce_hold"],
+            json!(false)
+        );
+    }
+
+    #[test]
+    fn trigger_recall_enforce_hold_approval_packet_validator_rejects_raw_packet() {
+        let mut packet = ready_enforce_hold_approval_packet("audit_only");
+        packet["raw_query"] = json!("secret validator raw query");
+        packet["content"] = json!("secret validator content");
+        packet["evidence"]["batch_diagnostics_summary"] = json!({
+            "raw_key": "secret validator raw key"
+        });
+        let result = trigger_recall_enforce_hold_approval_packet_validator(
+            TriggerRecallEnforceHoldApprovalPacketValidatorOptions {
+                approval_packet: packet,
+                raw_payload_fields_present: false,
+            },
+        );
+        let text = serde_json::to_string(&result).expect("serialize");
+
+        assert_eq!(result["status"], json!("blocked"));
+        assert_has_blockers(&result, &["blocked_raw_payload_or_empty_hold_leak"]);
+        assert!(!text.contains("secret validator raw query"));
+        assert!(!text.contains("secret validator content"));
+        assert!(!text.contains("secret validator raw key"));
+        assert_eq!(result["approval_packet_included"], json!(false));
+        assert_eq!(result["safety"]["raw_queries_included"], json!(false));
+        assert_eq!(result["safety"]["raw_keys_included"], json!(false));
+        assert_eq!(result["safety"]["content_included"], json!(false));
+        assert_eq!(result["side_effects"]["calls_memory_search"], json!(false));
     }
 
     #[test]
