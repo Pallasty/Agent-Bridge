@@ -23,9 +23,10 @@ implementation commit and exact approved mode.
 ## Reviewed Inputs
 
 - `docs/reports/goal-c-u/2026-06-23-trigger-recall-enforce-hold-production-proposal.md`
+- `docs/reports/goal-c-u/2026-06-23-trigger-recall-enforce-hold-approval-packet-schema.md`
 - `docs/reports/goal-c-u/2026-06-23-trigger-recall-pre-policy-hold-approval-packet-schema.md`
 - `docs/reports/goal-c-u/2026-06-23-trigger-recall-gated-batch-review-packet.md`
-- Forum thread 105 through post `#2509`
+- Forum thread 120 through post `#3983`
 - Current repo state: `master...origin/master`, rev-list `0 0`, worktree
   clean before this review.
 
