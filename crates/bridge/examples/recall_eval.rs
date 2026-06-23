@@ -227,9 +227,21 @@ const REVIEW_GATE_TARGET_CASES: &[usize] = &[1, 2, 5, 9, 14];
 const MIN_CJK_SHINGLE_ACCEPT_OVERLAP: usize = 4;
 const CASE2_TOOL_SURFACE_IDX1: usize = 2;
 const MIN_TOOL_SURFACE_PROJECTION_OVERLAP: usize = 4;
+const STRICT_TOOL_SURFACE_REQUIRED_TERM: &str = "projtoolsurface";
+const CASE2_TOOL_SURFACE_POLICY_CLUSTER: &[&str] = &[
+    "goal_b_surface_growth_gate_engine_finding_20260621",
+    "reference_ab_tool_surface_taxonomy_8class_retier_over_delete_20260618",
+];
 
 #[derive(Clone, Copy, Debug)]
 struct ToolSurfaceNegativeControl {
+    label: &'static str,
+    query: &'static str,
+    read: &'static str,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ToolSurfacePositiveControl {
     label: &'static str,
     query: &'static str,
     read: &'static str,
@@ -265,6 +277,64 @@ const TOOL_SURFACE_NEGATIVE_CONTROLS: &[ToolSurfaceNegativeControl] = &[
         label: "profile_missing_tool",
         query: "codex-lean essential profile 里面某个工具没暴露怎么办",
         read: "single profile/tool vocabulary should remain below the accepted projection threshold",
+    },
+];
+
+const TOOL_SURFACE_POSITIVE_CONTROLS: &[ToolSurfacePositiveControl] = &[
+    ToolSurfacePositiveControl {
+        label: "zh_classify_contract_retier",
+        query: "工具接口越来越多要怎么分类收缩,应该删除还是按 tier 重新分层",
+        read: "Chinese paraphrase of classify/contract/delete/retier should recover the policy cluster",
+    },
+    ToolSurfacePositiveControl {
+        label: "zh_surface_taxonomy_converge",
+        query: "工具面膨胀时要按什么 taxonomy 收敛,不要直接删",
+        read: "Chinese+English mixed paraphrase should bridge surface/taxonomy/contraction/delete",
+    },
+    ToolSurfacePositiveControl {
+        label: "en_tool_surface_too_large",
+        query: "tool surface is too large; should we classify taxonomy, delete tools, or retier profiles",
+        read: "English variant should bridge the same policy cluster",
+    },
+    ToolSurfacePositiveControl {
+        label: "en_retier_over_delete",
+        query: "tool-surface bloat needs taxonomy and re-tier over delete",
+        read: "English re-tier-over-delete phrasing should stay inside the intended family",
+    },
+    ToolSurfacePositiveControl {
+        label: "profile_tier_policy",
+        query: "tool surface profile tier policy: essential standard niche retier over delete",
+        read: "near-positive profile/tier policy should pass only when anchored by tool surface",
+    },
+    ToolSurfacePositiveControl {
+        label: "mcp_surface_allowlist",
+        query: "mcp tool surface allowlist should classify essential standard niche instead of deleting",
+        read: "MCP tool-surface allowlist policy should be treated as near-positive",
+    },
+    ToolSurfacePositiveControl {
+        label: "zh_trigger_taxonomy",
+        query: "agent bridge 工具面膨胀了,应该按触发方式分类收口,删除还是重新分级",
+        read: "Chinese paraphrase with surface, taxonomy, contraction, delete, and re-tier terms",
+    },
+    ToolSurfacePositiveControl {
+        label: "zh_dimension_retier",
+        query: "工具面太宽应该按维度归类并收口,优先清冗余还是重新分级",
+        read: "Chinese paraphrase close to the original case #2 wording",
+    },
+    ToolSurfacePositiveControl {
+        label: "en_taxonomy_retier_delete",
+        query: "tool surface contraction: classify by trigger taxonomy and retier before delete",
+        read: "English variant with explicit taxonomy, contraction, re-tier, and delete terms",
+    },
+    ToolSurfacePositiveControl {
+        label: "en_bloat_remove_retier",
+        query: "agent-bridge tool-surface taxonomy should clean up bloat by retier rather than remove tools",
+        read: "English bloat/remove wording for the same policy family",
+    },
+    ToolSurfacePositiveControl {
+        label: "profile_tier_allowlist_policy",
+        query: "tool surface profile tier policy: essential standard niche allowlist should retier tools before delete",
+        read: "near-positive profile/tier policy query that still names the tool surface",
     },
 ];
 
@@ -915,6 +985,26 @@ impl ScratchToolSurfaceProjectionFts {
             .collect())
     }
 
+    fn search_projected_accepted_strict_durable(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<ProjectionHit>, String> {
+        let query_terms = tool_surface_projection_terms("", query);
+        if query_terms.is_empty() {
+            return Ok(Vec::new());
+        }
+        let candidate_limit = limit.saturating_mul(12).max(limit);
+        let hits = self.search_projected(query, candidate_limit)?;
+        Ok(hits
+            .into_iter()
+            .filter(|hit| hit.overlap >= MIN_TOOL_SURFACE_PROJECTION_OVERLAP)
+            .filter(|hit| is_durable_tool_surface_projection_candidate(&hit.key))
+            .filter(|hit| has_strict_tool_surface_policy_terms(&hit.shared_terms))
+            .take(limit)
+            .collect())
+    }
+
     fn projection_hits_from_keys(
         &self,
         query_terms: &BTreeSet<String>,
@@ -1033,6 +1123,7 @@ fn print_case2_tool_surface_projection_probe(
     println!();
 
     print_case2_tool_surface_negative_controls(scratch, case.expect)?;
+    print_case2_tool_surface_positive_controls(scratch, case.expect)?;
     Ok(())
 }
 
@@ -1093,6 +1184,85 @@ fn print_case2_tool_surface_negative_controls(
         nonempty_accepted,
         false_target_hits,
         work_memory_hits
+    );
+    println!();
+    Ok(())
+}
+
+fn print_case2_tool_surface_positive_controls(
+    scratch: &ScratchToolSurfaceProjectionFts,
+    target_keys: &[&str],
+) -> Result<(), Box<dyn std::error::Error>> {
+    println!("## Case #2 tool-surface positive controls");
+    println!(
+        "  gate: positive controls should recover the expected policy memory in \
+         durable and strict-durable accepted candidates. Strict mode requires \
+         {STRICT_TOOL_SURFACE_REQUIRED_TERM} plus at least three additional \
+         policy terms."
+    );
+
+    let mut durable_hits = 0;
+    let mut strict_hits = 0;
+    let mut strict_cluster_hits = 0;
+    let mut strict_empty = 0;
+    for control in TOOL_SURFACE_POSITIVE_CONTROLS {
+        let query_terms = tool_surface_projection_terms("", control.query);
+        let durable = scratch.search_projected_accepted_durable(control.query, TOP_K)?;
+        let strict = scratch.search_projected_accepted_strict_durable(control.query, TOP_K)?;
+        let durable_keys = durable
+            .iter()
+            .map(|hit| hit.key.clone())
+            .collect::<Vec<_>>();
+        let strict_keys = strict.iter().map(|hit| hit.key.clone()).collect::<Vec<_>>();
+        let durable_rank = first_hit_rank(&durable_keys, target_keys);
+        let strict_rank = first_hit_rank(&strict_keys, target_keys);
+        let strict_cluster_rank = first_hit_rank(&strict_keys, CASE2_TOOL_SURFACE_POLICY_CLUSTER);
+        if durable_rank.is_some() {
+            durable_hits += 1;
+        }
+        if strict_rank.is_some() {
+            strict_hits += 1;
+        }
+        if strict_cluster_rank.is_some() {
+            strict_cluster_hits += 1;
+        }
+        if strict.is_empty() {
+            strict_empty += 1;
+        }
+        println!(
+            "  {}: terms={} durable_hit={} strict_hit={} strict_cluster={} durable={} strict={} — {}",
+            control.label,
+            projection_terms_label(&query_terms),
+            rank_cell(durable_rank),
+            rank_cell(strict_rank),
+            rank_cell(strict_cluster_rank),
+            durable.len(),
+            strict.len(),
+            control.read
+        );
+        for (i, hit) in strict.iter().take(3).enumerate() {
+            let star = if target_keys.iter().any(|target| *target == hit.key) {
+                " <== EXPECTED"
+            } else {
+                ""
+            };
+            println!(
+                "      {:>2}. overlap={} {}{} [{}]",
+                i + 1,
+                hit.overlap,
+                hit.key,
+                star,
+                hit.shared_terms.join(", ")
+            );
+        }
+    }
+    println!(
+        "  summary: controls={} durable_hits={} strict_hits={} strict_cluster_hits={} strict_empty={}",
+        TOOL_SURFACE_POSITIVE_CONTROLS.len(),
+        durable_hits,
+        strict_hits,
+        strict_cluster_hits,
+        strict_empty
     );
     println!();
     Ok(())
@@ -1491,6 +1661,7 @@ fn tool_surface_projection_terms(key: &str, text: &str) -> BTreeSet<String> {
         &hay,
         &[
             "工具面",
+            "工具接口",
             "工具",
             "tool-surface",
             "tool_surface",
@@ -1505,6 +1676,7 @@ fn tool_surface_projection_terms(key: &str, text: &str) -> BTreeSet<String> {
         &hay,
         &[
             "工具面",
+            "工具接口",
             "tool-surface",
             "tool_surface",
             "tool surface",
@@ -1539,8 +1711,12 @@ fn tool_surface_projection_terms(key: &str, text: &str) -> BTreeSet<String> {
             &hay,
             &[
                 "收口",
+                "收敛",
+                "收缩",
                 "通缩",
                 "压缩",
+                "精简",
+                "膨胀",
                 "bloat",
                 "contraction",
                 "cleanup",
@@ -1560,6 +1736,7 @@ fn tool_surface_projection_terms(key: &str, text: &str) -> BTreeSet<String> {
                 "tier",
                 "re-tier",
                 "retier",
+                "分层",
                 "essential",
                 "standard",
                 "niche",
@@ -1618,7 +1795,20 @@ fn is_work_memory_key(key: &str) -> bool {
 }
 
 fn is_durable_tool_surface_projection_candidate(key: &str) -> bool {
-    !is_work_memory_key(key) && !key.starts_with("snapshot_") && !key.starts_with("alert_")
+    !is_work_memory_key(key)
+        && !key.starts_with("snapshot_")
+        && !key.starts_with("alert_")
+        && !key.starts_with("skill:")
+}
+
+fn has_strict_tool_surface_policy_terms(terms: &[String]) -> bool {
+    let terms = terms.iter().map(String::as_str).collect::<BTreeSet<_>>();
+    terms.contains(STRICT_TOOL_SURFACE_REQUIRED_TERM)
+        && terms
+            .iter()
+            .filter(|term| **term != STRICT_TOOL_SURFACE_REQUIRED_TERM)
+            .count()
+            >= 3
 }
 
 fn projection_terms_label(terms: &BTreeSet<String>) -> String {
@@ -1883,5 +2073,54 @@ mod tests {
     fn work_memory_key_detection_is_prefix_scoped() {
         assert!(is_work_memory_key("work_memory_3d56857a5eed_shared_active"));
         assert!(!is_work_memory_key("ab_work_memory_policy_note"));
+    }
+
+    #[test]
+    fn durable_tool_surface_candidates_exclude_skill_rows() {
+        assert!(!is_durable_tool_surface_projection_candidate(
+            "skill:skills/sexual-health-analyzer"
+        ));
+        assert!(is_durable_tool_surface_projection_candidate(
+            "reference_ab_tool_surface_taxonomy_8class_retier_over_delete_20260618"
+        ));
+    }
+
+    #[test]
+    fn strict_tool_surface_policy_terms_require_surface_plus_three() {
+        assert!(has_strict_tool_surface_policy_terms(&[
+            "projtoolsurface".to_string(),
+            "projtooltaxonomy".to_string(),
+            "projtoolcontraction".to_string(),
+            "projtoolretier".to_string(),
+        ]));
+        assert!(!has_strict_tool_surface_policy_terms(&[
+            "projtooltaxonomy".to_string(),
+            "projtoolcontraction".to_string(),
+            "projtoolretier".to_string(),
+            "projtooldelete".to_string(),
+        ]));
+        assert!(!has_strict_tool_surface_policy_terms(&[
+            "projtoolsurface".to_string(),
+            "projtoolretier".to_string(),
+            "projtooldelete".to_string(),
+        ]));
+    }
+
+    #[test]
+    fn tool_surface_positive_controls_cover_surface_and_policy_terms() {
+        for control in TOOL_SURFACE_POSITIVE_CONTROLS {
+            let terms = tool_surface_projection_terms("", control.query);
+            assert!(
+                terms.contains("projtoolsurface"),
+                "{} should include tool-surface anchor",
+                control.label
+            );
+            assert!(
+                terms.len() >= MIN_TOOL_SURFACE_PROJECTION_OVERLAP,
+                "{} should include enough terms for accepted mode: {:?}",
+                control.label,
+                terms
+            );
+        }
     }
 }
