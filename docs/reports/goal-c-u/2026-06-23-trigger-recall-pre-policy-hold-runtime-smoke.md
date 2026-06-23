@@ -19,7 +19,7 @@ profile.
 Repository and binary state:
 
 ```text
-HEAD = origin/master = 989bee1 docs(memory): record post-install mcp stale check
+base before this report = b1aa844 docs(memory): record macos pre-policy hold rollout
 installed binary = /home/pallasting/.local/bin/agent-bridge.real
 ```
 
@@ -94,7 +94,7 @@ rollback present
   "held_store_search_called": false,
   "missing_approval_status": "blocked_to_baseline",
   "operator_disabled_status": "operator_disabled",
-  "raw_payload_leak_check": "passed",
+  "raw_payload_leak_check": true,
   "tool_count_all_profile": 273,
   "tools_list_contains_target": true
 }
