@@ -1,4 +1,4 @@
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -9,6 +9,8 @@ pub const TRIGGER_RECALL_OPT_IN_RUNTIME_TRANSITION_GATE_SCHEMA: &str =
     "agent_bridge.memory.trigger_recall.opt_in_runtime_transition_gate.v0";
 pub const TRIGGER_RECALL_OPT_IN_BASELINE_TRIAL_SCHEMA: &str =
     "agent_bridge.memory.trigger_recall.opt_in_baseline_trial.v0";
+pub const TRIGGER_RECALL_OPT_IN_GATED_BATCH_DIAGNOSTICS_SCHEMA: &str =
+    "agent_bridge.memory.trigger_recall.opt_in_gated_batch_diagnostics.v0";
 pub const TRIGGER_RECALL_OPT_IN_ENABLE_ENV: &str = "AB_TRIGGER_RECALL_OPT_IN";
 pub const TRIGGER_RECALL_DISABLE_ENV: &str = "AB_TRIGGER_RECALL_DISABLE";
 pub const TRIGGER_RECALL_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR: &str =
@@ -81,6 +83,25 @@ pub struct TriggerRecallOptInGatedBaselineTrialOptions {
     pub baseline_search_error: Option<String>,
     pub attempt_id: Option<String>,
     pub commit: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TriggerRecallOptInGatedBatchDiagnosticsPacket {
+    pub trial_packet: Value,
+    pub case_id: Option<String>,
+    pub expected_status: Option<String>,
+    pub expected_visible_behavior: Option<String>,
+    pub raw_payload_fields_present: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct TriggerRecallOptInGatedBatchDiagnosticsOptions {
+    pub packets: Vec<TriggerRecallOptInGatedBatchDiagnosticsPacket>,
+    pub attempt_id: Option<String>,
+    pub reviewer: Option<String>,
+    pub commit: Option<String>,
+    pub forum_post_id: Option<String>,
+    pub raw_payload_fields_present: bool,
 }
 
 fn unix_now_secs() -> i64 {
@@ -245,6 +266,31 @@ pub fn trigger_recall_value_contains_raw(value: &Value) -> bool {
         Value::Array(values) => values.iter().any(trigger_recall_value_contains_raw),
         _ => false,
     }
+}
+
+fn bool_false_at(value: &Value, pointer: &str) -> bool {
+    value.pointer(pointer).and_then(Value::as_bool) == Some(false)
+}
+
+fn string_at<'a>(value: &'a Value, pointer: &str) -> &'a str {
+    value.pointer(pointer).and_then(Value::as_str).unwrap_or("")
+}
+
+fn u64_at(value: &Value, pointer: &str) -> u64 {
+    value.pointer(pointer).and_then(Value::as_u64).unwrap_or(0)
+}
+
+fn redacted_external_hash(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| {
+            if value.starts_with("sha256:") && value.len() >= 24 {
+                value.to_string()
+            } else {
+                sha256_hex(value)
+            }
+        })
 }
 
 pub fn trigger_recall_opt_in_status(options: TriggerRecallOptInStatusOptions) -> Value {
@@ -673,7 +719,11 @@ fn transition_gate_blockers(
         gate_schema != TRIGGER_RECALL_OPT_IN_RUNTIME_TRANSITION_GATE_SCHEMA,
         "transition_gate_schema_mismatch",
     );
-    push_if(&mut blockers, !gate_read_only, "transition_gate_not_read_only");
+    push_if(
+        &mut blockers,
+        !gate_read_only,
+        "transition_gate_not_read_only",
+    );
     push_if(
         &mut blockers,
         !gate_marker,
@@ -921,6 +971,270 @@ pub fn trigger_recall_opt_in_gated_baseline_trial(
             "content_included": false,
             "unknown_fields_ignored": true
         }
+    })
+}
+
+pub fn trigger_recall_opt_in_gated_batch_diagnostics(
+    options: TriggerRecallOptInGatedBatchDiagnosticsOptions,
+) -> Value {
+    let outer_raw = options.raw_payload_fields_present;
+    let mut packet_results = Vec::with_capacity(options.packets.len());
+    let mut returned_accepted_count = 0u64;
+    let mut held_by_query_intent_count = 0u64;
+    let mut transition_gate_blocked_count = 0u64;
+    let mut baseline_search_error_count = 0u64;
+    let mut baseline_search_pending_count = 0u64;
+    let mut other_status_count = 0u64;
+    let mut raw_payload_blocked_count = 0u64;
+    let mut expectation_mismatch_count = 0u64;
+    let mut trial_memory_search_called_count = 0u64;
+    let mut baseline_count_before_total = 0u64;
+    let mut baseline_count_after_total = 0u64;
+    let mut baseline_order_hash_count = 0u64;
+
+    for (index, packet) in options.packets.iter().enumerate() {
+        let trial_packet = &packet.trial_packet;
+        let schema = trial_packet
+            .get("schema")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let read_only = trial_packet
+            .get("read_only")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let status = trial_packet
+            .get("status")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let visible_behavior = string_at(trial_packet, "/visible_behavior");
+        let query_intent_decision = string_at(trial_packet, "/query_intent/decision");
+        let reject_reason = string_at(trial_packet, "/query_intent/reject_reason");
+        let memory_search_called = trial_packet
+            .pointer("/baseline/memory_search_called")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            || trial_packet
+                .pointer("/side_effects/calls_memory_search")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+        let baseline_count_before = u64_at(
+            trial_packet,
+            "/baseline/baseline_candidate_count_before_gate",
+        );
+        let baseline_count_after = u64_at(
+            trial_packet,
+            "/baseline/baseline_candidate_count_after_gate",
+        );
+        let baseline_order_hash = redacted_external_hash(
+            trial_packet
+                .pointer("/baseline/baseline_order_hash_before_gate")
+                .and_then(Value::as_str),
+        );
+        let side_effect_contract_safe =
+            bool_false_at(trial_packet, "/side_effects/records_coactivation")
+                && bool_false_at(trial_packet, "/side_effects/writes_memory")
+                && bool_false_at(trial_packet, "/side_effects/writes_graph_edges")
+                && bool_false_at(trial_packet, "/side_effects/changes_memory_search_order")
+                && bool_false_at(
+                    trial_packet,
+                    "/side_effects/changes_default_memory_search_schema",
+                )
+                && bool_false_at(
+                    trial_packet,
+                    "/side_effects/changes_production_retrieval_default",
+                )
+                && bool_false_at(trial_packet, "/side_effects/runs_semantic_retrieval")
+                && bool_false_at(trial_packet, "/side_effects/runs_graph_retrieval");
+        let packet_raw = outer_raw
+            || packet.raw_payload_fields_present
+            || trigger_recall_value_contains_raw(trial_packet);
+
+        let mut blockers = BTreeSet::<String>::new();
+        push_if(
+            &mut blockers,
+            schema != TRIGGER_RECALL_OPT_IN_BASELINE_TRIAL_SCHEMA,
+            "trial_packet_schema_mismatch",
+        );
+        push_if(&mut blockers, !read_only, "trial_packet_not_read_only");
+        push_if(
+            &mut blockers,
+            !side_effect_contract_safe,
+            "trial_packet_side_effect_contract_invalid",
+        );
+        push_if(&mut blockers, packet_raw, "raw_payload_fields_present");
+
+        if packet_raw {
+            raw_payload_blocked_count += 1;
+        } else {
+            match status {
+                "returned_accepted" => returned_accepted_count += 1,
+                "held_by_query_intent" => held_by_query_intent_count += 1,
+                "transition_gate_blocked" => transition_gate_blocked_count += 1,
+                "baseline_search_error" => baseline_search_error_count += 1,
+                "baseline_search_pending" => baseline_search_pending_count += 1,
+                _ => other_status_count += 1,
+            }
+        }
+        if memory_search_called {
+            trial_memory_search_called_count += 1;
+        }
+        baseline_count_before_total =
+            baseline_count_before_total.saturating_add(baseline_count_before);
+        baseline_count_after_total =
+            baseline_count_after_total.saturating_add(baseline_count_after);
+        if baseline_order_hash.is_some() {
+            baseline_order_hash_count += 1;
+        }
+        let status_match = packet
+            .expected_status
+            .as_deref()
+            .map(|expected| expected == status);
+        let behavior_match = packet
+            .expected_visible_behavior
+            .as_deref()
+            .map(|expected| expected == visible_behavior);
+        if status_match == Some(false) || behavior_match == Some(false) {
+            expectation_mismatch_count += 1;
+        }
+        let case_hash = redacted_external_hash(packet.case_id.as_deref())
+            .unwrap_or_else(|| sha256_hex(&format!("packet:{index}")));
+        let diagnostic_status = if packet_raw {
+            "raw_payload_rejected"
+        } else if blockers.is_empty() {
+            "accepted_for_batch_summary"
+        } else {
+            "blocked_before_batch_summary"
+        };
+
+        packet_results.push(json!({
+            "packet_index": index,
+            "case_hash": case_hash,
+            "diagnostic_status": diagnostic_status,
+            "status": status,
+            "visible_behavior": visible_behavior,
+            "query_intent_decision": query_intent_decision,
+            "reject_reason": reject_reason,
+            "expected_status": packet.expected_status,
+            "expected_visible_behavior": packet.expected_visible_behavior,
+            "status_expectation_matched": status_match,
+            "visible_behavior_expectation_matched": behavior_match,
+            "trial_memory_search_called": memory_search_called,
+            "baseline_candidate_count_before_gate": baseline_count_before,
+            "baseline_candidate_count_after_gate": baseline_count_after,
+            "baseline_order_hash": baseline_order_hash,
+            "blocker_count": blockers.len(),
+            "blockers": blockers.into_iter().collect::<Vec<_>>(),
+            "trial_packet_included": false,
+            "visible_hits_included": false,
+            "raw_payload_fields_present": packet_raw
+        }));
+    }
+
+    let packet_count = packet_results.len() as u64;
+    let has_accepted = returned_accepted_count > 0;
+    let has_held = held_by_query_intent_count > 0;
+    let has_blocked_control = transition_gate_blocked_count > 0;
+    let status = if packet_count == 0 {
+        "blocked_no_packets"
+    } else if raw_payload_blocked_count > 0 {
+        "blocked_raw_payload_rejected"
+    } else if expectation_mismatch_count > 0 {
+        "blocked_expectation_mismatch"
+    } else if has_accepted && has_held && has_blocked_control {
+        "ready_for_enforce_hold_review_packet"
+    } else if has_accepted && has_held {
+        "needs_transition_blocked_control_packet"
+    } else {
+        "needs_accepted_and_held_trial_packets"
+    };
+
+    json!({
+        "schema": TRIGGER_RECALL_OPT_IN_GATED_BATCH_DIAGNOSTICS_SCHEMA,
+        "generated_at": unix_now_secs(),
+        "read_only": true,
+        "control_surface": "trigger_recall_opt_in_gated_batch_diagnostics",
+        "status": status,
+        "summary": {
+            "packet_count": packet_count,
+            "returned_accepted_count": returned_accepted_count,
+            "held_by_query_intent_count": held_by_query_intent_count,
+            "transition_gate_blocked_count": transition_gate_blocked_count,
+            "baseline_search_error_count": baseline_search_error_count,
+            "baseline_search_pending_count": baseline_search_pending_count,
+            "other_status_count": other_status_count,
+            "raw_payload_blocked_count": raw_payload_blocked_count,
+            "expectation_mismatch_count": expectation_mismatch_count,
+            "trial_memory_search_called_count": trial_memory_search_called_count,
+            "batch_tool_calls_memory_search_count": 0,
+            "baseline_candidate_count_before_gate_total": baseline_count_before_total,
+            "baseline_candidate_count_after_gate_total": baseline_count_after_total,
+            "baseline_order_hash_count": baseline_order_hash_count
+        },
+        "packet_results": packet_results,
+        "decision": {
+            "ready_for_enforce_hold_review_packet": status == "ready_for_enforce_hold_review_packet",
+            "may_implement_enforce_hold_now": false,
+            "may_change_default_memory_search_now": false,
+            "recommended_next_step": match status {
+                "ready_for_enforce_hold_review_packet" => "write_review_packet_before_any_enforce_hold_design",
+                "needs_transition_blocked_control_packet" => "add_transition_blocked_control_trial_packet",
+                "blocked_raw_payload_rejected" => "remove_raw_query_key_content_fields_and_rerun",
+                "blocked_expectation_mismatch" => "inspect_expectation_mismatches_before_review",
+                "blocked_no_packets" => "collect_gated_trial_packets",
+                _ => "collect_accepted_and_held_trial_packets",
+            }
+        },
+        "safety": {
+            "trial_packets_included": false,
+            "visible_hits_included": false,
+            "raw_queries_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "batch_tool_calls_memory_search": false,
+            "records_coactivation": false,
+            "writes_memory": false,
+            "writes_graph_edges": false,
+            "changes_memory_search_order": false,
+            "changes_default_memory_search_schema": false,
+            "changes_production_retrieval_default": false,
+            "may_enforce_hold": false
+        },
+        "review_refs": {
+            "attempt_id_hash": redacted_external_hash(options.attempt_id.as_deref()),
+            "reviewer_present": options.reviewer.as_ref().map(|value| !value.trim().is_empty()).unwrap_or(false),
+            "commit_present": options.commit.as_ref().map(|value| !value.trim().is_empty()).unwrap_or(false),
+            "forum_post_id_present": options.forum_post_id.as_ref().map(|value| !value.trim().is_empty()).unwrap_or(false)
+        },
+        "input_contract": {
+            "packet_count": packet_count,
+            "trial_packet_included": false,
+            "visible_hits_included": false,
+            "raw_payload_fields_present": outer_raw,
+            "raw_query_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "unknown_fields_ignored": true
+        },
+        "side_effects": {
+            "calls_memory_search": false,
+            "calls_memory_neighbors": false,
+            "records_coactivation": false,
+            "writes_memory": false,
+            "writes_graph_edges": false,
+            "writes_approval": false,
+            "changes_memory_search_order": false,
+            "changes_default_memory_search_schema": false,
+            "changes_production_retrieval_default": false,
+            "runs_semantic_retrieval": false,
+            "runs_graph_retrieval": false,
+            "may_enforce_hold": false
+        },
+        "calls_memory_search": false,
+        "runs_biocortex": false,
+        "changes_memory_search_order": false,
+        "raw_queries_included": false,
+        "raw_keys_included": false,
+        "content_included": false
     })
 }
 
@@ -1256,8 +1570,14 @@ mod tests {
         assert!(!serialized.contains("secret_g25_key"));
         assert_eq!(trial["status"], json!("returned_accepted"));
         assert_eq!(trial["query_intent"]["decision"], json!("allow"));
-        assert_eq!(trial["baseline"]["baseline_candidate_count_before_gate"], json!(1));
-        assert_eq!(trial["baseline"]["baseline_candidate_count_after_gate"], json!(1));
+        assert_eq!(
+            trial["baseline"]["baseline_candidate_count_before_gate"],
+            json!(1)
+        );
+        assert_eq!(
+            trial["baseline"]["baseline_candidate_count_after_gate"],
+            json!(1)
+        );
         assert_eq!(trial["visible_hits"].as_array().expect("hits").len(), 1);
         assert_eq!(trial["side_effects"]["calls_memory_search"], json!(true));
         assert_eq!(trial["side_effects"]["records_coactivation"], json!(false));
@@ -1304,7 +1624,201 @@ mod tests {
             json!("frontend_dashboard_intent")
         );
         assert_eq!(trial["visible_hits"], json!([]));
-        assert_eq!(trial["baseline"]["baseline_candidate_count_before_gate"], json!(1));
-        assert_eq!(trial["baseline"]["baseline_candidate_count_after_gate"], json!(0));
+        assert_eq!(
+            trial["baseline"]["baseline_candidate_count_before_gate"],
+            json!(1)
+        );
+        assert_eq!(
+            trial["baseline"]["baseline_candidate_count_after_gate"],
+            json!(0)
+        );
+    }
+
+    #[test]
+    fn gated_batch_diagnostics_summarizes_trial_statuses_without_store_calls() {
+        let accepted = trigger_recall_opt_in_gated_baseline_trial(
+            TriggerRecallOptInGatedBaselineTrialOptions {
+                runtime_transition_gate: ready_transition_gate_fixture(),
+                query: "LSWR G25 store write execution preflight landed output only plan next gate"
+                    .to_string(),
+                mode: "fts".to_string(),
+                per_call_opt_in: true,
+                scope: Some(PROJECT_SCOPE.to_string()),
+                scope_mode: "local_only".to_string(),
+                runtime_enabled: true,
+                limit: 5,
+                baseline_hits: Some(vec![TriggerRecallOptInGatedBaselineTrialHit {
+                    key: "secret_batch_accept_key".to_string(),
+                    kind: "decision".to_string(),
+                    score: 42.0,
+                    scope: Some(PROJECT_SCOPE.to_string()),
+                    created_at: 1,
+                    updated_at: 2,
+                    tags_count: 0,
+                }]),
+                baseline_search_called: true,
+                ..Default::default()
+            },
+        );
+        let held = trigger_recall_opt_in_gated_baseline_trial(
+            TriggerRecallOptInGatedBaselineTrialOptions {
+                runtime_transition_gate: ready_transition_gate_fixture(),
+                query: "Goal C dashboard state card spacing responsive layout visual design only"
+                    .to_string(),
+                mode: "fts".to_string(),
+                per_call_opt_in: true,
+                scope: Some(PROJECT_SCOPE.to_string()),
+                scope_mode: "local_only".to_string(),
+                runtime_enabled: true,
+                limit: 5,
+                baseline_hits: Some(vec![TriggerRecallOptInGatedBaselineTrialHit {
+                    key: "secret_batch_hold_key".to_string(),
+                    kind: "decision".to_string(),
+                    score: 7.0,
+                    scope: None,
+                    created_at: 1,
+                    updated_at: 2,
+                    tags_count: 0,
+                }]),
+                baseline_search_called: true,
+                ..Default::default()
+            },
+        );
+        let blocked = trigger_recall_opt_in_gated_baseline_trial(
+            TriggerRecallOptInGatedBaselineTrialOptions {
+                runtime_transition_gate: Value::Null,
+                query: "blocked transition query".to_string(),
+                mode: "fts".to_string(),
+                per_call_opt_in: true,
+                scope: Some(PROJECT_SCOPE.to_string()),
+                scope_mode: "local_only".to_string(),
+                runtime_enabled: true,
+                limit: 5,
+                ..Default::default()
+            },
+        );
+
+        let batch = trigger_recall_opt_in_gated_batch_diagnostics(
+            TriggerRecallOptInGatedBatchDiagnosticsOptions {
+                packets: vec![
+                    TriggerRecallOptInGatedBatchDiagnosticsPacket {
+                        trial_packet: accepted,
+                        case_id: Some("accepted secret case".to_string()),
+                        expected_status: Some("returned_accepted".to_string()),
+                        expected_visible_behavior: Some("baseline_fts_visible".to_string()),
+                        ..Default::default()
+                    },
+                    TriggerRecallOptInGatedBatchDiagnosticsPacket {
+                        trial_packet: held,
+                        case_id: Some("held secret case".to_string()),
+                        expected_status: Some("held_by_query_intent".to_string()),
+                        expected_visible_behavior: Some("held_by_query_intent".to_string()),
+                        ..Default::default()
+                    },
+                    TriggerRecallOptInGatedBatchDiagnosticsPacket {
+                        trial_packet: blocked,
+                        case_id: Some("blocked secret case".to_string()),
+                        expected_status: Some("transition_gate_blocked".to_string()),
+                        expected_visible_behavior: Some("transition_gate_blocked".to_string()),
+                        ..Default::default()
+                    },
+                ],
+                attempt_id: Some("batch-attempt-1".to_string()),
+                reviewer: Some("codex".to_string()),
+                commit: Some("batch-commit".to_string()),
+                forum_post_id: Some("3975".to_string()),
+                ..Default::default()
+            },
+        );
+
+        let serialized = serde_json::to_string(&batch).expect("serialize");
+        assert!(!serialized.contains("secret_batch_accept_key"));
+        assert!(!serialized.contains("secret_batch_hold_key"));
+        assert!(!serialized.contains("accepted secret case"));
+        assert!(!serialized.contains("held secret case"));
+        assert!(!serialized.contains("blocked secret case"));
+        assert_eq!(
+            batch["schema"],
+            json!(TRIGGER_RECALL_OPT_IN_GATED_BATCH_DIAGNOSTICS_SCHEMA)
+        );
+        assert_eq!(batch["read_only"], json!(true));
+        assert_eq!(
+            batch["status"],
+            json!("ready_for_enforce_hold_review_packet")
+        );
+        assert_eq!(batch["summary"]["packet_count"], json!(3));
+        assert_eq!(batch["summary"]["returned_accepted_count"], json!(1));
+        assert_eq!(batch["summary"]["held_by_query_intent_count"], json!(1));
+        assert_eq!(batch["summary"]["transition_gate_blocked_count"], json!(1));
+        assert_eq!(
+            batch["summary"]["trial_memory_search_called_count"],
+            json!(2)
+        );
+        assert_eq!(
+            batch["summary"]["batch_tool_calls_memory_search_count"],
+            json!(0)
+        );
+        assert_eq!(
+            batch["decision"]["ready_for_enforce_hold_review_packet"],
+            json!(true)
+        );
+        assert_eq!(
+            batch["decision"]["may_implement_enforce_hold_now"],
+            json!(false)
+        );
+        assert_eq!(batch["safety"]["trial_packets_included"], json!(false));
+        assert_eq!(batch["safety"]["visible_hits_included"], json!(false));
+        assert_eq!(batch["side_effects"]["calls_memory_search"], json!(false));
+        assert_eq!(batch["side_effects"]["may_enforce_hold"], json!(false));
+    }
+
+    #[test]
+    fn gated_batch_diagnostics_rejects_raw_trial_packet_without_echoing() {
+        let mut trial = trigger_recall_opt_in_gated_baseline_trial(
+            TriggerRecallOptInGatedBaselineTrialOptions {
+                runtime_transition_gate: ready_transition_gate_fixture(),
+                query: "LSWR G25 store write execution preflight landed output only plan next gate"
+                    .to_string(),
+                mode: "fts".to_string(),
+                per_call_opt_in: true,
+                scope: Some(PROJECT_SCOPE.to_string()),
+                scope_mode: "local_only".to_string(),
+                runtime_enabled: true,
+                limit: 5,
+                baseline_search_called: true,
+                ..Default::default()
+            },
+        );
+        trial["raw_query"] = json!("secret batch raw query");
+        trial["raw_key"] = json!("secret_batch_raw_key");
+        trial["content"] = json!("secret batch raw content");
+
+        let batch = trigger_recall_opt_in_gated_batch_diagnostics(
+            TriggerRecallOptInGatedBatchDiagnosticsOptions {
+                packets: vec![TriggerRecallOptInGatedBatchDiagnosticsPacket {
+                    trial_packet: trial,
+                    case_id: Some("raw secret case".to_string()),
+                    expected_status: Some("returned_accepted".to_string()),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            },
+        );
+
+        let serialized = serde_json::to_string(&batch).expect("serialize");
+        assert!(!serialized.contains("secret batch raw query"));
+        assert!(!serialized.contains("secret_batch_raw_key"));
+        assert!(!serialized.contains("secret batch raw content"));
+        assert!(!serialized.contains("raw secret case"));
+        assert_eq!(batch["status"], json!("blocked_raw_payload_rejected"));
+        assert_eq!(batch["summary"]["raw_payload_blocked_count"], json!(1));
+        assert_eq!(
+            batch["packet_results"][0]["trial_packet_included"],
+            json!(false)
+        );
+        let blockers = batch["packet_results"][0]["blockers"]
+            .as_array()
+            .expect("blockers");
+        assert!(blockers.contains(&json!("raw_payload_fields_present")));
     }
 }

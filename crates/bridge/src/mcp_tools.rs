@@ -3,9 +3,10 @@
 
 use crate::tool_diagnostics::{classify_tool_error, ToolErrorDiagnosticClass};
 use crate::trigger_recall_opt_in::{
-    trigger_recall_opt_in_gated_baseline_trial,
+    trigger_recall_opt_in_gated_baseline_trial, trigger_recall_opt_in_gated_batch_diagnostics,
     trigger_recall_opt_in_runtime_transition_gate, trigger_recall_opt_in_status,
-    trigger_recall_value_contains_raw, TriggerRecallOptInRuntimeTransitionGateOptions,
+    trigger_recall_value_contains_raw, TriggerRecallOptInGatedBatchDiagnosticsOptions,
+    TriggerRecallOptInGatedBatchDiagnosticsPacket, TriggerRecallOptInRuntimeTransitionGateOptions,
     TriggerRecallOptInGatedBaselineTrialHit, TriggerRecallOptInGatedBaselineTrialOptions,
     TriggerRecallOptInStatusOptions, TRIGGER_RECALL_DISABLE_ENV, TRIGGER_RECALL_OPT_IN_ENABLE_ENV,
 };
@@ -29030,6 +29031,166 @@ impl McpTool for TriggerRecallOptInGatedBaselineTrialTool {
 }
 
 // ===========================================================================
+//  trigger_recall_opt_in_gated_batch_diagnostics - gated trial batch review
+// ===========================================================================
+
+/// Read-only batch diagnostics for redacted trigger-recall gated baseline trial
+/// packets. This tool never calls store FTS itself; it only summarizes trial
+/// packet statuses, counts, and order hashes for the next review packet.
+pub struct TriggerRecallOptInGatedBatchDiagnosticsTool;
+
+impl TriggerRecallOptInGatedBatchDiagnosticsTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for TriggerRecallOptInGatedBatchDiagnosticsTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn trigger_recall_gated_batch_packets_from_args(
+    args: &Value,
+) -> Vec<TriggerRecallOptInGatedBatchDiagnosticsPacket> {
+    args.get("trial_packets")
+        .or_else(|| args.get("packets"))
+        .and_then(Value::as_array)
+        .map(|packets| {
+            packets
+                .iter()
+                .map(|packet| TriggerRecallOptInGatedBatchDiagnosticsPacket {
+                    trial_packet: packet
+                        .get("trial_packet")
+                        .or_else(|| packet.get("gated_baseline_trial"))
+                        .cloned()
+                        .unwrap_or(Value::Null),
+                    case_id: packet
+                        .get("case_id")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                    expected_status: packet
+                        .get("expected_status")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                    expected_visible_behavior: packet
+                        .get("expected_visible_behavior")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                    raw_payload_fields_present: trigger_recall_value_contains_raw(packet),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn trigger_recall_gated_batch_outer_args_contain_raw(args: &Value) -> bool {
+    let mut outer = args.clone();
+    if let Value::Object(map) = &mut outer {
+        map.remove("trial_packets");
+        map.remove("packets");
+    }
+    trigger_recall_value_contains_raw(&outer)
+}
+
+#[async_trait]
+impl McpTool for TriggerRecallOptInGatedBatchDiagnosticsTool {
+    fn name(&self) -> &'static str {
+        "trigger_recall_opt_in_gated_batch_diagnostics"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only batch diagnostics for redacted trigger \
+                 recall gated baseline trial packets. Consumes \
+                 trigger_recall_opt_in_gated_baseline_trial outputs and reports \
+                 only status counts, order hashes, hashed case ids, and blocker \
+                 summaries. Does not call memory_search or store FTS itself, \
+                 echo trial packets, return raw query/keys/content, record \
+                 coactivation, write memory, change default search, or \
+                 authorize enforce_hold."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["trial_packets"],
+                "properties": {
+                    "trial_packets": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["trial_packet"],
+                            "properties": {
+                                "trial_packet": {
+                                    "type": "object",
+                                    "description": "JSON object produced by trigger_recall_opt_in_gated_baseline_trial. The tool consumes only safe summary fields and does not echo the packet."
+                                },
+                                "case_id": {
+                                    "type": "string",
+                                    "description": "Optional audit case id. Output includes only a hash."
+                                },
+                                "expected_status": {
+                                    "type": "string",
+                                    "enum": [
+                                        "returned_accepted",
+                                        "held_by_query_intent",
+                                        "transition_gate_blocked",
+                                        "baseline_search_error",
+                                        "baseline_search_pending"
+                                    ]
+                                },
+                                "expected_visible_behavior": {
+                                    "type": "string",
+                                    "enum": [
+                                        "baseline_fts_visible",
+                                        "held_by_query_intent",
+                                        "transition_gate_blocked",
+                                        "baseline_search_error",
+                                        "baseline_search_pending"
+                                    ]
+                                }
+                            }
+                        },
+                        "description": "Redacted trial packets under review. Raw queries, memory keys, and content fields are rejected and never echoed."
+                    },
+                    "attempt_id": {
+                        "type": "string",
+                        "description": "Optional batch attempt id for audit correlation. Output includes only a hash."
+                    },
+                    "reviewer": { "type": "string" },
+                    "commit": { "type": "string" },
+                    "forum_post_id": { "type": "string" }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let payload = trigger_recall_opt_in_gated_batch_diagnostics(
+            TriggerRecallOptInGatedBatchDiagnosticsOptions {
+                packets: trigger_recall_gated_batch_packets_from_args(&args),
+                attempt_id: args
+                    .get("attempt_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                reviewer: args
+                    .get("reviewer")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                commit: args.get("commit").and_then(Value::as_str).map(str::to_string),
+                forum_post_id: args
+                    .get("forum_post_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                raw_payload_fields_present: trigger_recall_gated_batch_outer_args_contain_raw(&args),
+            },
+        );
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
+// ===========================================================================
 //  biocortex_retrieval_opt_in_dry_run — read-only future-path planner
 // ===========================================================================
 
@@ -52279,6 +52440,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         &mut reg,
         policy,
         Tier::Niche,
+        Arc::new(TriggerRecallOptInGatedBatchDiagnosticsTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
         Arc::new(BioCortexRetrievalOptInGatedStoreTrialTool::new(hub.clone())),
     );
     reg_if(
@@ -68002,6 +68169,173 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert_eq!(v["side_effects"]["records_coactivation"], json!(false));
 
         let _ = tokio::fs::remove_dir_all(temp_dir).await;
+    }
+
+    #[test]
+    fn trigger_recall_opt_in_gated_batch_diagnostics_schema_is_registered() {
+        let tool = TriggerRecallOptInGatedBatchDiagnosticsTool::new();
+        let schema = tool.schema();
+        assert_eq!(schema.name, "trigger_recall_opt_in_gated_batch_diagnostics");
+        assert!(schema.description.contains("Read-only"));
+        assert!(schema.description.contains("Does not call memory_search"));
+        assert!(schema.description.contains("authorize enforce_hold"));
+
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required");
+        assert!(required.contains(&json!("trial_packets")));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("trial_packets").is_some());
+        assert!(props.get("attempt_id").is_some());
+        assert!(props.get("query").is_none());
+        assert!(props.get("baseline_keys").is_none());
+        assert!(props.get("raw_content").is_none());
+        assert!(props.get("mutate").is_none());
+
+        let names: Vec<String> = build_registry_with_policy(
+            Hub::builder().build(),
+            ToolPolicy {
+                set: ToolSet::Profile,
+                profile: ToolProfile::All,
+            },
+        )
+        .list()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
+        assert!(names.contains(&schema.name));
+    }
+
+    #[tokio::test]
+    async fn trigger_recall_opt_in_gated_batch_diagnostics_redacts_packets() {
+        let accepted = trigger_recall_opt_in_gated_baseline_trial(
+            TriggerRecallOptInGatedBaselineTrialOptions {
+                runtime_transition_gate: trigger_recall_ready_transition_gate_fixture(),
+                query: "LSWR G25 store write execution preflight landed output only plan next gate"
+                    .to_string(),
+                mode: "fts".to_string(),
+                per_call_opt_in: true,
+                scope: Some("project:/Data/CascadeProjects/agent-bridge".to_string()),
+                scope_mode: "local_only".to_string(),
+                runtime_enabled: true,
+                limit: 5,
+                baseline_hits: Some(vec![TriggerRecallOptInGatedBaselineTrialHit {
+                    key: "secret_batch_mcp_accept_key".to_string(),
+                    kind: "decision".to_string(),
+                    score: 42.0,
+                    scope: Some("project:/Data/CascadeProjects/agent-bridge".to_string()),
+                    created_at: 1,
+                    updated_at: 2,
+                    tags_count: 0,
+                }]),
+                baseline_search_called: true,
+                ..Default::default()
+            },
+        );
+        let held = trigger_recall_opt_in_gated_baseline_trial(
+            TriggerRecallOptInGatedBaselineTrialOptions {
+                runtime_transition_gate: trigger_recall_ready_transition_gate_fixture(),
+                query: "Goal C dashboard state card spacing responsive layout visual design only"
+                    .to_string(),
+                mode: "fts".to_string(),
+                per_call_opt_in: true,
+                scope: Some("project:/Data/CascadeProjects/agent-bridge".to_string()),
+                scope_mode: "local_only".to_string(),
+                runtime_enabled: true,
+                limit: 5,
+                baseline_search_called: true,
+                ..Default::default()
+            },
+        );
+        let mut raw_blocked = trigger_recall_opt_in_gated_baseline_trial(
+            TriggerRecallOptInGatedBaselineTrialOptions {
+                runtime_transition_gate: Value::Null,
+                query: "secret blocked batch query".to_string(),
+                mode: "fts".to_string(),
+                per_call_opt_in: true,
+                scope: Some("project:/Data/CascadeProjects/agent-bridge".to_string()),
+                scope_mode: "local_only".to_string(),
+                runtime_enabled: true,
+                limit: 5,
+                ..Default::default()
+            },
+        );
+        raw_blocked["raw_key"] = json!("secret_batch_mcp_raw_key");
+        raw_blocked["content"] = json!("secret batch mcp raw content");
+
+        let tool = TriggerRecallOptInGatedBatchDiagnosticsTool::new();
+        let out = tool
+            .execute(
+                json!({
+                    "trial_packets": [
+                        {
+                            "trial_packet": accepted,
+                            "case_id": "accepted secret mcp case",
+                            "expected_status": "returned_accepted",
+                            "expected_visible_behavior": "baseline_fts_visible"
+                        },
+                        {
+                            "trial_packet": held,
+                            "case_id": "held secret mcp case",
+                            "expected_status": "held_by_query_intent",
+                            "expected_visible_behavior": "held_by_query_intent"
+                        },
+                        {
+                            "trial_packet": raw_blocked,
+                            "case_id": "raw secret mcp case",
+                            "expected_status": "transition_gate_blocked",
+                            "expected_visible_behavior": "transition_gate_blocked"
+                        }
+                    ],
+                    "attempt_id": "secret gated batch mcp attempt",
+                    "reviewer": "codex",
+                    "commit": "trigger-gated-batch-commit",
+                    "forum_post_id": "3975"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let text = match out.content.first() {
+            Some(ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        assert!(!text.contains("secret_batch_mcp_accept_key"));
+        assert!(!text.contains("secret_batch_mcp_raw_key"));
+        assert!(!text.contains("secret batch mcp raw content"));
+        assert!(!text.contains("accepted secret mcp case"));
+        assert!(!text.contains("held secret mcp case"));
+        assert!(!text.contains("raw secret mcp case"));
+        assert!(!text.contains("secret gated batch mcp attempt"));
+
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(
+            v["schema"],
+            json!("agent_bridge.memory.trigger_recall.opt_in_gated_batch_diagnostics.v0")
+        );
+        assert_eq!(v["read_only"], json!(true));
+        assert_eq!(v["status"], json!("blocked_raw_payload_rejected"));
+        assert_eq!(v["summary"]["packet_count"], json!(3));
+        assert_eq!(v["summary"]["returned_accepted_count"], json!(1));
+        assert_eq!(v["summary"]["held_by_query_intent_count"], json!(1));
+        assert_eq!(v["summary"]["raw_payload_blocked_count"], json!(1));
+        assert_eq!(
+            v["summary"]["batch_tool_calls_memory_search_count"],
+            json!(0)
+        );
+        assert_eq!(v["safety"]["trial_packets_included"], json!(false));
+        assert_eq!(v["safety"]["visible_hits_included"], json!(false));
+        assert_eq!(v["side_effects"]["calls_memory_search"], json!(false));
+        assert_eq!(v["side_effects"]["may_enforce_hold"], json!(false));
+        assert_eq!(v["raw_queries_included"], json!(false));
+        assert_eq!(v["raw_keys_included"], json!(false));
+        assert_eq!(v["content_included"], json!(false));
     }
 
     #[test]
