@@ -797,6 +797,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut projected_plus_intent_acc = Agg::default();
     let mut projected_precise_plus_or = Agg::default();
     let mut projected_union_policy_acc = Agg::default();
+    let mut projected_union_continuation_acc = Agg::default();
     let mut projected_oracle_or = Agg::default();
     let mut exact_projected = Agg::default();
     let gold_keys: BTreeSet<&str> = CORPUS
@@ -852,6 +853,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             projected_union_policy_keys.err(),
         );
 
+        let projected_union_continuation_keys =
+            fts.search_projected_union_then_continuation_accepted(case.query, TOP_K);
+        projected_union_continuation_acc.record(
+            first_hit_rank(
+                projected_union_continuation_keys.as_deref().unwrap_or(&[]),
+                case.expect,
+            ),
+            projected_union_continuation_keys.err(),
+        );
+
         let projected_oracle_keys =
             fts.search_precise_then_or_if_expected_missing(case.query, case.expect, TOP_K);
         projected_oracle_or.record(
@@ -878,6 +889,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut projected_union_errors = Vec::new();
     let mut projected_union_policy_false_hits = Vec::new();
     let mut projected_union_policy_errors = Vec::new();
+    let mut projected_union_continuation_false_hits = Vec::new();
+    let mut projected_union_continuation_errors = Vec::new();
     for control in NEGATIVE_CONTROLS {
         match fts.search(IndexKind::Projected, control.query, TOP_K) {
             Ok(keys) => push_false_hits(&mut negative_false_hits, control, &keys, &gold_keys),
@@ -912,6 +925,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ),
             Err(err) => projected_union_policy_errors.push(format!("{}:{err}", control.id)),
         }
+        match fts.search_projected_union_then_continuation_accepted(control.query, TOP_K) {
+            Ok(keys) => push_false_hits(
+                &mut projected_union_continuation_false_hits,
+                control,
+                &keys,
+                &gold_keys,
+            ),
+            Err(err) => {
+                projected_union_continuation_errors.push(format!("{}:{err}", control.id));
+            }
+        }
     }
 
     let active_total = rows.len();
@@ -945,6 +969,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     print_row("projected+intent", &projected_plus_intent_acc, n);
     print_row("projected_union", &projected_precise_plus_or, n);
     print_row("union+policy", &projected_union_policy_acc, n);
+    print_row("union+cont", &projected_union_continuation_acc, n);
     print_row("projected_oracle", &projected_oracle_or, n);
     print_row("exact_projected", &exact_projected, n);
     println!();
@@ -976,6 +1001,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let oracle_added = added_hit_indices(&intent_projected, &projected_oracle_or);
     let oracle_improved = improved_rank_indices(&intent_projected, &projected_oracle_or);
     let policy_lost = lost_hit_indices(&projected_precise_plus_or, &projected_union_policy_acc);
+    let continuation_lost = lost_hit_indices(
+        &projected_union_policy_acc,
+        &projected_union_continuation_acc,
+    );
     println!("  current: precise_else_OR (OR only when precise returns zero rows)");
     println!(
         "  precise+OR union added top-{TOP_K} hits: {} case(s){}",
@@ -1001,6 +1030,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "  union+policy lost top-{TOP_K} hits:     {} case(s){}",
         policy_lost.len(),
         fmt_idx(&policy_lost)
+    );
+    println!(
+        "  union+cont lost top-{TOP_K} hits:       {} case(s){}",
+        continuation_lost.len(),
+        fmt_idx(&continuation_lost)
     );
     println!(
         "  contract: projected_oracle uses gold labels and is diagnostic-only, never a deployable strategy"
@@ -1150,6 +1184,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     print_false_hit_bucket_summary("union+policy", &projected_union_policy_false_hits);
+    println!(
+        "  projected union+cont false hits: {}",
+        projected_union_continuation_false_hits.len()
+    );
+    if !projected_union_continuation_false_hits.is_empty() {
+        println!(
+            "  false hits: {}",
+            fmt_false_hits(&projected_union_continuation_false_hits)
+        );
+    }
+    print_false_hit_bucket_summary("union+cont", &projected_union_continuation_false_hits);
     println!("  parser errors: {}", projected_union_errors.len());
     if !projected_union_errors.is_empty() {
         println!("  errors: {}", projected_union_errors.join(", "));
@@ -1161,10 +1206,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !projected_union_policy_errors.is_empty() {
         println!("  errors: {}", projected_union_policy_errors.join(", "));
     }
+    println!(
+        "  union+cont parser errors: {}",
+        projected_union_continuation_errors.len()
+    );
+    if !projected_union_continuation_errors.is_empty() {
+        println!(
+            "  errors: {}",
+            projected_union_continuation_errors.join(", ")
+        );
+    }
     println!("  contract: candidate-assembly diagnostic only; no production query strategy change");
     println!();
 
     print_policy_acceptance_diagnostics(NEGATIVE_CONTROLS);
+    print_continuation_acceptance_diagnostics(NEGATIVE_CONTROLS);
 
     println!("## Per-case first-hit rank (- = no hit in top {TOP_K}; ERR = FTS parser error)");
     println!(
@@ -1249,6 +1305,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         fmt_idx(&miss_indices(&projected_union_policy_acc))
     );
     println!(
+        "  union+cont misses:      {} case(s){}",
+        miss_indices(&projected_union_continuation_acc).len(),
+        fmt_idx(&miss_indices(&projected_union_continuation_acc))
+    );
+    println!(
         "  projected_oracle misses: {} case(s){}",
         miss_indices(&projected_oracle_or).len(),
         fmt_idx(&miss_indices(&projected_oracle_or))
@@ -1294,6 +1355,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         projected_union_policy_errors.len()
     );
     println!(
+        "  union+cont ctrl:         {} false hit(s), {} parser error(s)",
+        projected_union_continuation_false_hits.len(),
+        projected_union_continuation_errors.len()
+    );
+    println!(
         "  caveat: hand-curated corpus, N={n}. This is a broader trigger-cohort \
          falsifier, not a production ranking benchmark."
     );
@@ -1317,6 +1383,7 @@ fn run_eval_for(
     let mut projected_plus_intent_acc = Agg::default();
     let mut projected_precise_plus_or = Agg::default();
     let mut projected_union_policy_acc = Agg::default();
+    let mut projected_union_continuation_acc = Agg::default();
     let mut projected_oracle_or = Agg::default();
     let mut exact_projected = Agg::default();
     let gold_keys: BTreeSet<&str> = cases
@@ -1372,6 +1439,16 @@ fn run_eval_for(
             projected_union_policy_keys.err(),
         );
 
+        let projected_union_continuation_keys =
+            fts.search_projected_union_then_continuation_accepted(case.query, TOP_K);
+        projected_union_continuation_acc.record(
+            first_hit_rank(
+                projected_union_continuation_keys.as_deref().unwrap_or(&[]),
+                case.expect,
+            ),
+            projected_union_continuation_keys.err(),
+        );
+
         let projected_oracle_keys =
             fts.search_precise_then_or_if_expected_missing(case.query, case.expect, TOP_K);
         projected_oracle_or.record(
@@ -1398,6 +1475,8 @@ fn run_eval_for(
     let mut projected_union_errors = Vec::new();
     let mut projected_union_policy_false_hits = Vec::new();
     let mut projected_union_policy_errors = Vec::new();
+    let mut projected_union_continuation_false_hits = Vec::new();
+    let mut projected_union_continuation_errors = Vec::new();
     for control in negative_controls {
         match fts.search(IndexKind::Projected, control.query, TOP_K) {
             Ok(keys) => push_false_hits(&mut negative_false_hits, control, &keys, &gold_keys),
@@ -1432,6 +1511,17 @@ fn run_eval_for(
             ),
             Err(err) => projected_union_policy_errors.push(format!("{}:{err}", control.id)),
         }
+        match fts.search_projected_union_then_continuation_accepted(control.query, TOP_K) {
+            Ok(keys) => push_false_hits(
+                &mut projected_union_continuation_false_hits,
+                control,
+                &keys,
+                &gold_keys,
+            ),
+            Err(err) => {
+                projected_union_continuation_errors.push(format!("{}:{err}", control.id));
+            }
+        }
     }
 
     let active_total = rows.len();
@@ -1465,6 +1555,7 @@ fn run_eval_for(
     print_row("projected+intent", &projected_plus_intent_acc, n);
     print_row("projected_union", &projected_precise_plus_or, n);
     print_row("union+policy", &projected_union_policy_acc, n);
+    print_row("union+cont", &projected_union_continuation_acc, n);
     print_row("projected_oracle", &projected_oracle_or, n);
     print_row("exact_projected", &exact_projected, n);
     println!();
@@ -1496,6 +1587,10 @@ fn run_eval_for(
     let oracle_added = added_hit_indices(&intent_projected, &projected_oracle_or);
     let oracle_improved = improved_rank_indices(&intent_projected, &projected_oracle_or);
     let policy_lost = lost_hit_indices(&projected_precise_plus_or, &projected_union_policy_acc);
+    let continuation_lost = lost_hit_indices(
+        &projected_union_policy_acc,
+        &projected_union_continuation_acc,
+    );
     println!("  current: precise_else_OR (OR only when precise returns zero rows)");
     println!(
         "  precise+OR union added top-{TOP_K} hits: {} case(s){}",
@@ -1521,6 +1616,11 @@ fn run_eval_for(
         "  union+policy lost top-{TOP_K} hits:     {} case(s){}",
         policy_lost.len(),
         fmt_idx(&policy_lost)
+    );
+    println!(
+        "  union+cont lost top-{TOP_K} hits:       {} case(s){}",
+        continuation_lost.len(),
+        fmt_idx(&continuation_lost)
     );
     println!(
         "  contract: projected_oracle uses gold labels and is diagnostic-only, never a deployable strategy"
@@ -1588,6 +1688,17 @@ fn run_eval_for(
         );
     }
     print_false_hit_bucket_summary("union+policy", &projected_union_policy_false_hits);
+    println!(
+        "  projected union+cont false hits: {}",
+        projected_union_continuation_false_hits.len()
+    );
+    if !projected_union_continuation_false_hits.is_empty() {
+        println!(
+            "  false hits: {}",
+            fmt_false_hits(&projected_union_continuation_false_hits)
+        );
+    }
+    print_false_hit_bucket_summary("union+cont", &projected_union_continuation_false_hits);
     println!("  projected parser errors: {}", negative_errors.len());
     println!("  cjk parser errors: {}", cjk_negative_errors.len());
     println!(
@@ -1606,6 +1717,10 @@ fn run_eval_for(
         "  projected union+policy parser errors: {}",
         projected_union_policy_errors.len()
     );
+    println!(
+        "  projected union+cont parser errors: {}",
+        projected_union_continuation_errors.len()
+    );
     println!("  controls:");
     for control in negative_controls {
         println!(
@@ -1619,6 +1734,7 @@ fn run_eval_for(
 
     print_exclusion_boundary_diagnostics(fts, negative_controls, &projected_intent_false_hits);
     print_policy_acceptance_diagnostics(negative_controls);
+    print_continuation_acceptance_diagnostics(negative_controls);
     print_policy_acceptance_control_eval(policy_acceptance_controls);
 
     println!("## Per-case first-hit rank (- = no hit in top {TOP_K}; ERR = FTS parser error)");
@@ -1702,6 +1818,11 @@ fn run_eval_for(
         "  union+policy misses:    {} case(s){}",
         miss_indices(&projected_union_policy_acc).len(),
         fmt_idx(&miss_indices(&projected_union_policy_acc))
+    );
+    println!(
+        "  union+cont misses:      {} case(s){}",
+        miss_indices(&projected_union_continuation_acc).len(),
+        fmt_idx(&miss_indices(&projected_union_continuation_acc))
     );
     println!(
         "  projected_oracle misses: {} case(s){}",
@@ -2079,6 +2200,17 @@ impl ScratchFts {
         limit: usize,
     ) -> Result<Vec<String>, String> {
         if policy_acceptance_reject_reason(query).is_some() {
+            return Ok(Vec::new());
+        }
+        self.search_precise_plus_or_union(IndexKind::Projected, query, limit)
+    }
+
+    fn search_projected_union_then_continuation_accepted(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<String>, String> {
+        if continuation_acceptance_reject_reason(query).is_some() {
             return Ok(Vec::new());
         }
         self.search_precise_plus_or_union(IndexKind::Projected, query, limit)
@@ -2526,6 +2658,46 @@ fn policy_acceptance_reject_reason(query: &str) -> Option<&'static str> {
     None
 }
 
+fn continuation_acceptance_reject_reason(query: &str) -> Option<&'static str> {
+    if let Some(reason) = policy_acceptance_reject_reason(query) {
+        return Some(reason);
+    }
+
+    let lower = query.to_lowercase();
+    let has_dashboard_or_state = contains_any(&lower, &["dashboard", "state"]);
+    if !has_dashboard_or_state {
+        return None;
+    }
+
+    if contains_any(
+        &lower,
+        &[
+            "exercise", "recovery", "pain", "tracker", "workout", "health", "fitness",
+        ],
+    ) {
+        return Some("health_dashboard_intent");
+    }
+
+    if contains_any(
+        &lower,
+        &[
+            "card spacing",
+            "color palette",
+            "button hover",
+            "responsive layout",
+            "visual design",
+            "visual-design",
+            "styling",
+            "layout",
+            "frontend",
+        ],
+    ) {
+        return Some("frontend_dashboard_intent");
+    }
+
+    None
+}
+
 fn contains_any(haystack: &str, needles: &[&str]) -> bool {
     needles.iter().any(|needle| haystack.contains(needle))
 }
@@ -2554,6 +2726,31 @@ fn print_policy_acceptance_diagnostics(controls: &[NegativeControl]) {
     }
     println!(
         "  contract: query-intent gate only; rejects unsafe/non-continuation requests before candidate acceptance; no production behavior change"
+    );
+    println!();
+}
+
+fn print_continuation_acceptance_diagnostics(controls: &[NegativeControl]) {
+    println!("## Eval-only continuation-intent gate diagnostics");
+    let mut rejected = 0;
+    for control in controls {
+        let policy_reason = policy_acceptance_reject_reason(control.query);
+        let continuation_reason = continuation_acceptance_reject_reason(control.query);
+        if continuation_reason.is_some() && continuation_reason != policy_reason {
+            rejected += 1;
+            println!(
+                "  reject {:<40} {:<34} {}",
+                control.id,
+                continuation_reason.unwrap_or("allow"),
+                control.note
+            );
+        }
+    }
+    if rejected == 0 {
+        println!("  no extra dashboard/state controls rejected beyond policy gate");
+    }
+    println!(
+        "  contract: query-intent gate only; separates dashboard/state continuation from frontend or health dashboard intent; no production behavior change"
     );
     println!();
 }
@@ -3137,11 +3334,22 @@ mod tests {
                 case.expect.contains(&expected_key),
                 "{case_id} should keep the intended Goal C gold key"
             );
+            assert_eq!(
+                continuation_acceptance_reject_reason(case.query),
+                None,
+                "{case_id} must remain an allowed dashboard/state continuation"
+            );
         }
 
-        for control_id in [
-            "aio2_unrelated_frontend_goal_c_words",
-            "aio2_unrelated_controlled_rsi_health_dashboard",
+        for (control_id, expected_reason) in [
+            (
+                "aio2_unrelated_frontend_goal_c_words",
+                "frontend_dashboard_intent",
+            ),
+            (
+                "aio2_unrelated_controlled_rsi_health_dashboard",
+                "health_dashboard_intent",
+            ),
         ] {
             let control = AIO2_NATIVE_NEGATIVE_CONTROLS
                 .iter()
@@ -3152,6 +3360,11 @@ mod tests {
                 policy_acceptance_reject_reason(control.query),
                 None,
                 "{control_id} must remain a domain-intent contrast, not a policy/adversarial gate"
+            );
+            assert_eq!(
+                continuation_acceptance_reject_reason(control.query),
+                Some(expected_reason),
+                "{control_id} should be rejected by the dashboard/state continuation gate"
             );
         }
     }
@@ -3421,6 +3634,81 @@ mod tests {
             )
             .expect("continuation allowed"),
             vec!["g25_store_write".to_string()]
+        );
+    }
+
+    #[test]
+    fn projected_union_continuation_gate_rejects_dashboard_role_mismatch() {
+        let rows = [
+            MemoryRow {
+                key: "goal_c_boundary".to_string(),
+                kind: "decision".to_string(),
+                scope: None,
+                content: String::new(),
+                projected:
+                    "Controlled RSI Goal C boundary dashboard state report first continuity decisions"
+                        .to_string(),
+                triggers: Vec::new(),
+            },
+            MemoryRow {
+                key: "goal_c_closure".to_string(),
+                kind: "decision".to_string(),
+                scope: None,
+                content: String::new(),
+                projected:
+                    "Agent Bridge Goal C dashboard state U report closure no executor decision"
+                        .to_string(),
+                triggers: Vec::new(),
+            },
+        ];
+        let fts = ScratchFts::build(&rows).expect("scratch fts");
+
+        assert_eq!(
+            continuation_acceptance_reject_reason(
+                "Goal C dashboard state for Controlled RSI boundary and report first continuity decisions"
+            ),
+            None
+        );
+        let allowed_keys = fts
+            .search_projected_union_then_continuation_accepted(
+                "Goal C dashboard state for Controlled RSI boundary and report first continuity decisions",
+                TOP_K,
+            )
+            .expect("continuation allowed");
+        assert_eq!(
+            allowed_keys.first().map(String::as_str),
+            Some("goal_c_boundary")
+        );
+        assert!(allowed_keys.contains(&"goal_c_closure".to_string()));
+
+        assert_eq!(
+            continuation_acceptance_reject_reason(
+                "Goal C dashboard state card spacing responsive layout visual design only not continuity ledger work"
+            ),
+            Some("frontend_dashboard_intent")
+        );
+        assert_eq!(
+            fts.search_projected_union_then_continuation_accepted(
+                "Goal C dashboard state card spacing responsive layout visual design only not continuity ledger work",
+                TOP_K,
+            )
+            .expect("frontend dashboard rejected"),
+            Vec::<String>::new()
+        );
+
+        assert_eq!(
+            continuation_acceptance_reject_reason(
+                "Controlled RSI exercise recovery dashboard state color cards pain tracker layout"
+            ),
+            Some("health_dashboard_intent")
+        );
+        assert_eq!(
+            fts.search_projected_union_then_continuation_accepted(
+                "Controlled RSI exercise recovery dashboard state color cards pain tracker layout",
+                TOP_K,
+            )
+            .expect("health dashboard rejected"),
+            Vec::<String>::new()
         );
     }
 

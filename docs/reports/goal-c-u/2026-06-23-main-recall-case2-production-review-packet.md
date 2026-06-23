@@ -1,10 +1,30 @@
 # Main Recall Case #2 Production Review Packet
 
 Date: 2026-06-23
-Host: `maxiaodeMac-Pro.local`
-Worktree: `/Users/pallasting/Projects/agent-bridge`
-Base: `d8f1547` (`test(memory): add case2 role-aware eval assembler`)
-Scope: production review only; no runtime implementation
+Primary worktree: `/Users/pallasting/Projects/agent-bridge`
+Scope: production review packet only; no runtime implementation
+
+## Decision
+
+Do not wire the case #2 role-aware projection assembler into default
+`memory_search`.
+
+Also do not implement a runtime flag in this slice. Keep the case #2
+tool-surface path eval-only until the remaining measurement and scope risks are
+closed.
+
+Accepted status:
+
+```text
+case2_role_aware_eval: accepted as evidence
+default_memory_search: rejected
+runtime_flag_or_opt_in_mode: deferred
+next_gate: broader hard-case family review, with snapshot hardening as the supporting gate
+```
+
+This is a conservative acceptance of the evidence, not a rejection of the idea.
+The eval result is strong for case #2, but too narrow to justify live retrieval
+behavior.
 
 ## Question
 
@@ -17,19 +37,33 @@ The case #2 role-aware eval assembler now succeeds in `recall_eval`:
 
 Should this become production retrieval behavior?
 
-## Evidence Package
+Answer: no for default production; not yet for opt-in production.
 
-### Baseline Identity
+## Evidence Reviewed
 
-The accepted comparison target is the pinned snapshot, not live-store-only
-output:
+| Report | Evidence |
+|---|---|
+| `2026-06-22-main-recall-hard-miss-autopsy.md` | case #2 is a candidate-visibility miss |
+| `2026-06-22-main-recall-case2-tool-surface-projection-probe.md` | projection makes the target visible |
+| `2026-06-22-main-recall-case2-tool-surface-negative-controls.md` | first hard negatives stay clean |
+| `2026-06-23-main-recall-case2-tool-surface-positive-controls.md` | 11/11 intended family controls pass |
+| `2026-06-23-main-recall-frozen-baseline-anchor.md` | lift claims must use a pinned store fingerprint |
+| `2026-06-23-main-recall-case2-tool-surface-rank-adjudication.md` | strict candidates need role interpretation |
+| `2026-06-23-main-recall-case2-runtime-design-sketch.md` | design shape forbids broad default expansion |
+| `2026-06-23-main-recall-case2-eval-assembler.md` | role-aware eval assembler makes case #2 target rank 1 |
+
+The strongest result is from the pinned Mac baseline:
 
 ```text
 AB_BASELINE_DB=/Users/pallasting/.local/share/agent-bridge/snapshots/state.snapshot.20260623.db
 store fingerprint: pinned=true active=3022 edges=5527 newest=1782205313
+toolproj hit: 2  toolproj_acc hit: 2  toolproj_acc_durable hit: 2  role_aware hit: 1
+controls=6 nonempty_accepted=0 false_target_hits=0 work_memory_hits=0
+controls=11 durable_hits=11 strict_hits=11 strict_cluster_hits=11 strict_empty=0 role_aware_hits=11 role_aware_rank1_hits=11
 ```
 
-The current hard-tier production anchor remains:
+The standing hard-tier runtime anchor remains unchanged because the assembler is
+eval-only:
 
 ```text
 hard-tier R@10: fts=0.375 fts+graph=0.375 hybrid=0.000 semantic=0.125
@@ -37,7 +71,11 @@ hard fts misses: #1, #2, #8, #9, #14
 hard zero-row fts misses: #1, #2
 ```
 
-### Eval Assembler Result
+The Aio2/GitHub-side review input is useful as repository sanity and an
+independent conservative read, but it is not the canonical case #2 production
+lift evidence because it does not use the Mac pinned baseline.
+
+## Eval Assembler Result
 
 The role-aware assembler is eval-only and not wired into production retrieval:
 
@@ -71,49 +109,38 @@ positive controls: controls=11 ... role_aware_hits=11 role_aware_rank1_hits=11
 tests: 20 passed
 ```
 
-## Review Decision
+## Production Options
 
-Options reviewed:
-
-| option | decision | reason |
+| Option | Decision | Reason |
 |---|---|---|
-| Reject as too narrow | Not chosen | The eval evidence is real: the role-aware assembler fixes the case #2 rank failure and keeps controls clean. Discarding it would lose a useful hard-miss recovery pattern. |
-| Keep eval-only until more hard cases | Chosen | The evidence is strong but still one projection family. A default runtime path needs at least one more hard-miss family or an explicit owner decision to ship a case #2-only opt-in. |
-| Implement behind a narrow opt-in flag | Conditional later | Plausible only after the next gate. It must remain disabled by default and report trigger/candidate/rank evidence when it fires. |
+| Reject the idea entirely | No | The eval evidence is too useful to discard; case #2 target rank improves inside the role-aware projected family. |
+| Keep eval-only | Yes | Safest current state; preserves evidence without changing live behavior. |
+| Implement a narrow runtime flag now | No | Premature before broader hard-case review and snapshot-open hardening. |
+| Wire into default `memory_search` | No | Too narrow, not yet aggregate-lifted, and would change live retrieval order from a single-family probe. |
 
-Verdict:
+## Why Not Default Runtime
 
-```text
-NO-GO for default production memory_search.
-CONDITIONAL-GO for a narrow opt-in experiment after one more gate.
-KEEP the role-aware assembler in recall_eval as the current evidence harness.
-```
+Default runtime wiring fails the current review for five reasons.
 
-This is not a rejection of the idea. It is a rejection of wiring a
-case-specific projection directly into default recall from a single hard case.
+First, the proof is case-family-specific. The role-aware assembler is built for
+tool-surface taxonomy/contraction/delete/re-tier queries. The main hard miss set
+still includes #1, #8, #9, and #14, which have different failure classes.
 
-## Rationale
+Second, the measured hard-tier anchor has not moved. The current result proves a
+candidate-level policy for case #2, not a production recall lift.
 
-### Why Default Production Is Not Ready
+Third, the role policy relies on curated projection terms and adjudicated
+candidate roles. That is acceptable for an eval harness, but it should not
+become invisible production ranking logic without another review.
 
-1. **Single-family proof**: the assembler is strong for tool-surface policy
-   queries, but the hard-tier miss set also includes #1, #8, #9, and #14. A
-   default runtime path needs evidence that it does not become another
-   case-specific patch.
-2. **Projection is hand-curated**: current role labels rely on known
-   tool-surface tokens and known distractor classes. That is acceptable in eval,
-   but risky as an implicit global ranking layer.
-3. **Snapshot-open caveat remains**: the frozen-baseline report showed current
-   `SqliteStore::open` can create WAL state on the snapshot. Fingerprint and
-   hard-tier lines were stable, but production gate claims still need a cleaner
-   read-only or managed-working-copy story.
-4. **Hard-tier aggregate is unchanged**: the eval assembler proves case-level
-   movement for #2, but the standing production modes still report the same
-   hard-tier anchor. The production lift claim has not yet been measured as a
-   runtime mode.
-5. **Safety surface**: default `memory_search` is broad; injecting a projection
-   path into it can alter unrelated queries unless the trigger, role policy, and
-   observability are stricter than the current proof requires.
+Fourth, the frozen-baseline report found that the current store-open path can
+create WAL state even when used as a snapshot for eval. The logical fingerprint
+was stable, but production-lift review should harden or explicitly manage that
+workflow before live retrieval behavior changes.
+
+Fifth, default `memory_search` is broad. Injecting a projection path into it can
+alter unrelated queries unless the trigger, role policy, and observability are
+stricter than the current proof requires.
 
 ## Production Blast Radius
 
@@ -148,78 +175,78 @@ A narrower path can contain the blast radius:
 - leave default store ordering untouched.
 
 This is the only implementation boundary that is plausible from current
-evidence.
+evidence, and it still needs one more gate before implementation.
 
-### Why Narrow Opt-In Remains Plausible
+## What Is Approved
 
-The evidence is too good to discard:
+This packet approves the following evidence as reusable:
 
-- the trigger can be made narrow: zero-row FTS or verified hard miss;
-- case #2 query emits a strong five-term projection;
-- negative controls remain empty;
-- role-aware sorting fixes the specific rank failure;
-- diagnostic/meta rows can be excluded by explicit rule;
-- all proof can be reproduced against a pinned `AB_BASELINE_DB`.
+- `projtoolsurface` plus strict policy-term gating is a viable case #2
+  diagnostic family;
+- volatile candidate filtering is mandatory;
+- role labels are mandatory before projected candidates can be interpreted;
+- diagnostic/meta candidates are excluded by default;
+- same-policy rows may be context, but must not outrank the primary taxonomy
+  answer for the original case #2 query;
+- any future implementation must compare against the same pinned
+  `AB_BASELINE_DB` fingerprint.
 
-So the next productive step is not default production. It is a constrained
-experiment that preserves the eval harness as the authority.
+## What Is Not Approved
 
-## Conditional Implementation Path
+This packet does not approve:
 
-The earliest acceptable production candidate would be:
+- default `memory_search` candidate expansion;
+- default ranking changes;
+- an MCP-visible opt-in retrieval mode;
+- tokenizer/schema migrations;
+- reindexing;
+- graph/PageRank influence;
+- semantic blending;
+- memory writes;
+- deploy behavior changes.
 
-```text
-opt-in only, disabled by default
-```
+## Required Before Runtime Flag
 
-Required shape:
+Before even a disabled-by-default runtime flag is worth implementing, require at
+least one of these gates:
 
-- guarded by explicit env/config flag, for example
-  `AB_MEMORY_ROLE_AWARE_PROJECTION_EXPERIMENT=1`;
-- only active for FTS-like recall paths;
-- only active when baseline FTS returns zero rows or when an explicit
-  eval-approved hard-miss cohort is selected;
-- only active when projection terms include `projtoolsurface` plus at least
-  three additional policy terms;
-- durable hygiene is mandatory: exclude volatile scratch rows, `skill:` rows,
-  archived/superseded rows, and non-active rows;
-- role-aware filtering is mandatory: primary and same-policy allowed;
-  adjacent demoted; diagnostic/meta excluded unless the query explicitly asks
-  for those domains;
-- every activation logs or reports enough evidence to audit trigger terms,
-  projected candidates, role labels, and final rank positions.
-
-This should still be treated as experimental. It should not silently replace
-the existing `memory_search` ordering.
-
-## Required Next Gate
-
-Before any opt-in runtime implementation, complete one of these:
-
-1. **Preferred**: `main-recall-second-hard-family-eval-v1`
+1. **Broader hard-case family review**
    - Pick one more pinned hard miss, preferably #1 or #8.
    - Build an eval-only projection/role assembler for that family.
    - Require clean negative controls and a role-aware rank improvement.
    - Purpose: prove the mechanism is not only a tool-surface patch.
 
-2. **Alternative**: `main-recall-readonly-snapshot-open-v1`
-   - Add a read-only or managed-working-copy path for eval snapshots.
+2. **Read-only snapshot hardening**
+   - Add or document a truly read-only store-open / snapshot working-copy path.
+   - Prove `AB_BASELINE_DB` comparisons do not mutate the source snapshot.
    - Purpose: strengthen production review evidence before runtime claims.
 
-3. **Fallback**: `main-recall-case2-optin-design-v1`
-   - Write a concrete opt-in implementation plan without coding it.
-   - Include env flag name, code boundary, tests, rollback, and MCP reconnect
-     proof.
+3. **Eval aggregate mode**
+   - Add a named eval-only aggregate row that includes role-aware case #2
+     behavior while preserving hard-tier reporting.
+   - Claim lift only if the hard-tier anchor moves under the same pinned
+     fingerprint and no controls regress.
 
-Recommended next step:
+## Next Gate
+
+Recommended next slice:
 
 ```text
 main-recall-second-hard-family-eval-v1
 ```
 
-Reason: the highest remaining production risk is narrowness, not case #2
-quality. A second hard family will tell us whether role-aware projection is a
-general pattern or just a successful bespoke patch.
+Reason: the highest remaining production risk is narrowness. Snapshot hardening
+is also important, but a second hard family will tell us whether role-aware
+projection is a general pattern or just a successful bespoke patch.
+
+Alternative if another lane takes the second hard family first:
+
+```text
+main-recall-readonly-snapshot-open-hardening-v1
+```
+
+Either path should stay report/eval-first. No production retrieval code should
+be changed until one of these gates closes.
 
 ## Production Go/No-Go Checklist
 
@@ -236,7 +263,6 @@ Default production remains **NO-GO** until all are true:
 
 ## Boundary
 
-This packet does not change production `memory_search`, tokenizer/schema/reindex,
-ranking, graph expansion, semantic retrieval, MCP tools, memory rows, deploy
-behavior, or the pinned snapshot. It only records the production review decision
-for the case #2 role-aware eval assembler.
+This packet is a decision document only. It does not change production
+`memory_search`, tokenizer/schema/reindex, ranking, graph expansion, semantic
+retrieval, MCP tools, memory rows, deploy behavior, or the pinned snapshot.
