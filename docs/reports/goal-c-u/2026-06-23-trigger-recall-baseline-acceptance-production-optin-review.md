@@ -8,6 +8,16 @@ Scope: production-facing design review only. No runtime implementation, no MCP
 tool registration, no default `memory_search` change, no memory writes, no graph
 writes, no reindex, and no deploy behavior change.
 
+Post-review integration note:
+
+- After this review was written, GitHub commit `036ea17` implemented the
+  approved Slice 1 read-only control plane.
+- The implementation was merged into this tree and validated locally.
+- Therefore `APPROVED-FOR-SLICE-1-IMPLEMENTATION` should be read as consumed by
+  `036ea17`, not as a duplicate open claim.
+- Current next gate is a post-implementation review / batch diagnostic decision
+  before any gated baseline trial. `enforce_hold` remains `NO-GO`.
+
 ## Verdict
 
 `APPROVED-FOR-SLICE-1-IMPLEMENTATION`.
@@ -223,7 +233,30 @@ intended profile visibility explicitly.
 
 ## Next Step
 
-Implement `trigger-recall-opt-in-slice1-status-transition-gate-v1`.
+Implementation state after reconciliation:
+
+- `036ea17` implemented `trigger-recall-opt-in-slice1-status-transition-gate-v1`.
+- The implementation report is
+  `docs/reports/goal-c-u/2026-06-23-trigger-recall-optin-readonly-control-plane.md`.
+
+Validated after merge:
+
+```bash
+cargo test -p ab-bridge --lib trigger_recall_opt_in -- --nocapture
+cargo test -p ab-bridge --example trigger_recall_eval -- --nocapture
+cargo check -p ab-bridge --examples
+git diff --check
+```
+
+Observed results:
+
+- `trigger_recall_opt_in`: 7 passed.
+- `trigger_recall_eval`: 27 passed.
+- `cargo check -p ab-bridge --examples`: passed with existing warnings only.
+- `git diff --check`: passed.
+
+Next gate: post-implementation review and redacted batch diagnostic decision for
+`trigger_recall_opt_in_gated_baseline_trial`.
 
 Do not combine Slice 1 with the gated baseline trial. The next review should be
 able to inspect a transition-gate artifact before any code path can call
