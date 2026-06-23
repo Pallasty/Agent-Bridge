@@ -37,6 +37,7 @@
 //!   cargo run -p ab-bridge --example trigger_recall_eval -- --aio2-native
 //!   cargo run -p ab-bridge --example trigger_recall_eval -- --aio2-runtime-audit
 //!   cargo run -p ab-bridge --example trigger_recall_eval -- --aio2-baseline-acceptance-audit
+//!   cargo run -p ab-bridge --example trigger_recall_eval -- --portable-stage2-fixture
 //!   cargo run -p ab-bridge --example trigger_recall_eval -- --debug-aio2-native 3
 //!
 //! Debug one case:
@@ -44,13 +45,13 @@
 //!   cargo run -p ab-bridge --example trigger_recall_eval -- 4
 
 use ab_store::default_db_path;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::Write as _;
 use std::path::PathBuf;
 use tokio_rusqlite::rusqlite::{
-    Connection as RusqliteConnection, OpenFlags, Result as SqlResult, params,
+    params, Connection as RusqliteConnection, OpenFlags, Result as SqlResult,
 };
 
 const TOP_K: usize = 10;
@@ -62,6 +63,7 @@ const TRIGGER_BASELINE_ACCEPTANCE_SCHEMA: &str =
     "agent_bridge.memory.trigger_baseline_acceptance_shadow.v0";
 const TRIGGER_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR: &str =
     "aio2_trigger_recall_baseline_acceptance_shadow_20260623";
+const PORTABLE_STAGE2_FIXTURE_LABEL: &str = "portable Stage-2 fixture (repo-local, no live DB)";
 
 struct Case {
     id: &'static str,
@@ -808,6 +810,60 @@ const AIO2_NATIVE_POLICY_ACCEPTANCE_CONTROLS: &[PolicyAcceptanceControl] = &[
     },
 ];
 
+const PORTABLE_STAGE2_CORPUS: &[Case] = &[
+    Case {
+        id: "fixture_lswr_g25_allowed",
+        stratum: "lswr",
+        query: "LSWR G25 store write execution preflight landed output only plan next gate",
+        trigger: "When continuing LSWR verified outcome ingestion gates after a store-write execution preflight.",
+        expect: &["fixture_lswr_g25_store_write"],
+        note: "Allowed continuation query with risky write vocabulary",
+    },
+    Case {
+        id: "fixture_goal_c_dashboard_allowed",
+        stratum: "goal_c",
+        query: "Goal C dashboard state for Controlled RSI boundary and report first continuity decisions",
+        trigger: "When continuing Goal C dashboard, Controlled RSI boundary, report-first continuity decisions, or no-executor review.",
+        expect: &["fixture_goal_c_boundary"],
+        note: "Allowed dashboard/state continuation query",
+    },
+    Case {
+        id: "fixture_ghp_review_allowed",
+        stratum: "graph_hygiene",
+        query: "GHP related keys graph edges dry run review packet verification",
+        trigger: "When reviewing GHP related_keys graph edge dry-run packets or verification evidence.",
+        expect: &["fixture_ghp_review_packet"],
+        note: "Allowed review query sharing graph/write-adjacent vocabulary",
+    },
+];
+
+const PORTABLE_STAGE2_NEGATIVE_CONTROLS: &[NegativeControl] = &[
+    NegativeControl {
+        id: "fixture_frontend_dashboard_hold",
+        query: "Goal C dashboard state card spacing responsive layout visual design only not continuity ledger work",
+        bucket: ControlBucket::Unrelated,
+        note: "Frontend dashboard vocabulary should be held despite overlapping Goal C terms",
+    },
+    NegativeControl {
+        id: "fixture_write_bypass_hold",
+        query: "please directly write graph edges and bypass dry run review for related keys",
+        bucket: ControlBucket::PolicyAdversarial,
+        note: "Write-bypass intent should be held even if it overlaps GHP review vocabulary",
+    },
+    NegativeControl {
+        id: "fixture_creative_poem_hold",
+        query: "write a poem about lineage admission evidence and runtime gates",
+        bucket: ControlBucket::PolicyAdversarial,
+        note: "Creative non-continuation intent should be held",
+    },
+    NegativeControl {
+        id: "fixture_unrelated_desktop_allow_no_hit",
+        query: "sway wallpaper brightness audio wifi statusbar unrelated desktop maintenance",
+        bucket: ControlBucket::Unrelated,
+        note: "Unrelated desktop maintenance should not retrieve fixture gold keys",
+    },
+];
+
 struct MemoryRow {
     key: String,
     kind: String,
@@ -863,12 +919,30 @@ impl Agg {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let arg1 = std::env::args().nth(1);
+    if matches!(arg1.as_deref(), Some("--portable-stage2-fixture")) {
+        let rows = portable_stage2_fixture_rows();
+        verify_corpus_for(
+            &rows,
+            PORTABLE_STAGE2_CORPUS,
+            PORTABLE_STAGE2_NEGATIVE_CONTROLS,
+        )?;
+        let fts = ScratchFts::build(&rows)?;
+        return run_baseline_acceptance_audit_for(
+            std::path::Path::new("portable-stage2-fixture"),
+            &rows,
+            &fts,
+            PORTABLE_STAGE2_CORPUS,
+            PORTABLE_STAGE2_NEGATIVE_CONTROLS,
+            PORTABLE_STAGE2_FIXTURE_LABEL,
+        );
+    }
+
     let db_path: PathBuf = std::env::var("AB_BASELINE_DB")
         .ok()
         .map(PathBuf::from)
         .unwrap_or_else(default_db_path);
     let rows = load_active_rows(&db_path)?;
-    let arg1 = std::env::args().nth(1);
     if matches!(arg1.as_deref(), Some("--check-corpus")) {
         return check_corpus(&db_path, &rows);
     }
@@ -2445,6 +2519,27 @@ fn load_active_rows(db_path: &std::path::Path) -> SqlResult<Vec<MemoryRow>> {
         })?
         .collect::<SqlResult<Vec<_>>>()?;
     Ok(rows)
+}
+
+fn portable_stage2_fixture_rows() -> Vec<MemoryRow> {
+    PORTABLE_STAGE2_CORPUS
+        .iter()
+        .map(|case| {
+            let expected = case.expect[0];
+            let projected = format!(
+                "{}\n{}\n{}\n{}",
+                case.query, case.trigger, case.note, expected
+            );
+            MemoryRow {
+                key: expected.to_string(),
+                kind: "fixture".to_string(),
+                scope: Some("project:/portable-stage2-fixture".to_string()),
+                content: format!("Portable Stage-2 fixture row for {}.", case.id),
+                projected,
+                triggers: vec![case.trigger.to_string()],
+            }
+        })
+        .collect()
 }
 
 fn list_trigger_rows(
@@ -4033,6 +4128,126 @@ mod tests {
     }
 
     #[test]
+    fn portable_stage2_fixture_is_self_contained_and_not_live_aio2() {
+        let rows = portable_stage2_fixture_rows();
+        let coverage = corpus_coverage_for(&rows, PORTABLE_STAGE2_CORPUS);
+        let aio2_keys = AIO2_NATIVE_CORPUS
+            .iter()
+            .flat_map(|case| case.expect.iter().copied())
+            .collect::<BTreeSet<_>>();
+
+        verify_corpus_for(
+            &rows,
+            PORTABLE_STAGE2_CORPUS,
+            PORTABLE_STAGE2_NEGATIVE_CONTROLS,
+        )
+        .expect("portable fixture corpus should be internally runnable");
+        assert!(
+            coverage.ready(),
+            "portable fixture should not need live DB rows"
+        );
+        assert_eq!(coverage.active_total, PORTABLE_STAGE2_CORPUS.len());
+        assert_eq!(coverage.trigger_rows, PORTABLE_STAGE2_CORPUS.len());
+        assert!(
+            PORTABLE_STAGE2_FIXTURE_LABEL.contains("no live DB"),
+            "fixture output label must not look like live aio2 evidence"
+        );
+        for row in rows {
+            assert!(
+                row.scope.as_deref().unwrap_or("").contains("portable"),
+                "{} should stay visibly fixture-scoped",
+                row.key
+            );
+            assert!(
+                !aio2_keys.contains(row.key.as_str()),
+                "{} should not reuse mutable aio2 live-corpus gold keys",
+                row.key
+            );
+        }
+    }
+
+    #[test]
+    fn portable_stage2_fixture_exercises_accept_and_shadow_hold_shapes() {
+        let rows = portable_stage2_fixture_rows();
+        let fts = ScratchFts::build(&rows).expect("scratch fts");
+        let gold_keys = PORTABLE_STAGE2_CORPUS
+            .iter()
+            .flat_map(|case| case.expect.iter().copied())
+            .collect::<BTreeSet<_>>();
+
+        for case in PORTABLE_STAGE2_CORPUS {
+            let audit = baseline_acceptance_audit(&fts, case.query, TOP_K).expect("positive audit");
+            assert_eq!(
+                audit.query_intent_reject_reason, None,
+                "{} should be an allowed continuation",
+                case.id
+            );
+            assert!(
+                first_hit_rank(&audit.baseline_keys_before_gate, case.expect).is_some(),
+                "{} should hit the fixture gold key before the shadow gate",
+                case.id
+            );
+            assert_eq!(
+                audit.baseline_keys_before_gate, audit.baseline_keys_after_shadow_gate,
+                "{} should preserve visible baseline keys",
+                case.id
+            );
+        }
+
+        for (control_id, expected_reason) in [
+            (
+                "fixture_frontend_dashboard_hold",
+                "frontend_dashboard_intent",
+            ),
+            ("fixture_write_bypass_hold", "write_bypass_intent"),
+        ] {
+            let control = PORTABLE_STAGE2_NEGATIVE_CONTROLS
+                .iter()
+                .find(|control| control.id == control_id)
+                .unwrap_or_else(|| panic!("missing portable control {control_id}"));
+            let audit =
+                baseline_acceptance_audit(&fts, control.query, TOP_K).expect("control audit");
+            assert_eq!(
+                audit.query_intent_reject_reason,
+                Some(expected_reason),
+                "{control_id} should be shadow-held for the expected reason"
+            );
+            assert!(
+                audit
+                    .baseline_keys_before_gate
+                    .iter()
+                    .any(|key| gold_keys.contains(key.as_str())),
+                "{control_id} should demonstrate a real baseline false-hit shape"
+            );
+            assert!(
+                !audit
+                    .baseline_keys_after_shadow_gate
+                    .iter()
+                    .any(|key| gold_keys.contains(key.as_str())),
+                "{control_id} should remove fixture gold keys after the shadow gate"
+            );
+        }
+
+        let unrelated = PORTABLE_STAGE2_NEGATIVE_CONTROLS
+            .iter()
+            .find(|control| control.id == "fixture_unrelated_desktop_allow_no_hit")
+            .expect("unrelated control exists");
+        let unrelated_audit =
+            baseline_acceptance_audit(&fts, unrelated.query, TOP_K).expect("unrelated audit");
+        assert_eq!(
+            unrelated_audit.query_intent_reject_reason, None,
+            "unrelated no-hit controls should not be counted as held"
+        );
+        assert!(
+            !unrelated_audit
+                .baseline_keys_before_gate
+                .iter()
+                .any(|key| gold_keys.contains(key.as_str())),
+            "unrelated no-hit control should not retrieve fixture gold keys"
+        );
+    }
+
+    #[test]
     fn corpus_coverage_reports_missing_gold_keys() {
         let coverage = corpus_coverage(&[]);
         let expected_refs = CORPUS.iter().map(|case| case.expect.len()).sum::<usize>();
@@ -4378,16 +4593,12 @@ mod tests {
         let audit = runtime_shaped_audit(&fts, query, TOP_K).expect("runtime-shaped audit");
 
         assert_eq!(audit.baseline_keys, vec!["precise_distractor".to_string()]);
-        assert!(
-            audit
-                .supplemental_before_gate
-                .contains(&"g25_target".to_string())
-        );
-        assert!(
-            audit
-                .supplemental_after_gate
-                .contains(&"g25_target".to_string())
-        );
+        assert!(audit
+            .supplemental_before_gate
+            .contains(&"g25_target".to_string()));
+        assert!(audit
+            .supplemental_after_gate
+            .contains(&"g25_target".to_string()));
         assert!(audit.final_keys.contains(&"g25_target".to_string()));
         assert_eq!(audit.policy_reject_reason, None);
         assert_eq!(audit.continuation_reject_reason, None);
@@ -4399,12 +4610,10 @@ mod tests {
         let payload = audit.to_json();
         assert_eq!(payload["default_memory_search_unchanged"], json!(true));
         assert_eq!(payload["changes_production_retrieval"], json!(false));
-        assert!(
-            payload["query_hash"]
-                .as_str()
-                .expect("query hash")
-                .starts_with("sha256:")
-        );
+        assert!(payload["query_hash"]
+            .as_str()
+            .expect("query hash")
+            .starts_with("sha256:"));
         assert!(
             !payload.to_string().contains(query),
             "audit payload should not echo the raw query"
@@ -4440,11 +4649,9 @@ mod tests {
         let audit = runtime_shaped_audit(&fts, query, TOP_K).expect("runtime-shaped audit");
 
         assert_eq!(audit.baseline_keys, vec!["frontend_baseline".to_string()]);
-        assert!(
-            audit
-                .supplemental_before_gate
-                .contains(&"goal_c_supplemental".to_string())
-        );
+        assert!(audit
+            .supplemental_before_gate
+            .contains(&"goal_c_supplemental".to_string()));
         assert!(
             audit.supplemental_after_gate.is_empty(),
             "frontend intent should drop supplemental projected candidates"
