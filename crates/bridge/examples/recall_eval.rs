@@ -3217,6 +3217,11 @@ async fn detect_store_model_alias(db_path: &std::path::Path) -> Option<&'static 
     match name.as_deref() {
         Some("multilingual-e5-small") => Some("e5-small"),
         Some("paraphrase-multilingual-MiniLM-L12-v2") => Some("para-ml"),
+        // gte-multilingual-base (768-dim) cut-over: auto-detect from the store's
+        // dominant backend so live acceptance picks the right query model without
+        // needing AGENT_BRIDGE_ONNX_MODEL set by hand. select_model() accepts this
+        // exact alias. (runbook Gate 1: recall_eval alias detection for GTE.)
+        Some("gte-multilingual-base") => Some("gte-multilingual-base"),
         _ => None, // all-MiniLM-L6-v2 is the default; nothing to override
     }
 }
