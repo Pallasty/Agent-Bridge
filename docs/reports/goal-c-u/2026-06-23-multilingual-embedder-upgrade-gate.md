@@ -12,6 +12,10 @@ Controlling board context:
 - #3969 claims the isolated BGE-M3 vs e5 probe. This report does not duplicate
   that implementation lane; it defines how to accept or reject the broader
   embedder-upgrade direction.
+- #3971 revises #3969 after loader verification: the cheap isolated probe is
+  blocked by production-loader shape, pooling, and external-data constraints.
+  The first executable slice is therefore a scoped loader-capability task, not
+  a model-file drop-in.
 - #3970 records the current U report boundary: `continuity-report` plus pinned
   `recall_eval` are the standing surfaces; embedder candidates are a separate
   memory-continuity input, not production authorization.
@@ -44,6 +48,9 @@ Current production-compatible vector path:
 - Therefore new candidates are not a safe drop-in until their dimension,
   pooling, tokenizer, prompt/instruction, and output-normalization contracts are
   explicitly tested.
+- Per #3971, the concrete loader gaps to close before most Chinese in-domain
+  candidates can be measured are: external-data ONNX initializers, per-model
+  pooling dispatch, and dense-output selection for multi-output ONNX exports.
 
 Current e5 CJK micro-pool measurement:
 
@@ -108,13 +115,29 @@ Sources:
 Before judging model quality, prove the harness is not producing invalid vectors:
 
 - real model load confirmed, no hash fallback;
+- external-data ONNX files are loaded when the export separates `model.onnx`
+  from `model.onnx_data`;
 - correct pooling per model;
+- multi-output models explicitly select the dense embedding output rather than
+  sparse or token/ColBERT outputs;
 - correct query/document instruction or prefix contract;
 - expected output dimension observed;
 - vector norm and cosine distribution sanity-checked;
 - model files and tokenizer provenance recorded.
 
 Failure here rejects only the harness, not the model.
+
+Minimum loader capability for the next executable slice:
+
+1. `external_initializers` handling for external-data ONNX exports.
+2. Per-model pooling dispatch: mean / CLS / last-token as required by the
+   candidate contract.
+3. `output_key` or equivalent dense-output selection for multi-output exports.
+
+This slice may touch `crates/store/src/vector.rs` only if it remains behind
+explicit model selection and does not change the default backend. Any such patch
+must have unit or example coverage proving existing e5-small behavior still
+loads and hashes/falls back honestly.
 
 ### Phase 1 - Read-Only CJK Micro-Pool
 
@@ -187,11 +210,17 @@ Required review contents:
 
 Proceed, but keep the lane split:
 
-1. Let #3969 own the isolated BGE-M3 probe.
-2. In parallel, prefer a 384-dim-capable candidate feasibility path for
+1. Treat #3971 as the current execution constraint: implement or review loader
+   capability support before judging BGE-M3/Qwen/Gemma quality.
+2. Keep BGE-M3 as a strong scratch/sidecar candidate, but do not treat it as a
+   cheap probe until dense-output selection and pooling are verified.
+3. In parallel, prefer a 384-dim-capable candidate feasibility path for
    Qwen3-Embedding-0.6B or EmbeddingGemma, because either may avoid the first
    schema migration while still testing Chinese in-domain lift.
-3. Do not change default `memory_search`, `vector.rs`, vector schema, graph
-   logic, or MCP tool exposure until Phase 2 beats the pinned hard-tier gate.
+4. Do not change default `memory_search`, vector schema, graph logic, or MCP
+   tool exposure until Phase 2 beats the pinned hard-tier gate. `vector.rs`
+   changes are allowed only as opt-in loader plumbing with existing-backend
+   regression proof.
 
-Current status: `ACCEPTED-AS-RESEARCH-GATE`, `PRODUCTION-NO-GO`.
+Current status: `ACCEPTED-AS-RESEARCH-GATE`, `LOADER-UPGRADE-FIRST`,
+`PRODUCTION-NO-GO`.
