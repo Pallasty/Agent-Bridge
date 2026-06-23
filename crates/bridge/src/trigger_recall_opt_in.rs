@@ -928,12 +928,13 @@ pub fn trigger_recall_opt_in_gated_baseline_trial(
 mod tests {
     use super::*;
 
-    #[test]
-    fn status_ready_path_stays_readonly() {
-        let status = trigger_recall_opt_in_status(TriggerRecallOptInStatusOptions {
+    const PROJECT_SCOPE: &str = "project:/Data/CascadeProjects/agent-bridge";
+
+    fn ready_status_options() -> TriggerRecallOptInStatusOptions {
+        TriggerRecallOptInStatusOptions {
             mode: "fts".to_string(),
             per_call_opt_in: true,
-            scope: Some("project:/Data/CascadeProjects/agent-bridge".to_string()),
+            scope: Some(PROJECT_SCOPE.to_string()),
             scope_mode: "local_only".to_string(),
             regression_anchor: Some(
                 TRIGGER_RECALL_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR.to_string(),
@@ -946,52 +947,217 @@ mod tests {
             baseline_shadow_false_hits_after_gate: Some(0),
             runtime_enabled: true,
             ..Default::default()
-        });
+        }
+    }
+
+    fn ready_status_packet() -> Value {
+        trigger_recall_opt_in_status(ready_status_options())
+    }
+
+    fn ready_gate_options(status_packet: Value) -> TriggerRecallOptInRuntimeTransitionGateOptions {
+        TriggerRecallOptInRuntimeTransitionGateOptions {
+            status_packet,
+            mode: "fts".to_string(),
+            per_call_opt_in: true,
+            scope: Some(PROJECT_SCOPE.to_string()),
+            scope_mode: "local_only".to_string(),
+            regression_anchor: Some(
+                TRIGGER_RECALL_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR.to_string(),
+            ),
+            runtime_enabled: true,
+            ..Default::default()
+        }
+    }
+
+    fn assert_has_blockers(value: &Value, expected: &[&str]) {
+        let blockers = value["boundary_check"]["blockers"]
+            .as_array()
+            .expect("blockers");
+        for expected in expected {
+            assert!(
+                blockers.contains(&json!(expected)),
+                "missing blocker {expected}; blockers={blockers:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn status_ready_path_stays_readonly() {
+        let status = ready_status_packet();
         assert_eq!(status["status"], json!("ready_for_transition_gate"));
         assert_eq!(status["side_effects"]["calls_memory_search"], json!(false));
+        assert_eq!(
+            status["side_effects"]["may_run_gated_baseline_trial_now"],
+            json!(false)
+        );
         assert_eq!(status["side_effects"]["may_enforce_hold_now"], json!(false));
     }
 
     #[test]
-    fn transition_gate_blocks_raw_packet_without_echoing() {
-        let mut status = trigger_recall_opt_in_status(TriggerRecallOptInStatusOptions {
-            mode: "fts".to_string(),
-            per_call_opt_in: true,
-            scope: Some("project:/Data/CascadeProjects/agent-bridge".to_string()),
-            scope_mode: "local_only".to_string(),
-            regression_anchor: Some(
-                TRIGGER_RECALL_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR.to_string(),
-            ),
-            aio2_corpus_ready: Some(true),
-            union_cont_misses: Some(0),
-            union_cont_false_hits: Some(0),
-            baseline_shadow_true_hits_lost: Some(0),
-            baseline_shadow_positive_cases_held: Some(0),
-            baseline_shadow_false_hits_after_gate: Some(0),
-            runtime_enabled: true,
-            ..Default::default()
-        });
-        status["raw_query"] = json!("secret trigger query");
-        let gate = trigger_recall_opt_in_runtime_transition_gate(
-            TriggerRecallOptInRuntimeTransitionGateOptions {
-                status_packet: status,
-                mode: "fts".to_string(),
-                per_call_opt_in: true,
-                scope: Some("project:/Data/CascadeProjects/agent-bridge".to_string()),
-                scope_mode: "local_only".to_string(),
-                regression_anchor: Some(
-                    TRIGGER_RECALL_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR.to_string(),
-                ),
-                runtime_enabled: true,
-                ..Default::default()
-            },
+    fn status_batch_matrix_blocks_unsafe_transition_inputs() {
+        let mut cases: Vec<(&str, TriggerRecallOptInStatusOptions, Vec<&str>)> = Vec::new();
+
+        let mut hybrid = ready_status_options();
+        hybrid.mode = "hybrid".to_string();
+        cases.push(("hybrid mode", hybrid, vec!["requested_mode_not_authorized"]));
+
+        let mut missing_opt_in = ready_status_options();
+        missing_opt_in.per_call_opt_in = false;
+        cases.push((
+            "missing per-call opt-in",
+            missing_opt_in,
+            vec!["per_call_opt_in_missing"],
+        ));
+
+        let mut bad_scope = ready_status_options();
+        bad_scope.scope = Some("project:relative-agent-bridge".to_string());
+        cases.push((
+            "non-exact project scope",
+            bad_scope,
+            vec!["exact_local_project_scope_missing"],
+        ));
+
+        let mut operator_disabled = ready_status_options();
+        operator_disabled.operator_disabled = true;
+        cases.push((
+            "operator disabled",
+            operator_disabled,
+            vec!["operator_disabled"],
+        ));
+
+        let mut missing_metric = ready_status_options();
+        missing_metric.baseline_shadow_true_hits_lost = None;
+        cases.push((
+            "missing metric",
+            missing_metric,
+            vec!["eval_metrics_absent", "baseline_shadow_true_hits_lost"],
+        ));
+
+        let mut union_miss = ready_status_options();
+        union_miss.union_cont_misses = Some(1);
+        cases.push((
+            "union continuation miss",
+            union_miss,
+            vec!["union_cont_misses_present"],
+        ));
+
+        let mut wrong_anchor = ready_status_options();
+        wrong_anchor.regression_anchor = Some("stale-anchor".to_string());
+        cases.push((
+            "wrong regression anchor",
+            wrong_anchor,
+            vec!["regression_anchor_mismatch"],
+        ));
+
+        let mut raw_payload = ready_status_options();
+        raw_payload.raw_payload_fields_present = true;
+        cases.push((
+            "raw payload marker",
+            raw_payload,
+            vec!["raw_payload_fields_present"],
+        ));
+
+        for (name, options, expected_blockers) in cases {
+            let status = trigger_recall_opt_in_status(options);
+            assert_ne!(
+                status["status"],
+                json!("ready_for_transition_gate"),
+                "{name}"
+            );
+            assert_eq!(
+                status["boundary_check"]["ready_for_transition_gate"],
+                json!(false),
+                "{name}"
+            );
+            assert_eq!(
+                status["side_effects"]["calls_memory_search"],
+                json!(false),
+                "{name}"
+            );
+            assert_eq!(
+                status["side_effects"]["may_enforce_hold_now"],
+                json!(false),
+                "{name}"
+            );
+            assert_has_blockers(&status, &expected_blockers);
+        }
+    }
+
+    #[test]
+    fn transition_gate_allows_only_ready_redacted_status() {
+        let gate = trigger_recall_opt_in_runtime_transition_gate(ready_gate_options(
+            ready_status_packet(),
+        ));
+        assert_eq!(gate["status"], json!("transition_allowed"));
+        assert_eq!(gate["transition"]["transition_allowed"], json!(true));
+        assert_eq!(
+            gate["transition"]["may_call_gated_baseline_trial"],
+            json!(true)
         );
+        assert_eq!(gate["transition"]["may_enforce_hold"], json!(false));
+        assert_eq!(
+            gate["transition"]["default_memory_search_unchanged"],
+            json!(true)
+        );
+        assert_eq!(gate["side_effects"]["calls_memory_search"], json!(false));
+        assert_eq!(gate["boundary_check"]["blockers"], json!([]));
+    }
+
+    #[test]
+    fn transition_gate_batch_matrix_blocks_unsafe_packets() {
+        let mut blocked_status_options = ready_status_options();
+        blocked_status_options.per_call_opt_in = false;
+        let blocked_status = trigger_recall_opt_in_status(blocked_status_options);
+        let gate =
+            trigger_recall_opt_in_runtime_transition_gate(ready_gate_options(blocked_status));
+        assert_eq!(gate["transition"]["transition_allowed"], json!(false));
+        assert_eq!(
+            gate["transition"]["may_call_gated_baseline_trial"],
+            json!(false)
+        );
+        assert_has_blockers(
+            &gate,
+            &[
+                "status_packet_not_ready_for_transition_gate",
+                "status_per_call_opt_in_missing",
+            ],
+        );
+
+        let mut bad_schema = ready_status_packet();
+        bad_schema["schema"] = json!("agent_bridge.memory.trigger_recall.opt_in_status.vOLD");
+        let gate = trigger_recall_opt_in_runtime_transition_gate(ready_gate_options(bad_schema));
+        assert_has_blockers(&gate, &["status_packet_schema_mismatch"]);
+
+        let mut bad_side_effect = ready_status_packet();
+        bad_side_effect["side_effects"]["calls_memory_search"] = json!(true);
+        let gate =
+            trigger_recall_opt_in_runtime_transition_gate(ready_gate_options(bad_side_effect));
+        assert_has_blockers(&gate, &["status_packet_side_effect_contract_invalid"]);
+
+        let mut gate_options = ready_gate_options(ready_status_packet());
+        gate_options.mode = "hybrid".to_string();
+        let gate = trigger_recall_opt_in_runtime_transition_gate(gate_options);
+        assert_has_blockers(&gate, &["requested_mode_not_authorized"]);
+
+        let mut gate_options = ready_gate_options(ready_status_packet());
+        gate_options.per_call_opt_in = false;
+        let gate = trigger_recall_opt_in_runtime_transition_gate(gate_options);
+        assert_has_blockers(&gate, &["per_call_opt_in_missing"]);
+
+        let mut gate_options = ready_gate_options(ready_status_packet());
+        gate_options.raw_payload_fields_present = true;
+        let gate = trigger_recall_opt_in_runtime_transition_gate(gate_options);
+        assert_has_blockers(&gate, &["raw_payload_fields_present"]);
+    }
+
+    #[test]
+    fn transition_gate_blocks_raw_packet_without_echoing() {
+        let mut status = ready_status_packet();
+        status["raw_query"] = json!("secret trigger query");
+        let gate = trigger_recall_opt_in_runtime_transition_gate(ready_gate_options(status));
         let serialized = serde_json::to_string(&gate).expect("serialize");
         assert!(!serialized.contains("secret trigger query"));
-        let blockers = gate["boundary_check"]["blockers"]
-            .as_array()
-            .expect("blockers");
-        assert!(blockers.contains(&json!("status_packet_contains_raw_payload")));
+        assert_has_blockers(&gate, &["status_packet_contains_raw_payload"]);
         assert_eq!(gate["transition"]["transition_allowed"], json!(false));
     }
 
