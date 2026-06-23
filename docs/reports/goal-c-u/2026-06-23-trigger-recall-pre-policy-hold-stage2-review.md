@@ -12,6 +12,8 @@ Verdict: `ACCEPTED-PENDING-AIO2-AUDIT-EVIDENCE`
 
 This review accepts the candidate shape through the narrow Stage-2 checklist, but does not approve merge, deploy, default retrieval changes, or production `enforce_hold`. The remaining blocker is the wider aio2 baseline acceptance audit, which cannot complete on this Mac corpus because the required key is absent.
 
+Post-merge coordination note: GitHub-side commit `aa4ad75` later added a separate Aio2 `/Data/...` Stage-1 candidate-work amendment. That amendment does not change this review target or remove this review's blocker; it authorizes another isolated candidate line that still needs its own exact-commit Stage-2 review.
+
 ## Diff Audit
 
 The candidate diff is limited to the Stage-1 authorized files:
