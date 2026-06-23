@@ -965,6 +965,43 @@ struct ProjectionHit {
     shared_terms: Vec<String>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ToolSurfaceCandidateRole {
+    PrimaryAnswer,
+    SamePolicyCluster,
+    AdjacentSubcase,
+    DiagnosticOrMeta,
+    Other,
+}
+
+impl ToolSurfaceCandidateRole {
+    fn label(self) -> &'static str {
+        match self {
+            Self::PrimaryAnswer => "primary",
+            Self::SamePolicyCluster => "same-policy",
+            Self::AdjacentSubcase => "adjacent",
+            Self::DiagnosticOrMeta => "diagnostic-meta",
+            Self::Other => "other",
+        }
+    }
+
+    fn sort_rank(self) -> u8 {
+        match self {
+            Self::PrimaryAnswer => 0,
+            Self::SamePolicyCluster => 1,
+            Self::AdjacentSubcase => 2,
+            Self::Other => 3,
+            Self::DiagnosticOrMeta => 4,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct RoleAwareProjectionHit {
+    hit: ProjectionHit,
+    role: ToolSurfaceCandidateRole,
+}
+
 struct ScratchToolSurfaceProjectionFts {
     db: RusqliteConnection,
     terms_by_key: HashMap<String, BTreeSet<String>>,
@@ -1100,6 +1137,15 @@ impl ScratchToolSurfaceProjectionFts {
             .collect())
     }
 
+    fn search_projected_role_aware(
+        &self,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<RoleAwareProjectionHit>, String> {
+        let strict = self.search_projected_accepted_strict_durable(query, limit)?;
+        Ok(role_aware_tool_surface_candidates(query, strict, limit))
+    }
+
     fn projection_hits_from_keys(
         &self,
         query_terms: &BTreeSet<String>,
@@ -1122,6 +1168,117 @@ impl ScratchToolSurfaceProjectionFts {
     }
 }
 
+fn role_aware_tool_surface_candidates(
+    query: &str,
+    hits: Vec<ProjectionHit>,
+    limit: usize,
+) -> Vec<RoleAwareProjectionHit> {
+    let diagnostic_or_meta_requested = query_mentions_tool_surface_diagnostic_or_meta(query);
+    let mut out = hits
+        .into_iter()
+        .filter_map(|hit| {
+            let role = classify_tool_surface_candidate(query, &hit);
+            if role == ToolSurfaceCandidateRole::DiagnosticOrMeta && !diagnostic_or_meta_requested {
+                return None;
+            }
+            Some(RoleAwareProjectionHit { hit, role })
+        })
+        .collect::<Vec<_>>();
+
+    out.sort_by(|a, b| {
+        a.role
+            .sort_rank()
+            .cmp(&b.role.sort_rank())
+            .then_with(|| b.hit.overlap.cmp(&a.hit.overlap))
+            .then_with(|| a.hit.key.cmp(&b.hit.key))
+    });
+    out.truncate(limit);
+    out
+}
+
+fn classify_tool_surface_candidate(query: &str, hit: &ProjectionHit) -> ToolSurfaceCandidateRole {
+    let key = hit.key.to_lowercase();
+    let query_has_adjacent_anchor = query_mentions_tool_surface_adjacent_subcase(query);
+
+    if key.contains("tool_diagnostics")
+        || key.contains("plan_load")
+        || key.contains("lookup_miss")
+        || key.contains("recall_eval")
+        || key.contains("falsifier")
+        || key.contains("goal_c")
+    {
+        return ToolSurfaceCandidateRole::DiagnosticOrMeta;
+    }
+    if key.contains("reference_ab_tool_surface_taxonomy")
+        || (hit.shared_terms.iter().any(|t| t == "projtoolsurface")
+            && hit.shared_terms.iter().any(|t| t == "projtooltaxonomy")
+            && hit.shared_terms.iter().any(|t| {
+                matches!(
+                    t.as_str(),
+                    "projtoolcontraction" | "projtooldelete" | "projtoolretier"
+                )
+            })
+            && key.contains("taxonomy")
+            && (key.contains("retier") || key.contains("delete")))
+    {
+        return ToolSurfaceCandidateRole::PrimaryAnswer;
+    }
+    if key.contains("native_overlap")
+        || key.contains("codex_native")
+        || key.contains("codebase")
+        || (key.contains("profile") && query_has_adjacent_anchor)
+    {
+        return ToolSurfaceCandidateRole::AdjacentSubcase;
+    }
+    if key.contains("surface_growth")
+        || key.contains("growth_gate")
+        || key.contains("tool_surface")
+        || key.contains("surface")
+    {
+        return ToolSurfaceCandidateRole::SamePolicyCluster;
+    }
+
+    ToolSurfaceCandidateRole::Other
+}
+
+fn query_mentions_tool_surface_adjacent_subcase(query: &str) -> bool {
+    let q = query.to_lowercase();
+    contains_any(
+        &q,
+        &[
+            "codex",
+            "native overlap",
+            "native-overlap",
+            "原生",
+            "profile",
+            "codebase",
+            "essential",
+            "standard",
+            "niche",
+        ],
+    )
+}
+
+fn query_mentions_tool_surface_diagnostic_or_meta(query: &str) -> bool {
+    let q = query.to_lowercase();
+    contains_any(
+        &q,
+        &[
+            "diagnostic",
+            "diagnostics",
+            "诊断",
+            "plan_load",
+            "lookup",
+            "miss",
+            "recall_eval",
+            "falsifier",
+            "goal c",
+            "goal-c",
+            "评估",
+        ],
+    )
+}
+
 fn print_case2_tool_surface_projection_probe(
     scratch: &ScratchToolSurfaceProjectionFts,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -1130,6 +1287,7 @@ fn print_case2_tool_surface_projection_probe(
     let projected = scratch.search_projected(case.query, TOP_K)?;
     let accepted = scratch.search_projected_accepted(case.query, TOP_K)?;
     let accepted_durable = scratch.search_projected_accepted_durable(case.query, TOP_K)?;
+    let role_aware = scratch.search_projected_role_aware(case.query, TOP_K)?;
     let projected_keys = projected
         .iter()
         .map(|hit| hit.key.clone())
@@ -1142,6 +1300,10 @@ fn print_case2_tool_surface_projection_probe(
         .iter()
         .map(|hit| hit.key.clone())
         .collect::<Vec<_>>();
+    let role_aware_keys = role_aware
+        .iter()
+        .map(|hit| hit.hit.key.clone())
+        .collect::<Vec<_>>();
 
     println!("## Case #2 tool-surface projection probe");
     println!(
@@ -1153,10 +1315,11 @@ fn print_case2_tool_surface_projection_probe(
         }
     );
     println!(
-        "  toolproj hit: {}  toolproj_acc hit: {}  toolproj_acc_durable hit: {}",
+        "  toolproj hit: {}  toolproj_acc hit: {}  toolproj_acc_durable hit: {}  role_aware hit: {}",
         rank_cell(first_hit_rank(&projected_keys, case.expect)),
         rank_cell(first_hit_rank(&accepted_keys, case.expect)),
         rank_cell(first_hit_rank(&accepted_durable_keys, case.expect)),
+        rank_cell(first_hit_rank(&role_aware_keys, case.expect)),
     );
     println!(
         "  gate: read-only in-memory FTS adds canonical tool-surface projection \
@@ -1213,6 +1376,26 @@ fn print_case2_tool_surface_projection_probe(
         );
     }
     if accepted_durable.is_empty() {
+        println!("    none");
+    }
+    println!("  role-aware strict durable top:");
+    for (i, hit) in role_aware.iter().take(TOP_K).enumerate() {
+        let star = if case.expect.iter().any(|e| *e == hit.hit.key) {
+            " <== EXPECTED"
+        } else {
+            ""
+        };
+        println!(
+            "    {:>2}. role={} overlap={} {}{} [{}]",
+            i + 1,
+            hit.role.label(),
+            hit.hit.overlap,
+            hit.hit.key,
+            star,
+            hit.hit.shared_terms.join(", ")
+        );
+    }
+    if role_aware.is_empty() {
         println!("    none");
     }
     println!();
@@ -1300,18 +1483,26 @@ fn print_case2_tool_surface_positive_controls(
     let mut strict_hits = 0;
     let mut strict_cluster_hits = 0;
     let mut strict_empty = 0;
+    let mut role_aware_rank1_hits = 0;
+    let mut role_aware_hits = 0;
     for control in TOOL_SURFACE_POSITIVE_CONTROLS {
         let query_terms = tool_surface_projection_terms("", control.query);
         let durable = scratch.search_projected_accepted_durable(control.query, TOP_K)?;
         let strict = scratch.search_projected_accepted_strict_durable(control.query, TOP_K)?;
+        let role_aware = scratch.search_projected_role_aware(control.query, TOP_K)?;
         let durable_keys = durable
             .iter()
             .map(|hit| hit.key.clone())
             .collect::<Vec<_>>();
         let strict_keys = strict.iter().map(|hit| hit.key.clone()).collect::<Vec<_>>();
+        let role_aware_keys = role_aware
+            .iter()
+            .map(|hit| hit.hit.key.clone())
+            .collect::<Vec<_>>();
         let durable_rank = first_hit_rank(&durable_keys, target_keys);
         let strict_rank = first_hit_rank(&strict_keys, target_keys);
         let strict_cluster_rank = first_hit_rank(&strict_keys, CASE2_TOOL_SURFACE_POLICY_CLUSTER);
+        let role_aware_rank = first_hit_rank(&role_aware_keys, target_keys);
         if durable_rank.is_some() {
             durable_hits += 1;
         }
@@ -1324,15 +1515,23 @@ fn print_case2_tool_surface_positive_controls(
         if strict.is_empty() {
             strict_empty += 1;
         }
+        if role_aware_rank.is_some() {
+            role_aware_hits += 1;
+        }
+        if role_aware_rank == Some(1) {
+            role_aware_rank1_hits += 1;
+        }
         println!(
-            "  {}: terms={} durable_hit={} strict_hit={} strict_cluster={} durable={} strict={} — {}",
+            "  {}: terms={} durable_hit={} strict_hit={} strict_cluster={} role_aware_hit={} durable={} strict={} role_aware={} — {}",
             control.label,
             projection_terms_label(&query_terms),
             rank_cell(durable_rank),
             rank_cell(strict_rank),
             rank_cell(strict_cluster_rank),
+            rank_cell(role_aware_rank),
             durable.len(),
             strict.len(),
+            role_aware.len(),
             control.read
         );
         for (i, hit) in strict.iter().take(3).enumerate() {
@@ -1350,14 +1549,33 @@ fn print_case2_tool_surface_positive_controls(
                 hit.shared_terms.join(", ")
             );
         }
+        println!("      role-aware top:");
+        for (i, hit) in role_aware.iter().take(3).enumerate() {
+            let star = if target_keys.iter().any(|target| *target == hit.hit.key) {
+                " <== EXPECTED"
+            } else {
+                ""
+            };
+            println!(
+                "      {:>2}. role={} overlap={} {}{} [{}]",
+                i + 1,
+                hit.role.label(),
+                hit.hit.overlap,
+                hit.hit.key,
+                star,
+                hit.hit.shared_terms.join(", ")
+            );
+        }
     }
     println!(
-        "  summary: controls={} durable_hits={} strict_hits={} strict_cluster_hits={} strict_empty={}",
+        "  summary: controls={} durable_hits={} strict_hits={} strict_cluster_hits={} strict_empty={} role_aware_hits={} role_aware_rank1_hits={}",
         TOOL_SURFACE_POSITIVE_CONTROLS.len(),
         durable_hits,
         strict_hits,
         strict_cluster_hits,
-        strict_empty
+        strict_empty,
+        role_aware_hits,
+        role_aware_rank1_hits
     );
     println!();
     Ok(())
@@ -2240,5 +2458,106 @@ mod tests {
                 terms
             );
         }
+    }
+
+    fn projection_hit_for_role(key: &str, terms: &[&str]) -> ProjectionHit {
+        ProjectionHit {
+            key: key.to_string(),
+            overlap: terms.len(),
+            shared_terms: terms.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn role_aware_tool_surface_candidates_prioritize_primary_answer() {
+        let query = CORPUS[CASE2_TOOL_SURFACE_IDX1 - 1].query;
+        let shared = [
+            "projtoolcontraction",
+            "projtooldelete",
+            "projtoolretier",
+            "projtoolsurface",
+            "projtooltaxonomy",
+        ];
+        let hits = vec![
+            projection_hit_for_role(
+                "goal_b_surface_growth_gate_engine_finding_20260621",
+                &shared,
+            ),
+            projection_hit_for_role(
+                "reference_ab_tool_surface_taxonomy_8class_retier_over_delete_20260618",
+                &shared,
+            ),
+            projection_hit_for_role(
+                "mcp_codex_native_overlap_surface_narrowed_deployed_20260617",
+                &shared[..4],
+            ),
+        ];
+
+        let ranked = role_aware_tool_surface_candidates(query, hits, TOP_K);
+
+        assert_eq!(
+            ranked[0].hit.key,
+            "reference_ab_tool_surface_taxonomy_8class_retier_over_delete_20260618"
+        );
+        assert_eq!(ranked[0].role, ToolSurfaceCandidateRole::PrimaryAnswer);
+        assert_eq!(ranked[1].role, ToolSurfaceCandidateRole::SamePolicyCluster);
+        assert_eq!(ranked[2].role, ToolSurfaceCandidateRole::AdjacentSubcase);
+    }
+
+    #[test]
+    fn role_aware_tool_surface_candidates_exclude_diagnostic_meta_by_default() {
+        let query = CORPUS[CASE2_TOOL_SURFACE_IDX1 - 1].query;
+        let shared = [
+            "projtoolcontraction",
+            "projtooldelete",
+            "projtoolretier",
+            "projtoolsurface",
+            "projtooltaxonomy",
+        ];
+        let hits = vec![
+            projection_hit_for_role(
+                "tool_diagnostics_plan_load_lookup_miss_20260619",
+                &shared[..4],
+            ),
+            projection_hit_for_role(
+                "goal_c_recall_eval_falsifier_anchor_contribution_20260621",
+                &shared[..4],
+            ),
+            projection_hit_for_role(
+                "reference_ab_tool_surface_taxonomy_8class_retier_over_delete_20260618",
+                &shared,
+            ),
+        ];
+
+        let ranked = role_aware_tool_surface_candidates(query, hits, TOP_K);
+        let keys = ranked
+            .iter()
+            .map(|hit| hit.hit.key.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            keys,
+            vec!["reference_ab_tool_surface_taxonomy_8class_retier_over_delete_20260618"]
+        );
+    }
+
+    #[test]
+    fn role_aware_tool_surface_candidates_allow_diagnostic_meta_when_requested() {
+        let query = "tool surface recall_eval falsifier diagnostic 为什么命中";
+        let shared = [
+            "projtoolcontraction",
+            "projtooldelete",
+            "projtoolretier",
+            "projtoolsurface",
+        ];
+        let hits = vec![projection_hit_for_role(
+            "goal_c_recall_eval_falsifier_anchor_contribution_20260621",
+            &shared,
+        )];
+
+        let ranked = role_aware_tool_surface_candidates(query, hits, TOP_K);
+
+        assert_eq!(ranked.len(), 1);
+        assert_eq!(ranked[0].role, ToolSurfaceCandidateRole::DiagnosticOrMeta);
     }
 }
