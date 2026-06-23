@@ -35,6 +35,7 @@
 //!   cargo run -p ab-bridge --example trigger_recall_eval -- --list-trigger-rows
 //!   cargo run -p ab-bridge --example trigger_recall_eval -- --check-aio2-native
 //!   cargo run -p ab-bridge --example trigger_recall_eval -- --aio2-native
+//!   cargo run -p ab-bridge --example trigger_recall_eval -- --aio2-runtime-audit
 //!   cargo run -p ab-bridge --example trigger_recall_eval -- --debug-aio2-native 3
 //!
 //! Debug one case:
@@ -42,6 +43,8 @@
 //!   cargo run -p ab-bridge --example trigger_recall_eval -- 4
 
 use ab_store::default_db_path;
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeSet, HashMap};
 use std::io::Write as _;
 use std::path::PathBuf;
@@ -52,6 +55,8 @@ use tokio_rusqlite::rusqlite::{
 const TOP_K: usize = 10;
 const MIN_CJK_SHINGLE_ACCEPT_OVERLAP: usize = 4;
 const TRIGGER_PREFIX: &str = "continuity_retrieval_trigger:";
+const TRIGGER_RUNTIME_AUDIT_SCHEMA: &str = "agent_bridge.memory.trigger_query_intent_acceptance.v0";
+const TRIGGER_RUNTIME_REGRESSION_ANCHOR: &str = "aio2_trigger_recall_union_cont_20260623";
 
 struct Case {
     id: &'static str,
@@ -95,6 +100,68 @@ struct PolicyAcceptanceControl {
     query: &'static str,
     expect: PolicyExpectation,
     note: &'static str,
+}
+
+#[derive(Clone, Debug)]
+struct RuntimeShapedAudit {
+    query_hash: String,
+    policy_reject_reason: Option<&'static str>,
+    continuation_reject_reason: Option<&'static str>,
+    baseline_keys: Vec<String>,
+    supplemental_before_gate: Vec<String>,
+    supplemental_after_gate: Vec<String>,
+    final_keys: Vec<String>,
+    fallback_behavior: &'static str,
+}
+
+impl RuntimeShapedAudit {
+    fn policy_decision(&self) -> &'static str {
+        if self.policy_reject_reason.is_some() {
+            "reject"
+        } else {
+            "allow"
+        }
+    }
+
+    fn continuation_decision(&self) -> &'static str {
+        if self.policy_reject_reason.is_some() {
+            "skipped_policy_rejected"
+        } else if self.continuation_reject_reason.is_some() {
+            "reject"
+        } else {
+            "allow"
+        }
+    }
+
+    fn to_json(&self) -> Value {
+        json!({
+            "schema": TRIGGER_RUNTIME_AUDIT_SCHEMA,
+            "enabled": true,
+            "read_only": true,
+            "mode": "fts",
+            "explicit_opt_in": true,
+            "default_memory_search_unchanged": true,
+            "scope_mode": "local_only",
+            "candidate_source": "projected_union",
+            "query_hash": &self.query_hash,
+            "policy_gate": {
+                "decision": self.policy_decision(),
+                "reject_reason": self.policy_reject_reason,
+            },
+            "continuation_gate": {
+                "decision": self.continuation_decision(),
+                "reject_reason": self.continuation_reject_reason,
+            },
+            "baseline_candidates": self.baseline_keys.len(),
+            "supplemental_candidates_before_gate": self.supplemental_before_gate.len(),
+            "supplemental_candidates_after_gate": self.supplemental_after_gate.len(),
+            "final_candidates": self.final_keys.len(),
+            "fallback_behavior": self.fallback_behavior,
+            "regression_anchor": TRIGGER_RUNTIME_REGRESSION_ANCHOR,
+            "changes_default_memory_search_order": false,
+            "changes_production_retrieval": false,
+        })
+    }
 }
 
 struct FalseHit {
@@ -769,6 +836,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             AIO2_NATIVE_CORPUS,
             AIO2_NATIVE_NEGATIVE_CONTROLS,
             AIO2_NATIVE_POLICY_ACCEPTANCE_CONTROLS,
+            "aio2-native active trigger rows, 2026-06-22",
+        );
+    }
+    if matches!(arg1.as_deref(), Some("--aio2-runtime-audit")) {
+        verify_corpus_for(&rows, AIO2_NATIVE_CORPUS, AIO2_NATIVE_NEGATIVE_CONTROLS)?;
+        let fts = ScratchFts::build(&rows)?;
+        return run_runtime_audit_for(
+            &db_path,
+            &rows,
+            &fts,
+            AIO2_NATIVE_CORPUS,
+            AIO2_NATIVE_NEGATIVE_CONTROLS,
             "aio2-native active trigger rows, 2026-06-22",
         );
     }
@@ -1841,6 +1920,231 @@ fn run_eval_for(
     Ok(())
 }
 
+fn run_runtime_audit_for(
+    db_path: &std::path::Path,
+    rows: &[MemoryRow],
+    fts: &ScratchFts,
+    cases: &[Case],
+    negative_controls: &[NegativeControl],
+    corpus_label: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut baseline_acc = Agg::default();
+    let mut projected_union_acc = Agg::default();
+    let mut runtime_final_acc = Agg::default();
+    let mut recovered_indices = Vec::new();
+    let mut lost_indices = Vec::new();
+    let mut sample_case_audits = Vec::new();
+    let gold_keys: BTreeSet<&str> = cases
+        .iter()
+        .flat_map(|case| case.expect.iter().copied())
+        .collect();
+
+    for (idx, case) in cases.iter().enumerate() {
+        let audit = runtime_shaped_audit(fts, case.query, TOP_K)?;
+        let projected_union =
+            fts.search_precise_plus_or_union(IndexKind::Projected, case.query, TOP_K)?;
+        let baseline_rank = first_hit_rank(&audit.baseline_keys, case.expect);
+        let union_rank = first_hit_rank(&projected_union, case.expect);
+        let final_rank = first_hit_rank(&audit.final_keys, case.expect);
+        baseline_acc.record(baseline_rank, None);
+        projected_union_acc.record(union_rank, None);
+        runtime_final_acc.record(final_rank, None);
+
+        if baseline_rank.is_none() && final_rank.is_some() {
+            recovered_indices.push(idx + 1);
+            sample_case_audits.push((idx + 1, case.id, audit.clone()));
+        }
+        if baseline_rank.is_some() && final_rank.is_none() {
+            lost_indices.push(idx + 1);
+        }
+    }
+
+    let mut baseline_false_hits = Vec::new();
+    let mut supplemental_false_hits = Vec::new();
+    let mut final_false_hits = Vec::new();
+    let mut rejected_control_audits = Vec::new();
+    for control in negative_controls {
+        let audit = runtime_shaped_audit(fts, control.query, TOP_K)?;
+        push_false_hits(
+            &mut baseline_false_hits,
+            control,
+            &audit.baseline_keys,
+            &gold_keys,
+        );
+        push_false_hits(
+            &mut supplemental_false_hits,
+            control,
+            &audit.supplemental_after_gate,
+            &gold_keys,
+        );
+        push_false_hits(
+            &mut final_false_hits,
+            control,
+            &audit.final_keys,
+            &gold_keys,
+        );
+        if audit.policy_reject_reason.is_some() || audit.continuation_reject_reason.is_some() {
+            rejected_control_audits.push((control.id, audit));
+        }
+    }
+
+    println!("# Trigger query-intent runtime-shaped audit - {corpus_label}");
+    println!("db:              {}", db_path.display());
+    println!("active rows:     {}", rows.len());
+    println!(
+        "trigger rows:    {}",
+        rows.iter().filter(|r| !r.triggers.is_empty()).count()
+    );
+    println!(
+        "projected rows:  {}",
+        rows.iter().filter(|r| r.content != r.projected).count()
+    );
+    println!("corpus:          {} cases", cases.len());
+    println!("negative_ctrls:  {} controls", negative_controls.len());
+    println!("top_k:           {TOP_K}");
+    println!("schema:          {TRIGGER_RUNTIME_AUDIT_SCHEMA}");
+    println!("regression:      {TRIGGER_RUNTIME_REGRESSION_ANCHOR}");
+    println!(
+        "read_only:       SELECT + in-memory FTS only; no memory_get, memory_search, writes, or reindex"
+    );
+    println!(
+        "contract:        models explicit opt-in supplemental candidates; default memory_search unchanged"
+    );
+    println!();
+
+    println!("## Runtime-shaped recall");
+    println!("  mode                   R@1     R@5    R@10     MRR");
+    print_row("baseline_fts", &baseline_acc, cases.len());
+    print_row("projected_union", &projected_union_acc, cases.len());
+    print_row("runtime_final", &runtime_final_acc, cases.len());
+    println!(
+        "  supplemental recovered baseline misses: {} case(s){}",
+        recovered_indices.len(),
+        fmt_idx(&recovered_indices)
+    );
+    println!(
+        "  runtime final lost baseline hits:       {} case(s){}",
+        lost_indices.len(),
+        fmt_idx(&lost_indices)
+    );
+    println!();
+
+    println!("## Negative controls");
+    println!(
+        "  baseline false hits retained:       {}",
+        baseline_false_hits.len()
+    );
+    if !baseline_false_hits.is_empty() {
+        println!(
+            "  baseline false hits: {}",
+            fmt_false_hits(&baseline_false_hits)
+        );
+    }
+    println!(
+        "  supplemental false hits after gate: {}",
+        supplemental_false_hits.len()
+    );
+    if !supplemental_false_hits.is_empty() {
+        println!(
+            "  supplemental false hits: {}",
+            fmt_false_hits(&supplemental_false_hits)
+        );
+    }
+    println!(
+        "  runtime final false hits:           {}",
+        final_false_hits.len()
+    );
+    if !final_false_hits.is_empty() {
+        println!("  final false hits: {}", fmt_false_hits(&final_false_hits));
+    }
+    println!(
+        "  caveat: runtime-shaped gate only drops supplemental projected candidates; baseline FTS results are intentionally preserved"
+    );
+    println!();
+
+    println!("## Recovered case audit samples");
+    if sample_case_audits.is_empty() {
+        println!("  no baseline misses recovered by supplemental candidates");
+    }
+    for (idx, case_id, audit) in sample_case_audits {
+        println!("case #{idx} {case_id}");
+        println!("{}", serde_json::to_string_pretty(&audit.to_json())?);
+    }
+    println!();
+
+    println!("## Rejected control audit samples");
+    if rejected_control_audits.is_empty() {
+        println!("  no controls rejected by query-intent gates");
+    }
+    for (control_id, audit) in rejected_control_audits {
+        println!("control {control_id}");
+        println!("{}", serde_json::to_string_pretty(&audit.to_json())?);
+    }
+    println!();
+
+    println!("## Decision");
+    println!(
+        "  eval_only: true; production memory_search, ranking, schema, indexing, graph, semantic retrieval, MCP surfaces, and memory rows unchanged"
+    );
+
+    Ok(())
+}
+
+fn runtime_shaped_audit(
+    fts: &ScratchFts,
+    query: &str,
+    limit: usize,
+) -> Result<RuntimeShapedAudit, String> {
+    let baseline_keys = fts.search(IndexKind::Projected, query, limit)?;
+    let projected_union_keys =
+        fts.search_precise_plus_or_union(IndexKind::Projected, query, limit)?;
+    let baseline_set = baseline_keys
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    let supplemental_before_gate = projected_union_keys
+        .into_iter()
+        .filter(|key| !baseline_set.contains(key.as_str()))
+        .collect::<Vec<_>>();
+    let policy_reject_reason = policy_acceptance_reject_reason(query);
+    let continuation_reject_reason = if policy_reject_reason.is_some() {
+        None
+    } else {
+        continuation_domain_reject_reason(query)
+    };
+    let gate_rejected = policy_reject_reason.is_some() || continuation_reject_reason.is_some();
+    let supplemental_after_gate = if gate_rejected {
+        Vec::new()
+    } else {
+        supplemental_before_gate.clone()
+    };
+    let final_keys = dedupe_limit(
+        baseline_keys
+            .clone()
+            .into_iter()
+            .chain(supplemental_after_gate.clone()),
+        limit,
+    );
+    let fallback_behavior = if gate_rejected {
+        "baseline_fts_only"
+    } else if supplemental_after_gate.is_empty() {
+        "baseline_fts_only_no_supplemental"
+    } else {
+        "baseline_plus_supplemental_projected"
+    };
+
+    Ok(RuntimeShapedAudit {
+        query_hash: query_hash(query),
+        policy_reject_reason,
+        continuation_reject_reason,
+        baseline_keys,
+        supplemental_before_gate,
+        supplemental_after_gate,
+        final_keys,
+        fallback_behavior,
+    })
+}
+
 fn load_active_rows(db_path: &std::path::Path) -> SqlResult<Vec<MemoryRow>> {
     let db = RusqliteConnection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     let mut stmt = db.prepare(
@@ -2663,6 +2967,10 @@ fn continuation_acceptance_reject_reason(query: &str) -> Option<&'static str> {
         return Some(reason);
     }
 
+    continuation_domain_reject_reason(query)
+}
+
+fn continuation_domain_reject_reason(query: &str) -> Option<&'static str> {
     let lower = query.to_lowercase();
     let has_dashboard_or_state = contains_any(&lower, &["dashboard", "state"]);
     if !has_dashboard_or_state {
@@ -2696,6 +3004,11 @@ fn continuation_acceptance_reject_reason(query: &str) -> Option<&'static str> {
     }
 
     None
+}
+
+fn query_hash(query: &str) -> String {
+    let digest = Sha256::digest(query.as_bytes());
+    format!("sha256:{digest:x}")
 }
 
 fn contains_any(haystack: &str, needles: &[&str]) -> bool {
@@ -3709,6 +4022,126 @@ mod tests {
             )
             .expect("health dashboard rejected"),
             Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn runtime_shaped_audit_accepts_supplemental_recovery_without_runtime_authority() {
+        let query = "LSWR G25 store write execution preflight landed output only plan next gate";
+        let rows = [
+            MemoryRow {
+                key: "precise_distractor".to_string(),
+                kind: "decision".to_string(),
+                scope: None,
+                content: String::new(),
+                projected:
+                    "LSWR G25 store write execution preflight landed output only plan next gate distractor"
+                        .to_string(),
+                triggers: Vec::new(),
+            },
+            MemoryRow {
+                key: "g25_target".to_string(),
+                kind: "decision".to_string(),
+                scope: None,
+                content: String::new(),
+                projected: "LSWR G25 store write execution preflight landed output only"
+                    .to_string(),
+                triggers: Vec::new(),
+            },
+        ];
+        let fts = ScratchFts::build(&rows).expect("scratch fts");
+        let audit = runtime_shaped_audit(&fts, query, TOP_K).expect("runtime-shaped audit");
+
+        assert_eq!(audit.baseline_keys, vec!["precise_distractor".to_string()]);
+        assert!(
+            audit
+                .supplemental_before_gate
+                .contains(&"g25_target".to_string())
+        );
+        assert!(
+            audit
+                .supplemental_after_gate
+                .contains(&"g25_target".to_string())
+        );
+        assert!(audit.final_keys.contains(&"g25_target".to_string()));
+        assert_eq!(audit.policy_reject_reason, None);
+        assert_eq!(audit.continuation_reject_reason, None);
+        assert_eq!(
+            audit.fallback_behavior,
+            "baseline_plus_supplemental_projected"
+        );
+
+        let payload = audit.to_json();
+        assert_eq!(payload["default_memory_search_unchanged"], json!(true));
+        assert_eq!(payload["changes_production_retrieval"], json!(false));
+        assert!(
+            payload["query_hash"]
+                .as_str()
+                .expect("query hash")
+                .starts_with("sha256:")
+        );
+        assert!(
+            !payload.to_string().contains(query),
+            "audit payload should not echo the raw query"
+        );
+    }
+
+    #[test]
+    fn runtime_shaped_audit_rejects_supplemental_but_keeps_baseline() {
+        let query = "Goal C dashboard state card spacing responsive layout visual design only not continuity ledger work";
+        let rows = [
+            MemoryRow {
+                key: "frontend_baseline".to_string(),
+                kind: "decision".to_string(),
+                scope: None,
+                content: String::new(),
+                projected:
+                    "Goal C dashboard state card spacing responsive layout visual design only not continuity ledger work"
+                        .to_string(),
+                triggers: Vec::new(),
+            },
+            MemoryRow {
+                key: "goal_c_supplemental".to_string(),
+                kind: "decision".to_string(),
+                scope: None,
+                content: String::new(),
+                projected:
+                    "Goal C dashboard state continuity ledger work report first decision"
+                        .to_string(),
+                triggers: Vec::new(),
+            },
+        ];
+        let fts = ScratchFts::build(&rows).expect("scratch fts");
+        let audit = runtime_shaped_audit(&fts, query, TOP_K).expect("runtime-shaped audit");
+
+        assert_eq!(audit.baseline_keys, vec!["frontend_baseline".to_string()]);
+        assert!(
+            audit
+                .supplemental_before_gate
+                .contains(&"goal_c_supplemental".to_string())
+        );
+        assert!(
+            audit.supplemental_after_gate.is_empty(),
+            "frontend intent should drop supplemental projected candidates"
+        );
+        assert_eq!(audit.final_keys, vec!["frontend_baseline".to_string()]);
+        assert_eq!(
+            audit.continuation_reject_reason,
+            Some("frontend_dashboard_intent")
+        );
+        assert_eq!(audit.fallback_behavior, "baseline_fts_only");
+
+        let payload = audit.to_json();
+        assert_eq!(
+            payload["continuation_gate"]["reject_reason"],
+            json!("frontend_dashboard_intent")
+        );
+        assert_eq!(payload["fallback_behavior"], json!("baseline_fts_only"));
+        assert_eq!(payload["final_candidates"], json!(1));
+        assert_eq!(
+            payload["supplemental_candidates_after_gate"],
+            json!(0),
+            "gate must affect supplemental candidates only"
         );
     }
 
