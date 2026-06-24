@@ -33382,15 +33382,40 @@ enum MemorySearchScopeRelation {
     CrossScope,
 }
 
+const PROJECT_SCOPE_ALIASES_ENV: &str = "AGENT_BRIDGE_PROJECT_SCOPE_ALIASES";
+
 fn memory_search_scope_relation(
     rec: &MemoryRecord,
     requested_scope: &str,
+) -> MemorySearchScopeRelation {
+    let aliases = std::env::var(PROJECT_SCOPE_ALIASES_ENV).ok();
+    memory_search_scope_relation_with_aliases(rec, requested_scope, aliases.as_deref())
+}
+
+fn memory_search_scope_relation_with_aliases(
+    rec: &MemoryRecord,
+    requested_scope: &str,
+    project_scope_aliases: Option<&str>,
 ) -> MemorySearchScopeRelation {
     let requested_scope = requested_scope.trim();
     match memory_scope_value(rec) {
         Some(scope)
             if !requested_scope.is_empty()
-                && project_scopes_read_time_compatible(scope, requested_scope) =>
+                && (project_scopes_read_time_compatible(scope, requested_scope)
+                    || crate::project_identity::project_scopes_canonical_match(
+                        scope,
+                        requested_scope,
+                    )
+                    || project_scope_aliases
+                        .map(str::trim)
+                        .filter(|aliases| !aliases.is_empty())
+                        .is_some_and(|aliases| {
+                            crate::project_identity::project_scopes_alias_by_registry(
+                                scope,
+                                requested_scope,
+                                aliases,
+                            )
+                        })) =>
         {
             MemorySearchScopeRelation::Local
         }
@@ -57526,6 +57551,100 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             "project:/repo/a",
             MemorySearchScopeMode::LocalPlusGlobal
         ));
+    }
+
+    #[test]
+    fn memory_search_scope_filter_normalizes_canonical_project_id_scope() {
+        let scoped = mk_mem_scoped(
+            "scoped",
+            "decision",
+            "content content content content",
+            &[],
+            Some("Project-ID:git:github.com/Pallasting/Agent-Bridge.git"),
+        );
+
+        assert!(memory_search_scope_mode_matches(
+            &scoped,
+            "project-id:git:github.com/pallasting/agent-bridge",
+            MemorySearchScopeMode::LocalOnly
+        ));
+    }
+
+    #[test]
+    fn memory_search_scope_filter_combines_default_legacy_and_approved_aliases() {
+        let aliases = "project-id:git:github.com/pallasting/agent-bridge=\
+            project:/Data/CascadeProjects/agent-bridge,\
+            project:/Users/pallasting/Projects/Agent-Bridge";
+        let aio = mk_mem_scoped(
+            "aio",
+            "decision",
+            "content content content content",
+            &[],
+            Some("project:/Data/CascadeProjects/agent-bridge"),
+        );
+        let parent = mk_mem_scoped(
+            "parent",
+            "decision",
+            "content content content content",
+            &[],
+            Some("project:/Data/CascadeProjects"),
+        );
+        let worktree = mk_mem_scoped(
+            "worktree",
+            "decision",
+            "content content content content",
+            &[],
+            Some("project:/Data/CascadeProjects/agent-bridge-feature-x"),
+        );
+
+        assert_eq!(
+            memory_search_scope_relation_with_aliases(
+                &aio,
+                "project:/Users/pallasting/Projects/Agent-Bridge",
+                None,
+            ),
+            MemorySearchScopeRelation::Local
+        );
+        assert_eq!(
+            memory_search_scope_relation_with_aliases(
+                &aio,
+                "project-id:git:github.com/pallasting/agent-bridge",
+                None,
+            ),
+            MemorySearchScopeRelation::CrossScope
+        );
+        assert_eq!(
+            memory_search_scope_relation_with_aliases(
+                &aio,
+                "project:/Users/pallasting/Projects/Agent-Bridge",
+                Some(aliases),
+            ),
+            MemorySearchScopeRelation::Local
+        );
+        assert_eq!(
+            memory_search_scope_relation_with_aliases(
+                &aio,
+                "project-id:git:github.com/pallasting/agent-bridge",
+                Some(aliases),
+            ),
+            MemorySearchScopeRelation::Local
+        );
+        assert_eq!(
+            memory_search_scope_relation_with_aliases(
+                &parent,
+                "project:/Users/pallasting/Projects/Agent-Bridge",
+                Some(aliases),
+            ),
+            MemorySearchScopeRelation::CrossScope
+        );
+        assert_eq!(
+            memory_search_scope_relation_with_aliases(
+                &worktree,
+                "project:/Users/pallasting/Projects/Agent-Bridge",
+                Some(aliases),
+            ),
+            MemorySearchScopeRelation::CrossScope
+        );
     }
 
     #[test]

@@ -60,6 +60,7 @@ pub mod present;
 pub mod present_approval;
 pub mod present_ingest;
 pub mod project;
+pub mod project_identity;
 pub mod remote_steer;
 pub mod rescue;
 pub mod router;
