@@ -99,6 +99,40 @@ impl Tier {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CaseScope {
+    AgentBridgeLocal,
+    GlobalOk,
+    CrossDomainGold,
+}
+
+impl CaseScope {
+    fn label(self) -> &'static str {
+        match self {
+            CaseScope::AgentBridgeLocal => "local",
+            CaseScope::GlobalOk => "global-ok",
+            CaseScope::CrossDomainGold => "cross-gold",
+        }
+    }
+
+    fn is_cross_domain_gold(self) -> bool {
+        matches!(self, CaseScope::CrossDomainGold)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ScopeRelation {
+    Local,
+    Global,
+    Cross,
+}
+
+impl ScopeRelation {
+    fn is_non_cross(self) -> bool {
+        matches!(self, ScopeRelation::Local | ScopeRelation::Global)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum BaselineDbSource {
     LiveDefault,
     EnvOverride,
@@ -144,6 +178,7 @@ struct Case {
     query: &'static str,
     expect: &'static [&'static str],
     tier: Tier,
+    scope: CaseScope,
 }
 
 /// v2 corpus — keys verified present in the live store on 2026-06-19 (queried
@@ -158,16 +193,19 @@ const CORPUS: &[Case] = &[
             "curated_implicit_lessondc26f323",
         ],
         tier: Tier::Hard,
+        scope: CaseScope::AgentBridgeLocal,
     },
     Case {
         query: "工具面太多了应该按什么维度归类收口,是直接删还是重新分级",
         expect: &["reference_ab_tool_surface_taxonomy_8class_retier_over_delete_20260618"],
         tier: Tier::Hard,
+        scope: CaseScope::AgentBridgeLocal,
     },
     Case {
         query: "某个工具 p95 延迟看着很高但调用样本很少要不要当成异常",
         expect: &["tool_atlas_low_sample_p95_classification_20260619"],
         tier: Tier::Moderate, // "p95" survives as a lexical anchor
+        scope: CaseScope::AgentBridgeLocal,
     },
     Case {
         query: "codex 的核心工具集和原生能力重叠,该不该因为很少用就降级",
@@ -182,66 +220,79 @@ const CORPUS: &[Case] = &[
             "mcp_codex_native_overlap_surface_narrowed_deployed_20260617",
         ],
         tier: Tier::Hard,
+        scope: CaseScope::AgentBridgeLocal,
     },
     Case {
         query: "怎么查看 sibling 推到远端的文件内容又不影响我的工作树",
         expect: &["lesson_git_show_origin_master_read_without_pull_20260518"],
         tier: Tier::Hard,
+        scope: CaseScope::AgentBridgeLocal,
     },
     Case {
         query: "memory_search 突然报数据库列不存在的错误是什么原因",
         expect: &["lesson_memory_search_fts5_lens_column_drift_20260518"],
         tier: Tier::Moderate, // "memory_search" / "列" echo
+        scope: CaseScope::AgentBridgeLocal,
     },
     Case {
         query: "多个 agent 在同一个 git 仓库一起干活 HEAD 争用怎么预防",
         expect: &["lesson_multi_agent_shared_git_worktree_head_contention"],
         tier: Tier::Hard,
+        scope: CaseScope::AgentBridgeLocal,
     },
     Case {
         query: "怎么远程给一个正在运行的长驻 agent 会话注入指令",
         expect: &["agentbridge_remote_session_steer_gap_20260529"],
         tier: Tier::Hard,
+        scope: CaseScope::AgentBridgeLocal,
     },
     Case {
         query: "agent-bridge 这个项目的核心愿景定位是什么",
         expect: &["agent_bridge_northstar_bidirectional_bridge_20260529"],
         tier: Tier::Hard,
+        scope: CaseScope::AgentBridgeLocal,
     },
     Case {
         query: "EdgeRazor 那篇论文有什么值得我们借鉴的地方",
         expect: &["aiot_edgerazor_borrow_eval_20260526"],
         tier: Tier::Moderate, // "EdgeRazor" echo
+        scope: CaseScope::CrossDomainGold,
     },
     Case {
         query: "kilo 和 codex 两个远程执行器一起用实测验证过吗",
         expect: &["kilo_codex_dual_executor_live_verified_20260531"],
         tier: Tier::Moderate, // "kilo" / "codex" echo
+        scope: CaseScope::AgentBridgeLocal,
     },
     Case {
         query: "skills lint 有没有规则检查严格度但缺少 preflight 的情况",
         expect: &["skills_lint_rigor_preflight_rule_impl_20260528"],
         tier: Tier::Moderate, // "skills lint" / "preflight" echo
+        scope: CaseScope::AgentBridgeLocal,
     },
     Case {
         query: "有没有一个全局通用的 TELLS 基线技能",
         expect: &["global_tells_baseline_skill_20260529"],
         tier: Tier::Moderate, // "TELLS" echo
+        scope: CaseScope::GlobalOk,
     },
     Case {
         query: "biocortex 影子试验是只读的吗,会不会改默认检索顺序",
         expect: &["ab_memory_continuity_t5_biocortex_shadow_trial_20260619"],
         tier: Tier::Hard,
+        scope: CaseScope::AgentBridgeLocal,
     },
     Case {
         query: "palace 评审 artifact 从外部工具借鉴了哪些设计模式",
         expect: &["palace_review_artifact_external_patterns_20260618"],
         tier: Tier::Moderate, // "palace" / "artifact" echo
+        scope: CaseScope::CrossDomainGold,
     },
     Case {
         query: "自检告警把 catalog 类记忆也算进计数导致误报",
         expect: &["lesson_c3_s2_self_check_counts_catalog_false_positive_20260518"],
         tier: Tier::Moderate, // "catalog" / "计数" / "误报" echo
+        scope: CaseScope::AgentBridgeLocal,
     },
     // ── Easy lexical controls (ceiling) ─────────────────────────────────────
     // Same targets as hard cases #7 and #9, with the distinctive tokens
@@ -252,15 +303,21 @@ const CORPUS: &[Case] = &[
         query: "multi agent shared git worktree HEAD contention lesson",
         expect: &["lesson_multi_agent_shared_git_worktree_head_contention"],
         tier: Tier::Easy,
+        scope: CaseScope::AgentBridgeLocal,
     },
     Case {
         query: "agent bridge northstar bidirectional bridge vision",
         expect: &["agent_bridge_northstar_bidirectional_bridge_20260529"],
         tier: Tier::Easy,
+        scope: CaseScope::AgentBridgeLocal,
     },
 ];
 
 const TOP_K: usize = 10;
+// Overfetch enough to cover the current local store so the hard-prefilter
+// variant approximates "rank all scoped rows", not "filter raw top-N".
+const SEMANTIC_SCOPE_CANDIDATE_K: usize = 10_000;
+const AGENT_BRIDGE_PROJECT_SCOPE: &str = "project:/Users/pallasting/Projects/agent-bridge";
 const GRAPH_NEIGHBOR_LIMIT: usize = 8;
 const HASH_BACKEND_NAME: &str = "fnv1a-hash-384";
 const REVIEW_GATE_TARGET_CASES: &[usize] = &[1, 2, 8, 9, 14];
@@ -505,6 +562,58 @@ where
     agg
 }
 
+/// Eval-only aggregate for semantic scope-routing experiments. This measures
+/// the three variants from forum #120/#4090:
+/// C = no scope handling, A = post-rank soft multiplier, B = hard prefilter.
+#[derive(Default)]
+struct SemanticScopeAgg {
+    mode: ModeAgg,
+    top_row_count: usize,
+    local_row_count: usize,
+    global_row_count: usize,
+    cross_row_count: usize,
+    purity_by_case: Vec<Option<f64>>,
+    cross_rows_by_case: Vec<usize>,
+}
+
+impl SemanticScopeAgg {
+    fn record(&mut self, case: &Case, hits: &[ab_store::MemorySearchHit]) {
+        let keys = keys_of_hits(hits);
+        self.mode.record(first_hit_rank(&keys, case.expect));
+
+        let mut local = 0usize;
+        let mut global = 0usize;
+        let mut cross = 0usize;
+        for hit in hits {
+            match memory_scope_relation(hit.record.scope.as_deref(), AGENT_BRIDGE_PROJECT_SCOPE) {
+                ScopeRelation::Local => local += 1,
+                ScopeRelation::Global => global += 1,
+                ScopeRelation::Cross => cross += 1,
+            }
+        }
+
+        let total = local + global + cross;
+        self.top_row_count += total;
+        self.local_row_count += local;
+        self.global_row_count += global;
+        self.cross_row_count += cross;
+        self.purity_by_case.push(if total == 0 {
+            None
+        } else {
+            Some((local + global) as f64 / total as f64)
+        });
+        self.cross_rows_by_case.push(cross);
+    }
+
+    fn non_cross_purity(&self) -> f64 {
+        if self.top_row_count == 0 {
+            0.0
+        } else {
+            (self.local_row_count + self.global_row_count) as f64 / self.top_row_count as f64
+        }
+    }
+}
+
 /// Offline candidate-set expansion: keep baseline FTS candidates in their
 /// original order, then append direct graph neighbors that were not already
 /// present. This is a yardstick for recall headroom, not a production ranker.
@@ -704,6 +813,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut fts = ModeAgg::default();
     let mut hybrid = ModeAgg::default();
     let mut semantic = ModeAgg::default();
+    let mut semantic_scope_raw = SemanticScopeAgg::default();
+    let mut semantic_scope_soft = SemanticScopeAgg::default();
+    let mut semantic_scope_hard = SemanticScopeAgg::default();
     let mut fts_graph = CandidateExpansionAgg::default();
     let mut fts_candidate_counts = Vec::with_capacity(CORPUS.len());
     let scratch_cjk = ScratchCjkFts::build(&db_path)?;
@@ -755,14 +867,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         hybrid.record(first_hit_rank(&hyb_keys, case.expect));
 
         if semantic_ready {
-            let sem_keys = keys_of(
-                store
-                    .memory_search_semantic(case.query, TOP_K as u32, 0.0)
-                    .await?,
-            );
-            semantic.record(first_hit_rank(&sem_keys, case.expect));
+            let sem_candidates = store
+                .memory_search_semantic(case.query, SEMANTIC_SCOPE_CANDIDATE_K as u32, 0.0)
+                .await?;
+            let sem_raw = semantic_scope_raw_candidates(&sem_candidates);
+            let sem_soft =
+                semantic_scope_soft_candidates(&sem_candidates, AGENT_BRIDGE_PROJECT_SCOPE);
+            let sem_hard =
+                semantic_scope_hard_candidates(&sem_candidates, AGENT_BRIDGE_PROJECT_SCOPE);
+            semantic.record(first_hit_rank(&keys_of_hits(&sem_raw), case.expect));
+            semantic_scope_raw.record(case, &sem_raw);
+            semantic_scope_soft.record(case, &sem_soft);
+            semantic_scope_hard.record(case, &sem_hard);
         } else {
             semantic.record(None);
+            semantic_scope_raw.record(case, &[]);
+            semantic_scope_soft.record(case, &[]);
+            semantic_scope_hard.record(case, &[]);
         }
     }
 
@@ -783,6 +904,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     println!();
+
+    if semantic_ready {
+        print_semantic_scope_eval_summary(
+            &semantic_scope_raw,
+            &semantic_scope_soft,
+            &semantic_scope_hard,
+            n,
+        );
+        print_semantic_scope_case_matrix(
+            &semantic_scope_raw,
+            &semantic_scope_soft,
+            &semantic_scope_hard,
+        );
+    }
 
     println!("## Offline candidate expansion (FTS + direct graph neighbors)");
     print_candidate_expansion_summary(&fts_graph, n);
@@ -960,6 +1095,85 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn keys_of(hits: Vec<ab_store::MemorySearchHit>) -> Vec<String> {
     hits.into_iter().map(|h| h.record.key).collect()
+}
+
+fn keys_of_hits(hits: &[ab_store::MemorySearchHit]) -> Vec<String> {
+    hits.iter().map(|h| h.record.key.clone()).collect()
+}
+
+fn semantic_scope_raw_candidates(
+    candidates: &[ab_store::MemorySearchHit],
+) -> Vec<ab_store::MemorySearchHit> {
+    candidates.iter().take(TOP_K).cloned().collect()
+}
+
+fn semantic_scope_soft_candidates(
+    candidates: &[ab_store::MemorySearchHit],
+    requested_scope: &str,
+) -> Vec<ab_store::MemorySearchHit> {
+    let mut hits = candidates.to_vec();
+    for hit in &mut hits {
+        let relation = memory_scope_relation(hit.record.scope.as_deref(), requested_scope);
+        hit.score *= semantic_scope_score_multiplier(relation);
+    }
+    hits.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    hits.truncate(TOP_K);
+    hits
+}
+
+fn semantic_scope_hard_candidates(
+    candidates: &[ab_store::MemorySearchHit],
+    requested_scope: &str,
+) -> Vec<ab_store::MemorySearchHit> {
+    candidates
+        .iter()
+        .filter(|hit| {
+            memory_scope_relation(hit.record.scope.as_deref(), requested_scope).is_non_cross()
+        })
+        .take(TOP_K)
+        .cloned()
+        .collect()
+}
+
+fn semantic_scope_score_multiplier(relation: ScopeRelation) -> f64 {
+    match relation {
+        ScopeRelation::Local => 1.0,
+        ScopeRelation::Global => 0.85,
+        ScopeRelation::Cross => 0.65,
+    }
+}
+
+fn memory_scope_relation(scope: Option<&str>, requested_scope: &str) -> ScopeRelation {
+    let Some(scope) = scope.map(str::trim).filter(|scope| !scope.is_empty()) else {
+        return ScopeRelation::Global;
+    };
+    if scope == "global" {
+        return ScopeRelation::Global;
+    }
+    if scope == requested_scope || project_scopes_overlap(scope, requested_scope) {
+        return ScopeRelation::Local;
+    }
+    ScopeRelation::Cross
+}
+
+fn project_scopes_overlap(a: &str, b: &str) -> bool {
+    let (Some(a), Some(b)) = (project_scope_path(a), project_scope_path(b)) else {
+        return false;
+    };
+    let a = Path::new(a);
+    let b = Path::new(b);
+    a.starts_with(b) || b.starts_with(a)
+}
+
+fn project_scope_path(scope: &str) -> Option<&str> {
+    scope
+        .strip_prefix("project:")
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
 }
 
 struct ScratchCjkFts {
@@ -2505,6 +2719,87 @@ fn print_mode_row(label: &str, agg: &ModeAgg, n: usize) {
     );
 }
 
+fn print_semantic_scope_eval_summary(
+    raw: &SemanticScopeAgg,
+    soft: &SemanticScopeAgg,
+    hard: &SemanticScopeAgg,
+    n: usize,
+) {
+    let hard_idxs = tier_indices(Tier::Hard);
+    println!("## Eval-only semantic scope A/B/C (candidate pool cap {SEMANTIC_SCOPE_CANDIDATE_K})");
+    println!(
+        "  {:<18} {:>4} {:>7} {:>7} {:>7} {:>7} {:>9} {:>8} {:>7}",
+        "mode", "n", "R@1", "R@5", "R@10", "MRR", "hardR@10", "purity", "cross"
+    );
+    print_semantic_scope_row("C raw/no-scope", raw, n, &hard_idxs);
+    print_semantic_scope_row("A soft-scope", soft, n, &hard_idxs);
+    print_semantic_scope_row("B hard-prefilter", hard, n, &hard_idxs);
+
+    let cross_gold = cross_gold_case_indices();
+    let hard_losses = cross_gold_loss_indices(raw, hard);
+    println!(
+        "  scope contract: purity = (local+global)/top{TOP_K} rows. B is \
+         local+global hard prefilter only; cross-domain gold cases are tracked \
+         as falsifiers, not counted away."
+    );
+    println!(
+        "  cross-domain gold tracked: {} case(s){}; B losses vs C raw: {} case(s){}",
+        cross_gold.len(),
+        fmt_idx(&cross_gold),
+        hard_losses.len(),
+        fmt_idx(&hard_losses)
+    );
+    println!();
+}
+
+fn print_semantic_scope_row(label: &str, agg: &SemanticScopeAgg, n: usize, hard_idxs: &[usize]) {
+    let nf = n as f64;
+    println!(
+        "  {:<18} {:>4} {:>7.3} {:>7.3} {:>7.3} {:>7.3} {:>9.3} {:>8.3} {:>7}",
+        label,
+        n,
+        agg.mode.r_at_1 as f64 / nf,
+        agg.mode.r_at_5 as f64 / nf,
+        agg.mode.r_at_10 as f64 / nf,
+        agg.mode.rr_sum / nf,
+        recall_at_10_for_indices(&agg.mode.ranks, hard_idxs),
+        agg.non_cross_purity(),
+        agg.cross_row_count,
+    );
+}
+
+fn print_semantic_scope_case_matrix(
+    raw: &SemanticScopeAgg,
+    soft: &SemanticScopeAgg,
+    hard: &SemanticScopeAgg,
+) {
+    println!("## Semantic scope per-case (eval-only)");
+    println!(
+        "  {:<4} {:<9} {:<11} {:>5} {:>6} {:>6} {:>8} {:>7}  {}",
+        "#", "tier", "scope", "C", "A", "B", "Bpurity", "Bcross", "query"
+    );
+    for (i, case) in CORPUS.iter().enumerate() {
+        let q: String = case.query.chars().take(32).collect();
+        println!(
+            "  {:<4} {:<9} {:<11} {:>5} {:>6} {:>6} {:>8} {:>7}  {}",
+            i + 1,
+            case.tier.label(),
+            case.scope.label(),
+            rank_cell(raw.mode.ranks[i]),
+            rank_cell(soft.mode.ranks[i]),
+            rank_cell(hard.mode.ranks[i]),
+            purity_cell(hard.purity_by_case[i]),
+            hard.cross_rows_by_case[i],
+            q
+        );
+    }
+    println!();
+}
+
+fn purity_cell(value: Option<f64>) -> String {
+    value.map_or_else(|| "—".to_string(), |value| format!("{value:.2}"))
+}
+
 fn print_eval_mode_row(label: &str, agg: &ModeAgg, n: usize) {
     let nf = n as f64;
     println!(
@@ -2660,6 +2955,41 @@ fn tier_indices(tier: Tier) -> Vec<usize> {
         .iter()
         .enumerate()
         .filter_map(|(i, case)| if case.tier == tier { Some(i) } else { None })
+        .collect()
+}
+
+fn cross_gold_case_indices() -> Vec<usize> {
+    CORPUS
+        .iter()
+        .enumerate()
+        .filter_map(|(i, case)| {
+            if case.scope.is_cross_domain_gold() {
+                Some(i + 1)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn cross_gold_loss_indices(raw: &SemanticScopeAgg, filtered: &SemanticScopeAgg) -> Vec<usize> {
+    CORPUS
+        .iter()
+        .enumerate()
+        .filter_map(|(i, case)| {
+            if case.scope.is_cross_domain_gold()
+                && raw.mode.ranks.get(i).is_some_and(|rank| rank.is_some())
+                && filtered
+                    .mode
+                    .ranks
+                    .get(i)
+                    .is_some_and(|rank| rank.is_none())
+            {
+                Some(i + 1)
+            } else {
+                None
+            }
+        })
         .collect()
 }
 
@@ -3251,7 +3581,7 @@ async fn confirm_real_embedder() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ab_store::MemoryEdge;
+    use ab_store::{MemoryEdge, MemoryRecord, MemorySearchHit};
 
     fn edge(from_key: &str, to_key: &str, weight: f64) -> MemoryEdge {
         MemoryEdge {
@@ -3259,6 +3589,33 @@ mod tests {
             to_key: to_key.to_string(),
             edge_type: "relates".to_string(),
             weight,
+        }
+    }
+
+    fn record(key: &str, scope: Option<&str>) -> MemoryRecord {
+        MemoryRecord {
+            key: key.to_string(),
+            kind: "context".to_string(),
+            content: String::new(),
+            tags: Vec::new(),
+            related_keys: Vec::new(),
+            scope: scope.map(str::to_string),
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".to_string(),
+            trigger_pattern: None,
+            superseded_by: None,
+        }
+    }
+
+    fn hit(key: &str, scope: Option<&str>, score: f64) -> MemorySearchHit {
+        MemorySearchHit {
+            record: record(key, scope),
+            score,
+            cosine: Some(score as f32),
         }
     }
 
@@ -3278,6 +3635,96 @@ mod tests {
                 .note()
                 .contains("same snapshot")
         );
+    }
+
+    #[test]
+    fn memory_scope_relation_classifies_global_local_and_cross_project() {
+        assert_eq!(
+            memory_scope_relation(None, AGENT_BRIDGE_PROJECT_SCOPE),
+            ScopeRelation::Global
+        );
+        assert_eq!(
+            memory_scope_relation(Some("global"), AGENT_BRIDGE_PROJECT_SCOPE),
+            ScopeRelation::Global
+        );
+        assert_eq!(
+            memory_scope_relation(Some(AGENT_BRIDGE_PROJECT_SCOPE), AGENT_BRIDGE_PROJECT_SCOPE),
+            ScopeRelation::Local
+        );
+        assert_eq!(
+            memory_scope_relation(
+                Some("project:/Users/pallasting/Projects/agent-bridge/crates/bridge"),
+                AGENT_BRIDGE_PROJECT_SCOPE
+            ),
+            ScopeRelation::Local
+        );
+        assert_eq!(
+            memory_scope_relation(
+                Some("project:/Users/pallasting/Projects/onsen-hd"),
+                AGENT_BRIDGE_PROJECT_SCOPE
+            ),
+            ScopeRelation::Cross
+        );
+    }
+
+    #[test]
+    fn semantic_scope_soft_candidates_apply_current_scope_multipliers() {
+        let candidates = vec![
+            hit(
+                "cross",
+                Some("project:/Users/pallasting/Projects/onsen-hd"),
+                0.90,
+            ),
+            hit("local", Some(AGENT_BRIDGE_PROJECT_SCOPE), 0.60),
+            hit("global", None, 0.62),
+        ];
+
+        let ranked = semantic_scope_soft_candidates(&candidates, AGENT_BRIDGE_PROJECT_SCOPE);
+        let keys = keys_of_hits(&ranked);
+
+        assert_eq!(keys, vec!["local", "cross", "global"]);
+        assert!(
+            ranked[0].score > ranked[1].score,
+            "local 0.60 should beat cross 0.90 after cross x0.65"
+        );
+    }
+
+    #[test]
+    fn semantic_scope_hard_candidates_keep_local_and_global_only() {
+        let candidates = vec![
+            hit(
+                "cross",
+                Some("project:/Users/pallasting/Projects/onsen-hd"),
+                0.90,
+            ),
+            hit("global", None, 0.62),
+            hit("local", Some(AGENT_BRIDGE_PROJECT_SCOPE), 0.60),
+        ];
+
+        let ranked = semantic_scope_hard_candidates(&candidates, AGENT_BRIDGE_PROJECT_SCOPE);
+
+        assert_eq!(keys_of_hits(&ranked), vec!["global", "local"]);
+    }
+
+    #[test]
+    fn cross_gold_loss_indices_reports_hard_prefilter_falsifier_cases() {
+        let mut raw = SemanticScopeAgg {
+            mode: ModeAgg {
+                ranks: vec![None; CORPUS.len()],
+                ..ModeAgg::default()
+            },
+            ..SemanticScopeAgg::default()
+        };
+        let hard = SemanticScopeAgg {
+            mode: ModeAgg {
+                ranks: vec![None; CORPUS.len()],
+                ..ModeAgg::default()
+            },
+            ..SemanticScopeAgg::default()
+        };
+        raw.mode.ranks[9] = Some(1); // case #10 is a cross-domain gold case
+
+        assert_eq!(cross_gold_loss_indices(&raw, &hard), vec![10]);
     }
 
     #[test]
