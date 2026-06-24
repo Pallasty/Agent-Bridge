@@ -98,7 +98,7 @@ use crate::biocortex_shadow::{
 use crate::biocortex_shadow::{biocortex_retrieval_shadow_report, BioCortexRetrievalShadowOptions};
 use crate::context_budget::{
     budget_recommendation, env_context_window, estimate_tokens_from_text, estimated_usage_tokens,
-    resolve_context_window,
+    fatigue_tier, model_supports_1m_beta, resolve_context_window,
 };
 use crate::hub::Hub;
 use crate::ide::{queue_ide_command, read_ide_snapshot, IdeCommandOptions, IdeSnapshotOptions};
@@ -46741,6 +46741,346 @@ impl McpTool for ContextPressureEstimateTool {
 }
 
 // ===========================================================================
+//        context_governor_snapshot - read-only lifecycle decision packet
+// ===========================================================================
+
+pub struct ContextGovernorSnapshotTool;
+
+impl ContextGovernorSnapshotTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for ContextGovernorSnapshotTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn context_governor_action(
+    rank: u32,
+    action: &str,
+    reason: &str,
+    effect: &str,
+    mutation: bool,
+) -> Value {
+    json!({
+        "rank": rank,
+        "action": action,
+        "reason": reason,
+        "effect": effect,
+        "requires_separate_tool_call": mutation,
+        "snapshot_mutates_state": false,
+    })
+}
+
+fn context_governor_suggested_actions(tier: &str, confidence: &str) -> Vec<Value> {
+    let mut actions = Vec::new();
+    let mut rank = 1u32;
+
+    if confidence == "low" {
+        actions.push(context_governor_action(
+            rank,
+            "provide_text_sample_before_aggressive_pruning",
+            "No text_sample was provided, so the pressure estimate is turn-count based.",
+            "Improves confidence before deciding to handoff, compact, or reduce context.",
+            false,
+        ));
+        rank += 1;
+    }
+
+    match tier {
+        "fresh" => {
+            actions.push(context_governor_action(
+                rank,
+                "continue_current_flow",
+                "Context pressure is below the first fatigue band.",
+                "No lifecycle intervention is needed yet.",
+                false,
+            ));
+            rank += 1;
+            actions.push(context_governor_action(
+                rank,
+                "use_semantic_bootstrap_on_scope_shift",
+                "If the task changes topic, retrieve by task query instead of carrying broad prior context.",
+                "Keeps down-slide injection relevant.",
+                true,
+            ));
+        }
+        "engaged" => {
+            actions.push(context_governor_action(
+                rank,
+                "save_active_work_memory_before_long_branch",
+                "The session has meaningful pressure but is not near the urgent band.",
+                "Preserves active state outside the model window before expanding scope.",
+                true,
+            ));
+            rank += 1;
+            actions.push(context_governor_action(
+                rank,
+                "prefer_targeted_retrieval",
+                "Avoid reloading broad transcripts or large file dumps when scoped lookup will do.",
+                "Reduces avoidable context growth.",
+                false,
+            ));
+        }
+        "strained" => {
+            actions.push(context_governor_action(
+                rank,
+                "save_work_memory_now",
+                "Context pressure is in the strained band.",
+                "Captures active files, hypothesis, evidence, and next step before compaction risk.",
+                true,
+            ));
+            rank += 1;
+            actions.push(context_governor_action(
+                rank,
+                "prepare_handoff_or_compaction_point",
+                "Further broad exploration risks losing relevant state to lossy compaction.",
+                "Creates a deliberate boundary before continuing.",
+                true,
+            ));
+            rank += 1;
+            actions.push(context_governor_action(
+                rank,
+                "avoid_broad_context_injection",
+                "Large unfiltered snippets are the main controllable growth source.",
+                "Use semantic memory_search/session_bootstrap query and short snippets.",
+                false,
+            ));
+        }
+        "saturated" => {
+            actions.push(context_governor_action(
+                rank,
+                "stop_expanding_current_thread",
+                "Context pressure is at or past the saturation band.",
+                "Prevents more work from entering a low-reliability window.",
+                false,
+            ));
+            rank += 1;
+            actions.push(context_governor_action(
+                rank,
+                "save_work_memory_and_handoff",
+                "The active task state should be externalized before more tool output is added.",
+                "Preserves recoverable state for a fresh window.",
+                true,
+            ));
+            rank += 1;
+            actions.push(context_governor_action(
+                rank,
+                "run_precompact_or_session_finalize",
+                "A lifecycle boundary is safer than continuing with an overloaded transcript.",
+                "Lets existing curate/finalize paths extract durable lessons and decisions.",
+                true,
+            ));
+        }
+        _ => {
+            actions.push(context_governor_action(
+                rank,
+                "inspect_context_pressure",
+                "Unknown fatigue tier returned by the estimator.",
+                "Treat this as diagnostic-only and avoid automatic pruning.",
+                false,
+            ));
+        }
+    }
+
+    actions.push(context_governor_action(
+        actions.len() as u32 + 1,
+        "keep_or_verify_lean_tool_surface",
+        "Eager clients pay for exposed tool schemas every request.",
+        "Keep codex-lean or run a measured A/B before widening the toolset.",
+        false,
+    ));
+
+    actions
+}
+
+fn build_context_governor_snapshot(args: &Value) -> Value {
+    let cwd = args
+        .get("cwd")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .map(|p| p.display().to_string())
+        })
+        .unwrap_or_else(|| "/".to_string());
+    let model_default = std::env::var("AGENT_BRIDGE_MODEL").unwrap_or_else(|_| "gpt-5.5".into());
+    let model = args
+        .get("model")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or(&model_default);
+    let turns = args
+        .get("conversation_turns")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0);
+    let text_raw = args
+        .get("text_sample")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let text_sample_provided = !text_raw.is_empty();
+    let explicit_window = args
+        .get("context_window")
+        .or_else(|| args.get("model_limit"))
+        .and_then(|v| v.as_u64());
+    let (limit, limit_source) =
+        resolve_context_window(explicit_window, env_context_window(), model);
+    let estimated = estimated_usage_tokens(text_raw, turns);
+    let pct_raw = if limit == 0 {
+        0.0
+    } else {
+        (estimated as f64 / limit as f64) * 100.0
+    };
+    let pct_used = (pct_raw * 10.0).round() / 10.0;
+    let tier = fatigue_tier(pct_raw);
+    let recommendation = budget_recommendation(pct_raw);
+    let soft_trigger = (limit as f64 * 0.80) as u64;
+    let distance_to_compaction = soft_trigger.saturating_sub(estimated);
+    let confidence = if text_sample_provided { "high" } else { "low" };
+    let long_context_beta_possible =
+        limit_source == "model_default" && model_supports_1m_beta(model);
+
+    let toolset_env = std::env::var("AGENT_BRIDGE_TOOLSET").ok();
+    let client_env = std::env::var("AGENT_BRIDGE_CLIENT").ok();
+    let source_env = std::env::var("AGENT_BRIDGE_MCP_SOURCE").ok();
+    let profile_env = std::env::var("AGENT_BRIDGE_TOOL_PROFILE").ok();
+    let policy = ToolPolicy::from_values(
+        toolset_env.as_deref(),
+        client_env.as_deref(),
+        source_env.as_deref(),
+        profile_env.as_deref(),
+    );
+    let exposed_tool_count = exposed_tool_count_for(
+        toolset_env.as_deref(),
+        client_env.as_deref(),
+        profile_env.as_deref(),
+    );
+
+    json!({
+        "schema": "agent_bridge.context_governor.snapshot.v0",
+        "cwd": cwd,
+        "direct_model_context_pruning": {
+            "supported": false,
+            "reason": "Agent-Bridge cannot delete or reorder content already admitted to the host model window. It governs lifecycle inputs, saved scratch state, bootstrap recall, and tool-surface size around the host."
+        },
+        "pressure": {
+            "model_hint": model,
+            "model_limit": limit,
+            "model_limit_source": limit_source,
+            "long_context_beta_possible": long_context_beta_possible,
+            "estimated_tokens_used": estimated,
+            "pct_used": pct_used,
+            "fatigue_tier": tier,
+            "recommendation": recommendation,
+            "distance_to_compaction_tokens": distance_to_compaction,
+            "soft_trigger_pct": 80,
+            "text_sample_provided": text_sample_provided,
+            "text_sample_chars": text_raw.chars().count(),
+            "text_sample_tokens_estimate": estimate_tokens_from_text(text_raw),
+            "confidence": confidence,
+            "heuristic_note": "Offline estimate only; pass text_sample for higher confidence on tool-heavy sessions."
+        },
+        "controls": {
+            "toolset": policy.label(),
+            "tool_profile": policy.profile().label(),
+            "toolset_env": toolset_env,
+            "tool_profile_env": profile_env,
+            "client_env": client_env,
+            "source_env": source_env,
+            "exposed_tool_count": exposed_tool_count,
+            "surfaces": [
+                {
+                    "name": "work_memory",
+                    "role": "short-lived active task scratchpad outside model context",
+                    "mutation_requires_separate_tool": true
+                },
+                {
+                    "name": "session_bootstrap",
+                    "role": "bounded down-slide recall with per-block budgets and optional semantic query",
+                    "mutation_requires_separate_tool": false
+                },
+                {
+                    "name": "session_lifecycle_step(precompact)",
+                    "role": "pre-compaction capture plus curate/finalize path",
+                    "mutation_requires_separate_tool": true
+                },
+                {
+                    "name": "codex-lean",
+                    "role": "eager tool-schema surface reduction for Codex-like clients",
+                    "mutation_requires_separate_tool": false
+                }
+            ]
+        },
+        "suggested_actions": context_governor_suggested_actions(tier, confidence),
+        "guardrails": {
+            "snapshot_is_read_only": true,
+            "does_not_write_memory": true,
+            "does_not_compact_session": true,
+            "does_not_change_tool_profile": true,
+            "does_not_execute_remote_code": true
+        }
+    })
+}
+
+#[async_trait]
+impl McpTool for ContextGovernorSnapshotTool {
+    fn name(&self) -> &'static str {
+        "context_governor_snapshot"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only context lifecycle governor snapshot. Estimates context \
+                 pressure, reports what Agent-Bridge can and cannot govern, and returns \
+                 ranked lifecycle actions such as saving work_memory, using targeted \
+                 bootstrap recall, or preparing handoff/compaction. It never mutates memory, \
+                 compacts a session, changes tool exposure, or claims to prune live model \
+                 context."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "cwd": { "type": "string", "description": "Project path for scoping. Defaults to current directory." },
+                    "model": {
+                        "type": "string",
+                        "description": "Model name hint for context window size. Defaults to AGENT_BRIDGE_MODEL, then gpt-5.5."
+                    },
+                    "context_window": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Explicit context-window size in tokens; overrides AGENT_BRIDGE_CONTEXT_WINDOW and model default."
+                    },
+                    "conversation_turns": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "default": 0,
+                        "description": "Coarse turn count when transcript text is unavailable."
+                    },
+                    "text_sample": {
+                        "type": "string",
+                        "description": "Optional recent transcript or excerpt for higher-confidence token estimation."
+                    },
+                    "compact": {
+                        "type": "boolean",
+                        "description": "Reserved for future compact projection; v0 always returns the full JSON packet."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        Ok(ToolResult::json_text(&build_context_governor_snapshot(&args)))
+    }
+}
+
+// ===========================================================================
 //        tool_call_attention_report — L6 P2 metacognition probe
 // ===========================================================================
 
@@ -49347,6 +49687,7 @@ fn codex_lean_tool(tool_name: &str) -> bool {
             | "readiness_audit"
             | "event_spine_snapshot"
             | "tool_atlas_snapshot"
+            | "context_governor_snapshot"
             | "memory_search"
             | "memory_save"
             | "memory_get"
@@ -52180,6 +52521,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Essential,
         Arc::new(ToolAtlasSnapshotTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(ContextGovernorSnapshotTool::new()),
     );
     // GoS-lite belief-graph projection over the same Tool Atlas telemetry.
     // Standard: it is the SSB belief-graph synthesis layer over Essential-tier
@@ -59410,6 +59757,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             "event_spine_snapshot",
             "readiness_audit",
             "tool_atlas_snapshot",
+            "context_governor_snapshot",
             "memory_search",
             "memory_save",
             "memory_neighbors",
@@ -59476,6 +59824,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(p.includes(Tier::Essential, "event_spine_snapshot"));
         assert!(p.includes(Tier::Essential, "readiness_audit"));
         assert!(p.includes(Tier::Essential, "tool_atlas_snapshot"));
+        assert!(p.includes(Tier::Essential, "context_governor_snapshot"));
         assert!(p.includes(Tier::Essential, "skills_recommend"));
         assert!(p.includes(Tier::Essential, "skills_route"));
         assert!(p.includes(Tier::Essential, "skills_feedback"));
@@ -59570,6 +59919,18 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             .collect();
 
         assert!(names.iter().any(|n| n == "tool_atlas_snapshot"));
+    }
+
+    #[test]
+    fn registry_exposes_context_governor_snapshot_to_codex_lean() {
+        let p = ToolPolicy::from_values(Some("codex-lean"), None, None, None);
+        let names: Vec<String> = build_registry_with_policy(Hub::builder().build(), p)
+            .list()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+
+        assert!(names.iter().any(|n| n == "context_governor_snapshot"));
     }
 
     #[test]
@@ -75551,6 +75912,58 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert_eq!(v["distance_to_compaction_tokens"], json!(145_000));
         assert_eq!(v["text_sample_provided"], json!(false));
         assert_eq!(v["confidence"], json!("low"));
+    }
+
+    #[test]
+    fn context_governor_snapshot_fresh_is_read_only_and_low_confidence() {
+        let v = build_context_governor_snapshot(&json!({
+            "model": "claude-sonnet-4",
+            "context_window": 200_000
+        }));
+        assert_eq!(v["schema"], json!("agent_bridge.context_governor.snapshot.v0"));
+        assert_eq!(v["direct_model_context_pruning"]["supported"], json!(false));
+        assert_eq!(v["pressure"]["fatigue_tier"], json!("fresh"));
+        assert_eq!(v["pressure"]["confidence"], json!("low"));
+        assert_eq!(v["guardrails"]["snapshot_is_read_only"], json!(true));
+        let actions = v["suggested_actions"].as_array().expect("actions");
+        assert!(
+            actions
+                .iter()
+                .any(|a| a["action"] == json!("provide_text_sample_before_aggressive_pruning")),
+            "low-confidence snapshot should ask for a text_sample before aggressive decisions"
+        );
+    }
+
+    #[test]
+    fn context_governor_snapshot_explicit_window_matches_pressure_precedence() {
+        let v = build_context_governor_snapshot(&json!({
+            "model": "claude-opus-4-8",
+            "conversation_turns": 30,
+            "context_window": 1_000_000
+        }));
+        assert_eq!(v["pressure"]["model_limit"], json!(1_000_000));
+        assert_eq!(v["pressure"]["model_limit_source"], json!("explicit"));
+        assert_eq!(v["pressure"]["long_context_beta_possible"], json!(false));
+        assert_eq!(v["pressure"]["fatigue_tier"], json!("fresh"));
+    }
+
+    #[test]
+    fn context_governor_snapshot_saturated_recommends_handoff() {
+        let v = build_context_governor_snapshot(&json!({
+            "model": "claude-sonnet-4",
+            "conversation_turns": 120,
+            "context_window": 200_000,
+            "text_sample": "recent tool-heavy transcript excerpt"
+        }));
+        assert_eq!(v["pressure"]["fatigue_tier"], json!("saturated"));
+        assert_eq!(v["pressure"]["confidence"], json!("high"));
+        let actions = v["suggested_actions"].as_array().expect("actions");
+        assert!(
+            actions
+                .iter()
+                .any(|a| a["action"] == json!("save_work_memory_and_handoff")),
+            "saturated snapshot should recommend externalizing active state"
+        );
     }
 
     #[tokio::test]
