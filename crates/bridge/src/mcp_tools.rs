@@ -18226,7 +18226,7 @@ impl McpTool for MemorySaveTool {
                     "tags":         { "type": "array", "items": { "type": "string" }, "default": [] },
                     "related_keys": { "type": "array", "items": { "type": "string" }, "default": [] },
                     "scope":        { "type": "string", "description": "Visibility: omit/global=everywhere, project:/abs/path=cwd-scoped, domain:rust=tech-domain." },
-                    "scope_identity_trace": { "type": "boolean", "default": false, "description": "If true, return a git/project-id identity trace for project scopes without changing the stored scope." },
+                    "scope_identity_trace": { "type": "boolean", "default": false, "description": "If true, return a git/project-id identity trace for project scopes without changing the stored scope. Honors AGENT_BRIDGE_PROJECT_ID as an explicit project id when set." },
                     "importance":   { "type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Override importance (0.0–1.0). Omit to auto-assign from kind: decision=0.8, lesson=0.7, todo=0.6, fact=0.5, observation=0.3." },
                     "trigger_pattern": { "type": "string", "description": "For kind=error_pattern: surfacing when session_bootstrap `error_hint` contains this substring (case-insensitive)." },
                     "continuity": {
@@ -18550,7 +18550,17 @@ impl McpTool for MemorySaveTool {
     }
 }
 
+const MEMORY_SAVE_PROJECT_ID_ENV: &str = "AGENT_BRIDGE_PROJECT_ID";
+
 fn memory_save_scope_identity_trace(scope: Option<&str>) -> Value {
+    let configured_project_id = std::env::var(MEMORY_SAVE_PROJECT_ID_ENV).ok();
+    memory_save_scope_identity_trace_with_project_id(scope, configured_project_id.as_deref())
+}
+
+fn memory_save_scope_identity_trace_with_project_id(
+    scope: Option<&str>,
+    configured_project_id: Option<&str>,
+) -> Value {
     let Some(scope) = scope.map(str::trim).filter(|s| !s.is_empty()) else {
         return json!({
             "status": "not_applicable",
@@ -18559,9 +18569,21 @@ fn memory_save_scope_identity_trace(scope: Option<&str>) -> Value {
         });
     };
 
-    let explicit_project_id =
-        strip_scope_prefix_case_insensitive(scope, crate::project_identity::PROJECT_ID_SCOPE_PREFIX)
-            .map(|_| scope);
+    let scope_project_id =
+        strip_scope_prefix_case_insensitive(scope, crate::project_identity::PROJECT_ID_SCOPE_PREFIX);
+    let configured_project_id = configured_project_id
+        .map(str::trim)
+        .filter(|project_id| !project_id.is_empty());
+    let explicit_project_id = scope_project_id
+        .map(|_| scope)
+        .or(configured_project_id);
+    let explicit_project_id_source = if scope_project_id.is_some() {
+        "scope"
+    } else if configured_project_id.is_some() {
+        "env"
+    } else {
+        "none"
+    };
     let legacy_project_path =
         strip_scope_prefix_case_insensitive(scope, crate::project_identity::LEGACY_PROJECT_SCOPE_PREFIX);
     if explicit_project_id.is_none() && legacy_project_path.is_none() {
@@ -18609,6 +18631,7 @@ fn memory_save_scope_identity_trace(scope: Option<&str>) -> Value {
         "identity": identity.identity,
         "canonical_scope": identity.canonical_scope,
         "legacy_scope": identity.legacy_scope,
+        "explicit_project_id_source": explicit_project_id_source,
         "evidence": identity.evidence.label(),
         "high_confidence": identity.evidence.is_high_confidence(),
         "git_remote": git_remote,
@@ -65464,6 +65487,47 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert_eq!(got_payload["scope"], json!("domain:rust"));
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[test]
+    fn memory_save_scope_identity_trace_accepts_configured_project_id() {
+        let trace = memory_save_scope_identity_trace_with_project_id(
+            Some("project:/tmp/Agent-Bridge"),
+            Some("git:github.com/pallasting/agent-bridge"),
+        );
+
+        assert_eq!(trace["status"], json!("ok"));
+        assert_eq!(
+            trace["stored_scope"],
+            json!("project:/tmp/Agent-Bridge")
+        );
+        assert_eq!(trace["stored_scope_changed"], json!(false));
+        assert_eq!(
+            trace["canonical_scope"],
+            json!("project-id:git:github.com/pallasting/agent-bridge")
+        );
+        assert_eq!(trace["evidence"], json!("explicit"));
+        assert_eq!(trace["explicit_project_id_source"], json!("env"));
+    }
+
+    #[test]
+    fn memory_save_scope_identity_trace_scope_project_id_wins_over_configured_project_id() {
+        let trace = memory_save_scope_identity_trace_with_project_id(
+            Some("project-id:git:gitlab.com/pallasting/agent-bridge"),
+            Some("git:github.com/pallasting/agent-bridge"),
+        );
+
+        assert_eq!(trace["status"], json!("ok"));
+        assert_eq!(
+            trace["stored_scope"],
+            json!("project-id:git:gitlab.com/pallasting/agent-bridge")
+        );
+        assert_eq!(
+            trace["canonical_scope"],
+            json!("project-id:git:gitlab.com/pallasting/agent-bridge")
+        );
+        assert_eq!(trace["evidence"], json!("explicit"));
+        assert_eq!(trace["explicit_project_id_source"], json!("scope"));
     }
 
     #[tokio::test]
