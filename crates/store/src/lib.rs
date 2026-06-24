@@ -1962,6 +1962,13 @@ pub struct MemoryStats {
 /// update here and both surfaces pick it up automatically.
 pub const CATALOG_KINDS_C3: &[&str] = &["skill"];
 
+/// Lookback window (seconds) for the S2 *recently-tombstoned* conservation
+/// credit (#122, 2026-06-24). Must comfortably exceed the C3 §3.4 5-minute
+/// anchor interval so consolidation tombstones inside the compared window are
+/// credited; over-coverage is safe because this credit only ever REDUCES S2
+/// false-fires and a hard DELETE leaves no tombstoned row to credit. 10 min.
+pub const S2_TOMBSTONE_RECENT_WINDOW_SECS: i64 = 600;
+
 /// Memory kinds excluded from graph-*coverage* denominators (orphan_fraction,
 /// M5 edge-coverage, degree/hub topology, P4 evolved coverage). These are
 /// edge-less *by design*, so counting them in the denominator deflates the
@@ -2041,6 +2048,20 @@ pub struct S234Counts {
     /// falsely (#110, 2026-06-11). archived+superseded is immune to
     /// same-window purge.
     pub memories_archived_superseded: u64,
+    /// Count of *recently* tombstoned working memories: `status='tombstoned'`
+    /// AND `kind NOT IN CATALOG_KINDS_C3` AND `updated_at` within the last
+    /// `S2_TOMBSTONE_RECENT_WINDOW_SECS`. This is an ADDITIVE conservation
+    /// credit on top of `memories_archived_superseded` (#122, 2026-06-24):
+    /// dream/curate consolidation tombstones its `curated_implicit_*`
+    /// by-products active→tombstoned, which `archived+superseded` does not
+    /// credit, so a consolidation-heavy window shows `unexplained_drop≈the
+    /// consolidation count` and S2 false-fires. Crediting *recently*
+    /// tombstoned rows (by `updated_at`, NOT the tombstoned tier *count*)
+    /// is immune to the #110 purge trap — `purge-tombstones` removes rows
+    /// with OLD `updated_at`, never the freshly-tombstoned ones — and is
+    /// safe against the inode-swap/accidental-DELETE class: a hard DELETE
+    /// leaves NO tombstoned row, so it is never credited and S2 still fires.
+    pub memories_tombstoned_recent: u64,
 }
 
 /// Filters for `memory_export` (v0.6). All None = export everything.

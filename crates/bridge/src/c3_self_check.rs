@@ -26,7 +26,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime};
 
-use ab_oob_alert::{Alert, AlertKind, ProcessFd, write_alert};
+use ab_oob_alert::{write_alert, Alert, AlertKind, ProcessFd};
 use ab_store::S234Counts;
 
 /// Window between consecutive S2-S4 anchor snapshots (per §3.4.2 "5min").
@@ -429,9 +429,20 @@ pub fn compute_s234_drops(prev: S234Counts, current: S234Counts) -> Vec<S234Drop
         // `retired`-delta credit then saturates to 0 and S2 fires falsely
         // (#110, 583→527 with retired 2104→1301). archived+superseded only
         // ever rises on a benign transition and is immune to same-window purge.
+        // #122 (2026-06-24): ADD a recently-tombstoned credit on top of the
+        // archived+superseded rise. dream/curate consolidation tombstones its
+        // `curated_implicit_*` by-products active→tombstoned (the 2026-06-23
+        // 1277→1178 false-fire was 122 such rows), which archived+superseded
+        // never reflects. `memories_tombstoned_recent` counts rows tombstoned
+        // within the lookback window (by `updated_at`), so it is immune to the
+        // #110 purge trap (purge drops OLD tombstones) and is purely additive:
+        // it can only SHRINK `unexplained`, never grow it, so it cannot
+        // re-introduce a #110-style false fire. A hard DELETE leaves no
+        // tombstoned row, so genuine disappearance is still uncredited + fires.
         let benign_credit = current
             .memories_archived_superseded
-            .saturating_sub(prev.memories_archived_superseded);
+            .saturating_sub(prev.memories_archived_superseded)
+            .saturating_add(current.memories_tombstoned_recent);
         let unexplained = drop.saturating_sub(benign_credit);
         let pct = drop as f64 / prev.memories_active as f64;
         let unexplained_pct = unexplained as f64 / prev.memories_active as f64;
@@ -863,6 +874,10 @@ mod tests {
             memory_edges: edges,
             memories_retired: retired,
             memories_archived_superseded: retired,
+            // recent-tombstone credit defaults off for the shared helper so
+            // the pre-existing #813/#110 conservation tests are unchanged;
+            // the dedicated #122 tests below build the literal to exercise it.
+            memories_tombstoned_recent: 0,
         }
     }
 
@@ -938,8 +953,8 @@ mod tests {
         _reset_s234_snapshot_for_tests();
         let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
         let _ = s234_check_against_snapshot(mk_counts(100, 5, 200), t0); // seed
-        // 60s later (well within the 5-min window); even with a clear
-        // drop, the helper must wait for the window to elapse.
+                                                                         // 60s later (well within the 5-min window); even with a clear
+                                                                         // drop, the helper must wait for the window to elapse.
         let t1 = t0 + Duration::from_secs(60);
         let out = s234_check_against_snapshot(mk_counts(50, 5, 200), t1);
         assert!(out.is_empty(), "within-window must not fire (got {out:?})");
@@ -1080,6 +1095,7 @@ mod tests {
             memory_edges: 1000,
             memories_retired: 2104,
             memories_archived_superseded: 200,
+            memories_tombstoned_recent: 0,
         };
         let cur = S234Counts {
             memories_active: 527,
@@ -1087,6 +1103,7 @@ mod tests {
             memory_edges: 1000,
             memories_retired: 1301,            // fell: purge-tombstones
             memories_archived_superseded: 256, // rose 56: archive-orphan-stubs
+            memories_tombstoned_recent: 0,
         };
         assert!(
             compute_s234_drops(prev, cur).is_empty(),
@@ -1105,6 +1122,7 @@ mod tests {
             memory_edges: 1000,
             memories_retired: 2104,
             memories_archived_superseded: 200,
+            memories_tombstoned_recent: 0,
         };
         let cur = S234Counts {
             memories_active: 527,
@@ -1112,6 +1130,7 @@ mod tests {
             memory_edges: 1000,
             memories_retired: 1301,
             memories_archived_superseded: 200, // no benign credit
+            memories_tombstoned_recent: 0,     // and no recent-tombstone credit
         };
         let events = compute_s234_drops(prev, cur);
         assert_eq!(events.len(), 1);
@@ -1131,6 +1150,10 @@ mod tests {
             memory_edges: 1000,
             memories_retired: 2316,
             memories_archived_superseded: 200,
+            // #122 fix: no recent-tombstone evidence in THIS shape (the drop is
+            // NOT explained by in-window consolidation), so it correctly still
+            // fires. The consolidation variant is covered by the test below.
+            memories_tombstoned_recent: 0,
         };
         let cur = S234Counts {
             memories_active: 1178,
@@ -1138,6 +1161,7 @@ mod tests {
             memory_edges: 1000,
             memories_retired: 2419,
             memories_archived_superseded: 200,
+            memories_tombstoned_recent: 0,
         };
         let events = compute_s234_drops(prev, cur);
         assert_eq!(events.len(), 1);
@@ -1152,6 +1176,64 @@ mod tests {
             !body.contains("[lifecycle]"),
             "no benign lifecycle credit exists in this shape"
         );
+    }
+
+    #[test]
+    fn compute_s234_drops_s2_consolidation_tombstone_churn_is_silent() {
+        // #122 (2026-06-23 real incident): active 1277→1178 (drop 99) on a
+        // consolidation-heavy window. archived+superseded did NOT rise (the
+        // dropped rows went active→TOMBSTONED as `curated_implicit_*`
+        // by-products, 122 such rows that day), so the pre-fix credit was 0
+        // and S2 false-fired. With the additive recent-tombstone credit the
+        // 99 freshly-tombstoned rows are credited → unexplained=0 → silent.
+        let prev = S234Counts {
+            memories_active: 1277,
+            forum_threads: 50,
+            memory_edges: 1000,
+            memories_retired: 2316,
+            memories_archived_superseded: 200,
+            memories_tombstoned_recent: 0,
+        };
+        let cur = S234Counts {
+            memories_active: 1178,
+            forum_threads: 50,
+            memory_edges: 1000,
+            memories_retired: 2419,
+            memories_archived_superseded: 200, // unchanged: not archive/supersede
+            memories_tombstoned_recent: 99,    // freshly tombstoned by consolidation
+        };
+        assert!(
+            compute_s234_drops(prev, cur).is_empty(),
+            "consolidation tombstone churn must not false-fire S2"
+        );
+    }
+
+    #[test]
+    fn compute_s234_drops_s2_partial_tombstone_credit_still_fires_remainder() {
+        // Safety floor: recent-tombstone credit is additive, not all-or-nothing.
+        // If only part of the drop is explained by recent tombstones (20 of a
+        // 99 drop), the UNEXPLAINED remainder (79, 6.2% > the 5% S2 threshold)
+        // still fires — the credit can only shrink `unexplained`, never mask a
+        // genuine residual loss.
+        let prev = S234Counts {
+            memories_active: 1277,
+            forum_threads: 50,
+            memory_edges: 1000,
+            memories_retired: 2316,
+            memories_archived_superseded: 200,
+            memories_tombstoned_recent: 0,
+        };
+        let cur = S234Counts {
+            memories_active: 1178,
+            forum_threads: 50,
+            memory_edges: 1000,
+            memories_retired: 2419,
+            memories_archived_superseded: 200,
+            memories_tombstoned_recent: 20,
+        };
+        let events = compute_s234_drops(prev, cur);
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].unexplained_drop, 79);
     }
 
     // ---- #110: Fix B (§3.4.4 hygiene-run suppression marker) ----

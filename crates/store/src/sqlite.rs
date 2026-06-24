@@ -67,10 +67,10 @@ use crate::{
     McpToolErrorRecord, McpToolSourceStats, MemoryCosineHit, MemoryEdge, MemoryEdgeExport,
     MemoryExportFilter, MemoryExportResult, MemoryListSort, MemoryQueryRecord, MemoryQueryStats,
     MemoryRecord, MemorySearchHit, MemoryStats, MisrankRow, ModeStats, NotificationRecord,
-    OverlapPair,
-    PlanRecord, PlanStep, ReinforceActiveStats, ReplayAuditRow, ReplayAuditStats, S234Counts,
-    SessionFilter, SignalFidelityStats, StateStore, StoredSession, WaypointRow, WaypointStats,
-    MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP, MEMORY_QUERY_LOG_RING_CAP, STDIO_CAP,
+    OverlapPair, PlanRecord, PlanStep, ReinforceActiveStats, ReplayAuditRow, ReplayAuditStats,
+    S234Counts, SessionFilter, SignalFidelityStats, StateStore, StoredSession, WaypointRow,
+    WaypointStats, MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP, MEMORY_QUERY_LOG_RING_CAP,
+    STDIO_CAP,
 };
 use tokio_rusqlite::rusqlite::OptionalExtension;
 
@@ -6337,12 +6337,8 @@ impl StateStore for SqliteStore {
                             } else {
                                 0.0
                             },
-                            p50_duration_us: pct_idx(&durs, 0.50)
-                                .try_into()
-                                .unwrap_or(u32::MAX),
-                            p95_duration_us: pct_idx(&durs, 0.95)
-                                .try_into()
-                                .unwrap_or(u32::MAX),
+                            p50_duration_us: pct_idx(&durs, 0.50).try_into().unwrap_or(u32::MAX),
+                            p95_duration_us: pct_idx(&durs, 0.95).try_into().unwrap_or(u32::MAX),
                             avg_top_hit_age_secs: if age_n > 0 {
                                 age_sum as f64 / age_n as f64
                             } else {
@@ -9568,6 +9564,20 @@ impl StateStore for SqliteStore {
             "SELECT COUNT(*) FROM memories \
              WHERE status IN ('archived','superseded') AND kind NOT IN ({placeholders})"
         );
+        // #122 (2026-06-24): ADDITIVE conservation credit for consolidation
+        // churn. dream/curate tombstones its `curated_implicit_*` by-products
+        // active→tombstoned, which archived+superseded does NOT credit, so a
+        // consolidation-heavy window false-fires S2. Credit *recently*
+        // tombstoned rows (by `updated_at`, NOT the tombstoned tier count):
+        // purge-tombstones removes rows with OLD `updated_at`, so this is
+        // immune to the #110 same-window-purge trap; and a hard DELETE leaves
+        // no row, so the inode-swap/accidental-DELETE class is never credited.
+        let tombstoned_recent_query = format!(
+            "SELECT COUNT(*) FROM memories \
+             WHERE status='tombstoned' AND kind NOT IN ({placeholders}) \
+             AND updated_at >= CAST(strftime('%s','now') AS INTEGER) - {window}",
+            window = crate::S2_TOMBSTONE_RECENT_WINDOW_SECS
+        );
         let counts = self
             .conn
             .call(move |c| -> RusqliteResult<S234Counts> {
@@ -9590,6 +9600,11 @@ impl StateStore for SqliteStore {
                     rusqlite::params_from_iter(kind_params.iter()),
                     |r| r.get(0),
                 )?;
+                let memories_tombstoned_recent: i64 = c.query_row(
+                    &tombstoned_recent_query,
+                    rusqlite::params_from_iter(kind_params.iter()),
+                    |r| r.get(0),
+                )?;
                 let forum_threads: i64 =
                     c.query_row("SELECT COUNT(*) FROM forum_threads", [], |r| r.get(0))?;
                 let memory_edges: i64 =
@@ -9600,6 +9615,7 @@ impl StateStore for SqliteStore {
                     memory_edges: memory_edges.max(0) as u64,
                     memories_retired: memories_retired.max(0) as u64,
                     memories_archived_superseded: memories_archived_superseded.max(0) as u64,
+                    memories_tombstoned_recent: memories_tombstoned_recent.max(0) as u64,
                 })
             })
             .await
