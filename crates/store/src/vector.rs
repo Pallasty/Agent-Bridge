@@ -16,6 +16,14 @@
 //! [`crate::embedding`]. The free function [`embed_text`] is a compatibility
 //! shim that delegates to `embedding::default_backend()`.
 
+/// Dimension for a stable embedding backend label.
+pub(crate) fn vector_dim_for_model_name(model_name: &str) -> usize {
+    match model_name {
+        "gte-multilingual-base" => 768,
+        _ => 384,
+    }
+}
+
 /// Canonical embedding dimension for the active model (model-aware, runtime).
 ///
 /// 768 for `gte-multilingual-base`, else 384 (e5 / MiniLM / para-ml). The
@@ -25,10 +33,7 @@
 pub fn vector_dim() -> usize {
     #[cfg(feature = "onnx-embed")]
     {
-        match onnx::active_model_name() {
-            "gte-multilingual-base" => 768,
-            _ => 384,
-        }
+        vector_dim_for_model_name(onnx::active_model_name())
     }
     #[cfg(not(feature = "onnx-embed"))]
     {
@@ -89,7 +94,8 @@ pub(crate) mod onnx {
             // absolute-cosine consumers (e.g. introspect novelty) stay meaningful. No
             // task prefix. The #1485/LEVER-3 retrieval-quality model for the
             // Chinese-dominant corpus.
-            Some("para-ml") | Some("paraphrase-ml-l12")
+            Some("para-ml")
+            | Some("paraphrase-ml-l12")
             | Some("paraphrase-multilingual-MiniLM-L12-v2") => (
                 EmbeddingModel::ParaphraseMLMiniLML12V2,
                 "paraphrase-multilingual-MiniLM-L12-v2",
@@ -216,9 +222,11 @@ pub(crate) mod onnx {
                     let elapsed = started.elapsed();
                     let payload = match result {
                         Ok(e) => {
+                            let model_name = active_model_name();
                             info!(
-                                "fastembed: {} ready (384-dim) — init {:.1}s",
-                                active_model_name(),
+                                "fastembed: {} ready ({}-dim) — init {:.1}s",
+                                model_name,
+                                super::vector_dim_for_model_name(model_name),
                                 elapsed.as_secs_f32()
                             );
                             Some(Mutex::new(e))
@@ -499,6 +507,17 @@ mod tests {
         let v = embed_text_hash("hello world");
         assert_eq!(v.len(), vector_dim());
         assert_eq!(vector_dim(), 384);
+    }
+
+    #[test]
+    fn model_name_dimension_gate_covers_gte_flagday() {
+        assert_eq!(vector_dim_for_model_name("all-MiniLM-L6-v2"), 384);
+        assert_eq!(vector_dim_for_model_name("multilingual-e5-small"), 384);
+        assert_eq!(
+            vector_dim_for_model_name("paraphrase-multilingual-MiniLM-L12-v2"),
+            384
+        );
+        assert_eq!(vector_dim_for_model_name("gte-multilingual-base"), 768);
     }
 
     #[test]
