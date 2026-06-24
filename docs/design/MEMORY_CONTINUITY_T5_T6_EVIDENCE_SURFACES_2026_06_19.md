@@ -1268,6 +1268,35 @@ a later runtime-enablement review; production runtime influence, candidate
 mutation, search-order changes, memory writes, graph-edge writes, and candidate
 expansion enablement remain later-gated non-claims.
 
+The next surface is the runtime-enablement review:
+
+- MCP tool:
+  `memory_biocortex_t6_candidate_expansion_runtime_enablement_review`;
+- schema:
+  `agent_bridge.memory_biocortex_t6_candidate_expansion.runtime_enablement_review.v0`;
+- required source:
+  the redacted JSON object from
+  `memory_biocortex_t6_candidate_expansion_shadow_telemetry_review`;
+- scope:
+  owner-decision preparation only: reviewer/source presence, decision-source
+  presence, bounded telemetry counts inherited from the source review,
+  append-only confirmation, redacted-aggregate-only confirmation, and a decision
+  that can open only an owner runtime-enablement decision review.
+
+The runtime-enablement review does not enable runtime behavior, implement
+runtime-enablement code, run shadow mode, call BioCortex or memory tools, change
+candidate sets or search order, write memory or graph edges, or approve
+production candidate expansion. It blocks if the source shadow telemetry review
+is not ready, if either the source or request includes raw query/key/content/case
+rows, if the source claims runtime authority, if reviewer or provenance metadata
+is missing, if the decision is not
+`approve_owner_runtime_enablement_review_only`, if failures, negative-control
+regressions, or redaction violations are present, or if append-only/redacted
+aggregate handling is not confirmed. Even when ready, the only opened follow-up
+is a later explicit owner runtime-enablement decision; runtime enablement,
+runtime influence, candidate expansion, search-order changes, memory writes,
+and graph-edge writes remain later-gated non-claims.
+
 ## Verification
 
 Targeted validation for this slice after `/Data` space was recovered:
