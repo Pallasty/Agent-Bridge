@@ -51,6 +51,10 @@ const MANAGED_TOOL_ENV_KEYS: &[&str] = &[
     "AGENT_BRIDGE_TOOLSET",
     "AGENT_BRIDGE_TOOL_PROFILE",
     "AGENT_BRIDGE_CODEX_HOST",
+    // Per-machine model selection belongs in the wrapper's machine.env.
+    // Preserving an old Codex-local embedder override can make MCP launch
+    // against a different vector dimensionality than the live memory store.
+    "AGENT_BRIDGE_ONNX_MODEL",
 ];
 
 /// Which frontend the setup is targeting. Drives whether hook scripts
@@ -1914,6 +1918,8 @@ AGENT_BRIDGE_TOOL_PROFILE = "all"
 AGENT_BRIDGE_CODEX_HOST = "stale-host"
 AGENT_BRIDGE_MODEL = "stale-model"
 AGENT_BRIDGE_MODEL_REASONING_EFFORT = "low"
+AGENT_BRIDGE_ONNX_MODEL = "e5-small"
+FASTEMBED_CACHE_DIR = "/tmp/fastembed"
 AB_PET_TTS_VOICE = "Meijia"
 AB_PET_TTS_RATE = "180"
 
@@ -1945,6 +1951,8 @@ enabled = true
         assert!(!out.contains("AGENT_BRIDGE_CODEX_HOST = \"stale-host\""));
         assert!(!out.contains("AGENT_BRIDGE_MODEL = \"stale-model\""));
         assert!(!out.contains("AGENT_BRIDGE_MODEL_REASONING_EFFORT = \"low\""));
+        assert!(!out.contains("AGENT_BRIDGE_ONNX_MODEL"));
+        assert!(out.contains("FASTEMBED_CACHE_DIR = \"/tmp/fastembed\""));
         assert!(out.contains("AB_PET_TTS_VOICE = \"Meijia\""));
         assert!(out.contains("AB_PET_TTS_RATE = \"180\""));
         assert!(out.contains("[plugins.example]\nenabled = true"));
