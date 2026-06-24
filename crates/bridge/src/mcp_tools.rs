@@ -33243,6 +33243,88 @@ fn memory_scope_value(rec: &MemoryRecord) -> Option<&str> {
         .filter(|scope| !scope.is_empty())
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum ProjectScopeIdentity {
+    Stable(String),
+    LegacyName(String),
+}
+
+fn normalize_project_identity_part(raw: &str) -> Option<String> {
+    let mut out = raw.trim().trim_end_matches('/').trim_end_matches('\\');
+    if out.is_empty() {
+        return None;
+    }
+    if let Some(stripped) = out.strip_suffix(".git") {
+        out = stripped;
+    }
+    let normalized = out.trim().to_ascii_lowercase();
+    (!normalized.is_empty()).then_some(normalized)
+}
+
+fn legacy_project_scope_name(scope: &str) -> Option<String> {
+    let path = scope.strip_prefix("project:")?;
+    let path = path.trim().trim_end_matches('/').trim_end_matches('\\');
+    let name = path
+        .rsplit(['/', '\\'])
+        .find(|part| !part.trim().is_empty())?;
+    normalize_project_identity_part(name)
+}
+
+fn project_scope_identity(scope: &str) -> Option<ProjectScopeIdentity> {
+    let scope = scope.trim();
+    if let Some(identity) = scope.strip_prefix("project-id:") {
+        return normalize_project_identity_part(identity).map(ProjectScopeIdentity::Stable);
+    }
+    legacy_project_scope_name(scope).map(ProjectScopeIdentity::LegacyName)
+}
+
+fn project_scope_identities_match(a: &str, b: &str) -> bool {
+    match (project_scope_identity(a), project_scope_identity(b)) {
+        (Some(ProjectScopeIdentity::Stable(a)), Some(ProjectScopeIdentity::Stable(b))) => a == b,
+        (Some(ProjectScopeIdentity::LegacyName(a)), Some(ProjectScopeIdentity::LegacyName(b))) => {
+            a == b
+        }
+        // Do not compare stable ids to legacy basename fallbacks yet: legacy
+        // rows lack enough evidence to prove remote identity across hosts.
+        _ => false,
+    }
+}
+
+fn project_scopes_read_time_compatible(a: &str, b: &str) -> bool {
+    let a = a.trim();
+    let b = b.trim();
+    !a.is_empty()
+        && !b.is_empty()
+        && (a == b || project_scope_paths_overlap(a, b) || project_scope_identities_match(a, b))
+}
+
+#[cfg(test)]
+fn project_identity_scope_from_git_remote(remote: &str) -> Option<String> {
+    let remote = remote.trim();
+    if remote.is_empty() {
+        return None;
+    }
+
+    let (host, path) = if let Some(rest) = remote.strip_prefix("git@") {
+        let (host, path) = rest.split_once(':')?;
+        (host, path)
+    } else if let Some((_, rest)) = remote.split_once("://") {
+        let rest = rest.trim_start_matches('/');
+        let (host, path) = rest.split_once('/')?;
+        let host = host.rsplit('@').next().unwrap_or(host);
+        (host, path)
+    } else {
+        return None;
+    };
+
+    let host = normalize_project_identity_part(host)?;
+    let path = path.trim().trim_start_matches('/').trim_end_matches('/');
+    let mut parts = path.split('/').filter(|part| !part.trim().is_empty());
+    let owner = normalize_project_identity_part(parts.next()?)?;
+    let repo = normalize_project_identity_part(parts.next()?)?;
+    Some(format!("project-id:git:{host}/{owner}/{repo}"))
+}
+
 fn project_scope_paths_overlap(a: &str, b: &str) -> bool {
     let (Some(a), Some(b)) = (a.strip_prefix("project:"), b.strip_prefix("project:")) else {
         return false;
@@ -33308,8 +33390,7 @@ fn memory_search_scope_relation(
     match memory_scope_value(rec) {
         Some(scope)
             if !requested_scope.is_empty()
-                && (scope == requested_scope
-                    || project_scope_paths_overlap(scope, requested_scope)) =>
+                && project_scopes_read_time_compatible(scope, requested_scope) =>
         {
             MemorySearchScopeRelation::Local
         }
@@ -33556,7 +33637,9 @@ fn memory_scopes_compatible(source: &MemoryRecord, target: &MemoryRecord, requir
         return true;
     }
     match (memory_scope_value(source), memory_scope_value(target)) {
-        (Some(a), Some(b)) => a == b || a == "global" || b == "global",
+        (Some(a), Some(b)) => {
+            a == "global" || b == "global" || project_scopes_read_time_compatible(a, b)
+        }
         _ => true,
     }
 }
@@ -33877,6 +33960,7 @@ fn preview_memory_orphan_candidates(
 fn memory_pair_scope_relation(source: &MemoryRecord, target: &MemoryRecord) -> &'static str {
     match (memory_scope_value(source), memory_scope_value(target)) {
         (Some(a), Some(b)) if a == b => "same_scope",
+        (Some(a), Some(b)) if project_scopes_read_time_compatible(a, b) => "same_project_scope",
         (Some("global"), _) | (_, Some("global")) | (None, _) | (_, None) => "global_or_unscoped",
         _ => "cross_scope",
     }
@@ -34665,6 +34749,9 @@ fn memory_related_key_scope_relation_from_values(
 ) -> &'static str {
     match (from_scope, to_scope) {
         (Some(from), Some(to)) if from == to => "same_scope",
+        (Some(from), Some(to)) if project_scopes_read_time_compatible(from, to) => {
+            "same_project_scope"
+        }
         (Some(_), Some(_)) => "cross_scope",
         (Some(_), None) => "target_global",
         (None, Some(_)) => "source_global",
@@ -57461,6 +57548,171 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             "domain:python",
             MemorySearchScopeMode::LocalOnly
         ));
+    }
+
+    #[test]
+    fn project_identity_git_remote_normalizes_ssh_and_https() {
+        let ssh =
+            project_identity_scope_from_git_remote("git@github.com:Pallasting/Agent-Bridge.git");
+        let ssh_url = project_identity_scope_from_git_remote(
+            "ssh://git@github.com/pallasting/Agent-Bridge.git",
+        );
+        let https =
+            project_identity_scope_from_git_remote("https://github.com/pallasting/agent-bridge");
+
+        assert_eq!(
+            ssh.as_deref(),
+            Some("project-id:git:github.com/pallasting/agent-bridge")
+        );
+        assert_eq!(ssh, ssh_url);
+        assert_eq!(ssh_url, https);
+    }
+
+    #[test]
+    fn project_scope_identity_matches_case_insensitive_project_ids() {
+        let rec = mk_mem_scoped(
+            "stable",
+            "lesson",
+            "content content content content",
+            &[],
+            Some("project-id:git:GitHub.com/Pallasting/Agent-Bridge.git"),
+        );
+
+        assert!(memory_search_scope_mode_matches(
+            &rec,
+            "project-id:git:github.com/pallasting/agent-bridge",
+            MemorySearchScopeMode::LocalOnly
+        ));
+    }
+
+    #[test]
+    fn memory_search_scope_filter_matches_same_project_legacy_paths() {
+        let aio2 = mk_mem_scoped(
+            "aio2",
+            "lesson",
+            "content content content content",
+            &[],
+            Some("project:/Data/CascadeProjects/agent-bridge"),
+        );
+
+        assert!(memory_search_scope_mode_matches(
+            &aio2,
+            "project:/Users/pallasting/Projects/agent-bridge",
+            MemorySearchScopeMode::LocalOnly
+        ));
+    }
+
+    #[test]
+    fn memory_search_scope_filter_normalizes_legacy_path_case() {
+        let rec = mk_mem_scoped(
+            "case",
+            "lesson",
+            "content content content content",
+            &[],
+            Some("project:/Data/CascadeProjects/Agent-Bridge"),
+        );
+
+        assert!(memory_search_scope_mode_matches(
+            &rec,
+            "project:/Users/pallasting/Projects/agent-bridge",
+            MemorySearchScopeMode::LocalOnly
+        ));
+    }
+
+    #[test]
+    fn project_scope_identity_does_not_make_parent_scope_local_by_basename() {
+        let parent = mk_mem_scoped(
+            "parent",
+            "lesson",
+            "content content content content",
+            &[],
+            Some("project:/Data/CascadeProjects"),
+        );
+
+        assert!(!memory_search_scope_mode_matches(
+            &parent,
+            "project:/Users/pallasting/Projects/agent-bridge",
+            MemorySearchScopeMode::LocalOnly
+        ));
+    }
+
+    #[test]
+    fn project_scope_identity_stable_ids_do_not_collapse_same_basename() {
+        let rec = mk_mem_scoped(
+            "other",
+            "lesson",
+            "content content content content",
+            &[],
+            Some("project-id:git:github.com/other/agent-bridge"),
+        );
+
+        assert!(!memory_search_scope_mode_matches(
+            &rec,
+            "project-id:git:gitlab.com/pallasting/agent-bridge",
+            MemorySearchScopeMode::LocalOnly
+        ));
+    }
+
+    #[test]
+    fn project_scope_identity_does_not_compare_stable_id_to_legacy_fallback() {
+        let rec = mk_mem_scoped(
+            "stable",
+            "lesson",
+            "content content content content",
+            &[],
+            Some("project-id:git:github.com/pallasting/agent-bridge"),
+        );
+
+        assert!(!memory_search_scope_mode_matches(
+            &rec,
+            "project:/Users/pallasting/Projects/agent-bridge",
+            MemorySearchScopeMode::LocalOnly
+        ));
+    }
+
+    #[test]
+    fn memory_scopes_compatible_allows_same_project_legacy_paths() {
+        let source = mk_mem_scoped(
+            "mac",
+            "lesson",
+            "content content content content",
+            &[],
+            Some("project:/Users/pallasting/Projects/agent-bridge"),
+        );
+        let target = mk_mem_scoped(
+            "aio2",
+            "lesson",
+            "content content content content",
+            &[],
+            Some("project:/Data/CascadeProjects/agent-bridge"),
+        );
+
+        assert!(memory_scopes_compatible(&source, &target, true));
+        assert_eq!(
+            memory_pair_scope_relation(&source, &target),
+            "same_project_scope"
+        );
+    }
+
+    #[test]
+    fn memory_scopes_compatible_keeps_different_stable_ids_cross_scope() {
+        let source = mk_mem_scoped(
+            "github",
+            "lesson",
+            "content content content content",
+            &[],
+            Some("project-id:git:github.com/pallasting/agent-bridge"),
+        );
+        let target = mk_mem_scoped(
+            "gitlab",
+            "lesson",
+            "content content content content",
+            &[],
+            Some("project-id:git:gitlab.com/pallasting/agent-bridge"),
+        );
+
+        assert!(!memory_scopes_compatible(&source, &target, true));
+        assert_eq!(memory_pair_scope_relation(&source, &target), "cross_scope");
     }
 
     #[test]
