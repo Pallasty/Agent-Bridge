@@ -18226,6 +18226,7 @@ impl McpTool for MemorySaveTool {
                     "tags":         { "type": "array", "items": { "type": "string" }, "default": [] },
                     "related_keys": { "type": "array", "items": { "type": "string" }, "default": [] },
                     "scope":        { "type": "string", "description": "Visibility: omit/global=everywhere, project:/abs/path=cwd-scoped, domain:rust=tech-domain." },
+                    "scope_identity_trace": { "type": "boolean", "default": false, "description": "If true, return a git/project-id identity trace for project scopes without changing the stored scope." },
                     "importance":   { "type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Override importance (0.0–1.0). Omit to auto-assign from kind: decision=0.8, lesson=0.7, todo=0.6, fact=0.5, observation=0.3." },
                     "trigger_pattern": { "type": "string", "description": "For kind=error_pattern: surfacing when session_bootstrap `error_hint` contains this substring (case-insensitive)." },
                     "continuity": {
@@ -18287,6 +18288,15 @@ impl McpTool for MemorySaveTool {
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty() && *s != "global")
             .map(|s| s.to_string());
+        let scope_identity_trace_requested = args
+            .get("scope_identity_trace")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let scope_identity_trace = if scope_identity_trace_requested {
+            Some(memory_save_scope_identity_trace(scope.as_deref()))
+        } else {
+            None
+        };
         // Optional importance override; 0.5 = "use kind-based default"
         let importance = args
             .get("importance")
@@ -18519,7 +18529,7 @@ impl McpTool for MemorySaveTool {
                 } else {
                     None
                 };
-                let resp = json!({
+                let mut resp = json!({
                     "status": "saved",
                     "key": key,
                     "continuity_metadata": continuity_metadata
@@ -18530,11 +18540,99 @@ impl McpTool for MemorySaveTool {
                     "prior_decision_warnings": b3_warnings,
                     "prior_decision_hints": b3_hints,
                 });
+                if let Some(trace) = scope_identity_trace {
+                    resp["scope_identity_trace"] = trace;
+                }
                 Ok(ToolResult::json_text(&resp))
             }
             Err(e) => Ok(ToolResult::error(format!("memory: {e}"))),
         }
     }
+}
+
+fn memory_save_scope_identity_trace(scope: Option<&str>) -> Value {
+    let Some(scope) = scope.map(str::trim).filter(|s| !s.is_empty()) else {
+        return json!({
+            "status": "not_applicable",
+            "reason": "no project scope supplied",
+            "write_policy": "trace_only_stored_scope_unchanged",
+        });
+    };
+
+    let explicit_project_id =
+        strip_scope_prefix_case_insensitive(scope, crate::project_identity::PROJECT_ID_SCOPE_PREFIX)
+            .map(|_| scope);
+    let legacy_project_path =
+        strip_scope_prefix_case_insensitive(scope, crate::project_identity::LEGACY_PROJECT_SCOPE_PREFIX);
+    if explicit_project_id.is_none() && legacy_project_path.is_none() {
+        return json!({
+            "status": "not_applicable",
+            "requested_scope": scope,
+            "reason": "non_project_scope",
+            "write_policy": "trace_only_stored_scope_unchanged",
+        });
+    }
+
+    let cwd = legacy_project_path
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .or_else(|| std::env::current_dir().ok().map(|p| p.display().to_string()));
+
+    let Some(cwd) = cwd else {
+        return json!({
+            "status": "not_applicable",
+            "requested_scope": scope,
+            "reason": "could not resolve cwd for project identity trace",
+            "write_policy": "trace_only_stored_scope_unchanged",
+        });
+    };
+
+    let cwd_path = Path::new(&cwd);
+    let git_remote = memory_save_git_capture(cwd_path, &["remote", "get-url", "origin"]);
+    let git_root = memory_save_git_capture(cwd_path, &["rev-parse", "--show-toplevel"]);
+    let identity = crate::project_identity::resolve_project_identity(
+        crate::project_identity::ProjectIdentityInput {
+            cwd: &cwd,
+            explicit_project_id,
+            git_remote: git_remote.as_deref(),
+            git_root: git_root.as_deref(),
+        },
+    );
+
+    json!({
+        "status": "ok",
+        "requested_scope": scope,
+        "stored_scope": scope,
+        "stored_scope_changed": false,
+        "write_policy": "trace_only_stored_scope_unchanged",
+        "identity": identity.identity,
+        "canonical_scope": identity.canonical_scope,
+        "legacy_scope": identity.legacy_scope,
+        "evidence": identity.evidence.label(),
+        "high_confidence": identity.evidence.is_high_confidence(),
+        "git_remote": git_remote,
+        "git_root": git_root,
+    })
+}
+
+fn strip_scope_prefix_case_insensitive<'a>(raw: &'a str, prefix: &str) -> Option<&'a str> {
+    raw.get(..prefix.len())
+        .filter(|candidate| candidate.eq_ignore_ascii_case(prefix))
+        .and_then(|_| raw.get(prefix.len()..))
+}
+
+fn memory_save_git_capture(cwd: &Path, args: &[&str]) -> Option<String> {
+    let out = std::process::Command::new("git")
+        .current_dir(cwd)
+        .args(args)
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!text.is_empty()).then_some(text)
 }
 
 /// Phase 0 telemetry helper. Build a `MemoryQueryRecord` with the common
@@ -65350,6 +65448,121 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             hit["record"]["continuity_metadata"]["actionability"],
             json!("plan_influence")
         );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn memory_save_scope_identity_trace_reports_canonical_without_changing_scope() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let repo_dir = temp_dir.join("Agent-Bridge");
+        tokio::fs::create_dir_all(&repo_dir).await.expect("repo dir");
+        let init = std::process::Command::new("git")
+            .current_dir(&repo_dir)
+            .args(["init"])
+            .output()
+            .expect("git init");
+        assert!(
+            init.status.success(),
+            "git init failed: {}",
+            String::from_utf8_lossy(&init.stderr)
+        );
+        let remote = std::process::Command::new("git")
+            .current_dir(&repo_dir)
+            .args([
+                "remote",
+                "add",
+                "origin",
+                "git@github.com:Pallasting/Agent-Bridge.git",
+            ])
+            .output()
+            .expect("git remote add");
+        assert!(
+            remote.status.success(),
+            "git remote add failed: {}",
+            String::from_utf8_lossy(&remote.stderr)
+        );
+
+        let legacy_scope = format!("project:{}", repo_dir.display());
+        let save = MemorySaveTool::new(hub.clone())
+            .execute(
+                json!({
+                    "key": "scope_identity_trace_roundtrip",
+                    "kind": "decision",
+                    "content": "scope identity trace should not change stored scope",
+                    "scope": legacy_scope,
+                    "scope_identity_trace": true
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("save execute");
+        let payload = result_text_as_json(&save);
+        assert_eq!(payload["status"], json!("saved"));
+        assert_eq!(
+            payload["scope_identity_trace"]["canonical_scope"],
+            json!("project-id:git:github.com/pallasting/agent-bridge")
+        );
+        assert_eq!(
+            payload["scope_identity_trace"]["evidence"],
+            json!("git_remote")
+        );
+        assert_eq!(
+            payload["scope_identity_trace"]["stored_scope_changed"],
+            json!(false)
+        );
+
+        let got = MemoryGetTool::new(hub.clone())
+            .execute(
+                json!({"key": "scope_identity_trace_roundtrip"}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("get execute");
+        let got_payload = result_text_as_json(&got);
+        assert_eq!(got_payload["scope"], json!(legacy_scope));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn memory_save_scope_identity_trace_skips_non_project_scope() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+
+        let save = MemorySaveTool::new(hub.clone())
+            .execute(
+                json!({
+                    "key": "scope_identity_trace_domain_scope",
+                    "kind": "decision",
+                    "content": "domain scopes must not report project identity traces",
+                    "scope": "domain:rust",
+                    "scope_identity_trace": true
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("save execute");
+        let payload = result_text_as_json(&save);
+        assert_eq!(payload["status"], json!("saved"));
+        assert_eq!(
+            payload["scope_identity_trace"]["status"],
+            json!("not_applicable")
+        );
+        assert_eq!(
+            payload["scope_identity_trace"]["reason"],
+            json!("non_project_scope")
+        );
+        assert!(payload["scope_identity_trace"]["canonical_scope"].is_null());
+
+        let got = MemoryGetTool::new(hub.clone())
+            .execute(
+                json!({"key": "scope_identity_trace_domain_scope"}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("get execute");
+        let got_payload = result_text_as_json(&got);
+        assert_eq!(got_payload["scope"], json!("domain:rust"));
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

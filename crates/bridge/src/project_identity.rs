@@ -13,6 +13,15 @@ impl ProjectIdentityEvidence {
     pub fn is_high_confidence(&self) -> bool {
         matches!(self, Self::Explicit | Self::GitRemote)
     }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Explicit => "explicit",
+            Self::GitRemote => "git_remote",
+            Self::GitRootName => "git_root_name",
+            Self::PathFallback => "path_fallback",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
