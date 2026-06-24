@@ -1238,6 +1238,36 @@ only opened follow-up is shadow telemetry review; runtime influence, candidate
 mutation, search-order changes, memory writes, graph-edge writes, and production
 enablement remain later-gated non-claims.
 
+The next surface is the shadow telemetry review:
+
+- MCP tool:
+  `memory_biocortex_t6_candidate_expansion_shadow_telemetry_review`;
+- schema:
+  `agent_bridge.memory_biocortex_t6_candidate_expansion.shadow_telemetry_review.v0`;
+- required source:
+  the redacted JSON object from
+  `memory_biocortex_t6_candidate_expansion_shadow_executor_invocation_report`;
+- scope:
+  redacted aggregate telemetry review only: reviewer/source presence, telemetry
+  window presence, bounded observed/reviewed case counts, failed-case count,
+  candidate-delta count, negative-control regression count, redaction-violation
+  count, append-only confirmation, and redacted-aggregate-only confirmation.
+
+The telemetry review does not invoke the executor, run shadow mode, read raw
+telemetry rows, call BioCortex or memory tools, write memory or graph edges, or
+approve runtime influence. It only validates that a bounded redacted aggregate
+shadow telemetry review is sourced from a ready invocation report. It blocks if
+the source invocation report is not ready, if either the source or request
+includes raw query/key/content/case rows, if the source claims runtime authority,
+if reviewer or provenance metadata is missing, if the decision is not
+`approve_shadow_telemetry_only`, if observed/reviewed counts are inconsistent or
+exceed the source bound, if failures, negative-control regressions, or redaction
+violations are present, or if the caller cannot assert append-only telemetry and
+redacted-aggregate-only handling. Even when ready, the only opened follow-up is
+a later runtime-enablement review; production runtime influence, candidate
+mutation, search-order changes, memory writes, graph-edge writes, and candidate
+expansion enablement remain later-gated non-claims.
+
 ## Verification
 
 Targeted validation for this slice after `/Data` space was recovered:

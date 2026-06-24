@@ -43870,6 +43870,435 @@ impl McpTool for MemoryBioCortexT6CandidateExpansionShadowExecutorInvocationRepo
     }
 }
 
+const MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_SHADOW_TELEMETRY_REVIEW_SCHEMA: &str =
+    "agent_bridge.memory_biocortex_t6_candidate_expansion.shadow_telemetry_review.v0";
+
+fn memory_biocortex_t6_candidate_expansion_shadow_telemetry_review_source_claims_runtime_authority(
+    report: &Value,
+) -> bool {
+    [
+        "/shadow_invocation_contract/this_tool_invokes_executor",
+        "/shadow_invocation_contract/this_tool_runs_shadow_mode",
+        "/shadow_invocation_contract/this_tool_calls_memory_search",
+        "/shadow_invocation_contract/this_tool_calls_memory_neighbors",
+        "/shadow_invocation_contract/this_tool_runs_biocortex",
+        "/shadow_invocation_contract/may_mutate_runtime_candidate_set",
+        "/shadow_invocation_contract/changes_runtime_candidate_set",
+        "/shadow_invocation_contract/may_change_runtime_search_order",
+        "/shadow_invocation_contract/runtime_influence_approved",
+        "/shadow_invocation_contract/may_enable_runtime_gate_now",
+        "/shadow_invocation_contract/may_write_memory_or_graph_edges",
+        "/shadow_invocation_contract/may_approve_production_candidate_expansion_now",
+        "/bounded_shadow_telemetry/raw_queries_allowed",
+        "/bounded_shadow_telemetry/raw_keys_allowed",
+        "/bounded_shadow_telemetry/content_allowed",
+        "/bounded_shadow_telemetry/case_rows_allowed",
+    ]
+    .iter()
+    .any(|pointer| {
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(report, pointer)
+    })
+}
+
+fn memory_biocortex_t6_candidate_expansion_shadow_telemetry_review_source_ready(
+    report: &Value,
+) -> bool {
+    report.get("schema").and_then(Value::as_str)
+        == Some(
+            MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_SHADOW_EXECUTOR_INVOCATION_REPORT_SCHEMA,
+        )
+        && report.get("read_only").and_then(Value::as_bool) == Some(true)
+        && memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            report,
+            "/shadow_executor_invocation_report/ready",
+        )
+        && report
+            .pointer("/shadow_executor_invocation_report/status")
+            .and_then(Value::as_str)
+            == Some("ready_for_shadow_telemetry_review")
+        && memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            report,
+            "/shadow_invocation_contract/may_review_shadow_telemetry_now",
+        )
+        && !memory_biocortex_t6_candidate_expansion_shadow_telemetry_review_source_claims_runtime_authority(report)
+        && !memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            report,
+            "/input_contract/shadow_executor_preflight_report_included",
+        )
+        && !memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            report,
+            "/input_contract/raw_query_included",
+        )
+        && !memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            report,
+            "/input_contract/raw_queries_included",
+        )
+        && !memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            report,
+            "/input_contract/raw_keys_included",
+        )
+        && !memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            report,
+            "/input_contract/content_included",
+        )
+        && !memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            report,
+            "/input_contract/case_rows_included",
+        )
+}
+
+fn memory_biocortex_t6_candidate_expansion_shadow_telemetry_review_payload(args: Value) -> Value {
+    let report = args
+        .get("shadow_executor_invocation_report")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let reviewer =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(&args, "reviewer");
+    let review_source = memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(
+        &args,
+        "review_source",
+    );
+    let telemetry_window_id =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(
+            &args,
+            "telemetry_window_id",
+        );
+    let telemetry_review_decision =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(
+            &args,
+            "telemetry_review_decision",
+        );
+    let observed_case_count =
+        memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_u64(
+            &args,
+            "observed_case_count",
+            0,
+        );
+    let reviewed_case_count =
+        memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_u64(
+            &args,
+            "reviewed_case_count",
+            0,
+        );
+    let failed_case_count =
+        memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_u64(
+            &args,
+            "failed_case_count",
+            0,
+        );
+    let candidate_delta_count =
+        memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_u64(
+            &args,
+            "candidate_delta_count",
+            0,
+        );
+    let negative_control_regression_count =
+        memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_u64(
+            &args,
+            "negative_control_regression_count",
+            0,
+        );
+    let redaction_violation_count =
+        memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_u64(
+            &args,
+            "redaction_violation_count",
+            0,
+        );
+    let append_only_telemetry_confirmed =
+        memory_biocortex_t6_candidate_expansion_shadow_executor_invocation_report_bool(
+            &args,
+            "append_only_telemetry_confirmed",
+            false,
+        );
+    let redacted_aggregate_only =
+        memory_biocortex_t6_candidate_expansion_shadow_executor_invocation_report_bool(
+            &args,
+            "redacted_aggregate_only",
+            false,
+        );
+    let source_shadow_case_count =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+            &report,
+            "/shadow_executor_invocation_report/shadow_case_count",
+        );
+    let source_max_shadow_case_bound =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+            &report,
+            "/bounded_shadow_telemetry/max_shadow_case_bound",
+        );
+    let source_case_bound = if source_shadow_case_count > 0 {
+        source_shadow_case_count
+    } else if source_max_shadow_case_bound > 0 {
+        source_max_shadow_case_bound
+    } else {
+        100
+    }
+    .min(100);
+
+    let mut block_reasons = BTreeSet::<String>::new();
+    if !memory_biocortex_t6_candidate_expansion_shadow_telemetry_review_source_ready(&report) {
+        block_reasons.insert("source_shadow_executor_invocation_report_not_ready".to_string());
+    }
+    if memory_biocortex_t6_candidate_expansion_shadow_execution_gate_contains_raw(&report) {
+        block_reasons.insert("source_shadow_executor_invocation_report_contains_raw".to_string());
+    }
+    if memory_biocortex_t6_candidate_expansion_shadow_execution_gate_contains_raw(&args) {
+        block_reasons.insert("input_contains_raw_or_source_fields".to_string());
+    }
+    if memory_biocortex_t6_candidate_expansion_shadow_telemetry_review_source_claims_runtime_authority(&report) {
+        block_reasons
+            .insert("source_shadow_executor_invocation_report_claims_runtime_authority".to_string());
+    }
+    if reviewer.is_empty() {
+        block_reasons.insert("reviewer_missing".to_string());
+    }
+    if review_source.is_empty() {
+        block_reasons.insert("review_source_missing".to_string());
+    }
+    if telemetry_window_id.is_empty() {
+        block_reasons.insert("telemetry_window_id_missing".to_string());
+    }
+    if telemetry_review_decision != "approve_shadow_telemetry_only" {
+        block_reasons
+            .insert("telemetry_review_decision_not_approve_shadow_telemetry_only".to_string());
+    }
+    if observed_case_count == 0 {
+        block_reasons.insert("observed_case_count_missing".to_string());
+    }
+    if observed_case_count > source_case_bound {
+        block_reasons.insert("observed_case_count_exceeds_source_bound".to_string());
+    }
+    if reviewed_case_count != observed_case_count {
+        block_reasons.insert("reviewed_case_count_mismatch".to_string());
+    }
+    if candidate_delta_count > observed_case_count {
+        block_reasons.insert("candidate_delta_exceeds_observed_cases".to_string());
+    }
+    if failed_case_count > 0 {
+        block_reasons.insert("failed_case_count_present".to_string());
+    }
+    if negative_control_regression_count > 0 {
+        block_reasons.insert("negative_control_regression_detected".to_string());
+    }
+    if redaction_violation_count > 0 {
+        block_reasons.insert("redaction_violation_detected".to_string());
+    }
+    if !append_only_telemetry_confirmed {
+        block_reasons.insert("append_only_telemetry_not_confirmed".to_string());
+    }
+    if !redacted_aggregate_only {
+        block_reasons.insert("redacted_aggregate_only_missing".to_string());
+    }
+
+    let block_reasons: Vec<String> = block_reasons.into_iter().collect();
+    let ready = block_reasons.is_empty();
+    let status = if ready {
+        "ready_for_runtime_enablement_review"
+    } else {
+        "blocked_shadow_telemetry_review"
+    };
+
+    json!({
+        "schema": MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_SHADOW_TELEMETRY_REVIEW_SCHEMA,
+        "generated_at": unix_now_secs(),
+        "read_only": true,
+        "shadow_telemetry_review": {
+            "ready": ready,
+            "status": status,
+            "block_reasons": block_reasons,
+            "reviewer_present": !reviewer.is_empty(),
+            "review_source_present": !review_source.is_empty(),
+            "telemetry_window_id_present": !telemetry_window_id.is_empty(),
+            "telemetry_review_decision": telemetry_review_decision,
+            "observed_case_count": observed_case_count,
+            "reviewed_case_count": reviewed_case_count,
+            "failed_case_count": failed_case_count,
+            "candidate_delta_count": candidate_delta_count,
+            "negative_control_regression_count": negative_control_regression_count,
+            "redaction_violation_count": redaction_violation_count,
+            "source_case_bound": source_case_bound,
+            "reviewed_case_count_matches": reviewed_case_count == observed_case_count,
+            "append_only_telemetry_confirmed": append_only_telemetry_confirmed,
+            "redacted_aggregate_only": redacted_aggregate_only,
+        },
+        "shadow_telemetry_contract": {
+            "may_prepare_runtime_enablement_review_now": ready,
+            "this_tool_invokes_executor": false,
+            "this_tool_runs_shadow_mode": false,
+            "this_tool_calls_memory_search": false,
+            "this_tool_calls_memory_neighbors": false,
+            "this_tool_runs_biocortex": false,
+            "may_mutate_runtime_candidate_set": false,
+            "changes_runtime_candidate_set": false,
+            "may_change_runtime_search_order": false,
+            "runtime_influence_approved": false,
+            "may_enable_runtime_gate_now": false,
+            "may_write_memory_or_graph_edges": false,
+            "may_approve_production_candidate_expansion_now": false,
+            "requires_later_runtime_enablement_gate": true,
+            "requires_later_candidate_expansion_enablement_gate": true,
+        },
+        "bounded_shadow_telemetry_review": {
+            "redacted_aggregate_required": true,
+            "append_only_telemetry_required": true,
+            "append_only_telemetry_confirmed": append_only_telemetry_confirmed,
+            "redacted_aggregate_only": redacted_aggregate_only,
+            "source_case_bound": source_case_bound,
+            "raw_queries_allowed": false,
+            "raw_keys_allowed": false,
+            "content_allowed": false,
+            "case_rows_allowed": false,
+            "production_traffic_allowed": false,
+        },
+        "input_contract": {
+            "shadow_executor_invocation_report_included": false,
+            "raw_query_included": false,
+            "raw_queries_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "case_rows_included": false,
+            "unknown_fields_ignored": true,
+        },
+        "non_goals": [
+            "This tool does not invoke a shadow executor or run shadow mode.",
+            "This tool does not read telemetry rows; it validates a bounded redacted aggregate review only.",
+            "This tool does not consume raw queries, raw keys, memory content, production traffic, or case rows.",
+            "This tool does not call BioCortex, memory_search, or memory_neighbors.",
+            "This tool does not mutate runtime candidate sets, search order, memory, graph edges, feature flags, approvals, or telemetry.",
+            "This tool does not approve runtime enablement or production candidate expansion."
+        ],
+    })
+}
+
+pub struct MemoryBioCortexT6CandidateExpansionShadowTelemetryReviewTool;
+impl MemoryBioCortexT6CandidateExpansionShadowTelemetryReviewTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for MemoryBioCortexT6CandidateExpansionShadowTelemetryReviewTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for MemoryBioCortexT6CandidateExpansionShadowTelemetryReviewTool {
+    fn name(&self) -> &'static str {
+        "memory_biocortex_t6_candidate_expansion_shadow_telemetry_review"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only T6 candidate-expansion shadow telemetry review gate. \
+                Consumes a safe shadow executor invocation report plus bounded redacted \
+                aggregate telemetry-review counts. It does not read raw telemetry, invoke \
+                executors, run shadow mode, call BioCortex or memory tools, mutate runtime \
+                candidates, change search order, or approve runtime influence."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": [
+                    "shadow_executor_invocation_report",
+                    "reviewer",
+                    "review_source",
+                    "telemetry_window_id",
+                    "telemetry_review_decision",
+                    "observed_case_count",
+                    "reviewed_case_count",
+                    "failed_case_count",
+                    "candidate_delta_count",
+                    "negative_control_regression_count",
+                    "redaction_violation_count",
+                    "append_only_telemetry_confirmed",
+                    "redacted_aggregate_only"
+                ],
+                "properties": {
+                    "shadow_executor_invocation_report": {
+                        "type": "object",
+                        "description": "JSON object produced by memory_biocortex_t6_candidate_expansion_shadow_executor_invocation_report. It is inspected but never echoed."
+                    },
+                    "reviewer": {
+                        "type": "string",
+                        "description": "Human or agent reviewer id for the telemetry review decision."
+                    },
+                    "review_source": {
+                        "type": "string",
+                        "description": "Review provenance such as a forum post or evidence packet id."
+                    },
+                    "telemetry_window_id": {
+                        "type": "string",
+                        "description": "Redacted aggregate telemetry window id. Raw telemetry row ids must not be supplied."
+                    },
+                    "telemetry_review_decision": {
+                        "type": "string",
+                        "enum": [
+                            "approve_shadow_telemetry_only",
+                            "request_shadow_telemetry_changes",
+                            "reject_shadow_telemetry"
+                        ],
+                        "description": "Only approve_shadow_telemetry_only can open the later runtime-enablement review path."
+                    },
+                    "observed_case_count": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100,
+                        "description": "Bounded count of redacted shadow cases observed in the aggregate telemetry."
+                    },
+                    "reviewed_case_count": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100,
+                        "description": "Count of redacted shadow cases reviewed; must match observed_case_count."
+                    },
+                    "failed_case_count": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100,
+                        "description": "Any failed case blocks the later runtime-enablement review path."
+                    },
+                    "candidate_delta_count": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100,
+                        "description": "Redacted count of hypothetical candidate deltas. No keys or content allowed."
+                    },
+                    "negative_control_regression_count": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100,
+                        "description": "Any negative-control regression blocks the later runtime-enablement review path."
+                    },
+                    "redaction_violation_count": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100,
+                        "description": "Any redaction violation blocks the later runtime-enablement review path."
+                    },
+                    "append_only_telemetry_confirmed": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Must be true to confirm only append-only telemetry was reviewed."
+                    },
+                    "redacted_aggregate_only": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Must be true to confirm no raw queries, keys, content, or case rows were supplied."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        Ok(ToolResult::json_text(
+            &memory_biocortex_t6_candidate_expansion_shadow_telemetry_review_payload(args),
+        ))
+    }
+}
+
 const MEMORY_NEURAL_CRITIC_SHADOW_EVAL_SCHEMA: &str =
     "agent_bridge.memory_neural_critic_shadow_eval.v0";
 const MEMORY_NEURAL_CRITIC_LABELS: [&str; 5] =
@@ -53566,6 +53995,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
+        Tier::Niche,
+        Arc::new(MemoryBioCortexT6CandidateExpansionShadowTelemetryReviewTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
         Tier::Standard,
         Arc::new(MemoryNeuralCriticShadowEvalTool::new()),
     );
@@ -55313,6 +55748,7 @@ mod tests {
         "memory_biocortex_t6_candidate_expansion_shadow_execution_gate",
         "memory_biocortex_t6_candidate_expansion_shadow_executor_preflight",
         "memory_biocortex_t6_candidate_expansion_shadow_executor_invocation_report",
+        "memory_biocortex_t6_candidate_expansion_shadow_telemetry_review",
     ];
 
     fn result_text(res: &ToolResult) -> String {
@@ -76029,6 +76465,228 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(!serialized.contains("secret invocation top-level query"));
         assert!(!serialized.contains("secret invocation case row"));
         assert!(!serialized.contains("\"shadow_executor_preflight_report\""));
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_t6_candidate_expansion_shadow_telemetry_review_accepts_redacted_aggregate(
+    ) {
+        let invocation_report = json!({
+            "schema": "agent_bridge.memory_biocortex_t6_candidate_expansion.shadow_executor_invocation_report.v0",
+            "read_only": true,
+            "shadow_executor_invocation_report": {
+                "ready": true,
+                "status": "ready_for_shadow_telemetry_review",
+                "block_reasons": [],
+                "shadow_case_count": 25,
+                "completed_case_count": 25,
+                "failed_case_count": 0,
+                "candidate_delta_count": 2,
+                "negative_control_regression_count": 0,
+                "max_shadow_case_bound": 25,
+                "case_counts_match": true,
+                "append_only_telemetry_written": true,
+                "redacted_summary_only": true
+            },
+            "shadow_invocation_contract": {
+                "may_review_shadow_telemetry_now": true,
+                "this_tool_invokes_executor": false,
+                "this_tool_runs_shadow_mode": false,
+                "this_tool_calls_memory_search": false,
+                "this_tool_calls_memory_neighbors": false,
+                "this_tool_runs_biocortex": false,
+                "may_mutate_runtime_candidate_set": false,
+                "changes_runtime_candidate_set": false,
+                "may_change_runtime_search_order": false,
+                "runtime_influence_approved": false,
+                "may_enable_runtime_gate_now": false,
+                "may_write_memory_or_graph_edges": false
+            },
+            "bounded_shadow_telemetry": {
+                "append_only_telemetry_written": true,
+                "redacted_summary_only": true,
+                "max_shadow_case_bound": 25,
+                "raw_queries_allowed": false,
+                "raw_keys_allowed": false,
+                "content_allowed": false,
+                "case_rows_allowed": false
+            },
+            "input_contract": {
+                "shadow_executor_preflight_report_included": false,
+                "raw_query_included": false,
+                "raw_queries_included": false,
+                "raw_keys_included": false,
+                "content_included": false,
+                "case_rows_included": false
+            }
+        });
+
+        let tool = MemoryBioCortexT6CandidateExpansionShadowTelemetryReviewTool::new();
+        let out = tool
+            .execute(
+                json!({
+                    "shadow_executor_invocation_report": invocation_report,
+                    "reviewer": "codex",
+                    "review_source": "forum:#115/post:3929",
+                    "telemetry_window_id": "redacted-window:t6-shadow-telemetry-001",
+                    "telemetry_review_decision": "approve_shadow_telemetry_only",
+                    "observed_case_count": 25,
+                    "reviewed_case_count": 25,
+                    "failed_case_count": 0,
+                    "candidate_delta_count": 2,
+                    "negative_control_regression_count": 0,
+                    "redaction_violation_count": 0,
+                    "append_only_telemetry_confirmed": true,
+                    "redacted_aggregate_only": true
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(
+            payload["schema"],
+            json!("agent_bridge.memory_biocortex_t6_candidate_expansion.shadow_telemetry_review.v0")
+        );
+        assert_eq!(payload["read_only"], json!(true));
+        assert_eq!(payload["shadow_telemetry_review"]["ready"], json!(true));
+        assert_eq!(
+            payload["shadow_telemetry_review"]["status"],
+            json!("ready_for_runtime_enablement_review")
+        );
+        assert_eq!(
+            payload["shadow_telemetry_contract"]["may_prepare_runtime_enablement_review_now"],
+            json!(true)
+        );
+        assert_eq!(
+            payload["shadow_telemetry_contract"]["may_enable_runtime_gate_now"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["shadow_telemetry_contract"]["runtime_influence_approved"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["shadow_telemetry_contract"]["may_mutate_runtime_candidate_set"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["shadow_telemetry_contract"]["may_write_memory_or_graph_edges"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["input_contract"]["shadow_executor_invocation_report_included"],
+            json!(false)
+        );
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_t6_candidate_expansion_shadow_telemetry_review_blocks_raw_or_authority_claims(
+    ) {
+        let invocation_report = json!({
+            "schema": "agent_bridge.memory_biocortex_t6_candidate_expansion.shadow_executor_invocation_report.v0",
+            "read_only": true,
+            "shadow_executor_invocation_report": {
+                "ready": false,
+                "status": "blocked_shadow_executor_invocation_report",
+                "block_reasons": ["negative_control_regression_detected"],
+                "shadow_case_count": 25,
+                "completed_case_count": 24,
+                "failed_case_count": 1,
+                "candidate_delta_count": 30,
+                "negative_control_regression_count": 1,
+                "max_shadow_case_bound": 25,
+                "case_counts_match": true,
+                "append_only_telemetry_written": true,
+                "redacted_summary_only": true
+            },
+            "shadow_invocation_contract": {
+                "may_review_shadow_telemetry_now": true,
+                "may_mutate_runtime_candidate_set": true,
+                "runtime_influence_approved": true,
+                "may_write_memory_or_graph_edges": true
+            },
+            "bounded_shadow_telemetry": {
+                "raw_queries_allowed": true,
+                "raw_keys_allowed": true,
+                "content_allowed": true,
+                "case_rows_allowed": true
+            },
+            "raw_query": "secret telemetry source query",
+            "content": "secret telemetry source content"
+        });
+
+        let tool = MemoryBioCortexT6CandidateExpansionShadowTelemetryReviewTool::new();
+        let out = tool
+            .execute(
+                json!({
+                    "shadow_executor_invocation_report": invocation_report,
+                    "reviewer": "",
+                    "review_source": "",
+                    "telemetry_window_id": "",
+                    "telemetry_review_decision": "approve_runtime_enablement",
+                    "observed_case_count": 10_000,
+                    "reviewed_case_count": 8,
+                    "failed_case_count": 1,
+                    "candidate_delta_count": 10_001,
+                    "negative_control_regression_count": 1,
+                    "redaction_violation_count": 1,
+                    "append_only_telemetry_confirmed": false,
+                    "redacted_aggregate_only": false,
+                    "raw_query": "secret telemetry top-level query",
+                    "case_rows": [{"query": "secret telemetry case row"}]
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(payload["shadow_telemetry_review"]["ready"], json!(false));
+        let reasons = payload["shadow_telemetry_review"]["block_reasons"]
+            .as_array()
+            .expect("block reasons");
+        assert!(reasons.contains(&json!("source_shadow_executor_invocation_report_not_ready")));
+        assert!(reasons.contains(&json!(
+            "source_shadow_executor_invocation_report_contains_raw"
+        )));
+        assert!(reasons.contains(&json!(
+            "source_shadow_executor_invocation_report_claims_runtime_authority"
+        )));
+        assert!(reasons.contains(&json!("input_contains_raw_or_source_fields")));
+        assert!(reasons.contains(&json!("reviewer_missing")));
+        assert!(reasons.contains(&json!("review_source_missing")));
+        assert!(reasons.contains(&json!("telemetry_window_id_missing")));
+        assert!(reasons.contains(&json!(
+            "telemetry_review_decision_not_approve_shadow_telemetry_only"
+        )));
+        assert!(reasons.contains(&json!("observed_case_count_exceeds_source_bound")));
+        assert!(reasons.contains(&json!("reviewed_case_count_mismatch")));
+        assert!(reasons.contains(&json!("candidate_delta_exceeds_observed_cases")));
+        assert!(reasons.contains(&json!("failed_case_count_present")));
+        assert!(reasons.contains(&json!("negative_control_regression_detected")));
+        assert!(reasons.contains(&json!("redaction_violation_detected")));
+        assert!(reasons.contains(&json!("append_only_telemetry_not_confirmed")));
+        assert!(reasons.contains(&json!("redacted_aggregate_only_missing")));
+        assert_eq!(
+            payload["shadow_telemetry_contract"]["may_prepare_runtime_enablement_review_now"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["shadow_telemetry_contract"]["runtime_influence_approved"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["input_contract"]["shadow_executor_invocation_report_included"],
+            json!(false)
+        );
+
+        let serialized = serde_json::to_string(&payload).expect("serialize");
+        assert!(!serialized.contains("secret telemetry source query"));
+        assert!(!serialized.contains("secret telemetry source content"));
+        assert!(!serialized.contains("secret telemetry top-level query"));
+        assert!(!serialized.contains("secret telemetry case row"));
+        assert!(!serialized.contains("\"shadow_executor_invocation_report\""));
     }
 
     #[tokio::test]
