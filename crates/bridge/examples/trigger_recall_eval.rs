@@ -71,10 +71,12 @@ const PORTABLE_STAGE2_FIXTURE_LABEL: &str = "portable Stage-2 fixture (repo-loca
 const POLICY_BENEFIT_FIXTURE_LABEL: &str =
     "portable policy-benefit fixture (repo-local contract, not production evidence)";
 const POLICY_BENEFIT_LIVE_MAC_LABEL: &str =
-    "current live Mac held-out corpus (e5/384, pre-GTE-cutover)";
+    "current live Mac baseline-findable held-out corpus (e5/384, pre-GTE-cutover)";
+const POLICY_BENEFIT_LIVE_EXCLUDED_CASES: &[&str] = &["nexus_wuxing_math"];
 const AIO2_BASELINE_ACCEPTANCE_TELEMETRY_LABEL: &str =
     "legacy aio2-native active trigger rows, 2026-06-22 (telemetry only; not a Stage-2 hard gate)";
 
+#[derive(Clone, Copy)]
 struct Case {
     id: &'static str,
     stratum: &'static str,
@@ -185,6 +187,7 @@ impl RuntimeShapedAudit {
 struct BaselineAcceptanceAudit {
     query_hash: String,
     query_intent_reject_reason: Option<&'static str>,
+    explicit_exclusion_filter_reason: Option<&'static str>,
     baseline_keys_before_gate: Vec<String>,
     baseline_keys_after_shadow_gate: Vec<String>,
 }
@@ -218,6 +221,10 @@ impl BaselineAcceptanceAudit {
             "query_intent": {
                 "decision": self.query_intent_decision(),
                 "reject_reason": self.query_intent_reject_reason,
+            },
+            "explicit_exclusion_filter": {
+                "decision": if self.explicit_exclusion_filter_reason.is_some() { "filter" } else { "allow" },
+                "reject_reason": self.explicit_exclusion_filter_reason,
             },
             "visible_behavior_if_production": self.visible_behavior_if_production(),
             "regression_anchor": TRIGGER_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR,
@@ -1049,12 +1056,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return check_corpus(&db_path, &rows);
     }
     if matches!(arg1.as_deref(), Some("--policy-benefit-live-mac")) {
-        verify_corpus_for(&rows, CORPUS, NEGATIVE_CONTROLS)?;
+        let policy_cases = policy_benefit_live_corpus();
+        verify_corpus_for(&rows, &policy_cases, NEGATIVE_CONTROLS)?;
         let fts = ScratchFts::build(&rows)?;
         return run_policy_benefit_eval_for(
             &rows,
             &fts,
-            CORPUS,
+            &policy_cases,
             NEGATIVE_CONTROLS,
             POLICY_BENEFIT_LIVE_MAC_LABEL,
             true,
@@ -2662,6 +2670,8 @@ fn policy_benefit_eval_summary(
         );
         if let Some(reason) = audit.query_intent_reject_reason {
             *held_controls_by_reason.entry(reason).or_insert(0) += 1;
+        } else if let Some(reason) = audit.explicit_exclusion_filter_reason {
+            *held_controls_by_reason.entry(reason).or_insert(0) += 1;
         }
     }
 
@@ -2815,12 +2825,30 @@ fn baseline_acceptance_audit(
 ) -> Result<BaselineAcceptanceAudit, String> {
     let baseline_keys = fts.search(IndexKind::Projected, query, limit)?;
     let query_intent_reject_reason = baseline_acceptance_reject_reason(query);
-    let baseline_keys_after_shadow_gate =
+    let baseline_keys_after_intent_gate =
         shadow_visible_baseline_keys(&baseline_keys, query_intent_reject_reason);
+    let clauses = explicit_exclusion_clauses(query);
+    let (baseline_keys_after_shadow_gate, explicit_exclusion_filter_reason) =
+        if query_intent_reject_reason.is_none() && !clauses.is_empty() {
+            let filtered = filter_explicit_exclusion_intent(
+                &fts.projected_by_key,
+                &clauses,
+                baseline_keys_after_intent_gate.clone(),
+            )?;
+            let reason = if filtered.len() < baseline_keys_after_intent_gate.len() {
+                Some("explicit_exclusion_candidate_filter")
+            } else {
+                None
+            };
+            (filtered, reason)
+        } else {
+            (baseline_keys_after_intent_gate, None)
+        };
 
     Ok(BaselineAcceptanceAudit {
         query_hash: query_hash(query),
         query_intent_reject_reason,
+        explicit_exclusion_filter_reason,
         baseline_keys_before_gate: baseline_keys,
         baseline_keys_after_shadow_gate,
     })
@@ -3034,6 +3062,14 @@ fn corpus_coverage_for(rows: &[MemoryRow], cases: &[Case]) -> CorpusCoverage {
 
 fn verify_corpus(rows: &[MemoryRow]) -> Result<(), Box<dyn std::error::Error>> {
     verify_corpus_for(rows, CORPUS, NEGATIVE_CONTROLS)
+}
+
+fn policy_benefit_live_corpus() -> Vec<Case> {
+    CORPUS
+        .iter()
+        .copied()
+        .filter(|case| !POLICY_BENEFIT_LIVE_EXCLUDED_CASES.contains(&case.id))
+        .collect()
 }
 
 fn verify_corpus_for(
@@ -4309,6 +4345,26 @@ mod tests {
     }
 
     #[test]
+    fn policy_benefit_live_corpus_tracks_cjk_only_case_outside_baseline_contract() {
+        assert!(
+            CORPUS.iter().any(|case| case.id == "nexus_wuxing_math"),
+            "the broader recall eval must keep the CJK-only recovery case"
+        );
+
+        let policy_cases = policy_benefit_live_corpus();
+        assert_eq!(
+            policy_cases.len(),
+            CORPUS.len() - POLICY_BENEFIT_LIVE_EXCLUDED_CASES.len()
+        );
+        assert!(
+            !policy_cases
+                .iter()
+                .any(|case| case.id == "nexus_wuxing_math"),
+            "policy-benefit live contract is scoped to baseline-findable positives; #27 is tracked by the CJK fallback eval"
+        );
+    }
+
+    #[test]
     fn aio2_native_corpus_stays_host_local_and_not_self_observing() {
         assert_eq!(
             AIO2_NATIVE_CORPUS.len(),
@@ -5259,6 +5315,109 @@ mod tests {
         );
         assert_eq!(payload["baseline_candidates_before_gate"], json!(1));
         assert_eq!(payload["baseline_candidates_after_shadow_gate"], json!(0));
+    }
+
+    #[test]
+    fn baseline_acceptance_audit_filters_explicit_exclusion_candidates() {
+        let query = "show UI notes, not runtime executor status";
+        let rows = [
+            MemoryRow {
+                key: "ui_notes".to_string(),
+                kind: "decision".to_string(),
+                scope: None,
+                content: String::new(),
+                projected: "show UI notes interface checklist".to_string(),
+                triggers: Vec::new(),
+            },
+            MemoryRow {
+                key: "runtime_executor".to_string(),
+                kind: "decision".to_string(),
+                scope: None,
+                content: String::new(),
+                projected: "runtime executor status deployment evidence".to_string(),
+                triggers: Vec::new(),
+            },
+        ];
+        let fts = ScratchFts::build(&rows).expect("scratch fts");
+        let audit =
+            baseline_acceptance_audit(&fts, query, TOP_K).expect("baseline exclusion audit");
+
+        assert_eq!(audit.query_intent_reject_reason, None);
+        assert_eq!(
+            audit.explicit_exclusion_filter_reason,
+            Some("explicit_exclusion_candidate_filter")
+        );
+        assert!(audit
+            .baseline_keys_before_gate
+            .contains(&"runtime_executor".to_string()));
+        assert!(audit
+            .baseline_keys_after_shadow_gate
+            .contains(&"ui_notes".to_string()));
+        assert!(!audit
+            .baseline_keys_after_shadow_gate
+            .contains(&"runtime_executor".to_string()));
+
+        let payload = audit.to_json();
+        assert_eq!(payload["query_intent"]["decision"], json!("allow"));
+        assert_eq!(
+            payload["explicit_exclusion_filter"]["decision"],
+            json!("filter")
+        );
+        assert_eq!(
+            payload["explicit_exclusion_filter"]["reject_reason"],
+            json!("explicit_exclusion_candidate_filter")
+        );
+    }
+
+    #[test]
+    fn policy_benefit_summary_counts_explicit_exclusion_candidate_filter() {
+        const CASES: &[Case] = &[Case {
+            id: "runtime_executor_allowed",
+            stratum: "agent_bridge",
+            query: "runtime executor status",
+            trigger: "When continuing runtime executor status deployment evidence.",
+            expect: &["runtime_executor"],
+            note: "Allowed runtime executor continuation",
+        }];
+        const CONTROLS: &[NegativeControl] = &[NegativeControl {
+            id: "ui_notes_not_executor",
+            query: "show UI notes, not runtime executor status",
+            bucket: ControlBucket::Unrelated,
+            note: "Explicitly excludes the runtime executor target while sharing terms.",
+        }];
+        let rows = [
+            MemoryRow {
+                key: "runtime_executor".to_string(),
+                kind: "decision".to_string(),
+                scope: None,
+                content: String::new(),
+                projected: "runtime executor status deployment evidence".to_string(),
+                triggers: Vec::new(),
+            },
+            MemoryRow {
+                key: "ui_notes".to_string(),
+                kind: "decision".to_string(),
+                scope: None,
+                content: String::new(),
+                projected: "show UI notes interface checklist".to_string(),
+                triggers: Vec::new(),
+            },
+        ];
+        let fts = ScratchFts::build(&rows).expect("scratch fts");
+        let summary =
+            policy_benefit_eval_summary(&fts, CASES, CONTROLS, "explicit exclusion test", true)
+                .expect("policy benefit summary");
+
+        assert!(summary.contract_passed());
+        assert_eq!(summary.positive_baseline_hits, 1);
+        assert_eq!(summary.false_hits_removed_by_shadow_gate, 1);
+        assert_eq!(summary.baseline_false_hits_after_gate, 0);
+        assert_eq!(
+            summary
+                .held_controls_by_reason
+                .get("explicit_exclusion_candidate_filter"),
+            Some(&1)
+        );
     }
 
     #[test]
