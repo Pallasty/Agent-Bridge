@@ -4,7 +4,7 @@ Date: 2026-06-25
 
 Schema: `agent_bridge.memory.gte_768.owner_review_packet.v0`
 
-Status: `OWNER_REVIEW_READY_CASE14_ADJUDICATED_READER_PROBE / LIVE_CUTOVER_NO_GO`.
+Status: `OWNER_REVIEW_READY_CASE14_ADJUDICATED_READER_PROBE_MAINTENANCE_DRAFTS / LIVE_CUTOVER_NO_GO`.
 
 Scope: owner/reviewer packet for deciding whether the GTE 768 evidence is
 strong enough to plan a live maintenance window. This packet does not approve
@@ -32,8 +32,9 @@ Recommended owner decision:
 
 Allowed next slice if owner accepts this packet:
 
-- docs-only live maintenance proposal;
-- rollback packet draft.
+- owner review / final authorization packet;
+- optional mixed-reader proof if owner rejects `atomic_node_cutover_only`;
+- Mac live-store disposition decision.
 
 Still blocked:
 
@@ -57,7 +58,19 @@ Reader compatibility probe:
 docs/reports/goal-c-u/2026-06-25-gte-768-reader-compatibility-probe.md
 ```
 
-Code/report head:
+Live maintenance proposal:
+
+```text
+docs/reports/goal-c-u/2026-06-25-gte-768-live-maintenance-proposal.md
+```
+
+Rollback draft:
+
+```text
+docs/reports/goal-c-u/2026-06-25-gte-768-rollback-packet-draft.md
+```
+
+Initial canonical rehearsal head:
 
 ```text
 c782979 docs(memory): record GTE canonical rehearsal
@@ -71,12 +84,13 @@ design thread 105 post #2554
 design thread 105 post #2555
 ```
 
-Evidence commits represented before this reader-probe update:
+Evidence commits represented before the maintenance-draft commit:
 
 ```text
 c782979 docs(memory): record GTE canonical rehearsal
 1f266a9 docs(memory): add GTE owner review packet
 cbfaa7e test(memory): adjudicate GTE case14 recall target
+33d55e0 test(memory): add GTE reader compatibility probe
 ```
 
 Current installed binary on aio2:
@@ -208,10 +222,11 @@ Runbook gates:
 | Candidate commit explicit | `PARTIAL` | GTE-capable code exists on master, but no owner-approved implementation commit is named for live cut-over. |
 | Rehearsal uses a copy | `PASS` | Canonical snapshot was copied into scratch and only the scratch DB was reindexed. |
 | Reader compatibility decided | `OPEN_WITH_PROBE` | Copied-DB probe supports `atomic_node_cutover_only`; no owner decision yet and mixed-reader support remains unproven. |
-| Dual-node deployment serialized | `OPEN` | No maintenance window or dual-node deploy plan yet. |
+| Dual-node deployment serialized | `OPEN_WITH_PROPOSAL` | Docs-only maintenance proposal exists; no owner-approved maintenance window yet. |
 | Store invariants hold | `PASS_FOR_SCRATCH_ONLY` | Scratch store has 3022 GTE rows; live stores were not mutated. |
 | Recall benefit reproduced | `PASS_FOR_CANONICAL_REHEARSAL` | after #14 adjudication, hard-tier semantic R@10 `0.875` vs FTS/hybrid `0.375`. |
 | Post-reconnect surface current | `PASS_FOR_CURRENT_AIO2_STATE` | doctor `ok=true fails=0 warns=0`; live readers are still non-GTE. |
+| Rollback packet | `OPEN_WITH_DRAFT` | rollback draft exists; final packet still needs exact backups, candidate binary hashes, owner/window, and post ids. |
 
 Current overall state:
 
@@ -263,7 +278,17 @@ the approved binary, reindex one node at a time, then reconnect clients.
 
 ## Required Live Proposal Shape
 
-The next docs-only proposal must name:
+Docs-only drafts now exist:
+
+```text
+proposal=docs/reports/goal-c-u/2026-06-25-gte-768-live-maintenance-proposal.md
+rollback=docs/reports/goal-c-u/2026-06-25-gte-768-rollback-packet-draft.md
+```
+
+They remain planning artifacts. They do not authorize live reindex, live DB
+mutation, deployment, runtime env switch, or production `memory_search` changes.
+
+The final authorization packet must name:
 
 - exact implementation commit to deploy;
 - exact binary sha256 per node after build/deploy;
@@ -371,7 +396,7 @@ This packet is ready for owner review as an evidence bundle.
 Recommended outcome:
 
 ```text
-ACCEPT_EVIDENCE_ONLY / AUTHORIZE_DOCS_ONLY_LIVE_PROPOSAL / LIVE_GTE_NO_GO
+ACCEPT_EVIDENCE_AND_DRAFTS_ONLY / REQUEST_FINAL_AUTHORIZATION_PACKET / LIVE_GTE_NO_GO
 ```
 
 No production change should occur until a later owner decision explicitly names
