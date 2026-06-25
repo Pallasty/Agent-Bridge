@@ -2,7 +2,7 @@
 
 Date: 2026-06-25
 
-Status: `MAC_FULL_GTE_VERIFIED / DUAL_NODE_LIVE_CUTOVER_NO_GO`.
+Status: `MAC_FULL_GTE_VERIFIED / STALE_READERS_CLEARED / DUAL_NODE_LIVE_CUTOVER_NO_GO`.
 
 Scope: read-only verification after the user completed the Mac-side full GTE
 768 migration. This report records observed state only. It does not authorize
@@ -28,8 +28,12 @@ dominant_bytes=3072
 dominant_dim=768
 ```
 
-Dual-node cut-over remains `NO_GO` because aio2 is not migrated and Mac still
-has stale MCP reader processes attached to the live DB.
+Dual-node cut-over remains `NO_GO` because aio2 is not migrated. The Mac stale
+MCP reader blocker was cleared in:
+
+```text
+docs/reports/goal-c-u/2026-06-25-gte-768-mac-stale-reader-cleanup.md
+```
 
 ## Mac Direct SQL Evidence
 
@@ -71,24 +75,21 @@ path=/Users/pallasting/.local/bin/agent-bridge.real
 sha256=886da427f62726472f67972b31bad960fc0d16a093a287a3dd068f9439eabf69
 ```
 
-Doctor summary:
+Doctor summary after stale-reader cleanup:
 
 ```text
 ok=true
 fails=0
-warns=3
+warns=2
 ```
 
 Warnings observed:
 
-- 12 MCP servers: 1 current `.real`, 11 stale `.real`, 0 direct, 0 unknown.
 - `/Users/pallasting/.local/bin/ab-system-control` is missing.
 - desktop runtime `system_control` is missing.
 
-The desktop-helper warnings are not GTE vector blockers. The stale MCP readers
-are a cut-over blocker because they have live DB/WAL handles open and must be
-refreshed or explicitly stopped before Mac can be accepted as a clean migrated
-node.
+The desktop-helper warnings are not GTE vector blockers. Post-cleanup doctor
+reported `3 MCP server(s) - all executing current agent-bridge.real`.
 
 ## Model Artifacts
 
@@ -151,10 +152,9 @@ Mac migration is verified by DB invariants.
 Overall live cut-over remains blocked:
 
 - aio2 has not been migrated to GTE 768;
-- Mac has stale MCP readers attached to the migrated live DB;
 - Mac `continuity-report` disagrees with direct SQL and should be corrected or
   explicitly waived before final acceptance.
 
-Recommended next action: refresh or stop stale Mac MCP clients, re-run Mac
-doctor and direct SQL, then decide whether to authorize aio2 live migration as
-a separate one-node maintenance step.
+Recommended next action: decide whether to authorize aio2 live migration as a
+separate one-node maintenance step, while tracking the Mac continuity-report
+discrepancy as a follow-up.

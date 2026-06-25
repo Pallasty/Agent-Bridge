@@ -54,7 +54,8 @@ path=/Users/pallasting/.local/bin/agent-bridge.real
 sha256=886da427f62726472f67972b31bad960fc0d16a093a287a3dd068f9439eabf69
 doctor_ok=true
 doctor_fails=0
-doctor_warns=3
+doctor_warns=2
+mcp_servers=3 current .real, 0 stale
 ```
 
 Candidate binary hashes are intentionally `TBD` until a final maintenance packet

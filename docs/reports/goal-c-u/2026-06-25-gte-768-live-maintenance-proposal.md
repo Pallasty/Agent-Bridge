@@ -48,6 +48,7 @@ docs/reports/goal-c-u/2026-06-25-gte-768-case14-miss-review.md
 docs/reports/goal-c-u/2026-06-25-gte-768-reader-compatibility-probe.md
 docs/reports/goal-c-u/2026-06-25-gte-768-owner-review-packet.md
 docs/reports/goal-c-u/2026-06-25-gte-768-mac-live-migration-verification.md
+docs/reports/goal-c-u/2026-06-25-gte-768-mac-stale-reader-cleanup.md
 ```
 
 Rollback companion draft:
@@ -90,8 +91,8 @@ installed_binary=/Users/pallasting/.local/bin/agent-bridge.real
 installed_binary_sha256=886da427f62726472f67972b31bad960fc0d16a093a287a3dd068f9439eabf69
 doctor_ok=true
 doctor_fails=0
-doctor_warns=3
-doctor_warning_summary=12 MCP servers: 1 current .real, 11 stale .real; missing ab-system-control desktop helpers
+doctor_warns=2
+doctor_warning_summary=3 MCP server(s) all current .real; missing ab-system-control desktop helpers
 live_db=/Users/pallasting/Library/Application Support/agent-bridge/state.db
 live_active_total=3248
 live_embedded=3248
@@ -105,9 +106,9 @@ live_old_or_non_gte_active_embedded=0
 ```
 
 Mac live-store note: the current Mac live DB is now verified as a full GTE 768
-store by direct SQL invariants. Mac cannot yet be accepted as a clean migrated
-node because stale MCP readers still have live DB/WAL handles open. Mac
-`continuity-report --json` also reported `embedded=0`, which contradicts direct
+store by direct SQL invariants. The stale MCP reader blocker was cleared:
+post-cleanup doctor reports all MCP servers are current `.real`. Mac
+`continuity-report --json` still reports `embedded=0`, which contradicts direct
 SQL and should be fixed or explicitly waived before final acceptance.
 
 ## Model Artifacts
@@ -146,7 +147,7 @@ Reason:
 - mixed-reader support was not proven;
 - live aio2 readers are still non-GTE;
 - aio2 live DB is still 384-era;
-- Mac has a verified GTE 768 live DB but still has stale MCP readers attached.
+- Mac has a verified GTE 768 live DB and stale MCP readers are cleared.
 
 Reader compatibility probe summary:
 
@@ -166,11 +167,10 @@ until the owner signs a final authorization packet.
 1. Announce a memory write freeze.
 2. Confirm `origin/master` and both local checkouts are at the approved commit.
 3. Confirm model artifact hashes on both nodes.
-4. Run `doctor --json` on both nodes. Stop if fails are non-zero or if Mac still
-   has stale MCP rows that can attach to the live store.
+4. Run `doctor --json` on both nodes. Stop if fails are non-zero or if stale MCP
+   rows reappear on the node being migrated.
 5. Run `scripts/verify-gte-768-preflight.sh --live-cutover --strict` on aio2.
-6. Run equivalent Mac preflight and confirm stale Mac MCP readers have been
-   refreshed or stopped.
+6. Run equivalent Mac preflight and confirm stale Mac MCP readers remain clear.
 7. Stop all Agent-Bridge readers on the node being migrated.
 8. Capture DB, WAL, SHM, and installed-binary backups.
 9. Build or install the approved binary from `origin/master`.
@@ -250,11 +250,11 @@ Stop before live mutation if any are true:
 - no final owner authorization packet exists;
 - no exact approved implementation commit is named;
 - no exact maintenance window is named;
-- Mac stale MCP rows can still attach to the store;
+- stale MCP rows can still attach to the store being migrated;
 - aio2 is still a 384-era live store when the window expects dual-node cut-over;
 - aio2 or Mac model core file hashes differ;
-- Mac direct-SQL profile, continuity-report discrepancy, and stale-reader
-  inventory are not explicitly accepted or remediated;
+- Mac direct-SQL profile and continuity-report discrepancy are not explicitly
+  accepted or remediated;
 - DB, WAL, SHM, or binary backups are missing;
 - `doctor --json` has fails on either node;
 - copied-DB probe is not green;
@@ -267,9 +267,9 @@ Stop before live mutation if any are true:
 1. Accept `33d55e0e5e0ee61fd7d248f0be8aea55a1d2ddd7` as the proposed
    implementation/proposal baseline, or choose a different commit.
 2. Accept `atomic_node_cutover_only`, or request a separate mixed-reader proof.
-3. Decide whether Mac's migrated state is accepted after stale-reader cleanup
-   and continuity-report follow-up, or whether Mac needs a rollback/backup
-   review before final acceptance.
+3. Decide whether Mac's migrated state is accepted after stale-reader cleanup,
+   with continuity-report follow-up tracked separately, or whether Mac needs a
+   rollback/backup review before final acceptance.
 4. Name maintenance window and write-freeze policy.
 5. Name rollback owner.
 6. Decide whether inactive/stale rows are left untouched or migrated later.
