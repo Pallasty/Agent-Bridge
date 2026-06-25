@@ -41,6 +41,20 @@ pub fn vector_dim() -> usize {
     }
 }
 
+/// Stable name of the active embedding model (env-selected via
+/// `AGENT_BRIDGE_ONNX_MODEL`, memoised). Exposed so the startup dim-guard can
+/// name the model a process is *configured* for when reporting a mismatch.
+pub fn active_model_name() -> &'static str {
+    #[cfg(feature = "onnx-embed")]
+    {
+        onnx::active_model_name()
+    }
+    #[cfg(not(feature = "onnx-embed"))]
+    {
+        "all-MiniLM-L6-v2"
+    }
+}
+
 // ── ONNX backend (optional) ───────────────────────────────────────────────
 
 #[cfg(feature = "onnx-embed")]
@@ -260,6 +274,15 @@ pub(crate) mod onnx {
         EMBEDDER.get()?.as_ref()
     }
 
+    /// True once the background init thread has *settled* — either the model
+    /// loaded (state=2 + EMBEDDER set) or it permanently failed over to hash
+    /// (state=2 + EMBEDDER None). Returns false while init is still in flight
+    /// (state 0/1), so a dim-guard can wait for a stable answer before probing
+    /// the real output dimension. Does NOT itself kick off init.
+    pub fn init_done() -> bool {
+        INIT_STATE.load(Ordering::Acquire) == 2
+    }
+
     /// Embed a single text string; returns `None` when ONNX is unavailable
     /// (model not cached, init still in progress, or permanent failure).
     pub fn embed(text: &str) -> Option<Vec<f32>> {
@@ -323,6 +346,25 @@ pub fn embed_text(text: &str) -> Vec<f32> {
 /// No-op cost for the hash backend.
 pub fn warmup() {
     let _ = embed_text("warmup");
+}
+
+/// True once the embedding backend has *settled* — the ONNX model finished
+/// loading (or permanently fell back to hash). For the hash-only build
+/// (`onnx-embed` off) there is no async init, so this is always true.
+///
+/// Used by the startup embedding dim-guard: it must wait for a settled answer
+/// before probing `embed_text(...).len()`, because during the init window
+/// `embed_text` returns the `vector_dim()`-wide hash fallback, which would mask
+/// a real model that loads at a *different* dimension (the silent-fallback bug).
+pub fn model_init_done() -> bool {
+    #[cfg(feature = "onnx-embed")]
+    {
+        onnx::init_done()
+    }
+    #[cfg(not(feature = "onnx-embed"))]
+    {
+        true
+    }
 }
 
 /// Cosine similarity between two equal-length vectors.

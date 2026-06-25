@@ -62,7 +62,8 @@ use crate::{
     AgentMessageRecord, AgentPresenceRecord, AgentPresenceUpsert, CoactivationEdge,
     CoactivationStats, CodebaseIndexStats, CodebaseSymbol, CompactPolicy, DecayUnusedStats,
     ForumExportResult, ForumImportReport, ForumPostExport, ForumPostOutcome, ForumPostRecord,
-    ForumThreadExport, ForumThreadRecord, GraphTopology, HebbianCluster, IdentityWindow,
+    EmbeddingProfile, ForumThreadExport, ForumThreadRecord, GraphTopology, HebbianCluster,
+    IdentityWindow,
     ImportConflictPolicy, ImportReport, McpToolCallFilter, McpToolCallRow, McpToolCallStats,
     McpToolErrorRecord, McpToolSourceStats, MemoryCosineHit, MemoryEdge, MemoryEdgeExport,
     MemoryExportFilter, MemoryExportResult, MemoryListSort, MemoryQueryRecord, MemoryQueryStats,
@@ -6643,6 +6644,46 @@ impl StateStore for SqliteStore {
             .collect())
     }
 
+    async fn dominant_embedding_profile(&self) -> Result<EmbeddingProfile> {
+        // Group active embeddings by (backend, byte-width) and take the largest
+        // bucket — the space the store was actually written in. Same shape as
+        // recall_eval's `stored_embedding_profile`, promoted to a store API so
+        // the production startup dim-guard and the offline eval share one truth.
+        let row: Option<(String, i64, i64)> = self
+            .conn
+            .call(|c| -> RusqliteResult<Option<(String, i64, i64)>> {
+                let mut stmt = c.prepare(
+                    "SELECT COALESCE(NULLIF(embedding_backend, ''), 'unknown') AS backend,
+                            LENGTH(embedding) AS bytes,
+                            COUNT(*) AS n
+                       FROM memories
+                      WHERE status = 'active'
+                        AND embedding IS NOT NULL
+                        AND LENGTH(embedding) > 0
+                      GROUP BY backend, bytes
+                      ORDER BY n DESC
+                      LIMIT 1",
+                )?;
+                let mut rows = stmt.query([])?;
+                match rows.next()? {
+                    Some(r) => Ok(Some((r.get(0)?, r.get(1)?, r.get(2)?))),
+                    None => Ok(None),
+                }
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("dominant_embedding_profile: {e}")))?;
+
+        Ok(match row {
+            Some((backend, bytes, n)) => EmbeddingProfile {
+                backend: Some(backend),
+                // f32 little-endian: 4 bytes per dimension.
+                dim: (bytes > 0).then_some((bytes / 4) as usize),
+                rows: n.max(0) as u64,
+            },
+            None => EmbeddingProfile::default(),
+        })
+    }
+
     async fn memory_reindex_embeddings(
         &self,
         batch_size: usize,
@@ -11625,6 +11666,67 @@ mod tests {
     //   • return the number of rows it actually rewrote
     // After the reindex, rewritten rows' embedding_backend columns must be the
     // current backend's name (deterministic via HashBackend).
+    #[tokio::test]
+    async fn dominant_embedding_profile_reports_majority_backend_and_dim() {
+        use crate::embedding::{set_default_backend, HashBackend};
+        use crate::MemoryRecord;
+        use std::sync::Arc;
+
+        let _ = set_default_backend(Arc::new(HashBackend));
+        let backend_name = crate::embedding::default_backend().name().to_string();
+        let dim = crate::vector::vector_dim();
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-dom-emb-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+
+        // Empty store: no embeddings → empty profile.
+        let empty = store
+            .dominant_embedding_profile()
+            .await
+            .expect("profile empty");
+        assert_eq!(empty.dim, None);
+        assert_eq!(empty.rows, 0);
+
+        let mk = |key: &str| MemoryRecord {
+            key: key.to_string(),
+            kind: "fact".to_string(),
+            content: format!("content for {key}"),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 1_700_000_000,
+            updated_at: 1_700_000_000,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".to_string(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        for k in ["a", "b", "c"] {
+            store.memory_save(&mk(k)).await.expect("save");
+        }
+
+        let prof = store
+            .dominant_embedding_profile()
+            .await
+            .expect("profile populated");
+        assert_eq!(prof.backend.as_deref(), Some(backend_name.as_str()));
+        assert_eq!(prof.dim, Some(dim));
+        assert_eq!(prof.rows, 3);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
     #[tokio::test]
     async fn memory_reindex_only_stale_upgrades_mismatched_and_null_backend() {
         use crate::embedding::{set_default_backend, HashBackend};

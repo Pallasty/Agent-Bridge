@@ -1929,6 +1929,23 @@ pub struct SessionFilter {
     pub exit_code: Option<i32>,
 }
 
+/// The dominant `(backend, dim)` pair among active stored memory embeddings —
+/// the embedding space the store was *actually* written in. Used by the startup
+/// embedding dim-guard to detect a process whose active embedder produces a
+/// different dimension than the store holds (silent model drift: a stale
+/// launchd env, a wrong `AGENT_BRIDGE_ONNX_MODEL`, or an ONNX load that fell
+/// back to a different model). `dim`/`backend` are `None` for an empty store.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EmbeddingProfile {
+    /// `embedding_backend` tag shared by the most active rows (e.g.
+    /// `"gte-multilingual-base"`). `None` when the store has no embeddings.
+    pub backend: Option<String>,
+    /// Vector dimension (floats) of those rows. `None` when unknown/empty.
+    pub dim: Option<usize>,
+    /// How many active rows share this dominant `(backend, dim)`.
+    pub rows: u64,
+}
+
 /// Aggregate statistics about the memory store (returned by `memory_stats`).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct MemoryStats {
@@ -3190,6 +3207,15 @@ pub trait StateStore: Send + Sync {
     ) -> Result<usize> {
         let _ = (batch_size, only_stale);
         Ok(0)
+    }
+
+    /// Dominant `(backend, dim)` among active stored embeddings — the space the
+    /// store was actually written in. Feeds the startup embedding dim-guard so a
+    /// process embedding at a different dimension than the store is flagged
+    /// instead of silently returning all-zero (dim-mismatched) semantic cosines.
+    /// Default returns an empty profile; SQLite overrides with a real query.
+    async fn dominant_embedding_profile(&self) -> Result<EmbeddingProfile> {
+        Ok(EmbeddingProfile::default())
     }
 
     /// Compute and persist embeddings for `codebase_symbols` rows whose

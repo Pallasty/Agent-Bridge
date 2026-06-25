@@ -6856,6 +6856,12 @@ async fn real_main() -> Result<()> {
         Cmd::Daemon => {
             let socket = default_socket_path();
             tracing::info!(socket = %socket.display(), "starting agent-bridge daemon");
+            // Embedding dim-guard: warn loudly if this process embeds at a
+            // different dimension than the store was written in (stale launchd
+            // plist / silent model fallback). Warn-only; see #4282.
+            if let Some(store) = hub.store.clone() {
+                ab_bridge::embedding_dim_guard::spawn(store);
+            }
             // P-α — spawn always-warm coactivation tick if a store is
             // available and the env disable flag is not set. The task
             // runs for the daemon's lifetime; detached on shutdown.
@@ -7061,8 +7067,12 @@ async fn real_main() -> Result<()> {
             // semantic query after (re)connect doesn't fall to the hash backend
             // and return garbage cosines against the real-model store. Only when
             // memory is enabled (otherwise the encoder is never used).
-            if store.is_some() {
+            if let Some(s) = store.clone() {
                 ab_store::vector::warmup();
+                // Embedding dim-guard (#4282): flag a query/store dim mismatch
+                // (stale env / silent model fallback) instead of silently
+                // serving all-zero cosines. Warn-only.
+                ab_bridge::embedding_dim_guard::spawn(s);
             }
             tracing::info!(tools = registry.list().len(), "starting MCP stdio server");
             serve_stdio(
@@ -7086,6 +7096,10 @@ async fn real_main() -> Result<()> {
                 listen = %listen,
                 "starting agent-bridge daemon-http (v20 read-only Stage 1)"
             );
+            // Embedding dim-guard (#4282): cross-machine peers query semantics
+            // through daemon-http, so a stale-env e5-384 process against a
+            // gte-768 store silently breaks peer recall. Flag it loudly.
+            ab_bridge::embedding_dim_guard::spawn(store.clone());
             ab_bridge::daemon_http::run(store, &listen).await
         }
         Cmd::Setup { .. }
