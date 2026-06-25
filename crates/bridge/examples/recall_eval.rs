@@ -363,7 +363,15 @@ const CORPUS: &[Case] = &[
     },
     Case {
         query: "biocortex 影子试验是只读的吗,会不会改默认检索顺序",
-        expect: &["ab_memory_continuity_t5_biocortex_shadow_trial_20260619"],
+        expect: &[
+            "ab_memory_continuity_t5_biocortex_shadow_trial_20260619",
+            // also-correct, verified 2026-06-25 via canonical snapshot content
+            // read: the T5/T6 evidence batch says the shadow packets were
+            // read-only and `changes_memory_search_order=false`, and that the
+            // advisory/control order did not change actual return order. It
+            // answers the user's safety question directly, not merely by topic.
+            "ab_memory_continuity_t5_t6_shadow_evidence_batch_20260619",
+        ],
         tier: Tier::Hard,
         scope: CaseScope::AgentBridgeLocal,
     },

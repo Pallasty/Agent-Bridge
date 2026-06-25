@@ -2,12 +2,16 @@
 
 Date: 2026-06-25
 
-Status: `REHEARSAL_COMPLETED_REVIEW_METRICS`.
+Status: `REHEARSAL_COMPLETED_REVIEW_METRICS / CASE14_LATER_ADJUDICATED`.
 
 Scope: record the SSH acquisition, fingerprint gate, scratch-only GTE reindex,
 and `recall_eval` replay on the canonical frozen Mac snapshot. This is evidence
 for owner review only. It does not authorize live DB mutation, live reindex,
 deployment, runtime env changes, or production `memory_search` changes.
+
+2026-06-25 update: case `#14` was later content-read and adjudicated with an
+also-correct semantic rank-3 hit. Current adjudication packet:
+`docs/reports/goal-c-u/2026-06-25-gte-768-case14-miss-review.md`.
 
 ## Snapshot Acquisition
 

@@ -4,7 +4,7 @@ Date: 2026-06-25
 
 Schema: `agent_bridge.memory.gte_768.owner_review_packet.v0`
 
-Status: `OWNER_REVIEW_READY / LIVE_CUTOVER_NO_GO`.
+Status: `OWNER_REVIEW_READY_CASE14_ADJUDICATED / LIVE_CUTOVER_NO_GO`.
 
 Scope: owner/reviewer packet for deciding whether the GTE 768 evidence is
 strong enough to plan a live maintenance window. This packet does not approve
@@ -33,7 +33,6 @@ Recommended owner decision:
 Allowed next slice if owner accepts this packet:
 
 - docs-only live maintenance proposal;
-- hard miss `#14` review;
 - copied-DB reader compatibility probe;
 - rollback packet draft.
 
@@ -63,6 +62,7 @@ Forum:
 
 ```text
 design thread 105 post #2553
+design thread 105 post #2554
 ```
 
 Current local checkout:
@@ -141,13 +141,13 @@ Overall 18-case recall:
 mode       R@1    R@5    R@10   MRR
 fts        0.278  0.556  0.667  0.366
 hybrid     0.278  0.500  0.667  0.364
-semantic   0.111  0.778  0.833  0.418
+semantic   0.111  0.833  0.889  0.436
 ```
 
 Main hard-tier runtime anchor:
 
 ```text
-hard-tier R@10: fts=0.375 fts+graph=0.375 hybrid=0.375 semantic=0.750
+hard-tier R@10: fts=0.375 fts+graph=0.375 hybrid=0.375 semantic=0.875
 ```
 
 Acceptance comparison:
@@ -165,18 +165,21 @@ Hard-tier review targets:
 #2  fts=- rows=0  fts+graph=- hybrid=- semantic=3
 #8  fts=- rows=10 fts+graph=- hybrid=- semantic=2
 #9  fts=- rows=10 fts+graph=- hybrid=- semantic=2
-#14 fts=- rows=10 fts+graph=- hybrid=- semantic=-
+#14 fts=- rows=10 fts+graph=- hybrid=- semantic=3
 ```
 
 Remaining semantic misses:
 
 ```text
-#5, #10, #14
+#5, #10
 ```
 
-The production-readiness review must focus on hard-tier `#14` before any live
-claim. `#14` is the only hard-tier review target still missed by semantic mode
-in this canonical replay.
+Case `#14` was content-read after the first owner-review packet. The semantic
+rank-3 row `ab_memory_continuity_t5_t6_shadow_evidence_batch_20260619` is
+also-correct because it explicitly states the T5 shadow packets were
+`read_only=true`, `changes_memory_search_order=false`, and did not change actual
+return order. See:
+`docs/reports/goal-c-u/2026-06-25-gte-768-case14-miss-review.md`.
 
 Eval-only role-aware hard-family aggregate:
 
@@ -200,7 +203,7 @@ Runbook gates:
 | Reader compatibility decided | `OPEN` | No owner decision yet. Default assumption should be `atomic_node_cutover_only`. |
 | Dual-node deployment serialized | `OPEN` | No maintenance window or dual-node deploy plan yet. |
 | Store invariants hold | `PASS_FOR_SCRATCH_ONLY` | Scratch store has 3022 GTE rows; live stores were not mutated. |
-| Recall benefit reproduced | `PASS_FOR_CANONICAL_REHEARSAL` | hard-tier semantic R@10 `0.750` vs FTS/hybrid `0.375`. |
+| Recall benefit reproduced | `PASS_FOR_CANONICAL_REHEARSAL` | after #14 adjudication, hard-tier semantic R@10 `0.875` vs FTS/hybrid `0.375`. |
 | Post-reconnect surface current | `PASS_FOR_CURRENT_AIO2_STATE` | doctor `ok=true fails=0 warns=0`; live readers are still non-GTE. |
 
 Current overall state:
@@ -314,8 +317,7 @@ Stop before live mutation if any are true:
   for active semantic rows;
 - recall_eval cannot confirm real GTE semantic mode;
 - hard-tier semantic R@10 drops below `0.625` without owner-accepted drift
-  explanation;
-- #14 review finds that the miss invalidates production-readiness claims.
+  explanation.
 
 ## Owner Questions
 
@@ -323,8 +325,8 @@ Owner/reviewer should decide:
 
 1. Accept or reject canonical rehearsal as sufficient evidence to plan live
    maintenance.
-2. Whether hard-tier `#14` must be fixed before any cut-over, or can be accepted
-   as a known residual miss.
+2. Whether to accept the `#14` also-correct adjudication as sufficient for the
+   GTE evidence review.
 3. Exact implementation commit for a future live proposal.
 4. Reader compatibility mode: `atomic_node_cutover_only` unless mixed mode is
    proved separately.
