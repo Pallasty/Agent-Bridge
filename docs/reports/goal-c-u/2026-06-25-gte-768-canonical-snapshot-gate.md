@@ -68,6 +68,9 @@ Opt-in rehearsal behavior:
 ```bash
 scripts/verify-gte-768-canonical-snapshot-gate.sh \
   --snapshot /path/to/canonical/frozen/state.db \
+  --expect-active 3022 \
+  --expect-edges 5527 \
+  --expect-newest 1782205313 \
   --run-rehearsal
 ```
 

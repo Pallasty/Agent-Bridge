@@ -21,6 +21,9 @@ live_db="${AB_STATE_DB:-$HOME/.local/share/agent-bridge/state.db}"
 snapshot_path="${AB_CANONICAL_BASELINE_DB:-${AB_BASELINE_DB:-}}"
 scratch_base="${AB_GTE_REHEARSAL_DIR:-$HOME/.cache/agent-bridge/gte-rehearsal}"
 search_roots_raw="${AB_GTE_SNAPSHOT_SEARCH_ROOTS:-$HOME/.cache/agent-bridge:$HOME/.local/share/agent-bridge}"
+expect_active="${AB_GTE_EXPECT_ACTIVE:-}"
+expect_edges="${AB_GTE_EXPECT_EDGES:-}"
+expect_newest="${AB_GTE_EXPECT_NEWEST:-}"
 run_rehearsal=false
 run_preflight=true
 strict=false
@@ -38,6 +41,9 @@ Flags:
                        Default: ~/.cache/agent-bridge:~/.local/share/agent-bridge
   --model-name NAME    Expected GTE backend label. Default: gte-multilingual-base
   --model-dir PATH     Base dir containing <model-name>/model.onnx.
+  --expect-active N    Optional expected active-memory count for --snapshot.
+  --expect-edges N     Optional expected memory-edge count for --snapshot.
+  --expect-newest N    Optional expected newest created_at for --snapshot.
   --skip-preflight     Do not call verify-gte-768-preflight.sh first.
   --run-rehearsal      Copy --snapshot into scratch, reindex that copy, and run
                        recall_eval against the copy. Requires --snapshot.
@@ -55,6 +61,8 @@ Statuses:
   NO_GO_CANONICAL_SNAPSHOT_MISSING  no explicit snapshot and no canonical hint;
   NO_GO_LIVE_STORE_SOURCE           --snapshot points at the live store;
   NO_GO_SNAPSHOT_HAS_WAL            --snapshot has a non-empty WAL sidecar;
+  NO_GO_SNAPSHOT_FINGERPRINT_MISMATCH explicit snapshot does not match an
+                                      expected logical fingerprint;
   READY_FOR_CANONICAL_REHEARSAL     explicit snapshot is safe to rehearse;
   REHEARSAL_COMPLETED_REVIEW_METRICS scratch reindex + recall_eval completed.
 USAGE
@@ -80,6 +88,18 @@ while [ "$#" -gt 0 ]; do
             ;;
         --model-dir)
             model_base="${2:-}"
+            shift 2
+            ;;
+        --expect-active)
+            expect_active="${2:-}"
+            shift 2
+            ;;
+        --expect-edges)
+            expect_edges="${2:-}"
+            shift 2
+            ;;
+        --expect-newest)
+            expect_newest="${2:-}"
             shift 2
             ;;
         --skip-preflight)
@@ -142,6 +162,25 @@ file_mtime() {
     stat -c '%y' "$1" 2>/dev/null || printf '?'
 }
 
+snapshot_fingerprint() {
+    local path="$1"
+    python3 - "$path" <<'PY'
+import pathlib
+import sqlite3
+import sys
+
+path = pathlib.Path(sys.argv[1]).resolve()
+uri = path.as_uri() + "?mode=ro"
+con = sqlite3.connect(uri, uri=True)
+con.execute("PRAGMA query_only=ON")
+
+active = con.execute("SELECT count(*) FROM memories WHERE status = 'active'").fetchone()[0]
+edges = con.execute("SELECT count(*) FROM memory_edges").fetchone()[0]
+newest = con.execute("SELECT coalesce(max(created_at), 0) FROM memories").fetchone()[0]
+print(f"{active} {edges} {newest}")
+PY
+}
+
 is_live_db() {
     local path="$1"
     [ -f "$path" ] && [ -f "$live_db" ] && [ "$path" -ef "$live_db" ]
@@ -176,6 +215,7 @@ say "snapshot:    ${snapshot_path:-<unset>}"
 say "model:       $model_name"
 say "model_dir:   $model_base/$model_name"
 say "scratch:     $scratch_base"
+say "expect:      active=${expect_active:-<unset>} edges=${expect_edges:-<unset>} newest=${expect_newest:-<unset>}"
 say
 
 say "## Reference contract"
@@ -240,6 +280,25 @@ else
         say "bytes=$(file_bytes "$snapshot_path")"
         say "mtime=$(file_mtime "$snapshot_path")"
         say "sha256=$(sha_or_unknown "$snapshot_path")"
+        if command -v python3 >/dev/null 2>&1; then
+            if fp="$(snapshot_fingerprint "$snapshot_path" 2>/dev/null)"; then
+                read -r fp_active fp_edges fp_newest <<< "$fp"
+                say "fingerprint=active=$fp_active edges=$fp_edges newest=$fp_newest"
+                if [ -n "$expect_active" ] && [ "$fp_active" != "$expect_active" ]; then
+                    block "NO_GO_SNAPSHOT_FINGERPRINT_MISMATCH" "active count mismatch: expected $expect_active got $fp_active"
+                fi
+                if [ -n "$expect_edges" ] && [ "$fp_edges" != "$expect_edges" ]; then
+                    block "NO_GO_SNAPSHOT_FINGERPRINT_MISMATCH" "edge count mismatch: expected $expect_edges got $fp_edges"
+                fi
+                if [ -n "$expect_newest" ] && [ "$fp_newest" != "$expect_newest" ]; then
+                    block "NO_GO_SNAPSHOT_FINGERPRINT_MISMATCH" "newest created_at mismatch: expected $expect_newest got $fp_newest"
+                fi
+            else
+                warn "could not read snapshot logical fingerprint with python3/sqlite"
+            fi
+        else
+            warn "python3 unavailable; cannot read snapshot logical fingerprint"
+        fi
         if [ -s "$snapshot_path-wal" ]; then
             block "NO_GO_SNAPSHOT_HAS_WAL" "non-empty WAL sidecar exists; provide a checkpointed/frozen snapshot instead: $snapshot_path-wal"
         elif [ -e "$snapshot_path-wal" ]; then
