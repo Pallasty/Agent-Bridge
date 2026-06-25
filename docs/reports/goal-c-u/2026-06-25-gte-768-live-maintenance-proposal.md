@@ -47,6 +47,7 @@ docs/reports/goal-c-u/2026-06-25-gte-768-canonical-snapshot-rehearsal.md
 docs/reports/goal-c-u/2026-06-25-gte-768-case14-miss-review.md
 docs/reports/goal-c-u/2026-06-25-gte-768-reader-compatibility-probe.md
 docs/reports/goal-c-u/2026-06-25-gte-768-owner-review-packet.md
+docs/reports/goal-c-u/2026-06-25-gte-768-mac-live-migration-verification.md
 ```
 
 Rollback companion draft:
@@ -57,10 +58,10 @@ docs/reports/goal-c-u/2026-06-25-gte-768-rollback-packet-draft.md
 
 ## Current Node Facts
 
-aio2 / ThinkBook, observed 2026-06-25:
+aio2 / ThinkBook, observed 2026-06-25 after Mac migration:
 
 ```text
-repo_head=33d55e0e5e0ee61fd7d248f0be8aea55a1d2ddd7
+repo_head=a9eaa6d
 installed_binary=/home/pallasting/.local/bin/agent-bridge.real
 installed_binary_sha256=cb76bf46963aa90dc496dad4ea7bd17e897be6525c9174e9449b40dacae147e7
 installed_binary_bytes=67179000
@@ -68,38 +69,46 @@ doctor_ok=true
 doctor_fails=0
 doctor_warns=0
 live_db=/home/pallasting/.local/share/agent-bridge/state.db
-live_active_total=498
-live_embedded=489
+live_active_total=500
+live_embedded=491
+live_null_or_empty=9
 live_dominant_backend=all-MiniLM-L6-v2
 live_stale_vectors=253
-live_stale_frac=0.517
+live_stale_frac=0.515
+live_gte_good=0
+live_old_or_non_gte_active_embedded=491
 live_readers_using_gte=0
 live_readers_not_using_gte=4
 ```
 
-Mac, observed over SSH 2026-06-25:
+Mac, observed over SSH 2026-06-25 after user-completed full migration:
 
 ```text
 host=maxiaodeMac-Pro.local
 ssh=pallasting@100.91.146.24
 installed_binary=/Users/pallasting/.local/bin/agent-bridge.real
-installed_binary_sha256=bed3af7c8876b6976ea494373ffb981a8c5970d35da5f25948b842672cd33b93
+installed_binary_sha256=886da427f62726472f67972b31bad960fc0d16a093a287a3dd068f9439eabf69
 doctor_ok=true
 doctor_fails=0
 doctor_warns=3
-doctor_warning_summary=3 stale MCP server rows; missing ab-system-control desktop helpers
+doctor_warning_summary=12 MCP servers: 1 current .real, 11 stale .real; missing ab-system-control desktop helpers
 live_db=/Users/pallasting/Library/Application Support/agent-bridge/state.db
-live_active_total=3247
-live_embedded=5
+live_active_total=3248
+live_embedded=3248
+live_null_or_empty=0
 live_dominant_backend=gte-multilingual-base
+live_dominant_bytes=3072
+live_dominant_dim=768
+live_gte_good=3248
+live_gte_bad_dim=0
+live_old_or_non_gte_active_embedded=0
 ```
 
-Mac live-store note: the current Mac live DB is not a clean full 384-dim
-pre-cutover store. It has only 5 embedded active rows and those rows are tagged
-`gte-multilingual-base`. This must be treated as a distinct live-state fact,
-not inferred from the canonical frozen snapshot. A final authorization packet
-must re-run the Mac profile and decide whether Mac is migrated, rebuilt from a
-backup, or deferred.
+Mac live-store note: the current Mac live DB is now verified as a full GTE 768
+store by direct SQL invariants. Mac cannot yet be accepted as a clean migrated
+node because stale MCP readers still have live DB/WAL handles open. Mac
+`continuity-report --json` also reported `embedded=0`, which contradicts direct
+SQL and should be fixed or explicitly waived before final acceptance.
 
 ## Model Artifacts
 
@@ -119,8 +128,8 @@ aio2 also has `asset-manifest.txt`:
 asset-manifest.txt 217f19f0481f08a9a8f8ea09b7830b4366bda989f0359f32aedbdb9c128c8833
 ```
 
-Mac did not have `asset-manifest.txt` during this read-only check. This is not
-a model-core hash mismatch, but the final packet should either install the
+Mac did not have `asset-manifest.txt` during the read-only checks. This is not a
+model-core hash mismatch, but the final packet should either install the
 manifest on Mac or explicitly waive it.
 
 ## Proposed Compatibility Mode
@@ -136,7 +145,8 @@ Reason:
 - copied-DB reader probe passed post-reindex invariants;
 - mixed-reader support was not proven;
 - live aio2 readers are still non-GTE;
-- Mac has stale MCP rows and a non-clean live profile.
+- aio2 live DB is still 384-era;
+- Mac has a verified GTE 768 live DB but still has stale MCP readers attached.
 
 Reader compatibility probe summary:
 
@@ -159,7 +169,8 @@ until the owner signs a final authorization packet.
 4. Run `doctor --json` on both nodes. Stop if fails are non-zero or if Mac still
    has stale MCP rows that can attach to the live store.
 5. Run `scripts/verify-gte-768-preflight.sh --live-cutover --strict` on aio2.
-6. Run equivalent Mac preflight or record why Mac is deferred.
+6. Run equivalent Mac preflight and confirm stale Mac MCP readers have been
+   refreshed or stopped.
 7. Stop all Agent-Bridge readers on the node being migrated.
 8. Capture DB, WAL, SHM, and installed-binary backups.
 9. Build or install the approved binary from `origin/master`.
@@ -240,8 +251,10 @@ Stop before live mutation if any are true:
 - no exact approved implementation commit is named;
 - no exact maintenance window is named;
 - Mac stale MCP rows can still attach to the store;
+- aio2 is still a 384-era live store when the window expects dual-node cut-over;
 - aio2 or Mac model core file hashes differ;
-- Mac current live DB profile is not explicitly accepted or deferred;
+- Mac direct-SQL profile, continuity-report discrepancy, and stale-reader
+  inventory are not explicitly accepted or remediated;
 - DB, WAL, SHM, or binary backups are missing;
 - `doctor --json` has fails on either node;
 - copied-DB probe is not green;
@@ -254,9 +267,9 @@ Stop before live mutation if any are true:
 1. Accept `33d55e0e5e0ee61fd7d248f0be8aea55a1d2ddd7` as the proposed
    implementation/proposal baseline, or choose a different commit.
 2. Accept `atomic_node_cutover_only`, or request a separate mixed-reader proof.
-3. Decide whether Mac is migrated in the same window, deferred, or first
-   normalized from a backup because its current live profile is not a clean
-   full 384-dim pre-cutover store.
+3. Decide whether Mac's migrated state is accepted after stale-reader cleanup
+   and continuity-report follow-up, or whether Mac needs a rollback/backup
+   review before final acceptance.
 4. Name maintenance window and write-freeze policy.
 5. Name rollback owner.
 6. Decide whether inactive/stale rows are left untouched or migrated later.
@@ -273,5 +286,6 @@ Recommended next implementation action after owner accepts the draft:
 
 ```text
 write final authorization packet with exact window, backups, binary hashes,
-Mac disposition, rollback owner, and go/no-go checkboxes
+Mac stale-reader cleanup evidence, aio2 migration decision, rollback owner, and
+go/no-go checkboxes
 ```

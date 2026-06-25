@@ -4,7 +4,7 @@ Date: 2026-06-25
 
 Schema: `agent_bridge.memory.gte_768.owner_review_packet.v0`
 
-Status: `OWNER_REVIEW_READY_CASE14_ADJUDICATED_READER_PROBE_MAINTENANCE_DRAFTS / LIVE_CUTOVER_NO_GO`.
+Status: `OWNER_REVIEW_READY_CASE14_ADJUDICATED_READER_PROBE_MAINTENANCE_DRAFTS_MAC_VERIFIED / LIVE_CUTOVER_NO_GO`.
 
 Scope: owner/reviewer packet for deciding whether the GTE 768 evidence is
 strong enough to plan a live maintenance window. This packet does not approve
@@ -34,7 +34,8 @@ Allowed next slice if owner accepts this packet:
 
 - owner review / final authorization packet;
 - optional mixed-reader proof if owner rejects `atomic_node_cutover_only`;
-- Mac live-store disposition decision.
+- Mac stale-reader cleanup and continuity-report discrepancy follow-up;
+- aio2 migration authorization decision.
 
 Still blocked:
 
@@ -68,6 +69,12 @@ Rollback draft:
 
 ```text
 docs/reports/goal-c-u/2026-06-25-gte-768-rollback-packet-draft.md
+```
+
+Mac live migration verification:
+
+```text
+docs/reports/goal-c-u/2026-06-25-gte-768-mac-live-migration-verification.md
 ```
 
 Initial canonical rehearsal head:
@@ -105,11 +112,14 @@ Current live store/readers are not cut over:
 
 ```text
 live_db=/home/pallasting/.local/share/agent-bridge/state.db
-active_total=495
-embedded=486
+active_total=500
+embedded=491
+null_or_empty=9
 dominant_backend=all-MiniLM-L6-v2
 stale_vectors=253
-stale_frac=0.521
+stale_frac=0.515
+gte_good=0
+old_or_non_gte_active_embedded=491
 live readers using GTE=0
 live readers not using GTE=4
 ```
@@ -222,19 +232,44 @@ Runbook gates:
 | Candidate commit explicit | `PARTIAL` | GTE-capable code exists on master, but no owner-approved implementation commit is named for live cut-over. |
 | Rehearsal uses a copy | `PASS` | Canonical snapshot was copied into scratch and only the scratch DB was reindexed. |
 | Reader compatibility decided | `OPEN_WITH_PROBE` | Copied-DB probe supports `atomic_node_cutover_only`; no owner decision yet and mixed-reader support remains unproven. |
-| Dual-node deployment serialized | `OPEN_WITH_PROPOSAL` | Docs-only maintenance proposal exists; no owner-approved maintenance window yet. |
-| Store invariants hold | `PASS_FOR_SCRATCH_ONLY` | Scratch store has 3022 GTE rows; live stores were not mutated. |
+| Dual-node deployment serialized | `OPEN_WITH_PROPOSAL` | Docs-only maintenance proposal exists; Mac is migrated but aio2 is not; no owner-approved aio2 maintenance window yet. |
+| Store invariants hold | `PASS_FOR_SCRATCH_AND_MAC_SQL` | Scratch store has 3022 GTE rows; the rehearsal did not mutate live stores. Mac live state is separately verified by direct SQL. |
 | Recall benefit reproduced | `PASS_FOR_CANONICAL_REHEARSAL` | after #14 adjudication, hard-tier semantic R@10 `0.875` vs FTS/hybrid `0.375`. |
-| Post-reconnect surface current | `PASS_FOR_CURRENT_AIO2_STATE` | doctor `ok=true fails=0 warns=0`; live readers are still non-GTE. |
+| Mac live migration | `PASS_WITH_FOLLOW_UP` | direct SQL verifies 3248 active GTE 768 rows; stale MCP readers and continuity-report discrepancy remain. |
+| Post-reconnect surface current | `PARTIAL` | aio2 doctor `ok=true fails=0 warns=0`; Mac doctor `ok=true fails=0 warns=3` due stale readers and missing desktop helpers. |
 | Rollback packet | `OPEN_WITH_DRAFT` | rollback draft exists; final packet still needs exact backups, candidate binary hashes, owner/window, and post ids. |
 
 Current overall state:
 
 ```text
 canonical_evidence_ready=true
+mac_gte_migrated=true
+aio2_gte_migrated=false
+dual_node_ready=false
 live_cutover_ready=false
 owner_live_authorization=false
 ```
+
+Mac current live state, observed after user-completed migration:
+
+```text
+live_db=/Users/pallasting/Library/Application Support/agent-bridge/state.db
+active_total=3248
+embedded=3248
+backend=gte-multilingual-base
+bytes=3072
+dim=768
+gte_good=3248
+old_or_non_gte_active_embedded=0
+doctor_ok=true
+doctor_fails=0
+doctor_warns=3
+stale_mcp_readers=11
+```
+
+Mac `continuity-report --json` still reported `embedded=0`, contradicting
+direct SQL. Treat direct SQL as the DB invariant and keep the report mismatch as
+a final-acceptance follow-up.
 
 ## Reader Compatibility Recommendation
 
@@ -295,6 +330,8 @@ The final authorization packet must name:
 - exact model artifact directory and hashes per node;
 - Mac and aio2 live DB backup paths for DB, WAL, and SHM;
 - client stop/reconnect procedure;
+- Mac stale MCP reader cleanup evidence;
+- Mac continuity-report discrepancy fix or waiver;
 - explicit choice of `atomic_node_cutover_only` or a proven
   `mixed_readers_supported`;
 - one-node-at-a-time migration sequence;
@@ -328,7 +365,9 @@ cargo run -p ab-bridge --example recall_eval
 
 ## Rollback Requirements
 
-Rollback must be prepared before any live 768 vectors are written.
+Rollback must be prepared before any future live 768 write or aio2 migration.
+Mac already contains live GTE 768 vectors, so Mac rollback now requires an
+explicit pre-GTE backup/snapshot decision and data-loss review.
 
 Required rollback facts per node:
 
@@ -361,6 +400,9 @@ Stop before live mutation if any are true:
 
 - owner has not named an approved implementation commit;
 - owner has not chosen reader compatibility mode;
+- aio2 remains 384-era when the proposed action expects dual-node cut-over;
+- Mac stale MCP readers can still attach to the migrated live store;
+- Mac `continuity-report` discrepancy is neither fixed nor waived;
 - Mac or aio2 model artifact hash differs from this packet without review;
 - `doctor --json` has fails or stale current MCP warnings;
 - any old reader can attach to a store that will receive 768 vectors;
@@ -383,8 +425,8 @@ Owner/reviewer should decide:
 3. Exact implementation commit for a future live proposal.
 4. Whether to accept `atomic_node_cutover_only` from the copied-DB probe, or
    require a separate mixed-reader proof.
-5. Whether Mac and aio2 must cut over in the same window or can serialize across
-   windows.
+5. Whether Mac's migrated state is accepted after stale-reader cleanup, and
+   whether aio2 is authorized as the next one-node migration.
 6. Whether inactive/stale rows remain at old dimensions or are handled in a
    later migration.
 7. Who owns rollback during the maintenance window.

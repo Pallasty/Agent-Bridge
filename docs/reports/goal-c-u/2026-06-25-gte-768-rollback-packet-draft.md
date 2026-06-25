@@ -33,9 +33,9 @@ If rollback is needed after 768 vectors are written, stop all readers for the
 node first, restore the 384-compatible DB files and matching old binary, then
 restart readers.
 
-## Current Old Binary Baseline
+## Current Binary Baseline
 
-aio2 current installed binary:
+aio2 current installed binary is still the old live baseline:
 
 ```text
 path=/home/pallasting/.local/bin/agent-bridge.real
@@ -46,11 +46,12 @@ doctor_fails=0
 doctor_warns=0
 ```
 
-Mac current installed binary:
+Mac current installed binary is now the migrated GTE-capable node baseline, not
+a 384-era rollback baseline:
 
 ```text
 path=/Users/pallasting/.local/bin/agent-bridge.real
-sha256=bed3af7c8876b6976ea494373ffb981a8c5970d35da5f25948b842672cd33b93
+sha256=886da427f62726472f67972b31bad960fc0d16a093a287a3dd068f9439eabf69
 doctor_ok=true
 doctor_fails=0
 doctor_warns=3
@@ -58,6 +59,28 @@ doctor_warns=3
 
 Candidate binary hashes are intentionally `TBD` until a final maintenance packet
 builds or selects the exact binary artifacts.
+
+## Mac Migrated-State Rollback Caveat
+
+Mac direct SQL now verifies the live DB as a full GTE 768 store:
+
+```text
+active_total=3248
+embedded=3248
+backend=gte-multilingual-base
+bytes=3072
+dim=768
+gte_good=3248
+old_or_non_gte_active_embedded=0
+```
+
+Therefore the current Mac binary and current Mac live DB cannot be used as a
+rollback target for old 384-era readers. A final rollback packet must identify
+the exact pre-GTE Mac backup or snapshot, record its data-loss implications, and
+verify that no current post-migration writes are silently discarded. The known
+2026-06-23 Mac snapshots are pre-GTE evidence snapshots, but they are not
+automatically a complete rollback target for post-2026-06-23 live state unless
+the owner explicitly accepts that scope.
 
 ## Required Backup Packet Fields
 
@@ -238,6 +261,8 @@ The final rollback packet must still name:
 - approved maintenance window;
 - exact candidate binary path and hash for aio2;
 - exact candidate binary path and hash for Mac;
+- exact Mac pre-GTE rollback DB/binary source, or an explicit decision that Mac
+  rollback is out of scope;
 - final backup directories;
 - final DB/WAL/SHM hashes;
 - exact stop/restart mechanism per node;
