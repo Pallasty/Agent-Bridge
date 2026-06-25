@@ -11,7 +11,9 @@ after forum #120 post #4297 ratified GitLab as the Agent-Bridge canonical host.
 
 Verified local sources:
 
-- code checkout reconciled across GitLab/GitHub: `master` at `33d55e0`;
+- code checkout reconciled across GitLab/GitHub for this design slice:
+  `master` at `33d55e0`; merge audit later observed both forges at `9e0d8cf`
+  without changing this authorization boundary;
 - visible board landing: design thread #120 post #4297;
 - scope policy docs:
   `SCOPE_PROJECT_ID_CANONICAL_POLICY_2026_06_24.md` and

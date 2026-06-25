@@ -21,9 +21,9 @@ Agent-Bridge scopes and would block or preserve every ambiguous case.
 
 ## Preflight State
 
-Before this plan, GitHub `master` was ahead of GitLab `origin/master` by five
-GTE review/probe commits. The local checkout was fast-forwarded to GitHub and
-then pushed to GitLab so both forges now agree at:
+At the start of this plan, GitHub `master` was ahead of GitLab `origin/master`
+by five GTE review/probe commits. The local checkout was fast-forwarded to
+GitHub and then pushed to GitLab so both forges agreed at:
 
 ```text
 33d55e0e5e0ee61fd7d248f0be8aea55a1d2ddd7
@@ -31,6 +31,11 @@ then pushed to GitLab so both forges now agree at:
 
 This keeps the newly ratified GitLab-primary contract coherent before any
 write-policy design.
+
+Merge audit refresh on 2026-06-25 observed `origin/master` and `github/master`
+both at `9e0d8cf0729d022520d3a222bbbbe70f5a1c082b`. The later target commits
+do not touch this plan's four scope-policy document files, and a merge-tree
+preflight reported no text conflicts.
 
 ## Current Gate Evidence
 
@@ -147,4 +152,3 @@ While this remains report-only, rollback is simply to keep writing legacy
 `project:/absolute/path` scopes. If a later production experiment is approved,
 rollback must disable canonical writes while preserving read-time compatibility
 for rows already written as `project-id:git:gitlab.com/pallasting/agent-bridge`.
-
