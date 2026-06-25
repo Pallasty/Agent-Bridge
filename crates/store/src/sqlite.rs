@@ -61,17 +61,16 @@ pub fn temporal_bonus(edge_type: &str) -> f64 {
 use crate::{
     AgentMessageRecord, AgentPresenceRecord, AgentPresenceUpsert, CoactivationEdge,
     CoactivationStats, CodebaseIndexStats, CodebaseSymbol, CompactPolicy, DecayUnusedStats,
-    ForumExportResult, ForumImportReport, ForumPostExport, ForumPostOutcome, ForumPostRecord,
-    EmbeddingProfile, ForumThreadExport, ForumThreadRecord, GraphTopology, HebbianCluster,
-    IdentityWindow,
-    ImportConflictPolicy, ImportReport, McpToolCallFilter, McpToolCallRow, McpToolCallStats,
-    McpToolErrorRecord, McpToolSourceStats, MemoryCosineHit, MemoryEdge, MemoryEdgeExport,
-    MemoryExportFilter, MemoryExportResult, MemoryListSort, MemoryQueryRecord, MemoryQueryStats,
-    MemoryRecord, MemorySearchHit, MemoryStats, MisrankRow, ModeStats, NotificationRecord,
-    OverlapPair, PlanRecord, PlanStep, ReinforceActiveStats, ReplayAuditRow, ReplayAuditStats,
-    S234Counts, SessionFilter, SignalFidelityStats, StateStore, StoredSession, WaypointRow,
-    WaypointStats, MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP, MEMORY_QUERY_LOG_RING_CAP,
-    STDIO_CAP,
+    EmbeddingProfile, ForumExportResult, ForumImportReport, ForumPostExport, ForumPostOutcome,
+    ForumPostRecord, ForumThreadExport, ForumThreadRecord, GraphTopology, HebbianCluster,
+    IdentityWindow, ImportConflictPolicy, ImportReport, McpToolCallFilter, McpToolCallRow,
+    McpToolCallStats, McpToolErrorRecord, McpToolSourceStats, MemoryCosineHit, MemoryEdge,
+    MemoryEdgeExport, MemoryExportFilter, MemoryExportResult, MemoryListSort, MemoryQueryRecord,
+    MemoryQueryStats, MemoryRecord, MemorySearchHit, MemoryStats, MisrankRow, ModeStats,
+    NotificationRecord, OverlapPair, PlanRecord, PlanStep, ReinforceActiveStats, ReplayAuditRow,
+    ReplayAuditStats, S234Counts, SessionFilter, SignalFidelityStats, StateStore, StoredSession,
+    WaypointRow, WaypointStats, MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP,
+    MEMORY_QUERY_LOG_RING_CAP, STDIO_CAP,
 };
 use tokio_rusqlite::rusqlite::OptionalExtension;
 
@@ -2309,6 +2308,90 @@ fn embedding_result_is_hash_fallback(backend_name: &str, content: &str, emb: &[f
     emb == hash.as_slice()
 }
 
+fn actual_embedding_backend_name(backend_name: &str, content: &str, emb: &[f32]) -> String {
+    if embedding_result_is_hash_fallback(backend_name, content, emb) {
+        "fnv1a-hash-384".to_string()
+    } else {
+        backend_name.to_string()
+    }
+}
+
+async fn wait_for_embedding_model_if_cold_fallback(backend_name: &str, content: &str, emb: &[f32]) {
+    if !embedding_result_is_hash_fallback(backend_name, content, emb)
+        || crate::vector::model_init_done()
+    {
+        return;
+    }
+
+    let max_wait_ms = std::env::var("AGENT_BRIDGE_ONNX_COLD_WRITE_WAIT_MS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(30_000)
+        .min(120_000);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(max_wait_ms);
+    while !crate::vector::model_init_done() && std::time::Instant::now() < deadline {
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+}
+
+async fn perceive_with_cold_fallback_retry(
+    backend: &std::sync::Arc<dyn crate::embedding::EmbeddingBackend>,
+    content: &str,
+    key: &str,
+) -> (Vec<f32>, String) {
+    let backend_name = backend.name().to_string();
+    let mut vec = backend.perceive(content, key);
+    wait_for_embedding_model_if_cold_fallback(&backend_name, content, &vec).await;
+    if embedding_result_is_hash_fallback(&backend_name, content, &vec)
+        && crate::vector::model_init_done()
+    {
+        vec = backend.perceive(content, key);
+    }
+    let actual_name = actual_embedding_backend_name(&backend_name, content, &vec);
+    (vec, actual_name)
+}
+
+async fn perceive_batch_with_cold_fallback_retry(
+    backend: &std::sync::Arc<dyn crate::embedding::EmbeddingBackend>,
+    contents: &[&str],
+    keys: &[&str],
+) -> Vec<(Vec<f32>, String)> {
+    let backend_name = backend.name().to_string();
+    let mut vecs = backend.perceive_batch(contents, keys);
+    let cold_fallback_seen = vecs
+        .iter()
+        .zip(contents.iter())
+        .any(|(v, content)| embedding_result_is_hash_fallback(&backend_name, content, v));
+    if cold_fallback_seen {
+        let probe_content = contents.first().copied().unwrap_or_default();
+        let probe_vec = vecs.first().map(Vec::as_slice).unwrap_or(&[]);
+        wait_for_embedding_model_if_cold_fallback(&backend_name, probe_content, probe_vec).await;
+        if crate::vector::model_init_done() {
+            vecs = backend.perceive_batch(contents, keys);
+        }
+    }
+
+    vecs.into_iter()
+        .zip(contents.iter())
+        .map(|(vec, content)| {
+            let actual_name = actual_embedding_backend_name(&backend_name, content, &vec);
+            (vec, actual_name)
+        })
+        .collect()
+}
+
+fn memory_import_embed_batch_size() -> usize {
+    std::env::var("AGENT_BRIDGE_MEMORY_IMPORT_EMBED_BATCH_SIZE")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(16)
+        .clamp(1, 128)
+}
+
+fn memory_import_record_needs_embedding(record: &MemoryRecord) -> bool {
+    record.status.is_empty() || record.status == "active"
+}
+
 /// Gate for dimension-aware stale repair inside `memory_reindex_embeddings`.
 ///
 /// Returns true only when re-embedding is requested (`only_stale`) AND this
@@ -3058,7 +3141,8 @@ impl StateStore for SqliteStore {
                 // backends record `last_perceived = key` (not content).
                 // HashBackend/OnnxBackend default impl ignores the key
                 // and behaves identically to pre-P-γ `embed()`.
-                let vec = backend.perceive(&content, &key);
+                let (vec, actual_name) =
+                    perceive_with_cold_fallback_retry(&backend, &content, &key).await;
                 // Stamp the backend that ACTUALLY produced this vector, not the
                 // configured name. A cold/short-lived embed context (e.g. the
                 // precompact / curate hook subprocess) silently falls back to
@@ -3068,13 +3152,6 @@ impl StateStore for SqliteStore {
                 // reindex sweep, so they are never repaired. Reusing the same
                 // detector the reindex path uses keeps the labels honest, so the
                 // sweep can find and fix these rows later.
-                let backend_name = backend.name().to_string();
-                let actual_name =
-                    if embedding_result_is_hash_fallback(&backend_name, &content, &vec) {
-                        "fnv1a-hash-384".to_string()
-                    } else {
-                        backend_name
-                    };
                 (crate::vector::encode_embedding(&vec), Some(actual_name))
             }
         };
@@ -5469,26 +5546,38 @@ impl StateStore for SqliteStore {
         let to_embed_idx: Vec<usize> = actions
             .iter()
             .enumerate()
-            .filter(|(_, a)| !matches!(a, ImportAction::Skip))
+            .filter(|(i, a)| {
+                !matches!(a, ImportAction::Skip)
+                    && memory_import_record_needs_embedding(&parsed[*i])
+            })
             .map(|(i, _)| i)
             .collect();
         let mut embeddings: Vec<Option<Vec<u8>>> = vec![None; parsed.len()];
+        let mut embedding_backends: Vec<Option<String>> = vec![None; parsed.len()];
         if !to_embed_idx.is_empty() {
-            let to_embed_refs: Vec<&str> = to_embed_idx
-                .iter()
-                .map(|&i| clamped_contents[i].as_str())
-                .collect();
-            // P-γ: parallel keys slice so substrate-aware backends record
-            // each row's memory_key as the perception identifier. Default
-            // perceive_batch impl on non-substrate backends ignores keys.
-            let to_embed_keys: Vec<&str> = to_embed_idx
-                .iter()
-                .map(|&i| parsed[i].key.as_str())
-                .collect();
             let backend = crate::embedding::default_backend();
-            let vecs = backend.perceive_batch(&to_embed_refs, &to_embed_keys);
-            for (k, &i) in to_embed_idx.iter().enumerate() {
-                embeddings[i] = Some(crate::vector::encode_embedding(&vecs[k]));
+            let embed_batch_size = memory_import_embed_batch_size();
+            for idx_chunk in to_embed_idx.chunks(embed_batch_size) {
+                let to_embed_refs: Vec<&str> = idx_chunk
+                    .iter()
+                    .map(|&i| clamped_contents[i].as_str())
+                    .collect();
+                // P-γ: parallel keys slice so substrate-aware backends record
+                // each row's memory_key as the perception identifier. Default
+                // perceive_batch impl on non-substrate backends ignores keys.
+                let to_embed_keys: Vec<&str> =
+                    idx_chunk.iter().map(|&i| parsed[i].key.as_str()).collect();
+                let vecs = perceive_batch_with_cold_fallback_retry(
+                    &backend,
+                    &to_embed_refs,
+                    &to_embed_keys,
+                )
+                .await;
+                for (k, &i) in idx_chunk.iter().enumerate() {
+                    let (vec, backend_name) = &vecs[k];
+                    embeddings[i] = Some(crate::vector::encode_embedding(vec));
+                    embedding_backends[i] = Some(backend_name.clone());
+                }
             }
         }
 
@@ -5496,6 +5585,7 @@ impl StateStore for SqliteStore {
         let clamped_for_tx = clamped_contents;
         let actions_for_tx = actions;
         let embeddings_for_tx = embeddings;
+        let embedding_backends_for_tx = embedding_backends;
         let vv_for_tx = vv_strings;
         let mut report = self
             .conn
@@ -5529,13 +5619,14 @@ impl StateStore for SqliteStore {
                             let embedding_bytes = embeddings_for_tx[idx]
                                 .as_deref()
                                 .unwrap_or(&[]);
+                            let embedding_backend = embedding_backends_for_tx[idx].as_deref();
                             tx.execute(
                                 "INSERT INTO memories
                                    (key, kind, content, tags, related_keys, scope,
                                     created_at, updated_at, last_accessed_at, access_count,
                                     importance, status, trigger_pattern, embedding,
-                                    fts_content, version_vector)
-                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                                    fts_content, embedding_backend, version_vector)
+                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
                                 params![
                                     r.key,
                                     r.kind,
@@ -5552,6 +5643,7 @@ impl StateStore for SqliteStore {
                                     trig,
                                     embedding_bytes,
                                     fts_content,
+                                    embedding_backend,
                                     vv_for_tx[idx],
                                 ],
                             )?;
@@ -5561,13 +5653,15 @@ impl StateStore for SqliteStore {
                             let embedding_bytes = embeddings_for_tx[idx]
                                 .as_deref()
                                 .unwrap_or(&[]);
+                            let embedding_backend = embedding_backends_for_tx[idx].as_deref();
                             tx.execute(
                                 "UPDATE memories SET
                                     kind = ?2, content = ?3, tags = ?4, related_keys = ?5,
                                     scope = ?6, updated_at = ?7, last_accessed_at = ?8,
                                     access_count = ?9, importance = ?10, status = ?11,
                                     trigger_pattern = ?12, embedding = ?13,
-                                    fts_content = ?14, version_vector = ?15
+                                    fts_content = ?14, embedding_backend = ?15,
+                                    version_vector = ?16
                                  WHERE key = ?1",
                                 params![
                                     r.key,
@@ -5584,6 +5678,7 @@ impl StateStore for SqliteStore {
                                     trig,
                                     embedding_bytes,
                                     fts_content,
+                                    embedding_backend,
                                     vv_for_tx[idx],
                                 ],
                             )?;
@@ -5603,6 +5698,7 @@ impl StateStore for SqliteStore {
                             // canonical row is a dream-replay / human concern.
                             let embedding_bytes =
                                 embeddings_for_tx[idx].as_deref().unwrap_or(&[]);
+                            let embedding_backend = embedding_backends_for_tx[idx].as_deref();
                             let suffix = crate::version_vector::node_id_from_name(
                                 &format!("{}|{}", content, vv_for_tx[idx]),
                             );
@@ -5612,9 +5708,9 @@ impl StateStore for SqliteStore {
                                    (key, kind, content, tags, related_keys, scope,
                                     created_at, updated_at, last_accessed_at, access_count,
                                     importance, status, trigger_pattern, embedding,
-                                    fts_content, version_vector)
+                                    fts_content, embedding_backend, version_vector)
                                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
-                                         'conflict', ?12, ?13, ?14, ?15)
+                                         'conflict', ?12, ?13, ?14, ?15, ?16)
                                  ON CONFLICT(key) DO NOTHING",
                                 params![
                                     conflict_key,
@@ -5631,6 +5727,7 @@ impl StateStore for SqliteStore {
                                     trig,
                                     embedding_bytes,
                                     fts_content,
+                                    embedding_backend,
                                     vv_for_tx[idx],
                                 ],
                             )?;
@@ -6735,7 +6832,8 @@ impl StateStore for SqliteStore {
             .await
             .map_err(|e| Error::Backend(format!("memory_reindex dominant-dim probe: {e}")))?
             .dim;
-        let dim_aware = reindex_should_sweep_mismatched_dims(stale_flag, expected_dim, dominant_dim);
+        let dim_aware =
+            reindex_should_sweep_mismatched_dims(stale_flag, expected_dim, dominant_dim);
         let expected_bytes = (expected_dim * 4) as i64;
 
         let to_update: Vec<(String, String)> = self
@@ -11155,6 +11253,82 @@ mod tests {
             "semantic search should find imported row; keys={:?}",
             hits.iter().map(|h| &h.record.key).collect::<Vec<_>>()
         );
+        let expected_backend = crate::embedding::default_backend().name().to_string();
+        let imported_backend: Option<String> = store
+            .conn
+            .call(|c| -> RusqliteResult<Option<String>> {
+                c.query_row(
+                    "SELECT embedding_backend FROM memories WHERE key = ?1",
+                    params!["import_sem_embed_ipc_warp_socket"],
+                    |row| row.get::<_, Option<String>>(0),
+                )
+            })
+            .await
+            .expect("query imported backend");
+        assert_eq!(
+            imported_backend.as_deref(),
+            Some(expected_backend.as_str()),
+            "memory_import should stamp embedding_backend for imported rows"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_import_skips_embeddings_for_inactive_rows() {
+        use crate::ImportConflictPolicy;
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-import-inactive-emb-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let db_path = temp_dir.join("state.db");
+        let store = SqliteStore::open(&db_path)
+            .await
+            .expect("open sqlite store");
+
+        let jsonl_path = temp_dir.join("probe.jsonl");
+        let line = serde_json::json!({
+            "key": "import_archived_no_embedding",
+            "kind": "context",
+            "content": "archived sync history should not cold-start GTE embedding",
+            "tags": ["import-test"],
+            "related_keys": [],
+            "scope": null,
+            "created_at": 1700000000_i64,
+            "updated_at": 1700000000_i64,
+            "last_accessed_at": 0_i64,
+            "access_count": 0_u64,
+            "importance": 0.5,
+            "status": "archived",
+            "trigger_pattern": null,
+        });
+        tokio::fs::write(&jsonl_path, format!("{}\n", line))
+            .await
+            .expect("write jsonl");
+
+        let report = store
+            .memory_import(&jsonl_path, ImportConflictPolicy::Skip, None)
+            .await
+            .expect("import");
+        assert_eq!(report.inserted, 1);
+        let (embedding_len, backend): (i64, Option<String>) = store
+            .conn
+            .call(|c| -> RusqliteResult<(i64, Option<String>)> {
+                c.query_row(
+                    "SELECT LENGTH(embedding), embedding_backend FROM memories WHERE key = ?1",
+                    params!["import_archived_no_embedding"],
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?)),
+                )
+            })
+            .await
+            .expect("query imported inactive embedding");
+        assert_eq!(embedding_len, 0);
+        assert_eq!(backend, None);
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
@@ -11815,11 +11989,12 @@ mod tests {
             .await
             .expect("inject wrong-dim rows");
 
-        let buckets = store
-            .embedding_profile_buckets()
-            .await
-            .expect("buckets");
-        assert_eq!(buckets.len(), 3, "real + two wrong-dim buckets: {buckets:?}");
+        let buckets = store.embedding_profile_buckets().await.expect("buckets");
+        assert_eq!(
+            buckets.len(),
+            3,
+            "real + two wrong-dim buckets: {buckets:?}"
+        );
         // Tie-break: real `dim` (wider vector) wins the 2-vs-2 tie over the
         // 4-float bucket, so the genuine majority stays dominant deterministically.
         assert_eq!(buckets[0].dim, Some(dim), "dominant must be the real dim");
@@ -11937,7 +12112,10 @@ mod tests {
             })
             .await
             .expect("query bad_c");
-        assert_eq!(len, expected_bytes, "bad_c re-embedded onto the current dim");
+        assert_eq!(
+            len, expected_bytes,
+            "bad_c re-embedded onto the current dim"
+        );
         assert_eq!(
             backend.as_deref(),
             Some(backend_name.as_str()),
