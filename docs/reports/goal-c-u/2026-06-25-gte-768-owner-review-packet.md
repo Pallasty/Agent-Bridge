@@ -4,7 +4,7 @@ Date: 2026-06-25
 
 Schema: `agent_bridge.memory.gte_768.owner_review_packet.v0`
 
-Status: `OWNER_REVIEW_READY_CASE14_ADJUDICATED / LIVE_CUTOVER_NO_GO`.
+Status: `OWNER_REVIEW_READY_CASE14_ADJUDICATED_READER_PROBE / LIVE_CUTOVER_NO_GO`.
 
 Scope: owner/reviewer packet for deciding whether the GTE 768 evidence is
 strong enough to plan a live maintenance window. This packet does not approve
@@ -33,7 +33,6 @@ Recommended owner decision:
 Allowed next slice if owner accepts this packet:
 
 - docs-only live maintenance proposal;
-- copied-DB reader compatibility probe;
 - rollback packet draft.
 
 Still blocked:
@@ -52,6 +51,12 @@ Primary report:
 docs/reports/goal-c-u/2026-06-25-gte-768-canonical-snapshot-rehearsal.md
 ```
 
+Reader compatibility probe:
+
+```text
+docs/reports/goal-c-u/2026-06-25-gte-768-reader-compatibility-probe.md
+```
+
 Code/report head:
 
 ```text
@@ -63,13 +68,15 @@ Forum:
 ```text
 design thread 105 post #2553
 design thread 105 post #2554
+design thread 105 post #2555
 ```
 
-Current local checkout:
+Evidence commits represented before this reader-probe update:
 
 ```text
-HEAD=origin/master=c782979
-worktree=clean before this packet
+c782979 docs(memory): record GTE canonical rehearsal
+1f266a9 docs(memory): add GTE owner review packet
+cbfaa7e test(memory): adjudicate GTE case14 recall target
 ```
 
 Current installed binary on aio2:
@@ -200,7 +207,7 @@ Runbook gates:
 | --- | --- | --- |
 | Candidate commit explicit | `PARTIAL` | GTE-capable code exists on master, but no owner-approved implementation commit is named for live cut-over. |
 | Rehearsal uses a copy | `PASS` | Canonical snapshot was copied into scratch and only the scratch DB was reindexed. |
-| Reader compatibility decided | `OPEN` | No owner decision yet. Default assumption should be `atomic_node_cutover_only`. |
+| Reader compatibility decided | `OPEN_WITH_PROBE` | Copied-DB probe supports `atomic_node_cutover_only`; no owner decision yet and mixed-reader support remains unproven. |
 | Dual-node deployment serialized | `OPEN` | No maintenance window or dual-node deploy plan yet. |
 | Store invariants hold | `PASS_FOR_SCRATCH_ONLY` | Scratch store has 3022 GTE rows; live stores were not mutated. |
 | Recall benefit reproduced | `PASS_FOR_CANONICAL_REHEARSAL` | after #14 adjudication, hard-tier semantic R@10 `0.875` vs FTS/hybrid `0.375`. |
@@ -218,6 +225,23 @@ owner_live_authorization=false
 
 Do not assume mixed 384/768 readers are safe merely because scratch reindex
 worked.
+
+Copied-DB reader compatibility probe:
+
+```text
+script=scripts/verify-gte-768-reader-compatibility-probe.sh
+report=docs/reports/goal-c-u/2026-06-25-gte-768-reader-compatibility-probe.md
+status=READY_FOR_ATOMIC_NODE_CUTOVER_PROPOSAL
+post_reindex_invariant=pass
+mixed_reader_support=not_proven
+```
+
+Observed profiles:
+
+```text
+pre_db:  active_total=3022 dominant=multilingual-e5-small dim=384 rows=1628 stale_for_target=3022
+post_db: active_total=3022 dominant=gte-multilingual-base dim=768 rows=3022 target_good=3022 stale_for_target=0
+```
 
 Recommended default for any future live proposal:
 
@@ -257,6 +281,10 @@ Minimum pre-live checks:
 
 ```bash
 scripts/verify-gte-768-preflight.sh
+scripts/verify-gte-768-reader-compatibility-probe.sh \
+  --pre-db /path/to/pre-reindex/copied/state.db \
+  --post-db /path/to/post-reindex/copied/state.db \
+  --strict
 scripts/verify-gte-768-canonical-snapshot-gate.sh \
   --snapshot /home/pallasting/.cache/agent-bridge/inbox/state.snapshot.20260623.checkpointed-for-aio2.db \
   --expect-active 3022 \
@@ -328,8 +356,8 @@ Owner/reviewer should decide:
 2. Whether to accept the `#14` also-correct adjudication as sufficient for the
    GTE evidence review.
 3. Exact implementation commit for a future live proposal.
-4. Reader compatibility mode: `atomic_node_cutover_only` unless mixed mode is
-   proved separately.
+4. Whether to accept `atomic_node_cutover_only` from the copied-DB probe, or
+   require a separate mixed-reader proof.
 5. Whether Mac and aio2 must cut over in the same window or can serialize across
    windows.
 6. Whether inactive/stale rows remain at old dimensions or are handled in a
