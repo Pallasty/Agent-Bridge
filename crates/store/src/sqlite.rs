@@ -2309,6 +2309,27 @@ fn embedding_result_is_hash_fallback(backend_name: &str, content: &str, emb: &[f
     emb == hash.as_slice()
 }
 
+/// Gate for dimension-aware stale repair inside `memory_reindex_embeddings`.
+///
+/// Returns true only when re-embedding is requested (`only_stale`) AND this
+/// process's expected embedding dim equals the store's DOMINANT dim. When both
+/// agree, reindex additionally sweeps mislabeled minority-dim rows — same
+/// backend tag, wrong byte-length (e.g. a cross-node dim-bug that wrote
+/// `backend=gte` onto a 384d vector) — and re-embeds them onto the correct
+/// space; the plain stale clause skips them because their backend already
+/// matches, yet they are invisible to semantic search (cosine length-mismatch →
+/// 0.0). The gate is the safety: a mis-configured process (e.g. an e5/384 binary
+/// pointed at a gte/768 store) must NOT "repair" every healthy row into the
+/// wrong dimension. The dim-guard surfaces that process/store mismatch loudly;
+/// reindex simply refuses to sweep in the wrong direction.
+fn reindex_should_sweep_mismatched_dims(
+    only_stale: bool,
+    expected_dim: usize,
+    dominant_dim: Option<usize>,
+) -> bool {
+    only_stale && dominant_dim == Some(expected_dim)
+}
+
 #[async_trait]
 impl StateStore for SqliteStore {
     async fn save_session(&self, session: &StoredSession) -> Result<()> {
@@ -6701,23 +6722,55 @@ impl StateStore for SqliteStore {
         let current_backend = crate::embedding::default_backend().name().to_string();
         let stale_flag = only_stale;
         let backend_arg = current_backend.clone();
+
+        // Dimension-aware stale repair (gated). `expected_dim` is the byte/elem
+        // dimension a correct embedding should have for THIS process's active
+        // model (768 for gte, 384 for e5/hash). `dominant_dim` is the store's
+        // most-common embedding dim. We only widen the stale sweep to catch
+        // same-backend wrong-dim rows when the two agree — see
+        // `reindex_should_sweep_mismatched_dims` for why the gate is mandatory.
+        let expected_dim = crate::vector::vector_dim();
+        let dominant_dim = self
+            .dominant_embedding_profile()
+            .await
+            .map_err(|e| Error::Backend(format!("memory_reindex dominant-dim probe: {e}")))?
+            .dim;
+        let dim_aware = reindex_should_sweep_mismatched_dims(stale_flag, expected_dim, dominant_dim);
+        let expected_bytes = (expected_dim * 4) as i64;
+
         let to_update: Vec<(String, String)> = self
             .conn
             .call(move |c| -> RusqliteResult<Vec<(String, String)>> {
                 let sql = if stale_flag {
-                    // Stale = no embedding, OR no recorded backend (NULL —
-                    // cross-machine/cross-project sync brings in 384d vectors
-                    // with no backend tag, leaving their embedding space
-                    // unknown and uncomparable at query time), OR a backend
-                    // different from the current one. The NULL clause is what
-                    // lets a reindex actually re-embed sync'd rows onto a single
-                    // known space (the #1485 retrieval-quality fix).
-                    "SELECT key, content FROM memories
-                     WHERE status = 'active'
-                       AND (embedding IS NULL
-                            OR embedding_backend IS NULL
-                            OR embedding_backend != ?2)
-                     LIMIT ?1"
+                    if dim_aware {
+                        // Plain stale clauses (see else-branch) PLUS a
+                        // same-backend wrong-dim clause: `LENGTH(embedding) != ?3`
+                        // catches mislabeled minority-dim vectors the backend tag
+                        // alone would miss. Gated on dominant==expected so a
+                        // mis-configured process can't mass-rewrite a healthy
+                        // store into the wrong dimension.
+                        "SELECT key, content FROM memories
+                         WHERE status = 'active'
+                           AND (embedding IS NULL
+                                OR embedding_backend IS NULL
+                                OR embedding_backend != ?2
+                                OR LENGTH(embedding) != ?3)
+                         LIMIT ?1"
+                    } else {
+                        // Stale = no embedding, OR no recorded backend (NULL —
+                        // cross-machine/cross-project sync brings in 384d vectors
+                        // with no backend tag, leaving their embedding space
+                        // unknown and uncomparable at query time), OR a backend
+                        // different from the current one. The NULL clause is what
+                        // lets a reindex actually re-embed sync'd rows onto a single
+                        // known space (the #1485 retrieval-quality fix).
+                        "SELECT key, content FROM memories
+                         WHERE status = 'active'
+                           AND (embedding IS NULL
+                                OR embedding_backend IS NULL
+                                OR embedding_backend != ?2)
+                         LIMIT ?1"
+                    }
                 } else {
                     "SELECT key, content FROM memories
                      WHERE status = 'active' AND embedding IS NULL
@@ -6725,10 +6778,17 @@ impl StateStore for SqliteStore {
                 };
                 let mut stmt = c.prepare(sql)?;
                 let rows = if stale_flag {
-                    stmt.query_map(params![cap as i64, backend_arg], |row| {
-                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                    })?
-                    .collect::<std::result::Result<Vec<_>, _>>()?
+                    if dim_aware {
+                        stmt.query_map(params![cap as i64, backend_arg, expected_bytes], |row| {
+                            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                        })?
+                        .collect::<std::result::Result<Vec<_>, _>>()?
+                    } else {
+                        stmt.query_map(params![cap as i64, backend_arg], |row| {
+                            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                        })?
+                        .collect::<std::result::Result<Vec<_>, _>>()?
+                    }
                 } else {
                     stmt.query_map([cap as i64], |row| {
                         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -11770,6 +11830,119 @@ mod tests {
             .map(|b| b.rows)
             .sum();
         assert_eq!(minority, 3, "two 4-float rows + one 2-float row");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[test]
+    fn reindex_dim_sweep_gate_only_fires_when_process_matches_store() {
+        // ON: stale requested AND this process's expected dim == store dominant.
+        assert!(reindex_should_sweep_mismatched_dims(true, 768, Some(768)));
+        assert!(reindex_should_sweep_mismatched_dims(true, 384, Some(384)));
+        // OFF: a full (non-stale) reindex only fills NULL embeddings.
+        assert!(!reindex_should_sweep_mismatched_dims(false, 768, Some(768)));
+        // OFF (the safety): a mis-configured process (e5/384 binary on a gte/768
+        // store, or vice-versa) must NOT sweep — else it would rewrite every
+        // healthy row into the wrong dimension. The dim-guard warns; reindex
+        // refuses to act in the wrong direction.
+        assert!(!reindex_should_sweep_mismatched_dims(true, 384, Some(768)));
+        assert!(!reindex_should_sweep_mismatched_dims(true, 768, Some(384)));
+        // OFF: an empty store has no dominant dim to repair against.
+        assert!(!reindex_should_sweep_mismatched_dims(true, 768, None));
+    }
+
+    // A row tagged with the CURRENT backend but holding a different-width vector
+    // (a cross-node dim-bug — e.g. aio2 wrote "backend=gte" onto a 384d body) is
+    // skipped by the plain stale clause (its backend already matches) yet is
+    // invisible to semantic search (cosine length-mismatch → 0.0). only_stale
+    // reindex must catch it via the dimension-aware clause and re-embed it onto
+    // the current width — gated on this process's dim matching the store's
+    // dominant dim (HashBackend keeps the two equal in tests).
+    #[tokio::test]
+    async fn memory_reindex_only_stale_repairs_same_backend_wrong_dim() {
+        use crate::embedding::{set_default_backend, HashBackend};
+        use crate::MemoryRecord;
+        use std::sync::Arc;
+
+        let _ = set_default_backend(Arc::new(HashBackend));
+        let backend_name = crate::embedding::default_backend().name().to_string();
+        let dim = crate::vector::vector_dim();
+        let expected_bytes = (dim * 4) as i64;
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-reindex-wrongdim-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+
+        let mk = |key: &str| MemoryRecord {
+            key: key.to_string(),
+            kind: "fact".to_string(),
+            content: format!("content for {key}"),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 1_700_000_000,
+            updated_at: 1_700_000_000,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".to_string(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+
+        // ok_a, ok_b establish the dominant dim; bad_c becomes the mislabeled
+        // minority. All three are stamped with the current backend by memory_save.
+        for k in ["ok_a", "ok_b", "bad_c"] {
+            store.memory_save(&mk(k)).await.expect("save");
+        }
+
+        // Corrupt bad_c into a 16-byte (4-float) vector while LEAVING its backend
+        // tag at the current backend — so the backend-mismatch clause can NOT
+        // catch it; only the dimension-aware clause can.
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                c.execute(
+                    "UPDATE memories SET embedding = ?1 WHERE key = 'bad_c'",
+                    params![vec![0u8; 16]],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("inject wrong-dim row");
+
+        let n = store
+            .memory_reindex_embeddings(100, true)
+            .await
+            .expect("reindex");
+        assert_eq!(n, 1, "only the wrong-dim bad_c should be reindexed");
+
+        // bad_c re-embedded back onto the correct width, backend tag unchanged.
+        let (len, backend): (i64, Option<String>) = store
+            .conn
+            .call(|c| -> RusqliteResult<(i64, Option<String>)> {
+                c.query_row(
+                    "SELECT LENGTH(embedding), embedding_backend FROM memories WHERE key = 'bad_c'",
+                    [],
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?)),
+                )
+            })
+            .await
+            .expect("query bad_c");
+        assert_eq!(len, expected_bytes, "bad_c re-embedded onto the current dim");
+        assert_eq!(
+            backend.as_deref(),
+            Some(backend_name.as_str()),
+            "backend tag stays the current backend (dim clause, not backend clause)"
+        );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
