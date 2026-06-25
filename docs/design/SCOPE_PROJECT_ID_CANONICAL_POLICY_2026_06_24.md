@@ -19,8 +19,9 @@ explicit project ID from either:
 - a caller supplied `scope=project-id:...`; or
 - `AGENT_BRIDGE_PROJECT_ID`, when no project-id scope is supplied.
 
+It also reports a no-op `scope_write_shadow_comparison` decision when requested.
 That trace does not rewrite stored memory scope today. It exists to prove the
-identity decision before any production write switch.
+identity and policy decision before any production write switch.
 
 ## Problem
 

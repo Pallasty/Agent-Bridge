@@ -16,9 +16,9 @@
 //!   cargo run -p ab-bridge --example scope_write_shadow_comparison
 
 use ab_bridge::project_identity::{
-    approved_scope_alias_canonical, legacy_project_scope, normalize_project_id, project_id_scope,
-    resolve_project_identity, ProjectIdentityInput, LEGACY_PROJECT_SCOPE_PREFIX,
-    PROJECT_ID_SCOPE_PREFIX,
+    evaluate_scope_write_shadow, legacy_project_scope, normalize_project_id, project_id_scope,
+    resolve_project_identity, ProjectIdentityInput, ScopeWriteShadowAction as ShadowAction,
+    ScopeWriteShadowDecision as ShadowDecision, LEGACY_PROJECT_SCOPE_PREFIX,
 };
 use std::path::{Path, PathBuf};
 
@@ -28,41 +28,11 @@ const ENV_ALIASES: &str = "AB_SCOPE_SHADOW_ALIASES";
 const ENV_ALIASES_COMPAT: &str = "AGENT_BRIDGE_PROJECT_SCOPE_ALIASES";
 const ENV_EXTRA_SCOPES: &str = "AB_SCOPE_SHADOW_EXTRA_SCOPES";
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ShadowAction {
-    Canonicalize,
-    KeepLegacyNeedsReview,
-    KeepUnchanged,
-    Blocked,
-}
-
-impl ShadowAction {
-    fn label(self) -> &'static str {
-        match self {
-            Self::Canonicalize => "canonicalize_in_shadow",
-            Self::KeepLegacyNeedsReview => "keep_legacy_needs_review",
-            Self::KeepUnchanged => "keep_unchanged",
-            Self::Blocked => "blocked",
-        }
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ScopeCase {
     label: String,
     scope: String,
     expected: ShadowAction,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct ShadowDecision {
-    scope: String,
-    action: ShadowAction,
-    reason: &'static str,
-    proposed_scope: Option<String>,
-    would_store_scope: String,
-    legacy_scope_preserved: Option<String>,
-    shadow_write_eligible: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -240,97 +210,8 @@ fn load_input() -> anyhow::Result<ShadowInput> {
     })
 }
 
-fn is_project_id_scope(scope: &str) -> bool {
-    scope
-        .get(..PROJECT_ID_SCOPE_PREFIX.len())
-        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(PROJECT_ID_SCOPE_PREFIX))
-}
-
-fn is_legacy_project_scope(scope: &str) -> bool {
-    scope
-        .get(..LEGACY_PROJECT_SCOPE_PREFIX.len())
-        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(LEGACY_PROJECT_SCOPE_PREFIX))
-}
-
 fn evaluate_scope(scope: &str, canonical_scope: &str, aliases: &str) -> ShadowDecision {
-    let scope = scope.trim();
-    let policy_canonical = normalize_canonical_scope(canonical_scope);
-    let mapped_canonical = approved_scope_alias_canonical(scope, aliases);
-
-    let (action, reason, proposed_scope, would_store_scope, legacy_scope_preserved) =
-        if scope.is_empty() {
-            (
-                ShadowAction::Blocked,
-                "empty_scope",
-                None,
-                scope.to_string(),
-                None,
-            )
-        } else if is_project_id_scope(scope) {
-            if mapped_canonical.as_deref() == policy_canonical.as_deref() {
-                let proposed = mapped_canonical.clone();
-                (
-                    ShadowAction::Canonicalize,
-                    "explicit_project_id_matches_policy",
-                    proposed.clone(),
-                    proposed.unwrap_or_else(|| scope.to_string()),
-                    None,
-                )
-            } else {
-                (
-                    ShadowAction::Blocked,
-                    "explicit_project_id_differs_from_policy",
-                    mapped_canonical,
-                    scope.to_string(),
-                    None,
-                )
-            }
-        } else if !is_legacy_project_scope(scope) {
-            (
-                ShadowAction::KeepUnchanged,
-                "non_project_scope",
-                None,
-                scope.to_string(),
-                None,
-            )
-        } else {
-            match (mapped_canonical.as_deref(), policy_canonical.as_deref()) {
-                (Some(mapped), Some(policy)) if mapped == policy => {
-                    let proposed = mapped_canonical.clone();
-                    (
-                        ShadowAction::Canonicalize,
-                        "approved_alias_policy",
-                        proposed.clone(),
-                        proposed.unwrap_or_else(|| scope.to_string()),
-                        Some(scope.to_string()),
-                    )
-                }
-                (Some(_), Some(_)) => (
-                    ShadowAction::Blocked,
-                    "mapped_to_different_canonical",
-                    mapped_canonical,
-                    scope.to_string(),
-                    Some(scope.to_string()),
-                ),
-                _ => (
-                    ShadowAction::KeepLegacyNeedsReview,
-                    "scope_not_in_policy",
-                    None,
-                    scope.to_string(),
-                    Some(scope.to_string()),
-                ),
-            }
-        };
-
-    ShadowDecision {
-        scope: scope.to_string(),
-        shadow_write_eligible: action == ShadowAction::Canonicalize,
-        action,
-        reason,
-        proposed_scope,
-        would_store_scope,
-        legacy_scope_preserved,
-    }
+    evaluate_scope_write_shadow(scope, Some(canonical_scope), Some(aliases))
 }
 
 fn build_report(input: ShadowInput) -> ShadowReport {
@@ -388,12 +269,12 @@ fn print_report(report: &ShadowReport) {
             decision.shadow_write_eligible,
             decision.reason,
             decision.proposed_scope.as_deref().unwrap_or("<none>"),
-            decision.would_store_scope,
+            decision.would_store_scope_if_enabled,
             decision
                 .legacy_scope_preserved
                 .as_deref()
                 .unwrap_or("<none>"),
-            decision.scope,
+            decision.requested_scope,
         );
     }
     println!();
@@ -445,7 +326,7 @@ mod tests {
         assert!(decision.shadow_write_eligible);
         assert_eq!(decision.reason, "approved_alias_policy");
         assert_eq!(decision.proposed_scope.as_deref(), Some(CANON));
-        assert_eq!(decision.would_store_scope, CANON);
+        assert_eq!(decision.would_store_scope_if_enabled, CANON);
         assert_eq!(
             decision.legacy_scope_preserved.as_deref(),
             Some("project:/Data/CascadeProjects/agent-bridge")
@@ -458,7 +339,7 @@ mod tests {
 
         assert_eq!(decision.action, ShadowAction::Canonicalize);
         assert_eq!(decision.reason, "approved_alias_policy");
-        assert_eq!(decision.would_store_scope, CANON);
+        assert_eq!(decision.would_store_scope_if_enabled, CANON);
     }
 
     #[test]
@@ -467,7 +348,7 @@ mod tests {
 
         assert_eq!(decision.action, ShadowAction::Canonicalize);
         assert_eq!(decision.reason, "approved_alias_policy");
-        assert_eq!(decision.would_store_scope, CANON);
+        assert_eq!(decision.would_store_scope_if_enabled, CANON);
     }
 
     #[test]
@@ -478,7 +359,7 @@ mod tests {
         assert!(!decision.shadow_write_eligible);
         assert_eq!(decision.reason, "scope_not_in_policy");
         assert_eq!(
-            decision.would_store_scope,
+            decision.would_store_scope_if_enabled,
             "project:/Data/CascadeProjects/agent-bridge-NOT-IN-REGISTRY"
         );
     }
@@ -497,7 +378,7 @@ mod tests {
 
         assert_eq!(decision.action, ShadowAction::KeepUnchanged);
         assert_eq!(decision.reason, "non_project_scope");
-        assert_eq!(decision.would_store_scope, "domain:rust");
+        assert_eq!(decision.would_store_scope_if_enabled, "domain:rust");
     }
 
     #[test]
@@ -514,7 +395,7 @@ mod tests {
 
         assert_eq!(decision.action, ShadowAction::Canonicalize);
         assert_eq!(decision.reason, "explicit_project_id_matches_policy");
-        assert_eq!(decision.would_store_scope, CANON);
+        assert_eq!(decision.would_store_scope_if_enabled, CANON);
         assert_eq!(decision.legacy_scope_preserved, None);
     }
 

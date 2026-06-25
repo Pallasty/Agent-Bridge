@@ -89,6 +89,13 @@ memory save requests:
 
 This gate must not change the stored scope used by `MemorySaveTool`.
 
+Implementation note, 2026-06-25: Gate 1 is implemented as an opt-in addition to
+`memory_save(scope_identity_trace=true)`. The response includes
+`scope_write_shadow_comparison` with the requested scope, current stored scope,
+canonical policy scope, resolved identity scope, identity source, reviewed-alias
+match flag, shadow action, proposed scope, and legacy scope preservation field.
+The save path still writes the caller-provided scope unchanged.
+
 ### Gate 2: Owner Decision Packet For Production Experiment
 
 Only after shadow comparison evidence is reviewed, prepare a separate owner

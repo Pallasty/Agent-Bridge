@@ -32,6 +32,38 @@ pub struct ProjectIdentity {
     pub evidence: ProjectIdentityEvidence,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScopeWriteShadowAction {
+    Canonicalize,
+    KeepLegacyNeedsReview,
+    KeepUnchanged,
+    Blocked,
+}
+
+impl ScopeWriteShadowAction {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Canonicalize => "canonicalize_in_shadow",
+            Self::KeepLegacyNeedsReview => "keep_legacy_needs_review",
+            Self::KeepUnchanged => "keep_unchanged",
+            Self::Blocked => "blocked",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ScopeWriteShadowDecision {
+    pub requested_scope: String,
+    pub canonical_policy_scope: Option<String>,
+    pub reviewed_alias_registry_match: bool,
+    pub action: ScopeWriteShadowAction,
+    pub reason: &'static str,
+    pub proposed_scope: Option<String>,
+    pub would_store_scope_if_enabled: String,
+    pub legacy_scope_preserved: Option<String>,
+    pub shadow_write_eligible: bool,
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct ProjectIdentityInput<'a> {
     pub cwd: &'a str,
@@ -181,6 +213,128 @@ pub fn approved_scope_alias_canonical(scope: &str, aliases: &str) -> Option<Stri
         }
     }
     None
+}
+
+pub fn evaluate_scope_write_shadow(
+    requested_scope: &str,
+    canonical_policy_scope: Option<&str>,
+    aliases: Option<&str>,
+) -> ScopeWriteShadowDecision {
+    let requested_scope = requested_scope.trim();
+    let canonical_policy_scope =
+        canonical_policy_scope.and_then(|raw| normalize_project_id(raw).map(|id| project_id_scope(&id)));
+    let aliases = aliases.map(str::trim).filter(|raw| !raw.is_empty());
+    let explicit_canonical = canonical_project_scope(requested_scope);
+    let legacy_scope = requested_scope
+        .get(..LEGACY_PROJECT_SCOPE_PREFIX.len())
+        .filter(|prefix| prefix.eq_ignore_ascii_case(LEGACY_PROJECT_SCOPE_PREFIX))
+        .map(|_| requested_scope.to_string());
+    let mapped_alias_canonical = if explicit_canonical.is_none() {
+        aliases.and_then(|registry| approved_scope_alias_canonical(requested_scope, registry))
+    } else {
+        None
+    };
+    let reviewed_alias_registry_match = matches!(
+        (mapped_alias_canonical.as_deref(), canonical_policy_scope.as_deref()),
+        (Some(mapped), Some(policy)) if mapped == policy
+    );
+
+    let (action, reason, proposed_scope, would_store_scope_if_enabled, legacy_scope_preserved) =
+        if requested_scope.is_empty() {
+            (
+                ScopeWriteShadowAction::Blocked,
+                "empty_scope",
+                None,
+                requested_scope.to_string(),
+                None,
+            )
+        } else if let Some(explicit) = explicit_canonical {
+            match canonical_policy_scope.as_deref() {
+                Some(policy) if explicit == policy => (
+                    ScopeWriteShadowAction::Canonicalize,
+                    "explicit_project_id_matches_policy",
+                    Some(explicit.clone()),
+                    explicit,
+                    None,
+                ),
+                Some(_) => (
+                    ScopeWriteShadowAction::Blocked,
+                    "explicit_project_id_differs_from_policy",
+                    Some(explicit),
+                    requested_scope.to_string(),
+                    None,
+                ),
+                None => (
+                    ScopeWriteShadowAction::KeepUnchanged,
+                    "explicit_project_id_without_policy",
+                    Some(explicit),
+                    requested_scope.to_string(),
+                    None,
+                ),
+            }
+        } else if legacy_scope.is_none() {
+            (
+                ScopeWriteShadowAction::KeepUnchanged,
+                "non_project_scope",
+                None,
+                requested_scope.to_string(),
+                None,
+            )
+        } else {
+            match (
+                mapped_alias_canonical.as_deref(),
+                canonical_policy_scope.as_deref(),
+            ) {
+                (Some(mapped), Some(policy)) if mapped == policy => (
+                    ScopeWriteShadowAction::Canonicalize,
+                    "approved_alias_policy",
+                    Some(mapped.to_string()),
+                    mapped.to_string(),
+                    Some(requested_scope.to_string()),
+                ),
+                (Some(mapped), Some(_)) => (
+                    ScopeWriteShadowAction::Blocked,
+                    "mapped_to_different_canonical",
+                    Some(mapped.to_string()),
+                    requested_scope.to_string(),
+                    Some(requested_scope.to_string()),
+                ),
+                (Some(mapped), None) => (
+                    ScopeWriteShadowAction::KeepLegacyNeedsReview,
+                    "approved_alias_without_canonical_policy",
+                    Some(mapped.to_string()),
+                    requested_scope.to_string(),
+                    Some(requested_scope.to_string()),
+                ),
+                (None, Some(_)) => (
+                    ScopeWriteShadowAction::KeepLegacyNeedsReview,
+                    "scope_not_in_policy",
+                    None,
+                    requested_scope.to_string(),
+                    Some(requested_scope.to_string()),
+                ),
+                (None, None) => (
+                    ScopeWriteShadowAction::KeepLegacyNeedsReview,
+                    "no_reviewed_alias_policy",
+                    None,
+                    requested_scope.to_string(),
+                    Some(requested_scope.to_string()),
+                ),
+            }
+        };
+
+    let shadow_write_eligible = matches!(action, ScopeWriteShadowAction::Canonicalize);
+    ScopeWriteShadowDecision {
+        requested_scope: requested_scope.to_string(),
+        canonical_policy_scope,
+        reviewed_alias_registry_match,
+        action,
+        reason,
+        proposed_scope,
+        would_store_scope_if_enabled,
+        legacy_scope_preserved,
+        shadow_write_eligible,
+    }
 }
 
 fn canonical_project_scope(scope: &str) -> Option<String> {
@@ -444,5 +598,90 @@ mod tests {
             "project-id:git:github.com/Pallasting/Agent-Bridge.git",
             "project-id:git:github.com/pallasting/agent-bridge"
         ));
+    }
+
+    #[test]
+    fn scope_write_shadow_canonicalizes_registered_legacy_scope() {
+        let aliases = "project-id:git:gitlab.com/pallasting/agent-bridge=\
+            project:/Users/pallasting/Projects/agent-bridge";
+        let decision = evaluate_scope_write_shadow(
+            "project:/Users/pallasting/Projects/agent-bridge/docs",
+            Some("project-id:git:gitlab.com/pallasting/agent-bridge"),
+            Some(aliases),
+        );
+
+        assert_eq!(decision.action, ScopeWriteShadowAction::Canonicalize);
+        assert_eq!(decision.action.label(), "canonicalize_in_shadow");
+        assert_eq!(decision.reason, "approved_alias_policy");
+        assert!(decision.reviewed_alias_registry_match);
+        assert!(decision.shadow_write_eligible);
+        assert_eq!(
+            decision.proposed_scope.as_deref(),
+            Some("project-id:git:gitlab.com/pallasting/agent-bridge")
+        );
+        assert_eq!(
+            decision.would_store_scope_if_enabled,
+            "project-id:git:gitlab.com/pallasting/agent-bridge"
+        );
+        assert_eq!(
+            decision.legacy_scope_preserved.as_deref(),
+            Some("project:/Users/pallasting/Projects/agent-bridge/docs")
+        );
+    }
+
+    #[test]
+    fn scope_write_shadow_keeps_unregistered_legacy_scope_for_review() {
+        let aliases = "project-id:git:gitlab.com/pallasting/agent-bridge=\
+            project:/Users/pallasting/Projects/agent-bridge";
+        let decision = evaluate_scope_write_shadow(
+            "project:/Users/pallasting/Projects/agent-bridge-shadow-worktree",
+            Some("project-id:git:gitlab.com/pallasting/agent-bridge"),
+            Some(aliases),
+        );
+
+        assert_eq!(
+            decision.action,
+            ScopeWriteShadowAction::KeepLegacyNeedsReview
+        );
+        assert_eq!(decision.reason, "scope_not_in_policy");
+        assert!(!decision.reviewed_alias_registry_match);
+        assert!(!decision.shadow_write_eligible);
+        assert_eq!(
+            decision.would_store_scope_if_enabled,
+            "project:/Users/pallasting/Projects/agent-bridge-shadow-worktree"
+        );
+    }
+
+    #[test]
+    fn scope_write_shadow_blocks_alternate_forge_project_id() {
+        let decision = evaluate_scope_write_shadow(
+            "project-id:git:github.com/pallasting/agent-bridge",
+            Some("project-id:git:gitlab.com/pallasting/agent-bridge"),
+            None,
+        );
+
+        assert_eq!(decision.action, ScopeWriteShadowAction::Blocked);
+        assert_eq!(decision.reason, "explicit_project_id_differs_from_policy");
+        assert!(!decision.shadow_write_eligible);
+    }
+
+    #[test]
+    fn scope_write_shadow_does_not_canonicalize_legacy_without_policy() {
+        let decision = evaluate_scope_write_shadow(
+            "project:/Users/pallasting/Projects/agent-bridge",
+            None,
+            None,
+        );
+
+        assert_eq!(
+            decision.action,
+            ScopeWriteShadowAction::KeepLegacyNeedsReview
+        );
+        assert_eq!(decision.reason, "no_reviewed_alias_policy");
+        assert_eq!(decision.proposed_scope, None);
+        assert_eq!(
+            decision.legacy_scope_preserved.as_deref(),
+            Some("project:/Users/pallasting/Projects/agent-bridge")
+        );
     }
 }

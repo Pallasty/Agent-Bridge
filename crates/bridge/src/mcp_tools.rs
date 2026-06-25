@@ -18230,7 +18230,7 @@ impl McpTool for MemorySaveTool {
                     "tags":         { "type": "array", "items": { "type": "string" }, "default": [] },
                     "related_keys": { "type": "array", "items": { "type": "string" }, "default": [] },
                     "scope":        { "type": "string", "description": "Visibility: omit/global=everywhere, project:/abs/path=cwd-scoped, domain:rust=tech-domain." },
-                    "scope_identity_trace": { "type": "boolean", "default": false, "description": "If true, return a git/project-id identity trace for project scopes without changing the stored scope. Honors explicit project-id scopes, AGENT_BRIDGE_PROJECT_SCOPE_ALIASES policy matches, and AGENT_BRIDGE_PROJECT_ID for dedicated processes." },
+                    "scope_identity_trace": { "type": "boolean", "default": false, "description": "If true, return a git/project-id identity trace plus no-op scope-write shadow comparison for project scopes without changing the stored scope. Honors explicit project-id scopes, AGENT_BRIDGE_PROJECT_SCOPE_ALIASES policy matches, and AGENT_BRIDGE_PROJECT_ID for dedicated processes." },
                     "importance":   { "type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Override importance (0.0–1.0). Omit to auto-assign from kind: decision=0.8, lesson=0.7, todo=0.6, fact=0.5, observation=0.3." },
                     "trigger_pattern": { "type": "string", "description": "For kind=error_pattern: surfacing when session_bootstrap `error_hint` contains this substring (case-insensitive)." },
                     "continuity": {
@@ -18607,6 +18607,8 @@ fn memory_save_scope_identity_trace_with_policy(
     let configured_project_id = configured_project_id
         .map(str::trim)
         .filter(|project_id| !project_id.is_empty());
+    let canonical_policy_scope =
+        memory_save_scope_policy_canonical(policy_project_id.as_deref(), configured_project_id);
     let explicit_project_id = scope_project_id
         .map(|_| scope)
         .or(policy_project_id.as_deref())
@@ -18647,6 +18649,16 @@ fn memory_save_scope_identity_trace_with_policy(
             git_root: git_root.as_deref(),
         },
     );
+    let identity_source = if explicit_project_id_source == "none" {
+        identity.evidence.label()
+    } else {
+        explicit_project_id_source
+    };
+    let shadow_decision = crate::project_identity::evaluate_scope_write_shadow(
+        scope,
+        canonical_policy_scope.as_deref(),
+        project_scope_aliases,
+    );
 
     json!({
         "status": "ok",
@@ -18662,6 +18674,50 @@ fn memory_save_scope_identity_trace_with_policy(
         "high_confidence": identity.evidence.is_high_confidence(),
         "git_remote": git_remote,
         "git_root": git_root,
+        "scope_write_shadow_comparison": memory_save_scope_shadow_decision_value(
+            &shadow_decision,
+            identity_source,
+            &identity.canonical_scope,
+        ),
+    })
+}
+
+fn memory_save_scope_policy_canonical(
+    policy_project_id: Option<&str>,
+    configured_project_id: Option<&str>,
+) -> Option<String> {
+    policy_project_id
+        .or(configured_project_id)
+        .map(str::trim)
+        .filter(|project_id| !project_id.is_empty())
+        .and_then(|project_id| {
+            crate::project_identity::normalize_project_id(project_id)
+                .map(|id| crate::project_identity::project_id_scope(&id))
+        })
+}
+
+fn memory_save_scope_shadow_decision_value(
+    decision: &crate::project_identity::ScopeWriteShadowDecision,
+    identity_source: &str,
+    resolved_identity_scope: &str,
+) -> Value {
+    json!({
+        "status": "ok",
+        "requested_scope": decision.requested_scope,
+        "current_stored_scope": decision.requested_scope,
+        "stored_scope_changed": false,
+        "write_policy": "shadow_only_stored_scope_unchanged",
+        "production_write_authorized": false,
+        "identity_source": identity_source,
+        "resolved_identity_scope": resolved_identity_scope,
+        "canonical_policy_scope": decision.canonical_policy_scope,
+        "reviewed_alias_registry_match": decision.reviewed_alias_registry_match,
+        "shadow_action": decision.action.label(),
+        "reason": decision.reason,
+        "proposed_scope": decision.proposed_scope,
+        "would_store_scope_if_enabled": decision.would_store_scope_if_enabled,
+        "legacy_scope_preserved": decision.legacy_scope_preserved,
+        "shadow_write_eligible": decision.shadow_write_eligible,
     })
 }
 
@@ -65574,6 +65630,105 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         );
         assert_eq!(trace["evidence"], json!("explicit"));
         assert_eq!(trace["explicit_project_id_source"], json!("policy"));
+    }
+
+    #[test]
+    fn memory_save_scope_identity_trace_includes_shadow_comparison_for_policy_alias() {
+        let aliases = "project-id:git:gitlab.com/pallasting/agent-bridge=\
+            project:/Users/pallasting/Projects/agent-bridge";
+        let trace = memory_save_scope_identity_trace_with_policy(
+            Some("project:/Users/pallasting/Projects/agent-bridge/docs"),
+            Some("git:github.com/pallasting/agent-bridge"),
+            Some(aliases),
+        );
+
+        assert_eq!(trace["status"], json!("ok"));
+        assert_eq!(
+            trace["canonical_scope"],
+            json!("project-id:git:gitlab.com/pallasting/agent-bridge")
+        );
+        assert_eq!(trace["explicit_project_id_source"], json!("policy"));
+        let shadow = &trace["scope_write_shadow_comparison"];
+        assert_eq!(shadow["status"], json!("ok"));
+        assert_eq!(shadow["stored_scope_changed"], json!(false));
+        assert_eq!(shadow["production_write_authorized"], json!(false));
+        assert_eq!(shadow["identity_source"], json!("policy"));
+        assert_eq!(
+            shadow["canonical_policy_scope"],
+            json!("project-id:git:gitlab.com/pallasting/agent-bridge")
+        );
+        assert_eq!(shadow["reviewed_alias_registry_match"], json!(true));
+        assert_eq!(shadow["shadow_action"], json!("canonicalize_in_shadow"));
+        assert_eq!(shadow["reason"], json!("approved_alias_policy"));
+        assert_eq!(
+            shadow["proposed_scope"],
+            json!("project-id:git:gitlab.com/pallasting/agent-bridge")
+        );
+        assert_eq!(
+            shadow["would_store_scope_if_enabled"],
+            json!("project-id:git:gitlab.com/pallasting/agent-bridge")
+        );
+        assert_eq!(
+            shadow["legacy_scope_preserved"],
+            json!("project:/Users/pallasting/Projects/agent-bridge/docs")
+        );
+        assert_eq!(shadow["shadow_write_eligible"], json!(true));
+    }
+
+    #[test]
+    fn memory_save_scope_identity_trace_shadow_uses_matching_alias_not_first_entry() {
+        let aliases = "project-id:git:gitlab.com/example/other=\
+            project:/Users/pallasting/Projects/other\n\
+            project-id:git:gitlab.com/pallasting/agent-bridge=\
+            project:/Users/pallasting/Projects/agent-bridge";
+        let trace = memory_save_scope_identity_trace_with_policy(
+            Some("project:/Users/pallasting/Projects/agent-bridge"),
+            None,
+            Some(aliases),
+        );
+
+        assert_eq!(trace["status"], json!("ok"));
+        assert_eq!(
+            trace["canonical_scope"],
+            json!("project-id:git:gitlab.com/pallasting/agent-bridge")
+        );
+        let shadow = &trace["scope_write_shadow_comparison"];
+        assert_eq!(
+            shadow["canonical_policy_scope"],
+            json!("project-id:git:gitlab.com/pallasting/agent-bridge")
+        );
+        assert_eq!(shadow["reviewed_alias_registry_match"], json!(true));
+        assert_eq!(shadow["shadow_action"], json!("canonicalize_in_shadow"));
+        assert_eq!(shadow["reason"], json!("approved_alias_policy"));
+    }
+
+    #[test]
+    fn memory_save_scope_identity_trace_keeps_legacy_when_no_reviewed_policy_exists() {
+        let trace = memory_save_scope_identity_trace_with_policy(
+            Some("project:/Users/pallasting/Projects/agent-bridge"),
+            None,
+            None,
+        );
+
+        assert_eq!(trace["status"], json!("ok"));
+        assert_eq!(
+            trace["stored_scope"],
+            json!("project:/Users/pallasting/Projects/agent-bridge")
+        );
+        assert_eq!(trace["stored_scope_changed"], json!(false));
+        let shadow = &trace["scope_write_shadow_comparison"];
+        assert_eq!(shadow["shadow_action"], json!("keep_legacy_needs_review"));
+        assert_eq!(shadow["reason"], json!("no_reviewed_alias_policy"));
+        assert_eq!(shadow["reviewed_alias_registry_match"], json!(false));
+        assert_eq!(shadow["shadow_write_eligible"], json!(false));
+        assert_eq!(
+            shadow["would_store_scope_if_enabled"],
+            json!("project:/Users/pallasting/Projects/agent-bridge")
+        );
+        assert_eq!(
+            shadow["legacy_scope_preserved"],
+            json!("project:/Users/pallasting/Projects/agent-bridge")
+        );
     }
 
     #[test]
