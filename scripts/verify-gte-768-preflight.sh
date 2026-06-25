@@ -17,6 +17,7 @@ db_path="${AB_STATE_DB:-$HOME/.local/share/agent-bridge/state.db}"
 ab_bin="${AB_BIN:-$HOME/.local/bin/agent-bridge.real}"
 run_tests=false
 strict=false
+live_cutover=false
 
 usage() {
     cat <<'USAGE'
@@ -29,6 +30,10 @@ Flags:
                        $AGENT_BRIDGE_ONNX_MODEL_DIR or ~/.cache/agent-bridge/onnx-models
   --ab-bin PATH        agent-bridge.real binary for continuity-report.
   --run-tests          Also run the small GTE dimension/gate unit tests.
+  --live-cutover       Treat non-GTE live readers as a blocking production
+                       cut-over risk. Without this flag, reader mismatch is
+                       reported as informational because scratch-copy rehearsal
+                       can run safely with old live readers.
   --strict             Exit non-zero when the cut-over is not ready.
   -h, --help           Show this help.
 
@@ -67,6 +72,10 @@ while [ "$#" -gt 0 ]; do
             ;;
         --run-tests)
             run_tests=true
+            shift
+            ;;
+        --live-cutover)
+            live_cutover=true
             shift
             ;;
         --strict)
@@ -152,6 +161,9 @@ if [ -f "$model_dir/model.onnx_data" ]; then
     bytes="$(wc -c < "$model_dir/model.onnx_data" | tr -d '[:space:]')"
     say "INFO model.onnx_data present ($bytes bytes)"
 fi
+if [ -f "$model_dir/asset-manifest.txt" ]; then
+    say "INFO asset-manifest.txt present"
+fi
 if [ "$missing" -gt 0 ]; then
     block "NO_GO_MODEL_ASSET_MISSING" "$missing required model asset file(s) missing"
 fi
@@ -177,7 +189,11 @@ done < <(pgrep -f 'agent-bridge.real (daemon|daemon-http|mcp)' || true)
 if [ "$reader_count" -eq 0 ]; then
     warn "no live agent-bridge daemon/mcp readers found"
 elif [ "$reader_mismatch" -gt 0 ]; then
-    block "NO_GO_LIVE_READER_MISMATCH" "$reader_mismatch live reader(s) are not using GTE"
+    if [ "$live_cutover" = true ]; then
+        block "NO_GO_LIVE_READER_MISMATCH" "$reader_mismatch live reader(s) are not using GTE"
+    else
+        say "INFO $reader_mismatch live reader(s) are not using GTE; OK for scratch rehearsal, not OK for live cut-over"
+    fi
 fi
 say
 
