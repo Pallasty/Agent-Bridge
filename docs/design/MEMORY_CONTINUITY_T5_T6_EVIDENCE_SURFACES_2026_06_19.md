@@ -1327,6 +1327,36 @@ artifact; runtime enablement, runtime influence, candidate expansion,
 search-order changes, memory writes, and graph-edge writes remain later-gated
 non-claims.
 
+The next surface is the runtime-enablement implementation-plan artifact:
+
+- MCP tool:
+  `memory_biocortex_t6_candidate_expansion_runtime_enablement_implementation_plan_artifact`;
+- schema:
+  `agent_bridge.memory_biocortex_t6_candidate_expansion.runtime_enablement_implementation_plan_artifact.v0`;
+- required source:
+  the redacted JSON object from
+  `memory_biocortex_t6_candidate_expansion_runtime_enablement_owner_decision_record`;
+- scope:
+  implementation-plan handoff only: owner-decision metadata, bounded aggregate
+  telemetry counts inherited from the source record, default-off/shadow-first
+  requirements, deterministic replay, bounded candidate delta, negative
+  controls, aggregate telemetry fields, and rollback requirements for a later
+  code-gate lane.
+
+The implementation-plan artifact does not enable runtime behavior, implement
+runtime-enablement code, run shadow mode, call BioCortex or memory tools, change
+candidate sets or search order, write memory or graph edges, or approve
+production candidate expansion. It blocks if the source owner decision record is
+not ready, if either the source or request includes raw query/key/content/case
+rows, if the source claims runtime authority, if the owner decision is not
+`approve_runtime_enablement_preflight_or_plan_review_only`, if failures,
+negative-control regressions, or redaction violations are present, or if
+append-only/redacted aggregate handling is not confirmed. Even when ready, the
+only opened follow-up is author review of a later runtime-enablement code
+implementation gate; runtime enablement, runtime influence, candidate
+expansion, search-order changes, memory writes, and graph-edge writes remain
+later-gated non-claims.
+
 ## Verification
 
 Targeted validation for this slice after `/Data` space was recovered:
