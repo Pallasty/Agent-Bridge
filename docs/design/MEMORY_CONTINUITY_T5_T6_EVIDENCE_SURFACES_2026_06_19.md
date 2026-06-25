@@ -2,6 +2,9 @@
 
 Date: 2026-06-19
 
+Related local authorization ledger:
+`MEMORY_AUTHORIZATION_CONTRACTS_2026_06_25.md`.
+
 ## Context
 
 The first live T5/T6 batch after MCP reconnect produced useful shadow evidence,
