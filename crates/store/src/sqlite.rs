@@ -6644,14 +6644,15 @@ impl StateStore for SqliteStore {
             .collect())
     }
 
-    async fn dominant_embedding_profile(&self) -> Result<EmbeddingProfile> {
-        // Group active embeddings by (backend, byte-width) and take the largest
-        // bucket — the space the store was actually written in. Same shape as
-        // recall_eval's `stored_embedding_profile`, promoted to a store API so
-        // the production startup dim-guard and the offline eval share one truth.
-        let row: Option<(String, i64, i64)> = self
+    async fn embedding_profile_buckets(&self) -> Result<Vec<EmbeddingProfile>> {
+        // Group active embeddings by (backend, byte-width), largest bucket
+        // first. Same shape as recall_eval's `stored_embedding_profile`,
+        // promoted to a store API so the production startup dim-guard and the
+        // offline eval share one truth — and extended to the FULL distribution
+        // so the guard can also spot minority wrong-dim (mislabeled/stale) rows.
+        let rows: Vec<(String, i64, i64)> = self
             .conn
-            .call(|c| -> RusqliteResult<Option<(String, i64, i64)>> {
+            .call(|c| -> RusqliteResult<Vec<(String, i64, i64)>> {
                 let mut stmt = c.prepare(
                     "SELECT COALESCE(NULLIF(embedding_backend, ''), 'unknown') AS backend,
                             LENGTH(embedding) AS bytes,
@@ -6661,27 +6662,34 @@ impl StateStore for SqliteStore {
                         AND embedding IS NOT NULL
                         AND LENGTH(embedding) > 0
                       GROUP BY backend, bytes
-                      ORDER BY n DESC
-                      LIMIT 1",
+                      -- Deterministic tie-break so the dominant bucket (and thus
+                      -- which warning fires) is stable across restarts and nodes
+                      -- on a row-count tie: prefer the wider vector, then name.
+                      ORDER BY n DESC, bytes DESC, backend ASC",
                 )?;
-                let mut rows = stmt.query([])?;
-                match rows.next()? {
-                    Some(r) => Ok(Some((r.get(0)?, r.get(1)?, r.get(2)?))),
-                    None => Ok(None),
-                }
+                let mapped = stmt
+                    .query_map([], |r| {
+                        Ok((
+                            r.get::<_, String>(0)?,
+                            r.get::<_, i64>(1)?,
+                            r.get::<_, i64>(2)?,
+                        ))
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(mapped)
             })
             .await
-            .map_err(|e| Error::Backend(format!("dominant_embedding_profile: {e}")))?;
+            .map_err(|e| Error::Backend(format!("embedding_profile_buckets: {e}")))?;
 
-        Ok(match row {
-            Some((backend, bytes, n)) => EmbeddingProfile {
+        Ok(rows
+            .into_iter()
+            .map(|(backend, bytes, n)| EmbeddingProfile {
                 backend: Some(backend),
                 // f32 little-endian: 4 bytes per dimension.
                 dim: (bytes > 0).then_some((bytes / 4) as usize),
                 rows: n.max(0) as u64,
-            },
-            None => EmbeddingProfile::default(),
-        })
+            })
+            .collect())
     }
 
     async fn memory_reindex_embeddings(
@@ -11712,7 +11720,7 @@ mod tests {
             trigger_pattern: None,
             superseded_by: None,
         };
-        for k in ["a", "b", "c"] {
+        for k in ["a", "b", "c", "d", "e"] {
             store.memory_save(&mk(k)).await.expect("save");
         }
 
@@ -11722,7 +11730,46 @@ mod tests {
             .expect("profile populated");
         assert_eq!(prof.backend.as_deref(), Some(backend_name.as_str()));
         assert_eq!(prof.dim, Some(dim));
-        assert_eq!(prof.rows, 3);
+        assert_eq!(prof.rows, 5);
+
+        // Inject wrong-dim rows (mislabeled/stale embeddings, e.g. peer-synced
+        // rows tagged the same backend but holding a different-width vector):
+        //   c,d -> 16 bytes (4 floats)   e -> 8 bytes (2 floats)
+        // Leaves a,b at the real `dim`. That makes the real bucket and the
+        // 4-float bucket TIE at 2 rows each, exercising the deterministic
+        // tie-break (wider vector wins so the genuine-majority stays dominant),
+        // plus two distinct minority buckets to exercise the minority sum.
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                c.execute(
+                    "UPDATE memories SET embedding = ?1 WHERE key IN ('c','d')",
+                    params![vec![0u8; 16]],
+                )?;
+                c.execute(
+                    "UPDATE memories SET embedding = ?2 WHERE key = ?1",
+                    params!["e", vec![0u8; 8]],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("inject wrong-dim rows");
+
+        let buckets = store
+            .embedding_profile_buckets()
+            .await
+            .expect("buckets");
+        assert_eq!(buckets.len(), 3, "real + two wrong-dim buckets: {buckets:?}");
+        // Tie-break: real `dim` (wider vector) wins the 2-vs-2 tie over the
+        // 4-float bucket, so the genuine majority stays dominant deterministically.
+        assert_eq!(buckets[0].dim, Some(dim), "dominant must be the real dim");
+        assert_eq!(buckets[0].rows, 2);
+        let minority: u64 = buckets
+            .iter()
+            .filter(|b| b.dim != buckets[0].dim)
+            .map(|b| b.rows)
+            .sum();
+        assert_eq!(minority, 3, "two 4-float rows + one 2-float row");
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

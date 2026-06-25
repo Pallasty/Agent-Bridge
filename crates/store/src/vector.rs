@@ -41,20 +41,6 @@ pub fn vector_dim() -> usize {
     }
 }
 
-/// Stable name of the active embedding model (env-selected via
-/// `AGENT_BRIDGE_ONNX_MODEL`, memoised). Exposed so the startup dim-guard can
-/// name the model a process is *configured* for when reporting a mismatch.
-pub fn active_model_name() -> &'static str {
-    #[cfg(feature = "onnx-embed")]
-    {
-        onnx::active_model_name()
-    }
-    #[cfg(not(feature = "onnx-embed"))]
-    {
-        "all-MiniLM-L6-v2"
-    }
-}
-
 // ── ONNX backend (optional) ───────────────────────────────────────────────
 
 #[cfg(feature = "onnx-embed")]

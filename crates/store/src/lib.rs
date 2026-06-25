@@ -3209,13 +3209,28 @@ pub trait StateStore: Send + Sync {
         Ok(0)
     }
 
-    /// Dominant `(backend, dim)` among active stored embeddings — the space the
-    /// store was actually written in. Feeds the startup embedding dim-guard so a
+    /// Full active-embedding distribution as `(backend, dim, rows)` buckets,
+    /// largest first. Default empty; SQLite overrides with a real query. The
+    /// startup dim-guard uses this to see BOTH the dominant space and the
+    /// minority of wrong-dim rows (mislabeled/stale, e.g. peer-synced rows
+    /// tagged `gte` but holding 384d vectors) that the dominant bucket hides.
+    async fn embedding_profile_buckets(&self) -> Result<Vec<EmbeddingProfile>> {
+        Ok(Vec::new())
+    }
+
+    /// Dominant `(backend, dim)` among active stored embeddings — the largest
+    /// bucket from [`Self::embedding_profile_buckets`], i.e. the space the store
+    /// was actually written in. Feeds the startup embedding dim-guard so a
     /// process embedding at a different dimension than the store is flagged
     /// instead of silently returning all-zero (dim-mismatched) semantic cosines.
-    /// Default returns an empty profile; SQLite overrides with a real query.
+    /// Empty profile for an empty store.
     async fn dominant_embedding_profile(&self) -> Result<EmbeddingProfile> {
-        Ok(EmbeddingProfile::default())
+        Ok(self
+            .embedding_profile_buckets()
+            .await?
+            .into_iter()
+            .next()
+            .unwrap_or_default())
     }
 
     /// Compute and persist embeddings for `codebase_symbols` rows whose
