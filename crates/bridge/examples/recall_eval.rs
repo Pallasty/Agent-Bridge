@@ -68,12 +68,12 @@
 //! + a paraphrase-cosine readiness probe) and SKIPS semantic with a clear note
 //! rather than reporting a false R@k=0.
 
-use ab_store::{MemoryEdge, SqliteStore, StateStore, default_db_path};
+use ab_store::{default_db_path, MemoryEdge, SqliteStore, StateStore};
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use tokio_rusqlite::rusqlite::{
-    Connection as RusqliteConnection, OpenFlags, Result as SqlResult, params,
+    params, Connection as RusqliteConnection, OpenFlags, Result as SqlResult,
 };
 
 /// Query difficulty, set by how much lexical signal the paraphrase leaves for
@@ -167,6 +167,91 @@ struct BaselineDbFingerprint {
     active_memories: i64,
     memory_edges: i64,
     newest_created_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct StoredEmbeddingProfile {
+    dominant_backend: Option<String>,
+    dominant_dim: Option<usize>,
+    dominant_rows: u64,
+}
+
+impl StoredEmbeddingProfile {
+    fn dominant_backend_label(&self) -> &str {
+        self.dominant_backend.as_deref().unwrap_or("none")
+    }
+
+    fn dominant_dim_label(&self) -> String {
+        self.dominant_dim
+            .map_or_else(|| "unknown".to_string(), |dim| dim.to_string())
+    }
+
+    fn backend_is_compatible_with(&self, backend_name: &str) -> bool {
+        match self.dominant_backend.as_deref() {
+            None | Some("unknown") => true,
+            Some(stored) => stored == backend_name,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct RealEmbedderProbe {
+    confirmed: bool,
+    timeout_secs: usize,
+    attempts: usize,
+    para: f32,
+    unrel: f32,
+    dim: usize,
+}
+
+impl RealEmbedderProbe {
+    fn gap(&self) -> f32 {
+        self.para - self.unrel
+    }
+}
+
+#[derive(Debug, Clone)]
+struct SemanticGate {
+    ready: bool,
+    reason: String,
+    backend_name: String,
+    query_dim: usize,
+    profile: StoredEmbeddingProfile,
+    probe: Option<RealEmbedderProbe>,
+}
+
+impl SemanticGate {
+    fn enabled_label(&self) -> String {
+        if self.ready {
+            "ENABLED (real model confirmed and query/store embeddings match)".to_string()
+        } else {
+            format!("SKIPPED ({})", self.reason)
+        }
+    }
+
+    fn print(&self) {
+        println!(
+            "# semantic gate: backend={} query_dim={} stored_backend={} stored_dim={} stored_rows={} reason={}",
+            self.backend_name,
+            self.query_dim,
+            self.profile.dominant_backend_label(),
+            self.profile.dominant_dim_label(),
+            self.profile.dominant_rows,
+            self.reason
+        );
+        if let Some(probe) = &self.probe {
+            println!(
+                "# semantic probe: confirmed={} timeout_secs={} attempts={} dim={} para={:.3} unrel={:.3} gap={:.3}",
+                probe.confirmed,
+                probe.timeout_secs,
+                probe.attempts,
+                probe.dim,
+                probe.para,
+                probe.unrel,
+                probe.gap()
+            );
+        }
+    }
 }
 
 /// One held-out recall case. `expect` is the ACCEPT-SET of memory keys that
@@ -320,6 +405,13 @@ const SEMANTIC_SCOPE_CANDIDATE_K: usize = 10_000;
 const AGENT_BRIDGE_PROJECT_SCOPE: &str = "project:/Users/pallasting/Projects/agent-bridge";
 const GRAPH_NEIGHBOR_LIMIT: usize = 8;
 const HASH_BACKEND_NAME: &str = "fnv1a-hash-384";
+const RECALL_EVAL_CONFIRM_SECS_ENV: &str = "AB_RECALL_EVAL_CONFIRM_SECS";
+const DEFAULT_CONFIRM_SECS: usize = 30;
+const GTE_CONFIRM_SECS: usize = 120;
+const PARAPHRASE_PROBE_A: &str = "an old stale build overwrote the deployed binary file";
+const PARAPHRASE_PROBE_B: &str =
+    "a previous outdated compile clobbered the binary that was shipped";
+const PARAPHRASE_PROBE_C: &str = "cats enjoy napping in a warm patch of afternoon sunlight";
 const REVIEW_GATE_TARGET_CASES: &[usize] = &[1, 2, 8, 9, 14];
 const MIN_CJK_SHINGLE_ACCEPT_OVERLAP: usize = 4;
 const CASE2_TOOL_SURFACE_IDX1: usize = 2;
@@ -370,7 +462,8 @@ const TOOL_SURFACE_NEGATIVE_CONTROLS: &[ToolSurfaceNegativeControl] = &[
     ToolSurfaceNegativeControl {
         label: "git_sibling_worktree",
         query: "怎么查看 sibling 推到远端的文件内容又不影响我的工作树",
-        read: "git/worktree operational lessons should not activate tool-surface taxonomy projection",
+        read:
+            "git/worktree operational lessons should not activate tool-surface taxonomy projection",
     },
     ToolSurfaceNegativeControl {
         label: "memory_search_quality",
@@ -380,7 +473,8 @@ const TOOL_SURFACE_NEGATIVE_CONTROLS: &[ToolSurfaceNegativeControl] = &[
     ToolSurfaceNegativeControl {
         label: "profile_missing_tool",
         query: "codex-lean essential profile 里面某个工具没暴露怎么办",
-        read: "single profile/tool vocabulary should remain below the accepted projection threshold",
+        read:
+            "single profile/tool vocabulary should remain below the accepted projection threshold",
     },
 ];
 
@@ -719,6 +813,150 @@ fn baseline_db_fingerprint(db_path: &Path) -> SqlResult<BaselineDbFingerprint> {
     })
 }
 
+fn embedding_dim_from_byte_len(byte_len: i64) -> Option<usize> {
+    if byte_len <= 0 || byte_len % 4 != 0 {
+        return None;
+    }
+    Some((byte_len / 4) as usize)
+}
+
+fn stored_embedding_profile(db_path: &Path) -> SqlResult<StoredEmbeddingProfile> {
+    let conn = RusqliteConnection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let mut stmt = conn.prepare(
+        "SELECT COALESCE(embedding_backend, 'unknown') AS backend,
+                LENGTH(embedding) AS bytes,
+                COUNT(*) AS rows
+           FROM memories
+          WHERE status='active' AND embedding IS NOT NULL AND LENGTH(embedding) > 0
+          GROUP BY backend, bytes
+          ORDER BY rows DESC
+          LIMIT 1",
+    )?;
+    let mut rows = stmt.query([])?;
+    if let Some(row) = rows.next()? {
+        let backend: String = row.get(0)?;
+        let byte_len: i64 = row.get(1)?;
+        let rows: i64 = row.get(2)?;
+        Ok(StoredEmbeddingProfile {
+            dominant_backend: Some(backend),
+            dominant_dim: embedding_dim_from_byte_len(byte_len),
+            dominant_rows: rows.max(0) as u64,
+        })
+    } else {
+        Ok(StoredEmbeddingProfile {
+            dominant_backend: None,
+            dominant_dim: None,
+            dominant_rows: 0,
+        })
+    }
+}
+
+fn parse_positive_usize(value: &str) -> Option<usize> {
+    value
+        .trim()
+        .parse::<usize>()
+        .ok()
+        .filter(|value| *value > 0)
+}
+
+fn default_confirm_secs_for_model(model: Option<&str>) -> usize {
+    match model {
+        Some(model) if model.contains("gte") => GTE_CONFIRM_SECS,
+        _ => DEFAULT_CONFIRM_SECS,
+    }
+}
+
+fn recall_eval_confirm_secs() -> usize {
+    std::env::var(RECALL_EVAL_CONFIRM_SECS_ENV)
+        .ok()
+        .as_deref()
+        .and_then(parse_positive_usize)
+        .unwrap_or_else(|| {
+            default_confirm_secs_for_model(std::env::var("AGENT_BRIDGE_ONNX_MODEL").ok().as_deref())
+        })
+}
+
+async fn semantic_gate_for(
+    db_path: &Path,
+    backend_name: &str,
+    query_dim: usize,
+) -> SqlResult<SemanticGate> {
+    let profile = stored_embedding_profile(db_path)?;
+
+    if backend_name == HASH_BACKEND_NAME {
+        return Ok(SemanticGate {
+            ready: false,
+            reason: "hash backend active; semantic cosines would not match real-model rows"
+                .to_string(),
+            backend_name: backend_name.to_string(),
+            query_dim,
+            profile,
+            probe: None,
+        });
+    }
+
+    if profile.dominant_rows == 0 {
+        return Ok(SemanticGate {
+            ready: false,
+            reason: "no active stored embeddings found".to_string(),
+            backend_name: backend_name.to_string(),
+            query_dim,
+            profile,
+            probe: None,
+        });
+    }
+
+    if !profile.backend_is_compatible_with(backend_name) {
+        return Ok(SemanticGate {
+            ready: false,
+            reason: format!(
+                "query backend {backend_name} does not match dominant stored backend {}",
+                profile.dominant_backend_label()
+            ),
+            backend_name: backend_name.to_string(),
+            query_dim,
+            profile,
+            probe: None,
+        });
+    }
+
+    if let Some(stored_dim) = profile.dominant_dim {
+        if stored_dim != query_dim {
+            return Ok(SemanticGate {
+                ready: false,
+                reason: format!("query_dim {query_dim} does not match stored_dim {stored_dim}"),
+                backend_name: backend_name.to_string(),
+                query_dim,
+                profile,
+                probe: None,
+            });
+        }
+    }
+
+    let probe = confirm_real_embedder().await;
+    let ready = probe.confirmed;
+    let reason = if ready {
+        "real embedder confirmed".to_string()
+    } else {
+        format!(
+            "model not confirmed within {}s; latest para={:.3} unrel={:.3} gap={:.3}",
+            probe.timeout_secs,
+            probe.para,
+            probe.unrel,
+            probe.gap()
+        )
+    };
+
+    Ok(SemanticGate {
+        ready,
+        reason,
+        backend_name: backend_name.to_string(),
+        query_dim,
+        profile,
+        probe: Some(probe),
+    })
+}
+
 fn print_baseline_db_context(db_path: &Path, source: BaselineDbSource) -> SqlResult<()> {
     let display_path = fs::canonicalize(db_path).unwrap_or_else(|_| db_path.to_path_buf());
     let fingerprint = baseline_db_fingerprint(db_path)?;
@@ -770,43 +1008,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store = open_baseline_store(&db_path, db_source).await?;
     let n = CORPUS.len();
 
-    // ── Debug dump: `recall_eval <case#>` prints the top-k of each mode (key,
-    // score, cosine) for one case, so a surprising R@k can be falsified —
-    // is the expected key absent (cosine), present-but-buried (blend), or is
-    // every cosine garbage (hash fallback)?
-    if let Some(arg) = std::env::args().nth(1) {
-        if let Ok(idx1) = arg.parse::<usize>() {
-            return debug_case(&store, idx1).await;
-        }
-    }
-
     // ── Embedding backend gate (semantic only) ──────────────────────────────
     // Query embeddings MUST match the model the store was indexed with (auto-
     // selected above). If the active backend is hash (onnx-embed off, or model
     // dir missing), report that and skip semantic rather than emit a false R@k=0.
     let backend = ab_store::embedding::default_backend();
     let backend_name = backend.name().to_string();
-    let semantic_ready = if backend_name == HASH_BACKEND_NAME {
-        false
-    } else {
-        confirm_real_embedder().await
-    };
+    let semantic_gate = semantic_gate_for(&db_path, &backend_name, backend.dim()).await?;
+    let semantic_ready = semantic_gate.ready;
+
+    // ── Debug dump: `recall_eval <case#>` prints the top-k of each mode (key,
+    // score, cosine) for one case, so a surprising R@k can be falsified —
+    // is the expected key absent (cosine), present-but-buried (blend), or is
+    // every cosine garbage (hash fallback)?
+    if let Some(arg) = std::env::args().nth(1) {
+        if let Ok(idx1) = arg.parse::<usize>() {
+            return debug_case(&store, idx1, &semantic_gate).await;
+        }
+    }
 
     println!("# T0 recall eval — drift-free, fixed held-out corpus");
     println!("db:              {}", db_path.display());
     println!("corpus:          {n} cases (v2, tiered: easy/moderate/hard)");
     println!("top_k:           {TOP_K}");
     println!("embed backend:   {backend_name}");
-    println!(
-        "semantic:        {}",
-        if semantic_ready {
-            "ENABLED (real model confirmed)"
-        } else if backend_name == HASH_BACKEND_NAME {
-            "SKIPPED (hash backend — rebuild with default features + AGENT_BRIDGE_ONNX_MODEL=para-ml)"
-        } else {
-            "SKIPPED (model not confirmed loaded within timeout — cosines would be hash garbage)"
-        }
-    );
+    println!("semantic:        {}", semantic_gate.enabled_label());
+    semantic_gate.print();
     println!();
 
     // ── Run each mode over the corpus ───────────────────────────────────────
@@ -2634,13 +2861,19 @@ fn role_aware_hard_family_ranks(
 
 /// Falsification dump for one case (1-based): show the top-k of each mode with
 /// score + cosine, and mark the expected key(s).
-async fn debug_case(store: &SqliteStore, idx1: usize) -> Result<(), Box<dyn std::error::Error>> {
+async fn debug_case(
+    store: &SqliteStore,
+    idx1: usize,
+    semantic_gate: &SemanticGate,
+) -> Result<(), Box<dyn std::error::Error>> {
     let case = CORPUS
         .get(idx1.saturating_sub(1))
         .ok_or("case index out of range")?;
     println!("# debug case #{idx1}");
     println!("query:  {}", case.query);
     println!("expect: {:?}\n", case.expect);
+    semantic_gate.print();
+    println!();
 
     let dump = |label: &str, hits: &[ab_store::MemorySearchHit]| {
         println!("## {label} (top {})", hits.len());
@@ -2676,8 +2909,7 @@ async fn debug_case(store: &SqliteStore, idx1: usize) -> Result<(), Box<dyn std:
             .memory_search_hybrid(case.query, &[], TOP_K as u32, 60.0, 10)
             .await?,
     );
-    let backend = ab_store::embedding::default_backend();
-    if backend.name() != HASH_BACKEND_NAME && confirm_real_embedder().await {
+    if semantic_gate.ready {
         dump(
             "semantic",
             &store
@@ -2685,10 +2917,8 @@ async fn debug_case(store: &SqliteStore, idx1: usize) -> Result<(), Box<dyn std:
                 .await?,
         );
     } else {
-        println!(
-            "## semantic — skipped (backend {} not a confirmed real model)",
-            backend.name()
-        );
+        println!("## semantic — {}", semantic_gate.enabled_label());
+        semantic_gate.print();
     }
     Ok(())
 }
@@ -3556,26 +3786,44 @@ async fn detect_store_model_alias(db_path: &std::path::Path) -> Option<&'static 
     }
 }
 
-async fn confirm_real_embedder() -> bool {
+async fn confirm_real_embedder() -> RealEmbedderProbe {
     use ab_store::vector::{cosine_similarity, embed_text, warmup};
     warmup();
-    // Strong same-language paraphrase vs. an unrelated sentence.
-    let a = "an old stale build overwrote the deployed binary file";
-    let b = "a previous outdated compile clobbered the binary that was shipped";
-    let c = "cats enjoy napping in a warm patch of afternoon sunlight";
-    for _ in 0..30 {
-        let va = embed_text(a);
-        let vb = embed_text(b);
-        let vc = embed_text(c);
+
+    let timeout_secs = recall_eval_confirm_secs();
+    let mut latest = RealEmbedderProbe {
+        confirmed: false,
+        timeout_secs,
+        attempts: 0,
+        para: 0.0,
+        unrel: 0.0,
+        dim: 0,
+    };
+
+    // Strong same-language paraphrase vs. an unrelated sentence. gte can take
+    // roughly 90s to cold-load on this host; the window is env/model-aware so
+    // the eval does not silently skip semantic while the real model is loading.
+    for attempt in 1..=timeout_secs {
+        let va = embed_text(PARAPHRASE_PROBE_A);
+        let vb = embed_text(PARAPHRASE_PROBE_B);
+        let vc = embed_text(PARAPHRASE_PROBE_C);
         let para = cosine_similarity(&va, &vb);
         let unrel = cosine_similarity(&va, &vc);
+        latest = RealEmbedderProbe {
+            confirmed: para > 0.45 && (para - unrel) > 0.15,
+            timeout_secs,
+            attempts: attempt,
+            para,
+            unrel,
+            dim: va.len(),
+        };
         // Real model: paraphrase cosine high AND clearly above unrelated.
-        if para > 0.45 && (para - unrel) > 0.15 {
-            return true;
+        if latest.confirmed {
+            return latest;
         }
         tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
     }
-    false
+    latest
 }
 
 #[cfg(test)]
@@ -3620,21 +3868,61 @@ mod tests {
     }
 
     #[test]
+    fn embedding_dim_from_byte_len_rejects_invalid_widths() {
+        assert_eq!(embedding_dim_from_byte_len(384 * 4), Some(384));
+        assert_eq!(embedding_dim_from_byte_len(768 * 4), Some(768));
+        assert_eq!(embedding_dim_from_byte_len(0), None);
+        assert_eq!(embedding_dim_from_byte_len(-4), None);
+        assert_eq!(embedding_dim_from_byte_len((768 * 4) + 2), None);
+    }
+
+    #[test]
+    fn confirm_window_defaults_are_model_aware() {
+        assert_eq!(parse_positive_usize("120"), Some(120));
+        assert_eq!(parse_positive_usize(" 30 "), Some(30));
+        assert_eq!(parse_positive_usize("0"), None);
+        assert_eq!(parse_positive_usize("bogus"), None);
+        assert_eq!(
+            default_confirm_secs_for_model(Some("gte-multilingual-base")),
+            GTE_CONFIRM_SECS
+        );
+        assert_eq!(
+            default_confirm_secs_for_model(Some("paraphrase-multilingual-MiniLM-L12-v2")),
+            DEFAULT_CONFIRM_SECS
+        );
+        assert_eq!(default_confirm_secs_for_model(None), DEFAULT_CONFIRM_SECS);
+    }
+
+    #[test]
+    fn stored_embedding_profile_backend_compatibility_is_strict_when_known() {
+        let unknown = StoredEmbeddingProfile {
+            dominant_backend: Some("unknown".to_string()),
+            dominant_dim: Some(768),
+            dominant_rows: 10,
+        };
+        assert!(unknown.backend_is_compatible_with("gte-multilingual-base"));
+
+        let gte = StoredEmbeddingProfile {
+            dominant_backend: Some("gte-multilingual-base".to_string()),
+            dominant_dim: Some(768),
+            dominant_rows: 10,
+        };
+        assert!(gte.backend_is_compatible_with("gte-multilingual-base"));
+        assert!(!gte.backend_is_compatible_with("paraphrase-multilingual-MiniLM-L12-v2"));
+    }
+
+    #[test]
     fn baseline_db_source_labels_distinguish_live_and_pinned_store() {
         assert!(!BaselineDbSource::LiveDefault.is_pinned());
         assert!(BaselineDbSource::EnvOverride.is_pinned());
         assert!(BaselineDbSource::LiveDefault.label().contains("live"));
         assert!(BaselineDbSource::LiveDefault.note().contains("drift-prone"));
-        assert!(
-            BaselineDbSource::EnvOverride
-                .label()
-                .contains("AB_BASELINE_DB")
-        );
-        assert!(
-            BaselineDbSource::EnvOverride
-                .note()
-                .contains("same snapshot")
-        );
+        assert!(BaselineDbSource::EnvOverride
+            .label()
+            .contains("AB_BASELINE_DB"));
+        assert!(BaselineDbSource::EnvOverride
+            .note()
+            .contains("same snapshot"));
     }
 
     #[test]
