@@ -4,7 +4,7 @@ Date: 2026-06-25
 
 Schema: `agent_bridge.memory.gte_768.owner_review_packet.v0`
 
-Status: `OWNER_REVIEW_READY_CASE14_ADJUDICATED_READER_PROBE_MAINTENANCE_DRAFTS_MAC_VERIFIED / LIVE_CUTOVER_NO_GO`.
+Status: `OWNER_REVIEW_READY_CASE14_ADJUDICATED_READER_PROBE_MAINTENANCE_DRAFTS_MAC_VERIFIED_STALE_READERS_CLEARED / LIVE_CUTOVER_NO_GO`.
 
 Scope: owner/reviewer packet for deciding whether the GTE 768 evidence is
 strong enough to plan a live maintenance window. This packet does not approve
@@ -34,7 +34,7 @@ Allowed next slice if owner accepts this packet:
 
 - owner review / final authorization packet;
 - optional mixed-reader proof if owner rejects `atomic_node_cutover_only`;
-- Mac stale-reader cleanup and continuity-report discrepancy follow-up;
+- Mac continuity-report discrepancy follow-up;
 - aio2 migration authorization decision.
 
 Still blocked:
@@ -75,6 +75,7 @@ Mac live migration verification:
 
 ```text
 docs/reports/goal-c-u/2026-06-25-gte-768-mac-live-migration-verification.md
+docs/reports/goal-c-u/2026-06-25-gte-768-mac-stale-reader-cleanup.md
 ```
 
 Initial canonical rehearsal head:
@@ -232,11 +233,11 @@ Runbook gates:
 | Candidate commit explicit | `PARTIAL` | GTE-capable code exists on master, but no owner-approved implementation commit is named for live cut-over. |
 | Rehearsal uses a copy | `PASS` | Canonical snapshot was copied into scratch and only the scratch DB was reindexed. |
 | Reader compatibility decided | `OPEN_WITH_PROBE` | Copied-DB probe supports `atomic_node_cutover_only`; no owner decision yet and mixed-reader support remains unproven. |
-| Dual-node deployment serialized | `OPEN_WITH_PROPOSAL` | Docs-only maintenance proposal exists; Mac is migrated but aio2 is not; no owner-approved aio2 maintenance window yet. |
+| Dual-node deployment serialized | `OPEN_WITH_PROPOSAL` | Docs-only maintenance proposal exists; Mac is migrated and stale readers are cleared, but aio2 is not migrated; no owner-approved aio2 maintenance window yet. |
 | Store invariants hold | `PASS_FOR_SCRATCH_AND_MAC_SQL` | Scratch store has 3022 GTE rows; the rehearsal did not mutate live stores. Mac live state is separately verified by direct SQL. |
 | Recall benefit reproduced | `PASS_FOR_CANONICAL_REHEARSAL` | after #14 adjudication, hard-tier semantic R@10 `0.875` vs FTS/hybrid `0.375`. |
-| Mac live migration | `PASS_WITH_FOLLOW_UP` | direct SQL verifies 3248 active GTE 768 rows; stale MCP readers and continuity-report discrepancy remain. |
-| Post-reconnect surface current | `PARTIAL` | aio2 doctor `ok=true fails=0 warns=0`; Mac doctor `ok=true fails=0 warns=3` due stale readers and missing desktop helpers. |
+| Mac live migration | `PASS_WITH_REPORT_FOLLOW_UP` | direct SQL verifies 3248 active GTE 768 rows; stale MCP readers are cleared; continuity-report discrepancy remains. |
+| Post-reconnect surface current | `PARTIAL_NON_GTE_WARNINGS_ONLY` | aio2 doctor `ok=true fails=0 warns=0`; Mac doctor `ok=true fails=0 warns=2` due missing desktop helpers, not GTE. |
 | Rollback packet | `OPEN_WITH_DRAFT` | rollback draft exists; final packet still needs exact backups, candidate binary hashes, owner/window, and post ids. |
 
 Current overall state:
@@ -244,6 +245,7 @@ Current overall state:
 ```text
 canonical_evidence_ready=true
 mac_gte_migrated=true
+mac_stale_mcp_readers=false
 aio2_gte_migrated=false
 dual_node_ready=false
 live_cutover_ready=false
@@ -263,8 +265,8 @@ gte_good=3248
 old_or_non_gte_active_embedded=0
 doctor_ok=true
 doctor_fails=0
-doctor_warns=3
-stale_mcp_readers=11
+doctor_warns=2
+stale_mcp_readers=0
 ```
 
 Mac `continuity-report --json` still reported `embedded=0`, contradicting
@@ -330,7 +332,6 @@ The final authorization packet must name:
 - exact model artifact directory and hashes per node;
 - Mac and aio2 live DB backup paths for DB, WAL, and SHM;
 - client stop/reconnect procedure;
-- Mac stale MCP reader cleanup evidence;
 - Mac continuity-report discrepancy fix or waiver;
 - explicit choice of `atomic_node_cutover_only` or a proven
   `mixed_readers_supported`;
