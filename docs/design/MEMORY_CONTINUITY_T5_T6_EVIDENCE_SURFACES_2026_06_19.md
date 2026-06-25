@@ -1238,6 +1238,153 @@ only opened follow-up is shadow telemetry review; runtime influence, candidate
 mutation, search-order changes, memory writes, graph-edge writes, and production
 enablement remain later-gated non-claims.
 
+The next surface is the shadow telemetry review:
+
+- MCP tool:
+  `memory_biocortex_t6_candidate_expansion_shadow_telemetry_review`;
+- schema:
+  `agent_bridge.memory_biocortex_t6_candidate_expansion.shadow_telemetry_review.v0`;
+- required source:
+  the redacted JSON object from
+  `memory_biocortex_t6_candidate_expansion_shadow_executor_invocation_report`;
+- scope:
+  redacted aggregate telemetry review only: reviewer/source presence, telemetry
+  window presence, bounded observed/reviewed case counts, failed-case count,
+  candidate-delta count, negative-control regression count, redaction-violation
+  count, append-only confirmation, and redacted-aggregate-only confirmation.
+
+The telemetry review does not invoke the executor, run shadow mode, read raw
+telemetry rows, call BioCortex or memory tools, write memory or graph edges, or
+approve runtime influence. It only validates that a bounded redacted aggregate
+shadow telemetry review is sourced from a ready invocation report. It blocks if
+the source invocation report is not ready, if either the source or request
+includes raw query/key/content/case rows, if the source claims runtime authority,
+if reviewer or provenance metadata is missing, if the decision is not
+`approve_shadow_telemetry_only`, if observed/reviewed counts are inconsistent or
+exceed the source bound, if failures, negative-control regressions, or redaction
+violations are present, or if the caller cannot assert append-only telemetry and
+redacted-aggregate-only handling. Even when ready, the only opened follow-up is
+a later runtime-enablement review; production runtime influence, candidate
+mutation, search-order changes, memory writes, graph-edge writes, and candidate
+expansion enablement remain later-gated non-claims.
+
+The next surface is the runtime-enablement review:
+
+- MCP tool:
+  `memory_biocortex_t6_candidate_expansion_runtime_enablement_review`;
+- schema:
+  `agent_bridge.memory_biocortex_t6_candidate_expansion.runtime_enablement_review.v0`;
+- required source:
+  the redacted JSON object from
+  `memory_biocortex_t6_candidate_expansion_shadow_telemetry_review`;
+- scope:
+  owner-decision preparation only: reviewer/source presence, decision-source
+  presence, bounded telemetry counts inherited from the source review,
+  append-only confirmation, redacted-aggregate-only confirmation, and a decision
+  that can open only an owner runtime-enablement decision review.
+
+The runtime-enablement review does not enable runtime behavior, implement
+runtime-enablement code, run shadow mode, call BioCortex or memory tools, change
+candidate sets or search order, write memory or graph edges, or approve
+production candidate expansion. It blocks if the source shadow telemetry review
+is not ready, if either the source or request includes raw query/key/content/case
+rows, if the source claims runtime authority, if reviewer or provenance metadata
+is missing, if the decision is not
+`approve_owner_runtime_enablement_review_only`, if failures, negative-control
+regressions, or redaction violations are present, or if append-only/redacted
+aggregate handling is not confirmed. Even when ready, the only opened follow-up
+is a later explicit owner runtime-enablement decision; runtime enablement,
+runtime influence, candidate expansion, search-order changes, memory writes,
+and graph-edge writes remain later-gated non-claims.
+
+The next surface is the runtime-enablement owner decision record:
+
+- MCP tool:
+  `memory_biocortex_t6_candidate_expansion_runtime_enablement_owner_decision_record`;
+- schema:
+  `agent_bridge.memory_biocortex_t6_candidate_expansion.runtime_enablement_owner_decision_record.v0`;
+- required source:
+  the redacted JSON object from
+  `memory_biocortex_t6_candidate_expansion_runtime_enablement_review`;
+- scope:
+  explicit owner decision recording only: owner presence, decision-source
+  presence, bounded telemetry counts inherited from the source review,
+  append-only confirmation, redacted-aggregate-only confirmation, and a decision
+  that can open only a later preflight or implementation-plan review artifact.
+
+The owner decision record does not enable runtime behavior, implement
+runtime-enablement code, run shadow mode, call BioCortex or memory tools, change
+candidate sets or search order, write memory or graph edges, or approve
+production candidate expansion. It blocks if the source runtime-enablement
+review is not ready, if either the source or request includes raw
+query/key/content/case rows, if the source claims runtime authority, if owner or
+decision-source metadata is missing, if the owner decision is not
+`approve_runtime_enablement_preflight_or_plan_review_only`, if failures,
+negative-control regressions, or redaction violations are present, or if
+append-only/redacted aggregate handling is not confirmed. Even when ready, the
+only opened follow-up is a later preflight or implementation-plan review
+artifact; runtime enablement, runtime influence, candidate expansion,
+search-order changes, memory writes, and graph-edge writes remain later-gated
+non-claims.
+
+The next surface is the runtime-enablement implementation-plan artifact:
+
+- MCP tool:
+  `memory_biocortex_t6_candidate_expansion_runtime_enablement_implementation_plan_artifact`;
+- schema:
+  `agent_bridge.memory_biocortex_t6_candidate_expansion.runtime_enablement_implementation_plan_artifact.v0`;
+- required source:
+  the redacted JSON object from
+  `memory_biocortex_t6_candidate_expansion_runtime_enablement_owner_decision_record`;
+- scope:
+  implementation-plan handoff only: owner-decision metadata, bounded aggregate
+  telemetry counts inherited from the source record, default-off/shadow-first
+  requirements, deterministic replay, bounded candidate delta, negative
+  controls, aggregate telemetry fields, and rollback requirements for a later
+  code-gate lane.
+
+The implementation-plan artifact does not enable runtime behavior, implement
+runtime-enablement code, run shadow mode, call BioCortex or memory tools, change
+candidate sets or search order, write memory or graph edges, or approve
+production candidate expansion. It blocks if the source owner decision record is
+not ready, if either the source or request includes raw query/key/content/case
+rows, if the source claims runtime authority, if the owner decision is not
+`approve_runtime_enablement_preflight_or_plan_review_only`, if failures,
+negative-control regressions, or redaction violations are present, or if
+append-only/redacted aggregate handling is not confirmed. Even when ready, the
+only opened follow-up is author review of a later runtime-enablement code
+implementation gate; runtime enablement, runtime influence, candidate
+expansion, search-order changes, memory writes, and graph-edge writes remain
+later-gated non-claims.
+
+The next surface is the runtime-enablement code implementation gate:
+
+- MCP tool:
+  `memory_biocortex_t6_candidate_expansion_runtime_enablement_code_implementation_gate`;
+- schema:
+  `agent_bridge.memory_biocortex_t6_candidate_expansion.runtime_enablement_code_implementation_gate.v0`;
+- required source:
+  the redacted JSON object from
+  `memory_biocortex_t6_candidate_expansion_runtime_enablement_implementation_plan_artifact`;
+- explicit reviewer decision:
+  `approve_shadow_runtime_enablement_code_implementation_only`.
+
+The code implementation gate can only authorize a later default-off shadow
+runtime-enablement code patch. It does not enable runtime behavior, run shadow
+mode, invoke executors, call BioCortex or memory tools, change candidate sets or
+search order, write memory or graph edges, mutate feature flags or runtime
+configuration, or approve production candidate expansion. It blocks if the
+source implementation-plan artifact is not ready, if either the source or
+request includes raw query/key/content/case rows, if the source claims runtime
+authority, if required default-off/shadow-first/deterministic replay/negative
+control/bounded delta/rollback fields are incomplete, or if the explicit
+reviewer decision is anything other than
+`approve_shadow_runtime_enablement_code_implementation_only`. Even when ready,
+the only opened follow-up is implementing a default-off shadow code path; any
+shadow execution, runtime enablement, runtime influence, candidate expansion,
+search-order change, memory write, graph-edge write, feature-flag activation,
+or runtime-configuration mutation remains later-gated.
+
 ## Verification
 
 Targeted validation for this slice after `/Data` space was recovered:

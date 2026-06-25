@@ -43870,6 +43870,2132 @@ impl McpTool for MemoryBioCortexT6CandidateExpansionShadowExecutorInvocationRepo
     }
 }
 
+const MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_SHADOW_TELEMETRY_REVIEW_SCHEMA: &str =
+    "agent_bridge.memory_biocortex_t6_candidate_expansion.shadow_telemetry_review.v0";
+const MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_REVIEW_SCHEMA: &str =
+    "agent_bridge.memory_biocortex_t6_candidate_expansion.runtime_enablement_review.v0";
+const MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_OWNER_DECISION_RECORD_SCHEMA:
+    &str =
+    "agent_bridge.memory_biocortex_t6_candidate_expansion.runtime_enablement_owner_decision_record.v0";
+const MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_IMPLEMENTATION_PLAN_ARTIFACT_SCHEMA:
+    &str =
+    "agent_bridge.memory_biocortex_t6_candidate_expansion.runtime_enablement_implementation_plan_artifact.v0";
+const MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_CODE_IMPLEMENTATION_GATE_SCHEMA:
+    &str =
+    "agent_bridge.memory_biocortex_t6_candidate_expansion.runtime_enablement_code_implementation_gate.v0";
+
+fn memory_biocortex_t6_candidate_expansion_shadow_telemetry_review_source_claims_runtime_authority(
+    report: &Value,
+) -> bool {
+    [
+        "/shadow_invocation_contract/this_tool_invokes_executor",
+        "/shadow_invocation_contract/this_tool_runs_shadow_mode",
+        "/shadow_invocation_contract/this_tool_calls_memory_search",
+        "/shadow_invocation_contract/this_tool_calls_memory_neighbors",
+        "/shadow_invocation_contract/this_tool_runs_biocortex",
+        "/shadow_invocation_contract/may_mutate_runtime_candidate_set",
+        "/shadow_invocation_contract/changes_runtime_candidate_set",
+        "/shadow_invocation_contract/may_change_runtime_search_order",
+        "/shadow_invocation_contract/runtime_influence_approved",
+        "/shadow_invocation_contract/may_enable_runtime_gate_now",
+        "/shadow_invocation_contract/may_write_memory_or_graph_edges",
+        "/shadow_invocation_contract/may_approve_production_candidate_expansion_now",
+        "/bounded_shadow_telemetry/raw_queries_allowed",
+        "/bounded_shadow_telemetry/raw_keys_allowed",
+        "/bounded_shadow_telemetry/content_allowed",
+        "/bounded_shadow_telemetry/case_rows_allowed",
+    ]
+    .iter()
+    .any(|pointer| {
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(report, pointer)
+    })
+}
+
+fn memory_biocortex_t6_candidate_expansion_shadow_telemetry_review_source_ready(
+    report: &Value,
+) -> bool {
+    report.get("schema").and_then(Value::as_str)
+        == Some(
+            MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_SHADOW_EXECUTOR_INVOCATION_REPORT_SCHEMA,
+        )
+        && report.get("read_only").and_then(Value::as_bool) == Some(true)
+        && memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            report,
+            "/shadow_executor_invocation_report/ready",
+        )
+        && report
+            .pointer("/shadow_executor_invocation_report/status")
+            .and_then(Value::as_str)
+            == Some("ready_for_shadow_telemetry_review")
+        && memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            report,
+            "/shadow_invocation_contract/may_review_shadow_telemetry_now",
+        )
+        && !memory_biocortex_t6_candidate_expansion_shadow_telemetry_review_source_claims_runtime_authority(report)
+        && !memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            report,
+            "/input_contract/shadow_executor_preflight_report_included",
+        )
+        && !memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            report,
+            "/input_contract/raw_query_included",
+        )
+        && !memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            report,
+            "/input_contract/raw_queries_included",
+        )
+        && !memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            report,
+            "/input_contract/raw_keys_included",
+        )
+        && !memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            report,
+            "/input_contract/content_included",
+        )
+        && !memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            report,
+            "/input_contract/case_rows_included",
+        )
+}
+
+fn memory_biocortex_t6_candidate_expansion_shadow_telemetry_review_payload(args: Value) -> Value {
+    let report = args
+        .get("shadow_executor_invocation_report")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let reviewer =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(&args, "reviewer");
+    let review_source = memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(
+        &args,
+        "review_source",
+    );
+    let telemetry_window_id =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(
+            &args,
+            "telemetry_window_id",
+        );
+    let telemetry_review_decision =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(
+            &args,
+            "telemetry_review_decision",
+        );
+    let observed_case_count =
+        memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_u64(
+            &args,
+            "observed_case_count",
+            0,
+        );
+    let reviewed_case_count =
+        memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_u64(
+            &args,
+            "reviewed_case_count",
+            0,
+        );
+    let failed_case_count =
+        memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_u64(
+            &args,
+            "failed_case_count",
+            0,
+        );
+    let candidate_delta_count =
+        memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_u64(
+            &args,
+            "candidate_delta_count",
+            0,
+        );
+    let negative_control_regression_count =
+        memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_u64(
+            &args,
+            "negative_control_regression_count",
+            0,
+        );
+    let redaction_violation_count =
+        memory_biocortex_t6_candidate_expansion_shadow_executor_preflight_u64(
+            &args,
+            "redaction_violation_count",
+            0,
+        );
+    let append_only_telemetry_confirmed =
+        memory_biocortex_t6_candidate_expansion_shadow_executor_invocation_report_bool(
+            &args,
+            "append_only_telemetry_confirmed",
+            false,
+        );
+    let redacted_aggregate_only =
+        memory_biocortex_t6_candidate_expansion_shadow_executor_invocation_report_bool(
+            &args,
+            "redacted_aggregate_only",
+            false,
+        );
+    let source_shadow_case_count =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+            &report,
+            "/shadow_executor_invocation_report/shadow_case_count",
+        );
+    let source_max_shadow_case_bound =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+            &report,
+            "/bounded_shadow_telemetry/max_shadow_case_bound",
+        );
+    let source_case_bound = if source_shadow_case_count > 0 {
+        source_shadow_case_count
+    } else if source_max_shadow_case_bound > 0 {
+        source_max_shadow_case_bound
+    } else {
+        100
+    }
+    .min(100);
+
+    let mut block_reasons = BTreeSet::<String>::new();
+    if !memory_biocortex_t6_candidate_expansion_shadow_telemetry_review_source_ready(&report) {
+        block_reasons.insert("source_shadow_executor_invocation_report_not_ready".to_string());
+    }
+    if memory_biocortex_t6_candidate_expansion_shadow_execution_gate_contains_raw(&report) {
+        block_reasons.insert("source_shadow_executor_invocation_report_contains_raw".to_string());
+    }
+    if memory_biocortex_t6_candidate_expansion_shadow_execution_gate_contains_raw(&args) {
+        block_reasons.insert("input_contains_raw_or_source_fields".to_string());
+    }
+    if memory_biocortex_t6_candidate_expansion_shadow_telemetry_review_source_claims_runtime_authority(&report) {
+        block_reasons
+            .insert("source_shadow_executor_invocation_report_claims_runtime_authority".to_string());
+    }
+    if reviewer.is_empty() {
+        block_reasons.insert("reviewer_missing".to_string());
+    }
+    if review_source.is_empty() {
+        block_reasons.insert("review_source_missing".to_string());
+    }
+    if telemetry_window_id.is_empty() {
+        block_reasons.insert("telemetry_window_id_missing".to_string());
+    }
+    if telemetry_review_decision != "approve_shadow_telemetry_only" {
+        block_reasons
+            .insert("telemetry_review_decision_not_approve_shadow_telemetry_only".to_string());
+    }
+    if observed_case_count == 0 {
+        block_reasons.insert("observed_case_count_missing".to_string());
+    }
+    if observed_case_count > source_case_bound {
+        block_reasons.insert("observed_case_count_exceeds_source_bound".to_string());
+    }
+    if reviewed_case_count != observed_case_count {
+        block_reasons.insert("reviewed_case_count_mismatch".to_string());
+    }
+    if candidate_delta_count > observed_case_count {
+        block_reasons.insert("candidate_delta_exceeds_observed_cases".to_string());
+    }
+    if failed_case_count > 0 {
+        block_reasons.insert("failed_case_count_present".to_string());
+    }
+    if negative_control_regression_count > 0 {
+        block_reasons.insert("negative_control_regression_detected".to_string());
+    }
+    if redaction_violation_count > 0 {
+        block_reasons.insert("redaction_violation_detected".to_string());
+    }
+    if !append_only_telemetry_confirmed {
+        block_reasons.insert("append_only_telemetry_not_confirmed".to_string());
+    }
+    if !redacted_aggregate_only {
+        block_reasons.insert("redacted_aggregate_only_missing".to_string());
+    }
+
+    let block_reasons: Vec<String> = block_reasons.into_iter().collect();
+    let ready = block_reasons.is_empty();
+    let status = if ready {
+        "ready_for_runtime_enablement_review"
+    } else {
+        "blocked_shadow_telemetry_review"
+    };
+
+    json!({
+        "schema": MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_SHADOW_TELEMETRY_REVIEW_SCHEMA,
+        "generated_at": unix_now_secs(),
+        "read_only": true,
+        "shadow_telemetry_review": {
+            "ready": ready,
+            "status": status,
+            "block_reasons": block_reasons,
+            "reviewer_present": !reviewer.is_empty(),
+            "review_source_present": !review_source.is_empty(),
+            "telemetry_window_id_present": !telemetry_window_id.is_empty(),
+            "telemetry_review_decision": telemetry_review_decision,
+            "observed_case_count": observed_case_count,
+            "reviewed_case_count": reviewed_case_count,
+            "failed_case_count": failed_case_count,
+            "candidate_delta_count": candidate_delta_count,
+            "negative_control_regression_count": negative_control_regression_count,
+            "redaction_violation_count": redaction_violation_count,
+            "source_case_bound": source_case_bound,
+            "reviewed_case_count_matches": reviewed_case_count == observed_case_count,
+            "append_only_telemetry_confirmed": append_only_telemetry_confirmed,
+            "redacted_aggregate_only": redacted_aggregate_only,
+        },
+        "shadow_telemetry_contract": {
+            "may_prepare_runtime_enablement_review_now": ready,
+            "this_tool_invokes_executor": false,
+            "this_tool_runs_shadow_mode": false,
+            "this_tool_calls_memory_search": false,
+            "this_tool_calls_memory_neighbors": false,
+            "this_tool_runs_biocortex": false,
+            "may_mutate_runtime_candidate_set": false,
+            "changes_runtime_candidate_set": false,
+            "may_change_runtime_search_order": false,
+            "runtime_influence_approved": false,
+            "may_enable_runtime_gate_now": false,
+            "may_write_memory_or_graph_edges": false,
+            "may_approve_production_candidate_expansion_now": false,
+            "requires_later_runtime_enablement_gate": true,
+            "requires_later_candidate_expansion_enablement_gate": true,
+        },
+        "bounded_shadow_telemetry_review": {
+            "redacted_aggregate_required": true,
+            "append_only_telemetry_required": true,
+            "append_only_telemetry_confirmed": append_only_telemetry_confirmed,
+            "redacted_aggregate_only": redacted_aggregate_only,
+            "source_case_bound": source_case_bound,
+            "raw_queries_allowed": false,
+            "raw_keys_allowed": false,
+            "content_allowed": false,
+            "case_rows_allowed": false,
+            "production_traffic_allowed": false,
+        },
+        "input_contract": {
+            "shadow_executor_invocation_report_included": false,
+            "raw_query_included": false,
+            "raw_queries_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "case_rows_included": false,
+            "unknown_fields_ignored": true,
+        },
+        "non_goals": [
+            "This tool does not invoke a shadow executor or run shadow mode.",
+            "This tool does not read telemetry rows; it validates a bounded redacted aggregate review only.",
+            "This tool does not consume raw queries, raw keys, memory content, production traffic, or case rows.",
+            "This tool does not call BioCortex, memory_search, or memory_neighbors.",
+            "This tool does not mutate runtime candidate sets, search order, memory, graph edges, feature flags, approvals, or telemetry.",
+            "This tool does not approve runtime enablement or production candidate expansion."
+        ],
+    })
+}
+
+pub struct MemoryBioCortexT6CandidateExpansionShadowTelemetryReviewTool;
+impl MemoryBioCortexT6CandidateExpansionShadowTelemetryReviewTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for MemoryBioCortexT6CandidateExpansionShadowTelemetryReviewTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for MemoryBioCortexT6CandidateExpansionShadowTelemetryReviewTool {
+    fn name(&self) -> &'static str {
+        "memory_biocortex_t6_candidate_expansion_shadow_telemetry_review"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only T6 candidate-expansion shadow telemetry review gate. \
+                Consumes a safe shadow executor invocation report plus bounded redacted \
+                aggregate telemetry-review counts. It does not read raw telemetry, invoke \
+                executors, run shadow mode, call BioCortex or memory tools, mutate runtime \
+                candidates, change search order, or approve runtime influence."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": [
+                    "shadow_executor_invocation_report",
+                    "reviewer",
+                    "review_source",
+                    "telemetry_window_id",
+                    "telemetry_review_decision",
+                    "observed_case_count",
+                    "reviewed_case_count",
+                    "failed_case_count",
+                    "candidate_delta_count",
+                    "negative_control_regression_count",
+                    "redaction_violation_count",
+                    "append_only_telemetry_confirmed",
+                    "redacted_aggregate_only"
+                ],
+                "properties": {
+                    "shadow_executor_invocation_report": {
+                        "type": "object",
+                        "description": "JSON object produced by memory_biocortex_t6_candidate_expansion_shadow_executor_invocation_report. It is inspected but never echoed."
+                    },
+                    "reviewer": {
+                        "type": "string",
+                        "description": "Human or agent reviewer id for the telemetry review decision."
+                    },
+                    "review_source": {
+                        "type": "string",
+                        "description": "Review provenance such as a forum post or evidence packet id."
+                    },
+                    "telemetry_window_id": {
+                        "type": "string",
+                        "description": "Redacted aggregate telemetry window id. Raw telemetry row ids must not be supplied."
+                    },
+                    "telemetry_review_decision": {
+                        "type": "string",
+                        "enum": [
+                            "approve_shadow_telemetry_only",
+                            "request_shadow_telemetry_changes",
+                            "reject_shadow_telemetry"
+                        ],
+                        "description": "Only approve_shadow_telemetry_only can open the later runtime-enablement review path."
+                    },
+                    "observed_case_count": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100,
+                        "description": "Bounded count of redacted shadow cases observed in the aggregate telemetry."
+                    },
+                    "reviewed_case_count": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100,
+                        "description": "Count of redacted shadow cases reviewed; must match observed_case_count."
+                    },
+                    "failed_case_count": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100,
+                        "description": "Any failed case blocks the later runtime-enablement review path."
+                    },
+                    "candidate_delta_count": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100,
+                        "description": "Redacted count of hypothetical candidate deltas. No keys or content allowed."
+                    },
+                    "negative_control_regression_count": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100,
+                        "description": "Any negative-control regression blocks the later runtime-enablement review path."
+                    },
+                    "redaction_violation_count": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100,
+                        "description": "Any redaction violation blocks the later runtime-enablement review path."
+                    },
+                    "append_only_telemetry_confirmed": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Must be true to confirm only append-only telemetry was reviewed."
+                    },
+                    "redacted_aggregate_only": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Must be true to confirm no raw queries, keys, content, or case rows were supplied."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        Ok(ToolResult::json_text(
+            &memory_biocortex_t6_candidate_expansion_shadow_telemetry_review_payload(args),
+        ))
+    }
+}
+
+fn memory_biocortex_t6_candidate_expansion_runtime_enablement_review_source_claims_runtime_authority(
+    review: &Value,
+) -> bool {
+    [
+        "/shadow_telemetry_contract/may_enable_runtime_gate_now",
+        "/shadow_telemetry_contract/runtime_influence_approved",
+        "/shadow_telemetry_contract/may_mutate_runtime_candidate_set",
+        "/shadow_telemetry_contract/changes_runtime_candidate_set",
+        "/shadow_telemetry_contract/may_change_runtime_search_order",
+        "/shadow_telemetry_contract/may_write_memory_or_graph_edges",
+        "/shadow_telemetry_contract/may_approve_production_candidate_expansion_now",
+        "/bounded_shadow_telemetry_review/raw_queries_allowed",
+        "/bounded_shadow_telemetry_review/raw_keys_allowed",
+        "/bounded_shadow_telemetry_review/content_allowed",
+        "/bounded_shadow_telemetry_review/case_rows_allowed",
+        "/bounded_shadow_telemetry_review/production_traffic_allowed",
+    ]
+    .iter()
+    .any(|pointer| {
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(review, pointer)
+    })
+}
+
+fn memory_biocortex_t6_candidate_expansion_runtime_enablement_review_source_ready(
+    review: &Value,
+) -> bool {
+    review.get("schema").and_then(Value::as_str)
+        == Some(MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_SHADOW_TELEMETRY_REVIEW_SCHEMA)
+        && review.get("read_only").and_then(Value::as_bool) == Some(true)
+        && memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            review,
+            "/shadow_telemetry_review/ready",
+        )
+        && review
+            .pointer("/shadow_telemetry_review/status")
+            .and_then(Value::as_str)
+            == Some("ready_for_runtime_enablement_review")
+        && memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            review,
+            "/shadow_telemetry_contract/may_prepare_runtime_enablement_review_now",
+        )
+        && !memory_biocortex_t6_candidate_expansion_runtime_enablement_review_source_claims_runtime_authority(review)
+        && memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+            review,
+            "/shadow_telemetry_review/failed_case_count",
+        ) == 0
+        && memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+            review,
+            "/shadow_telemetry_review/negative_control_regression_count",
+        ) == 0
+        && memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+            review,
+            "/shadow_telemetry_review/redaction_violation_count",
+        ) == 0
+        && memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            review,
+            "/shadow_telemetry_review/append_only_telemetry_confirmed",
+        )
+        && memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            review,
+            "/shadow_telemetry_review/redacted_aggregate_only",
+        )
+        && !memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            review,
+            "/input_contract/shadow_executor_invocation_report_included",
+        )
+        && !memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            review,
+            "/input_contract/raw_query_included",
+        )
+        && !memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            review,
+            "/input_contract/raw_queries_included",
+        )
+        && !memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            review,
+            "/input_contract/raw_keys_included",
+        )
+        && !memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            review,
+            "/input_contract/content_included",
+        )
+        && !memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            review,
+            "/input_contract/case_rows_included",
+        )
+}
+
+fn memory_biocortex_t6_candidate_expansion_runtime_enablement_review_payload(
+    args: Value,
+) -> Value {
+    let review = args
+        .get("shadow_telemetry_review")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let reviewer =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(&args, "reviewer");
+    let review_source = memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(
+        &args,
+        "review_source",
+    );
+    let decision_source = memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(
+        &args,
+        "decision_source",
+    );
+    let runtime_enablement_review_decision =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(
+            &args,
+            "runtime_enablement_review_decision",
+        );
+    let observed_case_count =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+            &review,
+            "/shadow_telemetry_review/observed_case_count",
+        );
+    let reviewed_case_count =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+            &review,
+            "/shadow_telemetry_review/reviewed_case_count",
+        );
+    let failed_case_count =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+            &review,
+            "/shadow_telemetry_review/failed_case_count",
+        );
+    let candidate_delta_count =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+            &review,
+            "/shadow_telemetry_review/candidate_delta_count",
+        );
+    let negative_control_regression_count =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+            &review,
+            "/shadow_telemetry_review/negative_control_regression_count",
+        );
+    let redaction_violation_count =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+            &review,
+            "/shadow_telemetry_review/redaction_violation_count",
+        );
+    let source_case_bound =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+            &review,
+            "/shadow_telemetry_review/source_case_bound",
+        );
+    let append_only_telemetry_confirmed =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            &review,
+            "/shadow_telemetry_review/append_only_telemetry_confirmed",
+        );
+    let redacted_aggregate_only =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            &review,
+            "/shadow_telemetry_review/redacted_aggregate_only",
+        );
+
+    let mut block_reasons = BTreeSet::<String>::new();
+    if !memory_biocortex_t6_candidate_expansion_runtime_enablement_review_source_ready(&review) {
+        block_reasons.insert("source_shadow_telemetry_review_not_ready".to_string());
+    }
+    if memory_biocortex_t6_candidate_expansion_shadow_execution_gate_contains_raw(&review) {
+        block_reasons.insert("source_shadow_telemetry_review_contains_raw".to_string());
+    }
+    if memory_biocortex_t6_candidate_expansion_shadow_execution_gate_contains_raw(&args) {
+        block_reasons.insert("input_contains_raw_or_source_fields".to_string());
+    }
+    if memory_biocortex_t6_candidate_expansion_runtime_enablement_review_source_claims_runtime_authority(&review) {
+        block_reasons
+            .insert("source_shadow_telemetry_review_claims_runtime_authority".to_string());
+    }
+    if reviewer.is_empty() {
+        block_reasons.insert("reviewer_missing".to_string());
+    }
+    if review_source.is_empty() {
+        block_reasons.insert("review_source_missing".to_string());
+    }
+    if decision_source.is_empty() {
+        block_reasons.insert("decision_source_missing".to_string());
+    }
+    if runtime_enablement_review_decision != "approve_owner_runtime_enablement_review_only" {
+        block_reasons
+            .insert("runtime_enablement_review_decision_not_owner_review_only".to_string());
+    }
+    if failed_case_count > 0 {
+        block_reasons.insert("failed_case_count_present".to_string());
+    }
+    if negative_control_regression_count > 0 {
+        block_reasons.insert("negative_control_regression_detected".to_string());
+    }
+    if redaction_violation_count > 0 {
+        block_reasons.insert("redaction_violation_detected".to_string());
+    }
+    if !append_only_telemetry_confirmed {
+        block_reasons.insert("append_only_telemetry_not_confirmed".to_string());
+    }
+    if !redacted_aggregate_only {
+        block_reasons.insert("redacted_aggregate_only_missing".to_string());
+    }
+    for reason in memory_biocortex_t6_string_array_at(
+        &review,
+        "/shadow_telemetry_review/block_reasons",
+    ) {
+        memory_biocortex_t6_push_reason(&mut block_reasons, &reason);
+    }
+
+    let block_reasons: Vec<String> = block_reasons.into_iter().collect();
+    let ready = block_reasons.is_empty();
+    let status = if ready {
+        "ready_for_owner_runtime_enablement_decision"
+    } else {
+        "blocked_runtime_enablement_review"
+    };
+
+    json!({
+        "schema": MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_REVIEW_SCHEMA,
+        "generated_at": unix_now_secs(),
+        "read_only": true,
+        "runtime_enablement_review": {
+            "ready": ready,
+            "status": status,
+            "block_reasons": block_reasons,
+            "reviewer_present": !reviewer.is_empty(),
+            "review_source_present": !review_source.is_empty(),
+            "decision_source_present": !decision_source.is_empty(),
+            "runtime_enablement_review_decision": runtime_enablement_review_decision,
+            "observed_case_count": observed_case_count,
+            "reviewed_case_count": reviewed_case_count,
+            "failed_case_count": failed_case_count,
+            "candidate_delta_count": candidate_delta_count,
+            "negative_control_regression_count": negative_control_regression_count,
+            "redaction_violation_count": redaction_violation_count,
+            "source_case_bound": source_case_bound,
+            "append_only_telemetry_confirmed": append_only_telemetry_confirmed,
+            "redacted_aggregate_only": redacted_aggregate_only,
+        },
+        "owner_decision_options": [
+            {
+                "option": "request_more_shadow_telemetry",
+                "effect": "No runtime change; collect more bounded append-only redacted shadow telemetry."
+            },
+            {
+                "option": "reject_runtime_enablement_path",
+                "effect": "No runtime change; stop the T6 runtime-enablement path."
+            },
+            {
+                "option": "approve_runtime_enablement_implementation_plan_only",
+                "effect": "Allows an implementation-plan review for runtime enablement, but still grants no runtime authority."
+            }
+        ],
+        "runtime_enablement_contract": {
+            "may_prepare_owner_runtime_enablement_decision": ready,
+            "owner_runtime_enablement_decision_required": true,
+            "may_prepare_runtime_enablement_implementation_plan_now": false,
+            "may_implement_runtime_enablement_code_now": false,
+            "may_enable_runtime_gate_now": false,
+            "this_tool_runs_shadow_mode": false,
+            "this_tool_calls_memory_search": false,
+            "this_tool_calls_memory_neighbors": false,
+            "this_tool_runs_biocortex": false,
+            "may_mutate_runtime_candidate_set": false,
+            "changes_runtime_candidate_set": false,
+            "may_change_runtime_search_order": false,
+            "runtime_influence_approved": false,
+            "may_write_memory_or_graph_edges": false,
+            "may_approve_production_candidate_expansion_now": false,
+            "requires_later_owner_runtime_enablement_decision": true,
+            "requires_later_runtime_enablement_implementation_plan": true,
+            "requires_later_runtime_enablement_gate": true,
+        },
+        "bounded_runtime_enablement_review": {
+            "redacted_aggregate_required": true,
+            "append_only_telemetry_required": true,
+            "append_only_telemetry_confirmed": append_only_telemetry_confirmed,
+            "redacted_aggregate_only": redacted_aggregate_only,
+            "source_case_bound": source_case_bound,
+            "raw_queries_allowed": false,
+            "raw_keys_allowed": false,
+            "content_allowed": false,
+            "case_rows_allowed": false,
+            "production_traffic_allowed": false,
+        },
+        "review_checklist": [
+            "Confirm the source shadow telemetry review is ready and aggregate-only.",
+            "Inspect observed/reviewed counts, failed cases, candidate deltas, negative-control regressions, and redaction violations.",
+            "Do not approve runtime enablement from this review tool; prepare an explicit owner runtime-enablement decision only.",
+            "Require a separate implementation plan, default-off feature flag, rollback plan, and runtime gate before any production influence.",
+            "Keep raw queries, raw keys, memory content, production traffic, and per-case rows out of the artifact."
+        ],
+        "input_contract": {
+            "shadow_telemetry_review_included": false,
+            "shadow_executor_invocation_report_included": false,
+            "raw_query_included": false,
+            "raw_queries_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "case_rows_included": false,
+            "unknown_fields_ignored": true,
+        },
+        "links": {
+            "reviewer": reviewer,
+            "review_source": review_source,
+            "decision_source": decision_source,
+        },
+        "non_goals": [
+            "This tool does not enable the runtime gate.",
+            "This tool does not implement runtime-enablement code or change feature flags.",
+            "This tool does not run shadow mode or production candidate expansion.",
+            "This tool does not call BioCortex, memory_search, or memory_neighbors.",
+            "This tool does not mutate candidate sets, search order, memory, graph edges, approvals, or telemetry.",
+            "This tool does not approve production candidate expansion."
+        ],
+    })
+}
+
+pub struct MemoryBioCortexT6CandidateExpansionRuntimeEnablementReviewTool;
+impl MemoryBioCortexT6CandidateExpansionRuntimeEnablementReviewTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for MemoryBioCortexT6CandidateExpansionRuntimeEnablementReviewTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for MemoryBioCortexT6CandidateExpansionRuntimeEnablementReviewTool {
+    fn name(&self) -> &'static str {
+        "memory_biocortex_t6_candidate_expansion_runtime_enablement_review"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only T6 candidate-expansion runtime-enablement review gate. \
+                Consumes a safe shadow telemetry review artifact and emits an owner-decision \
+                surface only. It does not enable runtime behavior, implement runtime code, \
+                call BioCortex or memory tools, mutate candidate sets, write memory/graph \
+                edges, or approve production candidate expansion."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": [
+                    "shadow_telemetry_review",
+                    "reviewer",
+                    "review_source",
+                    "decision_source",
+                    "runtime_enablement_review_decision"
+                ],
+                "properties": {
+                    "shadow_telemetry_review": {
+                        "type": "object",
+                        "description": "JSON object produced by memory_biocortex_t6_candidate_expansion_shadow_telemetry_review. It is inspected but never echoed."
+                    },
+                    "reviewer": {
+                        "type": "string",
+                        "description": "Human or agent reviewer id for this runtime-enablement review."
+                    },
+                    "review_source": {
+                        "type": "string",
+                        "description": "Review provenance such as a forum post or evidence packet id."
+                    },
+                    "decision_source": {
+                        "type": "string",
+                        "description": "Provenance for the reviewer decision on this artifact."
+                    },
+                    "runtime_enablement_review_decision": {
+                        "type": "string",
+                        "enum": [
+                            "approve_owner_runtime_enablement_review_only",
+                            "request_more_shadow_telemetry",
+                            "reject_runtime_enablement_review"
+                        ],
+                        "description": "Only approve_owner_runtime_enablement_review_only can open the owner decision review path. No value enables runtime behavior."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        Ok(ToolResult::json_text(
+            &memory_biocortex_t6_candidate_expansion_runtime_enablement_review_payload(args),
+        ))
+    }
+}
+
+fn memory_biocortex_t6_candidate_expansion_runtime_enablement_owner_decision_source_claims_runtime_authority(
+    review: &Value,
+) -> bool {
+    [
+        "/runtime_enablement_contract/may_prepare_runtime_enablement_implementation_plan_now",
+        "/runtime_enablement_contract/may_implement_runtime_enablement_code_now",
+        "/runtime_enablement_contract/may_enable_runtime_gate_now",
+        "/runtime_enablement_contract/runtime_influence_approved",
+        "/runtime_enablement_contract/may_mutate_runtime_candidate_set",
+        "/runtime_enablement_contract/changes_runtime_candidate_set",
+        "/runtime_enablement_contract/may_change_runtime_search_order",
+        "/runtime_enablement_contract/may_write_memory_or_graph_edges",
+        "/runtime_enablement_contract/may_approve_production_candidate_expansion_now",
+        "/bounded_runtime_enablement_review/raw_queries_allowed",
+        "/bounded_runtime_enablement_review/raw_keys_allowed",
+        "/bounded_runtime_enablement_review/content_allowed",
+        "/bounded_runtime_enablement_review/case_rows_allowed",
+        "/bounded_runtime_enablement_review/production_traffic_allowed",
+    ]
+    .iter()
+    .any(|pointer| {
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(review, pointer)
+    })
+}
+
+fn memory_biocortex_t6_candidate_expansion_runtime_enablement_owner_decision_source_ready(
+    review: &Value,
+) -> bool {
+    review.get("schema").and_then(Value::as_str)
+        == Some(MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_REVIEW_SCHEMA)
+        && review.get("read_only").and_then(Value::as_bool) == Some(true)
+        && memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            review,
+            "/runtime_enablement_review/ready",
+        )
+        && review
+            .pointer("/runtime_enablement_review/status")
+            .and_then(Value::as_str)
+            == Some("ready_for_owner_runtime_enablement_decision")
+        && memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            review,
+            "/runtime_enablement_contract/may_prepare_owner_runtime_enablement_decision",
+        )
+        && !memory_biocortex_t6_candidate_expansion_runtime_enablement_owner_decision_source_claims_runtime_authority(
+            review,
+        )
+        && memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+            review,
+            "/runtime_enablement_review/failed_case_count",
+        ) == 0
+        && memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+            review,
+            "/runtime_enablement_review/negative_control_regression_count",
+        ) == 0
+        && memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+            review,
+            "/runtime_enablement_review/redaction_violation_count",
+        ) == 0
+        && memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            review,
+            "/runtime_enablement_review/append_only_telemetry_confirmed",
+        )
+        && memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            review,
+            "/runtime_enablement_review/redacted_aggregate_only",
+        )
+        && !memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            review,
+            "/input_contract/shadow_telemetry_review_included",
+        )
+        && !memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            review,
+            "/input_contract/shadow_executor_invocation_report_included",
+        )
+        && !memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            review,
+            "/input_contract/raw_query_included",
+        )
+        && !memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            review,
+            "/input_contract/raw_queries_included",
+        )
+        && !memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            review,
+            "/input_contract/raw_keys_included",
+        )
+        && !memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            review,
+            "/input_contract/content_included",
+        )
+        && !memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            review,
+            "/input_contract/case_rows_included",
+        )
+}
+
+fn memory_biocortex_t6_candidate_expansion_runtime_enablement_owner_decision_record_payload(
+    args: Value,
+) -> Value {
+    let review = args
+        .get("runtime_enablement_review")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let owner =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(&args, "owner");
+    let decision_source = memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(
+        &args,
+        "decision_source",
+    );
+    let reviewer =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(&args, "reviewer");
+    let rationale =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(&args, "rationale");
+    let owner_decision = memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(
+        &args,
+        "owner_decision",
+    );
+    let observed_case_count =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+            &review,
+            "/runtime_enablement_review/observed_case_count",
+        );
+    let reviewed_case_count =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+            &review,
+            "/runtime_enablement_review/reviewed_case_count",
+        );
+    let failed_case_count =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+            &review,
+            "/runtime_enablement_review/failed_case_count",
+        );
+    let candidate_delta_count =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+            &review,
+            "/runtime_enablement_review/candidate_delta_count",
+        );
+    let negative_control_regression_count =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+            &review,
+            "/runtime_enablement_review/negative_control_regression_count",
+        );
+    let redaction_violation_count =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+            &review,
+            "/runtime_enablement_review/redaction_violation_count",
+        );
+    let source_case_bound =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+            &review,
+            "/runtime_enablement_review/source_case_bound",
+        );
+    let append_only_telemetry_confirmed =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            &review,
+            "/runtime_enablement_review/append_only_telemetry_confirmed",
+        );
+    let redacted_aggregate_only =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            &review,
+            "/runtime_enablement_review/redacted_aggregate_only",
+        );
+
+    let mut block_reasons = BTreeSet::<String>::new();
+    if !memory_biocortex_t6_candidate_expansion_runtime_enablement_owner_decision_source_ready(
+        &review,
+    ) {
+        block_reasons.insert("source_runtime_enablement_review_not_ready".to_string());
+    }
+    if memory_biocortex_t6_candidate_expansion_shadow_execution_gate_contains_raw(&review) {
+        block_reasons.insert("source_runtime_enablement_review_contains_raw".to_string());
+    }
+    if memory_biocortex_t6_candidate_expansion_shadow_execution_gate_contains_raw(&args) {
+        block_reasons.insert("input_contains_raw_or_source_fields".to_string());
+    }
+    if memory_biocortex_t6_candidate_expansion_runtime_enablement_owner_decision_source_claims_runtime_authority(
+        &review,
+    ) {
+        block_reasons
+            .insert("source_runtime_enablement_review_claims_runtime_authority".to_string());
+    }
+    if owner.is_empty() {
+        block_reasons.insert("owner_missing".to_string());
+    }
+    if decision_source.is_empty() {
+        block_reasons.insert("decision_source_missing".to_string());
+    }
+    if !matches!(
+        owner_decision.as_str(),
+        "approve_runtime_enablement_preflight_or_plan_review_only"
+            | "request_more_shadow_telemetry"
+            | "reject_runtime_enablement_path"
+    ) {
+        block_reasons.insert("owner_decision_invalid".to_string());
+    }
+    if owner_decision != "approve_runtime_enablement_preflight_or_plan_review_only" {
+        block_reasons
+            .insert("owner_decision_not_preflight_or_plan_review_only".to_string());
+    }
+    if failed_case_count > 0 {
+        block_reasons.insert("failed_case_count_present".to_string());
+    }
+    if negative_control_regression_count > 0 {
+        block_reasons.insert("negative_control_regression_detected".to_string());
+    }
+    if redaction_violation_count > 0 {
+        block_reasons.insert("redaction_violation_detected".to_string());
+    }
+    if !append_only_telemetry_confirmed {
+        block_reasons.insert("append_only_telemetry_not_confirmed".to_string());
+    }
+    if !redacted_aggregate_only {
+        block_reasons.insert("redacted_aggregate_only_missing".to_string());
+    }
+    for reason in memory_biocortex_t6_string_array_at(
+        &review,
+        "/runtime_enablement_review/block_reasons",
+    ) {
+        memory_biocortex_t6_push_reason(&mut block_reasons, &reason);
+    }
+
+    let block_reasons: Vec<String> = block_reasons.into_iter().collect();
+    let ready = block_reasons.is_empty();
+    let status = if ready {
+        "ready_for_runtime_enablement_preflight_or_plan_review"
+    } else {
+        "blocked_runtime_enablement_owner_decision_record"
+    };
+    let next_gate = if ready {
+        "prepare_runtime_enablement_preflight_or_plan_review_artifact"
+    } else {
+        "repair_runtime_enablement_review_or_owner_decision"
+    };
+
+    json!({
+        "schema": MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_OWNER_DECISION_RECORD_SCHEMA,
+        "generated_at": unix_now_secs(),
+        "read_only": true,
+        "runtime_enablement_owner_decision_record": {
+            "ready": ready,
+            "status": status,
+            "block_reasons": block_reasons,
+            "owner_present": !owner.is_empty(),
+            "decision_source_present": !decision_source.is_empty(),
+            "reviewer_present": !reviewer.is_empty(),
+            "owner_decision": owner_decision,
+            "owner": owner,
+            "decision_source": decision_source,
+            "reviewer": reviewer,
+            "rationale": rationale,
+            "observed_case_count": observed_case_count,
+            "reviewed_case_count": reviewed_case_count,
+            "failed_case_count": failed_case_count,
+            "candidate_delta_count": candidate_delta_count,
+            "negative_control_regression_count": negative_control_regression_count,
+            "redaction_violation_count": redaction_violation_count,
+            "source_case_bound": source_case_bound,
+            "append_only_telemetry_confirmed": append_only_telemetry_confirmed,
+            "redacted_aggregate_only": redacted_aggregate_only,
+            "decision": {
+                "verdict": status,
+                "next_gate": next_gate,
+                "preflight_or_plan_review_only": true,
+                "runtime_code_out_of_scope": true,
+                "runtime_authority_out_of_scope": true,
+                "candidate_expansion_authority_out_of_scope": true,
+            }
+        },
+        "runtime_enablement_owner_decision_contract": {
+            "explicit_owner_decision_required": true,
+            "may_prepare_runtime_enablement_preflight_or_plan_review": ready,
+            "may_prepare_runtime_enablement_implementation_plan_now": false,
+            "may_implement_runtime_enablement_code_now": false,
+            "may_enable_runtime_gate_now": false,
+            "this_tool_runs_shadow_mode": false,
+            "this_tool_calls_memory_search": false,
+            "this_tool_calls_memory_neighbors": false,
+            "this_tool_runs_biocortex": false,
+            "may_mutate_runtime_candidate_set": false,
+            "changes_runtime_candidate_set": false,
+            "may_change_runtime_search_order": false,
+            "runtime_influence_approved": false,
+            "may_write_memory_or_graph_edges": false,
+            "may_approve_production_candidate_expansion_now": false,
+            "requires_later_runtime_enablement_preflight_or_plan": true,
+            "requires_later_runtime_enablement_gate": true,
+            "requires_later_runtime_enablement_code_gate": true,
+        },
+        "bounded_runtime_enablement_owner_decision": {
+            "redacted_aggregate_required": true,
+            "append_only_telemetry_required": true,
+            "append_only_telemetry_confirmed": append_only_telemetry_confirmed,
+            "redacted_aggregate_only": redacted_aggregate_only,
+            "source_case_bound": source_case_bound,
+            "raw_queries_allowed": false,
+            "raw_keys_allowed": false,
+            "content_allowed": false,
+            "case_rows_allowed": false,
+            "production_traffic_allowed": false,
+        },
+        "review_checklist": [
+            "Confirm the source runtime-enablement review is ready and aggregate-only.",
+            "Confirm the owner decision came from an explicit external source.",
+            "If approving, limit follow-up work to a preflight or implementation-plan review artifact only.",
+            "Require a separate runtime-enablement gate and code gate before any runtime behavior exists.",
+            "Keep raw queries, raw keys, memory content, production traffic, and per-case rows out of the artifact."
+        ],
+        "input_contract": {
+            "runtime_enablement_review_included": false,
+            "shadow_telemetry_review_included": false,
+            "shadow_executor_invocation_report_included": false,
+            "raw_query_included": false,
+            "raw_queries_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "case_rows_included": false,
+            "unknown_fields_ignored": true,
+        },
+        "non_goals": [
+            "This tool does not enable the runtime gate.",
+            "This tool does not implement runtime-enablement code or change feature flags.",
+            "This tool does not run shadow mode or production candidate expansion.",
+            "This tool does not call BioCortex, memory_search, or memory_neighbors.",
+            "This tool does not mutate candidate sets, search order, memory, graph edges, approvals, or telemetry.",
+            "This tool does not approve production candidate expansion."
+        ],
+    })
+}
+
+pub struct MemoryBioCortexT6CandidateExpansionRuntimeEnablementOwnerDecisionRecordTool;
+impl MemoryBioCortexT6CandidateExpansionRuntimeEnablementOwnerDecisionRecordTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for MemoryBioCortexT6CandidateExpansionRuntimeEnablementOwnerDecisionRecordTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for MemoryBioCortexT6CandidateExpansionRuntimeEnablementOwnerDecisionRecordTool {
+    fn name(&self) -> &'static str {
+        "memory_biocortex_t6_candidate_expansion_runtime_enablement_owner_decision_record"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only T6 runtime-enablement owner decision record. \
+                Consumes a safe runtime-enablement review artifact and an explicit owner \
+                decision. A positive decision can only open a later preflight/plan review \
+                surface; it does not enable runtime behavior, implement runtime code, \
+                call BioCortex or memory tools, mutate candidate sets, write memory/graph \
+                edges, or approve production candidate expansion."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": [
+                    "runtime_enablement_review",
+                    "owner",
+                    "decision_source",
+                    "owner_decision"
+                ],
+                "properties": {
+                    "runtime_enablement_review": {
+                        "type": "object",
+                        "description": "JSON object produced by memory_biocortex_t6_candidate_expansion_runtime_enablement_review. It is inspected but never echoed."
+                    },
+                    "owner": {
+                        "type": "string",
+                        "description": "Owner/operator identity for the decision record."
+                    },
+                    "decision_source": {
+                        "type": "string",
+                        "description": "External source for the owner decision, such as a forum post id, issue URL, or signed review note id."
+                    },
+                    "owner_decision": {
+                        "type": "string",
+                        "enum": [
+                            "approve_runtime_enablement_preflight_or_plan_review_only",
+                            "request_more_shadow_telemetry",
+                            "reject_runtime_enablement_path"
+                        ],
+                        "description": "Only approve_runtime_enablement_preflight_or_plan_review_only opens the next review/planning path. No value enables runtime behavior."
+                    },
+                    "reviewer": {
+                        "type": "string",
+                        "description": "Optional reviewer identity or handle."
+                    },
+                    "rationale": {
+                        "type": "string",
+                        "description": "Optional short rationale copied from the external decision source."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        Ok(ToolResult::json_text(
+            &memory_biocortex_t6_candidate_expansion_runtime_enablement_owner_decision_record_payload(
+                args,
+            ),
+        ))
+    }
+}
+
+fn memory_biocortex_t6_candidate_expansion_runtime_enablement_implementation_plan_source_claims_runtime_authority(
+    record: &Value,
+) -> bool {
+    [
+        "/runtime_enablement_owner_decision_contract/may_prepare_runtime_enablement_implementation_plan_now",
+        "/runtime_enablement_owner_decision_contract/may_implement_runtime_enablement_code_now",
+        "/runtime_enablement_owner_decision_contract/may_enable_runtime_gate_now",
+        "/runtime_enablement_owner_decision_contract/this_tool_runs_shadow_mode",
+        "/runtime_enablement_owner_decision_contract/this_tool_calls_memory_search",
+        "/runtime_enablement_owner_decision_contract/this_tool_calls_memory_neighbors",
+        "/runtime_enablement_owner_decision_contract/this_tool_runs_biocortex",
+        "/runtime_enablement_owner_decision_contract/may_mutate_runtime_candidate_set",
+        "/runtime_enablement_owner_decision_contract/changes_runtime_candidate_set",
+        "/runtime_enablement_owner_decision_contract/may_change_runtime_search_order",
+        "/runtime_enablement_owner_decision_contract/runtime_influence_approved",
+        "/runtime_enablement_owner_decision_contract/may_write_memory_or_graph_edges",
+        "/runtime_enablement_owner_decision_contract/may_approve_production_candidate_expansion_now",
+        "/bounded_runtime_enablement_owner_decision/raw_queries_allowed",
+        "/bounded_runtime_enablement_owner_decision/raw_keys_allowed",
+        "/bounded_runtime_enablement_owner_decision/content_allowed",
+        "/bounded_runtime_enablement_owner_decision/case_rows_allowed",
+        "/bounded_runtime_enablement_owner_decision/production_traffic_allowed",
+    ]
+    .iter()
+    .any(|path| {
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(record, path)
+    })
+}
+
+fn memory_biocortex_t6_candidate_expansion_runtime_enablement_implementation_plan_source_ready(
+    record: &Value,
+) -> bool {
+    memory_biocortex_t6_string_at(record, "/schema")
+        == Some(
+            MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_OWNER_DECISION_RECORD_SCHEMA,
+        )
+        && memory_biocortex_t6_bool_at(record, "/read_only") == Some(true)
+        && memory_biocortex_t6_bool_at(record, "/runtime_enablement_owner_decision_record/ready")
+            == Some(true)
+        && record
+            .pointer("/runtime_enablement_owner_decision_record/status")
+            .and_then(Value::as_str)
+            == Some("ready_for_runtime_enablement_preflight_or_plan_review")
+        && memory_biocortex_t6_bool_at(
+            record,
+            "/runtime_enablement_owner_decision_contract/may_prepare_runtime_enablement_preflight_or_plan_review",
+        ) == Some(true)
+        && !memory_biocortex_t6_candidate_expansion_runtime_enablement_implementation_plan_source_claims_runtime_authority(record)
+}
+
+fn memory_biocortex_t6_candidate_expansion_runtime_enablement_implementation_plan_artifact_payload(
+    args: Value,
+) -> Value {
+    let record = args
+        .get("runtime_enablement_owner_decision_record")
+        .cloned()
+        .unwrap_or(Value::Null);
+    let reviewer =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(&args, "reviewer");
+    let commit =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(&args, "commit");
+    let forum_post_id = memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(
+        &args,
+        "forum_post_id",
+    );
+    let memory_key =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(&args, "memory_key");
+
+    let source_ready =
+        memory_biocortex_t6_candidate_expansion_runtime_enablement_implementation_plan_source_ready(
+            &record,
+        );
+    let source_claims_runtime_authority =
+        memory_biocortex_t6_candidate_expansion_runtime_enablement_implementation_plan_source_claims_runtime_authority(
+            &record,
+        );
+    let source_contains_raw =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_contains_raw(&record)
+            || record.get("runtime_enablement_review").is_some()
+            || memory_biocortex_t6_any_true(
+                &record,
+                &[
+                    "/input_contract/runtime_enablement_review_included",
+                    "/input_contract/shadow_telemetry_review_included",
+                    "/input_contract/shadow_executor_invocation_report_included",
+                    "/input_contract/raw_query_included",
+                    "/input_contract/raw_queries_included",
+                    "/input_contract/raw_keys_included",
+                    "/input_contract/content_included",
+                    "/input_contract/case_rows_included",
+                ],
+            );
+    let input_contains_raw =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_contains_raw(&args);
+    let append_only_telemetry_confirmed =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            &record,
+            "/runtime_enablement_owner_decision_record/append_only_telemetry_confirmed",
+        );
+    let redacted_aggregate_only =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_bool_at(
+            &record,
+            "/runtime_enablement_owner_decision_record/redacted_aggregate_only",
+        );
+    let failed_case_count =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+            &record,
+            "/runtime_enablement_owner_decision_record/failed_case_count",
+        );
+    let negative_control_regression_count =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+            &record,
+            "/runtime_enablement_owner_decision_record/negative_control_regression_count",
+        );
+    let redaction_violation_count =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_u64_at(
+            &record,
+            "/runtime_enablement_owner_decision_record/redaction_violation_count",
+        );
+    let owner_decision = memory_biocortex_t6_string_at(
+        &record,
+        "/runtime_enablement_owner_decision_record/owner_decision",
+    )
+    .unwrap_or("");
+    let source_requirements_ok = memory_biocortex_t6_bool_at(
+        &record,
+        "/runtime_enablement_owner_decision_contract/requires_later_runtime_enablement_preflight_or_plan",
+    ) == Some(true)
+        && memory_biocortex_t6_bool_at(
+            &record,
+            "/runtime_enablement_owner_decision_contract/requires_later_runtime_enablement_gate",
+        ) == Some(true)
+        && memory_biocortex_t6_bool_at(
+            &record,
+            "/runtime_enablement_owner_decision_contract/requires_later_runtime_enablement_code_gate",
+        ) == Some(true)
+        && append_only_telemetry_confirmed
+        && redacted_aggregate_only;
+
+    let mut block_reasons = BTreeSet::<String>::new();
+    if !source_ready {
+        block_reasons
+            .insert("source_runtime_enablement_owner_decision_record_not_ready".to_string());
+    }
+    if source_contains_raw {
+        block_reasons
+            .insert("source_runtime_enablement_owner_decision_record_contains_raw".to_string());
+    }
+    if input_contains_raw {
+        block_reasons.insert("input_contains_raw_or_source_fields".to_string());
+    }
+    if source_claims_runtime_authority {
+        block_reasons.insert(
+            "source_runtime_enablement_owner_decision_record_claims_runtime_authority"
+                .to_string(),
+        );
+    }
+    if !source_requirements_ok {
+        block_reasons.insert(
+            "source_runtime_enablement_owner_decision_record_requirements_incomplete".to_string(),
+        );
+    }
+    if owner_decision != "approve_runtime_enablement_preflight_or_plan_review_only" {
+        block_reasons.insert(
+            "source_owner_decision_record_not_approved_for_runtime_enablement_plan".to_string(),
+        );
+    }
+    if failed_case_count > 0 {
+        block_reasons.insert("failed_case_count_present".to_string());
+    }
+    if negative_control_regression_count > 0 {
+        block_reasons.insert("negative_control_regression_detected".to_string());
+    }
+    if redaction_violation_count > 0 {
+        block_reasons.insert("redaction_violation_detected".to_string());
+    }
+    if !append_only_telemetry_confirmed {
+        block_reasons.insert("append_only_telemetry_not_confirmed".to_string());
+    }
+    if !redacted_aggregate_only {
+        block_reasons.insert("redacted_aggregate_only_missing".to_string());
+    }
+    for reason in memory_biocortex_t6_string_array_at(
+        &record,
+        "/runtime_enablement_owner_decision_record/block_reasons",
+    ) {
+        memory_biocortex_t6_push_reason(&mut block_reasons, &reason);
+    }
+
+    let block_reasons: Vec<String> = block_reasons.into_iter().collect();
+    let ready = block_reasons.is_empty();
+    let status = if ready {
+        "ready_for_runtime_enablement_implementation_plan_review"
+    } else {
+        "blocked_runtime_enablement_implementation_plan_artifact"
+    };
+    let next_gate = if ready {
+        "author_review_runtime_enablement_code_implementation_gate_before_code"
+    } else {
+        "repair_runtime_enablement_owner_decision_record"
+    };
+    let telemetry_fields = vec![
+        "source_case_bound",
+        "observed_case_count",
+        "reviewed_case_count",
+        "candidate_delta_count",
+        "failed_case_count",
+        "negative_control_regression_count",
+        "redaction_violation_count",
+        "append_only_telemetry_confirmed",
+        "redacted_aggregate_only",
+        "runtime_gate_enabled",
+    ];
+
+    json!({
+        "schema": MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_IMPLEMENTATION_PLAN_ARTIFACT_SCHEMA,
+        "generated_at": unix_now_secs(),
+        "read_only": true,
+        "purpose": "T6 runtime-enablement implementation-plan artifact: consume a safe owner-decision record and emit the checklist for a later code-gate lane without implementing runtime code, enabling runtime behavior, invoking BioCortex, or approving candidate expansion.",
+        "runtime_enablement_implementation_plan_artifact": {
+            "ready": ready,
+            "status": status,
+            "block_reasons": block_reasons,
+            "decision": {
+                "verdict": status,
+                "next_gate": next_gate,
+                "preflight_plan_review_only": true,
+                "implementation_plan_review_required": true,
+                "runtime_code_out_of_scope": true,
+                "runtime_authority_out_of_scope": true,
+                "candidate_expansion_authority_out_of_scope": true,
+            },
+            "source_decision": {
+                "owner": memory_biocortex_t6_string_at(&record, "/runtime_enablement_owner_decision_record/owner"),
+                "owner_decision": memory_biocortex_t6_string_at(&record, "/runtime_enablement_owner_decision_record/owner_decision"),
+                "decision_source": memory_biocortex_t6_string_at(&record, "/runtime_enablement_owner_decision_record/decision_source"),
+                "reviewer": memory_biocortex_t6_string_at(&record, "/runtime_enablement_owner_decision_record/reviewer"),
+                "owner_decision_verdict": memory_biocortex_t6_string_at(&record, "/runtime_enablement_owner_decision_record/decision/verdict"),
+                "owner_decision_next_gate": memory_biocortex_t6_string_at(&record, "/runtime_enablement_owner_decision_record/decision/next_gate"),
+            },
+            "source_evidence": {
+                "observed_case_count": memory_biocortex_t6_u64_at(&record, "/runtime_enablement_owner_decision_record/observed_case_count"),
+                "reviewed_case_count": memory_biocortex_t6_u64_at(&record, "/runtime_enablement_owner_decision_record/reviewed_case_count"),
+                "failed_case_count": failed_case_count,
+                "candidate_delta_count": memory_biocortex_t6_u64_at(&record, "/runtime_enablement_owner_decision_record/candidate_delta_count"),
+                "negative_control_regression_count": negative_control_regression_count,
+                "redaction_violation_count": redaction_violation_count,
+                "source_case_bound": memory_biocortex_t6_u64_at(&record, "/runtime_enablement_owner_decision_record/source_case_bound"),
+                "append_only_telemetry_confirmed": append_only_telemetry_confirmed,
+                "redacted_aggregate_only": redacted_aggregate_only,
+            },
+            "requirements": {
+                "separate_runtime_enablement_gate": true,
+                "separate_runtime_enablement_code_gate": true,
+                "feature_flag_default_off": true,
+                "shadow_mode_first": true,
+                "deterministic_replay_fixture": true,
+                "bounded_candidate_delta": true,
+                "negative_controls": true,
+                "rollback_plan": true,
+                "telemetry_fields": telemetry_fields,
+            },
+        },
+        "implementation_plan": {
+            "runtime_gate_entrypoint": {
+                "tool_name": "memory_biocortex_t6_candidate_expansion_runtime_enablement_code_implementation_gate",
+                "scope": "separate_code_gate_review_before_runtime_enablement_code",
+                "default_runtime_enabled": false,
+            },
+            "feature_flag": {
+                "name": "AB_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_SHADOW",
+                "default_off": true,
+                "required_before_any_shadow_execution": true,
+            },
+            "shadow_mode_contract": {
+                "shadow_mode_first": true,
+                "default_enabled": false,
+                "can_influence_candidate_set": false,
+                "can_change_search_order": false,
+                "can_write_memory": false,
+            },
+            "deterministic_replay_fixture": {
+                "required": true,
+                "uses_redacted_fixture_ids_only": true,
+                "must_run_before_shadow_execution": true,
+            },
+            "bounded_candidate_delta": {
+                "required": true,
+                "max_added_candidates_requires_separate_code_gate": true,
+                "no_unbounded_neighbor_walks": true,
+            },
+            "negative_controls": {
+                "required": true,
+                "must_include_no_lift_and_noise_cases": true,
+                "regression_blocks_shadow_execution": true,
+            },
+            "telemetry_fields": telemetry_fields,
+            "rollback_contract": {
+                "required": true,
+                "restores_baseline_candidate_path": true,
+                "disables_shadow_flag": true,
+                "removes_runtime_influence": true,
+            },
+        },
+        "plan_contract": {
+            "may_prepare_runtime_enablement_code_implementation_gate": ready,
+            "may_prepare_runtime_enablement_code_gate_now": false,
+            "may_implement_runtime_enablement_code_now": false,
+            "may_enable_runtime_gate_now": false,
+            "may_run_shadow_mode_now": false,
+            "candidate_expansion_experiment_approved": false,
+            "may_run_candidate_expansion_dry_run_now": false,
+            "may_expand_candidate_set_now": false,
+            "changes_candidate_set_now": false,
+            "runtime_influence_approved": false,
+            "may_change_search_order_now": false,
+            "may_write_memory_or_graph_edges": false,
+            "requires_separate_runtime_enablement_implementation_plan": true,
+            "requires_separate_runtime_enablement_code_gate": true,
+            "requires_separate_runtime_enablement_gate": true,
+        },
+        "implementation_plan_checklist": [
+            "Treat this artifact as a plan-review handoff only, not runtime authorization.",
+            "Require a separate runtime-enablement implementation plan before code changes.",
+            "Require a separate code gate before adding default-off shadow runtime code.",
+            "Keep any future runtime gate default-off and shadow-only until separately approved.",
+            "Preserve deterministic replay fixtures, negative controls, bounded candidate deltas, and rollback.",
+            "Emit only aggregate telemetry fields; never include raw queries, keys, content, case rows, or raw errors.",
+            "Require a later runtime-enable gate before any candidate-set influence, search-order change, or production expansion."
+        ],
+        "links": {
+            "reviewer": reviewer,
+            "commit": commit,
+            "forum_post_id": forum_post_id,
+            "memory_key": memory_key,
+        },
+        "input_contract": {
+            "runtime_enablement_owner_decision_record_included": false,
+            "runtime_enablement_review_included": false,
+            "shadow_telemetry_review_included": false,
+            "shadow_executor_invocation_report_included": false,
+            "raw_query_included": false,
+            "raw_queries_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "case_rows_included": false,
+            "raw_error_included": false,
+            "unknown_fields_ignored": true,
+        },
+        "non_goals": [
+            "This tool does not enable a runtime gate.",
+            "This tool does not implement runtime-enablement code or change feature flags.",
+            "This tool does not run shadow mode, invoke executors, or run BioCortex.",
+            "This tool does not call memory_search or memory_neighbors.",
+            "This tool does not mutate candidate sets, search order, memory, graph edges, approvals, telemetry, feature flags, or runtime configuration.",
+            "This tool does not approve runtime influence or production candidate expansion."
+        ],
+    })
+}
+
+pub struct MemoryBioCortexT6CandidateExpansionRuntimeEnablementImplementationPlanArtifactTool;
+impl MemoryBioCortexT6CandidateExpansionRuntimeEnablementImplementationPlanArtifactTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for MemoryBioCortexT6CandidateExpansionRuntimeEnablementImplementationPlanArtifactTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for MemoryBioCortexT6CandidateExpansionRuntimeEnablementImplementationPlanArtifactTool {
+    fn name(&self) -> &'static str {
+        "memory_biocortex_t6_candidate_expansion_runtime_enablement_implementation_plan_artifact"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only T6 runtime-enablement preflight/plan artifact. \
+                Consumes a safe runtime-enablement owner-decision record and emits \
+                requirements for a later implementation-plan/code-gate lane. It \
+                does not enable runtime behavior, implement runtime code, call \
+                BioCortex or memory tools, mutate candidate sets, write \
+                memory/graph edges, or approve production candidate expansion."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["runtime_enablement_owner_decision_record"],
+                "properties": {
+                    "runtime_enablement_owner_decision_record": {
+                        "type": "object",
+                        "description": "JSON object produced by memory_biocortex_t6_candidate_expansion_runtime_enablement_owner_decision_record. It is inspected but never echoed."
+                    },
+                    "reviewer": {
+                        "type": "string",
+                        "description": "Optional reviewer identity or handle."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Optional implementation commit under review."
+                    },
+                    "forum_post_id": {
+                        "type": "string",
+                        "description": "Optional forum post id linking this artifact."
+                    },
+                    "memory_key": {
+                        "type": "string",
+                        "description": "Optional memory key linking this artifact."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        Ok(ToolResult::json_text(
+            &memory_biocortex_t6_candidate_expansion_runtime_enablement_implementation_plan_artifact_payload(
+                args,
+            ),
+        ))
+    }
+}
+
+fn memory_biocortex_t6_candidate_expansion_runtime_enablement_code_implementation_gate_payload(
+    args: Value,
+) -> Value {
+    let plan = args
+        .get("runtime_enablement_implementation_plan_artifact")
+        .unwrap_or(&Value::Null);
+    let reviewer =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(&args, "reviewer");
+    let decision_source = memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(
+        &args,
+        "decision_source",
+    );
+    let code_gate_decision = args
+        .get("code_gate_decision")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("missing_code_gate_decision");
+    let commit =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(&args, "commit");
+    let forum_post_id = memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(
+        &args,
+        "forum_post_id",
+    );
+    let memory_key =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(&args, "memory_key");
+
+    let plan_schema_valid = memory_biocortex_t6_string_at(plan, "/schema")
+        == Some(
+            MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_IMPLEMENTATION_PLAN_ARTIFACT_SCHEMA,
+        );
+    let plan_ready = memory_biocortex_t6_bool_at(
+        plan,
+        "/runtime_enablement_implementation_plan_artifact/ready",
+    ) == Some(true);
+    let plan_safe_contract = memory_biocortex_t6_bool_at(plan, "/read_only") == Some(true)
+        && memory_biocortex_t6_bool_at(
+            plan,
+            "/plan_contract/may_prepare_runtime_enablement_code_implementation_gate",
+        ) == Some(true)
+        && memory_biocortex_t6_bool_at(
+            plan,
+            "/plan_contract/may_prepare_runtime_enablement_code_gate_now",
+        ) == Some(false)
+        && memory_biocortex_t6_bool_at(
+            plan,
+            "/plan_contract/may_implement_runtime_enablement_code_now",
+        ) == Some(false)
+        && memory_biocortex_t6_bool_at(plan, "/plan_contract/may_enable_runtime_gate_now")
+            == Some(false)
+        && memory_biocortex_t6_bool_at(plan, "/plan_contract/may_run_shadow_mode_now")
+            == Some(false)
+        && memory_biocortex_t6_bool_at(
+            plan,
+            "/plan_contract/candidate_expansion_experiment_approved",
+        ) == Some(false)
+        && memory_biocortex_t6_bool_at(
+            plan,
+            "/plan_contract/may_run_candidate_expansion_dry_run_now",
+        ) == Some(false)
+        && memory_biocortex_t6_bool_at(plan, "/plan_contract/may_expand_candidate_set_now")
+            == Some(false)
+        && memory_biocortex_t6_bool_at(plan, "/plan_contract/changes_candidate_set_now")
+            == Some(false)
+        && memory_biocortex_t6_bool_at(plan, "/plan_contract/runtime_influence_approved")
+            == Some(false)
+        && memory_biocortex_t6_bool_at(plan, "/plan_contract/may_change_search_order_now")
+            == Some(false)
+        && memory_biocortex_t6_bool_at(plan, "/plan_contract/may_write_memory_or_graph_edges")
+            == Some(false)
+        && memory_biocortex_t6_bool_at(
+            plan,
+            "/plan_contract/requires_separate_runtime_enablement_code_gate",
+        ) == Some(true)
+        && memory_biocortex_t6_bool_at(
+            plan,
+            "/plan_contract/requires_separate_runtime_enablement_gate",
+        ) == Some(true);
+    let plan_claims_runtime_authority = memory_biocortex_t6_any_true(
+        plan,
+        &[
+            "/plan_contract/may_prepare_runtime_enablement_code_gate_now",
+            "/plan_contract/may_implement_runtime_enablement_code_now",
+            "/plan_contract/may_enable_runtime_gate_now",
+            "/plan_contract/may_run_shadow_mode_now",
+            "/plan_contract/candidate_expansion_experiment_approved",
+            "/plan_contract/may_run_candidate_expansion_dry_run_now",
+            "/plan_contract/may_expand_candidate_set_now",
+            "/plan_contract/changes_candidate_set_now",
+            "/plan_contract/runtime_influence_approved",
+            "/plan_contract/may_change_search_order_now",
+            "/plan_contract/may_write_memory_or_graph_edges",
+            "/implementation_plan/runtime_gate_entrypoint/default_runtime_enabled",
+            "/implementation_plan/shadow_mode_contract/default_enabled",
+            "/implementation_plan/shadow_mode_contract/can_influence_candidate_set",
+            "/implementation_plan/shadow_mode_contract/can_change_search_order",
+            "/implementation_plan/shadow_mode_contract/can_write_memory",
+        ],
+    );
+    let plan_requirements_ok = [
+        "/runtime_enablement_implementation_plan_artifact/requirements/separate_runtime_enablement_gate",
+        "/runtime_enablement_implementation_plan_artifact/requirements/separate_runtime_enablement_code_gate",
+        "/runtime_enablement_implementation_plan_artifact/requirements/feature_flag_default_off",
+        "/runtime_enablement_implementation_plan_artifact/requirements/shadow_mode_first",
+        "/runtime_enablement_implementation_plan_artifact/requirements/deterministic_replay_fixture",
+        "/runtime_enablement_implementation_plan_artifact/requirements/bounded_candidate_delta",
+        "/runtime_enablement_implementation_plan_artifact/requirements/negative_controls",
+        "/runtime_enablement_implementation_plan_artifact/requirements/rollback_plan",
+        "/implementation_plan/feature_flag/default_off",
+        "/implementation_plan/feature_flag/required_before_any_shadow_execution",
+        "/implementation_plan/shadow_mode_contract/shadow_mode_first",
+        "/implementation_plan/deterministic_replay_fixture/required",
+        "/implementation_plan/bounded_candidate_delta/required",
+        "/implementation_plan/negative_controls/required",
+        "/implementation_plan/rollback_contract/required",
+    ]
+    .iter()
+    .all(|path| memory_biocortex_t6_bool_at(plan, path) == Some(true))
+        && memory_biocortex_t6_bool_at(
+            plan,
+            "/implementation_plan/runtime_gate_entrypoint/default_runtime_enabled",
+        ) == Some(false)
+        && memory_biocortex_t6_bool_at(
+            plan,
+            "/implementation_plan/shadow_mode_contract/default_enabled",
+        ) == Some(false)
+        && memory_biocortex_t6_bool_at(
+            plan,
+            "/implementation_plan/shadow_mode_contract/can_influence_candidate_set",
+        ) == Some(false)
+        && memory_biocortex_t6_bool_at(
+            plan,
+            "/implementation_plan/shadow_mode_contract/can_change_search_order",
+        ) == Some(false)
+        && memory_biocortex_t6_bool_at(
+            plan,
+            "/implementation_plan/shadow_mode_contract/can_write_memory",
+        ) == Some(false)
+        && !memory_biocortex_t6_string_array_at(
+            plan,
+            "/runtime_enablement_implementation_plan_artifact/requirements/telemetry_fields",
+        )
+        .is_empty()
+        && !memory_biocortex_t6_string_array_at(plan, "/implementation_plan/telemetry_fields")
+            .is_empty();
+    let plan_flags_raw = memory_biocortex_t6_candidate_expansion_shadow_execution_gate_contains_raw(
+        plan,
+    ) || plan
+        .get("runtime_enablement_owner_decision_record")
+        .is_some()
+        || plan.get("runtime_enablement_review").is_some()
+        || plan.get("shadow_telemetry_review").is_some()
+        || plan.get("shadow_executor_invocation_report").is_some()
+        || plan.get("runtime_gate_owner_review_record").is_some()
+        || plan.get("owner_decision_record").is_some()
+        || plan.get("human_review_packet").is_some()
+        || plan.get("candidate_expansion_dry_run_report").is_some()
+        || plan.get("dry_run_report").is_some()
+        || plan.get("candidate_expansion_dry_run_plan").is_some()
+        || plan.get("recall_expansion_summary").is_some()
+        || plan.get("case_rows").is_some()
+        || memory_biocortex_t6_any_true(
+            plan,
+            &[
+                "/input_contract/runtime_enablement_implementation_plan_artifact_included",
+                "/input_contract/runtime_enablement_owner_decision_record_included",
+                "/input_contract/runtime_enablement_review_included",
+                "/input_contract/shadow_telemetry_review_included",
+                "/input_contract/shadow_executor_invocation_report_included",
+                "/input_contract/runtime_gate_owner_review_record_included",
+                "/input_contract/owner_decision_record_included",
+                "/input_contract/human_review_packet_included",
+                "/input_contract/dry_run_report_included",
+                "/input_contract/dry_run_plan_included",
+                "/input_contract/recall_expansion_summary_included",
+                "/input_contract/case_rows_included",
+                "/input_contract/raw_query_included",
+                "/input_contract/raw_queries_included",
+                "/input_contract/raw_keys_included",
+                "/input_contract/content_included",
+                "/input_contract/raw_error_included",
+            ],
+        );
+    let input_contains_raw =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_contains_raw(&args);
+    let code_gate_decision_valid = matches!(
+        code_gate_decision,
+        "approve_shadow_runtime_enablement_code_implementation_only"
+            | "request_runtime_enablement_implementation_plan_changes"
+            | "reject_runtime_enablement_code_implementation"
+    );
+    let code_gate_approves_shadow_code =
+        code_gate_decision == "approve_shadow_runtime_enablement_code_implementation_only";
+
+    let mut block_reasons = BTreeSet::<String>::new();
+    if !plan_schema_valid {
+        block_reasons.insert(
+            "source_runtime_enablement_implementation_plan_artifact_schema_invalid".to_string(),
+        );
+    }
+    if !plan_ready {
+        block_reasons.insert(
+            "source_runtime_enablement_implementation_plan_artifact_not_ready".to_string(),
+        );
+    }
+    if !plan_safe_contract || plan_claims_runtime_authority {
+        block_reasons.insert(
+            "source_runtime_enablement_implementation_plan_artifact_claims_runtime_authority"
+                .to_string(),
+        );
+    }
+    if !plan_requirements_ok {
+        block_reasons.insert(
+            "source_runtime_enablement_implementation_plan_artifact_requirements_incomplete"
+                .to_string(),
+        );
+    }
+    if plan_flags_raw {
+        block_reasons.insert(
+            "source_runtime_enablement_implementation_plan_artifact_contains_raw".to_string(),
+        );
+    }
+    if input_contains_raw {
+        block_reasons.insert("input_contains_raw_or_source_fields".to_string());
+    }
+    if reviewer.is_empty() {
+        block_reasons.insert("missing_reviewer".to_string());
+    }
+    if decision_source.is_empty() {
+        block_reasons.insert("missing_decision_source".to_string());
+    }
+    if !code_gate_decision_valid {
+        block_reasons.insert("invalid_code_gate_decision".to_string());
+    }
+    if code_gate_decision_valid && !code_gate_approves_shadow_code {
+        block_reasons.insert(
+            "code_gate_did_not_approve_shadow_runtime_enablement_code_implementation".to_string(),
+        );
+    }
+    for reason in memory_biocortex_t6_string_array_at(
+        plan,
+        "/runtime_enablement_implementation_plan_artifact/block_reasons",
+    ) {
+        memory_biocortex_t6_push_reason(&mut block_reasons, &reason);
+    }
+
+    let block_reasons: Vec<String> = block_reasons.into_iter().collect();
+    let ready = block_reasons.is_empty();
+    let status = if ready {
+        "shadow_runtime_enablement_code_implementation_authorized"
+    } else {
+        "blocked_before_runtime_enablement_code_implementation"
+    };
+    let next_gate = if ready {
+        "implement_default_off_shadow_runtime_enablement_code"
+    } else {
+        "repair_or_reapprove_runtime_enablement_implementation_plan_artifact"
+    };
+    let telemetry_fields =
+        memory_biocortex_t6_string_array_at(plan, "/implementation_plan/telemetry_fields");
+
+    json!({
+        "schema": MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_CODE_IMPLEMENTATION_GATE_SCHEMA,
+        "generated_at": unix_now_secs(),
+        "read_only": true,
+        "purpose": "T6 runtime-enablement code-implementation gate: consume a safe runtime-enablement implementation-plan artifact plus an explicit code-gate decision and record whether default-off shadow runtime-enablement code may be implemented without enabling runtime execution, shadow mode, candidate expansion, search-order changes, memory writes, or graph writes.",
+        "runtime_enablement_code_implementation_gate": {
+            "ready": ready,
+            "status": status,
+            "block_reasons": block_reasons,
+            "reviewer": reviewer,
+            "code_gate_decision": code_gate_decision,
+            "decision_source": decision_source,
+            "decision": {
+                "verdict": status,
+                "next_gate": next_gate,
+                "shadow_code_only": true,
+                "default_off_required": true,
+                "runtime_enablement_out_of_scope": true,
+                "runtime_authority_out_of_scope": true,
+                "candidate_expansion_authority_out_of_scope": true,
+            },
+            "source_decision": {
+                "plan_verdict": memory_biocortex_t6_string_at(plan, "/runtime_enablement_implementation_plan_artifact/decision/verdict"),
+                "plan_next_gate": memory_biocortex_t6_string_at(plan, "/runtime_enablement_implementation_plan_artifact/decision/next_gate"),
+                "owner": memory_biocortex_t6_string_at(plan, "/runtime_enablement_implementation_plan_artifact/source_decision/owner"),
+                "owner_decision": memory_biocortex_t6_string_at(plan, "/runtime_enablement_implementation_plan_artifact/source_decision/owner_decision"),
+                "owner_decision_source": memory_biocortex_t6_string_at(plan, "/runtime_enablement_implementation_plan_artifact/source_decision/decision_source"),
+                "reviewer": memory_biocortex_t6_string_at(plan, "/runtime_enablement_implementation_plan_artifact/source_decision/reviewer"),
+            },
+            "source_evidence": {
+                "observed_case_count": memory_biocortex_t6_u64_at(plan, "/runtime_enablement_implementation_plan_artifact/source_evidence/observed_case_count"),
+                "reviewed_case_count": memory_biocortex_t6_u64_at(plan, "/runtime_enablement_implementation_plan_artifact/source_evidence/reviewed_case_count"),
+                "failed_case_count": memory_biocortex_t6_u64_at(plan, "/runtime_enablement_implementation_plan_artifact/source_evidence/failed_case_count"),
+                "candidate_delta_count": memory_biocortex_t6_u64_at(plan, "/runtime_enablement_implementation_plan_artifact/source_evidence/candidate_delta_count"),
+                "negative_control_regression_count": memory_biocortex_t6_u64_at(plan, "/runtime_enablement_implementation_plan_artifact/source_evidence/negative_control_regression_count"),
+                "redaction_violation_count": memory_biocortex_t6_u64_at(plan, "/runtime_enablement_implementation_plan_artifact/source_evidence/redaction_violation_count"),
+                "source_case_bound": memory_biocortex_t6_u64_at(plan, "/runtime_enablement_implementation_plan_artifact/source_evidence/source_case_bound"),
+                "append_only_telemetry_confirmed": memory_biocortex_t6_bool_at(plan, "/runtime_enablement_implementation_plan_artifact/source_evidence/append_only_telemetry_confirmed"),
+                "redacted_aggregate_only": memory_biocortex_t6_bool_at(plan, "/runtime_enablement_implementation_plan_artifact/source_evidence/redacted_aggregate_only"),
+            },
+        },
+        "implementation_boundaries": {
+            "feature_flag_name": memory_biocortex_t6_string_at(plan, "/implementation_plan/feature_flag/name"),
+            "feature_flag_default_off": true,
+            "shadow_mode_first": true,
+            "default_runtime_enabled": false,
+            "default_shadow_enabled": false,
+            "deterministic_replay_fixture_required": true,
+            "negative_controls_required": true,
+            "bounded_candidate_delta_required": true,
+            "rollback_required": true,
+            "telemetry_fields": telemetry_fields,
+        },
+        "code_implementation_contract": {
+            "may_implement_shadow_runtime_enablement_code": ready,
+            "may_enable_runtime_gate_now": false,
+            "may_run_shadow_mode_now": false,
+            "candidate_expansion_experiment_approved": false,
+            "may_run_candidate_expansion_dry_run_now": false,
+            "may_expand_candidate_set_now": false,
+            "changes_candidate_set_now": false,
+            "runtime_influence_approved": false,
+            "may_change_search_order_now": false,
+            "may_write_memory_or_graph_edges": false,
+            "this_gate_approves_runtime_candidate_expansion": false,
+            "requires_separate_shadow_execution_gate": true,
+            "requires_separate_runtime_enablement_gate": true,
+        },
+        "implementation_checklist": [
+            "Implement only a default-off shadow runtime-enablement code path.",
+            "Keep the runtime-enablement feature flag disabled by default and unreachable without explicit operator opt-in.",
+            "Do not change candidate ordering, candidate-set membership, memory search, graph traversal, or writes.",
+            "Add deterministic replay fixtures before any shadow execution.",
+            "Add negative controls that block later shadow execution on regression.",
+            "Emit only aggregate telemetry fields; never log raw queries, keys, content, case rows, or raw errors.",
+            "Require a separate shadow-execution gate before running the code and a separate runtime-enable gate before any influence."
+        ],
+        "links": {
+            "commit": commit,
+            "forum_post_id": forum_post_id,
+            "memory_key": memory_key,
+        },
+        "input_contract": {
+            "runtime_enablement_implementation_plan_artifact_included": false,
+            "runtime_enablement_owner_decision_record_included": false,
+            "runtime_enablement_review_included": false,
+            "shadow_telemetry_review_included": false,
+            "shadow_executor_invocation_report_included": false,
+            "runtime_gate_owner_review_record_included": false,
+            "owner_decision_record_included": false,
+            "human_review_packet_included": false,
+            "dry_run_report_included": false,
+            "dry_run_plan_included": false,
+            "recall_expansion_summary_included": false,
+            "case_rows_included": false,
+            "raw_query_included": false,
+            "raw_queries_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "raw_error_included": false,
+        },
+        "non_goals": [
+            "This tool does not enable a runtime gate.",
+            "This tool does not run shadow mode or invoke executors.",
+            "This tool does not run BioCortex.",
+            "This tool does not call memory_search or memory_neighbors.",
+            "This tool does not sample production memories or graph rows.",
+            "This tool does not echo implementation-plan artifacts, owner-decision records, runtime-enablement reviews, shadow telemetry reviews, shadow executor invocation reports, case rows, queries, keys, content, or raw errors.",
+            "This tool does not write memory, graph edges, authorization records, approval packets, feature flags, or runtime configuration.",
+            "This tool does not approve runtime influence, search-order changes, dry-run execution, candidate-set expansion, or production candidate expansion."
+        ],
+    })
+}
+
+pub struct MemoryBioCortexT6CandidateExpansionRuntimeEnablementCodeImplementationGateTool;
+impl MemoryBioCortexT6CandidateExpansionRuntimeEnablementCodeImplementationGateTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for MemoryBioCortexT6CandidateExpansionRuntimeEnablementCodeImplementationGateTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for MemoryBioCortexT6CandidateExpansionRuntimeEnablementCodeImplementationGateTool {
+    fn name(&self) -> &'static str {
+        "memory_biocortex_t6_candidate_expansion_runtime_enablement_code_implementation_gate"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only T6 runtime-enablement code-implementation gate. \
+                Consumes a safe runtime-enablement implementation-plan artifact \
+                plus an explicit code-gate decision and can only authorize \
+                default-off shadow runtime-enablement code implementation; it \
+                never enables runtime execution, shadow mode, runtime influence, \
+                search-order changes, writes, or candidate expansion."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": [
+                    "runtime_enablement_implementation_plan_artifact",
+                    "reviewer",
+                    "code_gate_decision",
+                    "decision_source"
+                ],
+                "properties": {
+                    "runtime_enablement_implementation_plan_artifact": {
+                        "type": "object",
+                        "description": "JSON object produced by memory_biocortex_t6_candidate_expansion_runtime_enablement_implementation_plan_artifact. It is inspected but never echoed."
+                    },
+                    "reviewer": {
+                        "type": "string",
+                        "description": "Reviewer identity or handle authorizing the code-gate decision."
+                    },
+                    "code_gate_decision": {
+                        "type": "string",
+                        "enum": [
+                            "approve_shadow_runtime_enablement_code_implementation_only",
+                            "request_runtime_enablement_implementation_plan_changes",
+                            "reject_runtime_enablement_code_implementation"
+                        ],
+                        "description": "Explicit code-gate decision. Only approve_shadow_runtime_enablement_code_implementation_only can open default-off shadow runtime-enablement code implementation; no value approves runtime execution or candidate expansion."
+                    },
+                    "decision_source": {
+                        "type": "string",
+                        "description": "External source for the code-gate decision, such as forum post id or chat checkpoint."
+                    },
+                    "commit": {
+                        "type": "string",
+                        "description": "Optional implementation commit under review."
+                    },
+                    "forum_post_id": {
+                        "type": "string",
+                        "description": "Optional forum post id linking this code gate."
+                    },
+                    "memory_key": {
+                        "type": "string",
+                        "description": "Optional memory key linking this code gate."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        Ok(ToolResult::json_text(
+            &memory_biocortex_t6_candidate_expansion_runtime_enablement_code_implementation_gate_payload(
+                args,
+            ),
+        ))
+    }
+}
+
 const MEMORY_NEURAL_CRITIC_SHADOW_EVAL_SCHEMA: &str =
     "agent_bridge.memory_neural_critic_shadow_eval.v0";
 const MEMORY_NEURAL_CRITIC_LABELS: [&str; 5] =
@@ -53566,6 +55692,43 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
+        Tier::Niche,
+        Arc::new(MemoryBioCortexT6CandidateExpansionShadowTelemetryReviewTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(MemoryBioCortexT6CandidateExpansionRuntimeEnablementReviewTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(
+            MemoryBioCortexT6CandidateExpansionRuntimeEnablementOwnerDecisionRecordTool::new(),
+        ),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(
+            MemoryBioCortexT6CandidateExpansionRuntimeEnablementImplementationPlanArtifactTool::new(
+            ),
+        ),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(
+            MemoryBioCortexT6CandidateExpansionRuntimeEnablementCodeImplementationGateTool::new(),
+        ),
+    );
+    reg_if(
+        &mut reg,
+        policy,
         Tier::Standard,
         Arc::new(MemoryNeuralCriticShadowEvalTool::new()),
     );
@@ -55313,6 +57476,11 @@ mod tests {
         "memory_biocortex_t6_candidate_expansion_shadow_execution_gate",
         "memory_biocortex_t6_candidate_expansion_shadow_executor_preflight",
         "memory_biocortex_t6_candidate_expansion_shadow_executor_invocation_report",
+        "memory_biocortex_t6_candidate_expansion_shadow_telemetry_review",
+        "memory_biocortex_t6_candidate_expansion_runtime_enablement_review",
+        "memory_biocortex_t6_candidate_expansion_runtime_enablement_owner_decision_record",
+        "memory_biocortex_t6_candidate_expansion_runtime_enablement_implementation_plan_artifact",
+        "memory_biocortex_t6_candidate_expansion_runtime_enablement_code_implementation_gate",
     ];
 
     fn result_text(res: &ToolResult) -> String {
@@ -76029,6 +78197,1227 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(!serialized.contains("secret invocation top-level query"));
         assert!(!serialized.contains("secret invocation case row"));
         assert!(!serialized.contains("\"shadow_executor_preflight_report\""));
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_t6_candidate_expansion_shadow_telemetry_review_accepts_redacted_aggregate(
+    ) {
+        let invocation_report = json!({
+            "schema": "agent_bridge.memory_biocortex_t6_candidate_expansion.shadow_executor_invocation_report.v0",
+            "read_only": true,
+            "shadow_executor_invocation_report": {
+                "ready": true,
+                "status": "ready_for_shadow_telemetry_review",
+                "block_reasons": [],
+                "shadow_case_count": 25,
+                "completed_case_count": 25,
+                "failed_case_count": 0,
+                "candidate_delta_count": 2,
+                "negative_control_regression_count": 0,
+                "max_shadow_case_bound": 25,
+                "case_counts_match": true,
+                "append_only_telemetry_written": true,
+                "redacted_summary_only": true
+            },
+            "shadow_invocation_contract": {
+                "may_review_shadow_telemetry_now": true,
+                "this_tool_invokes_executor": false,
+                "this_tool_runs_shadow_mode": false,
+                "this_tool_calls_memory_search": false,
+                "this_tool_calls_memory_neighbors": false,
+                "this_tool_runs_biocortex": false,
+                "may_mutate_runtime_candidate_set": false,
+                "changes_runtime_candidate_set": false,
+                "may_change_runtime_search_order": false,
+                "runtime_influence_approved": false,
+                "may_enable_runtime_gate_now": false,
+                "may_write_memory_or_graph_edges": false
+            },
+            "bounded_shadow_telemetry": {
+                "append_only_telemetry_written": true,
+                "redacted_summary_only": true,
+                "max_shadow_case_bound": 25,
+                "raw_queries_allowed": false,
+                "raw_keys_allowed": false,
+                "content_allowed": false,
+                "case_rows_allowed": false
+            },
+            "input_contract": {
+                "shadow_executor_preflight_report_included": false,
+                "raw_query_included": false,
+                "raw_queries_included": false,
+                "raw_keys_included": false,
+                "content_included": false,
+                "case_rows_included": false
+            }
+        });
+
+        let tool = MemoryBioCortexT6CandidateExpansionShadowTelemetryReviewTool::new();
+        let out = tool
+            .execute(
+                json!({
+                    "shadow_executor_invocation_report": invocation_report,
+                    "reviewer": "codex",
+                    "review_source": "forum:#115/post:3929",
+                    "telemetry_window_id": "redacted-window:t6-shadow-telemetry-001",
+                    "telemetry_review_decision": "approve_shadow_telemetry_only",
+                    "observed_case_count": 25,
+                    "reviewed_case_count": 25,
+                    "failed_case_count": 0,
+                    "candidate_delta_count": 2,
+                    "negative_control_regression_count": 0,
+                    "redaction_violation_count": 0,
+                    "append_only_telemetry_confirmed": true,
+                    "redacted_aggregate_only": true
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(
+            payload["schema"],
+            json!("agent_bridge.memory_biocortex_t6_candidate_expansion.shadow_telemetry_review.v0")
+        );
+        assert_eq!(payload["read_only"], json!(true));
+        assert_eq!(payload["shadow_telemetry_review"]["ready"], json!(true));
+        assert_eq!(
+            payload["shadow_telemetry_review"]["status"],
+            json!("ready_for_runtime_enablement_review")
+        );
+        assert_eq!(
+            payload["shadow_telemetry_contract"]["may_prepare_runtime_enablement_review_now"],
+            json!(true)
+        );
+        assert_eq!(
+            payload["shadow_telemetry_contract"]["may_enable_runtime_gate_now"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["shadow_telemetry_contract"]["runtime_influence_approved"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["shadow_telemetry_contract"]["may_mutate_runtime_candidate_set"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["shadow_telemetry_contract"]["may_write_memory_or_graph_edges"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["input_contract"]["shadow_executor_invocation_report_included"],
+            json!(false)
+        );
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_t6_candidate_expansion_shadow_telemetry_review_blocks_raw_or_authority_claims(
+    ) {
+        let invocation_report = json!({
+            "schema": "agent_bridge.memory_biocortex_t6_candidate_expansion.shadow_executor_invocation_report.v0",
+            "read_only": true,
+            "shadow_executor_invocation_report": {
+                "ready": false,
+                "status": "blocked_shadow_executor_invocation_report",
+                "block_reasons": ["negative_control_regression_detected"],
+                "shadow_case_count": 25,
+                "completed_case_count": 24,
+                "failed_case_count": 1,
+                "candidate_delta_count": 30,
+                "negative_control_regression_count": 1,
+                "max_shadow_case_bound": 25,
+                "case_counts_match": true,
+                "append_only_telemetry_written": true,
+                "redacted_summary_only": true
+            },
+            "shadow_invocation_contract": {
+                "may_review_shadow_telemetry_now": true,
+                "may_mutate_runtime_candidate_set": true,
+                "runtime_influence_approved": true,
+                "may_write_memory_or_graph_edges": true
+            },
+            "bounded_shadow_telemetry": {
+                "raw_queries_allowed": true,
+                "raw_keys_allowed": true,
+                "content_allowed": true,
+                "case_rows_allowed": true
+            },
+            "raw_query": "secret telemetry source query",
+            "content": "secret telemetry source content"
+        });
+
+        let tool = MemoryBioCortexT6CandidateExpansionShadowTelemetryReviewTool::new();
+        let out = tool
+            .execute(
+                json!({
+                    "shadow_executor_invocation_report": invocation_report,
+                    "reviewer": "",
+                    "review_source": "",
+                    "telemetry_window_id": "",
+                    "telemetry_review_decision": "approve_runtime_enablement",
+                    "observed_case_count": 10_000,
+                    "reviewed_case_count": 8,
+                    "failed_case_count": 1,
+                    "candidate_delta_count": 10_001,
+                    "negative_control_regression_count": 1,
+                    "redaction_violation_count": 1,
+                    "append_only_telemetry_confirmed": false,
+                    "redacted_aggregate_only": false,
+                    "raw_query": "secret telemetry top-level query",
+                    "case_rows": [{"query": "secret telemetry case row"}]
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(payload["shadow_telemetry_review"]["ready"], json!(false));
+        let reasons = payload["shadow_telemetry_review"]["block_reasons"]
+            .as_array()
+            .expect("block reasons");
+        assert!(reasons.contains(&json!("source_shadow_executor_invocation_report_not_ready")));
+        assert!(reasons.contains(&json!(
+            "source_shadow_executor_invocation_report_contains_raw"
+        )));
+        assert!(reasons.contains(&json!(
+            "source_shadow_executor_invocation_report_claims_runtime_authority"
+        )));
+        assert!(reasons.contains(&json!("input_contains_raw_or_source_fields")));
+        assert!(reasons.contains(&json!("reviewer_missing")));
+        assert!(reasons.contains(&json!("review_source_missing")));
+        assert!(reasons.contains(&json!("telemetry_window_id_missing")));
+        assert!(reasons.contains(&json!(
+            "telemetry_review_decision_not_approve_shadow_telemetry_only"
+        )));
+        assert!(reasons.contains(&json!("observed_case_count_exceeds_source_bound")));
+        assert!(reasons.contains(&json!("reviewed_case_count_mismatch")));
+        assert!(reasons.contains(&json!("candidate_delta_exceeds_observed_cases")));
+        assert!(reasons.contains(&json!("failed_case_count_present")));
+        assert!(reasons.contains(&json!("negative_control_regression_detected")));
+        assert!(reasons.contains(&json!("redaction_violation_detected")));
+        assert!(reasons.contains(&json!("append_only_telemetry_not_confirmed")));
+        assert!(reasons.contains(&json!("redacted_aggregate_only_missing")));
+        assert_eq!(
+            payload["shadow_telemetry_contract"]["may_prepare_runtime_enablement_review_now"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["shadow_telemetry_contract"]["runtime_influence_approved"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["input_contract"]["shadow_executor_invocation_report_included"],
+            json!(false)
+        );
+
+        let serialized = serde_json::to_string(&payload).expect("serialize");
+        assert!(!serialized.contains("secret telemetry source query"));
+        assert!(!serialized.contains("secret telemetry source content"));
+        assert!(!serialized.contains("secret telemetry top-level query"));
+        assert!(!serialized.contains("secret telemetry case row"));
+        assert!(!serialized.contains("\"shadow_executor_invocation_report\""));
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_t6_candidate_expansion_runtime_enablement_review_accepts_shadow_telemetry_review(
+    ) {
+        let telemetry_review = json!({
+            "schema": "agent_bridge.memory_biocortex_t6_candidate_expansion.shadow_telemetry_review.v0",
+            "read_only": true,
+            "shadow_telemetry_review": {
+                "ready": true,
+                "status": "ready_for_runtime_enablement_review",
+                "block_reasons": [],
+                "reviewer_present": true,
+                "review_source_present": true,
+                "telemetry_window_id_present": true,
+                "telemetry_review_decision": "approve_shadow_telemetry_only",
+                "observed_case_count": 25,
+                "reviewed_case_count": 25,
+                "failed_case_count": 0,
+                "candidate_delta_count": 2,
+                "negative_control_regression_count": 0,
+                "redaction_violation_count": 0,
+                "source_case_bound": 25,
+                "reviewed_case_count_matches": true,
+                "append_only_telemetry_confirmed": true,
+                "redacted_aggregate_only": true
+            },
+            "shadow_telemetry_contract": {
+                "may_prepare_runtime_enablement_review_now": true,
+                "this_tool_invokes_executor": false,
+                "this_tool_runs_shadow_mode": false,
+                "this_tool_calls_memory_search": false,
+                "this_tool_calls_memory_neighbors": false,
+                "this_tool_runs_biocortex": false,
+                "may_mutate_runtime_candidate_set": false,
+                "changes_runtime_candidate_set": false,
+                "may_change_runtime_search_order": false,
+                "runtime_influence_approved": false,
+                "may_enable_runtime_gate_now": false,
+                "may_write_memory_or_graph_edges": false,
+                "may_approve_production_candidate_expansion_now": false,
+                "requires_later_runtime_enablement_gate": true,
+                "requires_later_candidate_expansion_enablement_gate": true
+            },
+            "bounded_shadow_telemetry_review": {
+                "redacted_aggregate_required": true,
+                "append_only_telemetry_required": true,
+                "append_only_telemetry_confirmed": true,
+                "redacted_aggregate_only": true,
+                "source_case_bound": 25,
+                "raw_queries_allowed": false,
+                "raw_keys_allowed": false,
+                "content_allowed": false,
+                "case_rows_allowed": false,
+                "production_traffic_allowed": false
+            },
+            "input_contract": {
+                "shadow_executor_invocation_report_included": false,
+                "raw_query_included": false,
+                "raw_queries_included": false,
+                "raw_keys_included": false,
+                "content_included": false,
+                "case_rows_included": false
+            },
+            "secret_source_review": "secret runtime enablement review source"
+        });
+
+        let tool = MemoryBioCortexT6CandidateExpansionRuntimeEnablementReviewTool::new();
+        let out = tool
+            .execute(
+                json!({
+                    "shadow_telemetry_review": telemetry_review,
+                    "reviewer": "codex",
+                    "review_source": "forum:#115/post:4190",
+                    "decision_source": "forum:#115/post:4200",
+                    "runtime_enablement_review_decision": "approve_owner_runtime_enablement_review_only"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(
+            payload["schema"],
+            json!("agent_bridge.memory_biocortex_t6_candidate_expansion.runtime_enablement_review.v0")
+        );
+        assert_eq!(payload["read_only"], json!(true));
+        assert_eq!(payload["runtime_enablement_review"]["ready"], json!(true));
+        assert_eq!(
+            payload["runtime_enablement_review"]["status"],
+            json!("ready_for_owner_runtime_enablement_decision")
+        );
+        assert_eq!(
+            payload["runtime_enablement_contract"]
+                ["may_prepare_owner_runtime_enablement_decision"],
+            json!(true)
+        );
+        assert_eq!(
+            payload["runtime_enablement_contract"]["may_enable_runtime_gate_now"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["runtime_enablement_contract"]["runtime_influence_approved"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["runtime_enablement_contract"]["may_write_memory_or_graph_edges"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["input_contract"]["shadow_telemetry_review_included"],
+            json!(false)
+        );
+
+        let serialized = serde_json::to_string(&payload).expect("serialize");
+        assert!(!serialized.contains("secret runtime enablement review source"));
+        assert!(!serialized.contains("\"shadow_telemetry_review\""));
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_t6_candidate_expansion_runtime_enablement_review_blocks_raw_or_authoritative_telemetry_review(
+    ) {
+        let telemetry_review = json!({
+            "schema": "agent_bridge.memory_biocortex_t6_candidate_expansion.shadow_telemetry_review.v0",
+            "read_only": true,
+            "shadow_telemetry_review": {
+                "ready": false,
+                "status": "blocked_shadow_telemetry_review",
+                "block_reasons": ["negative_control_regression_detected"],
+                "observed_case_count": 25,
+                "reviewed_case_count": 20,
+                "failed_case_count": 1,
+                "candidate_delta_count": 30,
+                "negative_control_regression_count": 1,
+                "redaction_violation_count": 1,
+                "source_case_bound": 25,
+                "append_only_telemetry_confirmed": false,
+                "redacted_aggregate_only": false
+            },
+            "shadow_telemetry_contract": {
+                "may_prepare_runtime_enablement_review_now": true,
+                "may_mutate_runtime_candidate_set": true,
+                "runtime_influence_approved": true,
+                "may_enable_runtime_gate_now": true,
+                "may_write_memory_or_graph_edges": true
+            },
+            "bounded_shadow_telemetry_review": {
+                "raw_queries_allowed": true,
+                "raw_keys_allowed": true,
+                "content_allowed": true,
+                "case_rows_allowed": true,
+                "production_traffic_allowed": true
+            },
+            "raw_query": "secret runtime enablement source query",
+            "content": "secret runtime enablement source content"
+        });
+
+        let tool = MemoryBioCortexT6CandidateExpansionRuntimeEnablementReviewTool::new();
+        let out = tool
+            .execute(
+                json!({
+                    "shadow_telemetry_review": telemetry_review,
+                    "reviewer": "",
+                    "review_source": "",
+                    "decision_source": "",
+                    "runtime_enablement_review_decision": "approve_runtime_enablement_now",
+                    "raw_query": "secret runtime enablement top-level query",
+                    "case_rows": [{"query": "secret runtime enablement case row"}]
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(
+            payload["runtime_enablement_review"]["ready"],
+            json!(false)
+        );
+        let reasons = payload["runtime_enablement_review"]["block_reasons"]
+            .as_array()
+            .expect("block reasons");
+        assert!(reasons.contains(&json!("source_shadow_telemetry_review_not_ready")));
+        assert!(reasons.contains(&json!("source_shadow_telemetry_review_contains_raw")));
+        assert!(reasons.contains(&json!(
+            "source_shadow_telemetry_review_claims_runtime_authority"
+        )));
+        assert!(reasons.contains(&json!("input_contains_raw_or_source_fields")));
+        assert!(reasons.contains(&json!("reviewer_missing")));
+        assert!(reasons.contains(&json!("review_source_missing")));
+        assert!(reasons.contains(&json!("decision_source_missing")));
+        assert!(reasons.contains(&json!(
+            "runtime_enablement_review_decision_not_owner_review_only"
+        )));
+        assert!(reasons.contains(&json!("failed_case_count_present")));
+        assert!(reasons.contains(&json!("negative_control_regression_detected")));
+        assert!(reasons.contains(&json!("redaction_violation_detected")));
+        assert!(reasons.contains(&json!("append_only_telemetry_not_confirmed")));
+        assert!(reasons.contains(&json!("redacted_aggregate_only_missing")));
+        assert_eq!(
+            payload["runtime_enablement_contract"]
+                ["may_prepare_owner_runtime_enablement_decision"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["runtime_enablement_contract"]["may_enable_runtime_gate_now"],
+            json!(false)
+        );
+
+        let serialized = serde_json::to_string(&payload).expect("serialize");
+        assert!(!serialized.contains("secret runtime enablement source query"));
+        assert!(!serialized.contains("secret runtime enablement source content"));
+        assert!(!serialized.contains("secret runtime enablement top-level query"));
+        assert!(!serialized.contains("secret runtime enablement case row"));
+        assert!(!serialized.contains("\"shadow_telemetry_review\""));
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_t6_candidate_expansion_runtime_enablement_owner_decision_record_accepts_runtime_enablement_review(
+    ) {
+        let runtime_enablement_review = json!({
+            "schema": "agent_bridge.memory_biocortex_t6_candidate_expansion.runtime_enablement_review.v0",
+            "read_only": true,
+            "runtime_enablement_review": {
+                "ready": true,
+                "status": "ready_for_owner_runtime_enablement_decision",
+                "block_reasons": [],
+                "reviewer_present": true,
+                "review_source_present": true,
+                "decision_source_present": true,
+                "runtime_enablement_review_decision": "approve_owner_runtime_enablement_review_only",
+                "observed_case_count": 25,
+                "reviewed_case_count": 25,
+                "failed_case_count": 0,
+                "candidate_delta_count": 2,
+                "negative_control_regression_count": 0,
+                "redaction_violation_count": 0,
+                "source_case_bound": 25,
+                "append_only_telemetry_confirmed": true,
+                "redacted_aggregate_only": true
+            },
+            "runtime_enablement_contract": {
+                "may_prepare_owner_runtime_enablement_decision": true,
+                "owner_runtime_enablement_decision_required": true,
+                "may_prepare_runtime_enablement_implementation_plan_now": false,
+                "may_implement_runtime_enablement_code_now": false,
+                "may_enable_runtime_gate_now": false,
+                "this_tool_runs_shadow_mode": false,
+                "this_tool_calls_memory_search": false,
+                "this_tool_calls_memory_neighbors": false,
+                "this_tool_runs_biocortex": false,
+                "may_mutate_runtime_candidate_set": false,
+                "changes_runtime_candidate_set": false,
+                "may_change_runtime_search_order": false,
+                "runtime_influence_approved": false,
+                "may_write_memory_or_graph_edges": false,
+                "may_approve_production_candidate_expansion_now": false,
+                "requires_later_owner_runtime_enablement_decision": true,
+                "requires_later_runtime_enablement_implementation_plan": true,
+                "requires_later_runtime_enablement_gate": true
+            },
+            "bounded_runtime_enablement_review": {
+                "redacted_aggregate_required": true,
+                "append_only_telemetry_required": true,
+                "append_only_telemetry_confirmed": true,
+                "redacted_aggregate_only": true,
+                "source_case_bound": 25,
+                "raw_queries_allowed": false,
+                "raw_keys_allowed": false,
+                "content_allowed": false,
+                "case_rows_allowed": false,
+                "production_traffic_allowed": false
+            },
+            "input_contract": {
+                "shadow_telemetry_review_included": false,
+                "shadow_executor_invocation_report_included": false,
+                "raw_query_included": false,
+                "raw_queries_included": false,
+                "raw_keys_included": false,
+                "content_included": false,
+                "case_rows_included": false
+            },
+            "secret_source_review": "secret owner source"
+        });
+
+        let tool =
+            MemoryBioCortexT6CandidateExpansionRuntimeEnablementOwnerDecisionRecordTool::new();
+        let out = tool
+            .execute(
+                json!({
+                    "runtime_enablement_review": runtime_enablement_review,
+                    "owner": "pallasting",
+                    "decision_source": "forum:#115/post:4234",
+                    "owner_decision": "approve_runtime_enablement_preflight_or_plan_review_only",
+                    "reviewer": "codex"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(
+            payload["schema"],
+            json!(
+                "agent_bridge.memory_biocortex_t6_candidate_expansion.runtime_enablement_owner_decision_record.v0"
+            )
+        );
+        assert_eq!(payload["read_only"], json!(true));
+        assert_eq!(
+            payload["runtime_enablement_owner_decision_record"]["ready"],
+            json!(true)
+        );
+        assert_eq!(
+            payload["runtime_enablement_owner_decision_record"]["status"],
+            json!("ready_for_runtime_enablement_preflight_or_plan_review")
+        );
+        assert_eq!(
+            payload["runtime_enablement_owner_decision_contract"]
+                ["may_prepare_runtime_enablement_preflight_or_plan_review"],
+            json!(true)
+        );
+        assert_eq!(
+            payload["runtime_enablement_owner_decision_contract"]
+                ["may_prepare_runtime_enablement_implementation_plan_now"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["runtime_enablement_owner_decision_contract"]["may_enable_runtime_gate_now"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["runtime_enablement_owner_decision_contract"]["runtime_influence_approved"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["runtime_enablement_owner_decision_contract"]
+                ["may_write_memory_or_graph_edges"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["input_contract"]["runtime_enablement_review_included"],
+            json!(false)
+        );
+
+        let serialized = serde_json::to_string(&payload).expect("serialize");
+        assert!(!serialized.contains("secret owner source"));
+        assert!(!serialized.contains("\"runtime_enablement_review\""));
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_t6_candidate_expansion_runtime_enablement_owner_decision_record_blocks_raw_or_authoritative_review(
+    ) {
+        let runtime_enablement_review = json!({
+            "schema": "agent_bridge.memory_biocortex_t6_candidate_expansion.runtime_enablement_review.v0",
+            "read_only": true,
+            "runtime_enablement_review": {
+                "ready": false,
+                "status": "blocked_runtime_enablement_review",
+                "block_reasons": ["source_block_reason"],
+                "observed_case_count": 25,
+                "reviewed_case_count": 25,
+                "failed_case_count": 1,
+                "candidate_delta_count": 2,
+                "negative_control_regression_count": 1,
+                "redaction_violation_count": 1,
+                "source_case_bound": 25,
+                "append_only_telemetry_confirmed": false,
+                "redacted_aggregate_only": false
+            },
+            "runtime_enablement_contract": {
+                "may_prepare_owner_runtime_enablement_decision": true,
+                "may_prepare_runtime_enablement_implementation_plan_now": true,
+                "may_implement_runtime_enablement_code_now": true,
+                "may_enable_runtime_gate_now": true,
+                "runtime_influence_approved": true,
+                "may_mutate_runtime_candidate_set": true,
+                "changes_runtime_candidate_set": true,
+                "may_change_runtime_search_order": true,
+                "may_write_memory_or_graph_edges": true,
+                "may_approve_production_candidate_expansion_now": true
+            },
+            "bounded_runtime_enablement_review": {
+                "raw_queries_allowed": true,
+                "raw_keys_allowed": true,
+                "content_allowed": true,
+                "case_rows_allowed": true,
+                "production_traffic_allowed": true
+            },
+            "raw_query": "secret owner source query",
+            "content": "secret owner source content"
+        });
+
+        let tool =
+            MemoryBioCortexT6CandidateExpansionRuntimeEnablementOwnerDecisionRecordTool::new();
+        let out = tool
+            .execute(
+                json!({
+                    "runtime_enablement_review": runtime_enablement_review,
+                    "owner": "",
+                    "decision_source": "",
+                    "owner_decision": "approve_runtime_enablement_now",
+                    "raw_query": "secret owner top-level query",
+                    "case_rows": [{"query": "secret owner case row"}]
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(
+            payload["runtime_enablement_owner_decision_record"]["ready"],
+            json!(false)
+        );
+        let reasons = payload["runtime_enablement_owner_decision_record"]["block_reasons"]
+            .as_array()
+            .expect("block reasons");
+        assert!(reasons.contains(&json!("source_runtime_enablement_review_not_ready")));
+        assert!(reasons.contains(&json!("source_runtime_enablement_review_contains_raw")));
+        assert!(reasons.contains(&json!(
+            "source_runtime_enablement_review_claims_runtime_authority"
+        )));
+        assert!(reasons.contains(&json!("input_contains_raw_or_source_fields")));
+        assert!(reasons.contains(&json!("owner_missing")));
+        assert!(reasons.contains(&json!("decision_source_missing")));
+        assert!(reasons.contains(&json!("owner_decision_invalid")));
+        assert!(reasons.contains(&json!(
+            "owner_decision_not_preflight_or_plan_review_only"
+        )));
+        assert!(reasons.contains(&json!("failed_case_count_present")));
+        assert!(reasons.contains(&json!("negative_control_regression_detected")));
+        assert!(reasons.contains(&json!("redaction_violation_detected")));
+        assert!(reasons.contains(&json!("append_only_telemetry_not_confirmed")));
+        assert!(reasons.contains(&json!("redacted_aggregate_only_missing")));
+        assert!(reasons.contains(&json!("source_block_reason")));
+        assert_eq!(
+            payload["runtime_enablement_owner_decision_contract"]
+                ["may_prepare_runtime_enablement_preflight_or_plan_review"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["runtime_enablement_owner_decision_contract"]["may_enable_runtime_gate_now"],
+            json!(false)
+        );
+
+        let serialized = serde_json::to_string(&payload).expect("serialize");
+        assert!(!serialized.contains("secret owner source query"));
+        assert!(!serialized.contains("secret owner source content"));
+        assert!(!serialized.contains("secret owner top-level query"));
+        assert!(!serialized.contains("secret owner case row"));
+        assert!(!serialized.contains("\"runtime_enablement_review\""));
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_t6_candidate_expansion_runtime_enablement_implementation_plan_artifact_accepts_owner_decision_record(
+    ) {
+        let owner_decision_record = json!({
+            "schema": "agent_bridge.memory_biocortex_t6_candidate_expansion.runtime_enablement_owner_decision_record.v0",
+            "read_only": true,
+            "runtime_enablement_owner_decision_record": {
+                "ready": true,
+                "status": "ready_for_runtime_enablement_preflight_or_plan_review",
+                "block_reasons": [],
+                "owner_present": true,
+                "decision_source_present": true,
+                "reviewer_present": true,
+                "owner_decision": "approve_runtime_enablement_preflight_or_plan_review_only",
+                "owner": "pallasting",
+                "decision_source": "forum:#115/post:4234",
+                "reviewer": "codex",
+                "observed_case_count": 25,
+                "reviewed_case_count": 25,
+                "failed_case_count": 0,
+                "candidate_delta_count": 2,
+                "negative_control_regression_count": 0,
+                "redaction_violation_count": 0,
+                "source_case_bound": 25,
+                "append_only_telemetry_confirmed": true,
+                "redacted_aggregate_only": true,
+                "decision": {
+                    "verdict": "ready_for_runtime_enablement_preflight_or_plan_review",
+                    "next_gate": "prepare_runtime_enablement_preflight_or_plan_review_artifact",
+                    "preflight_or_plan_review_only": true,
+                    "runtime_code_out_of_scope": true,
+                    "runtime_authority_out_of_scope": true,
+                    "candidate_expansion_authority_out_of_scope": true
+                }
+            },
+            "runtime_enablement_owner_decision_contract": {
+                "explicit_owner_decision_required": true,
+                "may_prepare_runtime_enablement_preflight_or_plan_review": true,
+                "may_prepare_runtime_enablement_implementation_plan_now": false,
+                "may_implement_runtime_enablement_code_now": false,
+                "may_enable_runtime_gate_now": false,
+                "this_tool_runs_shadow_mode": false,
+                "this_tool_calls_memory_search": false,
+                "this_tool_calls_memory_neighbors": false,
+                "this_tool_runs_biocortex": false,
+                "may_mutate_runtime_candidate_set": false,
+                "changes_runtime_candidate_set": false,
+                "may_change_runtime_search_order": false,
+                "runtime_influence_approved": false,
+                "may_write_memory_or_graph_edges": false,
+                "may_approve_production_candidate_expansion_now": false,
+                "requires_later_runtime_enablement_preflight_or_plan": true,
+                "requires_later_runtime_enablement_gate": true,
+                "requires_later_runtime_enablement_code_gate": true
+            },
+            "bounded_runtime_enablement_owner_decision": {
+                "redacted_aggregate_required": true,
+                "append_only_telemetry_required": true,
+                "append_only_telemetry_confirmed": true,
+                "redacted_aggregate_only": true,
+                "source_case_bound": 25,
+                "raw_queries_allowed": false,
+                "raw_keys_allowed": false,
+                "content_allowed": false,
+                "case_rows_allowed": false,
+                "production_traffic_allowed": false
+            },
+            "input_contract": {
+                "runtime_enablement_review_included": false,
+                "shadow_telemetry_review_included": false,
+                "shadow_executor_invocation_report_included": false,
+                "raw_query_included": false,
+                "raw_queries_included": false,
+                "raw_keys_included": false,
+                "content_included": false,
+                "case_rows_included": false
+            },
+            "secret_source_record": "secret runtime enablement owner record"
+        });
+
+        let tool =
+            MemoryBioCortexT6CandidateExpansionRuntimeEnablementImplementationPlanArtifactTool::new(
+            );
+        let out = tool
+            .execute(
+                json!({
+                    "runtime_enablement_owner_decision_record": owner_decision_record,
+                    "reviewer": "codex",
+                    "forum_post_id": "forum:#115/post:4247",
+                    "memory_key": "ab_memory_continuity_t6_runtime_enablement_implementation_plan_artifact_intent_20260625"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(
+            payload["schema"],
+            json!(
+                "agent_bridge.memory_biocortex_t6_candidate_expansion.runtime_enablement_implementation_plan_artifact.v0"
+            )
+        );
+        assert_eq!(payload["read_only"], json!(true));
+        assert_eq!(
+            payload["runtime_enablement_implementation_plan_artifact"]["ready"],
+            json!(true)
+        );
+        assert_eq!(
+            payload["runtime_enablement_implementation_plan_artifact"]["decision"]["next_gate"],
+            json!("author_review_runtime_enablement_code_implementation_gate_before_code")
+        );
+        assert_eq!(
+            payload["plan_contract"]["may_prepare_runtime_enablement_code_implementation_gate"],
+            json!(true)
+        );
+        assert_eq!(
+            payload["plan_contract"]["may_implement_runtime_enablement_code_now"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["plan_contract"]["may_enable_runtime_gate_now"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["plan_contract"]["runtime_influence_approved"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["implementation_plan"]["feature_flag"]["default_off"],
+            json!(true)
+        );
+        assert_eq!(
+            payload["implementation_plan"]["shadow_mode_contract"]["can_change_search_order"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["input_contract"]["runtime_enablement_owner_decision_record_included"],
+            json!(false)
+        );
+
+        let serialized = serde_json::to_string(&payload).expect("serialize");
+        assert!(!serialized.contains("secret runtime enablement owner record"));
+        assert!(!serialized.contains("\"runtime_enablement_owner_decision_record\""));
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_t6_candidate_expansion_runtime_enablement_implementation_plan_artifact_blocks_raw_or_authoritative_owner_decision_record(
+    ) {
+        let owner_decision_record = json!({
+            "schema": "agent_bridge.memory_biocortex_t6_candidate_expansion.runtime_enablement_owner_decision_record.v0",
+            "read_only": true,
+            "runtime_enablement_owner_decision_record": {
+                "ready": false,
+                "status": "blocked_runtime_enablement_owner_decision_record",
+                "block_reasons": ["source_owner_block_reason"],
+                "owner_decision": "request_more_shadow_telemetry",
+                "failed_case_count": 1,
+                "negative_control_regression_count": 1,
+                "redaction_violation_count": 1,
+                "append_only_telemetry_confirmed": false,
+                "redacted_aggregate_only": false
+            },
+            "runtime_enablement_owner_decision_contract": {
+                "may_prepare_runtime_enablement_preflight_or_plan_review": true,
+                "may_prepare_runtime_enablement_implementation_plan_now": true,
+                "may_implement_runtime_enablement_code_now": true,
+                "may_enable_runtime_gate_now": true,
+                "runtime_influence_approved": true,
+                "may_mutate_runtime_candidate_set": true,
+                "changes_runtime_candidate_set": true,
+                "may_change_runtime_search_order": true,
+                "may_write_memory_or_graph_edges": true,
+                "may_approve_production_candidate_expansion_now": true
+            },
+            "bounded_runtime_enablement_owner_decision": {
+                "raw_queries_allowed": true,
+                "raw_keys_allowed": true,
+                "content_allowed": true,
+                "case_rows_allowed": true,
+                "production_traffic_allowed": true
+            },
+            "runtime_enablement_review": {"secret": "source review should not echo"},
+            "raw_query": "secret plan source query",
+            "content": "secret plan source content"
+        });
+
+        let tool =
+            MemoryBioCortexT6CandidateExpansionRuntimeEnablementImplementationPlanArtifactTool::new(
+            );
+        let out = tool
+            .execute(
+                json!({
+                    "runtime_enablement_owner_decision_record": owner_decision_record,
+                    "raw_query": "secret plan top-level query",
+                    "case_rows": [{"query": "secret plan case row"}]
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(
+            payload["runtime_enablement_implementation_plan_artifact"]["ready"],
+            json!(false)
+        );
+        let reasons = payload["runtime_enablement_implementation_plan_artifact"]["block_reasons"]
+            .as_array()
+            .expect("block reasons");
+        assert!(reasons.contains(&json!(
+            "source_runtime_enablement_owner_decision_record_not_ready"
+        )));
+        assert!(reasons.contains(&json!(
+            "source_runtime_enablement_owner_decision_record_claims_runtime_authority"
+        )));
+        assert!(reasons.contains(&json!(
+            "source_runtime_enablement_owner_decision_record_contains_raw"
+        )));
+        assert!(reasons.contains(&json!(
+            "source_runtime_enablement_owner_decision_record_requirements_incomplete"
+        )));
+        assert!(reasons.contains(&json!(
+            "source_owner_decision_record_not_approved_for_runtime_enablement_plan"
+        )));
+        assert!(reasons.contains(&json!("input_contains_raw_or_source_fields")));
+        assert!(reasons.contains(&json!("source_owner_block_reason")));
+        assert_eq!(
+            payload["plan_contract"]["may_prepare_runtime_enablement_code_implementation_gate"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["plan_contract"]["may_enable_runtime_gate_now"],
+            json!(false)
+        );
+
+        let serialized = serde_json::to_string(&payload).expect("serialize");
+        assert!(!serialized.contains("source review should not echo"));
+        assert!(!serialized.contains("secret plan source query"));
+        assert!(!serialized.contains("secret plan source content"));
+        assert!(!serialized.contains("secret plan top-level query"));
+        assert!(!serialized.contains("secret plan case row"));
+        assert!(!serialized.contains("\"runtime_enablement_owner_decision_record\""));
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_t6_candidate_expansion_runtime_enablement_code_implementation_gate_accepts_plan_artifact(
+    ) {
+        let owner_decision_record = json!({
+            "schema": "agent_bridge.memory_biocortex_t6_candidate_expansion.runtime_enablement_owner_decision_record.v0",
+            "read_only": true,
+            "runtime_enablement_owner_decision_record": {
+                "ready": true,
+                "status": "ready_for_runtime_enablement_preflight_or_plan_review",
+                "block_reasons": [],
+                "owner_present": true,
+                "decision_source_present": true,
+                "reviewer_present": true,
+                "owner_decision": "approve_runtime_enablement_preflight_or_plan_review_only",
+                "owner": "pallasting",
+                "decision_source": "forum:#115/post:4234",
+                "reviewer": "codex",
+                "observed_case_count": 25,
+                "reviewed_case_count": 25,
+                "failed_case_count": 0,
+                "candidate_delta_count": 2,
+                "negative_control_regression_count": 0,
+                "redaction_violation_count": 0,
+                "source_case_bound": 25,
+                "append_only_telemetry_confirmed": true,
+                "redacted_aggregate_only": true,
+                "decision": {
+                    "verdict": "ready_for_runtime_enablement_preflight_or_plan_review",
+                    "next_gate": "prepare_runtime_enablement_preflight_or_plan_review_artifact",
+                    "preflight_or_plan_review_only": true,
+                    "runtime_code_out_of_scope": true,
+                    "runtime_authority_out_of_scope": true,
+                    "candidate_expansion_authority_out_of_scope": true
+                }
+            },
+            "runtime_enablement_owner_decision_contract": {
+                "explicit_owner_decision_required": true,
+                "may_prepare_runtime_enablement_preflight_or_plan_review": true,
+                "may_prepare_runtime_enablement_implementation_plan_now": false,
+                "may_implement_runtime_enablement_code_now": false,
+                "may_enable_runtime_gate_now": false,
+                "this_tool_runs_shadow_mode": false,
+                "this_tool_calls_memory_search": false,
+                "this_tool_calls_memory_neighbors": false,
+                "this_tool_runs_biocortex": false,
+                "may_mutate_runtime_candidate_set": false,
+                "changes_runtime_candidate_set": false,
+                "may_change_runtime_search_order": false,
+                "runtime_influence_approved": false,
+                "may_write_memory_or_graph_edges": false,
+                "may_approve_production_candidate_expansion_now": false,
+                "requires_later_runtime_enablement_preflight_or_plan": true,
+                "requires_later_runtime_enablement_gate": true,
+                "requires_later_runtime_enablement_code_gate": true
+            },
+            "bounded_runtime_enablement_owner_decision": {
+                "redacted_aggregate_required": true,
+                "append_only_telemetry_required": true,
+                "append_only_telemetry_confirmed": true,
+                "redacted_aggregate_only": true,
+                "source_case_bound": 25,
+                "raw_queries_allowed": false,
+                "raw_keys_allowed": false,
+                "content_allowed": false,
+                "case_rows_allowed": false,
+                "production_traffic_allowed": false
+            },
+            "input_contract": {
+                "runtime_enablement_review_included": false,
+                "shadow_telemetry_review_included": false,
+                "shadow_executor_invocation_report_included": false,
+                "raw_query_included": false,
+                "raw_queries_included": false,
+                "raw_keys_included": false,
+                "content_included": false,
+                "case_rows_included": false
+            },
+            "secret_source_record": "secret runtime enablement owner record for code gate"
+        });
+
+        let plan_tool =
+            MemoryBioCortexT6CandidateExpansionRuntimeEnablementImplementationPlanArtifactTool::new(
+            );
+        let plan_out = plan_tool
+            .execute(
+                json!({
+                    "runtime_enablement_owner_decision_record": owner_decision_record,
+                    "reviewer": "codex",
+                    "forum_post_id": "forum:#115/post:4254",
+                    "memory_key": "ab_memory_continuity_t6_runtime_enablement_implementation_plan_artifact_landed_20260625"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute implementation plan");
+        let plan = result_text_as_json(&plan_out);
+
+        let tool =
+            MemoryBioCortexT6CandidateExpansionRuntimeEnablementCodeImplementationGateTool::new();
+        let out = tool
+            .execute(
+                json!({
+                    "runtime_enablement_implementation_plan_artifact": plan,
+                    "reviewer": "codex-runtime-enablement-code-gate",
+                    "code_gate_decision": "approve_shadow_runtime_enablement_code_implementation_only",
+                    "decision_source": "forum:#115/post:4396",
+                    "forum_post_id": "forum:#115/post:4396",
+                    "memory_key": "ab_memory_continuity_t6_runtime_enablement_code_implementation_gate_intent_20260625"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute code gate");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(
+            payload["schema"],
+            json!(
+                "agent_bridge.memory_biocortex_t6_candidate_expansion.runtime_enablement_code_implementation_gate.v0"
+            )
+        );
+        assert_eq!(payload["read_only"], json!(true));
+        assert_eq!(
+            payload["runtime_enablement_code_implementation_gate"]["ready"],
+            json!(true)
+        );
+        assert_eq!(
+            payload["runtime_enablement_code_implementation_gate"]["decision"]["next_gate"],
+            json!("implement_default_off_shadow_runtime_enablement_code")
+        );
+        assert_eq!(
+            payload["code_implementation_contract"]
+                ["may_implement_shadow_runtime_enablement_code"],
+            json!(true)
+        );
+        assert_eq!(
+            payload["code_implementation_contract"]["may_enable_runtime_gate_now"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["code_implementation_contract"]["may_run_shadow_mode_now"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["code_implementation_contract"]["runtime_influence_approved"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["code_implementation_contract"]["may_write_memory_or_graph_edges"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["input_contract"]["runtime_enablement_implementation_plan_artifact_included"],
+            json!(false)
+        );
+
+        let serialized = serde_json::to_string(&payload).expect("serialize");
+        assert!(!serialized.contains("secret runtime enablement owner record for code gate"));
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_t6_candidate_expansion_runtime_enablement_code_implementation_gate_blocks_raw_or_authoritative_plan(
+    ) {
+        let plan = json!({
+            "schema": "agent_bridge.memory_biocortex_t6_candidate_expansion.runtime_enablement_implementation_plan_artifact.v0",
+            "read_only": true,
+            "runtime_enablement_implementation_plan_artifact": {
+                "ready": false,
+                "status": "blocked_runtime_enablement_implementation_plan_artifact",
+                "block_reasons": ["source_runtime_enablement_plan_block_reason"],
+                "requirements": {
+                    "separate_runtime_enablement_gate": false,
+                    "separate_runtime_enablement_code_gate": true,
+                    "feature_flag_default_off": true,
+                    "shadow_mode_first": true,
+                    "deterministic_replay_fixture": true,
+                    "bounded_candidate_delta": true,
+                    "negative_controls": true,
+                    "rollback_plan": true,
+                    "telemetry_fields": ["runtime_gate_enabled"]
+                },
+                "decision": {
+                    "verdict": "blocked_runtime_enablement_implementation_plan_artifact",
+                    "next_gate": "repair_runtime_enablement_owner_decision_record"
+                }
+            },
+            "implementation_plan": {
+                "runtime_gate_entrypoint": {
+                    "tool_name": "memory_biocortex_t6_candidate_expansion_runtime_enablement_code_implementation_gate",
+                    "default_runtime_enabled": true
+                },
+                "feature_flag": {
+                    "name": "AB_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_SHADOW",
+                    "default_off": false,
+                    "required_before_any_shadow_execution": true
+                },
+                "shadow_mode_contract": {
+                    "shadow_mode_first": true,
+                    "default_enabled": true,
+                    "can_influence_candidate_set": true,
+                    "can_change_search_order": true,
+                    "can_write_memory": true
+                },
+                "deterministic_replay_fixture": {"required": true},
+                "bounded_candidate_delta": {"required": true},
+                "negative_controls": {"required": true},
+                "telemetry_fields": ["runtime_gate_enabled"],
+                "rollback_contract": {"required": true}
+            },
+            "plan_contract": {
+                "may_prepare_runtime_enablement_code_implementation_gate": true,
+                "may_prepare_runtime_enablement_code_gate_now": true,
+                "may_implement_runtime_enablement_code_now": true,
+                "may_enable_runtime_gate_now": true,
+                "may_run_shadow_mode_now": true,
+                "candidate_expansion_experiment_approved": true,
+                "may_run_candidate_expansion_dry_run_now": true,
+                "may_expand_candidate_set_now": true,
+                "changes_candidate_set_now": true,
+                "runtime_influence_approved": true,
+                "may_change_search_order_now": true,
+                "may_write_memory_or_graph_edges": true,
+                "requires_separate_runtime_enablement_code_gate": true,
+                "requires_separate_runtime_enablement_gate": true
+            },
+            "input_contract": {
+                "runtime_enablement_owner_decision_record_included": true,
+                "raw_query_included": true,
+                "content_included": true,
+                "case_rows_included": true
+            },
+            "runtime_enablement_owner_decision_record": {"secret": "source owner record should not echo"},
+            "raw_query": "secret runtime enablement code gate source query",
+            "content": "secret runtime enablement code gate source content"
+        });
+
+        let tool =
+            MemoryBioCortexT6CandidateExpansionRuntimeEnablementCodeImplementationGateTool::new();
+        let out = tool
+            .execute(
+                json!({
+                    "runtime_enablement_implementation_plan_artifact": plan,
+                    "reviewer": "codex-runtime-enablement-code-gate",
+                    "code_gate_decision": "request_runtime_enablement_implementation_plan_changes",
+                    "decision_source": "forum:#115/post:4396",
+                    "raw_query": "secret runtime enablement code gate top-level query",
+                    "case_rows": [{"query": "secret runtime enablement code gate case row"}]
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute code gate");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(
+            payload["runtime_enablement_code_implementation_gate"]["ready"],
+            json!(false)
+        );
+        let reasons = payload["runtime_enablement_code_implementation_gate"]["block_reasons"]
+            .as_array()
+            .expect("block reasons");
+        assert!(reasons.contains(&json!(
+            "source_runtime_enablement_implementation_plan_artifact_not_ready"
+        )));
+        assert!(reasons.contains(&json!(
+            "source_runtime_enablement_implementation_plan_artifact_claims_runtime_authority"
+        )));
+        assert!(reasons.contains(&json!(
+            "source_runtime_enablement_implementation_plan_artifact_requirements_incomplete"
+        )));
+        assert!(reasons.contains(&json!(
+            "source_runtime_enablement_implementation_plan_artifact_contains_raw"
+        )));
+        assert!(reasons.contains(&json!("input_contains_raw_or_source_fields")));
+        assert!(reasons.contains(&json!(
+            "code_gate_did_not_approve_shadow_runtime_enablement_code_implementation"
+        )));
+        assert!(reasons.contains(&json!("source_runtime_enablement_plan_block_reason")));
+        assert_eq!(
+            payload["code_implementation_contract"]
+                ["may_implement_shadow_runtime_enablement_code"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["code_implementation_contract"]["may_enable_runtime_gate_now"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["code_implementation_contract"]["may_write_memory_or_graph_edges"],
+            json!(false)
+        );
+
+        let serialized = serde_json::to_string(&payload).expect("serialize");
+        assert!(!serialized.contains("source owner record should not echo"));
+        assert!(!serialized.contains("secret runtime enablement code gate source query"));
+        assert!(!serialized.contains("secret runtime enablement code gate source content"));
+        assert!(!serialized.contains("secret runtime enablement code gate top-level query"));
+        assert!(!serialized.contains("secret runtime enablement code gate case row"));
+        assert!(!serialized.contains("\"runtime_enablement_owner_decision_record\""));
     }
 
     #[tokio::test]
