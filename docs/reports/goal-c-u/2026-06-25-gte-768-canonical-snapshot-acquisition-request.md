@@ -2,12 +2,38 @@
 
 Date: 2026-06-25
 
-Status: `REQUEST_CANONICAL_SNAPSHOT`.
+Status: `FULFILLED_BY_SSH_READY_FOR_OWNER_REVIEW_PACKET`.
 
 Scope: request the exact pinned Mac snapshot needed before Agent-Bridge can
 continue the GTE/768 cut-over evidence lane. This is a transfer/request packet
 only. It does not authorize live reindex, live DB mutation, deploy, runtime env
 changes, or production `memory_search` changes.
+
+## Fulfillment Update
+
+2026-06-25: SMB was unavailable, so the snapshot was exported and transferred
+over SSH from `pallasting@100.91.146.24` (`maxiaodeMac-Pro.local`) to aio2.
+
+Received artifact:
+
+```text
+/home/pallasting/.cache/agent-bridge/inbox/state.snapshot.20260623.checkpointed-for-aio2.db
+sha256=21b218ddc5d9d9a868520d2441df5bb0b7d3546dba68a28a4db509f0d34189ae
+fingerprint=active=3022 edges=5527 newest=1782205313
+```
+
+The scratch-only rehearsal completed with:
+
+```text
+status=REHEARSAL_COMPLETED_REVIEW_METRICS warnings=0
+hard-tier R@10: fts=0.375 fts+graph=0.375 hybrid=0.375 semantic=0.750
+```
+
+Current report:
+
+```text
+docs/reports/goal-c-u/2026-06-25-gte-768-canonical-snapshot-rehearsal.md
+```
 
 ## Why This Packet Exists
 

@@ -2,11 +2,15 @@
 
 Date: 2026-06-25
 
-Status: `NO_GO_CANONICAL_SNAPSHOT_MISSING`.
+Status: `SUPERSEDED_BY_CANONICAL_REHEARSAL_REPORT`.
 
 Scope: add and validate a read-only gate for the next GTE/768 step: finding or
 explicitly accepting a canonical frozen Mac snapshot before any scratch-copy
 rehearsal that could be used as production cut-over evidence.
+
+2026-06-25 update: the canonical snapshot was later acquired by SSH and replayed
+successfully. Current result packet:
+`docs/reports/goal-c-u/2026-06-25-gte-768-canonical-snapshot-rehearsal.md`.
 
 ## References Checked
 

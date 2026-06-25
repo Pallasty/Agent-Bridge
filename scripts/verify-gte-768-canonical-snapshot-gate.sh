@@ -170,7 +170,7 @@ import sqlite3
 import sys
 
 path = pathlib.Path(sys.argv[1]).resolve()
-uri = path.as_uri() + "?mode=ro"
+uri = path.as_uri() + "?mode=ro&immutable=1"
 con = sqlite3.connect(uri, uri=True)
 con.execute("PRAGMA query_only=ON")
 
