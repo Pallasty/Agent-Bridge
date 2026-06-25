@@ -6,23 +6,26 @@ Status: local continuity ledger
 ## Source State
 
 This ledger records the current local authorization boundary for Agent-Bridge
-memory-related work after reconnect, remote sync, and board sync on aio2.
+memory-related work after reconnect, remote sync, and board sync. It was updated
+after forum #120 post #4297 ratified GitLab as the Agent-Bridge canonical host.
 
 Verified local sources:
 
-- code checkout: `master` at `ffdc8fc`;
-- memory/forum sync repository: `1e69b8b`;
-- visible board landing: design thread #105 posts #2470 through #2474;
+- code checkout reconciled across GitLab/GitHub for this design slice:
+  `master` at `33d55e0`; merge audit later observed both forges at `9e0d8cf`
+  without changing this authorization boundary;
+- visible board landing: design thread #120 post #4297;
 - scope policy docs:
   `SCOPE_PROJECT_ID_CANONICAL_POLICY_2026_06_24.md` and
   `SCOPE_PHASE3_WRITE_TIME_PROJECT_ID_PLAN_2026_06_24.md`;
+- GitLab-ratified follow-up plan:
+  `docs/reports/goal-c-u/2026-06-25-scope-policy-write-switch-gitlab-ratified-plan.md`;
 - T5/T6 evidence doc:
   `MEMORY_CONTINUITY_T5_T6_EVIDENCE_SURFACES_2026_06_19.md`.
 
-`SCOPE_PHASE3_WRITE_TIME_PROJECT_ID_PLAN_2026_06_24.md` cites forum #120, but
-thread #120 is not present in the locally synced forum store during this audit.
-Treat the merged docs and visible #105 posts as the local authority. Treat #120
-references as upstream provenance until that thread is readable locally.
+The pre-ratification GitHub recommendation packet
+`docs/reports/goal-c-u/2026-06-25-scope-canonical-host-owner-decision-packet.md`
+is superseded. Keep it as historical evidence only.
 
 ## Current Authorization Boundary
 
@@ -41,6 +44,15 @@ Current `master` authorizes trace and report work only:
 Future production `project-id:*` writes require high-confidence evidence. Allowed
 production candidates are explicit project IDs and reviewed git-remote/registry
 policy. `GitRootName` and `PathFallback` remain diagnostic evidence only.
+
+The owner-ratified Agent-Bridge canonical project ID is:
+
+```text
+project-id:git:gitlab.com/pallasting/agent-bridge
+```
+
+GitHub is a synchronized mirror and must not be treated as equivalent unless a
+future owner decision explicitly supersedes #4297.
 
 Not authorized in this slice:
 

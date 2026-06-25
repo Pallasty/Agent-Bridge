@@ -2,7 +2,7 @@
 
 Date: 2026-06-24
 
-Status: design guardrail
+Status: design guardrail, updated after owner ratification
 
 Related local authorization ledger:
 `MEMORY_AUTHORIZATION_CONTRACTS_2026_06_25.md`.
@@ -33,10 +33,10 @@ That is acceptable for a dedicated single-project smoke process. It is not
 acceptable as a production policy for shared Codex, Claude Code, Cursor, Warp, or
 daemon-http sessions.
 
-There is also a host-choice problem. This checkout may report a GitLab origin
-while the public mirror is on GitHub. Choosing GitLab versus GitHub as the
-canonical host is a policy decision, not a fact that should be silently inferred
-from whichever remote name happens to be `origin` on the current machine.
+There is also a host-choice problem. Different nodes have observed different
+primary remotes. Choosing GitLab versus GitHub as the canonical host is a policy
+decision, not a fact that should be silently inferred from whichever remote name
+happens to be `origin` on the current machine.
 
 ## Decision
 
@@ -72,15 +72,22 @@ write targets.
 
 ## Agent-Bridge Project Policy
 
+Owner ratified the Agent-Bridge canonical host in forum #120 post #4297:
+
+```text
+canonical_project_id=project-id:git:gitlab.com/pallasting/agent-bridge
+production_project_id_writes_authorized=false
+```
+
 For `/Users/pallasting/Projects/agent-bridge`, the current live trace on this
-Mac resolves to:
+Mac also resolves to:
 
 `project-id:git:gitlab.com/pallasting/agent-bridge`
 
-That is because the active checkout's Git remote evidence points at GitLab. If
-the public GitHub mirror should become the canonical project ID, encode that via
-a scoped registry or a dedicated single-project process. Do not rely on a global
-environment variable in a shared MCP process.
+GitHub remains a synchronized mirror and may appear as evidence on another node,
+but it is not the canonical write target unless a later owner decision supersedes
+#4297. A future write switch must use the reviewed GitLab canonical policy, not
+whichever remote name happens to be available in the running process.
 
 ## Acceptance Gates For Write Switch
 
@@ -105,4 +112,4 @@ This document does not:
 - switch stored memory scopes to `project-id:*`;
 - migrate existing rows;
 - add a new MCP tool; or
-- choose GitHub versus GitLab as the canonical host for Agent-Bridge.
+- choose any replacement for the owner-ratified GitLab canonical host.
