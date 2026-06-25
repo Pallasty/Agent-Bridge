@@ -97,9 +97,14 @@ Sync pushes after final fixes:
 
 - `89ff8d9` at `2026-06-25T17:02:11Z`
 - `bb720e7` at `2026-06-25T17:03:08Z`
+- `3991173` at `2026-06-25T17:08:14Z` after forum post #2562
 
 Daily hygiene after wrapper fix completed successfully, including
 `dream snapshot --name daily`. The new daily snapshots are GTE-tagged.
+
+Forum coordination:
+
+- Thread 105 post #2562 records the completed aio2 live migration result.
 
 Timers after verification:
 
