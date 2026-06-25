@@ -1357,6 +1357,34 @@ implementation gate; runtime enablement, runtime influence, candidate
 expansion, search-order changes, memory writes, and graph-edge writes remain
 later-gated non-claims.
 
+The next surface is the runtime-enablement code implementation gate:
+
+- MCP tool:
+  `memory_biocortex_t6_candidate_expansion_runtime_enablement_code_implementation_gate`;
+- schema:
+  `agent_bridge.memory_biocortex_t6_candidate_expansion.runtime_enablement_code_implementation_gate.v0`;
+- required source:
+  the redacted JSON object from
+  `memory_biocortex_t6_candidate_expansion_runtime_enablement_implementation_plan_artifact`;
+- explicit reviewer decision:
+  `approve_shadow_runtime_enablement_code_implementation_only`.
+
+The code implementation gate can only authorize a later default-off shadow
+runtime-enablement code patch. It does not enable runtime behavior, run shadow
+mode, invoke executors, call BioCortex or memory tools, change candidate sets or
+search order, write memory or graph edges, mutate feature flags or runtime
+configuration, or approve production candidate expansion. It blocks if the
+source implementation-plan artifact is not ready, if either the source or
+request includes raw query/key/content/case rows, if the source claims runtime
+authority, if required default-off/shadow-first/deterministic replay/negative
+control/bounded delta/rollback fields are incomplete, or if the explicit
+reviewer decision is anything other than
+`approve_shadow_runtime_enablement_code_implementation_only`. Even when ready,
+the only opened follow-up is implementing a default-off shadow code path; any
+shadow execution, runtime enablement, runtime influence, candidate expansion,
+search-order change, memory write, graph-edge write, feature-flag activation,
+or runtime-configuration mutation remains later-gated.
+
 ## Verification
 
 Targeted validation for this slice after `/Data` space was recovered:
