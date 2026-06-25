@@ -76,6 +76,7 @@ Mac live migration verification:
 ```text
 docs/reports/goal-c-u/2026-06-25-gte-768-mac-live-migration-verification.md
 docs/reports/goal-c-u/2026-06-25-gte-768-mac-stale-reader-cleanup.md
+docs/reports/goal-c-u/2026-06-25-gte-768-aio2-live-migration-precheck.md
 ```
 
 Initial canonical rehearsal head:
@@ -113,16 +114,17 @@ Current live store/readers are not cut over:
 
 ```text
 live_db=/home/pallasting/.local/share/agent-bridge/state.db
-active_total=500
-embedded=491
+active_total=502
+embedded=493
 null_or_empty=9
 dominant_backend=all-MiniLM-L6-v2
 stale_vectors=253
-stale_frac=0.515
+stale_frac=0.513
 gte_good=0
-old_or_non_gte_active_embedded=491
+old_or_non_gte_active_embedded=493
 live readers using GTE=0
 live readers not using GTE=4
+live_cutover_preflight_status=NO_GO_LIVE_READER_MISMATCH
 ```
 
 This is acceptable for scratch evidence and explicitly not acceptable for live

@@ -49,6 +49,7 @@ docs/reports/goal-c-u/2026-06-25-gte-768-reader-compatibility-probe.md
 docs/reports/goal-c-u/2026-06-25-gte-768-owner-review-packet.md
 docs/reports/goal-c-u/2026-06-25-gte-768-mac-live-migration-verification.md
 docs/reports/goal-c-u/2026-06-25-gte-768-mac-stale-reader-cleanup.md
+docs/reports/goal-c-u/2026-06-25-gte-768-aio2-live-migration-precheck.md
 ```
 
 Rollback companion draft:
@@ -70,16 +71,17 @@ doctor_ok=true
 doctor_fails=0
 doctor_warns=0
 live_db=/home/pallasting/.local/share/agent-bridge/state.db
-live_active_total=500
-live_embedded=491
+live_active_total=502
+live_embedded=493
 live_null_or_empty=9
 live_dominant_backend=all-MiniLM-L6-v2
 live_stale_vectors=253
-live_stale_frac=0.515
+live_stale_frac=0.513
 live_gte_good=0
-live_old_or_non_gte_active_embedded=491
+live_old_or_non_gte_active_embedded=493
 live_readers_using_gte=0
 live_readers_not_using_gte=4
+live_cutover_preflight_status=NO_GO_LIVE_READER_MISMATCH
 ```
 
 Mac, observed over SSH 2026-06-25 after user-completed full migration:
