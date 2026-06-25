@@ -17913,7 +17913,7 @@ const CONTINUITY_TAG_PREFIXES: [&str; 7] = [
     CONTINUITY_SUPERSEDES_TAG_PREFIX,
 ];
 
-const CONTINUITY_ROLE_VALUES: [&str; 7] = [
+const CONTINUITY_ROLE_INPUT_VALUES: [&str; 8] = [
     "state",
     "constraint",
     "procedure",
@@ -17921,6 +17921,7 @@ const CONTINUITY_ROLE_VALUES: [&str; 7] = [
     "preference",
     "warning",
     "archive",
+    "decision",
 ];
 const CONTINUITY_CONFIDENCE_VALUES: [&str; 5] =
     ["verified", "observed", "inferred", "user_stated", "stale"];
@@ -18027,7 +18028,10 @@ fn memory_continuity_enum_field(
 ) -> std::result::Result<Option<String>, String> {
     match obj.get(field).and_then(Value::as_str) {
         Some(value) => {
-            let parsed = memory_validate_continuity_enum(field, value, allowed)?;
+            let mut parsed = memory_validate_continuity_enum(field, value, allowed)?;
+            if field == "continuity_role" && parsed == "decision" {
+                parsed = "state".to_string();
+            }
             Ok((!parsed.is_empty()).then_some(parsed))
         }
         None => Ok(None),
@@ -18061,7 +18065,7 @@ fn memory_continuity_metadata_from_args(
         continuity_role: memory_continuity_enum_field(
             obj,
             "continuity_role",
-            &CONTINUITY_ROLE_VALUES,
+            &CONTINUITY_ROLE_INPUT_VALUES,
         )?,
         retrieval_trigger: memory_continuity_string_field(obj, "retrieval_trigger"),
         confidence: memory_continuity_enum_field(obj, "confidence", &CONTINUITY_CONFIDENCE_VALUES)?,
@@ -18233,7 +18237,7 @@ impl McpTool for MemorySaveTool {
                         "type": "object",
                         "description": "Optional continuity metadata encoded in backward-compatible memory tags and surfaced as continuity_metadata on reads.",
                         "properties": {
-                            "continuity_role": { "type": "string", "enum": ["state", "constraint", "procedure", "evidence", "preference", "warning", "archive"] },
+                            "continuity_role": { "type": "string", "enum": ["state", "constraint", "procedure", "evidence", "preference", "warning", "archive", "decision"], "description": "`decision` is accepted as an input alias and stored as `state`; use `kind: decision` for the memory's durable type." },
                             "retrieval_trigger": { "type": "string", "description": "Short condition under which this memory should be retrieved. Stored with a 160-character cap." },
                             "confidence": { "type": "string", "enum": ["verified", "observed", "inferred", "user_stated", "stale"] },
                             "freshness_policy": { "type": "string", "enum": ["never_expires", "ttl", "version_bound", "project_phase_bound"] },
@@ -65317,6 +65321,21 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(tags.contains(&"unrelated".to_string()));
         assert!(!tags.contains(&"continuity_role:archive".to_string()));
         assert!(!tags.contains(&"continuity_confidence:stale".to_string()));
+    }
+
+    #[test]
+    fn memory_continuity_role_decision_alias_normalizes_to_state() {
+        let metadata = memory_continuity_metadata_from_args(&json!({
+            "continuity": {
+                "continuity_role": "decision",
+                "confidence": "verified"
+            }
+        }))
+        .expect("parse metadata")
+        .expect("metadata");
+
+        assert_eq!(metadata.continuity_role.as_deref(), Some("state"));
+        assert_eq!(metadata.confidence.as_deref(), Some("verified"));
     }
 
     #[tokio::test(flavor = "current_thread")]
