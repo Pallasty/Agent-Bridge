@@ -4,6 +4,9 @@ Date: 2026-06-24
 
 Status: design guardrail
 
+Related local authorization ledger:
+`MEMORY_AUTHORIZATION_CONTRACTS_2026_06_25.md`.
+
 ## Context
 
 Agent-Bridge is moving project-scoped memory from path-shaped scopes such as
