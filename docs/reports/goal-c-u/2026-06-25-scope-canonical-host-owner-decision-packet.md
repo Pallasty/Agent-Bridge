@@ -1,7 +1,22 @@
 # Scope Canonical Host Owner Decision Packet
 
 Date: 2026-06-25
-Status: recommendation packet, not production write authorization
+Status: superseded recommendation packet, not production write authorization
+
+## Supersession
+
+Forum #120 post #4297 supersedes this packet's recommendation. The owner
+ratified GitLab as the canonical host:
+
+```text
+canonical_project_id=project-id:git:gitlab.com/pallasting/agent-bridge
+production_project_id_writes_authorized=false
+```
+
+This packet is kept as historical evidence for the pre-ratification GitHub
+recommendation and for its negative-control structure. Do not use it as current
+authority for Agent-Bridge write-time project-id policy. The current follow-up
+packet is `2026-06-25-scope-policy-write-switch-gitlab-ratified-plan.md`.
 
 ## Purpose
 
@@ -16,7 +31,7 @@ does not write memory with `project-id:*`, does not migrate existing rows, does
 not change search order, does not write graph edges, does not add an MCP tool,
 and does not authorize production canonical writes.
 
-## Recommendation
+## Superseded Recommendation
 
 Adopt the GitHub project ID as the canonical Agent-Bridge memory scope target:
 
