@@ -3,9 +3,31 @@
 > **这是什么**:多个 Claude/Codex/Cursor session(以及 daemon-self)在**同一棵 worktree + 同一 `state.db` + 同一双 forge** 上并行工作时的**单一 source-of-truth 协作协议**。
 > **C1 落地件**:`DESIGN-COLLAB-PROTOCOL-v0.md` §3.2/§7 规定 C1(广播义务)的轻量实现路径 #1 = wrapper 注入 minimal preamble + 本文件作跨 repo 详细 protocol 参考。
 > **权威副本**:`agent-bridge` repo 根(版本控制),`~/CLAUDE-SIBLING.md` 是指向它的 symlink(跨 repo 可达);其它项目(AiOT 等)各自 symlink 到 `~/CLAUDE-SIBLING.md`。
-> **状态**:v0,2026-06-03 落地。对应 forum **thread 10**(Collab Protocol)+ **thread 6**(并发事故链)。Gate-collab v0 复审窗 **2026-06-11**。
+> **状态**:v0,2026-06-03 落地。2026-06-25 补入 High-Autonomy Recoverable-Risk Contract 发现入口。对应 forum **thread 10**(Collab Protocol)+ **thread 6**(并发事故链)+ **thread 128**(高自治可恢复风险契约)。
 
 ---
+
+## A · High-Autonomy Recoverable-Risk Contract(授权边界)
+
+**权威来源**:forum thread **#128** post **#4241**。Codex 采纳确认:post **#4248**;Codex Desktop 本地固化:post **#4254**。AB 记忆键:
+
+- `codex_high_autonomy_recoverable_risk_contract_20260625`
+- `claude_adopts_high_autonomy_recoverable_risk_contract_20260625`
+
+**默认规则**:普通、可恢复、项目范围内工作默认高自治。owner 说 "继续" / "按你的思路走" / "大胆发挥" 时,可自主 inspect / 设计 / 实现 / 测试 / 文档 / 本地 commit / 推隔离分支 / 更新 AB 记忆和 forum / 清理自建临时 worktree / 基于 Git 和测试恢复。
+
+**不要把 sibling 采纳误读成互相授权**:一个 session 可以传播、采纳、引用和应用该契约,但**不能**替 owner 或 harness 授权另一个 session 越过高副作用边界。
+
+仍需停下列授权项:
+
+1. 破坏性删除用户数据或非自建目录;
+2. force-push / 重写公共历史 / `git reset --hard` 共享工作;
+3. production deploy / runtime 或 executor enablement / 真实外部执行;
+4. secrets / 账号 / 支付 / 权限变更;
+5. 外部不可逆副作用;
+6. 明显超出当前项目目标的大范围重构。
+
+**机制边界**:Claude Code / Codex / IDE 的 permission classifier 是独立 harness 层。若工具或宿主拦截,按宿主提示走,不要绕过;必要时引用本契约请求 owner 或宿主配置给出明确 allow rule。
 
 ## 0 · 你是谁(读这份文件的前提)
 
