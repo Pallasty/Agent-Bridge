@@ -19472,6 +19472,62 @@ fn merge_alias_compatible_work_memory(
     same_node
 }
 
+/// Cross-node "peer" work_memory lanes — the wake delta. Returns lanes that are
+/// alias-compatible with `requested_scope` (same logical project) but written
+/// under a DIFFERENT scope (i.e. a sibling NODE's path, e.g. aio2's
+/// `project:/Data/...` for a Mac session's `project:/Users/...`), with
+/// `updated_at > since_ts`, most-recent first. Same-node lanes (scope ==
+/// requested_scope) are excluded — those are the agent's own, surfaced by `list`.
+///
+/// Reliable across nodes because `updated_at` survives state.db sync unchanged
+/// (sync's stabilise_sync_metadata zeroes last_accessed_at / access_count /
+/// importance but NOT updated_at). Pull/turn-driven by design: it reads lanes
+/// already synced into the local store, so a peer's update surfaces once sync has
+/// carried it over — there is no live push (that is the sibling node's lane).
+fn cross_node_peer_lanes(
+    requested_scope: &str,
+    broad: Vec<MemoryRecord>,
+    aliases: &str,
+    since_ts: i64,
+    limit: usize,
+) -> Vec<MemoryRecord> {
+    let mut peers: Vec<MemoryRecord> = broad
+        .into_iter()
+        .filter(|r| r.updated_at > since_ts)
+        // Exclude this session's own scope AND same-node ancestor/descendant
+        // scopes (e.g. the parent `project:/Users/.../Projects` of this
+        // `…/Projects/agent-bridge`). A TRUE cross-node peer has a different root
+        // path (aio2 `/Data/…` vs Mac `/Users/…`), not a prefix relation — those
+        // survive; same-node path relatives are the agent's own neighborhood.
+        .filter(|r| {
+            !scope_is_path_prefix_related(r.scope.as_deref().unwrap_or(""), requested_scope)
+        })
+        // …but still the SAME logical project (alias-compatible).
+        .filter(|r| {
+            project_scopes_read_time_compatible_with_aliases(
+                r.scope.as_deref().unwrap_or(""),
+                requested_scope,
+                Some(aliases),
+            )
+        })
+        .collect();
+    peers.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+    peers.truncate(limit);
+    peers
+}
+
+/// True if `a` and `b` are the same scope or one is a path-segment prefix of the
+/// other (same-node ancestor/descendant), e.g.
+/// `project:/Users/x/Projects` vs `project:/Users/x/Projects/agent-bridge`.
+/// Segment-aware so `…/Projects` does not match `…/Projects-foo`.
+fn scope_is_path_prefix_related(a: &str, b: &str) -> bool {
+    fn is_segment_prefix(short: &str, long: &str) -> bool {
+        long == short
+            || (long.starts_with(short) && long.as_bytes().get(short.len()) == Some(&b'/'))
+    }
+    is_segment_prefix(a, b) || is_segment_prefix(b, a)
+}
+
 fn json_string_array(args: &Value, key: &str) -> Vec<String> {
     args.get(key)
         .and_then(|v| v.as_array())
@@ -19646,6 +19702,34 @@ fn format_work_memory_block(
     Some(out)
 }
 
+/// Format the cross-node peer wake block for session_bootstrap. `rows` are
+/// already filtered to cross-node peer lanes (see [`cross_node_peer_lanes`]) and
+/// recency-sorted. Shows the sibling node's scope + lane key + a short snippet so
+/// a starting session perceives what a peer node changed for this project. None
+/// when there are no peer lanes (clean / single-node).
+fn format_cross_node_peer_block(rows: &[MemoryRecord], is_compact: bool) -> Option<Vec<String>> {
+    if rows.is_empty() {
+        return None;
+    }
+    let mut out = vec![
+        if is_compact {
+            "=== Cross-node peer work memory ===".to_string()
+        } else {
+            "=== Cross-node peer work memory (a sibling node updated these lanes for this project) ==="
+                .to_string()
+        },
+        String::new(),
+    ];
+    for r in rows.iter().take(3) {
+        let scope = r.scope.as_deref().unwrap_or("?");
+        let (snippet, _, _) = truncate_chars(&r.content, 90);
+        let snippet = snippet.replace('\n', " ");
+        out.push(format!("[{scope}] {}: {snippet}…", r.key));
+    }
+    out.push(String::new());
+    Some(out)
+}
+
 async fn save_precompact_work_memory_snapshot(
     hub: &Hub,
     cwd: &str,
@@ -19721,10 +19805,11 @@ impl McpTool for WorkMemoryTool {
                 "properties": {
                     "op": {
                         "type": "string",
-                        "enum": ["save", "list", "get", "clear"],
+                        "enum": ["save", "list", "get", "clear", "peers"],
                         "default": "list",
-                        "description": "save overwrites a project/session slot; list returns recent work memories; get reads one key; clear deletes one slot/key."
+                        "description": "save overwrites a project/session slot; list returns recent work memories (with cross-node fan-in); get reads one key; clear deletes one slot/key; peers returns ONLY cross-node sibling lanes (a DIFFERENT node working this same project, surfaced via scope-alias) changed since `since_ts` — the cross-node wake delta: 'what did my peers change since I last looked'."
                     },
+                    "since_ts": { "type": "integer", "description": "[peers] Only return cross-node lanes with updated_at > this unix-seconds cursor. Pass back the response's next_cursor to poll incrementally. Default 0 = all peer lanes." },
                     "cwd": { "type": "string", "description": "Project path for scoping. Defaults to current working directory." },
                     "session_id": { "type": "string", "description": "Optional session namespace. Omit for a shared project slot." },
                     "slot": { "type": "string", "default": "active", "description": "Short slot name, e.g. active, release, precompact." },
@@ -19928,8 +20013,66 @@ impl McpTool for WorkMemoryTool {
                     &json!({ "deleted": deleted, "key": key }),
                 ))
             }
+            "peers" => {
+                // Cross-node wake delta: which sibling-NODE lanes for this project
+                // changed since the caller's cursor. Requires the scope-alias
+                // registry (no aliases = no cross-node concept = empty).
+                let since_ts = args.get("since_ts").and_then(|v| v.as_i64()).unwrap_or(0);
+                let limit = args
+                    .get("limit")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(8)
+                    .clamp(1, 50) as usize;
+                let peers = match std::env::var(PROJECT_SCOPE_ALIASES_ENV)
+                    .ok()
+                    .filter(|s| !s.trim().is_empty())
+                {
+                    Some(aliases) => {
+                        let broad = store
+                            .list_memories(
+                                Some(WORK_MEMORY_KIND),
+                                MemoryListSort::Recent,
+                                WORK_MEMORY_ALIAS_FANIN_SCAN,
+                            )
+                            .await?;
+                        cross_node_peer_lanes(
+                            &work_memory_scope(&cwd),
+                            broad,
+                            &aliases,
+                            since_ts,
+                            limit,
+                        )
+                    }
+                    None => Vec::new(),
+                };
+                // next_cursor lets the caller poll incrementally (pass back as since_ts).
+                let next_cursor = peers.iter().map(|r| r.updated_at).max().unwrap_or(since_ts);
+                let rows: Vec<Value> = peers
+                    .iter()
+                    .map(|r| {
+                        let (snippet, truncated, total_chars) = truncate_chars(&r.content, 200);
+                        json!({
+                            "key": r.key,
+                            "scope": r.scope,
+                            "updated_at": r.updated_at,
+                            "tags": r.tags,
+                            "snippet": snippet,
+                            "truncated": truncated,
+                            "content_chars": total_chars,
+                        })
+                    })
+                    .collect();
+                Ok(ToolResult::json_text(&json!({
+                    "cwd": cwd,
+                    "kind": WORK_MEMORY_KIND,
+                    "since_ts": since_ts,
+                    "next_cursor": next_cursor,
+                    "peer_lane_count": rows.len(),
+                    "peer_lanes": rows,
+                })))
+            }
             other => Ok(ToolResult::error(format!(
-                "unknown work_memory op: {other} (expected save|list|get|clear)"
+                "unknown work_memory op: {other} (expected save|list|get|clear|peers)"
             ))),
         }
     }
@@ -22041,6 +22184,7 @@ const BUDGET_PERCEPTION: usize = 150;
 const BUDGET_LETTER_EACH: usize = 150;
 const BUDGET_FEEDBACK_PREAMBLE: usize = 300;
 const BUDGET_WORK_MEMORY: usize = 260;
+const BUDGET_CROSS_NODE_PEERS: usize = 160;
 const BUDGET_DECISIONS_DUE: usize = 200;
 const BUDGET_ERROR_PATTERNS: usize = 200;
 const BUDGET_CONTINUITY_KERNEL: usize = 260;
@@ -22482,6 +22626,32 @@ impl McpTool for SessionBootstrapTool {
                 .unwrap_or_default();
             if let Some(block) = format_work_memory_block(&work_rows, is_compact, 180) {
                 lines.extend(cap_block_lines(block, BUDGET_WORK_MEMORY));
+            }
+
+            // Cross-node wake (auto-surface): lanes a SIBLING NODE updated for this
+            // same project (e.g. an aio2 session's project:/Data/... lane aliased
+            // to this Mac session's project). The work_memory block above is
+            // exact-scope and same-node only; this block makes a starting session
+            // PERCEIVE peer activity without an explicit `work_memory op=peers`
+            // call. Pull/turn-driven: shows lanes already synced into the local
+            // store. Gated on the scope-alias registry (no aliases = no cross-node).
+            if let Some(aliases) = std::env::var(PROJECT_SCOPE_ALIASES_ENV)
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+            {
+                let broad = store
+                    .list_memories(
+                        Some(WORK_MEMORY_KIND),
+                        MemoryListSort::Recent,
+                        WORK_MEMORY_ALIAS_FANIN_SCAN,
+                    )
+                    .await
+                    .unwrap_or_default();
+                let peers =
+                    cross_node_peer_lanes(&work_memory_scope(&cwd), broad, &aliases, 0, 3);
+                if let Some(block) = format_cross_node_peer_block(&peers, is_compact) {
+                    lines.extend(cap_block_lines(block, BUDGET_CROSS_NODE_PEERS));
+                }
             }
         }
 
@@ -58276,6 +58446,111 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             vec!["wm_mac"],
             "only same-node lane; no cross-node leak without a covering alias"
         );
+    }
+
+    #[test]
+    fn cross_node_peer_lanes_returns_only_cross_node_changed_since_cursor() {
+        let mk = |key: &str, scope: &str, updated: i64| MemoryRecord {
+            key: key.to_string(),
+            kind: WORK_MEMORY_KIND.to_string(),
+            content: format!("content {key}"),
+            tags: vec![],
+            related_keys: vec![],
+            scope: Some(scope.to_string()),
+            created_at: 0,
+            updated_at: updated,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".to_string(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        let aliases = "project-id:git:gitlab.com/pallasting/agent-bridge=\
+            project:/Users/pallasting/Projects/agent-bridge,\
+            project:/Data/CascadeProjects/agent-bridge";
+        let requested = "project:/Users/pallasting/Projects/agent-bridge";
+        let broad = vec![
+            // own same-node lane — must be EXCLUDED (it's the agent's own).
+            mk("wm_mac", "project:/Users/pallasting/Projects/agent-bridge", 500),
+            // aio2 peer lane updated after the cursor — INCLUDED.
+            mk("wm_aio2_new", "project:/Data/CascadeProjects/agent-bridge", 300),
+            // aio2 peer lane updated BEFORE the cursor — EXCLUDED by since_ts.
+            mk("wm_aio2_old", "project:/Data/CascadeProjects/agent-bridge", 100),
+            // unrelated project — must NOT leak.
+            mk("wm_other", "project:/Data/CascadeProjects/biocortex-rs", 999),
+        ];
+        let out = cross_node_peer_lanes(requested, broad, aliases, 200, 8);
+        let keys: Vec<&str> = out.iter().map(|r| r.key.as_str()).collect();
+        assert_eq!(
+            keys,
+            vec!["wm_aio2_new"],
+            "only the cross-node peer lane changed since the cursor; own lane, \
+             stale peer lane, and unrelated project all excluded"
+        );
+        // next-cursor semantics: the returned lane's updated_at is the max.
+        assert_eq!(out[0].updated_at, 300);
+    }
+
+    #[test]
+    fn cross_node_peer_lanes_orders_recent_first_and_truncates() {
+        let mk = |key: &str, updated: i64| MemoryRecord {
+            key: key.to_string(),
+            kind: WORK_MEMORY_KIND.to_string(),
+            content: String::new(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: Some("project:/Data/CascadeProjects/agent-bridge".to_string()),
+            created_at: 0,
+            updated_at: updated,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".to_string(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        let aliases = "project-id:git:gitlab.com/pallasting/agent-bridge=\
+            project:/Users/pallasting/Projects/agent-bridge,\
+            project:/Data/CascadeProjects/agent-bridge";
+        let requested = "project:/Users/pallasting/Projects/agent-bridge";
+        let broad = vec![mk("a", 100), mk("b", 300), mk("c", 200)];
+        let out = cross_node_peer_lanes(requested, broad, aliases, 0, 2);
+        let keys: Vec<&str> = out.iter().map(|r| r.key.as_str()).collect();
+        assert_eq!(keys, vec!["b", "c"], "most-recent first, truncated to limit");
+    }
+
+    #[test]
+    fn cross_node_peer_lanes_excludes_same_node_parent_scope() {
+        // A same-node PARENT scope (project:/Users/.../Projects) is alias/prefix-
+        // compatible but is NOT a cross-node peer — it must not leak into peers.
+        let mk = |key: &str, scope: &str| MemoryRecord {
+            key: key.to_string(),
+            kind: WORK_MEMORY_KIND.to_string(),
+            content: String::new(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: Some(scope.to_string()),
+            created_at: 0,
+            updated_at: 100,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".to_string(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        let aliases = "project-id:git:gitlab.com/pallasting/agent-bridge=\
+            project:/Users/pallasting/Projects/agent-bridge,\
+            project:/Data/CascadeProjects/agent-bridge";
+        let requested = "project:/Users/pallasting/Projects/agent-bridge";
+        let broad = vec![
+            mk("wm_parent", "project:/Users/pallasting/Projects"), // same-node ancestor → excluded
+            mk("wm_aio2", "project:/Data/CascadeProjects/agent-bridge"), // cross-node → kept
+        ];
+        let out = cross_node_peer_lanes(requested, broad, aliases, 0, 8);
+        let keys: Vec<&str> = out.iter().map(|r| r.key.as_str()).collect();
+        assert_eq!(keys, vec!["wm_aio2"], "parent same-node scope excluded; only cross-node peer kept");
     }
 
     #[tokio::test]
