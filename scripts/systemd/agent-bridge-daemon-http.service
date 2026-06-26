@@ -16,6 +16,10 @@ Type=simple
 WorkingDirectory=/Data/CascadeProjects/agent-bridge
 ExecStart=%h/.local/bin/agent-bridge daemon-http --listen 0.0.0.0:7878
 Restart=on-failure
+# Exit 78 (EX_CONFIG) = embedding dim-guard class-1 abort (stale config/store dim
+# mismatch); won't self-heal across restarts, so don't crash-loop — surface a
+# clean `failed` state. Fix the env/model or set AGENT_BRIDGE_DIM_GUARD_STRICT=0.
+RestartPreventExitStatus=78
 RestartSec=5
 OOMScoreAdjust=-100
 MemoryHigh=1G

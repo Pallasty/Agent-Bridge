@@ -40,6 +40,14 @@
 
   <key>RunAtLoad</key>
   <true/>
+  <!-- exit 78 (EX_CONFIG) = embedding dim-guard class-1 strict abort (#4282), a
+       stale-config/store dim mismatch that won't self-heal. launchd cannot exclude
+       a single exit code (unlike systemd RestartPreventExitStatus=78 used by the
+       Linux units), so KeepAlive stays true to keep crash auto-restart; the in-app
+       mixed-dim grace removes the mid-migration false-positive, leaving only a
+       genuine uniform misconfiguration — which loops LOUDLY until fixed. Bypass:
+       add AGENT_BRIDGE_DIM_GUARD_STRICT=0 to EnvironmentVariables during a planned
+       migration, then reload. -->
   <key>KeepAlive</key>
   <true/>
 

@@ -45,6 +45,11 @@ Before=agent-bridge-daemon-http.service agent-bridge-palace.service
 Type=simple
 ExecStart=%h/.local/bin/agent-bridge daemon
 Restart=on-failure
+# Exit 78 (EX_CONFIG) = embedding dim-guard class-1 abort: a stale-config/store
+# dim mismatch that will not self-heal across restarts. Do NOT crash-loop on it —
+# surface a clean `failed` state instead (fix the model/env to match the store,
+# finish an in-flight reindex, or set AGENT_BRIDGE_DIM_GUARD_STRICT=0 to bypass).
+RestartPreventExitStatus=78
 RestartSec=5
 # Be killed LAST under future memory pressure (state.db data integrity matters).
 OOMScoreAdjust=-100

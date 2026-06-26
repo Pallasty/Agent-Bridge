@@ -30,6 +30,10 @@ ExecStart=%h/.local/bin/agent-bridge daemon-http
 # Default listen: 0.0.0.0:7878 (tailnet-reachable). Override:
 #   Environment=AGENT_BRIDGE_HTTP_LISTEN=127.0.0.1:7878
 Restart=on-failure
+# Exit 78 (EX_CONFIG) = embedding dim-guard class-1 abort (stale config/store dim
+# mismatch); won't self-heal across restarts, so don't crash-loop — surface a
+# clean `failed` state. Fix the env/model or set AGENT_BRIDGE_DIM_GUARD_STRICT=0.
+RestartPreventExitStatus=78
 RestartSec=5s
 # Reasonable resource caps for a single-node forum/presence server.
 LimitNOFILE=4096

@@ -1059,6 +1059,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut fts_cjk = ModeAgg::default();
     let mut fts_cjk_acc = ModeAgg::default();
     let mut fts_empty_cjk_acc = ModeAgg::default();
+    // Item B (2026-06-26): deployable-shape probe for the env-gated default-path
+    // semantic fallback — baseline FTS unless it returns zero rows, then the top
+    // semantic keys. Measures the FTS-empty tail recovery the shipped flag
+    // actually delivers (NOT full semantic mode on every case).
+    let mut fts_empty_semantic = ModeAgg::default();
 
     for case in CORPUS {
         let fts_keys = keys_of(store.memory_search(case.query, &[], TOP_K as u32).await?);
@@ -1110,15 +1115,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 semantic_scope_soft_candidates(&sem_candidates, AGENT_BRIDGE_PROJECT_SCOPE);
             let sem_hard =
                 semantic_scope_hard_candidates(&sem_candidates, AGENT_BRIDGE_PROJECT_SCOPE);
-            semantic.record(first_hit_rank(&keys_of_hits(&sem_raw), case.expect));
+            let sem_topk_keys = keys_of_hits(&sem_raw);
+            semantic.record(first_hit_rank(&sem_topk_keys, case.expect));
             semantic_scope_raw.record(case, &sem_raw);
             semantic_scope_soft.record(case, &sem_soft);
             semantic_scope_hard.record(case, &sem_hard);
+            // Item B deployable-shape: baseline FTS unless it returns zero rows,
+            // then substitute the top semantic keys — the env-gated default-path
+            // fallback's shape, so the measured delta is the FTS-empty tail
+            // recovery, NOT full semantic mode on every case. Slight UPPER bound:
+            // this reads the top semantic candidates at threshold 0.0 while the
+            // shipped fallback floors cosine at 0.3, so a low-cosine recovery here
+            // may not survive in prod.
+            let fe_sem_keys = if fts_keys.is_empty() {
+                &sem_topk_keys
+            } else {
+                &fts_keys
+            };
+            fts_empty_semantic.record(first_hit_rank(fe_sem_keys, case.expect));
         } else {
             semantic.record(None);
             semantic_scope_raw.record(case, &[]);
             semantic_scope_soft.record(case, &[]);
             semantic_scope_hard.record(case, &[]);
+            // No real embedder → the shipped fallback would not fire → plain FTS.
+            fts_empty_semantic.record(first_hit_rank(&fts_keys, case.expect));
         }
     }
 
@@ -1179,6 +1200,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     println!();
 
+    // ── Item B: env-gated default-path semantic fallback (deployable shape) ──
+    println!("## Item B deployable-shape probe (FTS-empty → semantic fallback)");
+    print_mode_row("fts_empty+semantic", &fts_empty_semantic, n);
+    {
+        let fts_empty_idx: Vec<usize> = fts_candidate_counts
+            .iter()
+            .enumerate()
+            .filter(|(_, c)| **c == 0)
+            .map(|(i, _)| i)
+            .collect();
+        let by_tier = |t: Tier| -> usize {
+            CORPUS
+                .iter()
+                .enumerate()
+                .filter(|(i, c)| c.tier == t && fts_candidate_counts[*i] == 0)
+                .count()
+        };
+        println!(
+            "  FTS-empty cases (where this fallback ACTUALLY fires): {} of {}{}",
+            fts_empty_idx.len(),
+            n,
+            fmt_idx(&fts_empty_idx)
+        );
+        println!(
+            "  FTS-empty by tier: hard={} moderate={} easy={}",
+            by_tier(Tier::Hard),
+            by_tier(Tier::Moderate),
+            by_tier(Tier::Easy)
+        );
+        println!(
+            "  honest read: this is the AGENT_BRIDGE_RECALL_SEMANTIC_FALLBACK shape (default-OFF \
+             in prod). It changes ranking ONLY for the FTS-empty cases above — it does NOT \
+             deliver full semantic-mode R@k on every case. Read fts_empty+semantic vs fts for \
+             the from-zero recovery of the no-lexical-overlap tail; the per-tier table breaks it \
+             down by difficulty. Live memory_search is unchanged until the owner flips the flag."
+        );
+        println!();
+    }
+
     print_case2_tool_surface_projection_probe(&scratch_tool_surface)?;
     print_case8_remote_session_projection_probe(&scratch_remote_session)?;
     print_role_aware_hard_family_aggregate(&scratch_tool_surface, &scratch_remote_session)?;
@@ -1208,6 +1268,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         print_tier_row("fts+cjk", &fts_cjk, &idxs, tier.label());
         print_tier_row("fts+cjk_acc", &fts_cjk_acc, &idxs, tier.label());
         print_tier_row("fts_empty+cjk", &fts_empty_cjk_acc, &idxs, tier.label());
+        if semantic_ready {
+            print_tier_row("fts_empty+semantic", &fts_empty_semantic, &idxs, tier.label());
+        }
         print_tier_row("hybrid", &hybrid, &idxs, tier.label());
         if semantic_ready {
             print_tier_row("semantic", &semantic, &idxs, tier.label());
@@ -1292,6 +1355,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         fts_empty_cjk_acc_added.len(),
         fmt_idx(&fts_empty_cjk_acc_added)
     );
+    if semantic_ready {
+        let fts_empty_semantic_added = added_hit_indices(&fts, &fts_empty_semantic);
+        println!(
+            "  Item B fts_empty+semantic added hits over fts misses: {} case(s){} \
+             — the shipped fallback's REAL recovery set (FTS-empty tail only, not full semantic)",
+            fts_empty_semantic_added.len(),
+            fmt_idx(&fts_empty_semantic_added)
+        );
+    }
     if semantic_ready {
         let sem_miss = miss_indices(&semantic);
         println!(

@@ -18855,6 +18855,62 @@ impl McpTool for MemoryGetTool {
     }
 }
 
+/// Item B (2026-06-26, #120): is the owner-gated semantic fallback for the
+/// FTS-empty recall tail enabled? **Default-OFF** — only an explicit
+/// `AGENT_BRIDGE_RECALL_SEMANTIC_FALLBACK=1`/`true` turns it on; until then the
+/// default (fts) `memory_search` path is byte-identical to the prior behavior.
+/// Rationale: gte-768 semantic recall is ~2x fts on the hard (no-lexical-overlap)
+/// recall_eval tier, but only for queries FTS cannot serve at all — so the
+/// fallback fires strictly when FTS returns zero rows AND a real (non-hash)
+/// embedder is loaded. Pure (env split out) so the policy is unit-tested.
+fn recall_semantic_fallback_enabled_from(env_val: Option<&str>) -> bool {
+    matches!(env_val, Some(v) if v == "1" || v.eq_ignore_ascii_case("true"))
+}
+
+fn recall_semantic_fallback_enabled() -> bool {
+    recall_semantic_fallback_enabled_from(
+        std::env::var("AGENT_BRIDGE_RECALL_SEMANTIC_FALLBACK")
+            .ok()
+            .as_deref(),
+    )
+}
+
+/// Item B real-embedder gate: would a query embed produce a REAL vector (not the
+/// hash fallback)? Under remote delegation the embed runs on a warm peer, so the
+/// local model state is irrelevant. Otherwise the local ONNX model must have
+/// actually loaded AND the active backend must not be the hash fallback — this
+/// covers cold-load (model_init_done false), a hash-only build (model_init_done
+/// is true unconditionally there, but the backend name is the hash backend), and
+/// a permanent model-load failure. Consulted only on the rare FTS-empty branch.
+fn fallback_embedder_ready() -> bool {
+    if crate::remote_embed::active_remote_url().is_some() {
+        return true;
+    }
+    ab_store::vector::model_init_done()
+        && !ab_store::embedding::default_backend()
+            .name()
+            .to_ascii_lowercase()
+            .contains("hash")
+}
+
+#[cfg(test)]
+mod recall_semantic_fallback_tests {
+    use super::recall_semantic_fallback_enabled_from;
+
+    #[test]
+    fn semantic_fallback_default_off_unless_truthy() {
+        // Default-OFF: unset / "0" / arbitrary values keep the fts path byte-identical.
+        assert!(!recall_semantic_fallback_enabled_from(None));
+        assert!(!recall_semantic_fallback_enabled_from(Some("0")));
+        assert!(!recall_semantic_fallback_enabled_from(Some("")));
+        assert!(!recall_semantic_fallback_enabled_from(Some("yes")));
+        // Only an explicit truthy value opts in.
+        assert!(recall_semantic_fallback_enabled_from(Some("1")));
+        assert!(recall_semantic_fallback_enabled_from(Some("true")));
+        assert!(recall_semantic_fallback_enabled_from(Some("TRUE")));
+    }
+}
+
 pub struct MemorySearchTool {
     hub: Hub,
 }
@@ -18981,6 +19037,7 @@ impl McpTool for MemorySearchTool {
         };
 
         let started = Instant::now();
+        let mut semantic_fallback_fired = false;
         let hits = if mode == "hybrid" {
             let expand_top = args
                 .get("expand_top")
@@ -19037,7 +19094,37 @@ impl McpTool for MemorySearchTool {
                     .await?
             }
         } else {
-            store.memory_search(&q, &tags, inner_limit).await?
+            // Default (fts) path. Item B (2026-06-26, #120): owner-gated semantic
+            // fallback for the FTS-empty tail. gte-768 semantic recall is ~2x fts
+            // on the hard (no-lexical-overlap) recall_eval tier — but only for the
+            // paraphrase queries FTS cannot serve AT ALL, so recover via cosine
+            // strictly when FTS returns zero rows AND the flag is on AND a real
+            // (non-hash) embedder has loaded (cold-load hash never injects noise).
+            // Default-OFF: byte-identical to pure fts until the owner flips it.
+            let mut fts_hits = store.memory_search(&q, &tags, inner_limit).await?;
+            // Fire only on the no-lexical-overlap tail: FTS truly empty, AND no
+            // tag predicate to honor (memory_search_semantic ignores tags_any, so
+            // substituting would leak tag-violating rows), AND the flag is on, AND
+            // a real embedder is available (cold-load hash never injects noise).
+            if fts_hits.is_empty()
+                && tags.is_empty()
+                && recall_semantic_fallback_enabled()
+                && fallback_embedder_ready()
+            {
+                let threshold = args
+                    .get("threshold")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.3)
+                    .clamp(0.0, 1.0) as f32;
+                let fb = store
+                    .memory_search_semantic(&q, inner_limit, threshold)
+                    .await?;
+                if !fb.is_empty() {
+                    semantic_fallback_fired = true;
+                    fts_hits = fb;
+                }
+            }
+            fts_hits
         };
 
         // Scope mode is intentionally applied before Seed/coactivation rerank:
@@ -19150,10 +19237,16 @@ impl McpTool for MemorySearchTool {
         // user actually sees). Top-hit age uses created_at as the recency anchor;
         // we deliberately don't use last_accessed_at because memory_search itself
         // bumps it on read in some backends and would self-zero this signal.
-        let kind_label = match mode {
-            "hybrid" => "search_hybrid",
-            "semantic" => "search_semantic",
-            _ => "search_fts",
+        let kind_label = if semantic_fallback_fired {
+            // Honest telemetry: a default-path query that FTS could not serve and
+            // the gated semantic fallback recovered — never silently labeled fts.
+            "search_fts_semantic_fallback"
+        } else {
+            match mode {
+                "hybrid" => "search_hybrid",
+                "semantic" => "search_semantic",
+                _ => "search_fts",
+            }
         };
         let now_secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

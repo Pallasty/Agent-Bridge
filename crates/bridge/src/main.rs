@@ -4056,6 +4056,34 @@ fn main() -> Result<()> {
         .block_on(real_main())
 }
 
+/// Strict startup gate for the embedding dim-guard (Item A, 2026-06-26, #4282).
+///
+/// A class-1 *config-vs-store* dim mismatch means this process is configured for
+/// a model whose vector dim differs from the store's dominant dim — so every
+/// semantic query scores dim-mismatched `0.0` cosines and recall silently
+/// degrades to recency-only (the 2026-06-25 stale-launchd bug). **Default-on**:
+/// abort loudly instead of serving a silently-broken store.
+/// `AGENT_BRIDGE_DIM_GUARD_STRICT=0` opts out (e.g. mid-migration when the store
+/// is transiently mixed-dim — prefer finishing the reindex before restart). An
+/// empty store never blocks. The detached, warn-only `embedding_dim_guard::spawn`
+/// path still covers the silent-fallback / in-store-anomaly classes.
+async fn dim_guard_strict_preflight(store: &Arc<dyn StateStore>) {
+    if let Some(warning) = ab_bridge::embedding_dim_guard::preflight_class1(store).await {
+        if ab_bridge::embedding_dim_guard::strict_class1_enabled(
+            std::env::var("AGENT_BRIDGE_DIM_GUARD_STRICT").ok().as_deref(),
+        ) {
+            tracing::error!(target: "embedding_dim_guard", "STRICT ABORT: {warning}");
+            eprintln!(
+                "FATAL [embedding_dim_guard] {warning}\n  Refusing to start: \
+                 AGENT_BRIDGE_DIM_GUARD_STRICT is on by default. Point the process at the model \
+                 that matches the store (finish any reindex before restart), or set \
+                 AGENT_BRIDGE_DIM_GUARD_STRICT=0 to bypass (semantic recall stays degraded)."
+            );
+            std::process::exit(78);
+        }
+    }
+}
+
 async fn real_main() -> Result<()> {
     // Load API tokens from the user's plaintext creds notebook before any
     // worker thread can read env. Self-heals after a `cargo install` that
@@ -6856,10 +6884,13 @@ async fn real_main() -> Result<()> {
         Cmd::Daemon => {
             let socket = default_socket_path();
             tracing::info!(socket = %socket.display(), "starting agent-bridge daemon");
-            // Embedding dim-guard: warn loudly if this process embeds at a
-            // different dimension than the store was written in (stale launchd
-            // plist / silent model fallback). Warn-only; see #4282.
+            // Embedding dim-guard (#4282): a class-1 config-vs-store dim mismatch
+            // strict-aborts here (default-on; mixed-dim migration & empty store
+            // exempt; AGENT_BRIDGE_DIM_GUARD_STRICT=0 bypasses). The detached
+            // spawn() below stays warn-only for the silent-fallback / in-store
+            // anomaly classes.
             if let Some(store) = hub.store.clone() {
+                dim_guard_strict_preflight(&store).await;
                 ab_bridge::embedding_dim_guard::spawn(store);
             }
             // P-α — spawn always-warm coactivation tick if a store is
@@ -7093,7 +7124,9 @@ async fn real_main() -> Result<()> {
                 ab_store::vector::warmup();
                 // Embedding dim-guard (#4282): flag a query/store dim mismatch
                 // (stale env / silent model fallback) instead of silently
-                // serving all-zero cosines. Warn-only.
+                // serving all-zero cosines. Strict class-1 preflight aborts here
+                // (default-on); the spawn() path stays warn-only for classes 2-4.
+                dim_guard_strict_preflight(&s).await;
                 ab_bridge::embedding_dim_guard::spawn(s);
             }
             tracing::info!(tools = registry.list().len(), "starting MCP stdio server");
@@ -7120,7 +7153,11 @@ async fn real_main() -> Result<()> {
             );
             // Embedding dim-guard (#4282): cross-machine peers query semantics
             // through daemon-http, so a stale-env e5-384 process against a
-            // gte-768 store silently breaks peer recall. Flag it loudly.
+            // gte-768 store silently breaks peer recall. Class-1 strict-aborts
+            // here (default-on; mixed-dim migration & empty store exempt;
+            // AGENT_BRIDGE_DIM_GUARD_STRICT=0 bypasses); the spawn() below stays
+            // warn-only for the other classes.
+            dim_guard_strict_preflight(&store).await;
             ab_bridge::embedding_dim_guard::spawn(store.clone());
             ab_bridge::daemon_http::run(store, &listen).await
         }

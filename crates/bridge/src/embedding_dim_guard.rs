@@ -127,6 +127,61 @@ pub fn evaluate_embedding_dims(
     DimGuardReport { warnings }
 }
 
+/// Policy for the **strict** startup gate: should a class-1 (config-vs-store)
+/// embedding-dim mismatch ABORT startup? **Default-on** — only an explicit
+/// `AGENT_BRIDGE_DIM_GUARD_STRICT=0` opts out (e.g. during a deliberate
+/// reindex/migration window where the store is transiently mixed-dim and the
+/// dominant bucket has not flipped to the new model yet). Pure so the policy is
+/// unit-tested without touching the environment.
+pub fn strict_class1_enabled(env_val: Option<&str>) -> bool {
+    !matches!(env_val, Some("0"))
+}
+
+/// True when the store holds active rows at more than one embedding dim — an
+/// in-flight reindex/migration (e.g. 384 → gte-768) where the dominant bucket is
+/// transient. The strict gate SKIPS its abort in this state so a correctly-
+/// configured process can restart mid-migration; the genuine stale-config bug
+/// (every row the wrong dim) is a UNIFORM store and is still caught. Pure.
+pub fn store_is_mixed_dim(buckets: &[EmbeddingProfile], dominant: &EmbeddingProfile) -> bool {
+    buckets
+        .iter()
+        .any(|b| b.dim.is_some() && b.dim != dominant.dim)
+}
+
+/// Synchronous (no model-load, no settle wait) class-1 "config vs store" probe
+/// for the strict startup gate. Returns the config-vs-store warning string when
+/// this process's configured embedding dim disagrees with the store's dominant
+/// dim — meaning every semantic query would score dim-mismatched `0.0` cosines
+/// against the store and recall would silently degrade to recency-only. Returns
+/// `None` for an empty store (bootstrap never blocks) or when the dims agree.
+///
+/// Reuses [`evaluate_embedding_dims`] with `actual=None` / `minority=0`, so ONLY
+/// the class-1 line can surface here; the silent-fallback (class-2) and
+/// in-store-anomaly (class-4) checks stay on the detached, warn-only [`spawn`]
+/// path (they need the model to settle / the full bucket distribution). The
+/// abort decision + `process::exit` live in the caller (main.rs) so this module
+/// stays I/O-light and unit-testable — see [`strict_class1_enabled`].
+pub async fn preflight_class1(store: &Arc<dyn StateStore>) -> Option<String> {
+    let buckets = store.embedding_profile_buckets().await.ok()?;
+    let dominant = buckets.first().cloned().unwrap_or_default();
+    // Empty store: nothing written yet, nothing to compare against — never block
+    // a fresh node's bootstrap.
+    if dominant.dim.is_none() || dominant.rows == 0 {
+        return None;
+    }
+    // In-flight reindex/migration: do NOT hard-abort (the detached warn-only path
+    // still flags it). Only abort when the store is uniformly a dim this process
+    // can't serve — the genuine stale-config bug.
+    if store_is_mixed_dim(&buckets, &dominant) {
+        return None;
+    }
+    let backend = ab_store::embedding::default_backend();
+    evaluate_embedding_dims(backend.name(), backend.dim(), None, &dominant, 0)
+        .warnings
+        .into_iter()
+        .find(|w| w.contains("config vs store"))
+}
+
 /// Spawn the startup dim-guard as a detached background task. Call once per
 /// long-lived store-backed service (daemon / daemon-http / mcp). Cheap: one
 /// SQL `GROUP BY` + (after the model warms) one throwaway embed.
@@ -308,5 +363,55 @@ mod tests {
         assert!(!fallback.warnings.iter().any(|w| w.contains("config vs store")));
         assert!(!fallback.warnings.iter().any(|w| w.contains("effective")));
         assert!(!fallback.warnings.iter().any(|w| w.contains("in-store")));
+    }
+
+    #[test]
+    fn strict_class1_default_on_unless_explicitly_zero() {
+        // Default-on: unset and any value other than "0" enable the strict abort.
+        assert!(strict_class1_enabled(None));
+        assert!(strict_class1_enabled(Some("1")));
+        assert!(strict_class1_enabled(Some("true")));
+        assert!(strict_class1_enabled(Some("")));
+        // Only an explicit "0" opts out (migration/bootstrap bypass).
+        assert!(!strict_class1_enabled(Some("0")));
+    }
+
+    #[test]
+    fn class1_extraction_picks_only_config_vs_store_line() {
+        // preflight_class1 keys off the config-vs-store line even when other
+        // warnings co-occur — the real stale-plist case fires config-vs-store +
+        // effective, and the strict gate must surface exactly the class-1 line.
+        let p = profile("gte-multilingual-base", 768, 3098);
+        let class1 = evaluate_embedding_dims("multilingual-e5-small", 384, None, &p, 0)
+            .warnings
+            .into_iter()
+            .find(|w| w.contains("config vs store"));
+        assert!(class1.is_some(), "class-1 mismatch should surface config-vs-store");
+        assert!(class1.unwrap().contains("768d"));
+    }
+
+    #[test]
+    fn class1_extraction_none_when_dims_agree() {
+        // Agreement (configured == dominant) → no class-1 warning → preflight
+        // returns None → the strict gate never blocks a correctly-aligned process.
+        let p = profile("gte-multilingual-base", 768, 3098);
+        let class1 = evaluate_embedding_dims("gte-multilingual-base", 768, None, &p, 0)
+            .warnings
+            .into_iter()
+            .find(|w| w.contains("config vs store"));
+        assert!(class1.is_none(), "aligned dims must not trip the strict gate");
+    }
+
+    #[test]
+    fn mixed_dim_store_skips_strict_abort_uniform_store_does_not() {
+        // In-flight migration: a gte-768 dominant bucket plus a leftover 384 bucket
+        // → mixed → the strict gate must NOT abort (let the reindex finish).
+        let dom = profile("gte-multilingual-base", 768, 3000);
+        let mixed = [dom.clone(), profile("multilingual-e5-small", 384, 200)];
+        assert!(store_is_mixed_dim(&mixed, &dom));
+        // A uniform store (single dim) is NOT mixed → the genuine stale-config bug
+        // (process dim != this uniform store dim) is still allowed to abort.
+        let uniform = [dom.clone()];
+        assert!(!store_is_mixed_dim(&uniform, &dom));
     }
 }
