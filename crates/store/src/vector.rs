@@ -41,6 +41,22 @@ pub fn vector_dim() -> usize {
     }
 }
 
+/// Stable name of the active embedding model (model-aware, runtime). Mirrors
+/// [`vector_dim`]: `"gte-multilingual-base"` since the gte default flip, or the
+/// env-selected model. Public so downstream crates (e.g. a remote/delegating
+/// embedding backend) can label stored rows with the SAME name the local model
+/// would, keeping the `embedding_backend` tag / dim-guard / M6 audit consistent.
+pub fn active_model_name() -> &'static str {
+    #[cfg(feature = "onnx-embed")]
+    {
+        onnx::active_model_name()
+    }
+    #[cfg(not(feature = "onnx-embed"))]
+    {
+        "all-MiniLM-L6-v2"
+    }
+}
+
 // ── ONNX backend (optional) ───────────────────────────────────────────────
 
 #[cfg(feature = "onnx-embed")]

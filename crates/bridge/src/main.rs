@@ -7062,11 +7062,33 @@ async fn real_main() -> Result<()> {
                 "memory": if hub.store.is_some() { "sqlite" } else { "none" },
             });
             let store = hub.store.clone();
+            // Tiered embedding delegation: if AGENT_BRIDGE_EMBED_REMOTE_URL is
+            // set, this MCP process delegates embedding to the shared daemon-http
+            // /embed service instead of loading its own ~2.8GB ONNX copy (8+
+            // sessions × 2.8GB = freeze). Role-scoped — ONLY the MCP arm installs
+            // it; daemon / daemon-http embed locally (they are the server). Must
+            // run before warmup()/build_registry so the OnceLock lands on the
+            // RemoteEmbedBackend. Falls back to a local load if the daemon is
+            // unreachable, so correctness is never at risk.
+            match ab_bridge::remote_embed::install_if_configured() {
+                ab_bridge::remote_embed::InstallOutcome::Installed(url) => {
+                    tracing::info!(%url, "embedding delegation active (RemoteEmbedBackend)");
+                }
+                ab_bridge::remote_embed::InstallOutcome::NotConfigured => {}
+                ab_bridge::remote_embed::InstallOutcome::AlreadyInitialized => {
+                    tracing::warn!(
+                        "embedding delegation skipped: a default backend was already \
+                         installed (substrate?) — this MCP will embed locally"
+                    );
+                }
+            }
             let registry = build_registry(hub);
             // Eagerly warm the embedding model on a bg thread so the first
             // semantic query after (re)connect doesn't fall to the hash backend
             // and return garbage cosines against the real-model store. Only when
-            // memory is enabled (otherwise the encoder is never used).
+            // memory is enabled (otherwise the encoder is never used). When
+            // delegation is active, warmup() routes through RemoteEmbedBackend
+            // (a cheap HTTP round-trip), NOT a local 2.8GB model load.
             if let Some(s) = store.clone() {
                 ab_store::vector::warmup();
                 // Embedding dim-guard (#4282): flag a query/store dim mismatch

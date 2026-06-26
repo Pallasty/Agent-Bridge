@@ -15,7 +15,10 @@ pub mod vector;
 pub use embedding::{
     default_backend, set_default_backend, EmbeddingBackend, HashBackend, OnnxBackend,
 };
-pub use vector::{cosine_similarity, decode_embedding, embed_text, encode_embedding, vector_dim};
+pub use vector::{
+    active_model_name, cosine_similarity, decode_embedding, embed_text, encode_embedding,
+    vector_dim,
+};
 pub mod version_vector;
 pub use version_vector::{
     node_id_from_env, node_id_from_name, Counter, NodeId, Ordering, VersionVector,

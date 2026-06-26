@@ -55,6 +55,12 @@ axum = "0.7"
 # for the Tailscale REST API (api.tailscale.com over HTTPS — see
 # tailscale_api.rs); peer-to-peer tailnet calls themselves are plain HTTP.
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# Sync HTTP client for RemoteEmbedBackend (tiered embedding delegation): the
+# EmbeddingBackend::embed() trait method is sync and is called from tokio worker
+# threads, where reqwest::blocking would panic (nested runtime). ureq uses raw
+# blocking sockets — no runtime. localhost http only for now; add features=["tls"]
+# when a Tier-3 https cloud /embed endpoint is introduced.
+ureq = { version = "2", default-features = false }
 # C2 lockfile primitive (kill(pid, 0) liveness probe).
 libc = "0.2"
 png = "0.17"

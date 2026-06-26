@@ -29,6 +29,7 @@ pub mod daemon_http;
 pub mod dream_replay;
 pub mod embedding_dim_guard;
 pub mod event_spine;
+pub mod remote_embed;
 pub mod github_api;
 pub mod gitlab_api;
 pub mod gos_lite;

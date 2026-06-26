@@ -49773,6 +49773,15 @@ fn select_raw_encoder_kind() -> String {
 }
 
 fn build_raw_encoder() -> Arc<dyn ab_store::EmbeddingBackend> {
+    // If embedding delegation is active in THIS process, the raw encoder
+    // delegates too — the shared /embed service is itself a raw encoder (no
+    // substrate wrapping), so `embed_text` doesn't load a local ~2.8GB model in
+    // a delegating MCP. Role-safe: `active_remote_url()` is set only by the MCP
+    // startup path, never in daemon / daemon-http, so this can't self-loop into
+    // the daemon's own /embed. Falls back to a local load if the daemon is down.
+    if let Some(url) = crate::remote_embed::active_remote_url() {
+        return Arc::new(crate::remote_embed::RemoteEmbedBackend::new(url));
+    }
     match select_raw_encoder_kind().as_str() {
         "hash" => Arc::new(ab_store::HashBackend),
         // "onnx" or fallthrough — OnnxBackend carries its own hash
