@@ -19342,6 +19342,14 @@ const WORK_MEMORY_KIND: &str = "work_memory";
 const WORK_MEMORY_DEFAULT_SLOT: &str = "active";
 const WORK_MEMORY_MAX_CONTENT_CHARS: usize = 12_000;
 const WORK_MEMORY_PRECOMPACT_CHARS: usize = 6_000;
+/// Upper bound on work_memory rows scanned (most-recent first, across ALL
+/// projects' scopes) for cross-node fan-in in the alias-aware `list`. The scan
+/// is then filtered to alias-compatible scopes. NOTE: an alias-compatible
+/// sibling lane older than the Nth most-recent work_memory row store-wide is
+/// silently NOT surfaced — acceptable because work_memory is a recent-sorted,
+/// TTL-bounded scratchpad, but raise this (or scope the broad fetch) if the
+/// active work_memory population ever approaches this bound. (Live: ~61 active.)
+const WORK_MEMORY_ALIAS_FANIN_SCAN: u32 = 500;
 
 fn unix_now_secs() -> i64 {
     SystemTime::now()
@@ -19419,6 +19427,49 @@ fn work_memory_key(cwd: &str, session_id: Option<&str>, slot: &str) -> String {
         .map(|s| sanitize_work_memory_component(s, "session", 48))
         .unwrap_or_else(|| "shared".to_string());
     format!("work_memory_{}_{}_{}", &scope_hash[..12], owner, slot)
+}
+
+/// Cross-node fan-in merge for `work_memory list`.
+///
+/// `same_node` is the exact-scope result (today's behaviour); `broad` is all
+/// work_memory rows across every scope. Returns `same_node` PLUS any `broad` row
+/// whose scope is alias-compatible with `requested_scope` — using the same
+/// read-time canonicalization `memory_search` uses (`AGENT_BRIDGE_PROJECT_SCOPE_ALIASES`)
+/// — that is not already present, sorted most-recently-accessed first and capped
+/// to `limit`. This surfaces a sibling node's lanes for the SAME project (e.g.
+/// aio2's `project:/Data/...` path) which otherwise sync into state.db but stay
+/// invisible to an exact-scope list. Pure (no IO) so the cross-node visibility
+/// rule is unit-testable. Keys are never rewritten here, so a cross-node lane
+/// surfaces as its own distinct row — read-converge, never write-overwrite.
+fn merge_alias_compatible_work_memory(
+    mut same_node: Vec<MemoryRecord>,
+    broad: Vec<MemoryRecord>,
+    requested_scope: &str,
+    aliases: &str,
+    limit: usize,
+) -> Vec<MemoryRecord> {
+    let seen: std::collections::HashSet<String> =
+        same_node.iter().map(|r| r.key.clone()).collect();
+    let mut extra: Vec<MemoryRecord> = broad
+        .into_iter()
+        .filter(|r| !seen.contains(&r.key))
+        .filter(|r| {
+            project_scopes_read_time_compatible_with_aliases(
+                r.scope.as_deref().unwrap_or(""),
+                requested_scope,
+                Some(aliases),
+            )
+        })
+        .collect();
+    // PIN the same-node lanes (already recent-sorted and capped at `limit` by the
+    // SQL): an agent must never lose sight of its OWN current lane. Fill only the
+    // REMAINING budget with the most-recently-accessed cross-node lanes. A naive
+    // "merge-all then truncate" would let newer sibling lanes evict the local lane
+    // entirely under truncate(limit).
+    extra.sort_by(|a, b| b.last_accessed_at.cmp(&a.last_accessed_at));
+    let room = limit.saturating_sub(same_node.len());
+    same_node.extend(extra.into_iter().take(room));
+    same_node
 }
 
 fn json_string_array(args: &Value, key: &str) -> Vec<String> {
@@ -19788,7 +19839,7 @@ impl McpTool for WorkMemoryTool {
                     .get("compact")
                     .and_then(|v| v.as_bool())
                     .unwrap_or_else(compact_mcp_output_default);
-                let rows = store
+                let mut rows = store
                     .list_memories_in_scope(
                         &cwd,
                         Some(WORK_MEMORY_KIND),
@@ -19796,6 +19847,34 @@ impl McpTool for WorkMemoryTool {
                         limit,
                     )
                     .await?;
+                // Cross-node fan-in: work_memory list is otherwise exact-scope,
+                // so lanes written under an alias-compatible scope on ANOTHER
+                // node (e.g. aio2's project:/Data/... path for this same
+                // project) stay invisible even though they sync into state.db.
+                // When a scope-alias registry is configured, widen the READ via
+                // the same canonicalization memory_search uses so cross-node
+                // lanes surface in the fan-in. Key derivation is untouched, so
+                // cross-node lanes remain DISTINCT rows (read-converge, never
+                // write-overwrite).
+                if let Some(aliases) = std::env::var(PROJECT_SCOPE_ALIASES_ENV)
+                    .ok()
+                    .filter(|s| !s.trim().is_empty())
+                {
+                    let broad = store
+                        .list_memories(
+                            Some(WORK_MEMORY_KIND),
+                            MemoryListSort::Recent,
+                            WORK_MEMORY_ALIAS_FANIN_SCAN,
+                        )
+                        .await?;
+                    rows = merge_alias_compatible_work_memory(
+                        rows,
+                        broad,
+                        &work_memory_scope(&cwd),
+                        &aliases,
+                        limit as usize,
+                    );
+                }
                 if compact {
                     let rows: Vec<Value> = rows
                         .into_iter()
@@ -58042,6 +58121,150 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert_eq!(a, b);
         assert!(a.starts_with("work_memory_"));
         assert!(a.contains("_session-with-spaces_active-slot"));
+    }
+
+    #[test]
+    fn work_memory_list_fan_in_surfaces_alias_compatible_cross_node_lanes() {
+        let mk = |key: &str, scope: &str, accessed: i64| MemoryRecord {
+            key: key.to_string(),
+            kind: WORK_MEMORY_KIND.to_string(),
+            content: format!("content {key}"),
+            tags: vec![],
+            related_keys: vec![],
+            scope: Some(scope.to_string()),
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: accessed,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".to_string(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        let aliases = "project-id:git:gitlab.com/pallasting/agent-bridge=\
+            project:/Users/pallasting/Projects/agent-bridge,\
+            project:/Data/CascadeProjects/agent-bridge";
+        let requested = "project:/Users/pallasting/Projects/agent-bridge";
+
+        // same_node = the Mac lane already returned by the exact-scope query.
+        let same_node = vec![mk(
+            "wm_mac",
+            "project:/Users/pallasting/Projects/agent-bridge",
+            100,
+        )];
+        // broad = every work_memory row: the Mac lane (dup), an alias-compatible
+        // aio2 lane, and an unrelated project's lane that must NOT leak.
+        let broad = vec![
+            mk(
+                "wm_mac",
+                "project:/Users/pallasting/Projects/agent-bridge",
+                100,
+            ),
+            mk("wm_aio2", "project:/Data/CascadeProjects/agent-bridge", 200),
+            mk("wm_other", "project:/Data/CascadeProjects/biocortex-rs", 300),
+        ];
+        let out = merge_alias_compatible_work_memory(same_node, broad, requested, aliases, 8);
+        let keys: Vec<&str> = out.iter().map(|r| r.key.as_str()).collect();
+        assert!(keys.contains(&"wm_mac"), "same-node lane kept");
+        assert!(
+            keys.contains(&"wm_aio2"),
+            "alias-compatible cross-node lane surfaced"
+        );
+        assert!(
+            !keys.contains(&"wm_other"),
+            "unrelated project must NOT leak"
+        );
+        assert_eq!(out.len(), 2, "exactly mac + aio2, deduped");
+        // same-node lane is PINNED first, then cross-node fills the remaining budget.
+        assert_eq!(out[0].key, "wm_mac");
+        assert_eq!(out[1].key, "wm_aio2");
+    }
+
+    #[test]
+    fn work_memory_fan_in_pins_same_node_lane_against_eviction() {
+        let mk = |key: &str, scope: &str, accessed: i64| MemoryRecord {
+            key: key.to_string(),
+            kind: WORK_MEMORY_KIND.to_string(),
+            content: String::new(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: Some(scope.to_string()),
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: accessed,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".to_string(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        let aliases = "project-id:git:gitlab.com/pallasting/agent-bridge=\
+            project:/Users/pallasting/Projects/agent-bridge,\
+            project:/Data/CascadeProjects/agent-bridge";
+        let requested = "project:/Users/pallasting/Projects/agent-bridge";
+        // One STALE same-node lane + two NEWER cross-node lanes, limit=2. A naive
+        // merge-then-truncate would evict the agent's own lane entirely.
+        let same_node = vec![mk(
+            "wm_mine",
+            "project:/Users/pallasting/Projects/agent-bridge",
+            10,
+        )];
+        let broad = vec![
+            mk(
+                "wm_mine",
+                "project:/Users/pallasting/Projects/agent-bridge",
+                10,
+            ),
+            mk("wm_aio2_a", "project:/Data/CascadeProjects/agent-bridge", 200),
+            mk("wm_aio2_b", "project:/Data/CascadeProjects/agent-bridge", 300),
+        ];
+        let out = merge_alias_compatible_work_memory(same_node, broad, requested, aliases, 2);
+        let keys: Vec<&str> = out.iter().map(|r| r.key.as_str()).collect();
+        assert!(
+            keys.contains(&"wm_mine"),
+            "an agent's own lane must never be evicted by newer cross-node lanes"
+        );
+        assert_eq!(out.len(), 2, "capped to limit");
+        assert_eq!(out[0].key, "wm_mine", "own lane pinned first");
+        // room = 2 - 1 = 1 => only the single most-recent cross-node lane (300).
+        assert_eq!(out[1].key, "wm_aio2_b");
+    }
+
+    #[test]
+    fn work_memory_fan_in_without_covering_alias_keeps_only_same_node() {
+        let mk = |key: &str, scope: &str| MemoryRecord {
+            key: key.to_string(),
+            kind: WORK_MEMORY_KIND.to_string(),
+            content: String::new(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: Some(scope.to_string()),
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".to_string(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        // The alias covers a DIFFERENT project, so the aio2 agent-bridge lane is
+        // NOT compatible and must stay invisible — proves the alias is the
+        // load-bearing gate, not an unconditional cross-scope dump.
+        let aliases = "project-id:name:other=project:/x/other,project:/y/other";
+        let requested = "project:/Users/pallasting/Projects/agent-bridge";
+        let same_node = vec![mk("wm_mac", "project:/Users/pallasting/Projects/agent-bridge")];
+        let broad = vec![
+            mk("wm_mac", "project:/Users/pallasting/Projects/agent-bridge"),
+            mk("wm_aio2", "project:/Data/CascadeProjects/agent-bridge"),
+        ];
+        let out = merge_alias_compatible_work_memory(same_node, broad, requested, aliases, 8);
+        let keys: Vec<&str> = out.iter().map(|r| r.key.as_str()).collect();
+        assert_eq!(
+            keys,
+            vec!["wm_mac"],
+            "only same-node lane; no cross-node leak without a covering alias"
+        );
     }
 
     #[tokio::test]
