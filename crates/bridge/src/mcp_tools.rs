@@ -49759,7 +49759,8 @@ impl McpTool for ToolCallAttentionReportTool {
 /// Pure helper — pick raw inner encoder per Phase 2.1 precedence,
 /// independent of `ab_store::default_backend()` (which may be wrapped
 /// by `SeedBackend` when v22 substrate is installed; here we want raw
-/// 384-d MiniLM output with no substrate perception side effect).
+/// encoder output — gte-multilingual-base 768-d by default since the
+/// 2026-06-26 default flip — with no substrate perception side effect).
 ///
 /// Mirrors `seed_bridge::select_inner_kind()` so wrap and raw paths
 /// agree on which encoder produces the vectors.
@@ -49783,11 +49784,11 @@ fn build_raw_encoder() -> Arc<dyn ab_store::EmbeddingBackend> {
 
 /// **Phase 2.1 / onsen-hd integration** — `embed_text` MCP tool.
 ///
-/// Exposes the raw inner sentence encoder (`all-MiniLM-L6-v2` 384-d via
-/// `fastembed`, hash fallback on model-load failure) so external apps
-/// can build their own grids / indexes without touching v22 substrate
-/// state. Companion HTTP route `POST /embed` ships on daemon-http for
-/// non-MCP clients (Unity / Unreal / Godot / Web).
+/// Exposes the raw inner sentence encoder (`gte-multilingual-base` 768-d
+/// via `fastembed` by default, hash fallback on model-load failure) so
+/// external apps can build their own grids / indexes without touching v22
+/// substrate state. Companion HTTP route `POST /embed` ships on daemon-http
+/// for non-MCP clients (Unity / Unreal / Godot / Web).
 ///
 /// Returns raw inner output — does NOT feed substrate perception. Use
 /// `memory_save` for substrate-aware embedding flow.
@@ -49813,8 +49814,9 @@ impl McpTool for EmbedTextTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Raw sentence-encoder pass-through — returns 384-d \
-                `all-MiniLM-L6-v2` MiniLM embedding (hash fallback on model-load \
+            description: "Raw sentence-encoder pass-through — returns the active \
+                inner encoder's embedding (gte-multilingual-base, 768-d by default; \
+                dimension follows the configured model, hash fallback on model-load \
                 failure). Exposes Phase 2.1 inner encoder for external apps (e.g. \
                 game NPC AI, custom indexers) that need encoder semantics WITHOUT \
                 feeding v22 substrate perception. Companion HTTP route POST /embed \
@@ -80835,9 +80837,10 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
     }
 
     #[tokio::test]
-    async fn embed_text_returns_384_dim_vector() {
-        // Robust to test parallelism: both backends produce 384d, so
-        // assert dim invariant + backend name is one of the known two.
+    async fn embed_text_dim_matches_vector_dim() {
+        // Robust to test parallelism: both backends produce vector_dim()-d
+        // vectors (768 since the gte default flip), so assert against the live
+        // vector_dim() invariant + backend name is one of the known set.
         let tool = EmbedTextTool::new();
         let ctx = ToolContext::default();
         let res = tool
@@ -80849,12 +80852,15 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             _ => panic!("expected text content"),
         };
         let v: Value = serde_json::from_str(&text).expect("valid json");
-        assert_eq!(v["dim"], json!(384), "encoder must produce 384-d output");
+        let dim = ab_store::vector_dim();
+        assert_eq!(v["dim"], json!(dim), "encoder must produce vector_dim()-d output");
         let embedding = v["embedding"].as_array().expect("embedding array");
-        assert_eq!(embedding.len(), 384, "vector length matches dim");
+        assert_eq!(embedding.len(), dim, "vector length matches dim");
         let backend = v["backend"].as_str().expect("backend name");
         assert!(
-            backend == "all-MiniLM-L6-v2" || backend == "fnv1a-hash-384",
+            backend == "all-MiniLM-L6-v2"
+                || backend == "fnv1a-hash-384"
+                || backend == "gte-multilingual-base",
             "unexpected backend name: {backend}"
         );
     }
@@ -80877,8 +80883,8 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         let embedding = v["embedding"].as_array().expect("embedding array");
         assert_eq!(
             embedding.len(),
-            384,
-            "empty text must still return dim-sized vec"
+            ab_store::vector_dim(),
+            "empty text must still return dim-sized vec (768 since the gte default flip)"
         );
     }
 

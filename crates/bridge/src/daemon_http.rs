@@ -7608,12 +7608,18 @@ mod tests {
     }
 
     #[test]
-    fn embed_backend_factory_returns_384_dim() {
+    fn embed_backend_factory_dim_matches_vector_dim() {
         let b = build_raw_embed_backend();
-        assert_eq!(b.dim(), 384, "embedding backend must produce 384-d vectors");
+        assert_eq!(
+            b.dim(),
+            ab_store::vector_dim(),
+            "embedding backend dim must track the active model (768 since the gte default flip)"
+        );
         let name = b.name();
         assert!(
-            name == "fnv1a-hash-384" || name == "all-MiniLM-L6-v2",
+            name == "fnv1a-hash-384"
+                || name == "all-MiniLM-L6-v2"
+                || name == "gte-multilingual-base",
             "unexpected backend name: {name}"
         );
     }

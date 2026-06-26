@@ -3762,7 +3762,8 @@ fn is_cjk_unified(ch: char) -> bool {
 /// Action A: detect the embed model the live store was indexed with so the
 /// query embedder matches the stored vector space. Returns the
 /// `AGENT_BRIDGE_ONNX_MODEL` alias for the dominant *tagged* backend among
-/// active rows, or None when it is the default (all-MiniLM) or unknown.
+/// active rows, or None to fall through to the compiled default (gte-768
+/// since the 2026-06-26 default flip) for legacy/unknown backends.
 /// Read-only; a brief separate connection so it runs before embedder init.
 async fn detect_store_model_alias(db_path: &std::path::Path) -> Option<&'static str> {
     let conn = tokio_rusqlite::Connection::open(db_path).await.ok()?;
@@ -3790,7 +3791,7 @@ async fn detect_store_model_alias(db_path: &std::path::Path) -> Option<&'static 
         // needing AGENT_BRIDGE_ONNX_MODEL set by hand. select_model() accepts this
         // exact alias. (runbook Gate 1: recall_eval alias detection for GTE.)
         Some("gte-multilingual-base") => Some("gte-multilingual-base"),
-        _ => None, // all-MiniLM-L6-v2 is the default; nothing to override
+        _ => None, // legacy/unknown backend; fall through to the compiled default (now gte-768)
     }
 }
 

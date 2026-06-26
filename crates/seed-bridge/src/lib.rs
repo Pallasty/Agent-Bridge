@@ -900,7 +900,9 @@ mod tests {
             },
         );
         let out = backend.embed("hello world");
-        assert_eq!(backend.dim(), 384);
+        // dim() delegates to the inner backend, which tracks vector_dim()
+        // (768 since the gte default flip).
+        assert_eq!(backend.dim(), ab_store::vector_dim());
         assert_eq!(out, raw, "outer embed must equal inner embed");
     }
 
@@ -959,7 +961,7 @@ mod tests {
         // projected vector verbatim).
         let b = fixture(8); // D=8 small for inspection
         let inner_vec = b.inner.embed("test");
-        assert_eq!(inner_vec.len(), 384);
+        assert_eq!(inner_vec.len(), ab_store::vector_dim());
         let _ = b.embed("test");
         let grid = b.grid.lock().unwrap();
         let z = &grid.z_states[grid.primary_carrier];

@@ -74,12 +74,14 @@ pub(crate) mod onnx {
     static INIT_STARTED: OnceLock<()> = OnceLock::new();
     static INIT_STATE: AtomicU8 = AtomicU8::new(0);
 
-    /// Opt-in embedding-model selection via `AGENT_BRIDGE_ONNX_MODEL`.
-    /// Default is unchanged (`all-MiniLM-L6-v2`) so existing stores and sibling
-    /// lanes are not forced onto a new backend. `AGENT_BRIDGE_ONNX_MODEL=e5-small`
-    /// switches to the bilingual `multilingual-e5-small` (also 384-dim, so
-    /// `VECTOR_DIM` is unchanged) — the #1447 retrieval-quality win for the
-    /// Chinese-dominant memory corpus. Returns (model, stable-name, needs-e5-prefix).
+    /// Embedding-model selection via `AGENT_BRIDGE_ONNX_MODEL`.
+    /// Compiled default is `gte-multilingual-base` (768-dim multilingual) as of
+    /// the 2026-06-26 default flip — every live node already runs gte via env, so
+    /// making it the compiled default removes the env dependency (defense in
+    /// depth: a node that loses its env still picks gte, not the legacy MiniLM).
+    /// Set `AGENT_BRIDGE_ONNX_MODEL=all-minilm` to pin the legacy 384-dim MiniLM
+    /// default, or `=e5-small` / `=para-ml` for the other 384-dim multilingual
+    /// options. Returns (model, stable-name, needs-e5-prefix).
     fn select_model() -> (EmbeddingModel, &'static str, bool) {
         match std::env::var("AGENT_BRIDGE_ONNX_MODEL").ok().as_deref() {
             Some("e5-small") | Some("multilingual-e5-small") => (
@@ -111,7 +113,24 @@ pub(crate) mod onnx {
                 "gte-multilingual-base",
                 false,
             ),
-            _ => (EmbeddingModel::AllMiniLML6V2, "all-MiniLM-L6-v2", false),
+            // Explicit legacy pin: `AGENT_BRIDGE_ONNX_MODEL=all-minilm` keeps the
+            // original 384-dim MiniLM default reachable after the default flip
+            // (rollback-without-recompile / a node that genuinely wants it).
+            Some("all-minilm") | Some("all-MiniLM-L6-v2") | Some("minilm") => {
+                (EmbeddingModel::AllMiniLML6V2, "all-MiniLM-L6-v2", false)
+            }
+            // Compiled default is now gte-multilingual-base (768-dim multilingual)
+            // — the Chinese-dominant corpus's best retriever, and what every live
+            // node already runs via AGENT_BRIDGE_ONNX_MODEL=gte. Making it the
+            // compiled default removes the env dependency. Same load path as the
+            // explicit gte branch above: try_load_local from a local ONNX dir; a
+            // node without the model falls through to HashBackend — now LOUD via
+            // the startup embedding dim-guard, never silent.
+            _ => (
+                EmbeddingModel::MultilingualE5Small,
+                "gte-multilingual-base",
+                false,
+            ),
         }
     }
 
@@ -529,12 +548,14 @@ mod tests {
     }
 
     #[test]
-    fn hash_dim_is_384() {
-        // Tests run with the default model (no AGENT_BRIDGE_ONNX_MODEL set),
-        // so the e5/MiniLM/default path must stay 384-dim.
+    fn hash_dim_matches_default_model() {
+        // Tests run with the default model (no AGENT_BRIDGE_ONNX_MODEL set).
+        // The compiled default is gte-multilingual-base (768-dim) as of the
+        // 2026-06-26 default flip, so the hash backend must match at 768 and
+        // never disagree with vector_dim().
         let v = embed_text_hash("hello world");
         assert_eq!(v.len(), vector_dim());
-        assert_eq!(vector_dim(), 384);
+        assert_eq!(vector_dim(), 768);
     }
 
     #[test]

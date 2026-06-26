@@ -245,12 +245,14 @@ mod tests {
     #[test]
     fn hash_backend_dim_and_determinism() {
         let b = HashBackend;
+        // name() is a stable label, not a live dimension; dim()/embed() track
+        // the active model via vector_dim() (768 since the gte default flip).
         assert_eq!(b.name(), "fnv1a-hash-384");
-        assert_eq!(b.dim(), 384);
+        assert_eq!(b.dim(), vector_dim());
         let v1 = b.embed("Warp IPC socket");
         let v2 = b.embed("Warp IPC socket");
         assert_eq!(v1, v2);
-        assert_eq!(v1.len(), 384);
+        assert_eq!(v1.len(), vector_dim());
     }
 
     #[test]

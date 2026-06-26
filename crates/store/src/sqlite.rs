@@ -8037,8 +8037,17 @@ impl StateStore for SqliteStore {
             let mut unknown = 0u64;
             for (backend, n) in rows {
                 match backend.as_deref() {
-                    Some(b) if b.starts_with("onnx") || b.contains("MiniLM") => onnx += n,
-                    Some(b) if b.starts_with("hash") || b.contains("fnv") => hash += n,
+                    // Hash fallback (stale): the fnv1a hash encoder, written when
+                    // the ONNX model failed to load.
+                    Some(b) if b.contains("hash") || b.contains("fnv") => hash += n,
+                    // Any other non-empty backend tag is a real ONNX sentence-
+                    // encoder — gte-multilingual-base, multilingual-e5-small,
+                    // paraphrase-multilingual-MiniLM-L12-v2, all-MiniLM-L6-v2, …
+                    // Classify by "not hash / not null" rather than enumerating
+                    // model names, so a future model isn't misread as stale (the
+                    // gte/e5 misclassification this replaces).
+                    Some(b) if !b.is_empty() => onnx += n,
+                    // NULL or empty backend tag: pre-v26 rows with no provenance.
                     _ => unknown += n,
                 }
             }
@@ -16021,7 +16030,7 @@ mod tests {
             .await
             .expect("inspect migrated rows");
 
-        assert_eq!(version, "35"); // v35 = semantic_events.descriptor (SSB unified Object/Affordance contract); latest after all migrations
+        assert_eq!(version, "36"); // v36 = memory FTS indexed projection; latest after all migrations
         assert_eq!(bad_count, 0);
         assert_eq!(mem_created, 1_779_641_229_i64);
         assert_eq!(post_created, 1_779_641_229_i64);
@@ -16941,7 +16950,16 @@ mod tests {
             .conn
             .call(|c| -> RusqliteResult<()> {
                 let now = 1_000_000_i64;
-                for (key, backend) in [("a", "onnx:all-MiniLM-L6-v2"), ("b", "hash:fnv1a-384")] {
+                // a = onnx-prefixed MiniLM, b = hash fallback, plus two real
+                // ONNX models that the OLD name-pattern classifier wrongly read
+                // as "unknown": gte-multilingual-base and multilingual-e5-small.
+                // They must now count as onnx (real model), not stale.
+                for (key, backend) in [
+                    ("a", "onnx:all-MiniLM-L6-v2"),
+                    ("b", "hash:fnv1a-384"),
+                    ("d", "gte-multilingual-base"),
+                    ("e", "multilingual-e5-small"),
+                ] {
                     c.execute(
                         "INSERT INTO memories
                            (key, kind, content, tags, related_keys, scope,
@@ -16972,11 +16990,14 @@ mod tests {
             .await
             .expect("audit");
 
-        assert_eq!(r.m6_embedding.onnx, 1, "onnx backend");
+        assert_eq!(
+            r.m6_embedding.onnx, 3,
+            "real ONNX models (MiniLM + gte + e5) all count as onnx"
+        );
         assert_eq!(r.m6_embedding.hash, 1, "hash backend");
         assert_eq!(r.m6_embedding.unknown, 1, "NULL backend");
-        assert_eq!(r.m6_embedding.total, 3);
-        assert!((r.m6_embedding.stale_fraction - (2.0 / 3.0)).abs() < 1e-9);
+        assert_eq!(r.m6_embedding.total, 5);
+        assert!((r.m6_embedding.stale_fraction - (2.0 / 5.0)).abs() < 1e-9);
 
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
@@ -20246,7 +20267,7 @@ mod tests {
         let v = store.schema_meta_version().await.expect("query");
         assert_eq!(
             v.as_deref(),
-            Some("35"),
+            Some("36"),
             "if schema bumped, update both this assertion and S5 docs"
         );
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
