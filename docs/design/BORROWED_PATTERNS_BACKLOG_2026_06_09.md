@@ -282,3 +282,241 @@ Initial MCP health check from Codex showed:
 
 That means the first implementation should treat HTTP/Palace availability as a
 separate runtime concern rather than as proof that MCP itself is broken.
+
+## Orca Borrows (2026-06-19)
+
+Source: external evaluation of `stablyai/orca` (Electron/TS desktop ADE for fleets
+of parallel CLI agents). Full plan + verification-status table in
+`docs/design/ORCA_BORROW_PLAN_2026_06_19.md`; decision memory
+`decision_orca_borrow_not_adopt_20260619`. Verdict = BORROW design only (same
+"borrow-not-adopt" posture as rmux/camofox/SkillOpt/walkthrough-tdoc): Electron/TS
+to Rust/MCP is a port not a drop-in, and orca is a multi-vendor GUI cockpit while
+Agent-Bridge is a single-user backend. These are convergent-design borrows, NOT a
+new subsystem. Each task carries an explicit pre-code verification gate.
+
+**Status (verified 2026-06-26):** several borrows have since landed on master —
+ORCA-1 (worktree_remove teardown safety) = `e3fc906`; ORCA-3 (prompt-injection
+profile for steer, tracked in commit as forum OB-3) = `52ec1ba`; ORCA-6 (Codex
+app-server read-only investigation) = DONE on branch
+`spike/codex-appserver-host-channel` (memory
+`session_handoff_codex_appserver_host_spike_20260620`). Separately the
+changes_digest bounded patch-hunks borrow (forum OB-4) landed as `162e20a`. The
+remaining ORCA-2 / ORCA-4 / ORCA-5 / ORCA-VERIFY items are still proposals. NOTE:
+the commit-message "OB-N" enumeration is the forum numbering and does NOT line up
+1:1 with this doc's "AB-BORROW-ORCA-N" IDs (forum OB-4 = changes_digest, not this
+doc's ORCA-4 = annotation-as-steering).
+
+### AB-BORROW-ORCA-1: worktree_remove teardown safety pipeline  [P1 — now]
+
+Outcome:
+
+- `worktree_remove` stops being a bare `git worktree remove [-f]` and gains
+  defense-in-depth: path-safety reject (root/home/empty, canonicalized for
+  symlink/`..`), git-registration verify, orphan-proof (`.git` points into THIS
+  repo's admin dir), and SIGTERM of any agent/PTY whose cwd is under the worktree.
+
+Likely reuse:
+
+- `crates/agent/src/worktree.rs:72-81` (the remove fn), `agent_session_list` +
+  `agent_kill` for the PTY-kill step, canonical-path rule from AB-BORROW-2.
+
+Acceptance:
+
+- Unit tests: dirty tree refused, root/home/empty rejected, foreign `.git`
+  rejected, sibling session under path is SIGTERM'd before removal.
+- No dependency on any orca wiki-only claim (design-level, orca-impl-independent).
+
+Verification gate:
+
+- None external — this is independently motivated by AB's own most-documented
+  pain (CLAUDE-SIBLING S5/S6 + shared-tree churn / `.real`-clobber lessons). Ship
+  behind the existing adversarial-audit-before-deploy discipline.
+
+Boundary note:
+
+- Borrow the small defensive checks only. Do NOT adopt orca's first-class
+  worktree-object machinery (stable ID / store table / tri-modal create): orca
+  isolates one-agent-per-worktree, AB's hazard is many-agents-in-ONE-shared-tree,
+  which orca never has.
+
+### AB-BORROW-ORCA-2: per-agent capability table + preflightTrust  [P2]
+
+Outcome:
+
+- Collapse the scattered `Frontend` match-arms (`crates/bridge/src/setup.rs:57`)
+  into one declarative record per known agent CLI (launchCmd / expectedProcess /
+  promptInjectionMode / resumeCommand / trustArtifact), read by
+  `agent_steer_launch` / `agent_spawn`. Optionally pre-write the target CLI's
+  trust artifact before injecting a steer prompt so an onboarding/trust prompt
+  never swallows the first message.
+
+Likely reuse:
+
+- `setup.rs` Frontend enum, `agent_steer_launch`, remote_steer gate logic.
+
+Acceptance:
+
+- One capability table; adding a known CLI is a data row, not scattered arms.
+- preflightTrust only lands if the swallow bug is reproduced (gate below).
+
+Verification gate:
+
+- FALSIFY FIRST: does AB's tmux-based steer actually hit "trust/onboarding prompt
+  swallows the first injected message"? If yes, confirm the per-CLI trust-artifact
+  format from orca SOURCE (wiki-only today) before relying on it. Config-table
+  refactor itself has no orca dependency.
+
+### AB-BORROW-ORCA-3: promptInjectionMode taxonomy for steer  [P2]
+
+Outcome:
+
+- `agent_steer_drive` gains an explicit injection-mode per target (argv /
+  flag-prompt / flag-prompt-interactive / flag-interactive / stdin-after-start)
+  plus a bracketed-paste + quiet-render readiness heuristic, replacing the
+  best-effort settle + bare-Enter.
+
+Acceptance:
+
+- Each AB-supported backend tagged with a mode; steering a long prompt no longer
+  drops the Enter / gets eaten by bracketed paste.
+
+Verification gate:
+
+- Validate against already-recorded steer gotchas (remote zsh equals-expansion
+  family, long-prompt-not-submitted, has-session transient-false). orca's 5-mode
+  union is primary-confirmed from source, so the taxonomy is trustworthy; the AB
+  mapping is the work.
+
+### AB-BORROW-ORCA-4: annotation-as-steering review loop  [P3 — demand-gated]
+
+Outcome:
+
+- A diff-line comment becomes a structured steer message injected back to the
+  agent, collapsing review + instruction into one loop. Prereq: give
+  `changes_digest` a hunk/patch scope (today it stops at numstat/name-status,
+  `crates/bridge/src/project.rs:301`).
+
+Likely reuse:
+
+- `changes_digest` (+ new hunk scope), `present` / `build_walkthrough_html`,
+  `present_await_decision` as the human gate, `agent_steer_drive` for injection.
+  Forge write-back (pr_review/pr_comment/pr_merge) gated behind the human-confirm
+  card — outward writes are NOT auto-authorized.
+
+Acceptance:
+
+- Step 1 (hunk scope) is small + unit-testable and lands first.
+- Comment anchors to {file, line, commit/event-spine id}, preserving verify-first
+  / no-green-laundering.
+
+Verification gate:
+
+- Demand-driven. Mirrors the deliberately-deferred Palace Review Artifact (tdoc
+  comment round-trip judged "heavier than needed" on 2026-06-18). orca is a second,
+  stronger data point that the round-trip is worth building WHEN there is demand.
+
+### AB-BORROW-ORCA-5: dual graceful-degradation status channel  [P2 — coupled to Codex-no-hook]
+
+Outcome:
+
+- Worker status is observed via OSC stream-sniff (universal, hookless) AND an
+  optional richer hook channel, degrading to a tui-idle / PaneSnapshot-diff
+  heuristic. Closes the gap where steer_status is driver-written (an un-driven or
+  hookless worker is invisible).
+
+Likely reuse:
+
+- `osc_parse` (OSC 9/99/133/777 already parsed), `agent_steer_capture`
+  (PaneSnapshot cols/rows/cursor/highlighted), the SOP-P4 "worker posts
+  steer_status" contract noted as not-yet-wired.
+
+Acceptance:
+
+- A hookless agent (e.g. Codex CLI) still surfaces live status to
+  `agent_orchestrate_scan` via terminal-observe, not only last-drive state.
+
+Verification gate:
+
+- DIRECTLY couples to open question Q1 (Codex CLI has no hooks). FALSIFY: does
+  Codex CLI emit any OSC (9999/133)? If yes, sniff it; if no, fall back to
+  PaneSnapshot-diff / tui-idle. This reframes "Codex lacks a capability" as "AB
+  lacks a hookless fallback observation channel" — which is exactly this task.
+
+### 2026-06-20 verification update — Codex 0.141 host/hook surface (live-probed)
+
+Empirical probe of Codex 0.141.0 on this machine OVERTURNED the "Codex has no
+hooks" premise and reframed the AB-as-host "chimera" into two layers. Full
+evidence + plan in `ORCA_BORROW_PLAN_2026_06_19.md` §8. Key facts:
+
+- Codex has CC-compatible hooks (`~/.codex/hooks.json`: PreCompact/Stop/SessionEnd/
+  UserPromptSubmit/PostToolUse); AB's hooks are installed AND trusted
+  (`config.toml [hooks.state]` trusted_hash per hook) AND firing today
+  (`hook-runs.jsonl`). AB is ALREADY a cross-CC+Codex cognitive substrate via
+  convergent contracts (MCP + hooks.json) — zero per-CLI code.
+- => Layer 1 (memory/lifecycle) is LIVE, not a build. The only open gate is
+  fire-but-fail: `ab-precompact-hook` parses the CC payload shape (session_id +
+  transcript JSONL) with no CLI branch; verify Codex's payload parity.
+- => Layer 2 (fleet/host) is the real chimera frontier and Codex exposes a
+  cleaner host channel than tmux screen-scrape (see AB-BORROW-ORCA-6).
+
+### AB-BORROW-ORCA-6: Codex app-server as a structured host channel  [P2 — read-only investigation first]
+
+Outcome:
+
+- Evaluate driving an AB-hosted Codex via its `app-server` / `--remote
+  ws://|unix://` / `remote-control` / `exec-server` programmatic control plane
+  (orca-relay-like) instead of `remote_steer`'s tmux `capture-pane` screen-scrape.
+  Screen-scrape is lossy (PaneSnapshot parses terminal chars); app-server gives
+  structured events/state = qualitatively cleaner host integration.
+
+Likely reuse:
+
+- `remote_steer.rs` launch/observe path (as the fallback), the Multiplexer trait
+  (a non-tmux backend could fill PaneSnapshot from app-server events).
+
+Acceptance:
+
+- A read-only assessment of app-server protocol stability (it carries an
+  EXPERIMENTAL tag) and whether it exposes the lifecycle/status signals AB's
+  orchestrate_scan needs. No code lands until stability is confirmed.
+
+Verification gate:
+
+- app-server/remote-control are flagged EXPERIMENTAL by Codex — do NOT build on
+  it until the protocol is confirmed stable across a Codex minor bump. Investigate
+  only; keep tmux capture-pane as the working baseline.
+
+### AB-BORROW-ORCA-VERIFY: Codex pre_compact payload parity  [P1 — Layer 1 gate, GATED on owner for prod write]
+
+Outcome:
+
+- Confirm Codex actually produces non-empty curate output on pre_compact (not just
+  fires the hook). NOTE (2026-06-20 read-only probe): `ab-precompact-hook` is
+  ALREADY Codex-format-aware (transcript located under `~/.codex/sessions`; turn
+  extraction branches on `response_item`/`payload`/`input_text`/`output_text`,
+  matching the real Codex rollout jsonl) — so the fire-but-fail gate is largely
+  CLOSED. The only residual is whether Codex delivers `session_id` in the hook
+  stdin payload (the hook also falls back to `CLAUDE_SESSION_ID`).
+
+Acceptance:
+
+- A Codex session triggers compact and `session_curate`/`session_finalize` write
+  real distilled memories (verified non-empty), OR the payload mismatch is found
+  and `ab-*-hook` gains a CC-vs-Codex transcript-locating branch.
+
+Verification gate:
+
+- Triggering compact runs curate, which WRITES to the production state.db — a
+  production write that is GATED on owner approval. Alternative read-only probe:
+  exercise only the UserPromptSubmit injection path (read-only) to confirm payload
+  parses. NOTE: `hook-runs.jsonl` output_bytes is a hardcoded-0 placeholder in
+  ab-precompact-hook and CANNOT be used to judge fail.
+
+### Parked (design-level, no current demand)
+
+- Durable PTY-host process surviving daemon redeploy (orca forked node-pty daemon
+  + token-auth Unix socket) — would ease `.real`-clobber orphan-session pain;
+  validates AB's tmux-session-survives-the-client model. Park.
+- completion -> phone push + remote follow-up injection (mobile dimension's only
+  transferable nugget) — `notify`/Notifier trait gains a remote backend. Low
+  priority: owner co-locates with the agents. Park.
