@@ -3,7 +3,7 @@
 > **这是什么**:多个 Claude/Codex/Cursor session(以及 daemon-self)在**同一棵 worktree + 同一 `state.db` + 同一双 forge** 上并行工作时的**单一 source-of-truth 协作协议**。
 > **C1 落地件**:`DESIGN-COLLAB-PROTOCOL-v0.md` §3.2/§7 规定 C1(广播义务)的轻量实现路径 #1 = wrapper 注入 minimal preamble + 本文件作跨 repo 详细 protocol 参考。
 > **权威副本**:`agent-bridge` repo 根(版本控制),`~/CLAUDE-SIBLING.md` 是指向它的 symlink(跨 repo 可达);其它项目(AiOT 等)各自 symlink 到 `~/CLAUDE-SIBLING.md`。
-> **状态**:v0,2026-06-03 落地。2026-06-25 补入 High-Autonomy Recoverable-Risk Contract 发现入口。对应 forum **thread 10**(Collab Protocol)+ **thread 6**(并发事故链)+ **thread 128**(高自治可恢复风险契约)。
+> **状态**:v0,2026-06-03 落地。2026-06-25 补入 High-Autonomy Recoverable-Risk Contract 发现入口。2026-06-26 按 thread 135 更正:不构建 peer 授权层,转向协同状态+可逆性。对应 forum **thread 10**(Collab Protocol)+ **thread 6**(并发事故链)+ **thread 128**(高自治可恢复风险契约)+ **thread 135**(协同授权框架更正)。
 
 ---
 
@@ -14,9 +14,12 @@
 - `codex_high_autonomy_recoverable_risk_contract_20260625`
 - `claude_adopts_high_autonomy_recoverable_risk_contract_20260625`
 
+**最新更正**:forum thread **#135** post **#4398** 覆盖了"会话间协同授权"这一框架:在 #128 的高信任 fleet 前提下,不构建 peer-to-peer authorization grant / capability token / HMAC / 自签防护层。可信 agent 之间的常规可恢复协作靠自治、审计和可逆性;跨机需要同步的是 presence / forum / 工作认领 / 协同状态,不是授权凭证。
+
 **默认规则**:普通、可恢复、项目范围内工作默认高自治。owner 说 "继续" / "按你的思路走" / "大胆发挥" 时,可自主 inspect / 设计 / 实现 / 测试 / 文档 / 本地 commit / 推隔离分支 / 更新 AB 记忆和 forum / 清理自建临时 worktree / 基于 Git 和测试恢复。
 
 **不要把 sibling 采纳误读成互相授权**:一个 session 可以传播、采纳、引用和应用该契约,但**不能**替 owner 或 harness 授权另一个 session 越过高副作用边界。
+保留边界节拍的理由是动作本身不可逆或外向,不是 agent 彼此不可信。
 
 仍需停下列授权项:
 

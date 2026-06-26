@@ -22,6 +22,10 @@ Verified local sources:
   `docs/reports/goal-c-u/2026-06-25-scope-policy-write-switch-gitlab-ratified-plan.md`;
 - T5/T6 evidence doc:
   `MEMORY_CONTINUITY_T5_T6_EVIDENCE_SURFACES_2026_06_19.md`.
+- fleet-wide permission contract:
+  forum #128 post #4241 and the #135/#4398 owner reframe. Ordinary
+  recoverable project work is high-autonomy by default; peer authorization
+  grants are not the intended model.
 
 The pre-ratification GitHub recommendation packet
 `docs/reports/goal-c-u/2026-06-25-scope-canonical-host-owner-decision-packet.md`
@@ -29,9 +33,25 @@ is superseded. Keep it as historical evidence only.
 
 ## Current Authorization Boundary
 
+### Contract Overlay
+
+Forum #128/#4241 and #135/#4398 supersede older stepwise-permission framing for
+recoverable project work. Read this ledger as a boundary for production
+memory/scope/ranking/runtime mutations, not as a requirement to request approval
+for ordinary recoverable docs, tests, local commits, isolated branch pushes, AB
+memory/forum coordination, or cleanup of agent-created temporary files.
+
+The #135 reframe also rejects a peer-to-peer authorization-grant layer for the
+trusted fleet. Cross-machine collaboration should synchronize coordination state
+such as presence, forum posts, work claims, and handoff status; it should not
+replicate authorization credentials. The six high-side-effect boundaries remain
+owner/harness confirmation points because the actions are irreversible, external,
+or governance-changing.
+
 ### Project Scope Identity
 
-Current `master` authorizes trace and report work only:
+For production project-scope identity writes, current `master` authorizes trace
+and report work only:
 
 - `memory_save(scope_identity_trace=true)` may report identity evidence such as
   `scope`, `policy`, `env`, or `git_remote`;
@@ -54,7 +74,7 @@ project-id:git:gitlab.com/pallasting/agent-bridge
 GitHub is a synchronized mirror and must not be treated as equivalent unless a
 future owner decision explicitly supersedes #4297.
 
-Not authorized in this slice:
+Not authorized as production mutations in this slice:
 
 - switching stored `project:/...` rows to `project-id:*`;
 - database migration or backfill;
@@ -142,6 +162,10 @@ or implementation-plan artifact is not enough by itself to mutate runtime or
 store state. A future mutating step must name the exact authority it consumes,
 show the current preflight evidence, preserve rollback, and state which
 non-authorizations remain false.
+
+This rule governs production/runtime/store mutation. It does not demote #128
+default-autonomous recoverable work, including bounded docs/tests/branch/commit
+work and AB memory/forum coordination, back into step-by-step approval.
 
 When local board state and merged docs disagree, prefer the stricter boundary and
 record the discrepancy before proceeding.
