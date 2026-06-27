@@ -241,6 +241,24 @@ async fn run(store: Arc<dyn StateStore>) {
         warn!(target: "embedding_dim_guard", "{w}");
     }
 
+    // Delegating mode (opt-in via AGENT_BRIDGE_EMBED_REMOTE_URL): this process has
+    // NO local model — embeds route to the remote /embed. There is no local ONNX to
+    // "settle" (model_init_done() tracks the LOCAL init, which never fires here) and
+    // no local actual-dim to probe. Phase 1 above already validated the remote-
+    // reported dim against the store, so stop now instead of waiting out
+    // SETTLE_TIMEOUT_SECS for an init that will never come (and never trigger the
+    // local model load this whole delegation is meant to avoid).
+    if crate::remote_embed::active_remote_url().is_some() {
+        info!(
+            target: "embedding_dim_guard",
+            "delegating mode (AGENT_BRIDGE_EMBED_REMOTE_URL set): skipping local model \
+             warmup + actual-dim probe; Phase-1 config={model_name}/{configured}d vs \
+             store={}d already checked",
+            dominant.dim.unwrap_or(0)
+        );
+        return;
+    }
+
     // Phase 2 — wait for the embedder to settle, then probe its REAL output dim
     // (during the load window embed_text returns the vector_dim()-wide hash
     // fallback, which would mask a real model loading at a different dim).

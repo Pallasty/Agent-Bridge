@@ -16,9 +16,12 @@
 //! degradation is built in: if the remote is unreachable, it falls back to a
 //! local in-process embed, so correctness is never sacrificed for RAM sharing.
 //!
-//! Role-scoped install: only delegating roles (MCP) call [`install_if_configured`].
-//! The daemon / daemon-http processes ARE the server and must embed locally —
-//! they never delegate (it would be a self-loop).
+//! Role-scoped install: delegating roles call [`install_if_configured`] — the MCP
+//! arm always, and the `daemon` arm opt-in when AGENT_BRIDGE_EMBED_REMOTE_URL points
+//! at the shared daemon-http /embed (so the writer shares one model copy instead of
+//! loading its own ~1.2GB ONNX). daemon-http IS the embedding server and must NEVER
+//! delegate — its arm does not call this, so even when it inherits the same env it
+//! cannot self-loop into its own /embed.
 
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -237,9 +240,9 @@ pub enum InstallOutcome {
 }
 
 /// Install [`RemoteEmbedBackend`] as the process default IFF [`REMOTE_URL_ENV`]
-/// is set. Call ONLY from delegating roles (MCP / CLI one-shot) and BEFORE the
-/// first `default_backend()` / `warmup()`. Daemon and daemon-http MUST NOT call
-/// this — they are the embedding server and would self-delegate into a loop.
+/// is set. Call from delegating roles (MCP / CLI one-shot, and the opt-in `daemon`
+/// arm) BEFORE the first `default_backend()` / `warmup()`. daemon-http MUST NOT
+/// call this — it is the embedding server and would self-delegate into a loop.
 pub fn install_if_configured() -> InstallOutcome {
     let Some(url) = remote_url_from_env() else {
         return InstallOutcome::NotConfigured;
@@ -292,6 +295,16 @@ mod tests {
         // Declared dim disagrees with the actual vector length → reject (→ fallback),
         // never store a vector whose dimension is mislabeled.
         assert!(parse_embed_response(r#"{"embedding":[0.1,0.2,0.3],"backend":"m","dim":768}"#).is_none());
+    }
+
+    #[test]
+    fn active_remote_url_unset_until_installed() {
+        // daemon-http (and a non-delegating daemon) never call install_if_configured,
+        // so the process-global ACTIVE_URL stays None and the dim-guard warms the
+        // local model as before. Guards against a regression that would make every
+        // process believe it is delegating (and wrongly skip the dim-guard probe).
+        // No test calls install_if_configured(), so this OnceLock stays unset.
+        assert!(active_remote_url().is_none());
     }
 
     #[test]

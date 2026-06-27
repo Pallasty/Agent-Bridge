@@ -6884,6 +6884,27 @@ async fn real_main() -> Result<()> {
         Cmd::Daemon => {
             let socket = default_socket_path();
             tracing::info!(socket = %socket.display(), "starting agent-bridge daemon");
+            // Opt-in tiered embedding delegation (default OFF). When
+            // AGENT_BRIDGE_EMBED_REMOTE_URL is set, the daemon delegates embeds to
+            // the shared daemon-http /embed service instead of loading its OWN
+            // ~1.2GB gte ONNX copy (the daemon + daemon-http double-load). Role-safe:
+            // daemon-http is the embedding server and NEVER installs delegation (its
+            // arm below does not call this), so even though it inherits the same env
+            // this cannot self-loop. Graceful local fallback if the remote is
+            // unreachable preserves correctness. Must run before any default_backend()
+            // / warmup() / dim-guard use so the OnceLock lands on RemoteEmbedBackend.
+            match ab_bridge::remote_embed::install_if_configured() {
+                ab_bridge::remote_embed::InstallOutcome::Installed(url) => {
+                    tracing::info!(%url, "embedding delegation active (RemoteEmbedBackend)");
+                }
+                ab_bridge::remote_embed::InstallOutcome::NotConfigured => {}
+                ab_bridge::remote_embed::InstallOutcome::AlreadyInitialized => {
+                    tracing::warn!(
+                        "embedding delegation skipped: a default backend was already \
+                         installed — daemon will embed locally"
+                    );
+                }
+            }
             // Embedding dim-guard (#4282): a class-1 config-vs-store dim mismatch
             // strict-aborts here (default-on; mixed-dim migration & empty store
             // exempt; AGENT_BRIDGE_DIM_GUARD_STRICT=0 bypasses). The detached
