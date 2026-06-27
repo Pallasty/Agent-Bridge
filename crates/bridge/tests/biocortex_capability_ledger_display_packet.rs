@@ -143,6 +143,27 @@ fn display_model_marks_mutating_packet_as_unsafe() {
 }
 
 #[test]
+fn display_model_rejects_runtime_decision_words_even_when_safety_flags_are_false() {
+    let mut packet = accepted_packet();
+    packet.downstream_action = "enable_runtime".to_string();
+    packet.integration_decision = "runtime_admission".to_string();
+    let display_model = build_biocortex_capability_ledger_display_model_from_packet(&packet);
+
+    assert_eq!(display_model.status.label, "Rejected");
+    assert_eq!(display_model.status.tone, "danger");
+    assert!(!display_model.safety.display_ready);
+    assert!(display_model.safety.read_only_confirmed);
+    assert_eq!(
+        badge_value(&display_model, "downstream_action"),
+        Some("enable_runtime".to_string())
+    );
+    assert_eq!(
+        badge_value(&display_model, "integration_decision"),
+        Some("runtime_admission".to_string())
+    );
+}
+
+#[test]
 fn display_model_serializes_as_json_without_runtime_affordances() {
     let display_model =
         build_biocortex_capability_ledger_display_model_from_packet(&accepted_packet());

@@ -572,7 +572,10 @@ pub fn build_biocortex_capability_ledger_display_model_from_packet(
     let unsafe_surface = unsafe_display_surface_observed(&packet.safety);
     let read_only_display =
         packet.read_only_confirmed && packet.safety.static_artifact_only && !unsafe_surface;
-    let display_ready = packet.verdict == "accepted" && read_only_display && required_failed == 0;
+    let display_ready = packet.verdict == "accepted"
+        && read_only_display
+        && display_only_decision(packet)
+        && required_failed == 0;
 
     BioCortexCapabilityLedgerDisplayModel {
         schema: BIOCORTEX_CAPABILITY_LEDGER_DISPLAY_MODEL_SCHEMA.to_string(),
@@ -744,6 +747,11 @@ fn unsafe_display_surface_observed(safety: &BioCortexCapabilityLedgerConsumerSaf
         || safety.language_generation_observed
         || safety.cognition_claim_observed
         || !safety.static_artifact_only
+}
+
+fn display_only_decision(packet: &BioCortexCapabilityLedgerReportPacket) -> bool {
+    packet.downstream_action == "display_or_review_only"
+        && packet.integration_decision == "shadow_only_no_runtime_admission"
 }
 
 fn display_badge(
