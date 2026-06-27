@@ -28,9 +28,10 @@ OOMScoreAdjust=-100
 # pre-model baseline, so every model allocation past memory.high hit synchronous
 # direct reclaim and a ~22s cold-load throttled into ~8.5h — during which /embed
 # silently served a hash vector mislabeled "gte" (forum #137, fixed 2026-06-27).
-# 4G leaves headroom over steady RSS + load transient; MemoryMax=max still caps
-# nothing (no OOM), OOMScoreAdjust protects under host pressure. Re-tune this if
-# the embedding model footprint changes again.
+# 4G leaves headroom over steady RSS + load transient; MemoryMax is deliberately
+# unset (systemd default: no hard cgroup cap / no OOM), and OOMScoreAdjust
+# protects under host pressure. Re-tune this if the embedding model footprint
+# changes again.
 MemoryHigh=4G
 StandardOutput=append:%h/.cache/agent-bridge/daemon-http.log
 StandardError=append:%h/.cache/agent-bridge/daemon-http.log
