@@ -260,11 +260,22 @@ say "deployed markers:"; printf '  + %s\n' $(markers_in "$REAL_PATH")
 # Reconnect surface: a deployed-over .real shows as "(deleted)" in /proc/PID/exe
 # for any MCP server still mapping the OLD inode. Report the count so the operator
 # knows which sessions still need /mcp reconnect. Read-only — never kills anything.
-stale=0; fresh=0
+stale=0; fresh=0; stale_list=""
 for pid in $(pgrep -f 'agent-bridge.*mcp' 2>/dev/null || true); do
     exe="$(readlink "/proc/$pid/exe" 2>/dev/null || true)"
     case "$exe" in
-        *"(deleted)") stale=$((stale + 1)) ;;
+        *"(deleted)")
+            stale=$((stale + 1))
+            # Identify the owning client so the operator knows exactly which session
+            # to /mcp reconnect: parent process (CC/Codex/Cursor) + the server's cwd
+            # (the project it serves). /proc only — this whole block is Linux-only;
+            # on macOS readlink /proc returns nothing so stale stays 0 (no-op).
+            ppid="$(awk '{print $4}' "/proc/$pid/stat" 2>/dev/null || echo '?')"
+            pcomm="$(tr -d '\0' < "/proc/$ppid/comm" 2>/dev/null || echo '?')"
+            cwd="$(readlink "/proc/$pid/cwd" 2>/dev/null || echo '?')"
+            stale_list="${stale_list}
+        - pid $pid  (client: ${ppid}/${pcomm}, cwd: ${cwd})"
+            ;;
         */agent-bridge.real) fresh=$((fresh + 1)) ;;
     esac
 done
@@ -274,8 +285,10 @@ say "DONE. The running MCP server still holds the OLD binary —"
 say "      run /mcp reconnect (per CC session) to activate the new one."
 if [ "$stale" -gt 0 ]; then
     say "      reconnect surface: $stale running MCP server(s) still on the OLD binary"
-    say "      ($fresh already on the new one) — each is a CC/Codex/Cursor session that"
-    say "      needs its own /mcp reconnect to pick up this deploy."
+    say "      ($fresh already on the new one) — each needs its own /mcp reconnect"
+    say "      (until reconnected, agent-bridge doctor reports warns>=1 and the strict"
+    say "      warns=0 pre-write gate stays blocked). Servers to reconnect:"
+    printf '%s\n' "$stale_list"
 fi
 if [ -n "${bak:-}" ]; then say "      rollback: cp '$bak' '$REAL_PATH' && /mcp reconnect"; fi
 # Explicit success: the final command above must not leave a nonzero status (a
