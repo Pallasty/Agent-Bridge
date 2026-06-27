@@ -49457,6 +49457,339 @@ impl McpTool for ContextPressureEstimateTool {
 }
 
 // ===========================================================================
+//        research_cycle_plan - read-only/advisory research control packet
+// ===========================================================================
+
+pub struct ResearchCyclePlanTool;
+
+impl ResearchCyclePlanTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for ResearchCyclePlanTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+fn research_cycle_text(args: &Value, key: &str) -> String {
+    args.get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_default()
+}
+
+fn research_cycle_text_list(args: &Value, key: &str) -> Vec<String> {
+    match args.get(key) {
+        Some(Value::Array(values)) => values
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .take(20)
+            .collect(),
+        Some(Value::String(raw)) => {
+            let trimmed = raw.trim();
+            if trimmed.is_empty() {
+                Vec::new()
+            } else {
+                vec![trimmed.to_string()]
+            }
+        }
+        _ => Vec::new(),
+    }
+}
+
+fn research_cycle_requested_actions(args: &Value) -> BTreeSet<String> {
+    research_cycle_text_list(args, "requested_actions")
+        .into_iter()
+        .map(|action| {
+            action
+                .chars()
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() {
+                        c.to_ascii_lowercase()
+                    } else {
+                        '_'
+                    }
+                })
+                .collect::<String>()
+        })
+        .collect()
+}
+
+fn research_cycle_action(rank: u32, action: &str, reason: &str, mutation: bool) -> Value {
+    json!({
+        "rank": rank,
+        "action": action,
+        "reason": reason,
+        "requires_separate_tool_call": mutation,
+        "this_tool_mutates_state": false,
+    })
+}
+
+fn build_research_cycle_plan(args: &Value) -> Value {
+    let research_question = research_cycle_text(args, "research_question");
+    let hypothesis = research_cycle_text(args, "hypothesis");
+    let source_anchors = research_cycle_text_list(args, "source_anchors");
+    let proposed_experiment = research_cycle_text(args, "proposed_experiment");
+    let experiment_command = research_cycle_text(args, "experiment_command");
+    let evidence_summary = research_cycle_text(args, "evidence_summary");
+    let reproducibility_handle = research_cycle_text(args, "reproducibility_handle");
+    let expected_artifact = research_cycle_text(args, "expected_artifact");
+    let falsifier = research_cycle_text(args, "falsifier");
+    let owner = research_cycle_text(args, "owner");
+    let reviewer = research_cycle_text(args, "reviewer");
+    let forum_thread_id = args.get("forum_thread_id").and_then(Value::as_u64);
+    let memory_key = research_cycle_text(args, "memory_key");
+    let requested_actions = research_cycle_requested_actions(args);
+
+    let mut blockers = Vec::<Value>::new();
+    if hypothesis.is_empty() {
+        blockers.push(json!("hypothesis_missing"));
+    }
+    if source_anchors.is_empty() {
+        blockers.push(json!("source_anchors_missing"));
+    }
+    if proposed_experiment.is_empty() {
+        blockers.push(json!("proposed_experiment_missing"));
+    }
+    if experiment_command.is_empty() {
+        blockers.push(json!("experiment_command_missing"));
+    }
+    if evidence_summary.is_empty() {
+        blockers.push(json!("evidence_summary_missing"));
+    }
+    if reproducibility_handle.is_empty() {
+        blockers.push(json!("reproducibility_handle_missing"));
+    }
+    if falsifier.is_empty() {
+        blockers.push(json!("falsifier_missing"));
+    }
+    if requested_actions
+        .iter()
+        .any(|a| a.contains("execute") || a.contains("run_code") || a.contains("spawn"))
+    {
+        blockers.push(json!("execution_not_authorized"));
+    }
+    if requested_actions
+        .iter()
+        .any(|a| a.contains("write_memory") || a.contains("memory_save") || a.contains("ingest"))
+    {
+        blockers.push(json!("memory_write_not_authorized"));
+    }
+    if requested_actions
+        .iter()
+        .any(|a| a.contains("manuscript") || a.contains("paper_generation"))
+    {
+        blockers.push(json!("manuscript_generation_not_authorized"));
+    }
+
+    let status = if blockers.is_empty() {
+        "ready_for_human_review"
+    } else {
+        "planned_needs_evidence"
+    };
+    let mut actions = Vec::new();
+    let mut rank = 1u32;
+    if blockers.is_empty() {
+        actions.push(research_cycle_action(
+            rank,
+            "publish_review_packet_to_forum",
+            "Evidence handles are present; the next step is human-readable review, not automatic ingestion.",
+            true,
+        ));
+        rank += 1;
+        actions.push(research_cycle_action(
+            rank,
+            "await_owner_memory_ingest_decision",
+            "Durable AB memory should only receive accepted conclusions after owner/reviewer approval.",
+            false,
+        ));
+    } else {
+        actions.push(research_cycle_action(
+            rank,
+            "capture_missing_evidence",
+            "The plan is advisory until source, command, evidence, reproducibility, and falsifier handles are complete.",
+            false,
+        ));
+        rank += 1;
+        actions.push(research_cycle_action(
+            rank,
+            "post_blockers_for_review",
+            "Visible blockers keep speculative research branches from becoming durable claims.",
+            true,
+        ));
+    }
+    actions.push(research_cycle_action(
+        actions.len() as u32 + 1,
+        "keep_execution_in_separate_authorized_lane",
+        "This v0 packet borrows research-loop structure without executing LLM-written code or generating manuscripts.",
+        false,
+    ));
+
+    json!({
+        "schema": "agent_bridge.research_cycle.plan.v0",
+        "source_pattern": "ai_scientist_v2_research_loop",
+        "inspired_by": {
+            "paper": "Towards end-to-end automation of AI research",
+            "doi": "10.1038/s41586-026-10265-5",
+            "repo": "https://github.com/SakanaAI/AI-Scientist-v2",
+            "borrowed_pattern": "staged research lifecycle with experiment journal and advisory review",
+            "code_reuse": false,
+            "license_review_required_for_code_reuse": true,
+        },
+        "inputs": {
+            "research_question": research_question,
+            "hypothesis": hypothesis,
+            "source_anchors": source_anchors,
+            "source_anchor_count": source_anchors.len(),
+            "proposed_experiment": proposed_experiment,
+            "experiment_command": experiment_command,
+            "evidence_summary": evidence_summary,
+            "reproducibility_handle": reproducibility_handle,
+            "expected_artifact": expected_artifact,
+            "falsifier": falsifier,
+            "owner": owner,
+            "reviewer": reviewer,
+            "forum_thread_id": forum_thread_id,
+            "memory_key": memory_key,
+        },
+        "research_tree": {
+            "mode": "single_root_first_branch_v0",
+            "autonomous_branching": false,
+            "root": {
+                "id": "root",
+                "kind": "hypothesis",
+                "status": status,
+                "question_present": !research_question.is_empty(),
+                "hypothesis_present": !hypothesis.is_empty(),
+                "source_anchor_count": source_anchors.len(),
+            },
+            "candidate_branches": [
+                {
+                    "id": "branch_001",
+                    "kind": "proposed_experiment",
+                    "status": status,
+                    "requires_human_review": true,
+                    "may_execute_from_this_packet": false,
+                }
+            ],
+        },
+        "evidence_contract": {
+            "requires_source_anchors": true,
+            "requires_experiment_command": true,
+            "requires_evidence_summary": true,
+            "requires_reproducibility_handle": true,
+            "requires_falsifier": true,
+            "negative_results_policy": "negative_results_are_evidence_and_may_close_or_reframe_the_branch",
+            "claims_without_evidence_allowed": false,
+        },
+        "review_contract": {
+            "review_is_advisory": true,
+            "critic_dimensions": [
+                "novelty",
+                "method",
+                "implementation_correctness",
+                "evidence_strength",
+                "safety_and_license",
+                "memory_ingest_readiness"
+            ],
+            "human_review_required": true,
+        },
+        "gates": {
+            "may_execute": false,
+            "may_spawn_agents": false,
+            "may_write_memory": false,
+            "may_write_forum": false,
+            "may_generate_manuscript": false,
+            "may_change_runtime_policy": false,
+            "requires_owner_review_before_ingest": true,
+        },
+        "tool_activity": {
+            "calls_memory_search": false,
+            "writes_memory": false,
+            "writes_forum": false,
+            "spawns_agents": false,
+            "executes_commands": false,
+            "imports_external_code": false,
+        },
+        "guardrails": {
+            "read_only_packet": true,
+            "does_not_call_memory_search": true,
+            "does_not_write_memory": true,
+            "does_not_spawn_agents": true,
+            "does_not_execute_commands": true,
+            "does_not_generate_manuscripts": true,
+            "does_not_reopen_parked_embedding_runtime": true,
+        },
+        "blockers": blockers,
+        "recommended_next_actions": actions,
+    })
+}
+
+#[async_trait]
+impl McpTool for ResearchCyclePlanTool {
+    fn name(&self) -> &'static str {
+        "research_cycle_plan"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only/advisory research-cycle planning packet inspired by AI \
+                 Scientist-v2's staged research loop. It structures a hypothesis, source \
+                 anchors, experiment evidence handles, review contract, blockers, and \
+                 owner-gated memory-ingest posture. It never searches memory, writes memory \
+                 or forum posts, spawns agents, executes commands, imports external code, \
+                 generates manuscripts, or changes runtime policy."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "research_question": { "type": "string" },
+                    "hypothesis": { "type": "string" },
+                    "source_anchors": {
+                        "oneOf": [
+                            { "type": "array", "items": { "type": "string" } },
+                            { "type": "string" }
+                        ],
+                        "description": "URLs, memory keys, forum posts, commits, or file paths that anchor the claim."
+                    },
+                    "proposed_experiment": { "type": "string" },
+                    "experiment_command": {
+                        "type": "string",
+                        "description": "Command that would verify the experiment in a separate authorized lane. This tool does not run it."
+                    },
+                    "evidence_summary": { "type": "string" },
+                    "reproducibility_handle": { "type": "string" },
+                    "expected_artifact": { "type": "string" },
+                    "falsifier": { "type": "string" },
+                    "owner": { "type": "string" },
+                    "reviewer": { "type": "string" },
+                    "forum_thread_id": { "type": "integer" },
+                    "memory_key": { "type": "string" },
+                    "requested_actions": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Optional requested actions; execution/write/manuscript requests are reported as blockers, never performed."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        Ok(ToolResult::json_text(&build_research_cycle_plan(&args)))
+    }
+}
+
+// ===========================================================================
 //        context_governor_snapshot - read-only lifecycle decision packet
 // ===========================================================================
 
@@ -55254,6 +55587,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         policy,
         Tier::Essential,
         Arc::new(ContextGovernorSnapshotTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(ResearchCyclePlanTool::new()),
     );
     // GoS-lite belief-graph projection over the same Tool Atlas telemetry.
     // Standard: it is the SSB belief-graph synthesis layer over Essential-tier
@@ -63207,6 +63546,34 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             .map(|s| s.name)
             .collect();
         assert!(!lean_names.iter().any(|n| n == "gos_lite_snapshot"));
+    }
+
+    #[test]
+    fn registry_exposes_research_cycle_plan_tool_in_standard_profile() {
+        let standard = ToolPolicy::from_values(None, None, None, Some("standard"));
+        let standard_names: Vec<String> =
+            build_registry_with_policy(Hub::builder().build(), standard)
+                .list()
+                .into_iter()
+                .map(|s| s.name)
+                .collect();
+        assert!(standard_names.iter().any(|n| n == "research_cycle_plan"));
+
+        let all = ToolPolicy::from_values(None, None, None, Some("all"));
+        let all_names: Vec<String> = build_registry_with_policy(Hub::builder().build(), all)
+            .list()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        assert!(all_names.iter().any(|n| n == "research_cycle_plan"));
+
+        let lean = ToolPolicy::from_values(Some("codex-lean"), None, None, None);
+        let lean_names: Vec<String> = build_registry_with_policy(Hub::builder().build(), lean)
+            .list()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        assert!(!lean_names.iter().any(|n| n == "research_cycle_plan"));
     }
 
     #[test]
@@ -80736,6 +81103,120 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
                 .any(|a| a["action"] == json!("save_work_memory_and_handoff")),
             "saturated snapshot should recommend externalizing active state"
         );
+    }
+
+    #[test]
+    fn research_cycle_plan_preserves_inputs_and_blocks_missing_evidence() {
+        let v = build_research_cycle_plan(&json!({
+            "research_question": "Can AB make paper analysis reusable across sessions?",
+            "hypothesis": "A structured research-cycle packet improves handoff quality.",
+            "source_anchors": [
+                "https://www.nature.com/articles/s41586-026-10265-5",
+                "memory:analysis_ai_scientist_v2_value_for_agent_bridge_research_automation_20260627"
+            ],
+            "proposed_experiment": "Run one paper-analysis task through memory, board, and review gates.",
+            "expected_artifact": "research-cycle review packet",
+            "falsifier": "The packet cannot recover source/evidence/next-step decisions after restart.",
+            "forum_thread_id": 139,
+            "owner": "codex"
+        }));
+
+        assert_eq!(v["schema"], json!("agent_bridge.research_cycle.plan.v0"));
+        assert_eq!(v["source_pattern"], json!("ai_scientist_v2_research_loop"));
+        assert_eq!(
+            v["inputs"]["hypothesis"],
+            json!("A structured research-cycle packet improves handoff quality.")
+        );
+        assert_eq!(v["inputs"]["source_anchor_count"], json!(2));
+        assert_eq!(
+            v["research_tree"]["root"]["status"],
+            json!("planned_needs_evidence")
+        );
+        assert_eq!(
+            v["evidence_contract"]["negative_results_policy"],
+            json!("negative_results_are_evidence_and_may_close_or_reframe_the_branch")
+        );
+        let blockers = v["blockers"].as_array().expect("blockers");
+        assert!(blockers.contains(&json!("experiment_command_missing")));
+        assert!(blockers.contains(&json!("reproducibility_handle_missing")));
+        assert_eq!(v["guardrails"]["does_not_call_memory_search"], json!(true));
+    }
+
+    #[test]
+    fn research_cycle_plan_hard_codes_authority_gates_false() {
+        let v = build_research_cycle_plan(&json!({
+            "hypothesis": "Let the agent generate a manuscript automatically.",
+            "source_anchors": ["https://github.com/SakanaAI/AI-Scientist-v2"],
+            "proposed_experiment": "Generate a manuscript and run code",
+            "requested_actions": ["execute_experiment", "write_memory", "generate_manuscript"]
+        }));
+
+        assert_eq!(v["gates"]["may_execute"], json!(false));
+        assert_eq!(v["gates"]["may_write_memory"], json!(false));
+        assert_eq!(v["gates"]["may_generate_manuscript"], json!(false));
+        assert_eq!(
+            v["gates"]["requires_owner_review_before_ingest"],
+            json!(true)
+        );
+        let blockers = v["blockers"].as_array().expect("blockers");
+        assert!(blockers.contains(&json!("execution_not_authorized")));
+        assert!(blockers.contains(&json!("memory_write_not_authorized")));
+        assert!(blockers.contains(&json!("manuscript_generation_not_authorized")));
+        assert_eq!(v["tool_activity"]["calls_memory_search"], json!(false));
+        assert_eq!(v["tool_activity"]["spawns_agents"], json!(false));
+        assert_eq!(v["tool_activity"]["executes_commands"], json!(false));
+    }
+
+    #[test]
+    fn research_cycle_plan_ready_for_review_when_evidence_handles_exist() {
+        let v = build_research_cycle_plan(&json!({
+            "research_question": "Does the v0 plan capture enough evidence?",
+            "hypothesis": "Complete evidence handles make the plan review-ready.",
+            "source_anchors": ["https://www.nature.com/articles/s41586-026-10265-5"],
+            "proposed_experiment": "Run focused unit tests for the read-only packet.",
+            "experiment_command": "cargo test -p ab-bridge research_cycle_plan",
+            "evidence_summary": "RED/GREEN unit tests and board post #4459",
+            "reproducibility_handle": "branch:codex/research-cycle-plan-v0-20260627",
+            "expected_artifact": "MCP JSON packet",
+            "falsifier": "Any authority gate returns true."
+        }));
+
+        assert_eq!(
+            v["research_tree"]["root"]["status"],
+            json!("ready_for_human_review")
+        );
+        assert_eq!(v["blockers"], json!([]));
+        let actions = v["recommended_next_actions"].as_array().expect("actions");
+        assert!(actions
+            .iter()
+            .any(|a| a["action"] == json!("publish_review_packet_to_forum")));
+        assert!(actions
+            .iter()
+            .any(|a| a["action"] == json!("await_owner_memory_ingest_decision")));
+    }
+
+    #[tokio::test]
+    async fn research_cycle_plan_tool_returns_json_packet() {
+        let tool = ResearchCyclePlanTool::new();
+        let ctx = ToolContext::default();
+        let res = tool
+            .execute(
+                json!({
+                    "hypothesis": "A read-only packet is enough for v0.",
+                    "source_anchors": ["memory:analysis_ai_scientist_v2_value_for_agent_bridge_research_automation_20260627"],
+                    "proposed_experiment": "Inspect the packet output."
+                }),
+                &ctx,
+            )
+            .await
+            .expect("execute ok");
+        let text = match res.content.first() {
+            Some(ab_mcp::ContentBlock::Text { text }) => text.clone(),
+            _ => panic!("expected text content"),
+        };
+        let v: Value = serde_json::from_str(&text).expect("valid json");
+        assert_eq!(v["schema"], json!("agent_bridge.research_cycle.plan.v0"));
+        assert_eq!(v["gates"]["may_execute"], json!(false));
     }
 
     #[tokio::test]
