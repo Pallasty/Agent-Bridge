@@ -18,7 +18,8 @@
 #   - Restart=on-failure to self-heal sub-process death
 #   - WantedBy=default.target to come up on next user session
 #   - OOMScoreAdjust=-100 to be killed last under future memory pressure
-#   - MemoryHigh=2G soft cgroup limit (per forum #276 `#7a37d28e` suggestion)
+#   - MemoryHigh soft cgroup limit (was 2G per forum #276; raised to 4G after the
+#     gte-768 cutover — see the inline note below)
 #
 # Wrapper path used (`%h/.local/bin/agent-bridge` not `.real`) so
 # AB_SUBSTRATE_PROJECTION=svd + AB_SUBSTRATE_SVD_PATH defaults inject
@@ -53,9 +54,14 @@ RestartPreventExitStatus=78
 RestartSec=5
 # Be killed LAST under future memory pressure (state.db data integrity matters).
 OOMScoreAdjust=-100
-# Soft cgroup ceiling — daemon RSS ~25-40MB steady, leaving headroom for
-# embedding cache prefetch. 2G is generous; logs warn before kill.
-MemoryHigh=2G
+# Soft cgroup ceiling. This daemon loads its own gte-768 ORT session for the
+# embedding cache / substrate tick, so steady RSS is ~2.5G (NOT the ~25-40MB this
+# comment claimed pre-embedding-model). Keep MemoryHigh comfortably above that:
+# the gte-768 cutover (2026-06-25) doubled the per-process model footprint and a
+# too-low cap throttles the cold-load into hours via synchronous direct reclaim
+# (see agent-bridge-daemon-http.service for the full post-mortem). 4G leaves
+# headroom; MemoryMax=max means no OOM. Re-tune if the model footprint changes.
+MemoryHigh=4G
 StandardOutput=append:%h/.cache/agent-bridge/daemon.log
 StandardError=append:%h/.cache/agent-bridge/daemon.log
 # `agent-bridge daemon` runs forever; don't time out start.

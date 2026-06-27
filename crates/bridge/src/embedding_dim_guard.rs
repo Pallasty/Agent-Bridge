@@ -28,7 +28,13 @@ use ab_store::{EmbeddingProfile, StateStore};
 use tracing::{info, warn};
 
 /// Max seconds to wait for the embedding model to settle before giving up on
-/// the actual-output-dim probe. gte's ORT session can cold-load ~90s.
+/// the actual-output-dim probe. gte's ORT session cold-loads in ~22s on a node
+/// with adequate memory headroom; 180s is generous. NOTE: if a too-low systemd
+/// `MemoryHigh` cgroup cap throttles the load via synchronous direct reclaim,
+/// the cold-load can stretch into hours and blow past this window — the probe is
+/// then skipped and a hash fallback can serve mislabeled as the configured model
+/// (forum #137, 2026-06-27). That is a host-config bug, not a reason to raise
+/// this timeout; fix the cgroup cap instead.
 const SETTLE_TIMEOUT_SECS: u64 = 180;
 
 /// Result of comparing the active embedder against the store's dominant
