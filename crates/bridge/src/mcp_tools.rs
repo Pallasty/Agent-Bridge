@@ -53287,6 +53287,9 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     "agent_steer_list",
     "agent_steer_kill",
     "agent_orchestrate_scan",
+    // Research cycle planner: read-only/advisory packet for Codex to review
+    // automation proposals without gaining execute/spawn/write authority.
+    "research_cycle_plan",
 ];
 
 fn codex_essential_tool(tier: Tier, tool_name: &str) -> bool {
@@ -63753,9 +63756,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     fn tool_policy_codex_essential_exposes_extras_list() {
         let p = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
         let extras = p.extras();
-        // 60 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
+        // 61 = IDE(2) + FORUM_READ(3: read/list_threads/digest) + FORUM_POST(1)
         //      + FORUM_MANAGE(2) + PRESENCE_ANNOUNCE(1) + PRESENCE_LIST(1)
-        //      + DIRECT(50: 6 avatar observation/sync/renderer tools
+        //      + DIRECT(51: 6 avatar observation/sync/renderer tools
         //      + xiao_shu_action_request + 14 mobile bridge tools
         //      + memory_graph_topology + memory_retrieval_feedback
         //      + memory_consolidation_queue
@@ -63775,13 +63778,14 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         //      + semantic_bus_peer_conformance
         //      + system_control
         //      + 5 remote-steering tools: agent_steer_launch/drive/capture/list/kill
-        //      + agent_orchestrate_scan).
+        //      + agent_orchestrate_scan
+        //      + research_cycle_plan).
         // forum_digest joined via the FORUM_READ capability group (2026-05-23).
         // Native-overlap probes such as browser_lite_probe stay in broader
         // profiles, not codex-essential direct extras.
         // T6 candidate-expansion gate ceremony tools are all/Niche only and
         // must not re-enter Codex's eager direct extras.
-        assert_eq!(extras.len(), 60);
+        assert_eq!(extras.len(), 61);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -63847,6 +63851,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert!(extras.contains(&"agent_steer_list"));
         assert!(extras.contains(&"agent_steer_kill"));
         assert!(extras.contains(&"agent_orchestrate_scan"));
+        assert!(extras.contains(&"research_cycle_plan"));
     }
 
     #[test]
@@ -64147,6 +64152,37 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             .map(|s| s.name)
             .collect();
         assert!(!lean_names.iter().any(|n| n == "research_cycle_plan"));
+    }
+
+    #[test]
+    fn registry_exposes_research_cycle_plan_tool_in_codex_essential_profile() {
+        let codex_essential = ToolPolicy::from_values(Some("codex-essential"), None, None, None);
+        assert!(
+            codex_essential.extras().contains(&"research_cycle_plan"),
+            "research_cycle_plan should be a codex-essential direct extra so compact Codex can review research plans"
+        );
+
+        let essential_names: Vec<String> =
+            build_registry_with_policy(Hub::builder().build(), codex_essential)
+                .list()
+                .into_iter()
+                .map(|s| s.name)
+                .collect();
+        assert!(
+            essential_names.iter().any(|n| n == "research_cycle_plan"),
+            "research_cycle_plan should be exposed in codex-essential"
+        );
+
+        let lean = ToolPolicy::from_values(Some("codex-lean"), None, None, None);
+        let lean_names: Vec<String> = build_registry_with_policy(Hub::builder().build(), lean)
+            .list()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        assert!(
+            !lean_names.iter().any(|n| n == "research_cycle_plan"),
+            "research_cycle_plan should stay out of codex-lean"
+        );
     }
 
     #[test]
