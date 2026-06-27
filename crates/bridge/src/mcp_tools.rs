@@ -44227,6 +44227,8 @@ const MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_CODE_IMPLEMENTA
     "agent_bridge.memory_biocortex_t6_candidate_expansion.runtime_enablement_code_implementation_gate.v0";
 const MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_SHADOW_CODE_GATE_SCHEMA: &str =
     "agent_bridge.memory_biocortex_t6_candidate_expansion.runtime_enablement_shadow_code_gate.v0";
+const MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_SHADOW_FEATURE_FLAG: &str =
+    "AB_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_SHADOW";
 
 fn memory_biocortex_t6_candidate_expansion_shadow_telemetry_review_source_claims_runtime_authority(
     report: &Value,
@@ -46659,6 +46661,16 @@ fn memory_biocortex_t6_candidate_expansion_runtime_enablement_shadow_code_payloa
         memory_biocortex_t6_push_reason(&mut block_reasons, &reason);
     }
 
+    let feature_flag_name =
+        memory_biocortex_t6_string_at(code_gate, "/implementation_boundaries/feature_flag_name")
+            .unwrap_or("");
+    if feature_flag_name
+        != MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_SHADOW_FEATURE_FLAG
+    {
+        block_reasons
+            .insert("runtime_enablement_shadow_feature_flag_name_invalid".to_string());
+    }
+
     let block_reasons: Vec<String> = block_reasons.into_iter().collect();
     let ready = block_reasons.is_empty();
     let status = if ready {
@@ -46675,9 +46687,6 @@ fn memory_biocortex_t6_candidate_expansion_runtime_enablement_shadow_code_payloa
         code_gate,
         "/implementation_boundaries/telemetry_fields",
     );
-    let feature_flag_name =
-        memory_biocortex_t6_string_at(code_gate, "/implementation_boundaries/feature_flag_name")
-            .unwrap_or("");
 
     json!({
         "schema": MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_SHADOW_CODE_GATE_SCHEMA,
@@ -81068,7 +81077,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         let out = tool
             .execute(
                 json!({
-                    "runtime_enablement_code_implementation_gate": code_gate,
+                    "runtime_enablement_code_implementation_gate": code_gate.clone(),
                     "reviewer": "codex-runtime-enablement-shadow-code-gate",
                     "implementation_decision": "accept_default_off_shadow_runtime_enablement_code",
                     "decision_source": "forum:#115/post:4475",
@@ -81133,6 +81142,42 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         let serialized = serde_json::to_string(&payload).expect("serialize");
         assert!(!serialized.contains("secret runtime enablement code gate source"));
         assert!(!serialized.contains("\"runtime_enablement_code_implementation_gate\":"));
+
+        let mut wrong_flag_gate = code_gate.clone();
+        wrong_flag_gate["implementation_boundaries"]["feature_flag_name"] =
+            json!("AB_BIOCORTEX_T6_WRONG_RUNTIME_FLAG");
+        let bad_out = tool
+            .execute(
+                json!({
+                    "runtime_enablement_code_implementation_gate": wrong_flag_gate,
+                    "reviewer": "codex-runtime-enablement-shadow-code-gate",
+                    "implementation_decision": "accept_default_off_shadow_runtime_enablement_code",
+                    "decision_source": "forum:#115/post:4475",
+                    "implementation_commit": "abc1234",
+                    "feature_flag_default_off_confirmed": true,
+                    "runtime_entrypoint_default_off_confirmed": true,
+                    "shadow_mode_default_off_confirmed": true,
+                    "deterministic_replay_fixture_present": true,
+                    "bounded_candidate_delta_guard_present": true,
+                    "negative_controls_present": true,
+                    "aggregate_telemetry_only_confirmed": true,
+                    "rollback_path_confirmed": true
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute wrong flag shadow code gate");
+        let bad_payload = result_text_as_json(&bad_out);
+        assert_eq!(
+            bad_payload["runtime_enablement_shadow_code_gate"]["ready"],
+            json!(false)
+        );
+        let bad_reasons = bad_payload["runtime_enablement_shadow_code_gate"]["block_reasons"]
+            .as_array()
+            .expect("wrong flag block reasons");
+        assert!(bad_reasons.contains(&json!(
+            "runtime_enablement_shadow_feature_flag_name_invalid"
+        )));
     }
 
     #[tokio::test]
