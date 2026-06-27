@@ -10,6 +10,8 @@ use std::collections::BTreeMap;
 
 pub const BIOCORTEX_CAPABILITY_LEDGER_CONSUMER_SCHEMA: &str =
     "agent_bridge.biocortex_capability_ledger.consumer_dry_run.v0";
+pub const BIOCORTEX_CAPABILITY_LEDGER_REVIEW_ARTIFACT_SCHEMA: &str =
+    "agent_bridge.biocortex_capability_ledger.review_artifact.v0";
 
 const PASSED: &str = "passed";
 const FAILED: &str = "failed";
@@ -295,4 +297,195 @@ fn guidance_for(verdict: &str) -> Vec<String> {
                 .to_string(),
         ]
     }
+}
+
+pub fn render_biocortex_capability_ledger_review_artifact(
+    summary: &BioCortexCapabilityLedgerConsumerSummary,
+) -> String {
+    let mut lines = Vec::new();
+    let passed = summary
+        .checks
+        .iter()
+        .filter(|check| check.verdict == PASSED)
+        .count();
+    let failed = summary
+        .checks
+        .iter()
+        .filter(|check| check.verdict == FAILED)
+        .count();
+    let required_failed = summary
+        .checks
+        .iter()
+        .filter(|check| check.required && check.verdict == FAILED)
+        .count();
+
+    lines.push("# BioCortex Capability Ledger Review Artifact".to_string());
+    lines.push(String::new());
+    push_kv(
+        &mut lines,
+        "report_schema",
+        BIOCORTEX_CAPABILITY_LEDGER_REVIEW_ARTIFACT_SCHEMA,
+    );
+    push_kv(&mut lines, "summary_schema", &summary.schema);
+    push_kv(&mut lines, "input_schema", &summary.input_schema);
+    push_kv(
+        &mut lines,
+        "input_schema_version",
+        optional_text(summary.input_schema_version.as_deref()),
+    );
+    push_kv(
+        &mut lines,
+        "input_mode",
+        optional_text(summary.input_mode.as_deref()),
+    );
+    push_kv(
+        &mut lines,
+        "input_generated_by",
+        optional_text(summary.input_generated_by.as_deref()),
+    );
+    push_kv(&mut lines, "verdict", &summary.verdict);
+    push_kv(
+        &mut lines,
+        "read_only_confirmed",
+        bool_text(summary.read_only_confirmed),
+    );
+    push_kv(&mut lines, "downstream_action", &summary.downstream_action);
+    push_kv(
+        &mut lines,
+        "integration_decision",
+        &summary.integration_decision,
+    );
+
+    lines.push(String::new());
+    lines.push("## Safety".to_string());
+    push_bullet_kv(
+        &mut lines,
+        "static_artifact_only",
+        bool_text(summary.safety.static_artifact_only),
+    );
+    push_bullet_kv(
+        &mut lines,
+        "memory_write_attempted",
+        bool_text(summary.safety.memory_write_attempted),
+    );
+    push_bullet_kv(
+        &mut lines,
+        "retrieval_order_change_attempted",
+        bool_text(summary.safety.retrieval_order_change_attempted),
+    );
+    push_bullet_kv(
+        &mut lines,
+        "runtime_authority_observed",
+        bool_text(summary.safety.runtime_authority_observed),
+    );
+    push_bullet_kv(
+        &mut lines,
+        "executor_enablement_observed",
+        bool_text(summary.safety.executor_enablement_observed),
+    );
+    push_bullet_kv(
+        &mut lines,
+        "mcp_tool_registration",
+        bool_text(summary.safety.mcp_tool_registration),
+    );
+    push_bullet_kv(
+        &mut lines,
+        "nexus_world_tick_touched",
+        bool_text(summary.safety.nexus_world_tick_touched),
+    );
+    push_bullet_kv(
+        &mut lines,
+        "aiot_runtime_called",
+        bool_text(summary.safety.aiot_runtime_called),
+    );
+    push_bullet_kv(
+        &mut lines,
+        "language_generation_observed",
+        bool_text(summary.safety.language_generation_observed),
+    );
+    push_bullet_kv(
+        &mut lines,
+        "cognition_claim_observed",
+        bool_text(summary.safety.cognition_claim_observed),
+    );
+
+    lines.push(String::new());
+    lines.push("## Required Checks".to_string());
+    push_bullet_kv(&mut lines, "passed", passed.to_string());
+    push_bullet_kv(&mut lines, "failed", failed.to_string());
+    push_bullet_kv(&mut lines, "required_failed", required_failed.to_string());
+
+    lines.push(String::new());
+    lines.push("## Failed Checks".to_string());
+    let failed_checks = summary
+        .checks
+        .iter()
+        .filter(|check| check.verdict == FAILED)
+        .collect::<Vec<_>>();
+    if failed_checks.is_empty() {
+        lines.push("- none".to_string());
+    } else {
+        for check in failed_checks {
+            lines.push(format!(
+                "- {}: {}; required={}; evidence={}",
+                one_line(&check.check),
+                one_line(&check.verdict),
+                bool_text(check.required),
+                one_line(&check.evidence)
+            ));
+        }
+    }
+
+    lines.push(String::new());
+    lines.push("## Guidance".to_string());
+    push_string_list(&mut lines, &summary.guidance);
+
+    lines.push(String::new());
+    lines.push("## Boundary".to_string());
+    lines.push("- This artifact is display/review only.".to_string());
+    lines.push(
+        "- It is not owner authorization, runtime admission, MCP tool registration, retrieval influence, memory mutation, language generation, or cognition evidence."
+            .to_string(),
+    );
+    lines.push(
+        "- A rejected artifact must not be surfaced as a valid BioCortex capability summary."
+            .to_string(),
+    );
+
+    format!("{}\n", lines.join("\n"))
+}
+
+fn push_kv(lines: &mut Vec<String>, key: &str, value: impl AsRef<str>) {
+    lines.push(format!("{key}: {}", one_line(value.as_ref())));
+}
+
+fn push_bullet_kv(lines: &mut Vec<String>, key: &str, value: impl AsRef<str>) {
+    lines.push(format!("- {key}: {}", one_line(value.as_ref())));
+}
+
+fn push_string_list(lines: &mut Vec<String>, values: &[String]) {
+    if values.is_empty() {
+        lines.push("- none".to_string());
+        return;
+    }
+
+    for value in values {
+        lines.push(format!("- {}", one_line(value)));
+    }
+}
+
+fn bool_text(value: bool) -> &'static str {
+    if value {
+        "true"
+    } else {
+        "false"
+    }
+}
+
+fn optional_text(value: Option<&str>) -> &str {
+    value.unwrap_or("none")
+}
+
+fn one_line(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
 }
