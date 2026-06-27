@@ -12,6 +12,10 @@ pub const BIOCORTEX_CAPABILITY_LEDGER_CONSUMER_SCHEMA: &str =
     "agent_bridge.biocortex_capability_ledger.consumer_dry_run.v0";
 pub const BIOCORTEX_CAPABILITY_LEDGER_REVIEW_ARTIFACT_SCHEMA: &str =
     "agent_bridge.biocortex_capability_ledger.review_artifact.v0";
+pub const BIOCORTEX_CAPABILITY_LEDGER_REPORT_PACKET_SCHEMA: &str =
+    "agent_bridge.biocortex_capability_ledger.report_packet.v0";
+pub const BIOCORTEX_CAPABILITY_LEDGER_DISPLAY_MODEL_SCHEMA: &str =
+    "agent_bridge.biocortex_capability_ledger.display_model.v0";
 
 const PASSED: &str = "passed";
 const FAILED: &str = "failed";
@@ -140,6 +144,89 @@ pub struct BioCortexCapabilityLedgerConsumerCheck {
     pub verdict: String,
     pub required: bool,
     pub evidence: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BioCortexCapabilityLedgerReportPacket {
+    pub schema: String,
+    pub summary_schema: String,
+    pub report_schema: String,
+    pub input_schema: String,
+    pub input_schema_version: Option<String>,
+    pub input_mode: Option<String>,
+    pub input_generated_by: Option<String>,
+    pub verdict: String,
+    pub read_only_confirmed: bool,
+    pub downstream_action: String,
+    pub integration_decision: String,
+    pub safety: BioCortexCapabilityLedgerConsumerSafety,
+    pub summary: BioCortexCapabilityLedgerConsumerSummary,
+    pub report_markdown: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BioCortexCapabilityLedgerDisplayModel {
+    pub schema: String,
+    pub packet_schema: String,
+    pub summary_schema: String,
+    pub report_schema: String,
+    pub title: String,
+    pub status: BioCortexCapabilityLedgerDisplayStatus,
+    pub safety: BioCortexCapabilityLedgerDisplaySafety,
+    pub badges: Vec<BioCortexCapabilityLedgerDisplayBadge>,
+    pub metrics: Vec<BioCortexCapabilityLedgerDisplayMetric>,
+    pub failed_checks: Vec<BioCortexCapabilityLedgerDisplayFailedCheck>,
+    pub guidance: Vec<String>,
+    pub report_markdown: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BioCortexCapabilityLedgerDisplayStatus {
+    pub label: String,
+    pub tone: String,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BioCortexCapabilityLedgerDisplaySafety {
+    pub display_ready: bool,
+    pub read_only_confirmed: bool,
+    pub static_artifact_only: bool,
+    pub mutation_surface: String,
+    pub memory_write_attempted: bool,
+    pub retrieval_order_change_attempted: bool,
+    pub runtime_authority_observed: bool,
+    pub executor_enablement_observed: bool,
+    pub mcp_tool_registration: bool,
+    pub nexus_world_tick_touched: bool,
+    pub aiot_runtime_called: bool,
+    pub language_generation_observed: bool,
+    pub cognition_claim_observed: bool,
+    pub allowed_surfaces: Vec<String>,
+    pub forbidden_surfaces: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BioCortexCapabilityLedgerDisplayBadge {
+    pub label: String,
+    pub value: String,
+    pub tone: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BioCortexCapabilityLedgerDisplayMetric {
+    pub label: String,
+    pub value: String,
+    pub detail: String,
+    pub tone: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BioCortexCapabilityLedgerDisplayFailedCheck {
+    pub label: String,
+    pub required: bool,
+    pub evidence: String,
+    pub tone: String,
 }
 
 pub fn consume_biocortex_capability_ledger(
@@ -453,6 +540,236 @@ pub fn render_biocortex_capability_ledger_review_artifact(
     );
 
     format!("{}\n", lines.join("\n"))
+}
+
+pub fn build_biocortex_capability_ledger_report_packet(
+    summary: &BioCortexCapabilityLedgerConsumerSummary,
+) -> BioCortexCapabilityLedgerReportPacket {
+    BioCortexCapabilityLedgerReportPacket {
+        schema: BIOCORTEX_CAPABILITY_LEDGER_REPORT_PACKET_SCHEMA.to_string(),
+        summary_schema: summary.schema.clone(),
+        report_schema: BIOCORTEX_CAPABILITY_LEDGER_REVIEW_ARTIFACT_SCHEMA.to_string(),
+        input_schema: summary.input_schema.clone(),
+        input_schema_version: summary.input_schema_version.clone(),
+        input_mode: summary.input_mode.clone(),
+        input_generated_by: summary.input_generated_by.clone(),
+        verdict: summary.verdict.clone(),
+        read_only_confirmed: summary.read_only_confirmed,
+        downstream_action: summary.downstream_action.clone(),
+        integration_decision: summary.integration_decision.clone(),
+        safety: summary.safety.clone(),
+        summary: summary.clone(),
+        report_markdown: render_biocortex_capability_ledger_review_artifact(summary),
+    }
+}
+
+pub fn build_biocortex_capability_ledger_display_model_from_packet(
+    packet: &BioCortexCapabilityLedgerReportPacket,
+) -> BioCortexCapabilityLedgerDisplayModel {
+    let passed = check_count(packet, PASSED);
+    let failed = check_count(packet, FAILED);
+    let required_failed = required_failed_count(packet);
+    let unsafe_surface = unsafe_display_surface_observed(&packet.safety);
+    let read_only_display =
+        packet.read_only_confirmed && packet.safety.static_artifact_only && !unsafe_surface;
+    let display_ready = packet.verdict == "accepted" && read_only_display && required_failed == 0;
+
+    BioCortexCapabilityLedgerDisplayModel {
+        schema: BIOCORTEX_CAPABILITY_LEDGER_DISPLAY_MODEL_SCHEMA.to_string(),
+        packet_schema: packet.schema.clone(),
+        summary_schema: packet.summary_schema.clone(),
+        report_schema: packet.report_schema.clone(),
+        title: "BioCortex Capability Ledger".to_string(),
+        status: display_status(display_ready),
+        safety: display_safety(packet, display_ready, read_only_display),
+        badges: vec![
+            display_badge(
+                "verdict",
+                &packet.verdict,
+                if display_ready { "success" } else { "danger" },
+            ),
+            display_badge(
+                "read_only",
+                bool_text(read_only_display),
+                if read_only_display {
+                    "success"
+                } else {
+                    "danger"
+                },
+            ),
+            display_badge(
+                "downstream_action",
+                &packet.downstream_action,
+                if display_ready { "success" } else { "danger" },
+            ),
+            display_badge(
+                "integration_decision",
+                &packet.integration_decision,
+                if display_ready { "success" } else { "danger" },
+            ),
+        ],
+        metrics: vec![
+            display_metric(
+                "checks_passed",
+                passed,
+                "Consumer checks with passed verdict.",
+                if failed == 0 { "success" } else { "warning" },
+            ),
+            display_metric(
+                "checks_failed",
+                failed,
+                "Consumer checks with failed verdict.",
+                if failed == 0 { "success" } else { "danger" },
+            ),
+            display_metric(
+                "required_failed",
+                required_failed,
+                "Required consumer checks with failed verdict.",
+                if required_failed == 0 {
+                    "success"
+                } else {
+                    "danger"
+                },
+            ),
+        ],
+        failed_checks: packet
+            .summary
+            .checks
+            .iter()
+            .filter(|check| check.verdict == FAILED)
+            .map(|check| BioCortexCapabilityLedgerDisplayFailedCheck {
+                label: one_line(&check.check),
+                required: check.required,
+                evidence: one_line(&check.evidence),
+                tone: if check.required { "danger" } else { "warning" }.to_string(),
+            })
+            .collect(),
+        guidance: packet.summary.guidance.clone(),
+        report_markdown: packet.report_markdown.clone(),
+    }
+}
+
+fn display_status(display_ready: bool) -> BioCortexCapabilityLedgerDisplayStatus {
+    if display_ready {
+        BioCortexCapabilityLedgerDisplayStatus {
+            label: "Ready for read-only display".to_string(),
+            tone: "success".to_string(),
+            detail:
+                "Static ledger summary may be shown in reports, dashboards, forum posts, or handoff packets."
+                    .to_string(),
+        }
+    } else {
+        BioCortexCapabilityLedgerDisplayStatus {
+            label: "Rejected".to_string(),
+            tone: "danger".to_string(),
+            detail:
+                "Static ledger validation failed or unsafe affordances were observed; do not surface as a valid BioCortex capability summary."
+                    .to_string(),
+        }
+    }
+}
+
+fn display_safety(
+    packet: &BioCortexCapabilityLedgerReportPacket,
+    display_ready: bool,
+    read_only_display: bool,
+) -> BioCortexCapabilityLedgerDisplaySafety {
+    let safety = &packet.safety;
+    BioCortexCapabilityLedgerDisplaySafety {
+        display_ready,
+        read_only_confirmed: read_only_display,
+        static_artifact_only: safety.static_artifact_only,
+        mutation_surface: if unsafe_display_surface_observed(safety) {
+            "unsafe_affordance_observed"
+        } else {
+            "none"
+        }
+        .to_string(),
+        memory_write_attempted: safety.memory_write_attempted,
+        retrieval_order_change_attempted: safety.retrieval_order_change_attempted,
+        runtime_authority_observed: safety.runtime_authority_observed,
+        executor_enablement_observed: safety.executor_enablement_observed,
+        mcp_tool_registration: safety.mcp_tool_registration,
+        nexus_world_tick_touched: safety.nexus_world_tick_touched,
+        aiot_runtime_called: safety.aiot_runtime_called,
+        language_generation_observed: safety.language_generation_observed,
+        cognition_claim_observed: safety.cognition_claim_observed,
+        allowed_surfaces: vec![
+            "forum_post_body".to_string(),
+            "report_markdown".to_string(),
+            "dashboard_card".to_string(),
+            "handoff_packet".to_string(),
+        ],
+        forbidden_surfaces: vec![
+            "memory_write".to_string(),
+            "graph_edge_mutation".to_string(),
+            "retrieval_order_change".to_string(),
+            "mcp_tool_registration".to_string(),
+            "runtime_admission".to_string(),
+            "executor_enablement".to_string(),
+            "nexus_world_tick".to_string(),
+            "aiot_runtime_call".to_string(),
+            "language_generation".to_string(),
+            "cognition_claim".to_string(),
+        ],
+    }
+}
+
+fn check_count(packet: &BioCortexCapabilityLedgerReportPacket, verdict: &str) -> usize {
+    packet
+        .summary
+        .checks
+        .iter()
+        .filter(|check| check.verdict == verdict)
+        .count()
+}
+
+fn required_failed_count(packet: &BioCortexCapabilityLedgerReportPacket) -> usize {
+    packet
+        .summary
+        .checks
+        .iter()
+        .filter(|check| check.required && check.verdict == FAILED)
+        .count()
+}
+
+fn unsafe_display_surface_observed(safety: &BioCortexCapabilityLedgerConsumerSafety) -> bool {
+    safety.memory_write_attempted
+        || safety.retrieval_order_change_attempted
+        || safety.runtime_authority_observed
+        || safety.executor_enablement_observed
+        || safety.mcp_tool_registration
+        || safety.nexus_world_tick_touched
+        || safety.aiot_runtime_called
+        || safety.language_generation_observed
+        || safety.cognition_claim_observed
+        || !safety.static_artifact_only
+}
+
+fn display_badge(
+    label: impl Into<String>,
+    value: impl Into<String>,
+    tone: impl Into<String>,
+) -> BioCortexCapabilityLedgerDisplayBadge {
+    BioCortexCapabilityLedgerDisplayBadge {
+        label: label.into(),
+        value: value.into(),
+        tone: tone.into(),
+    }
+}
+
+fn display_metric(
+    label: impl Into<String>,
+    value: usize,
+    detail: impl Into<String>,
+    tone: impl Into<String>,
+) -> BioCortexCapabilityLedgerDisplayMetric {
+    BioCortexCapabilityLedgerDisplayMetric {
+        label: label.into(),
+        value: value.to_string(),
+        detail: detail.into(),
+        tone: tone.into(),
+    }
 }
 
 fn push_kv(lines: &mut Vec<String>, key: &str, value: impl AsRef<str>) {
