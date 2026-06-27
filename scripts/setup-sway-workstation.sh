@@ -55,6 +55,13 @@ cat > "$target_home/.config/sway/config" <<'SWAY_CONFIG'
 # Keep distro defaults, then add local session startup glue.
 include /etc/sway/config
 
+# Run X11 apps (e.g. WeChat) under Sway via XWayland.
+xwayland enable
+
+# Borderless windows: remove the title bar and the blue focus border.
+default_border none
+default_floating_border none
+
 # Touchpad: one-finger tap is left click, two-finger tap is right click.
 input type:touchpad {
     tap enabled
@@ -124,14 +131,28 @@ cat > "$target_home/.local/bin/sway-status" <<'SWAY_STATUS'
 #!/usr/bin/env bash
 set -u
 
+# Status-bar glyphs. U+FE0E (text variation selector) forces a monochrome,
+# text-presentation glyph so the per-block color attribute still applies
+# (otherwise pango may fall back to a colored emoji glyph and ignore color).
+ic_agent=$'⬢'            # ⬢ agent-bridge node
+ic_warp=$'☁︎'       # ☁ WARP (cloud tunnel)
+ic_wifi=')'                  # ) Wi-Fi radio wave; repeated for signal strength
+ic_ime_py=$'中'          # 中 pinyin / Chinese input
+ic_ime_en='A'                # A latin/ascii input
+ic_ime_im=$'文'          # 文 other input method
+ic_bat=$'\U0001f50b︎'   # 🔋 battery (on battery)
+ic_chg=$'⚡︎'       # ⚡ charging
+ic_cpu=$'⚙︎'       # ⚙ CPU
+ic_ram=$'▦'             # ▦ RAM
+
 prev_total=0
 prev_idle=0
 cpu_percent=0
-warp_text="WARP ..."
-wifi_text="WiFi ..."
-ime_text="IME ..."
-battery_text="BAT ..."
-agent_text="AB"
+warp_text="$ic_warp"
+wifi_text="$ic_wifi"
+ime_text="$ic_ime_en"
+battery_text="$ic_bat"
+agent_text="$ic_agent"
 warp_tick=99
 wifi_tick=99
 ime_tick=99
@@ -152,19 +173,23 @@ block() {
         "$(json_string "$color")"
 }
 
-bars_for_percent() {
-    local pct="$1"
-    if [ "$pct" -ge 88 ]; then
-        printf "████"
-    elif [ "$pct" -ge 63 ]; then
-        printf "███░"
-    elif [ "$pct" -ge 38 ]; then
-        printf "██░░"
-    elif [ "$pct" -ge 13 ]; then
-        printf "█░░░"
-    else
-        printf "░░░░"
+# Map a 0-100 value to a 1..4 magnitude (rough "at a glance" level). Level is
+# shown by how many times the block's icon is repeated; severity is shown by
+# color. Always >=1 so the icon never disappears.
+level_of() {
+    local p="$1"
+    if   [ "$p" -le 25 ]; then printf 1
+    elif [ "$p" -le 50 ]; then printf 2
+    elif [ "$p" -le 75 ]; then printf 3
+    else printf 4
     fi
+}
+
+# Repeat a (possibly multibyte) glyph N times.
+repeat_glyph() {
+    local g="$1" n="$2" out="" i
+    for (( i = 0; i < n; i++ )); do out+="$g"; done
+    printf '%s' "$out"
 }
 
 log_event() {
@@ -260,13 +285,11 @@ read_cpu() {
 }
 
 read_ram() {
-    local total available used pct bars color
+    local total available used pct color
     total=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
     available=$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)
     used=$((total - available))
     pct=$((100 * used / total))
-
-    bars=$(bars_for_percent "$pct")
 
     if [ "$pct" -ge 90 ]; then
         color="#f38ba8ff"
@@ -276,49 +299,49 @@ read_ram() {
         color="#cba6f7ff"
     fi
 
-    printf "RAM %s %d%%|%s" "$bars" "$pct" "$color"
+    printf '%s|%s' "$(repeat_glyph "$ic_ram" "$(level_of "$pct")")" "$color"
 }
 
 read_warp() {
     local status
     if ! command -v warp-cli >/dev/null 2>&1; then
-        printf "WARP|#6c7086ff"
+        printf '%s|#6c7086ff' "$ic_warp"
         return
     fi
 
     status=$(warp-cli status 2>/dev/null || true)
     case "$status" in
         *"Status update: Connected"*)
-            printf "WARP|#a6e3a1ff"
+            printf '%s|#a6e3a1ff' "$ic_warp"
             ;;
         *"Status update: Disconnected"*)
-            printf "WARP|#6c7086ff"
+            printf '%s|#f38ba8ff' "$ic_warp"
             ;;
         *"Unable to connect"*|*"Error"*|*"failed"*)
-            printf "WARP|#f38ba8ff"
+            printf '%s|#f38ba8ff' "$ic_warp"
             ;;
         *)
-            printf "WARP|#f9e2afff"
+            printf '%s|#f9e2afff' "$ic_warp"
             ;;
     esac
 }
 
 read_wifi() {
-    local radio active_line device type state ssid signal bars
+    local radio active_line device type state ssid signal
     if ! command -v nmcli >/dev/null 2>&1; then
-        printf "WIFI|#6c7086ff"
+        printf '%s|#6c7086ff' "$ic_wifi"
         return
     fi
 
     radio=$(nmcli -t -f WIFI general 2>/dev/null || true)
     if [ "$radio" != "enabled" ]; then
-        printf "WIFI|#6c7086ff"
+        printf '%s|#6c7086ff' "$ic_wifi"
         return
     fi
 
     active_line=$(nmcli -t -f DEVICE,TYPE,STATE,CONNECTION dev status 2>/dev/null | awk -F: '$2 == "wifi" && $3 == "connected" {print; exit}')
     if [ -z "$active_line" ]; then
-        printf "WIFI|#f38ba8ff"
+        printf '%s|#f38ba8ff' "$ic_wifi"
         return
     fi
 
@@ -327,17 +350,16 @@ $active_line
 EOF
     signal=$(nmcli -t -f ACTIVE,SSID,SIGNAL dev wifi 2>/dev/null | awk -F: -v ssid="$ssid" '$1 == "yes" || $2 == ssid {print $3; exit}')
     if [ -n "$signal" ]; then
-        bars=$(bars_for_percent "$signal")
-        printf "WIFI %s %s|#89b4faff" "$bars" "$signal"
+        printf '%s|#89b4faff' "$(repeat_glyph "$ic_wifi" "$(level_of "$signal")")"
     else
-        printf "WIFI|#89b4faff"
+        printf '%s|#89b4faff' "$ic_wifi"
     fi
 }
 
 read_ime() {
     local name state
     if ! command -v fcitx5-remote >/dev/null 2>&1; then
-        printf "A|#6c7086ff"
+        printf '%s|#6c7086ff' "$ic_ime_en"
         return
     fi
 
@@ -350,28 +372,28 @@ read_ime() {
     fi
 
     case "$state" in
-        1) printf "A|#6c7086ff" ;;
+        1) printf '%s|#6c7086ff' "$ic_ime_en" ;;
         2)
             case "$name" in
-                *pinyin*|*Pinyin*) printf "PY|#fab387ff" ;;
-                *keyboard*|*Keyboard*) printf "A|#6c7086ff" ;;
-                *) printf "IM|#fab387ff" ;;
+                *pinyin*|*Pinyin*) printf '%s|#fab387ff' "$ic_ime_py" ;;
+                *keyboard*|*Keyboard*) printf '%s|#6c7086ff' "$ic_ime_en" ;;
+                *) printf '%s|#fab387ff' "$ic_ime_im" ;;
             esac
             ;;
-        *) printf "IM|#f9e2afff" ;;
+        *) printf '%s|#f9e2afff' "$ic_ime_im" ;;
     esac
 }
 
 read_battery() {
-    local battery info state percent pct bars color label
+    local battery info state percent pct color label
     if ! command -v upower >/dev/null 2>&1; then
-        printf "BAT ░░░░|#6c7086ff"
+        printf '%s|#6c7086ff' "$ic_bat"
         return
     fi
 
     battery=$(upower -e 2>/dev/null | awk '/battery/ {print; exit}')
     if [ -z "$battery" ]; then
-        printf "BAT ░░░░|#6c7086ff"
+        printf '%s|#6c7086ff' "$ic_bat"
         return
     fi
 
@@ -380,22 +402,20 @@ read_battery() {
     percent=$(printf "%s\n" "$info" | awk -F': *' '/percentage:/ {print $2; exit}')
     pct=${percent%\%}
     if [ -z "$pct" ]; then
-        printf "BAT ░░░░|#6c7086ff"
+        printf '%s|#6c7086ff' "$ic_bat"
         return
     fi
 
-    bars=$(bars_for_percent "$pct")
-
     case "$state:$pct" in
         charging:*|fully-charged:*)
-            label="+BAT"
+            label="$ic_chg"
             color="#94e2d5ff"
             ;;
         *:[0-9]|*:1[0-5]) color="#f38ba8ff" ;;
         *:1[6-9]|*:2[0-9]|*:3[0-5]) color="#f9e2afff" ;;
         *) color="#a6e3a1ff" ;;
     esac
-    printf "%s %s %s|%s" "${label:-BAT}" "$bars" "$percent" "$color"
+    printf '%s|%s' "$(repeat_glyph "${label:-$ic_bat}" "$(level_of "$pct")")" "$color"
 }
 
 run_status_loop() {
@@ -405,6 +425,10 @@ run_status_loop() {
     first=1
     while true; do
         read_cpu
+        cpu_color="#a6e3a1ff"
+        [ "$cpu_percent" -ge 50 ] && cpu_color="#f9e2afff"
+        [ "$cpu_percent" -ge 80 ] && cpu_color="#f38ba8ff"
+        cpu_text=$(repeat_glyph "$ic_cpu" "$(level_of "$cpu_percent")")
         IFS='|' read -r ram_text ram_color <<<"$(read_ram)"
 
         if [ "$warp_tick" -ge 5 ]; then
@@ -447,7 +471,7 @@ run_status_loop() {
             "$(block wifi "$wifi_text" "${wifi_color:-#ffffffff}")" \
             "$(block ime "$ime_text" "${ime_color:-#ffffffff}")" \
             "$(block battery "$battery_text" "${battery_color:-#ffffffff}")" \
-            "$(block cpu "CPU ${cpu_percent}%" "#f9e2afff")" \
+            "$(block cpu "$cpu_text" "$cpu_color")" \
             "$(block ram "$ram_text" "${ram_color:-#cba6f7ff}")" \
             "$(block clock "$(date '+%Y-%m-%d %H:%M:%S')" "#ffffffff")"
         sleep 1
