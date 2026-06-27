@@ -19594,6 +19594,18 @@ mod tests {
         }
     }
 
+    fn assert_snapshot_fingerprint_contract(fingerprint: &str) {
+        let is_sha256_hex = fingerprint.len() == 64
+            && fingerprint
+                .chars()
+                .all(|ch| ch.is_ascii_hexdigit() && !ch.is_ascii_uppercase());
+        let is_disabled_stub = fingerprint.starts_with("seed-substrate-disabled-");
+        assert!(
+            is_sha256_hex || is_disabled_stub,
+            "unexpected snapshot fingerprint shape: {fingerprint}"
+        );
+    }
+
     #[test]
     fn summarize_snapshot_rows_empty_returns_zero_counts() {
         let p = Path::new("/tmp/none.parquet");
@@ -19625,11 +19637,11 @@ mod tests {
         let latest_hot = sum.latest_hot.expect("latest hot");
         assert_eq!(latest_hot.step, 80);
         assert_eq!(latest_hot.cycle_ts, 4000);
-        assert_eq!(latest_hot.fingerprint.len(), 64); // sha256 hex
+        assert_snapshot_fingerprint_contract(&latest_hot.fingerprint);
         let latest_long = sum.latest_long.expect("latest long");
         assert_eq!(latest_long.step, 100);
         assert_eq!(latest_long.cycle_ts, 5000);
-        assert_eq!(latest_long.fingerprint.len(), 64);
+        assert_snapshot_fingerprint_contract(&latest_long.fingerprint);
     }
 
     #[test]

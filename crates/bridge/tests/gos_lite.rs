@@ -43,7 +43,7 @@ fn atlas_with_failure_and_latency() -> ToolAtlasSnapshot {
         current_tools: vec!["browser_click".to_string(), "memory_save".to_string()],
         stats: vec![
             stat("browser_click", 4, 3, 32, 191.0),
-            stat("memory_save", 4, 0, 2_586, 561.0),
+            stat("memory_save", 20, 0, 2_586, 561.0),
         ],
         recent_errors: vec![McpToolErrorRecord {
             ts: 1_781_448_517,

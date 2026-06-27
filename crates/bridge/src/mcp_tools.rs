@@ -44225,6 +44225,8 @@ const MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_IMPLEMENTATION_
 const MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_CODE_IMPLEMENTATION_GATE_SCHEMA:
     &str =
     "agent_bridge.memory_biocortex_t6_candidate_expansion.runtime_enablement_code_implementation_gate.v0";
+const MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_SHADOW_CODE_GATE_SCHEMA: &str =
+    "agent_bridge.memory_biocortex_t6_candidate_expansion.runtime_enablement_shadow_code_gate.v0";
 
 fn memory_biocortex_t6_candidate_expansion_shadow_telemetry_review_source_claims_runtime_authority(
     report: &Value,
@@ -46334,6 +46336,570 @@ impl McpTool for MemoryBioCortexT6CandidateExpansionRuntimeEnablementCodeImpleme
             &memory_biocortex_t6_candidate_expansion_runtime_enablement_code_implementation_gate_payload(
                 args,
             ),
+        ))
+    }
+}
+
+fn memory_biocortex_t6_candidate_expansion_runtime_enablement_shadow_code_source_claims_runtime_authority(
+    code_gate: &Value,
+) -> bool {
+    memory_biocortex_t6_any_true(
+        code_gate,
+        &[
+            "/code_implementation_contract/may_enable_runtime_gate_now",
+            "/code_implementation_contract/may_run_shadow_mode_now",
+            "/code_implementation_contract/candidate_expansion_experiment_approved",
+            "/code_implementation_contract/may_run_candidate_expansion_dry_run_now",
+            "/code_implementation_contract/may_expand_candidate_set_now",
+            "/code_implementation_contract/changes_candidate_set_now",
+            "/code_implementation_contract/runtime_influence_approved",
+            "/code_implementation_contract/may_change_search_order_now",
+            "/code_implementation_contract/may_write_memory_or_graph_edges",
+            "/code_implementation_contract/this_gate_approves_runtime_candidate_expansion",
+            "/implementation_boundaries/default_runtime_enabled",
+            "/implementation_boundaries/default_shadow_enabled",
+            "/input_contract/runtime_enablement_implementation_plan_artifact_included",
+            "/input_contract/runtime_enablement_owner_decision_record_included",
+            "/input_contract/runtime_enablement_review_included",
+            "/input_contract/shadow_telemetry_review_included",
+            "/input_contract/shadow_executor_invocation_report_included",
+            "/input_contract/runtime_gate_owner_review_record_included",
+            "/input_contract/owner_decision_record_included",
+            "/input_contract/human_review_packet_included",
+            "/input_contract/dry_run_report_included",
+            "/input_contract/dry_run_plan_included",
+            "/input_contract/recall_expansion_summary_included",
+            "/input_contract/case_rows_included",
+            "/input_contract/raw_query_included",
+            "/input_contract/raw_queries_included",
+            "/input_contract/raw_keys_included",
+            "/input_contract/content_included",
+            "/input_contract/raw_error_included",
+        ],
+    )
+}
+
+fn memory_biocortex_t6_candidate_expansion_runtime_enablement_shadow_code_payload(
+    args: Value,
+) -> Value {
+    let code_gate = args
+        .get("runtime_enablement_code_implementation_gate")
+        .unwrap_or(&Value::Null);
+    let reviewer =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(&args, "reviewer");
+    let decision_source = memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(
+        &args,
+        "decision_source",
+    );
+    let implementation_decision = args
+        .get("implementation_decision")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("missing_implementation_decision");
+    let implementation_commit =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(
+            &args,
+            "implementation_commit",
+        );
+    let forum_post_id = memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(
+        &args,
+        "forum_post_id",
+    );
+    let memory_key =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_string(&args, "memory_key");
+    let feature_flag_default_off_confirmed =
+        memory_biocortex_t6_candidate_expansion_shadow_executor_invocation_report_bool(
+            &args,
+            "feature_flag_default_off_confirmed",
+            false,
+        );
+    let runtime_entrypoint_default_off_confirmed =
+        memory_biocortex_t6_candidate_expansion_shadow_executor_invocation_report_bool(
+            &args,
+            "runtime_entrypoint_default_off_confirmed",
+            false,
+        );
+    let shadow_mode_default_off_confirmed =
+        memory_biocortex_t6_candidate_expansion_shadow_executor_invocation_report_bool(
+            &args,
+            "shadow_mode_default_off_confirmed",
+            false,
+        );
+    let deterministic_replay_fixture_present =
+        memory_biocortex_t6_candidate_expansion_shadow_executor_invocation_report_bool(
+            &args,
+            "deterministic_replay_fixture_present",
+            false,
+        );
+    let bounded_candidate_delta_guard_present =
+        memory_biocortex_t6_candidate_expansion_shadow_executor_invocation_report_bool(
+            &args,
+            "bounded_candidate_delta_guard_present",
+            false,
+        );
+    let negative_controls_present =
+        memory_biocortex_t6_candidate_expansion_shadow_executor_invocation_report_bool(
+            &args,
+            "negative_controls_present",
+            false,
+        );
+    let aggregate_telemetry_only_confirmed =
+        memory_biocortex_t6_candidate_expansion_shadow_executor_invocation_report_bool(
+            &args,
+            "aggregate_telemetry_only_confirmed",
+            false,
+        );
+    let rollback_path_confirmed =
+        memory_biocortex_t6_candidate_expansion_shadow_executor_invocation_report_bool(
+            &args,
+            "rollback_path_confirmed",
+            false,
+        );
+
+    let source_schema_valid = memory_biocortex_t6_string_at(code_gate, "/schema")
+        == Some(
+            MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_CODE_IMPLEMENTATION_GATE_SCHEMA,
+        );
+    let source_ready = memory_biocortex_t6_bool_at(
+        code_gate,
+        "/runtime_enablement_code_implementation_gate/ready",
+    ) == Some(true);
+    let source_status = memory_biocortex_t6_string_at(
+        code_gate,
+        "/runtime_enablement_code_implementation_gate/status",
+    ) == Some("shadow_runtime_enablement_code_implementation_authorized");
+    let source_next_gate = memory_biocortex_t6_string_at(
+        code_gate,
+        "/runtime_enablement_code_implementation_gate/decision/next_gate",
+    ) == Some("implement_default_off_shadow_runtime_enablement_code");
+    let source_contract_ok = memory_biocortex_t6_bool_at(code_gate, "/read_only") == Some(true)
+        && memory_biocortex_t6_bool_at(
+            code_gate,
+            "/code_implementation_contract/may_implement_shadow_runtime_enablement_code",
+        ) == Some(true)
+        && memory_biocortex_t6_bool_at(
+            code_gate,
+            "/code_implementation_contract/may_enable_runtime_gate_now",
+        ) == Some(false)
+        && memory_biocortex_t6_bool_at(
+            code_gate,
+            "/code_implementation_contract/may_run_shadow_mode_now",
+        ) == Some(false)
+        && memory_biocortex_t6_bool_at(
+            code_gate,
+            "/code_implementation_contract/candidate_expansion_experiment_approved",
+        ) == Some(false)
+        && memory_biocortex_t6_bool_at(
+            code_gate,
+            "/code_implementation_contract/may_run_candidate_expansion_dry_run_now",
+        ) == Some(false)
+        && memory_biocortex_t6_bool_at(
+            code_gate,
+            "/code_implementation_contract/may_expand_candidate_set_now",
+        ) == Some(false)
+        && memory_biocortex_t6_bool_at(
+            code_gate,
+            "/code_implementation_contract/changes_candidate_set_now",
+        ) == Some(false)
+        && memory_biocortex_t6_bool_at(
+            code_gate,
+            "/code_implementation_contract/runtime_influence_approved",
+        ) == Some(false)
+        && memory_biocortex_t6_bool_at(
+            code_gate,
+            "/code_implementation_contract/may_change_search_order_now",
+        ) == Some(false)
+        && memory_biocortex_t6_bool_at(
+            code_gate,
+            "/code_implementation_contract/may_write_memory_or_graph_edges",
+        ) == Some(false)
+        && memory_biocortex_t6_bool_at(
+            code_gate,
+            "/code_implementation_contract/this_gate_approves_runtime_candidate_expansion",
+        ) == Some(false)
+        && memory_biocortex_t6_bool_at(
+            code_gate,
+            "/code_implementation_contract/requires_separate_shadow_execution_gate",
+        ) == Some(true)
+        && memory_biocortex_t6_bool_at(
+            code_gate,
+            "/code_implementation_contract/requires_separate_runtime_enablement_gate",
+        ) == Some(true);
+    let source_boundaries_ok = memory_biocortex_t6_bool_at(
+        code_gate,
+        "/implementation_boundaries/feature_flag_default_off",
+    ) == Some(true)
+        && memory_biocortex_t6_bool_at(code_gate, "/implementation_boundaries/shadow_mode_first")
+            == Some(true)
+        && memory_biocortex_t6_bool_at(
+            code_gate,
+            "/implementation_boundaries/default_runtime_enabled",
+        ) == Some(false)
+        && memory_biocortex_t6_bool_at(
+            code_gate,
+            "/implementation_boundaries/default_shadow_enabled",
+        ) == Some(false)
+        && memory_biocortex_t6_bool_at(
+            code_gate,
+            "/implementation_boundaries/deterministic_replay_fixture_required",
+        ) == Some(true)
+        && memory_biocortex_t6_bool_at(
+            code_gate,
+            "/implementation_boundaries/negative_controls_required",
+        ) == Some(true)
+        && memory_biocortex_t6_bool_at(
+            code_gate,
+            "/implementation_boundaries/bounded_candidate_delta_required",
+        ) == Some(true)
+        && memory_biocortex_t6_bool_at(code_gate, "/implementation_boundaries/rollback_required")
+            == Some(true)
+        && !memory_biocortex_t6_string_array_at(
+            code_gate,
+            "/implementation_boundaries/telemetry_fields",
+        )
+        .is_empty();
+    let source_claims_runtime_authority =
+        memory_biocortex_t6_candidate_expansion_runtime_enablement_shadow_code_source_claims_runtime_authority(code_gate);
+    let source_contains_raw =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_contains_raw(code_gate)
+            || code_gate
+                .get("runtime_enablement_implementation_plan_artifact")
+                .is_some()
+            || code_gate
+                .get("runtime_enablement_owner_decision_record")
+                .is_some()
+            || code_gate.get("runtime_enablement_review").is_some()
+            || code_gate.get("shadow_telemetry_review").is_some()
+            || code_gate.get("shadow_executor_invocation_report").is_some()
+            || code_gate.get("case_rows").is_some();
+    let input_contains_raw =
+        memory_biocortex_t6_candidate_expansion_shadow_execution_gate_contains_raw(&args);
+    let implementation_decision_valid = matches!(
+        implementation_decision,
+        "accept_default_off_shadow_runtime_enablement_code"
+            | "request_shadow_runtime_enablement_code_changes"
+            | "reject_shadow_runtime_enablement_code"
+    );
+    let implementation_decision_accepts =
+        implementation_decision == "accept_default_off_shadow_runtime_enablement_code";
+
+    let mut block_reasons = BTreeSet::<String>::new();
+    if !source_schema_valid {
+        block_reasons.insert(
+            "source_runtime_enablement_code_implementation_gate_schema_invalid".to_string(),
+        );
+    }
+    if !source_ready || !source_status || !source_next_gate {
+        block_reasons
+            .insert("source_runtime_enablement_code_implementation_gate_not_ready".to_string());
+    }
+    if !source_contract_ok || source_claims_runtime_authority {
+        block_reasons.insert(
+            "source_runtime_enablement_code_implementation_gate_claims_runtime_authority"
+                .to_string(),
+        );
+    }
+    if !source_boundaries_ok {
+        block_reasons.insert(
+            "source_runtime_enablement_code_implementation_gate_requirements_incomplete"
+                .to_string(),
+        );
+    }
+    if source_contains_raw {
+        block_reasons
+            .insert("source_runtime_enablement_code_implementation_gate_contains_raw".to_string());
+    }
+    if input_contains_raw {
+        block_reasons.insert("input_contains_raw_or_source_fields".to_string());
+    }
+    if reviewer.is_empty() {
+        block_reasons.insert("missing_reviewer".to_string());
+    }
+    if decision_source.is_empty() {
+        block_reasons.insert("missing_decision_source".to_string());
+    }
+    if implementation_commit.is_empty() {
+        block_reasons.insert("missing_implementation_commit".to_string());
+    }
+    if !implementation_decision_valid || !implementation_decision_accepts {
+        block_reasons.insert(
+            "implementation_decision_not_accept_default_off_shadow_runtime_enablement_code"
+                .to_string(),
+        );
+    }
+    if !feature_flag_default_off_confirmed {
+        block_reasons.insert("feature_flag_default_off_not_confirmed".to_string());
+    }
+    if !runtime_entrypoint_default_off_confirmed {
+        block_reasons.insert("runtime_entrypoint_default_off_not_confirmed".to_string());
+    }
+    if !shadow_mode_default_off_confirmed {
+        block_reasons.insert("shadow_mode_default_off_not_confirmed".to_string());
+    }
+    if !deterministic_replay_fixture_present {
+        block_reasons.insert("deterministic_replay_fixture_missing".to_string());
+    }
+    if !bounded_candidate_delta_guard_present {
+        block_reasons.insert("bounded_candidate_delta_guard_missing".to_string());
+    }
+    if !negative_controls_present {
+        block_reasons.insert("negative_controls_missing".to_string());
+    }
+    if !aggregate_telemetry_only_confirmed {
+        block_reasons.insert("aggregate_telemetry_only_not_confirmed".to_string());
+    }
+    if !rollback_path_confirmed {
+        block_reasons.insert("rollback_path_not_confirmed".to_string());
+    }
+    for reason in memory_biocortex_t6_string_array_at(
+        code_gate,
+        "/runtime_enablement_code_implementation_gate/block_reasons",
+    ) {
+        memory_biocortex_t6_push_reason(&mut block_reasons, &reason);
+    }
+
+    let block_reasons: Vec<String> = block_reasons.into_iter().collect();
+    let ready = block_reasons.is_empty();
+    let status = if ready {
+        "default_off_shadow_runtime_enablement_code_recorded"
+    } else {
+        "blocked_before_runtime_enablement_shadow_code_gate"
+    };
+    let next_gate = if ready {
+        "author_review_shadow_execution_gate_before_any_shadow_run"
+    } else {
+        "repair_default_off_shadow_runtime_enablement_code"
+    };
+    let telemetry_fields = memory_biocortex_t6_string_array_at(
+        code_gate,
+        "/implementation_boundaries/telemetry_fields",
+    );
+    let feature_flag_name =
+        memory_biocortex_t6_string_at(code_gate, "/implementation_boundaries/feature_flag_name")
+            .unwrap_or("");
+
+    json!({
+        "schema": MEMORY_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_SHADOW_CODE_GATE_SCHEMA,
+        "generated_at": unix_now_secs(),
+        "read_only": true,
+        "purpose": "T6 runtime-enablement shadow-code gate: record whether the default-off shadow runtime-enablement code implementation satisfies the previous code-implementation gate without enabling runtime execution, shadow mode, BioCortex, memory tools, candidate expansion, search-order changes, memory writes, graph writes, or feature flags.",
+        "runtime_enablement_shadow_code_gate": {
+            "ready": ready,
+            "status": status,
+            "block_reasons": block_reasons,
+            "reviewer": reviewer,
+            "implementation_decision": implementation_decision,
+            "decision_source": decision_source,
+            "implementation_commit": implementation_commit,
+            "decision": {
+                "verdict": status,
+                "next_gate": next_gate,
+                "default_off_shadow_code_only": true,
+                "runtime_enablement_out_of_scope": true,
+                "shadow_execution_out_of_scope": true,
+                "runtime_authority_out_of_scope": true,
+                "candidate_expansion_authority_out_of_scope": true,
+            },
+            "source_decision": {
+                "code_gate_status": memory_biocortex_t6_string_at(code_gate, "/runtime_enablement_code_implementation_gate/status"),
+                "code_gate_next_gate": memory_biocortex_t6_string_at(code_gate, "/runtime_enablement_code_implementation_gate/decision/next_gate"),
+                "source_feature_flag_name": feature_flag_name,
+            },
+        },
+        "implementation_evidence": {
+            "feature_flag_name": feature_flag_name,
+            "feature_flag_default_off_confirmed": feature_flag_default_off_confirmed,
+            "runtime_entrypoint_default_off_confirmed": runtime_entrypoint_default_off_confirmed,
+            "shadow_mode_default_off_confirmed": shadow_mode_default_off_confirmed,
+            "deterministic_replay_fixture_present": deterministic_replay_fixture_present,
+            "bounded_candidate_delta_guard_present": bounded_candidate_delta_guard_present,
+            "negative_controls_present": negative_controls_present,
+            "aggregate_telemetry_only_confirmed": aggregate_telemetry_only_confirmed,
+            "rollback_path_confirmed": rollback_path_confirmed,
+            "source_telemetry_fields": telemetry_fields,
+        },
+        "runtime_enablement_shadow_code_contract": {
+            "default_off_shadow_code_recorded": ready,
+            "may_run_shadow_mode_now": false,
+            "may_enable_runtime_gate_now": false,
+            "candidate_expansion_experiment_approved": false,
+            "may_run_candidate_expansion_dry_run_now": false,
+            "may_expand_candidate_set_now": false,
+            "changes_candidate_set_now": false,
+            "runtime_influence_approved": false,
+            "may_change_search_order_now": false,
+            "may_write_memory_or_graph_edges": false,
+            "this_gate_approves_runtime_candidate_expansion": false,
+            "this_tool_calls_memory_search": false,
+            "this_tool_calls_memory_neighbors": false,
+            "this_tool_runs_biocortex": false,
+            "requires_separate_shadow_execution_gate": true,
+            "requires_separate_runtime_enablement_gate": true,
+        },
+        "bounded_runtime_enablement_shadow_code": {
+            "aggregate_telemetry_only_confirmed": aggregate_telemetry_only_confirmed,
+            "raw_queries_allowed": false,
+            "raw_keys_allowed": false,
+            "content_allowed": false,
+            "case_rows_allowed": false,
+            "raw_errors_allowed": false,
+            "production_traffic_allowed": false,
+        },
+        "links": {
+            "commit": implementation_commit,
+            "forum_post_id": forum_post_id,
+            "memory_key": memory_key,
+        },
+        "input_contract": {
+            "runtime_enablement_code_implementation_gate_included": false,
+            "runtime_enablement_implementation_plan_artifact_included": false,
+            "runtime_enablement_owner_decision_record_included": false,
+            "runtime_enablement_review_included": false,
+            "shadow_telemetry_review_included": false,
+            "shadow_executor_invocation_report_included": false,
+            "case_rows_included": false,
+            "raw_query_included": false,
+            "raw_queries_included": false,
+            "raw_keys_included": false,
+            "content_included": false,
+            "raw_error_included": false,
+        },
+        "non_goals": [
+            "This tool does not enable a runtime gate.",
+            "This tool does not run shadow mode or invoke executors.",
+            "This tool does not run BioCortex.",
+            "This tool does not call memory_search or memory_neighbors.",
+            "This tool does not sample production memories or graph rows.",
+            "This tool does not echo runtime-enablement code-implementation gate payloads, implementation-plan artifacts, owner-decision records, runtime-enablement reviews, shadow telemetry reviews, shadow executor invocation reports, case rows, queries, keys, content, or raw errors.",
+            "This tool does not write memory, graph edges, authorization records, approval packets, feature flags, runtime configuration, or telemetry.",
+            "This tool does not approve shadow execution, runtime influence, search-order changes, dry-run execution, candidate-set expansion, or production candidate expansion."
+        ],
+    })
+}
+
+pub struct MemoryBioCortexT6CandidateExpansionRuntimeEnablementShadowCodeGateTool;
+impl MemoryBioCortexT6CandidateExpansionRuntimeEnablementShadowCodeGateTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for MemoryBioCortexT6CandidateExpansionRuntimeEnablementShadowCodeGateTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl McpTool for MemoryBioCortexT6CandidateExpansionRuntimeEnablementShadowCodeGateTool {
+    fn name(&self) -> &'static str {
+        "memory_biocortex_t6_candidate_expansion_runtime_enablement_shadow_code_gate"
+    }
+
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only T6 runtime-enablement shadow-code gate. \
+                Consumes the prior runtime-enablement code-implementation gate \
+                plus explicit implementation evidence and can only record that \
+                default-off shadow runtime-enablement code is ready for a later \
+                shadow-execution gate; it never enables runtime execution, runs \
+                shadow mode, calls BioCortex or memory tools, changes candidate \
+                sets/search order, writes memory/graph edges, or approves \
+                production candidate expansion."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": [
+                    "runtime_enablement_code_implementation_gate",
+                    "reviewer",
+                    "implementation_decision",
+                    "decision_source",
+                    "implementation_commit",
+                    "feature_flag_default_off_confirmed",
+                    "runtime_entrypoint_default_off_confirmed",
+                    "shadow_mode_default_off_confirmed",
+                    "deterministic_replay_fixture_present",
+                    "bounded_candidate_delta_guard_present",
+                    "negative_controls_present",
+                    "aggregate_telemetry_only_confirmed",
+                    "rollback_path_confirmed"
+                ],
+                "properties": {
+                    "runtime_enablement_code_implementation_gate": {
+                        "type": "object",
+                        "description": "JSON object produced by memory_biocortex_t6_candidate_expansion_runtime_enablement_code_implementation_gate. It is inspected but never echoed."
+                    },
+                    "reviewer": {
+                        "type": "string",
+                        "description": "Reviewer identity or handle validating the default-off shadow runtime-enablement code."
+                    },
+                    "implementation_decision": {
+                        "type": "string",
+                        "enum": [
+                            "accept_default_off_shadow_runtime_enablement_code",
+                            "request_shadow_runtime_enablement_code_changes",
+                            "reject_shadow_runtime_enablement_code"
+                        ],
+                        "description": "Only accept_default_off_shadow_runtime_enablement_code can open the later shadow-execution gate."
+                    },
+                    "decision_source": {
+                        "type": "string",
+                        "description": "External source for the implementation review decision, such as a forum post id."
+                    },
+                    "implementation_commit": {
+                        "type": "string",
+                        "description": "Commit or build identifier for the default-off shadow runtime-enablement code under review."
+                    },
+                    "forum_post_id": {
+                        "type": "string",
+                        "description": "Optional forum post id linking this gate."
+                    },
+                    "memory_key": {
+                        "type": "string",
+                        "description": "Optional memory key linking this gate."
+                    },
+                    "feature_flag_default_off_confirmed": {
+                        "type": "boolean",
+                        "description": "Must be true: feature flag remains default-off."
+                    },
+                    "runtime_entrypoint_default_off_confirmed": {
+                        "type": "boolean",
+                        "description": "Must be true: runtime entrypoint remains disabled by default."
+                    },
+                    "shadow_mode_default_off_confirmed": {
+                        "type": "boolean",
+                        "description": "Must be true: shadow execution remains disabled by default."
+                    },
+                    "deterministic_replay_fixture_present": {
+                        "type": "boolean",
+                        "description": "Must be true before any later shadow-execution gate can be reviewed."
+                    },
+                    "bounded_candidate_delta_guard_present": {
+                        "type": "boolean",
+                        "description": "Must be true: candidate deltas remain bounded aggregate counts only."
+                    },
+                    "negative_controls_present": {
+                        "type": "boolean",
+                        "description": "Must be true: negative controls exist and block later shadow execution on regression."
+                    },
+                    "aggregate_telemetry_only_confirmed": {
+                        "type": "boolean",
+                        "description": "Must be true: telemetry remains aggregate-only and excludes raw queries, keys, content, rows, and raw errors."
+                    },
+                    "rollback_path_confirmed": {
+                        "type": "boolean",
+                        "description": "Must be true: rollback path exists before later gates."
+                    }
+                }
+            }),
+        }
+    }
+
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        Ok(ToolResult::json_text(
+            &memory_biocortex_t6_candidate_expansion_runtime_enablement_shadow_code_payload(args),
         ))
     }
 }
@@ -56421,6 +56987,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
+        Tier::Niche,
+        Arc::new(MemoryBioCortexT6CandidateExpansionRuntimeEnablementShadowCodeGateTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
         Tier::Standard,
         Arc::new(MemoryNeuralCriticShadowEvalTool::new()),
     );
@@ -58173,6 +58745,7 @@ mod tests {
         "memory_biocortex_t6_candidate_expansion_runtime_enablement_owner_decision_record",
         "memory_biocortex_t6_candidate_expansion_runtime_enablement_implementation_plan_artifact",
         "memory_biocortex_t6_candidate_expansion_runtime_enablement_code_implementation_gate",
+        "memory_biocortex_t6_candidate_expansion_runtime_enablement_shadow_code_gate",
     ];
 
     fn result_text(res: &ToolResult) -> String {
@@ -80387,6 +80960,266 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(!serialized.contains("secret runtime enablement code gate top-level query"));
         assert!(!serialized.contains("secret runtime enablement code gate case row"));
         assert!(!serialized.contains("\"runtime_enablement_owner_decision_record\""));
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_t6_candidate_expansion_runtime_enablement_shadow_code_gate_accepts_default_off_code_report(
+    ) {
+        let code_gate = json!({
+            "schema": "agent_bridge.memory_biocortex_t6_candidate_expansion.runtime_enablement_code_implementation_gate.v0",
+            "read_only": true,
+            "runtime_enablement_code_implementation_gate": {
+                "ready": true,
+                "status": "shadow_runtime_enablement_code_implementation_authorized",
+                "block_reasons": [],
+                "decision": {
+                    "verdict": "shadow_runtime_enablement_code_implementation_authorized",
+                    "next_gate": "implement_default_off_shadow_runtime_enablement_code",
+                    "shadow_code_only": true,
+                    "default_off_required": true,
+                    "runtime_enablement_out_of_scope": true,
+                    "runtime_authority_out_of_scope": true,
+                    "candidate_expansion_authority_out_of_scope": true
+                }
+            },
+            "implementation_boundaries": {
+                "feature_flag_name": "AB_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_SHADOW",
+                "feature_flag_default_off": true,
+                "shadow_mode_first": true,
+                "default_runtime_enabled": false,
+                "default_shadow_enabled": false,
+                "deterministic_replay_fixture_required": true,
+                "negative_controls_required": true,
+                "bounded_candidate_delta_required": true,
+                "rollback_required": true,
+                "telemetry_fields": [
+                    "runtime_gate_enabled",
+                    "shadow_mode_enabled",
+                    "candidate_delta_count"
+                ]
+            },
+            "code_implementation_contract": {
+                "may_implement_shadow_runtime_enablement_code": true,
+                "may_enable_runtime_gate_now": false,
+                "may_run_shadow_mode_now": false,
+                "candidate_expansion_experiment_approved": false,
+                "may_run_candidate_expansion_dry_run_now": false,
+                "may_expand_candidate_set_now": false,
+                "changes_candidate_set_now": false,
+                "runtime_influence_approved": false,
+                "may_change_search_order_now": false,
+                "may_write_memory_or_graph_edges": false,
+                "this_gate_approves_runtime_candidate_expansion": false,
+                "requires_separate_shadow_execution_gate": true,
+                "requires_separate_runtime_enablement_gate": true
+            },
+            "input_contract": {
+                "runtime_enablement_implementation_plan_artifact_included": false,
+                "runtime_enablement_owner_decision_record_included": false,
+                "runtime_enablement_review_included": false,
+                "shadow_telemetry_review_included": false,
+                "shadow_executor_invocation_report_included": false,
+                "raw_query_included": false,
+                "raw_queries_included": false,
+                "raw_keys_included": false,
+                "content_included": false,
+                "raw_error_included": false
+            },
+            "secret_source_record": "secret runtime enablement code gate source"
+        });
+
+        let tool = MemoryBioCortexT6CandidateExpansionRuntimeEnablementShadowCodeGateTool::new();
+        let out = tool
+            .execute(
+                json!({
+                    "runtime_enablement_code_implementation_gate": code_gate,
+                    "reviewer": "codex-runtime-enablement-shadow-code-gate",
+                    "implementation_decision": "accept_default_off_shadow_runtime_enablement_code",
+                    "decision_source": "forum:#115/post:4475",
+                    "implementation_commit": "abc1234",
+                    "forum_post_id": "forum:#115/post:4475",
+                    "memory_key": "ab_memory_continuity_t6_runtime_enablement_shadow_code_gate_20260627",
+                    "feature_flag_default_off_confirmed": true,
+                    "runtime_entrypoint_default_off_confirmed": true,
+                    "shadow_mode_default_off_confirmed": true,
+                    "deterministic_replay_fixture_present": true,
+                    "bounded_candidate_delta_guard_present": true,
+                    "negative_controls_present": true,
+                    "aggregate_telemetry_only_confirmed": true,
+                    "rollback_path_confirmed": true
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute shadow code gate");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(
+            payload["schema"],
+            json!(
+                "agent_bridge.memory_biocortex_t6_candidate_expansion.runtime_enablement_shadow_code_gate.v0"
+            )
+        );
+        assert_eq!(payload["read_only"], json!(true));
+        assert_eq!(
+            payload["runtime_enablement_shadow_code_gate"]["ready"],
+            json!(true)
+        );
+        assert_eq!(
+            payload["runtime_enablement_shadow_code_gate"]["decision"]["next_gate"],
+            json!("author_review_shadow_execution_gate_before_any_shadow_run")
+        );
+        assert_eq!(
+            payload["runtime_enablement_shadow_code_contract"]["default_off_shadow_code_recorded"],
+            json!(true)
+        );
+        assert_eq!(
+            payload["runtime_enablement_shadow_code_contract"]["may_run_shadow_mode_now"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["runtime_enablement_shadow_code_contract"]["may_enable_runtime_gate_now"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["runtime_enablement_shadow_code_contract"]["may_expand_candidate_set_now"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["runtime_enablement_shadow_code_contract"]["may_write_memory_or_graph_edges"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["input_contract"]["runtime_enablement_code_implementation_gate_included"],
+            json!(false)
+        );
+
+        let serialized = serde_json::to_string(&payload).expect("serialize");
+        assert!(!serialized.contains("secret runtime enablement code gate source"));
+        assert!(!serialized.contains("\"runtime_enablement_code_implementation_gate\":"));
+    }
+
+    #[tokio::test]
+    async fn memory_biocortex_t6_candidate_expansion_runtime_enablement_shadow_code_gate_blocks_raw_or_authoritative_code_gate(
+    ) {
+        let code_gate = json!({
+            "schema": "agent_bridge.memory_biocortex_t6_candidate_expansion.runtime_enablement_code_implementation_gate.v0",
+            "read_only": true,
+            "runtime_enablement_code_implementation_gate": {
+                "ready": false,
+                "status": "blocked_before_runtime_enablement_code_implementation",
+                "block_reasons": ["source_runtime_enablement_code_gate_block_reason"],
+                "decision": {
+                    "next_gate": "repair_or_reapprove_runtime_enablement_implementation_plan_artifact"
+                }
+            },
+            "implementation_boundaries": {
+                "feature_flag_name": "AB_BIOCORTEX_T6_CANDIDATE_EXPANSION_RUNTIME_ENABLEMENT_SHADOW",
+                "feature_flag_default_off": false,
+                "shadow_mode_first": true,
+                "default_runtime_enabled": true,
+                "default_shadow_enabled": true,
+                "deterministic_replay_fixture_required": true,
+                "negative_controls_required": true,
+                "bounded_candidate_delta_required": true,
+                "rollback_required": true,
+                "telemetry_fields": ["runtime_gate_enabled"]
+            },
+            "code_implementation_contract": {
+                "may_implement_shadow_runtime_enablement_code": true,
+                "may_enable_runtime_gate_now": true,
+                "may_run_shadow_mode_now": true,
+                "candidate_expansion_experiment_approved": true,
+                "may_run_candidate_expansion_dry_run_now": true,
+                "may_expand_candidate_set_now": true,
+                "changes_candidate_set_now": true,
+                "runtime_influence_approved": true,
+                "may_change_search_order_now": true,
+                "may_write_memory_or_graph_edges": true,
+                "this_gate_approves_runtime_candidate_expansion": true,
+                "requires_separate_shadow_execution_gate": false,
+                "requires_separate_runtime_enablement_gate": false
+            },
+            "input_contract": {
+                "raw_query_included": true,
+                "content_included": true,
+                "raw_error_included": true
+            },
+            "raw_query": "secret runtime enablement shadow code source query",
+            "content": "secret runtime enablement shadow code source content"
+        });
+
+        let tool = MemoryBioCortexT6CandidateExpansionRuntimeEnablementShadowCodeGateTool::new();
+        let out = tool
+            .execute(
+                json!({
+                    "runtime_enablement_code_implementation_gate": code_gate,
+                    "implementation_decision": "request_shadow_runtime_enablement_code_changes",
+                    "feature_flag_default_off_confirmed": false,
+                    "runtime_entrypoint_default_off_confirmed": false,
+                    "shadow_mode_default_off_confirmed": false,
+                    "deterministic_replay_fixture_present": false,
+                    "bounded_candidate_delta_guard_present": false,
+                    "negative_controls_present": false,
+                    "aggregate_telemetry_only_confirmed": false,
+                    "rollback_path_confirmed": false,
+                    "raw_query": "secret runtime enablement shadow code top-level query",
+                    "case_rows": [{"query": "secret runtime enablement shadow code case row"}]
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute shadow code gate");
+        let payload = result_text_as_json(&out);
+
+        assert_eq!(
+            payload["runtime_enablement_shadow_code_gate"]["ready"],
+            json!(false)
+        );
+        let reasons = payload["runtime_enablement_shadow_code_gate"]["block_reasons"]
+            .as_array()
+            .expect("block reasons");
+        assert!(reasons.contains(&json!(
+            "source_runtime_enablement_code_implementation_gate_not_ready"
+        )));
+        assert!(reasons.contains(&json!(
+            "source_runtime_enablement_code_implementation_gate_claims_runtime_authority"
+        )));
+        assert!(reasons.contains(&json!(
+            "source_runtime_enablement_code_implementation_gate_contains_raw"
+        )));
+        assert!(reasons.contains(&json!(
+            "implementation_decision_not_accept_default_off_shadow_runtime_enablement_code"
+        )));
+        assert!(reasons.contains(&json!("input_contains_raw_or_source_fields")));
+        assert!(reasons.contains(&json!("feature_flag_default_off_not_confirmed")));
+        assert!(reasons.contains(&json!("runtime_entrypoint_default_off_not_confirmed")));
+        assert!(reasons.contains(&json!("shadow_mode_default_off_not_confirmed")));
+        assert!(reasons.contains(&json!("deterministic_replay_fixture_missing")));
+        assert!(reasons.contains(&json!("bounded_candidate_delta_guard_missing")));
+        assert!(reasons.contains(&json!("negative_controls_missing")));
+        assert!(reasons.contains(&json!("aggregate_telemetry_only_not_confirmed")));
+        assert!(reasons.contains(&json!("rollback_path_not_confirmed")));
+        assert!(reasons.contains(&json!("source_runtime_enablement_code_gate_block_reason")));
+        assert_eq!(
+            payload["runtime_enablement_shadow_code_contract"]["may_run_shadow_mode_now"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["runtime_enablement_shadow_code_contract"]["may_enable_runtime_gate_now"],
+            json!(false)
+        );
+        assert_eq!(
+            payload["runtime_enablement_shadow_code_contract"]["may_write_memory_or_graph_edges"],
+            json!(false)
+        );
+
+        let serialized = serde_json::to_string(&payload).expect("serialize");
+        assert!(!serialized.contains("secret runtime enablement shadow code source query"));
+        assert!(!serialized.contains("secret runtime enablement shadow code source content"));
+        assert!(!serialized.contains("secret runtime enablement shadow code top-level query"));
+        assert!(!serialized.contains("secret runtime enablement shadow code case row"));
+        assert!(!serialized.contains("\"runtime_enablement_code_implementation_gate\":"));
     }
 
     #[tokio::test]
