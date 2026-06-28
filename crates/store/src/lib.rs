@@ -11,6 +11,7 @@ pub mod coactivation_latch;
 pub mod codebase;
 pub mod connectivity_repair;
 pub mod embedding;
+pub mod lineage_audit;
 pub mod quant;
 pub mod sqlite;
 pub use sqlite::{default_db_path, temporal_bonus, weight_for_edge_type, SqliteStore};
