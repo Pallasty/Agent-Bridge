@@ -194,11 +194,28 @@ rather than forcing a merge. Keep `Missing` as a corpus-gap counter.
   `AB_OUTCOME_GATED_CONSOLIDATION_DISABLE`); registered at `Tier::Niche` with
   the other gate-ceremony tools. `may_apply=true` authorizes *only* a later
   Stage 2 transition-gate request — no verb is ever applied by this surface.
-- **Stage 2 — Transition gate (supervisor cross-check):**
-  `…_transition_gate` validates `schema==v1`, `read_only`, no raw payload,
-  quorum complete, anchor matches `OUTCOME_GATED_CONSOLIDATION_ANCHOR`; echoes
-  `{reviewer, commit, forum_post_id, memory_key}`. Models
-  `trigger_recall_opt_in_runtime_transition_gate` (`:545`). Zero writes.
+- **Stage 2 — Transition gate (supervisor cross-check) — LANDED 2026-06-28:**
+  `outcome_gated_consolidation_transition_gate` consumes a Stage 1 `status`
+  packet + a *re-asserted* transition request and reports
+  `boundary_check.runtime_transition_allowed` → whether a later Stage 3 dry-run
+  apply trial may be requested. Pure
+  `outcome_gated_consolidation_transition_gate_eval()` validates: `schema ==
+  v1`, `read_only`, **no raw payload** (`outcome_gated_packet_contains_raw`
+  rejects a packet carrying `content`/`target_key`/`gated_actions`/`buckets`/…
+  — the gate must never become a content side-channel), packet `side_effects`
+  all-false **AND** `data_access.mutates_state==false` (a packet missing those
+  **fails closed**), `boundary_check.may_apply==true`, then **re-checks**
+  runtime/operator/per-call independently of the packet (a stale "ready" packet
+  cannot smuggle a transition through) and `regression_anchor ==
+  OUTCOME_GATED_CONSOLIDATION_ANCHOR`
+  (`outcome_gated_consolidation_stage2_transition_readonly_20260628`). Any
+  residual packet blockers are folded in as `status_<blocker>`. Records
+  presence-only `{reviewer, commit, forum_post_id, memory_key}`; **never echoes
+  the packet**. `transition_allowed=true` sets `may_call_apply_trial=true` but
+  `may_apply_now=false` + `apply_trial_dry_run_forced=true` — it only unlocks
+  the next read-only surface. Registered `Tier::Niche`; default-OFF behind
+  `AB_OUTCOME_GATED_CONSOLIDATION`. Zero writes. Models
+  `trigger_recall_opt_in_runtime_transition_gate` (`:545`).
 - **Stage 3 — Gated dry-run apply trial:** `…_apply_trial` runs the *same*
   winner/threshold logic the executor would, `dry_run` **hard-forced true**,
   returns the exact planned mutations (winner/loser keys, supersedes edges,

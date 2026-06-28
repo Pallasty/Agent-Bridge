@@ -37525,6 +37525,286 @@ impl McpTool for OutcomeGatedConsolidationStatusTool {
     }
 }
 
+// ===========================================================================
+//   outcome_gated_consolidation_transition_gate — Stage 2 read-only gate
+// ===========================================================================
+
+/// Stage 2 transition gate schema.
+const OUTCOME_GATED_CONSOLIDATION_TRANSITION_GATE_SCHEMA: &str =
+    "agent_bridge.outcome_gated_consolidation.transition_gate.v1";
+/// Acknowledgment anchor the caller must echo verbatim to prove they are acting
+/// against the current Stage 2 contract (a deliberate version speed-bump, like
+/// `TRIGGER_RECALL_BASELINE_ACCEPTANCE_REGRESSION_ANCHOR`).
+const OUTCOME_GATED_CONSOLIDATION_ANCHOR: &str =
+    "outcome_gated_consolidation_stage2_transition_readonly_20260628";
+
+/// Defensive redaction check: a well-formed Stage 1 status packet is already
+/// aggregate (counts + blocker names only). If the caller hands us a packet that
+/// still carries per-row keys/content or the full action/bucket lists, treat it
+/// as raw and refuse — the gate must never become a content side-channel.
+fn outcome_gated_packet_contains_raw(value: &Value) -> bool {
+    fn key_is_raw(key: &str) -> bool {
+        matches!(
+            key,
+            "content"
+                | "raw_content"
+                | "preview"
+                | "gated_actions"
+                | "buckets"
+                | "evidence_feedback_keys"
+                | "target_key"
+        )
+    }
+    match value {
+        Value::Object(map) => map
+            .iter()
+            .any(|(key, val)| key_is_raw(key) || outcome_gated_packet_contains_raw(val)),
+        Value::Array(values) => values.iter().any(outcome_gated_packet_contains_raw),
+        _ => false,
+    }
+}
+
+/// Runtime/operator/opt-in/anchor flags + review refs for the Stage 2 gate. The
+/// gate re-asserts the runtime/operator/opt-in conditions independently of the
+/// packet (a stale "ready" packet cannot smuggle a transition through).
+struct OutcomeGatedConsolidationTransitionFlags {
+    runtime_enabled: bool,
+    operator_disabled: bool,
+    per_call_opt_in: bool,
+    anchor_ok: bool,
+    reviewer: Option<String>,
+    commit: Option<String>,
+    forum_post_id: Option<String>,
+    memory_key: Option<String>,
+}
+
+/// Stage 2 (outcome-gated consolidation): read-only transition gate. Consumes a
+/// Stage 1 `status` packet plus a re-asserted transition request and decides
+/// whether a *later* Stage 3 dry-run apply trial MAY be requested. It echoes no
+/// packet, applies no verb, and writes nothing: `transition_allowed=true` only
+/// unlocks the next read-only surface. Models
+/// `trigger_recall_opt_in_runtime_transition_gate` (`trigger_recall_opt_in.rs:545`).
+fn outcome_gated_consolidation_transition_gate_eval(
+    status_packet: &Value,
+    flags: OutcomeGatedConsolidationTransitionFlags,
+) -> Value {
+    let status_schema = status_packet
+        .get("schema")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let status_read_only = status_packet
+        .get("read_only")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let source_status = status_packet
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("missing");
+    let source_may_apply = status_packet
+        .pointer("/boundary_check/may_apply")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let source_contains_raw = outcome_gated_packet_contains_raw(status_packet);
+    // The packet's mutation inventory must be entirely false AND it must declare
+    // it does not mutate state. A packet missing `side_effects` fails closed.
+    let source_side_effects_safe = status_packet
+        .get("side_effects")
+        .and_then(Value::as_object)
+        .map(|m| m.values().all(|v| v.as_bool() == Some(false)))
+        .unwrap_or(false)
+        && status_packet
+            .pointer("/data_access/mutates_state")
+            .and_then(Value::as_bool)
+            == Some(false);
+
+    // Blocker order, most-fundamental first: packet integrity, then packet
+    // readiness, then the re-asserted runtime/operator/opt-in/anchor conditions.
+    let mut blockers: Vec<String> = Vec::new();
+    if status_schema != OUTCOME_GATED_CONSOLIDATION_STATUS_SCHEMA {
+        blockers.push("status_packet_schema_mismatch".to_string());
+    }
+    if !status_read_only {
+        blockers.push("status_packet_not_read_only".to_string());
+    }
+    if source_contains_raw {
+        blockers.push("status_packet_contains_raw_payload".to_string());
+    }
+    if !source_side_effects_safe {
+        blockers.push("status_packet_side_effect_contract_invalid".to_string());
+    }
+    if !source_may_apply {
+        blockers.push("status_packet_not_ready".to_string());
+    }
+    if !flags.runtime_enabled {
+        blockers.push("feature_runtime_disabled".to_string());
+    }
+    if flags.operator_disabled {
+        blockers.push("operator_disabled".to_string());
+    }
+    if !flags.per_call_opt_in {
+        blockers.push("per_call_opt_in_missing".to_string());
+    }
+    if !flags.anchor_ok {
+        blockers.push("regression_anchor_mismatch".to_string());
+    }
+    // Fold any residual blockers the packet itself reported (defensive: a sound
+    // packet with may_apply=true has none, but never trust that blindly).
+    if let Some(src) = status_packet
+        .pointer("/boundary_check/blockers")
+        .and_then(Value::as_array)
+    {
+        for blocker in src {
+            if let Some(name) = blocker.as_str() {
+                blockers.push(format!("status_{name}"));
+            }
+        }
+    }
+
+    let present = |v: &Option<String>| v.as_ref().map(|s| !s.trim().is_empty()).unwrap_or(false);
+    let allowed = blockers.is_empty();
+    json!({
+        "schema": OUTCOME_GATED_CONSOLIDATION_TRANSITION_GATE_SCHEMA,
+        "generated_at": unix_now_secs(),
+        "read_only": true,
+        "runtime_transition_gate": true,
+        "implementation_stage": "outcome_gated_consolidation_readonly_transition_gate",
+        "status": if allowed { "transition_allowed" } else { "blocked" },
+        "source_status": {
+            "schema": status_schema,
+            "status": source_status,
+            "read_only": status_read_only,
+            "may_apply": source_may_apply,
+            "side_effect_contract_safe": source_side_effects_safe,
+            "status_packet_included": false,
+            "raw_payload_fields_present": source_contains_raw
+        },
+        "requested_transition": {
+            "per_call_opt_in": flags.per_call_opt_in,
+            "operator_disabled": flags.operator_disabled,
+            "runtime_enabled": flags.runtime_enabled,
+            "regression_anchor_matches": flags.anchor_ok,
+            "required_anchor": OUTCOME_GATED_CONSOLIDATION_ANCHOR
+        },
+        "transition": {
+            "transition_allowed": allowed,
+            "may_call_apply_trial": allowed,
+            "may_apply_now": false,
+            "apply_trial_dry_run_forced": true,
+            "next_allowed_surface": if allowed { "outcome_gated_consolidation_apply_trial" } else { "none" }
+        },
+        "boundary_check": {
+            "runtime_transition_allowed": allowed,
+            "blockers": blockers
+        },
+        "review_refs": {
+            "reviewer_present": present(&flags.reviewer),
+            "commit_present": present(&flags.commit),
+            "forum_post_id_present": present(&flags.forum_post_id),
+            "memory_key_present": present(&flags.memory_key)
+        },
+        "input_contract": {
+            "status_packet_included": false,
+            "raw_payload_fields_present": source_contains_raw,
+            "unknown_fields_ignored": true
+        },
+        "side_effects": {
+            "archives_memory": false,
+            "supersedes_memory": false,
+            "rewrites_memory_content": false,
+            "writes_memory": false,
+            "writes_graph_edges": false,
+            "runs_memory_consolidate": false,
+            "runs_memory_compact": false,
+            "writes_approval": false,
+            "applies_any_gated_verb": false,
+            "authorizes_apply_now": false
+        }
+    })
+}
+
+/// Stage 2 of outcome-gated consolidation. Read-only transition gate: consumes a
+/// Stage 1 `outcome_gated_consolidation_status` packet plus a re-asserted
+/// transition request and reports whether a later Stage 3 dry-run apply trial may
+/// be requested. It echoes no packet, reads no memory, applies no verb, and
+/// writes nothing. Default-OFF behind `AB_OUTCOME_GATED_CONSOLIDATION`.
+pub struct OutcomeGatedConsolidationTransitionGateTool;
+impl OutcomeGatedConsolidationTransitionGateTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+impl Default for OutcomeGatedConsolidationTransitionGateTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+#[async_trait]
+impl McpTool for OutcomeGatedConsolidationTransitionGateTool {
+    fn name(&self) -> &'static str {
+        "outcome_gated_consolidation_transition_gate"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only Stage 2 transition gate for outcome-gated memory \
+                consolidation. Consumes a Stage 1 outcome_gated_consolidation_status \
+                packet plus a re-asserted transition request (per_call_opt_in, \
+                operator_disabled, regression_anchor) and decides whether a later \
+                Stage 3 dry-run apply trial may be requested. Default-OFF behind \
+                AB_OUTCOME_GATED_CONSOLIDATION. It does not echo the packet, read \
+                memory, archive/consolidate/compact, write memory or edges, or apply \
+                any gated verb; transition_allowed only unlocks the next read-only \
+                surface."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["status_packet"],
+                "properties": {
+                    "status_packet": { "type": "object", "description": "JSON object produced by outcome_gated_consolidation_status. The gate consumes only safe summary fields and never echoes the packet." },
+                    "per_call_opt_in": { "type": "boolean", "default": false, "description": "Per-call consent that a Stage 3 apply trial may be requested if otherwise ready." },
+                    "operator_disabled": { "type": "boolean", "default": false, "description": "Per-call operator kill-switch. OR-ed with the AB_OUTCOME_GATED_CONSOLIDATION_DISABLE env." },
+                    "regression_anchor": { "type": "string", "description": "Must equal the current Stage 2 anchor string to proceed; a version speed-bump." },
+                    "reviewer": { "type": "string", "description": "Reviewer handle (presence only is recorded)." },
+                    "commit": { "type": "string", "description": "Commit ref (presence only is recorded)." },
+                    "forum_post_id": { "type": "string", "description": "Forum review post id (presence only is recorded)." },
+                    "memory_key": { "type": "string", "description": "Decision memory key (presence only is recorded)." }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let status_packet = args.get("status_packet").cloned().unwrap_or(Value::Null);
+        let operator_disabled = args
+            .get("operator_disabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            || mcp_env_truthy(OUTCOME_GATED_CONSOLIDATION_DISABLE_ENV);
+        let anchor = args
+            .get("regression_anchor")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let flags = OutcomeGatedConsolidationTransitionFlags {
+            runtime_enabled: mcp_env_truthy(OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV),
+            operator_disabled,
+            per_call_opt_in: args
+                .get("per_call_opt_in")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            anchor_ok: anchor == OUTCOME_GATED_CONSOLIDATION_ANCHOR,
+            reviewer: args.get("reviewer").and_then(Value::as_str).map(str::to_string),
+            commit: args.get("commit").and_then(Value::as_str).map(str::to_string),
+            forum_post_id: args
+                .get("forum_post_id")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            memory_key: args.get("memory_key").and_then(Value::as_str).map(str::to_string),
+        };
+        Ok(ToolResult::json_text(
+            &outcome_gated_consolidation_transition_gate_eval(&status_packet, flags),
+        ))
+    }
+}
+
 fn memory_biocortex_sha256_json(value: &Value) -> String {
     let encoded = serde_json::to_vec(value).unwrap_or_default();
     let mut hasher = Sha256::new();
@@ -57347,13 +57627,19 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Standard,
         Arc::new(MemoryConsolidationQueueTool::new(hub.clone())),
     );
-    // Stage 1 gate-ceremony status surface — Niche like the trigger-recall /
+    // Stage 1 + Stage 2 gate-ceremony surfaces — Niche like the trigger-recall /
     // biocortex opt-in gate tools, kept out of the eager Standard/codex set.
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
         Arc::new(OutcomeGatedConsolidationStatusTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(OutcomeGatedConsolidationTransitionGateTool::new()),
     );
     reg_if(
         &mut reg,
@@ -76004,6 +76290,195 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert_eq!(status["candidates"]["total"], json!(0));
         assert_eq!(ogc_blocker_list(&status), vec!["no_shadow_eligible_candidates".to_string()]);
         ogc_assert_no_mutation_side_effects(&status);
+    }
+
+    // --- Stage 2: outcome_gated_consolidation_transition_gate --------------
+
+    fn ogc_ready_status_packet() -> Value {
+        // A genuine Stage 1 packet with may_apply=true (round-trip, no drift).
+        outcome_gated_consolidation_status_eval(
+            &[ogc_action("t", "archive_direct", true, &[])],
+            &ogc_summary(),
+            OutcomeGatedConsolidationStatusFlags {
+                runtime_enabled: true,
+                operator_disabled: false,
+                per_call_opt_in: true,
+            },
+        )
+    }
+
+    fn ogc_transition_flags(anchor_ok: bool) -> OutcomeGatedConsolidationTransitionFlags {
+        OutcomeGatedConsolidationTransitionFlags {
+            runtime_enabled: true,
+            operator_disabled: false,
+            per_call_opt_in: true,
+            anchor_ok,
+            reviewer: None,
+            commit: None,
+            forum_post_id: None,
+            memory_key: None,
+        }
+    }
+
+    fn ogc_transition_blockers(gate: &Value) -> Vec<String> {
+        gate["boundary_check"]["blockers"]
+            .as_array()
+            .expect("blockers array")
+            .iter()
+            .map(|b| b.as_str().unwrap().to_string())
+            .collect()
+    }
+
+    fn ogc_assert_transition_no_side_effects(gate: &Value) {
+        let se = &gate["side_effects"];
+        for key in [
+            "archives_memory",
+            "supersedes_memory",
+            "rewrites_memory_content",
+            "writes_memory",
+            "writes_graph_edges",
+            "runs_memory_consolidate",
+            "runs_memory_compact",
+            "writes_approval",
+            "applies_any_gated_verb",
+            "authorizes_apply_now",
+        ] {
+            assert_eq!(se[key], json!(false), "transition side_effect {key} must be false");
+        }
+        assert_eq!(gate["read_only"], json!(true));
+        assert_eq!(gate["transition"]["may_apply_now"], json!(false));
+        assert_eq!(gate["transition"]["apply_trial_dry_run_forced"], json!(true));
+        assert_eq!(gate["source_status"]["status_packet_included"], json!(false));
+        assert_eq!(
+            gate["schema"],
+            json!("agent_bridge.outcome_gated_consolidation.transition_gate.v1")
+        );
+    }
+
+    #[test]
+    fn outcome_gated_transition_allows_when_packet_ready_and_gates_open() {
+        let packet = ogc_ready_status_packet();
+        assert_eq!(packet["boundary_check"]["may_apply"], json!(true));
+        let gate = outcome_gated_consolidation_transition_gate_eval(
+            &packet,
+            ogc_transition_flags(true),
+        );
+        assert!(ogc_transition_blockers(&gate).is_empty());
+        assert_eq!(gate["status"], json!("transition_allowed"));
+        assert_eq!(gate["transition"]["transition_allowed"], json!(true));
+        assert_eq!(gate["transition"]["may_call_apply_trial"], json!(true));
+        assert_eq!(
+            gate["transition"]["next_allowed_surface"],
+            json!("outcome_gated_consolidation_apply_trial")
+        );
+        // Allowed STILL applies nothing.
+        ogc_assert_transition_no_side_effects(&gate);
+    }
+
+    #[test]
+    fn outcome_gated_transition_blocks_on_anchor_mismatch() {
+        let gate = outcome_gated_consolidation_transition_gate_eval(
+            &ogc_ready_status_packet(),
+            ogc_transition_flags(false),
+        );
+        assert_eq!(gate["status"], json!("blocked"));
+        assert!(ogc_transition_blockers(&gate).contains(&"regression_anchor_mismatch".to_string()));
+        assert_eq!(gate["transition"]["may_call_apply_trial"], json!(false));
+        ogc_assert_transition_no_side_effects(&gate);
+    }
+
+    #[test]
+    fn outcome_gated_transition_blocks_on_unready_packet() {
+        // Stage 1 packet built with the feature OFF ⇒ may_apply=false, and it
+        // carries its own blockers; the gate must refuse and fold them in.
+        let unready = outcome_gated_consolidation_status_eval(
+            &[ogc_action("t", "archive_direct", true, &[])],
+            &ogc_summary(),
+            OutcomeGatedConsolidationStatusFlags {
+                runtime_enabled: false,
+                operator_disabled: false,
+                per_call_opt_in: false,
+            },
+        );
+        assert_eq!(unready["boundary_check"]["may_apply"], json!(false));
+        let gate = outcome_gated_consolidation_transition_gate_eval(
+            &unready,
+            ogc_transition_flags(true),
+        );
+        assert_eq!(gate["status"], json!("blocked"));
+        let bl = ogc_transition_blockers(&gate);
+        assert!(bl.contains(&"status_packet_not_ready".to_string()));
+        // The packet's own leading blocker is folded with a status_ prefix.
+        assert!(bl.contains(&"status_feature_runtime_disabled".to_string()));
+        ogc_assert_transition_no_side_effects(&gate);
+    }
+
+    #[test]
+    fn outcome_gated_transition_blocks_on_schema_mismatch() {
+        let bogus = json!({ "schema": "something_else.v9", "read_only": true });
+        let gate = outcome_gated_consolidation_transition_gate_eval(
+            &bogus,
+            ogc_transition_flags(true),
+        );
+        let bl = ogc_transition_blockers(&gate);
+        assert!(bl.contains(&"status_packet_schema_mismatch".to_string()));
+        // A packet with no side_effects/data_access also fails the safety contract.
+        assert!(bl.contains(&"status_packet_side_effect_contract_invalid".to_string()));
+        assert_eq!(gate["status"], json!("blocked"));
+        ogc_assert_transition_no_side_effects(&gate);
+    }
+
+    #[test]
+    fn outcome_gated_transition_rejects_raw_payload() {
+        // Inject a raw field into an otherwise-ready packet.
+        let mut packet = ogc_ready_status_packet();
+        packet
+            .as_object_mut()
+            .unwrap()
+            .insert("gated_actions".to_string(), json!([{ "target_key": "secret_key" }]));
+        let gate = outcome_gated_consolidation_transition_gate_eval(
+            &packet,
+            ogc_transition_flags(true),
+        );
+        assert!(ogc_transition_blockers(&gate).contains(&"status_packet_contains_raw_payload".to_string()));
+        assert_eq!(gate["status"], json!("blocked"));
+        // The gate never echoes the raw field back.
+        assert!(gate.get("gated_actions").is_none());
+        assert_eq!(gate["source_status"]["raw_payload_fields_present"], json!(true));
+        ogc_assert_transition_no_side_effects(&gate);
+    }
+
+    #[test]
+    fn outcome_gated_transition_gate_schema_is_readonly_and_registered() {
+        let tool = OutcomeGatedConsolidationTransitionGateTool::new();
+        let schema = tool.schema();
+        assert_eq!(schema.name, "outcome_gated_consolidation_transition_gate");
+        assert!(schema.description.contains("Read-only"));
+        assert!(schema.description.contains("apply any gated verb"));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("status_packet").is_some());
+        assert!(props.get("regression_anchor").is_some());
+        assert!(props.get("per_call_opt_in").is_some());
+        // No apply/execute knobs on the Stage 2 boundary.
+        assert!(props.get("apply").is_none());
+        assert!(props.get("dry_run").is_none());
+
+        let names: Vec<String> = build_registry_with_policy(
+            Hub::builder().build(),
+            ToolPolicy {
+                set: ToolSet::Profile,
+                profile: ToolProfile::All,
+            },
+        )
+        .list()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
+        assert!(names.contains(&schema.name));
     }
 
     #[tokio::test]
