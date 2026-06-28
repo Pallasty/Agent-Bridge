@@ -4986,9 +4986,17 @@ impl StateStore for SqliteStore {
                 let mut edge_keys: std::collections::HashSet<String> =
                     std::collections::HashSet::new();
                 {
+                    // Feedback edges (retrieval_*) must NOT confer hub-durability:
+                    // every memory_retrieval_feedback writes an edge to_key=target,
+                    // so without this filter a single stale/harmful flag would make
+                    // a memory permanently un-archivable. Only semantic edges
+                    // (relates/supersedes/evolved/corrects/...) count toward
+                    // durability here.
                     let mut estmt = c.prepare(
                         "SELECT from_key FROM memory_edges \
-                         UNION SELECT to_key FROM memory_edges",
+                           WHERE edge_type NOT LIKE 'retrieval%' \
+                         UNION SELECT to_key FROM memory_edges \
+                           WHERE edge_type NOT LIKE 'retrieval%'",
                     )?;
                     let rows = estmt.query_map([], |r| r.get::<_, String>(0))?;
                     for k in rows.flatten() {
@@ -5292,7 +5300,8 @@ impl StateStore for SqliteStore {
                        AND (related_keys IS NULL OR related_keys IN ('[]', ''))
                        AND NOT EXISTS (
                          SELECT 1 FROM memory_edges e
-                         WHERE e.from_key = memories.key OR e.to_key = memories.key
+                         WHERE (e.from_key = memories.key OR e.to_key = memories.key)
+                           AND e.edge_type NOT LIKE 'retrieval%'
                        )",
                 )?;
                 let keys: Vec<String> = stmt
@@ -14048,6 +14057,256 @@ mod tests {
         );
         assert_eq!(get("hub_a"), Some("active"), "connected row spared");
         assert_eq!(get("hub_b"), Some("active"), "connected row spared");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn decay_importance_retrieval_edges_do_not_confer_durability() {
+        // Fix A (outcome-gated consolidation prerequisite): a retrieval_* feedback
+        // edge must NOT make its target durable. Before the fix, the edge_keys
+        // query counted ANY edge, so one stale/harmful flag (which writes an edge
+        // to_key=target) made a memory permanently un-archivable. Real semantic
+        // edges (relates/...) must still protect; a row with BOTH stays protected.
+        use crate::embedding::{set_default_backend, HashBackend};
+        use crate::MemoryRecord;
+        let _ = set_default_backend(std::sync::Arc::new(HashBackend));
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-decay-retrieval-edge-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("d.db"))
+            .await
+            .expect("open");
+
+        let now = now_secs();
+        let mk = |key: &str, importance: f64| MemoryRecord {
+            key: key.to_string(),
+            kind: format!("kind_{key}"),
+            content: format!("body-{key}"),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: now,
+            updated_at: now,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        // Feedback source rows are high-importance + recent so they are not
+        // themselves archival candidates and don't perturb the count.
+        for k in ["fb1", "fb2"] {
+            store.memory_save(&mk(k, 0.8)).await.expect("save");
+        }
+        // stale_target: only a retrieval_stale edge → must NOT be durable.
+        // hub_a/hub_b: a real `relates` edge → durable. mixed: BOTH → durable.
+        for k in ["stale_target", "hub_a", "hub_b", "mixed"] {
+            store.memory_save(&mk(k, 0.1)).await.expect("save");
+        }
+        store
+            .memory_link("fb1", "stale_target", "retrieval_stale", 0.5)
+            .await
+            .expect("link");
+        store
+            .memory_link("hub_a", "hub_b", "relates", 1.0)
+            .await
+            .expect("link");
+        store
+            .memory_link("fb2", "mixed", "retrieval_harmful", 0.4)
+            .await
+            .expect("link");
+        store
+            .memory_link("mixed", "hub_a", "relates", 1.0)
+            .await
+            .expect("link");
+
+        // Backdate the decay anchor for ONLY the low-importance candidates so
+        // decay drives them below the threshold; leave fb1/fb2 recent.
+        let old = now - 365 * 86_400;
+        let keys_low = vec!["stale_target", "hub_a", "hub_b", "mixed"];
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<usize> {
+                let q = format!(
+                    "UPDATE memories SET updated_at=?, last_decayed_at=? WHERE key IN ({})",
+                    keys_low.iter().map(|_| "?").collect::<Vec<_>>().join(",")
+                );
+                let mut p: Vec<rusqlite::types::Value> = vec![
+                    rusqlite::types::Value::Integer(old),
+                    rusqlite::types::Value::Integer(old),
+                ];
+                p.extend(
+                    keys_low
+                        .into_iter()
+                        .map(|k| rusqlite::types::Value::Text(k.to_string())),
+                );
+                c.execute(&q, rusqlite::params_from_iter(p.iter()))
+            })
+            .await
+            .expect("backdate");
+
+        let archived = store
+            .memory_decay_importance(30.0, 0.05)
+            .await
+            .expect("decay");
+        assert_eq!(
+            archived, 1,
+            "only the retrieval-flagged, otherwise-isolated row is archived"
+        );
+
+        let statuses = store
+            .conn
+            .call(|c| -> RusqliteResult<Vec<(String, String)>> {
+                let mut stmt = c.prepare("SELECT key, status FROM memories ORDER BY key")?;
+                let rows =
+                    stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+                rows.collect()
+            })
+            .await
+            .expect("statuses");
+        let get = |k: &str| {
+            statuses
+                .iter()
+                .find(|(key, _)| key == k)
+                .map(|(_, s)| s.as_str())
+        };
+        assert_eq!(
+            get("stale_target"),
+            Some("archived"),
+            "a retrieval_* edge must NOT protect its target from decay-archival"
+        );
+        assert_eq!(get("hub_a"), Some("active"), "real `relates` edge protects");
+        assert_eq!(get("hub_b"), Some("active"), "real `relates` edge protects");
+        assert_eq!(
+            get("mixed"),
+            Some("active"),
+            "a row with a real edge stays durable even with a retrieval edge too"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_compact_retrieval_edges_do_not_protect() {
+        // Fix A: the compact durable-edge guard must also ignore retrieval_*
+        // edges, so a feedback-flagged-but-otherwise-junk row stays compactable.
+        use crate::embedding::{set_default_backend, HashBackend};
+        use crate::{CompactPolicy, MemoryRecord};
+        let _ = set_default_backend(std::sync::Arc::new(HashBackend));
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-compact-retrieval-edge-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("c.db"))
+            .await
+            .expect("open");
+
+        let now = now_secs();
+        let mk = |key: &str, importance: f64| MemoryRecord {
+            key: key.to_string(),
+            kind: format!("kind_{key}"),
+            content: format!("body-{key}"),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: now,
+            updated_at: now,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store.memory_save(&mk("fb", 0.8)).await.expect("save"); // durable by importance
+        for k in ["stale_junk", "real_a", "real_b", "mixed"] {
+            store.memory_save(&mk(k, 0.2)).await.expect("save");
+        }
+        store
+            .memory_link("fb", "stale_junk", "retrieval_stale", 0.5)
+            .await
+            .expect("link");
+        store
+            .memory_link("real_a", "real_b", "relates", 1.0)
+            .await
+            .expect("link");
+        store
+            .memory_link("fb", "mixed", "retrieval_duplicate", 0.5)
+            .await
+            .expect("link");
+        store
+            .memory_link("mixed", "real_a", "relates", 1.0)
+            .await
+            .expect("link");
+
+        let old = now - 200 * 86_400;
+        let keys_all = vec!["stale_junk", "real_a", "real_b", "mixed"];
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<usize> {
+                let q = format!(
+                    "UPDATE memories SET created_at=?, last_accessed_at=? WHERE key IN ({})",
+                    keys_all.iter().map(|_| "?").collect::<Vec<_>>().join(",")
+                );
+                let mut p: Vec<rusqlite::types::Value> = vec![
+                    rusqlite::types::Value::Integer(old),
+                    rusqlite::types::Value::Integer(old),
+                ];
+                p.extend(
+                    keys_all
+                        .into_iter()
+                        .map(|k| rusqlite::types::Value::Text(k.to_string())),
+                );
+                c.execute(&q, rusqlite::params_from_iter(p.iter()))
+            })
+            .await
+            .expect("backdate");
+
+        let retired = store
+            .memory_compact(CompactPolicy {
+                min_uses: Some(2),
+                older_than_secs: Some(90 * 86_400),
+                dry_run: false,
+            })
+            .await
+            .expect("compact");
+        assert_eq!(
+            retired,
+            vec!["stale_junk".to_string()],
+            "only the retrieval-flagged junk row is eligible; real-edged rows protected"
+        );
+
+        let statuses = store
+            .conn
+            .call(|c| -> RusqliteResult<Vec<(String, String)>> {
+                let mut stmt = c.prepare("SELECT key, status FROM memories ORDER BY key")?;
+                let rows =
+                    stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
+                rows.collect()
+            })
+            .await
+            .expect("statuses");
+        let get = |k: &str| {
+            statuses
+                .iter()
+                .find(|(key, _)| key == k)
+                .map(|(_, s)| s.as_str())
+        };
+        assert_eq!(get("stale_junk"), Some("tombstoned"), "retrieval-only row compacted");
+        assert_eq!(get("real_a"), Some("active"), "real-edged row protected");
+        assert_eq!(get("real_b"), Some("active"), "real-edged row protected");
+        assert_eq!(get("mixed"), Some("active"), "row with a real edge protected");
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
