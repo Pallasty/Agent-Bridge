@@ -37079,13 +37079,16 @@ fn outcome_gated_consolidation_status_eval(
     }
 
     let may_apply = blockers.is_empty();
-    // Single human-facing status string; precedence matches the blocker order.
+    // Single human-facing status string. Its precedence MUST match the blocker
+    // order above so the top-level `status` always equals the leading blocker's
+    // category (runtime before operator, etc.) — a kanban/auto-consumer reading
+    // `status` and one reading `blockers[0]` must never disagree.
     let status = if may_apply {
         "ready_for_transition_gate"
-    } else if flags.operator_disabled {
-        "operator_disabled"
     } else if !flags.runtime_enabled {
         "feature_runtime_disabled"
+    } else if flags.operator_disabled {
+        "operator_disabled"
     } else if !flags.per_call_opt_in {
         "awaiting_per_call_opt_in"
     } else {
@@ -75899,6 +75902,63 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(ogc_blocker_list(&status).contains(&"operator_disabled".to_string()));
         assert_eq!(status["status"], json!("operator_disabled"));
         ogc_assert_no_mutation_side_effects(&status);
+    }
+
+    #[test]
+    fn outcome_gated_status_string_matches_leading_blocker() {
+        // When BOTH runtime and operator are disabled, the leading blocker is the
+        // feature gate; the top-level `status` must agree (not report operator).
+        let actions = vec![ogc_action("tgt_stale", "archive_via_consolidate", true, &[])];
+        let status = outcome_gated_consolidation_status_eval(
+            &actions,
+            &ogc_summary(),
+            OutcomeGatedConsolidationStatusFlags {
+                runtime_enabled: false,
+                operator_disabled: true,
+                per_call_opt_in: false,
+            },
+        );
+        let blockers = ogc_blocker_list(&status);
+        assert_eq!(blockers.first().map(String::as_str), Some("feature_runtime_disabled"));
+        assert!(blockers.contains(&"operator_disabled".to_string()));
+        assert_eq!(status["status"], json!("feature_runtime_disabled"));
+
+        // General invariant across the gate ladder: the human status string maps
+        // 1:1 onto whichever blocker leads the ordered list.
+        let blocker_to_status = |b: &str| match b {
+            "feature_runtime_disabled" => "feature_runtime_disabled",
+            "operator_disabled" => "operator_disabled",
+            "per_call_opt_in_missing" => "awaiting_per_call_opt_in",
+            "no_shadow_eligible_candidates" => "no_eligible_candidates",
+            other => panic!("unexpected blocker {other}"),
+        };
+        for (runtime, operator, optin, eligible) in [
+            (false, false, false, true),
+            (true, true, true, true),
+            (true, false, false, true),
+            (true, false, true, false),
+        ] {
+            let acts = if eligible {
+                vec![ogc_action("t", "archive_direct", true, &[])]
+            } else {
+                vec![ogc_action("t", "archive_direct", false, &["QuorumNotMet"])]
+            };
+            let s = outcome_gated_consolidation_status_eval(
+                &acts,
+                &ogc_summary(),
+                OutcomeGatedConsolidationStatusFlags {
+                    runtime_enabled: runtime,
+                    operator_disabled: operator,
+                    per_call_opt_in: optin,
+                },
+            );
+            let bl = ogc_blocker_list(&s);
+            let lead = bl.first().expect("a blocker for a non-ready case");
+            assert_eq!(
+                s["status"], json!(blocker_to_status(lead)),
+                "status must mirror leading blocker {lead}"
+            );
+        }
     }
 
     #[test]
