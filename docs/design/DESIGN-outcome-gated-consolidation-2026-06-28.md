@@ -220,10 +220,17 @@ rather than forcing a merge. Keep `Missing` as a corpus-gap counter.
   `AB_OUTCOME_GATED_CONSOLIDATION`. Zero writes. Models
   `trigger_recall_opt_in_runtime_transition_gate` (`:545`).
 - **Stage 3 — Gated dry-run apply trial — LANDED 2026-06-28:**
-  `outcome_gated_consolidation_apply_trial` consumes a Stage 2 transition-gate
-  packet and, **only if it authorizes the transition**, plans the exact mutation
-  each shadow-eligible candidate would receive. `dry_run` is **hard-forced
-  true** — it reads memory and recomputes the shadow but writes nothing. Per
+  `outcome_gated_consolidation_apply_trial` **re-asserts the runtime/operator/
+  per-call gate at the trial layer** (default-OFF `AB_OUTCOME_GATED_CONSOLIDATION`
+  — a previously-allowed/crafted transition packet cannot leak a key-level plan
+  while the feature is disabled; `blocked_by_runtime_gate`) **and** validates a
+  Stage 2 transition-gate packet — schema/read_only/side_effects/raw plus its
+  **own internal consistency** (`transition.may_call_apply_trial==true`,
+  `apply_trial_dry_run_forced==true`, `may_apply_now==false`; a self-
+  contradictory packet fails closed). Only if **both** gates pass does it plan
+  the exact mutation each shadow-eligible candidate would receive. `dry_run` is
+  **hard-forced true** — it reads memory and recomputes the shadow but writes
+  nothing. Per
   verb: `archive_direct` → `accepted` `{op: archive_status, → archived}`;
   `archive_via_consolidate` → reuses the **same** consolidate winner logic
   (`outcome_gated_consolidate_rank = importance*(1+access_count)`, jaccard ≥
