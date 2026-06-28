@@ -194,15 +194,59 @@ rather than forcing a merge. Keep `Missing` as a corpus-gap counter.
   `AB_OUTCOME_GATED_CONSOLIDATION_DISABLE`); registered at `Tier::Niche` with
   the other gate-ceremony tools. `may_apply=true` authorizes *only* a later
   Stage 2 transition-gate request — no verb is ever applied by this surface.
-- **Stage 2 — Transition gate (supervisor cross-check):**
-  `…_transition_gate` validates `schema==v1`, `read_only`, no raw payload,
-  quorum complete, anchor matches `OUTCOME_GATED_CONSOLIDATION_ANCHOR`; echoes
-  `{reviewer, commit, forum_post_id, memory_key}`. Models
-  `trigger_recall_opt_in_runtime_transition_gate` (`:545`). Zero writes.
-- **Stage 3 — Gated dry-run apply trial:** `…_apply_trial` runs the *same*
-  winner/threshold logic the executor would, `dry_run` **hard-forced true**,
-  returns the exact planned mutations (winner/loser keys, supersedes edges,
-  status transitions) as the diff. Per-action `accepted|held(reason)`.
+- **Stage 2 — Transition gate (supervisor cross-check) — LANDED 2026-06-28:**
+  `outcome_gated_consolidation_transition_gate` consumes a Stage 1 `status`
+  packet + a *re-asserted* transition request and reports
+  `boundary_check.runtime_transition_allowed` → whether a later Stage 3 dry-run
+  apply trial may be requested. Pure
+  `outcome_gated_consolidation_transition_gate_eval()` validates: `schema ==
+  v1`, `read_only`, **no raw payload** (`outcome_gated_packet_contains_raw`
+  rejects `content`/`target_key`/`gated_actions`/`buckets`/… both *inside* the
+  packet **and** in the *outer* `args` beside it — `execute()` strips the known
+  wrapper fields then scans the remainder, so a raw field cannot bypass the
+  contract by sitting next to `status_packet`; the gate must never become a
+  content side-channel), packet `side_effects`
+  all-false **AND** `data_access.mutates_state==false` (a packet missing those
+  **fails closed**), `boundary_check.may_apply==true`, then **re-checks**
+  runtime/operator/per-call independently of the packet (a stale "ready" packet
+  cannot smuggle a transition through) and `regression_anchor ==
+  OUTCOME_GATED_CONSOLIDATION_ANCHOR`
+  (`outcome_gated_consolidation_stage2_transition_readonly_20260628`). Any
+  residual packet blockers are folded in as `status_<blocker>`. Records
+  presence-only `{reviewer, commit, forum_post_id, memory_key}`; **never echoes
+  the packet**. `transition_allowed=true` sets `may_call_apply_trial=true` but
+  `may_apply_now=false` + `apply_trial_dry_run_forced=true` — it only unlocks
+  the next read-only surface. Registered `Tier::Niche`; default-OFF behind
+  `AB_OUTCOME_GATED_CONSOLIDATION`. Zero writes. Models
+  `trigger_recall_opt_in_runtime_transition_gate` (`:545`).
+- **Stage 3 — Gated dry-run apply trial — LANDED 2026-06-28:**
+  `outcome_gated_consolidation_apply_trial` **re-asserts the runtime/operator/
+  per-call gate at the trial layer** (default-OFF `AB_OUTCOME_GATED_CONSOLIDATION`
+  — a previously-allowed/crafted transition packet cannot leak a key-level plan
+  while the feature is disabled; `blocked_by_runtime_gate`) **and** validates a
+  Stage 2 transition-gate packet — schema/read_only/side_effects/raw plus its
+  **own internal consistency** (`transition.may_call_apply_trial==true`,
+  `apply_trial_dry_run_forced==true`, `may_apply_now==false`; a self-
+  contradictory packet fails closed). Only if **both** gates pass does it plan
+  the exact mutation each shadow-eligible candidate would receive. `dry_run` is
+  **hard-forced true** — it reads memory and recomputes the shadow but writes
+  nothing. Per
+  verb: `archive_direct` → `accepted` `{op: archive_status, → archived}`;
+  `archive_via_consolidate` → reuses the **same** consolidate winner logic
+  (`outcome_gated_consolidate_rank = importance*(1+access_count)`, jaccard ≥
+  `min_similarity` (default 0.45), same-kind — kept in sync with
+  `MemoryConsolidateTool`) to emit `accepted` `{op: memory_consolidate, winner,
+  loser, supersedes_edge winner→loser}` when the target is the loser, else
+  `held(target_is_consolidate_winner)` (never archive a winner) or
+  `held(no_consolidate_partner_above_threshold)` when content can't confirm the
+  feedback-named duplicate; `queue_rewrite` →
+  `held(rewrite_is_content_decision_not_auto_applied)` (too_large never
+  auto-archives). Each plan entry is `accepted|held(reason)`; summary rolls up
+  accepted/held + `hold_reasons` histogram. A blocked/invalid transition packet
+  ⇒ `status=blocked_by_transition_gate` + empty plan. Outer-args raw-payload
+  defense as in Stage 2. `side_effects` all-false; registered `Tier::Niche`;
+  default-OFF behind `AB_OUTCOME_GATED_CONSOLIDATION`. Models
+  `trigger_recall_opt_in_gated_baseline_trial`.
 - **Stage 4 — Approval packet (owner sign-off):** `…_approval_packet` freezes
   the Stage-3 diff under sha256 (`memory_biocortex_sha256_json`) +
   reviewer/commit/forum refs + single-use `per_call_apply_token`. Execution is
