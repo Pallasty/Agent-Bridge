@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod codebase;
 pub mod embedding;
+pub mod quant;
 pub mod sqlite;
 pub use sqlite::{default_db_path, temporal_bonus, weight_for_edge_type, SqliteStore};
 pub mod vector;
