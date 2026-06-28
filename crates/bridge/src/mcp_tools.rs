@@ -37001,6 +37001,153 @@ fn memory_consolidation_queue_from_records(
     })
 }
 
+/// Stage 1 (outcome-gated consolidation) status schema. v1 mirrors the
+/// boundary_check/side_effects shape of `trigger_recall_opt_in_status`.
+const OUTCOME_GATED_CONSOLIDATION_STATUS_SCHEMA: &str =
+    "agent_bridge.outcome_gated_consolidation.status.v1";
+/// Default-OFF runtime enable flag for outcome-gated consolidation. Absent or
+/// non-truthy ⇒ `runtime_enabled=false` ⇒ `may_apply` can never be true.
+const OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV: &str = "AB_OUTCOME_GATED_CONSOLIDATION";
+/// Operator kill-switch. Truthy ⇒ `operator_disabled=true` regardless of the
+/// per-call `operator_disabled` argument.
+const OUTCOME_GATED_CONSOLIDATION_DISABLE_ENV: &str = "AB_OUTCOME_GATED_CONSOLIDATION_DISABLE";
+
+/// Runtime/operator/per-call flags consumed by the Stage 1 status evaluation.
+/// All three default to the safe value (disabled / not-opted-in).
+struct OutcomeGatedConsolidationStatusFlags {
+    runtime_enabled: bool,
+    operator_disabled: bool,
+    per_call_opt_in: bool,
+}
+
+/// Stage 1 (outcome-gated consolidation): read-only gate evaluation over the
+/// Stage 0 `gated_actions` shadow. Reports `may_apply` — whether a later Stage 2
+/// transition gate MAY be *requested* — plus a deterministically ordered blocker
+/// list, a verb/blocker rollup, and an all-false mutation side-effect inventory.
+///
+/// This surface mutates nothing and applies no verb at any point: `may_apply`
+/// is a boundary signal only, exactly like
+/// `trigger_recall_opt_in_status`'s `boundary_check.ready_for_transition_gate`.
+/// See docs/design/DESIGN-outcome-gated-consolidation-2026-06-28.md.
+fn outcome_gated_consolidation_status_eval(
+    gated_actions: &[Value],
+    queue_summary: &Value,
+    flags: OutcomeGatedConsolidationStatusFlags,
+) -> Value {
+    let eligible_count = gated_actions
+        .iter()
+        .filter(|a| a.get("shadow_eligible").and_then(Value::as_bool) == Some(true))
+        .count();
+    let blocked_count = gated_actions.len() - eligible_count;
+
+    // Verb rollup over shadow-eligible candidates (what a Stage 2 gate could act
+    // on) and a blocker-reason histogram over every candidate's blockers.
+    let mut eligible_verb_counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut candidate_blocker_counts: BTreeMap<String, usize> = BTreeMap::new();
+    for action in gated_actions {
+        let shadow_eligible =
+            action.get("shadow_eligible").and_then(Value::as_bool) == Some(true);
+        if shadow_eligible {
+            if let Some(verb) = action.get("verb").and_then(Value::as_str) {
+                *eligible_verb_counts.entry(verb.to_string()).or_default() += 1;
+            }
+        }
+        if let Some(blockers) = action.get("candidate_blockers").and_then(Value::as_array) {
+            for blocker in blockers {
+                if let Some(name) = blocker.as_str() {
+                    *candidate_blocker_counts.entry(name.to_string()).or_default() += 1;
+                }
+            }
+        }
+    }
+
+    // Ordered gate blockers — most-fundamental first, so the leading entry is the
+    // single thing to fix next. Runtime/operator gate the whole feature; per-call
+    // opt-in gates this request; eligibility gates whether there is anything to do.
+    let mut blockers: Vec<String> = Vec::new();
+    if !flags.runtime_enabled {
+        blockers.push("feature_runtime_disabled".to_string());
+    }
+    if flags.operator_disabled {
+        blockers.push("operator_disabled".to_string());
+    }
+    if !flags.per_call_opt_in {
+        blockers.push("per_call_opt_in_missing".to_string());
+    }
+    if eligible_count == 0 {
+        blockers.push("no_shadow_eligible_candidates".to_string());
+    }
+
+    let may_apply = blockers.is_empty();
+    // Single human-facing status string; precedence matches the blocker order.
+    let status = if may_apply {
+        "ready_for_transition_gate"
+    } else if flags.operator_disabled {
+        "operator_disabled"
+    } else if !flags.runtime_enabled {
+        "feature_runtime_disabled"
+    } else if !flags.per_call_opt_in {
+        "awaiting_per_call_opt_in"
+    } else {
+        "no_eligible_candidates"
+    };
+
+    json!({
+        "schema": OUTCOME_GATED_CONSOLIDATION_STATUS_SCHEMA,
+        "generated_at": unix_now_secs(),
+        "read_only": true,
+        "control_surface": "outcome_gated_consolidation_status",
+        "status": status,
+        "runtime_gate": {
+            "runtime_enable_env": OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV,
+            "runtime_enabled": flags.runtime_enabled,
+            "operator_disable_env": OUTCOME_GATED_CONSOLIDATION_DISABLE_ENV,
+            "operator_disabled": flags.operator_disabled,
+            "per_call_opt_in": flags.per_call_opt_in,
+            "feature_flag_default_off": true
+        },
+        "candidates": {
+            "total": gated_actions.len(),
+            "shadow_eligible": eligible_count,
+            "blocked": blocked_count,
+            "eligible_verb_counts": eligible_verb_counts,
+            "candidate_blocker_counts": candidate_blocker_counts,
+            "scanned_records": queue_summary.get("scanned_records").cloned().unwrap_or(Value::Null),
+            "active_records": queue_summary.get("active_records").cloned().unwrap_or(Value::Null)
+        },
+        "boundary_check": {
+            "may_apply": may_apply,
+            "blockers": blockers,
+            "meaning": "may_apply=true authorizes only a later Stage 2 transition-gate request; this surface applies no verb at any stage."
+        },
+        "side_effects": {
+            "archives_memory": false,
+            "supersedes_memory": false,
+            "rewrites_memory_content": false,
+            "writes_memory": false,
+            "writes_graph_edges": false,
+            "runs_memory_consolidate": false,
+            "runs_memory_compact": false,
+            "changes_memory_search_order": false,
+            "changes_default_memory_schema": false,
+            "applies_any_gated_verb": false,
+            "authorizes_apply_now": false
+        },
+        "data_access": {
+            "reads_memory_rows": true,
+            "reads_memory_edges": true,
+            "read_only": true,
+            "mutates_state": false
+        },
+        "next_stage": {
+            "stage": 2,
+            "control_surface": "outcome_gated_consolidation_transition_gate",
+            "available": false,
+            "note": "Stage 2 transition gate is not implemented yet; Stage 1 status is the current read-only boundary."
+        }
+    })
+}
+
 // ===========================================================================
 //          memory_consolidation_queue — T4 read-only consolidation candidates
 // ===========================================================================
@@ -37175,6 +37322,202 @@ impl McpTool for MemoryConsolidationQueueTool {
 
         Ok(ToolResult::json_text(
             &memory_consolidation_queue_from_records(&records, &edges_by_key, options),
+        ))
+    }
+}
+
+// ===========================================================================
+//   outcome_gated_consolidation_status — Stage 1 read-only gate boundary
+// ===========================================================================
+
+/// Stage 1 of outcome-gated consolidation. Read-only gate status over the
+/// Stage 0 `gated_actions` shadow: reports `may_apply` (whether a later Stage 2
+/// transition gate MAY be requested), ordered blockers, and an all-false
+/// mutation side-effect inventory. It reads memory rows/edges to recompute the
+/// shadow but archives nothing, writes no edge, and applies no verb. Runtime is
+/// default-OFF behind `AB_OUTCOME_GATED_CONSOLIDATION`.
+pub struct OutcomeGatedConsolidationStatusTool {
+    hub: Hub,
+}
+impl OutcomeGatedConsolidationStatusTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for OutcomeGatedConsolidationStatusTool {
+    fn name(&self) -> &'static str {
+        "outcome_gated_consolidation_status"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only Stage 1 gate status for outcome-gated memory \
+                consolidation. Evaluates the Stage 0 gated_actions shadow and reports \
+                may_apply (whether a later Stage 2 transition gate may be requested), \
+                deterministically ordered blockers, and a verb/blocker rollup. \
+                Default-OFF behind AB_OUTCOME_GATED_CONSOLIDATION. It reads memory \
+                rows/edges but archives nothing, writes no edge, runs no consolidate/ \
+                compact, changes no retrieval ranking, and applies no gated verb."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "scope": {
+                        "type": "string",
+                        "description": "Optional memory scope, e.g. project:/abs/path or domain:rust."
+                    },
+                    "scope_mode": {
+                        "type": "string",
+                        "enum": ["local_only", "local_plus_global", "exploratory"],
+                        "default": "local_plus_global",
+                        "description": "When scope is set: local_only keeps matching rows; local_plus_global also includes global/unscoped rows; exploratory scans all rows."
+                    },
+                    "skip_tags": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "default": ["auto_curated", "alert", "ttl:7d"],
+                        "description": "Rows with these tags are excluded from shadow consideration."
+                    },
+                    "skip_kinds": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "default": ["skill", "work_memory", "snapshot"],
+                        "description": "Rows with these kinds are excluded. session_handoff and feedback are intentionally kept."
+                    },
+                    "max_records": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10000,
+                        "default": 1000,
+                        "description": "Maximum records to scan from the memory store."
+                    },
+                    "max_gated_actions": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 50,
+                        "description": "Maximum entries in the gated_actions shadow the status evaluates."
+                    },
+                    "large_content_chars": {
+                        "type": "integer",
+                        "minimum": 200,
+                        "maximum": 20000,
+                        "default": 2400,
+                        "description": "Content length threshold used while building the shadow."
+                    },
+                    "low_use_max_access_count": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100,
+                        "default": 1,
+                        "description": "Maximum access_count still considered low-use."
+                    },
+                    "per_call_opt_in": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Per-call consent that a Stage 2 transition gate may be requested if otherwise ready. Default false."
+                    },
+                    "operator_disabled": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Per-call operator kill-switch. OR-ed with the AB_OUTCOME_GATED_CONSOLIDATION_DISABLE env."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let requested_scope = args
+            .get("scope")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let scope_mode = MemorySearchScopeMode::parse(
+            args.get("scope_mode")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty()),
+            true,
+        );
+        let skip_tags =
+            memory_string_array_arg(&args, "skip_tags", &["auto_curated", "alert", "ttl:7d"]);
+        let skip_kinds =
+            memory_string_array_arg(&args, "skip_kinds", &["skill", "work_memory", "snapshot"]);
+        let max_records = args
+            .get("max_records")
+            .and_then(Value::as_u64)
+            .unwrap_or(1000)
+            .clamp(1, 10_000) as u32;
+        let options = MemoryConsolidationQueueOptions {
+            max_gated_actions: args
+                .get("max_gated_actions")
+                .and_then(Value::as_u64)
+                .unwrap_or(50)
+                .clamp(1, 500) as usize,
+            large_content_chars: args
+                .get("large_content_chars")
+                .and_then(Value::as_u64)
+                .unwrap_or(2_400)
+                .clamp(200, 20_000) as usize,
+            low_use_max_access_count: args
+                .get("low_use_max_access_count")
+                .and_then(Value::as_u64)
+                .unwrap_or(1)
+                .min(100),
+            ..MemoryConsolidationQueueOptions::default()
+        };
+
+        let rows = store
+            .list_memories(None, MemoryListSort::Recent, max_records)
+            .await?;
+        let records: Vec<MemoryRecord> = rows
+            .into_iter()
+            .filter(|rec| {
+                memory_record_active(rec)
+                    && !memory_has_any_tag(rec, &skip_tags)
+                    && !memory_kind_is_any(rec, &skip_kinds)
+                    && requested_scope
+                        .map(|scope| memory_search_scope_mode_matches(rec, scope, scope_mode))
+                        .unwrap_or(true)
+            })
+            .collect();
+
+        let mut edges_by_key: HashMap<String, Vec<MemoryEdge>> = HashMap::new();
+        for rec in &records {
+            if let Ok(edges) = store.memory_neighbors(&rec.key).await {
+                edges_by_key.insert(rec.key.clone(), edges);
+            }
+        }
+
+        let queue = memory_consolidation_queue_from_records(&records, &edges_by_key, options);
+        let gated_actions = queue
+            .get("gated_actions")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let summary = queue.get("summary").cloned().unwrap_or(Value::Null);
+
+        let operator_disabled = args
+            .get("operator_disabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            || mcp_env_truthy(OUTCOME_GATED_CONSOLIDATION_DISABLE_ENV);
+        let flags = OutcomeGatedConsolidationStatusFlags {
+            runtime_enabled: mcp_env_truthy(OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV),
+            operator_disabled,
+            per_call_opt_in: args
+                .get("per_call_opt_in")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        };
+
+        Ok(ToolResult::json_text(
+            &outcome_gated_consolidation_status_eval(&gated_actions, &summary, flags),
         ))
     }
 }
@@ -57001,6 +57344,14 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Standard,
         Arc::new(MemoryConsolidationQueueTool::new(hub.clone())),
     );
+    // Stage 1 gate-ceremony status surface — Niche like the trigger-recall /
+    // biocortex opt-in gate tools, kept out of the eager Standard/codex set.
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Niche,
+        Arc::new(OutcomeGatedConsolidationStatusTool::new(hub.clone())),
+    );
     reg_if(
         &mut reg,
         policy,
@@ -70243,6 +70594,40 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(names.contains(&schema.name));
     }
 
+    #[test]
+    fn outcome_gated_consolidation_status_schema_is_readonly_and_registered() {
+        let tool = OutcomeGatedConsolidationStatusTool::new(Hub::builder().build());
+        let schema = tool.schema();
+        assert_eq!(schema.name, "outcome_gated_consolidation_status");
+        assert!(schema.description.contains("Read-only"));
+        assert!(schema.description.contains("applies no gated verb"));
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("per_call_opt_in").is_some());
+        assert!(props.get("operator_disabled").is_some());
+        assert!(props.get("scope").is_some());
+        // No mutation/apply knobs are exposed by the Stage 1 boundary.
+        assert!(props.get("apply").is_none());
+        assert!(props.get("execute").is_none());
+        assert!(props.get("confirm").is_none());
+
+        let names: Vec<String> = build_registry_with_policy(
+            Hub::builder().build(),
+            ToolPolicy {
+                set: ToolSet::Profile,
+                profile: ToolProfile::All,
+            },
+        )
+        .list()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
+        assert!(names.contains(&schema.name));
+    }
+
     #[tokio::test]
     async fn trigger_recall_opt_in_status_does_not_echo_query_or_raw_fields() {
         let _lock = frontend_env_test_setup();
@@ -75380,6 +75765,185 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         let big = find("tgt_big");
         assert_eq!(big["verb"], json!("queue_rewrite"));
         assert!(!blockers(big).contains(&"DurableGuardWouldArchiveHub".to_string()));
+    }
+
+    // --- Stage 1: outcome_gated_consolidation_status -----------------------
+
+    fn ogc_action(target: &str, verb: &str, eligible: bool, blockers: &[&str]) -> Value {
+        json!({
+            "target_key": target,
+            "verb": verb,
+            "candidate_blockers": blockers,
+            "shadow_eligible": eligible,
+        })
+    }
+
+    fn ogc_summary() -> Value {
+        json!({ "scanned_records": 12, "active_records": 9 })
+    }
+
+    fn ogc_blocker_list(status: &Value) -> Vec<String> {
+        status["boundary_check"]["blockers"]
+            .as_array()
+            .expect("blockers array")
+            .iter()
+            .map(|b| b.as_str().unwrap().to_string())
+            .collect()
+    }
+
+    fn ogc_assert_no_mutation_side_effects(status: &Value) {
+        let se = &status["side_effects"];
+        for key in [
+            "archives_memory",
+            "supersedes_memory",
+            "rewrites_memory_content",
+            "writes_memory",
+            "writes_graph_edges",
+            "runs_memory_consolidate",
+            "runs_memory_compact",
+            "changes_memory_search_order",
+            "changes_default_memory_schema",
+            "applies_any_gated_verb",
+            "authorizes_apply_now",
+        ] {
+            assert_eq!(se[key], json!(false), "side_effect {key} must be false");
+        }
+        assert_eq!(status["data_access"]["reads_memory_rows"], json!(true));
+        assert_eq!(status["data_access"]["mutates_state"], json!(false));
+        assert_eq!(status["read_only"], json!(true));
+        assert_eq!(status["next_stage"]["available"], json!(false));
+        assert_eq!(
+            status["schema"],
+            json!("agent_bridge.outcome_gated_consolidation.status.v1")
+        );
+    }
+
+    #[test]
+    fn outcome_gated_status_default_off_blocks_with_feature_first() {
+        // Default flags: runtime disabled, no per-call opt-in, even with an
+        // otherwise-eligible candidate present.
+        let actions = vec![ogc_action("tgt_stale", "archive_via_consolidate", true, &[])];
+        let status = outcome_gated_consolidation_status_eval(
+            &actions,
+            &ogc_summary(),
+            OutcomeGatedConsolidationStatusFlags {
+                runtime_enabled: false,
+                operator_disabled: false,
+                per_call_opt_in: false,
+            },
+        );
+        assert_eq!(status["boundary_check"]["may_apply"], json!(false));
+        let blockers = ogc_blocker_list(&status);
+        // Feature gate is the most-fundamental blocker, listed first.
+        assert_eq!(blockers.first().map(String::as_str), Some("feature_runtime_disabled"));
+        assert!(blockers.contains(&"per_call_opt_in_missing".to_string()));
+        assert!(!blockers.contains(&"no_shadow_eligible_candidates".to_string()));
+        assert_eq!(status["status"], json!("feature_runtime_disabled"));
+        assert_eq!(status["candidates"]["shadow_eligible"], json!(1));
+        ogc_assert_no_mutation_side_effects(&status);
+    }
+
+    #[test]
+    fn outcome_gated_status_ready_when_all_gates_open() {
+        let actions = vec![
+            ogc_action("tgt_stale", "archive_via_consolidate", true, &[]),
+            ogc_action("tgt_harm", "archive_direct", true, &[]),
+            ogc_action("tgt_dup", "archive_via_consolidate", false, &["QuorumNotMet"]),
+        ];
+        let status = outcome_gated_consolidation_status_eval(
+            &actions,
+            &ogc_summary(),
+            OutcomeGatedConsolidationStatusFlags {
+                runtime_enabled: true,
+                operator_disabled: false,
+                per_call_opt_in: true,
+            },
+        );
+        assert_eq!(status["boundary_check"]["may_apply"], json!(true));
+        assert!(ogc_blocker_list(&status).is_empty());
+        assert_eq!(status["status"], json!("ready_for_transition_gate"));
+        assert_eq!(status["candidates"]["total"], json!(3));
+        assert_eq!(status["candidates"]["shadow_eligible"], json!(2));
+        assert_eq!(status["candidates"]["blocked"], json!(1));
+        // Verb rollup counts only the eligible candidates.
+        assert_eq!(
+            status["candidates"]["eligible_verb_counts"]["archive_via_consolidate"],
+            json!(1)
+        );
+        assert_eq!(
+            status["candidates"]["eligible_verb_counts"]["archive_direct"],
+            json!(1)
+        );
+        // Blocker histogram spans every candidate, eligible or not.
+        assert_eq!(
+            status["candidates"]["candidate_blocker_counts"]["QuorumNotMet"],
+            json!(1)
+        );
+        // may_apply=true STILL applies nothing.
+        ogc_assert_no_mutation_side_effects(&status);
+    }
+
+    #[test]
+    fn outcome_gated_status_operator_disable_takes_precedence() {
+        let actions = vec![ogc_action("tgt_stale", "archive_via_consolidate", true, &[])];
+        let status = outcome_gated_consolidation_status_eval(
+            &actions,
+            &ogc_summary(),
+            OutcomeGatedConsolidationStatusFlags {
+                runtime_enabled: true,
+                operator_disabled: true,
+                per_call_opt_in: true,
+            },
+        );
+        assert_eq!(status["boundary_check"]["may_apply"], json!(false));
+        assert!(ogc_blocker_list(&status).contains(&"operator_disabled".to_string()));
+        assert_eq!(status["status"], json!("operator_disabled"));
+        ogc_assert_no_mutation_side_effects(&status);
+    }
+
+    #[test]
+    fn outcome_gated_status_no_eligible_candidates_blocks() {
+        // All gates open, but every candidate is shadow-blocked.
+        let actions = vec![
+            ogc_action("tgt_dup", "archive_via_consolidate", false, &["QuorumNotMet", "SingleSourceOnly"]),
+            ogc_action("tgt_hub", "archive_direct", false, &["DurableGuardWouldArchiveHub"]),
+        ];
+        let status = outcome_gated_consolidation_status_eval(
+            &actions,
+            &ogc_summary(),
+            OutcomeGatedConsolidationStatusFlags {
+                runtime_enabled: true,
+                operator_disabled: false,
+                per_call_opt_in: true,
+            },
+        );
+        assert_eq!(status["boundary_check"]["may_apply"], json!(false));
+        assert_eq!(ogc_blocker_list(&status), vec!["no_shadow_eligible_candidates".to_string()]);
+        assert_eq!(status["status"], json!("no_eligible_candidates"));
+        assert_eq!(status["candidates"]["shadow_eligible"], json!(0));
+        assert_eq!(
+            status["candidates"]["candidate_blocker_counts"]["SingleSourceOnly"],
+            json!(1)
+        );
+        ogc_assert_no_mutation_side_effects(&status);
+    }
+
+    #[test]
+    fn outcome_gated_status_empty_shadow_blocks_on_eligibility() {
+        // No negative-feedback candidates at all: gates open but nothing to do.
+        let status = outcome_gated_consolidation_status_eval(
+            &[],
+            &ogc_summary(),
+            OutcomeGatedConsolidationStatusFlags {
+                runtime_enabled: true,
+                operator_disabled: false,
+                per_call_opt_in: true,
+            },
+        );
+        assert_eq!(status["boundary_check"]["may_apply"], json!(false));
+        assert_eq!(status["candidates"]["total"], json!(0));
+        assert_eq!(ogc_blocker_list(&status), vec!["no_shadow_eligible_candidates".to_string()]);
+        ogc_assert_no_mutation_side_effects(&status);
     }
 
     #[tokio::test]

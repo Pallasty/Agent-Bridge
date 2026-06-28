@@ -172,11 +172,28 @@ rather than forcing a merge. Keep `Missing` as a corpus-gap counter.
   candidate. `read_only=true`, schema `v0→v1`. Pure fn, no writes. **Ship Fix A
   (durable-guard narrowing) in this same PR**, behind a SQL change + dry-run
   eligibility readback. *(~1 day + the guard fix.)*
-- **Stage 1 — Status gate (read-only):** `outcome_gated_consolidation_status`,
-  a pure `evaluate()` (mirrors `BioCortexRetrievalOptInRequest::evaluate`,
-  `lib.rs:353`) → `may_apply` + blockers `[FeatureDisabled, OperatorDisabled,
-  RuntimeDisabled, PerCallOptInMissing, QuorumNotMet, QueuePacketStale,
-  SingleSourceOnly, DurableGuardWouldArchiveHub]`. `side_effects` all-false.
+- **Stage 1 — Status gate (read-only) — LANDED 2026-06-28:**
+  `outcome_gated_consolidation_status`, a pure
+  `outcome_gated_consolidation_status_eval()` (mirrors
+  `BioCortexRetrievalOptInRequest::evaluate`, `lib.rs:353`, and
+  `trigger_recall_opt_in_status`) over the Stage-0 `gated_actions` shadow →
+  `boundary_check.may_apply` + ordered gate blockers `[feature_runtime_disabled,
+  operator_disabled, per_call_opt_in_missing, no_shadow_eligible_candidates]`
+  (most-fundamental first; the leading entry is the next thing to fix).
+  **Refinement vs. the original sketch:** the *per-candidate* eligibility
+  blockers (`QuorumNotMet`, `SingleSourceOnly`, `DurableGuardWouldArchiveHub`,
+  `ContentMergeUnverified`) stay on each `gated_action` (Stage 0) and are
+  surfaced here as a `candidates.candidate_blocker_counts` histogram; the gate
+  collapses them into the single "≥1 `shadow_eligible` candidate?" check, so
+  `FeatureDisabled`/`RuntimeDisabled` also merge into one
+  `feature_runtime_disabled` (the env flag *is* the runtime feature).
+  `QueuePacketStale` is deferred to the Stage 2 transition gate that consumes a
+  status packet. `side_effects` mutation inventory is all-false; a separate
+  `data_access` block honestly marks the read-only row/edge reads. Default-OFF
+  behind `AB_OUTCOME_GATED_CONSOLIDATION` (+ operator kill
+  `AB_OUTCOME_GATED_CONSOLIDATION_DISABLE`); registered at `Tier::Niche` with
+  the other gate-ceremony tools. `may_apply=true` authorizes *only* a later
+  Stage 2 transition-gate request — no verb is ever applied by this surface.
 - **Stage 2 — Transition gate (supervisor cross-check):**
   `…_transition_gate` validates `schema==v1`, `read_only`, no raw payload,
   quorum complete, anchor matches `OUTCOME_GATED_CONSOLIDATION_ANCHOR`; echoes
