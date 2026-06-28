@@ -37904,7 +37904,18 @@ fn outcome_gated_apply_trial_plan_candidate(
         // Stale/duplicate → route to memory_consolidate. Recompute the same
         // jaccard + winner the executor uses, scoped to the target's kind.
         "archive_via_consolidate" => {
-            let mut best: Option<(&MemoryRecord, f64)> = None;
+            // memory_consolidate archives the LOSER of every above-threshold
+            // same-kind pair, so the target is archived iff some similar peer
+            // OUTRANKS it; the canonical winner is the highest-ranked such peer.
+            // Selecting by rank (not by similarity) matches the executor — a very
+            // similar but lower-ranked peer must not mask a higher-ranked one that
+            // would actually archive the target. Iteration order over `by_key`
+            // (a RandomState HashMap) is non-deterministic, so ties break on the
+            // peer key to keep the plan — and thus the Stage 4 diff_hash —
+            // reproducible across recomputes.
+            let target_rank = outcome_gated_consolidate_rank(target);
+            let mut any_similar = false;
+            let mut winner: Option<(&MemoryRecord, f64, f64)> = None; // (peer, rank, sim)
             for cand in by_key.values() {
                 if cand.key == target.key || cand.kind != target.kind {
                     continue;
@@ -37913,46 +37924,44 @@ fn outcome_gated_apply_trial_plan_candidate(
                 if sim < min_sim {
                     continue;
                 }
-                if best.map(|(_, s)| sim > s).unwrap_or(true) {
-                    best = Some((cand, sim));
+                any_similar = true;
+                let cand_rank = outcome_gated_consolidate_rank(cand);
+                if cand_rank <= target_rank {
+                    continue; // cannot archive the target
+                }
+                let better = match winner {
+                    None => true,
+                    Some((w, w_rank, _)) => {
+                        cand_rank > w_rank || (cand_rank == w_rank && cand.key < w.key)
+                    }
+                };
+                if better {
+                    winner = Some((cand, cand_rank, sim));
                 }
             }
-            match best {
+            match winner {
+                Some((peer, _, sim)) => accepted(json!({
+                    "op": "memory_consolidate",
+                    "winner": peer.key,
+                    "loser": target_key,
+                    "loser_to_status": "archived",
+                    "supersedes_edge": {
+                        "from": peer.key,
+                        "to": target_key,
+                        "edge_type": "supersedes",
+                        "weight": 1.0
+                    },
+                    "similarity": (sim * 100.0).round() / 100.0
+                })),
+                // Similar peers exist but none outrank the target → target wins.
+                None if any_similar => held(
+                    "target_is_consolidate_winner",
+                    json!({ "op": "memory_consolidate", "would_keep": target_key }),
+                ),
                 None => held(
                     "no_consolidate_partner_above_threshold",
                     json!({ "op": "memory_consolidate", "target": target_key, "min_similarity": min_sim }),
                 ),
-                Some((partner, sim)) => {
-                    let target_rank = outcome_gated_consolidate_rank(target);
-                    let partner_rank = outcome_gated_consolidate_rank(partner);
-                    // Tie favors the target as winner (>=) → we then HOLD, never
-                    // archiving a memory that ranks at least as high as its peer.
-                    if target_rank >= partner_rank {
-                        held(
-                            "target_is_consolidate_winner",
-                            json!({
-                                "op": "memory_consolidate",
-                                "would_keep": target_key,
-                                "would_archive_instead": partner.key,
-                                "similarity": (sim * 100.0).round() / 100.0
-                            }),
-                        )
-                    } else {
-                        accepted(json!({
-                            "op": "memory_consolidate",
-                            "winner": partner.key,
-                            "loser": target_key,
-                            "loser_to_status": "archived",
-                            "supersedes_edge": {
-                                "from": partner.key,
-                                "to": target_key,
-                                "edge_type": "supersedes",
-                                "weight": 1.0
-                            },
-                            "similarity": (sim * 100.0).round() / 100.0
-                        }))
-                    }
-                }
             }
         }
         // too_large → shrinking content is a content decision, not a lifecycle
@@ -77743,6 +77752,34 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert_eq!(trial["summary"]["candidates"], json!(5));
         assert_eq!(trial["summary"]["accepted"], json!(2));
         assert_eq!(trial["summary"]["held"], json!(3));
+        ogc_assert_trial_no_side_effects(&trial);
+    }
+
+    #[test]
+    fn outcome_gated_apply_trial_consolidate_picks_outranking_peer_not_highest_sim() {
+        // a_low is equally similar to the target but ranks BELOW it; z_high is
+        // equally similar and ranks ABOVE it. The plan must archive the target
+        // under z_high (the peer that would actually win), never hold it because
+        // a lower-ranked similar peer was visited first.
+        let recs = vec![
+            t4_memory_record("t_mid", "lesson", "shared body alpha beta gamma", &[], &[], 0, 0.5),
+            t4_memory_record("a_low", "lesson", "shared body alpha beta delta", &[], &[], 0, 0.2),
+            // identical content to a_low ⇒ identical similarity; higher rank.
+            t4_memory_record("z_high", "lesson", "shared body alpha beta delta", &[], &[], 9, 0.5),
+        ];
+        let by_key: HashMap<String, &MemoryRecord> =
+            recs.iter().map(|r| (r.key.clone(), r)).collect();
+        let trial = outcome_gated_consolidation_apply_trial_eval(
+            &ogc_allowed_transition_packet(),
+            ogc_trial_flags_open(),
+            &[ogc_action("t_mid", "archive_via_consolidate", true, &[])],
+            &by_key,
+            0.45,
+        );
+        let entry = ogc_trial_entry(&trial, "t_mid");
+        assert_eq!(entry["decision"], json!("accepted"), "target is outranked ⇒ archived");
+        assert_eq!(entry["planned_mutation"]["winner"], json!("z_high"));
+        assert_eq!(entry["planned_mutation"]["loser"], json!("t_mid"));
         ogc_assert_trial_no_side_effects(&trial);
     }
 
