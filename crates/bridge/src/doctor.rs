@@ -739,8 +739,17 @@ fn system_control_audit_dir() -> PathBuf {
     if Path::new("/Data").is_dir() {
         return PathBuf::from("/Data/agent-bridge/system-control");
     }
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/".into());
-    PathBuf::from(home).join(".local/share/agent-bridge/system-control")
+    let home = PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| "/".into()));
+    // Per-OS data dir (mirror of setup::agent_bridge_data_dir): macOS uses
+    // ~/Library/Application Support; Linux honours XDG_DATA_HOME then falls
+    // back to ~/.local/share.
+    #[cfg(target_os = "macos")]
+    let dir = home.join("Library/Application Support/agent-bridge/system-control");
+    #[cfg(not(target_os = "macos"))]
+    let dir = std::env::var("XDG_DATA_HOME")
+        .map(|x| PathBuf::from(x).join("agent-bridge/system-control"))
+        .unwrap_or_else(|_| home.join(".local/share/agent-bridge/system-control"));
+    dir
 }
 
 #[cfg(unix)]
