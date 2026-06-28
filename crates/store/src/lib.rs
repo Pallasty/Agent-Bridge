@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod coactivation_latch;
 pub mod codebase;
+pub mod connectivity_repair;
 pub mod embedding;
 pub mod quant;
 pub mod sqlite;
