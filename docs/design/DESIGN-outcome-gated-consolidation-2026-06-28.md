@@ -247,10 +247,24 @@ rather than forcing a merge. Keep `Missing` as a corpus-gap counter.
   defense as in Stage 2. `side_effects` all-false; registered `Tier::Niche`;
   default-OFF behind `AB_OUTCOME_GATED_CONSOLIDATION`. Models
   `trigger_recall_opt_in_gated_baseline_trial`.
-- **Stage 4 — Approval packet (owner sign-off):** `…_approval_packet` freezes
-  the Stage-3 diff under sha256 (`memory_biocortex_sha256_json`) +
-  reviewer/commit/forum refs + single-use `per_call_apply_token`. Execution is
-  valid only against a packet whose hash still matches a live recompute.
+- **Stage 4 — Approval packet (owner sign-off) — LANDED 2026-06-28:**
+  `outcome_gated_consolidation_approval_packet` validates a Stage 3 apply-trial
+  packet (schema/read_only/`dry_run_forced`/`status==trial_complete`/side_effects/
+  raw + the trial's own `runtime_gate.accepted` & `transition_gate_check.accepted`
+  + `accepted_actions>0`), **re-asserts the runtime gate + anchor**, and
+  **REQUIRES all four owner refs** (`reviewer`/`commit`/`forum_post_id`/
+  `memory_key` — vs. presence-only optional at Stages 2-3). Only if all pass does
+  it freeze a **volatile-field-free canonical diff** (plan target/verb/decision/
+  hold_reason/planned_mutation + `min_similarity`, excluding `generated_at`)
+  under `diff_hash = memory_biocortex_sha256_json(canonical)` and issue
+  `apply_token = sha256({diff_hash, reviewer, commit, forum_post_id, memory_key,
+  anchor})` (raw refs hashed in, never echoed). `accepted_targets` surfaces the
+  approved {target,verb}. Blocked ⇒ `diff_hash`/`apply_token` null. Pure fn (no
+  store); `may_apply_now=false`, `next_allowed_surface=session_finalize(...)`.
+  `execution_contract` declares the Stage 5 obligation:
+  `valid_only_if_diff_hash_matches_live_recompute` + `apply_token_single_use`.
+  Registered `Tier::Niche`; default-OFF. Models the house `*_approval_packet` /
+  `enforce_hold_approval_packet` tools.
 - **Stage 5 — Execution in `session_finalize`:** add
   `apply_outcome_gated: bool = false` + `approval_packet` args. **Default false
   ⇒ zero behavior change** (only an added read-only `follow_up` hint next to

@@ -38371,6 +38371,419 @@ impl McpTool for OutcomeGatedConsolidationApplyTrialTool {
     }
 }
 
+// ===========================================================================
+//   outcome_gated_consolidation_approval_packet — Stage 4 owner sign-off
+// ===========================================================================
+
+/// Stage 4 approval-packet schema.
+const OUTCOME_GATED_CONSOLIDATION_APPROVAL_PACKET_SCHEMA: &str =
+    "agent_bridge.outcome_gated_consolidation.approval_packet.v1";
+
+/// Runtime/operator/opt-in/anchor flags + the four owner sign-off refs for the
+/// Stage 4 approval packet. Unlike Stages 2-3 (presence-only optional refs),
+/// Stage 4 REQUIRES all four refs to be present.
+struct OutcomeGatedConsolidationApprovalFlags {
+    runtime_enabled: bool,
+    operator_disabled: bool,
+    per_call_opt_in: bool,
+    anchor_ok: bool,
+    outer_raw_payload_present: bool,
+    reviewer: Option<String>,
+    commit: Option<String>,
+    forum_post_id: Option<String>,
+    memory_key: Option<String>,
+}
+
+/// Narrow content-leak check for a Stage 3 trial packet. Unlike
+/// `outcome_gated_packet_contains_raw` (which also denies key-type fields like
+/// `target_key`), a trial packet LEGITIMATELY carries target/winner/loser keys
+/// in its plan — so here we reject only actual memory *content* fields.
+fn outcome_gated_contains_memory_content(value: &Value) -> bool {
+    fn key_is_content(key: &str) -> bool {
+        matches!(key, "content" | "raw_content" | "preview")
+    }
+    match value {
+        Value::Object(map) => map
+            .iter()
+            .any(|(key, val)| key_is_content(key) || outcome_gated_contains_memory_content(val)),
+        Value::Array(values) => values.iter().any(outcome_gated_contains_memory_content),
+        _ => false,
+    }
+}
+
+/// The stable, volatile-field-free projection of a Stage 3 trial's plan that the
+/// approval hash commits to. Excludes `generated_at` and any field that changes
+/// per call; includes exactly what must remain identical for the approval to
+/// stay valid — so a Stage 5 live recompute can re-derive and compare it.
+fn outcome_gated_approval_canonical_diff(trial_packet: &Value) -> Value {
+    let plan: Vec<Value> = trial_packet
+        .get("plan")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .map(|p| {
+                    json!({
+                        "target_key": p.get("target_key").cloned().unwrap_or(Value::Null),
+                        "verb": p.get("verb").cloned().unwrap_or(Value::Null),
+                        "decision": p.get("decision").cloned().unwrap_or(Value::Null),
+                        "hold_reason": p.get("hold_reason").cloned().unwrap_or(Value::Null),
+                        "planned_mutation": p.get("planned_mutation").cloned().unwrap_or(Value::Null),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    json!({
+        "min_similarity": trial_packet.get("min_similarity").cloned().unwrap_or(Value::Null),
+        "plan": plan
+    })
+}
+
+/// Stage 4 (outcome-gated consolidation): read-only **owner approval packet**.
+/// Validates a Stage 3 apply-trial packet, re-asserts the runtime gate, requires
+/// the owner sign-off refs + anchor, and — only if all pass — freezes the trial
+/// diff under a sha256 `diff_hash` and issues a binding `apply_token`. Writes
+/// nothing and applies no verb: it authorizes only a later Stage 5 execution
+/// whose live recompute must still hash to `diff_hash`. Models the
+/// `*_approval_packet` / `enforce_hold_approval_packet` house tools.
+fn outcome_gated_consolidation_approval_packet_eval(
+    trial_packet: &Value,
+    flags: OutcomeGatedConsolidationApprovalFlags,
+) -> Value {
+    let trial_schema = trial_packet.get("schema").and_then(Value::as_str).unwrap_or("");
+    let trial_read_only = trial_packet
+        .get("read_only")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let trial_dry_run_forced = trial_packet
+        .get("dry_run_forced")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let trial_status = trial_packet.get("status").and_then(Value::as_str).unwrap_or("missing");
+    // Narrow content check: the trial plan legitimately carries target keys.
+    let trial_contains_raw = outcome_gated_contains_memory_content(trial_packet);
+    let trial_side_effects_safe = trial_packet
+        .get("side_effects")
+        .and_then(Value::as_object)
+        .map(|m| m.values().all(|v| v.as_bool() == Some(false)))
+        .unwrap_or(false);
+    // The trial's own gates must have passed (the plan is only meaningful then).
+    let trial_gates_accepted = trial_packet
+        .pointer("/runtime_gate/accepted")
+        .and_then(Value::as_bool)
+        == Some(true)
+        && trial_packet
+            .pointer("/transition_gate_check/accepted")
+            .and_then(Value::as_bool)
+            == Some(true);
+    let accepted_actions = trial_packet
+        .pointer("/summary/accepted")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let held_actions = trial_packet
+        .pointer("/summary/held")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+
+    // Trial-packet integrity.
+    let mut trial_blockers: Vec<String> = Vec::new();
+    if trial_schema != OUTCOME_GATED_CONSOLIDATION_APPLY_TRIAL_SCHEMA {
+        trial_blockers.push("apply_trial_packet_schema_mismatch".to_string());
+    }
+    if !trial_read_only {
+        trial_blockers.push("apply_trial_packet_not_read_only".to_string());
+    }
+    if !trial_dry_run_forced {
+        trial_blockers.push("apply_trial_packet_dry_run_not_forced".to_string());
+    }
+    if trial_status != "trial_complete" {
+        trial_blockers.push("apply_trial_not_complete".to_string());
+    }
+    if trial_contains_raw {
+        trial_blockers.push("apply_trial_packet_contains_raw_payload".to_string());
+    }
+    if flags.outer_raw_payload_present {
+        trial_blockers.push("raw_payload_fields_present".to_string());
+    }
+    if !trial_side_effects_safe {
+        trial_blockers.push("apply_trial_side_effect_contract_invalid".to_string());
+    }
+    if !trial_gates_accepted {
+        trial_blockers.push("apply_trial_gates_not_accepted".to_string());
+    }
+    if accepted_actions == 0 {
+        trial_blockers.push("no_accepted_actions_to_approve".to_string());
+    }
+    let trial_ok = trial_blockers.is_empty();
+
+    // Re-assert the runtime gate (same default-off posture as Stage 3).
+    let mut runtime_blockers: Vec<String> = Vec::new();
+    if !flags.runtime_enabled {
+        runtime_blockers.push("feature_runtime_disabled".to_string());
+    }
+    if flags.operator_disabled {
+        runtime_blockers.push("operator_disabled".to_string());
+    }
+    if !flags.per_call_opt_in {
+        runtime_blockers.push("per_call_opt_in_missing".to_string());
+    }
+    if !flags.anchor_ok {
+        runtime_blockers.push("regression_anchor_mismatch".to_string());
+    }
+    let runtime_ok = runtime_blockers.is_empty();
+
+    // Owner sign-off: all four refs REQUIRED (non-empty).
+    let present = |v: &Option<String>| v.as_ref().map(|s| !s.trim().is_empty()).unwrap_or(false);
+    let reviewer_present = present(&flags.reviewer);
+    let commit_present = present(&flags.commit);
+    let forum_post_id_present = present(&flags.forum_post_id);
+    let memory_key_present = present(&flags.memory_key);
+    let mut ref_blockers: Vec<String> = Vec::new();
+    if !reviewer_present {
+        ref_blockers.push("reviewer_missing".to_string());
+    }
+    if !commit_present {
+        ref_blockers.push("commit_missing".to_string());
+    }
+    if !forum_post_id_present {
+        ref_blockers.push("forum_post_id_missing".to_string());
+    }
+    if !memory_key_present {
+        ref_blockers.push("memory_key_missing".to_string());
+    }
+    let refs_ok = ref_blockers.is_empty();
+
+    let approved = trial_ok && runtime_ok && refs_ok;
+
+    // Freeze the diff + issue the binding token ONLY when approved.
+    let canonical = outcome_gated_approval_canonical_diff(trial_packet);
+    let (diff_hash, apply_token, accepted_targets) = if approved {
+        let diff_hash = memory_biocortex_sha256_json(&canonical);
+        // The token binds the frozen diff to this exact approver + anchor. The
+        // raw refs are hashed in, never echoed. Single-use enforcement is
+        // Stage 5's responsibility (record consumed tokens); here it is a
+        // reproducible commitment a later execution must reproduce.
+        let token = memory_biocortex_sha256_json(&json!({
+            "diff_hash": diff_hash,
+            "reviewer": flags.reviewer,
+            "commit": flags.commit,
+            "forum_post_id": flags.forum_post_id,
+            "memory_key": flags.memory_key,
+            "anchor": OUTCOME_GATED_CONSOLIDATION_ANCHOR
+        }));
+        let targets: Vec<Value> = trial_packet
+            .get("plan")
+            .and_then(Value::as_array)
+            .map(|rows| {
+                rows.iter()
+                    .filter(|p| p.get("decision").and_then(Value::as_str) == Some("accepted"))
+                    .map(|p| {
+                        json!({
+                            "target_key": p.get("target_key").cloned().unwrap_or(Value::Null),
+                            "verb": p.get("verb").cloned().unwrap_or(Value::Null)
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        (Value::String(diff_hash), Value::String(token), Value::Array(targets))
+    } else {
+        (Value::Null, Value::Null, Value::Array(Vec::new()))
+    };
+
+    let mut all_blockers: Vec<String> = Vec::new();
+    all_blockers.extend(runtime_blockers.iter().cloned());
+    all_blockers.extend(trial_blockers.iter().cloned());
+    all_blockers.extend(ref_blockers.iter().cloned());
+
+    let status = if approved {
+        "approved"
+    } else if !runtime_ok {
+        "blocked_by_runtime_gate"
+    } else if !trial_ok {
+        "blocked_by_apply_trial"
+    } else {
+        "blocked_missing_owner_signoff"
+    };
+
+    json!({
+        "schema": OUTCOME_GATED_CONSOLIDATION_APPROVAL_PACKET_SCHEMA,
+        "generated_at": unix_now_secs(),
+        "read_only": true,
+        "status": status,
+        "runtime_gate": {
+            "runtime_enable_env": OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV,
+            "runtime_enabled": flags.runtime_enabled,
+            "operator_disable_env": OUTCOME_GATED_CONSOLIDATION_DISABLE_ENV,
+            "operator_disabled": flags.operator_disabled,
+            "per_call_opt_in": flags.per_call_opt_in,
+            "regression_anchor_matches": flags.anchor_ok,
+            "required_anchor": OUTCOME_GATED_CONSOLIDATION_ANCHOR,
+            "feature_flag_default_off": true,
+            "accepted": runtime_ok,
+            "blockers": runtime_blockers
+        },
+        "source_trial_check": {
+            "schema_matches": trial_schema == OUTCOME_GATED_CONSOLIDATION_APPLY_TRIAL_SCHEMA,
+            "read_only": trial_read_only,
+            "dry_run_forced": trial_dry_run_forced,
+            "status": trial_status,
+            "gates_accepted": trial_gates_accepted,
+            "side_effect_contract_safe": trial_side_effects_safe,
+            "accepted_actions": accepted_actions,
+            "held_actions": held_actions,
+            "apply_trial_packet_included": false,
+            "accepted": trial_ok,
+            "blockers": trial_blockers
+        },
+        "review_refs": {
+            "reviewer_present": reviewer_present,
+            "commit_present": commit_present,
+            "forum_post_id_present": forum_post_id_present,
+            "memory_key_present": memory_key_present,
+            "all_required_present": refs_ok,
+            "blockers": ref_blockers
+        },
+        "approval": {
+            "approved": approved,
+            "diff_hash": diff_hash,
+            "apply_token": apply_token,
+            "accepted_action_count": accepted_actions,
+            "held_action_count": held_actions,
+            "accepted_targets": accepted_targets
+        },
+        "execution_contract": {
+            "valid_only_if_diff_hash_matches_live_recompute": true,
+            "apply_token_single_use": true,
+            "may_apply_now": false,
+            "next_allowed_surface": if approved {
+                "session_finalize(apply_outcome_gated=true, approval_packet=...)"
+            } else {
+                "none"
+            }
+        },
+        "boundary_check": {
+            "approved": approved,
+            "blockers": all_blockers
+        },
+        "side_effects": {
+            "archives_memory": false,
+            "supersedes_memory": false,
+            "rewrites_memory_content": false,
+            "writes_memory": false,
+            "writes_graph_edges": false,
+            "runs_memory_consolidate": false,
+            "runs_memory_compact": false,
+            "writes_approval_record": false,
+            "applies_any_gated_verb": false,
+            "executes_any_plan_action": false
+        }
+    })
+}
+
+/// Stage 4 of outcome-gated consolidation. Read-only owner approval packet:
+/// validates a Stage 3 apply-trial packet, re-asserts the runtime gate, requires
+/// the owner sign-off refs + anchor, and — only if all pass — freezes the trial
+/// diff under a sha256 `diff_hash` + issues a binding `apply_token`. Writes
+/// nothing. Default-OFF behind `AB_OUTCOME_GATED_CONSOLIDATION`.
+pub struct OutcomeGatedConsolidationApprovalPacketTool;
+impl OutcomeGatedConsolidationApprovalPacketTool {
+    pub fn new() -> Self {
+        Self
+    }
+}
+impl Default for OutcomeGatedConsolidationApprovalPacketTool {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+#[async_trait]
+impl McpTool for OutcomeGatedConsolidationApprovalPacketTool {
+    fn name(&self) -> &'static str {
+        "outcome_gated_consolidation_approval_packet"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only Stage 4 owner approval packet for outcome-gated memory \
+                consolidation. Validates a Stage 3 outcome_gated_consolidation_apply_trial \
+                packet, re-asserts the runtime/operator/per-call gate + anchor, and REQUIRES \
+                reviewer/commit/forum_post_id/memory_key. Only if all pass does it freeze the \
+                trial diff under a sha256 diff_hash and issue a binding apply_token. Default-OFF \
+                behind AB_OUTCOME_GATED_CONSOLIDATION. It writes nothing, records no approval, \
+                and applies no verb — it authorizes only a later Stage 5 execution whose live \
+                recompute must still hash to diff_hash."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["apply_trial_packet", "reviewer", "commit", "forum_post_id", "memory_key"],
+                "properties": {
+                    "apply_trial_packet": { "type": "object", "description": "JSON object produced by outcome_gated_consolidation_apply_trial. Consumed for integrity + diff freeze; not echoed." },
+                    "reviewer": { "type": "string", "description": "Approving reviewer handle (required; hashed into the token, never echoed)." },
+                    "commit": { "type": "string", "description": "Commit ref under review (required)." },
+                    "forum_post_id": { "type": "string", "description": "Forum review thread/post id (required)." },
+                    "memory_key": { "type": "string", "description": "Decision memory key recording the approval (required)." },
+                    "regression_anchor": { "type": "string", "description": "Must equal the current outcome-gated anchor string." },
+                    "per_call_opt_in": { "type": "boolean", "default": false, "description": "Per-call consent to mint an approval packet now." },
+                    "operator_disabled": { "type": "boolean", "default": false, "description": "Per-call operator kill-switch. OR-ed with the AB_OUTCOME_GATED_CONSOLIDATION_DISABLE env." }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let trial_packet = args
+            .get("apply_trial_packet")
+            .cloned()
+            .unwrap_or(Value::Null);
+        let operator_disabled = args
+            .get("operator_disabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            || mcp_env_truthy(OUTCOME_GATED_CONSOLIDATION_DISABLE_ENV);
+        let anchor = args
+            .get("regression_anchor")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        // Detect raw memory keys/content in the OUTER args (defense in depth).
+        let mut outer = args.clone();
+        if let Some(obj) = outer.as_object_mut() {
+            for known in [
+                "apply_trial_packet",
+                "reviewer",
+                "commit",
+                "forum_post_id",
+                "memory_key",
+                "regression_anchor",
+                "per_call_opt_in",
+                "operator_disabled",
+            ] {
+                obj.remove(known);
+            }
+        }
+        let outer_raw_payload_present = outcome_gated_packet_contains_raw(&outer);
+        let flags = OutcomeGatedConsolidationApprovalFlags {
+            runtime_enabled: mcp_env_truthy(OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV),
+            operator_disabled,
+            per_call_opt_in: args
+                .get("per_call_opt_in")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            anchor_ok: anchor == OUTCOME_GATED_CONSOLIDATION_ANCHOR,
+            outer_raw_payload_present,
+            reviewer: args.get("reviewer").and_then(Value::as_str).map(str::to_string),
+            commit: args.get("commit").and_then(Value::as_str).map(str::to_string),
+            forum_post_id: args
+                .get("forum_post_id")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            memory_key: args.get("memory_key").and_then(Value::as_str).map(str::to_string),
+        };
+        Ok(ToolResult::json_text(
+            &outcome_gated_consolidation_approval_packet_eval(&trial_packet, flags),
+        ))
+    }
+}
+
 fn memory_biocortex_sha256_json(value: &Value) -> String {
     let encoded = serde_json::to_vec(value).unwrap_or_default();
     let mut hasher = Sha256::new();
@@ -58216,6 +58629,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
+        Tier::Niche,
+        Arc::new(OutcomeGatedConsolidationApprovalPacketTool::new()),
+    );
+    reg_if(
+        &mut reg,
+        policy,
         Tier::Standard,
         Arc::new(MemoryBioCortexShadowTrialTool::new(hub.clone())),
     );
@@ -77478,6 +77897,217 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         restore_env_var(OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV, prior_enable);
         restore_env_var(OUTCOME_GATED_CONSOLIDATION_DISABLE_ENV, prior_disable);
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    // --- Stage 4: outcome_gated_consolidation_approval_packet -------------
+
+    fn ogc_trial_complete_packet() -> Value {
+        let recs = vec![t4_memory_record("appr_t", "note", "a bad memory", &[], &[], 0, 0.5)];
+        let by_key: HashMap<String, &MemoryRecord> =
+            recs.iter().map(|r| (r.key.clone(), r)).collect();
+        outcome_gated_consolidation_apply_trial_eval(
+            &ogc_allowed_transition_packet(),
+            ogc_trial_flags_open(),
+            &[ogc_action("appr_t", "archive_direct", true, &[])],
+            &by_key,
+            0.45,
+        )
+    }
+
+    fn ogc_approval_flags_full(anchor_ok: bool) -> OutcomeGatedConsolidationApprovalFlags {
+        OutcomeGatedConsolidationApprovalFlags {
+            runtime_enabled: true,
+            operator_disabled: false,
+            per_call_opt_in: true,
+            anchor_ok,
+            outer_raw_payload_present: false,
+            reviewer: Some("alice".to_string()),
+            commit: Some("abc1234".to_string()),
+            forum_post_id: Some("forum:42".to_string()),
+            memory_key: Some("decision:approve_consolidation".to_string()),
+        }
+    }
+
+    fn ogc_assert_approval_no_side_effects(pkt: &Value) {
+        let se = &pkt["side_effects"];
+        for key in [
+            "archives_memory",
+            "supersedes_memory",
+            "rewrites_memory_content",
+            "writes_memory",
+            "writes_graph_edges",
+            "runs_memory_consolidate",
+            "runs_memory_compact",
+            "writes_approval_record",
+            "applies_any_gated_verb",
+            "executes_any_plan_action",
+        ] {
+            assert_eq!(se[key], json!(false), "approval side_effect {key} must be false");
+        }
+        assert_eq!(pkt["read_only"], json!(true));
+        assert_eq!(pkt["execution_contract"]["may_apply_now"], json!(false));
+        assert_eq!(
+            pkt["schema"],
+            json!("agent_bridge.outcome_gated_consolidation.approval_packet.v1")
+        );
+    }
+
+    fn ogc_approval_blockers(pkt: &Value) -> Vec<String> {
+        pkt["boundary_check"]["blockers"]
+            .as_array()
+            .expect("blockers")
+            .iter()
+            .map(|b| b.as_str().unwrap().to_string())
+            .collect()
+    }
+
+    #[test]
+    fn outcome_gated_approval_mints_packet_when_all_pass() {
+        let pkt = outcome_gated_consolidation_approval_packet_eval(
+            &ogc_trial_complete_packet(),
+            ogc_approval_flags_full(true),
+        );
+        assert_eq!(pkt["status"], json!("approved"));
+        assert_eq!(pkt["approval"]["approved"], json!(true));
+        let diff_hash = pkt["approval"]["diff_hash"].as_str().expect("diff_hash");
+        let token = pkt["approval"]["apply_token"].as_str().expect("apply_token");
+        assert!(diff_hash.starts_with("sha256:"));
+        assert!(token.starts_with("sha256:"));
+        assert_eq!(pkt["approval"]["accepted_action_count"], json!(1));
+        // The accepted target is surfaced but raw reviewer/commit are not echoed.
+        assert_eq!(pkt["approval"]["accepted_targets"][0]["target_key"], json!("appr_t"));
+        assert_eq!(pkt.get("reviewer"), None);
+        assert!(ogc_approval_blockers(&pkt).is_empty());
+        assert_eq!(
+            pkt["execution_contract"]["next_allowed_surface"],
+            json!("session_finalize(apply_outcome_gated=true, approval_packet=...)")
+        );
+        ogc_assert_approval_no_side_effects(&pkt);
+    }
+
+    #[test]
+    fn outcome_gated_approval_requires_all_owner_refs() {
+        let mut flags = ogc_approval_flags_full(true);
+        flags.reviewer = None;
+        flags.forum_post_id = Some("   ".to_string()); // whitespace ⇒ absent
+        let pkt = outcome_gated_consolidation_approval_packet_eval(
+            &ogc_trial_complete_packet(),
+            flags,
+        );
+        assert_eq!(pkt["status"], json!("blocked_missing_owner_signoff"));
+        assert_eq!(pkt["approval"]["approved"], json!(false));
+        assert_eq!(pkt["approval"]["diff_hash"], Value::Null);
+        assert_eq!(pkt["approval"]["apply_token"], Value::Null);
+        let bl = ogc_approval_blockers(&pkt);
+        assert!(bl.contains(&"reviewer_missing".to_string()));
+        assert!(bl.contains(&"forum_post_id_missing".to_string()));
+        ogc_assert_approval_no_side_effects(&pkt);
+    }
+
+    #[test]
+    fn outcome_gated_approval_runtime_and_anchor_gate_block() {
+        // Feature disabled AND anchor wrong: both fold into the runtime gate.
+        let mut flags = ogc_approval_flags_full(false);
+        flags.runtime_enabled = false;
+        let pkt = outcome_gated_consolidation_approval_packet_eval(
+            &ogc_trial_complete_packet(),
+            flags,
+        );
+        assert_eq!(pkt["status"], json!("blocked_by_runtime_gate"));
+        let bl = ogc_approval_blockers(&pkt);
+        assert!(bl.contains(&"feature_runtime_disabled".to_string()));
+        assert!(bl.contains(&"regression_anchor_mismatch".to_string()));
+        assert_eq!(pkt["approval"]["apply_token"], Value::Null);
+        ogc_assert_approval_no_side_effects(&pkt);
+    }
+
+    #[test]
+    fn outcome_gated_approval_rejects_incomplete_or_ungated_trial() {
+        // A trial that was itself blocked (runtime off) ⇒ status not complete,
+        // gates not accepted, nothing to approve.
+        let recs = vec![t4_memory_record("x", "note", "bad", &[], &[], 0, 0.5)];
+        let by_key: HashMap<String, &MemoryRecord> =
+            recs.iter().map(|r| (r.key.clone(), r)).collect();
+        let blocked_trial = outcome_gated_consolidation_apply_trial_eval(
+            &ogc_allowed_transition_packet(),
+            OutcomeGatedConsolidationTrialFlags {
+                runtime_enabled: false,
+                operator_disabled: false,
+                per_call_opt_in: true,
+                outer_raw_payload_present: false,
+            },
+            &[ogc_action("x", "archive_direct", true, &[])],
+            &by_key,
+            0.45,
+        );
+        let pkt = outcome_gated_consolidation_approval_packet_eval(
+            &blocked_trial,
+            ogc_approval_flags_full(true),
+        );
+        assert_eq!(pkt["status"], json!("blocked_by_apply_trial"));
+        let bl = ogc_approval_blockers(&pkt);
+        assert!(bl.contains(&"apply_trial_not_complete".to_string()));
+        assert!(bl.contains(&"apply_trial_gates_not_accepted".to_string()));
+        assert!(bl.contains(&"no_accepted_actions_to_approve".to_string()));
+        assert_eq!(pkt["approval"]["diff_hash"], Value::Null);
+        ogc_assert_approval_no_side_effects(&pkt);
+    }
+
+    #[test]
+    fn outcome_gated_approval_diff_hash_is_deterministic_and_plan_bound() {
+        let trial = ogc_trial_complete_packet();
+        let a =
+            outcome_gated_consolidation_approval_packet_eval(&trial, ogc_approval_flags_full(true));
+        let b =
+            outcome_gated_consolidation_approval_packet_eval(&trial, ogc_approval_flags_full(true));
+        // Same plan ⇒ identical frozen hash (Stage 5 can re-derive it).
+        assert_eq!(a["approval"]["diff_hash"], b["approval"]["diff_hash"]);
+
+        // Tamper the plan ⇒ the frozen hash must change.
+        let mut tampered = trial.clone();
+        tampered["plan"][0]["verb"] = json!("queue_rewrite");
+        let c = outcome_gated_consolidation_approval_packet_eval(
+            &tampered,
+            ogc_approval_flags_full(true),
+        );
+        assert_ne!(a["approval"]["diff_hash"], c["approval"]["diff_hash"]);
+    }
+
+    #[test]
+    fn outcome_gated_approval_schema_is_readonly_and_registered() {
+        let tool = OutcomeGatedConsolidationApprovalPacketTool::new();
+        let schema = tool.schema();
+        assert_eq!(schema.name, "outcome_gated_consolidation_approval_packet");
+        assert!(schema.description.contains("Read-only"));
+        assert!(schema.description.contains("writes nothing"));
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required");
+        for r in ["apply_trial_packet", "reviewer", "commit", "forum_post_id", "memory_key"] {
+            assert!(required.contains(&json!(r)), "{r} must be required");
+        }
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("apply").is_none());
+        assert!(props.get("execute").is_none());
+
+        let names: Vec<String> = build_registry_with_policy(
+            Hub::builder().build(),
+            ToolPolicy {
+                set: ToolSet::Profile,
+                profile: ToolProfile::All,
+            },
+        )
+        .list()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
+        assert!(names.contains(&schema.name));
     }
 
     #[tokio::test]
