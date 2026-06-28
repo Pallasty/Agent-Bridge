@@ -12,6 +12,7 @@ members = [
     "crates/bridge",
     "crates/ab-tts",
     "crates/oob-alert",
+    "crates/memory-columnar",
     "bin/agent-cli",
 ]
 
@@ -35,6 +36,7 @@ default-members = [
     "crates/bridge",
     "crates/ab-tts",
     "crates/oob-alert",
+    "crates/memory-columnar",
     "bin/agent-cli",
     # `crates/seed-bridge` stays in the workspace for explicit legacy checks,
     # but is not a default member because it requires the external AiOT

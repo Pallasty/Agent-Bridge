@@ -1,0 +1,32 @@
+[package]
+name = "ab-memory-columnar"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = """
+Read-only columnar (Arrow/Parquet) archive of the agent-bridge memories table —
+the "long-term memory library" surface (CascadeProjects scan T5 borrow).
+
+Projects each memories row into a typed columnar layout with the embedding as a
+real Arrow List<Float32> instead of an opaque BLOB, behind a versioned
+schema-contract. The codec is DB-agnostic; the read-only SQLite read lives in
+examples/memory_columnar_export.rs.
+"""
+
+[dependencies]
+thiserror.workspace = true
+arrow = "53.0"
+parquet = "53.0"
+sha2 = "0.10"
+
+[dev-dependencies]
+tempfile = "3"
+serde_json.workspace = true
+# Example reads the live memories table read-only; reuses ab-store's BLOB
+# decoder + default DB path. default-features off avoids the heavy ONNX build.
+ab-store = { path = "../store", default-features = false }
+tokio.workspace = true
+tokio-rusqlite.workspace = true
