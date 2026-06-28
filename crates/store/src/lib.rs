@@ -7,6 +7,7 @@ use ab_core::{NotifyEvent, Result, SessionId};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+pub mod coactivation_latch;
 pub mod codebase;
 pub mod embedding;
 pub mod quant;
