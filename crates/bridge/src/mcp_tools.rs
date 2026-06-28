@@ -36577,6 +36577,10 @@ impl McpTool for MemoryOrphanInventoryTool {
 #[derive(Clone, Copy, Debug)]
 struct MemoryConsolidationQueueOptions {
     max_per_bucket: usize,
+    /// Cap on the flat `gated_actions` list (Stage 0). Distinct from
+    /// `max_per_bucket` because gated_actions aggregate negative feedback across
+    /// buckets into one entry per target, so the two contracts can diverge.
+    max_gated_actions: usize,
     preview_chars: usize,
     large_content_chars: usize,
     low_use_max_access_count: u64,
@@ -36586,6 +36590,7 @@ impl Default for MemoryConsolidationQueueOptions {
     fn default() -> Self {
         Self {
             max_per_bucket: 20,
+            max_gated_actions: 50,
             preview_chars: 180,
             large_content_chars: 2_400,
             low_use_max_access_count: 1,
@@ -36966,7 +36971,7 @@ fn memory_consolidation_queue_from_records(
         .map(|(bucket, rows)| (bucket.clone(), rows.len()))
         .collect();
     let gated_actions =
-        memory_consolidation_gated_actions(&active, &by_key, edges_by_key, options.max_per_bucket);
+        memory_consolidation_gated_actions(&active, &by_key, edges_by_key, options.max_gated_actions);
 
     json!({
         "schema": "agent_bridge.memory_consolidation_queue.v1",
@@ -37060,6 +37065,13 @@ impl McpTool for MemoryConsolidationQueueTool {
                         "default": 20,
                         "description": "Maximum candidate rows returned per bucket."
                     },
+                    "max_gated_actions": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 50,
+                        "description": "Maximum entries in the flat gated_actions list (Stage 0 shadow)."
+                    },
                     "preview_chars": {
                         "type": "integer",
                         "minimum": 0,
@@ -37117,6 +37129,11 @@ impl McpTool for MemoryConsolidationQueueTool {
                 .and_then(Value::as_u64)
                 .unwrap_or(20)
                 .clamp(1, 100) as usize,
+            max_gated_actions: args
+                .get("max_gated_actions")
+                .and_then(Value::as_u64)
+                .unwrap_or(50)
+                .clamp(1, 500) as usize,
             preview_chars: args
                 .get("preview_chars")
                 .and_then(Value::as_u64)
@@ -37458,6 +37475,7 @@ impl McpTool for MemoryBioCortexShadowTrialTool {
             &queue_edges_by_key,
             MemoryConsolidationQueueOptions {
                 max_per_bucket: queue_max_per_bucket,
+                max_gated_actions: 50,
                 preview_chars: 0,
                 large_content_chars: 2_400,
                 low_use_max_access_count: 1,
@@ -75220,6 +75238,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             &edges_by_key,
             MemoryConsolidationQueueOptions {
                 max_per_bucket: 10,
+                max_gated_actions: 10,
                 preview_chars: 80,
                 large_content_chars: 1_000,
                 low_use_max_access_count: 1,
