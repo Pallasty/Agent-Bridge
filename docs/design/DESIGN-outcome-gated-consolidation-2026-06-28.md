@@ -219,10 +219,27 @@ rather than forcing a merge. Keep `Missing` as a corpus-gap counter.
   the next read-only surface. Registered `Tier::Niche`; default-OFF behind
   `AB_OUTCOME_GATED_CONSOLIDATION`. Zero writes. Models
   `trigger_recall_opt_in_runtime_transition_gate` (`:545`).
-- **Stage 3 — Gated dry-run apply trial:** `…_apply_trial` runs the *same*
-  winner/threshold logic the executor would, `dry_run` **hard-forced true**,
-  returns the exact planned mutations (winner/loser keys, supersedes edges,
-  status transitions) as the diff. Per-action `accepted|held(reason)`.
+- **Stage 3 — Gated dry-run apply trial — LANDED 2026-06-28:**
+  `outcome_gated_consolidation_apply_trial` consumes a Stage 2 transition-gate
+  packet and, **only if it authorizes the transition**, plans the exact mutation
+  each shadow-eligible candidate would receive. `dry_run` is **hard-forced
+  true** — it reads memory and recomputes the shadow but writes nothing. Per
+  verb: `archive_direct` → `accepted` `{op: archive_status, → archived}`;
+  `archive_via_consolidate` → reuses the **same** consolidate winner logic
+  (`outcome_gated_consolidate_rank = importance*(1+access_count)`, jaccard ≥
+  `min_similarity` (default 0.45), same-kind — kept in sync with
+  `MemoryConsolidateTool`) to emit `accepted` `{op: memory_consolidate, winner,
+  loser, supersedes_edge winner→loser}` when the target is the loser, else
+  `held(target_is_consolidate_winner)` (never archive a winner) or
+  `held(no_consolidate_partner_above_threshold)` when content can't confirm the
+  feedback-named duplicate; `queue_rewrite` →
+  `held(rewrite_is_content_decision_not_auto_applied)` (too_large never
+  auto-archives). Each plan entry is `accepted|held(reason)`; summary rolls up
+  accepted/held + `hold_reasons` histogram. A blocked/invalid transition packet
+  ⇒ `status=blocked_by_transition_gate` + empty plan. Outer-args raw-payload
+  defense as in Stage 2. `side_effects` all-false; registered `Tier::Niche`;
+  default-OFF behind `AB_OUTCOME_GATED_CONSOLIDATION`. Models
+  `trigger_recall_opt_in_gated_baseline_trial`.
 - **Stage 4 — Approval packet (owner sign-off):** `…_approval_packet` freezes
   the Stage-3 diff under sha256 (`memory_biocortex_sha256_json`) +
   reviewer/commit/forum refs + single-use `per_call_apply_token`. Execution is
