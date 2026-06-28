@@ -97,6 +97,8 @@ async fn run_sync_inner(verbose: bool) -> Result<bool> {
         eprintln!("[sync] repo: {}", repo.display());
     }
 
+    ensure_gc_bounded(&repo, verbose);
+
     git_pull_rebase(&repo, verbose);
 
     // If pull left us off a branch (or some earlier run did and was never
@@ -650,6 +652,75 @@ fn run_forge(provider: Provider, args: &[&str]) -> Result<()> {
     Ok(())
 }
 
+/// Loose-object count above which we pack the memory-sync repo.
+const SYNC_GC_LOOSE_COUNT: u64 = 64;
+/// Loose-object on-disk size (KiB) above which we pack — the real guard, since
+/// each sync rewrites a tens-of-MB `memory.jsonl` so a handful of loose blobs is
+/// already hundreds of MB. 200 MiB.
+const SYNC_GC_LOOSE_SIZE_KIB: u64 = 200 * 1024;
+
+/// Keep the memory-sync repo's git footprint bounded. Every sync rewrites the
+/// full (tens-of-MB) `memory.jsonl`, so each commit adds a fresh large loose
+/// blob. Git's *own* auto-gc does **not** reliably catch this: its default
+/// `gc.auto` is 6700 and — more importantly — its loose-object trigger only
+/// *samples one fanout bucket and estimates* (count ≈ bucket×256), so it fires
+/// probabilistically, not at a real count. One node's `.git` reached 1.1 GB /
+/// 285 unpacked ~29 MB blobs before a manual `git gc` reclaimed 78%.
+///
+/// So we bound it deterministically here: read the **true** loose-object count +
+/// on-disk size via `git count-objects -v` and run a plain `git gc` when either
+/// is over threshold. This both caps ongoing growth and *heals an existing
+/// backlog* on the next sync. Plain `gc` only — `--aggressive` OOM-killed on a
+/// low-RAM node and isn't needed for routine packing.
+///
+/// We also lower repo-local `gc.auto` as a cheap secondary assist for git's own
+/// background maintenance (only when unset locally, so an explicit per-repo
+/// operator value wins). Everything is best-effort: any failure is ignored —
+/// housekeeping must never fail a sync.
+fn ensure_gc_bounded(repo: &Path, verbose: bool) {
+    // Secondary assist: nudge git's own auto-gc threshold down (statistical, not
+    // load-bearing — the deterministic pack below is the real bound).
+    let has_local = git_capture(repo, &["config", "--local", "--get", "gc.auto"])
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false);
+    if !has_local {
+        let _ = run_git(
+            repo,
+            &["config", "gc.auto", &SYNC_GC_LOOSE_COUNT.to_string()],
+        );
+    }
+
+    // Deterministic bound: pack when the true loose count or size is over budget.
+    if let Some((count, size_kib)) = loose_object_stats(repo) {
+        if count > SYNC_GC_LOOSE_COUNT || size_kib > SYNC_GC_LOOSE_SIZE_KIB {
+            if verbose {
+                eprintln!(
+                    "[sync] packing memory-sync .git: {count} loose objs / {size_kib} KiB over budget"
+                );
+            }
+            let _ = run_git(repo, &["gc", "--quiet"]);
+        }
+    }
+}
+
+/// Parse `git count-objects -v` into `(loose_count, loose_size_kib)`.
+/// `None` on any error or unparseable output (caller treats as "skip packing").
+fn loose_object_stats(repo: &Path) -> Option<(u64, u64)> {
+    let out = git_capture(repo, &["count-objects", "-v"]).ok()?;
+    let mut count = None;
+    let mut size = None;
+    for line in out.lines() {
+        if let Some((k, v)) = line.split_once(':') {
+            match k.trim() {
+                "count" => count = v.trim().parse::<u64>().ok(),
+                "size" => size = v.trim().parse::<u64>().ok(),
+                _ => {}
+            }
+        }
+    }
+    Some((count?, size?))
+}
+
 fn run_git(repo: &Path, args: &[&str]) -> Result<()> {
     let status = Command::new("git")
         .arg("-C")
@@ -1034,6 +1105,61 @@ mod tests {
         let p = default_memory_repo_path();
         assert_ne!(p.as_os_str(), "   ");
         std::env::remove_var("AGENT_BRIDGE_MEMORY_REPO");
+    }
+
+    #[test]
+    fn ensure_gc_bounded_sets_when_unset_and_respects_override() {
+        let tmp = std::env::temp_dir().join(format!("ab-gcbound-cfg-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        if run_git(&tmp, &["init", "-q"]).is_err() {
+            // No git on PATH (e.g. minimal CI image) — nothing to assert.
+            let _ = std::fs::remove_dir_all(&tmp);
+            return;
+        }
+        // Unset → sets the bounded default (assert on the LOCAL scope, so this is
+        // independent of any global/system gc.auto the host may carry).
+        ensure_gc_bounded(&tmp, false);
+        let v = git_capture(&tmp, &["config", "--local", "--get", "gc.auto"]).unwrap();
+        assert_eq!(v.trim(), "64");
+        // An explicit repo-local operator value must NOT be clobbered.
+        run_git(&tmp, &["config", "gc.auto", "200"]).unwrap();
+        ensure_gc_bounded(&tmp, false);
+        let v2 = git_capture(&tmp, &["config", "--local", "--get", "gc.auto"]).unwrap();
+        assert_eq!(v2.trim(), "200", "must respect an operator override");
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn ensure_gc_bounded_packs_when_loose_objects_exceed_threshold() {
+        let tmp = std::env::temp_dir().join(format!("ab-gcbound-pack-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+        if run_git(&tmp, &["init", "-q"]).is_err() {
+            let _ = std::fs::remove_dir_all(&tmp);
+            return;
+        }
+        // Create > SYNC_GC_LOOSE_COUNT loose blobs (each unique → distinct object)
+        // by staging that many files. `git add` writes loose blobs; no commit /
+        // identity needed.
+        let n = SYNC_GC_LOOSE_COUNT + 6;
+        for i in 0..n {
+            std::fs::write(tmp.join(format!("f{i}.txt")), format!("unique blob {i}\n")).unwrap();
+        }
+        run_git(&tmp, &["add", "-A"]).unwrap();
+        let (before, _) = loose_object_stats(&tmp).expect("count-objects parses");
+        assert!(
+            before > SYNC_GC_LOOSE_COUNT,
+            "expected > {SYNC_GC_LOOSE_COUNT} loose, got {before}"
+        );
+        // Over threshold → ensure_gc_bounded must pack them away.
+        ensure_gc_bounded(&tmp, false);
+        let (after, _) = loose_object_stats(&tmp).expect("count-objects parses");
+        assert_eq!(
+            after, 0,
+            "loose objects should be packed after gc (was {before})"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
