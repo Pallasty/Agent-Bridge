@@ -38793,6 +38793,411 @@ impl McpTool for OutcomeGatedConsolidationApprovalPacketTool {
     }
 }
 
+// ===========================================================================
+//   outcome_gated_consolidation_apply — Stage 5 gated WRITE executor
+// ===========================================================================
+
+/// Stage 5 apply schema.
+const OUTCOME_GATED_CONSOLIDATION_APPLY_SCHEMA: &str =
+    "agent_bridge.outcome_gated_consolidation.apply.v1";
+
+/// Recompute the Stage 3 plan + its canonical (hashable) projection from a LIVE
+/// record set — the exact computation Stages 3/4 ran, so the resulting hash
+/// reproduces the frozen `diff_hash` iff the store has not drifted since
+/// approval. Returns (full plan entries, canonical projection).
+fn outcome_gated_recompute_plan(
+    records: &[MemoryRecord],
+    edges_by_key: &HashMap<String, Vec<MemoryEdge>>,
+    options: MemoryConsolidationQueueOptions,
+    min_sim: f64,
+) -> (Vec<Value>, Value) {
+    let queue = memory_consolidation_queue_from_records(records, edges_by_key, options);
+    let gated_actions = queue
+        .get("gated_actions")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let by_key: HashMap<String, &MemoryRecord> =
+        records.iter().map(|rec| (rec.key.clone(), rec)).collect();
+    let plan: Vec<Value> = gated_actions
+        .iter()
+        .filter(|a| a.get("shadow_eligible").and_then(Value::as_bool) == Some(true))
+        .map(|a| outcome_gated_apply_trial_plan_candidate(a, &by_key, min_sim))
+        .collect();
+    let canonical =
+        outcome_gated_approval_canonical_diff(&json!({ "plan": plan, "min_similarity": min_sim }));
+    (plan, canonical)
+}
+
+/// Stage 5 of outcome-gated consolidation — the FIRST and only stage that can
+/// write. It executes the mutations a Stage 4 approval packet froze, but ONLY
+/// when ALL of these independently hold: (1) the runtime feature env is on,
+/// operator not disabled, per-call opt-in, anchor matches; (2) the approval
+/// packet is schema-valid + `status==approved` and its `apply_token` is
+/// reproduced from the re-supplied owner refs; (3) a LIVE recompute of the plan
+/// still hashes to the packet's frozen `diff_hash` (staleness defense); and
+/// (4) `confirm_apply==true`. Any failure ⇒ a no-write verified preview.
+/// Default-OFF behind `AB_OUTCOME_GATED_CONSOLIDATION`.
+pub struct OutcomeGatedConsolidationApplyTool {
+    hub: Hub,
+}
+impl OutcomeGatedConsolidationApplyTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for OutcomeGatedConsolidationApplyTool {
+    fn name(&self) -> &'static str {
+        "outcome_gated_consolidation_apply"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Stage 5 WRITE executor for outcome-gated memory consolidation — the \
+                only stage that mutates memory. Applies the mutations a Stage 4 \
+                outcome_gated_consolidation_approval_packet froze (archive harmful targets, \
+                consolidate-merge duplicates with a supersedes edge), but ONLY when ALL hold: \
+                the runtime feature env is on + operator not disabled + per_call_opt_in + anchor \
+                matches; the approval packet is valid/approved and its apply_token is reproduced \
+                from the re-supplied owner refs; a LIVE recompute still hashes to the frozen \
+                diff_hash (staleness defense); and confirm_apply=true. Otherwise it writes \
+                NOTHING and returns a verified preview. Default-OFF behind \
+                AB_OUTCOME_GATED_CONSOLIDATION. Scoping args MUST match the trial that produced \
+                the approval, or the diff_hash check fails closed."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "required": ["approval_packet", "reviewer", "commit", "forum_post_id", "memory_key"],
+                "properties": {
+                    "approval_packet": { "type": "object", "description": "JSON object produced by outcome_gated_consolidation_approval_packet (status=approved)." },
+                    "reviewer": { "type": "string", "description": "Same approving reviewer ref used at Stage 4 (re-supplied to reproduce apply_token)." },
+                    "commit": { "type": "string" },
+                    "forum_post_id": { "type": "string" },
+                    "memory_key": { "type": "string" },
+                    "regression_anchor": { "type": "string", "description": "Must equal the current outcome-gated anchor string." },
+                    "per_call_opt_in": { "type": "boolean", "default": false },
+                    "operator_disabled": { "type": "boolean", "default": false },
+                    "confirm_apply": { "type": "boolean", "default": false, "description": "Final explicit write confirmation. Default false ⇒ verified preview, no writes." },
+                    "max_apply_per_pass": { "type": "integer", "minimum": 1, "maximum": 200, "default": 25, "description": "Cap on mutations applied this call." },
+                    "min_similarity": { "type": "number", "minimum": 0.1, "maximum": 0.95, "default": 0.45, "description": "Must match the trial's value (enforced by the diff_hash check)." },
+                    "scope": { "type": "string" },
+                    "scope_mode": { "type": "string", "enum": ["local_only", "local_plus_global", "exploratory"], "default": "local_plus_global" },
+                    "skip_tags": { "type": "array", "items": { "type": "string" }, "default": ["auto_curated", "alert", "ttl:7d"] },
+                    "skip_kinds": { "type": "array", "items": { "type": "string" }, "default": ["skill", "work_memory", "snapshot"] },
+                    "max_records": { "type": "integer", "minimum": 1, "maximum": 10000, "default": 1000 },
+                    "max_gated_actions": { "type": "integer", "minimum": 1, "maximum": 500, "default": 50 },
+                    "large_content_chars": { "type": "integer", "minimum": 200, "maximum": 20000, "default": 2400 },
+                    "low_use_max_access_count": { "type": "integer", "minimum": 0, "maximum": 100, "default": 1 }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let packet = args.get("approval_packet").cloned().unwrap_or(Value::Null);
+        let reviewer = args.get("reviewer").and_then(Value::as_str).map(str::to_string);
+        let commit = args.get("commit").and_then(Value::as_str).map(str::to_string);
+        let forum_post_id = args.get("forum_post_id").and_then(Value::as_str).map(str::to_string);
+        let memory_key = args.get("memory_key").and_then(Value::as_str).map(str::to_string);
+        let anchor = args.get("regression_anchor").and_then(Value::as_str).unwrap_or("");
+        let anchor_ok = anchor == OUTCOME_GATED_CONSOLIDATION_ANCHOR;
+        let per_call_opt_in = args.get("per_call_opt_in").and_then(Value::as_bool).unwrap_or(false);
+        let operator_disabled = args
+            .get("operator_disabled")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            || mcp_env_truthy(OUTCOME_GATED_CONSOLIDATION_DISABLE_ENV);
+        let runtime_enabled = mcp_env_truthy(OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV);
+        let confirm_apply = args.get("confirm_apply").and_then(Value::as_bool).unwrap_or(false);
+        let max_apply_per_pass = args
+            .get("max_apply_per_pass")
+            .and_then(Value::as_u64)
+            .unwrap_or(25)
+            .clamp(1, 200) as usize;
+        let min_sim = args
+            .get("min_similarity")
+            .and_then(Value::as_f64)
+            .unwrap_or(OUTCOME_GATED_CONSOLIDATION_DEFAULT_MIN_SIMILARITY)
+            .clamp(0.1, 0.95);
+
+        // ---- Gate 1: runtime ------------------------------------------------
+        let mut runtime_blockers: Vec<String> = Vec::new();
+        if !runtime_enabled {
+            runtime_blockers.push("feature_runtime_disabled".to_string());
+        }
+        if operator_disabled {
+            runtime_blockers.push("operator_disabled".to_string());
+        }
+        if !per_call_opt_in {
+            runtime_blockers.push("per_call_opt_in_missing".to_string());
+        }
+        if !anchor_ok {
+            runtime_blockers.push("regression_anchor_mismatch".to_string());
+        }
+        let runtime_ok = runtime_blockers.is_empty();
+
+        // ---- Gate 2: approval packet validity + token reproduction ----------
+        let pkt_schema = packet.get("schema").and_then(Value::as_str).unwrap_or("");
+        let pkt_status = packet.get("status").and_then(Value::as_str).unwrap_or("missing");
+        let pkt_read_only = packet.get("read_only").and_then(Value::as_bool).unwrap_or(false);
+        let frozen_diff_hash = packet
+            .pointer("/approval/diff_hash")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let frozen_token = packet
+            .pointer("/approval/apply_token")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        // Reproduce the token from the re-supplied refs (only the original
+        // approver's refs + the frozen diff_hash + anchor reproduce it).
+        let expected_token = if frozen_diff_hash.is_empty() {
+            String::new()
+        } else {
+            memory_biocortex_sha256_json(&json!({
+                "diff_hash": frozen_diff_hash,
+                "reviewer": reviewer,
+                "commit": commit,
+                "forum_post_id": forum_post_id,
+                "memory_key": memory_key,
+                "anchor": OUTCOME_GATED_CONSOLIDATION_ANCHOR
+            }))
+        };
+        let token_matches = !frozen_token.is_empty() && expected_token == frozen_token;
+
+        let mut approval_blockers: Vec<String> = Vec::new();
+        if pkt_schema != OUTCOME_GATED_CONSOLIDATION_APPROVAL_PACKET_SCHEMA {
+            approval_blockers.push("approval_packet_schema_mismatch".to_string());
+        }
+        if !pkt_read_only {
+            approval_blockers.push("approval_packet_not_read_only".to_string());
+        }
+        if pkt_status != "approved" {
+            approval_blockers.push("approval_packet_not_approved".to_string());
+        }
+        if frozen_diff_hash.is_empty() {
+            approval_blockers.push("approval_packet_missing_diff_hash".to_string());
+        }
+        if !token_matches {
+            approval_blockers.push("approval_token_mismatch".to_string());
+        }
+        let approval_ok = approval_blockers.is_empty();
+
+        // Gates 1+2 are checked WITHOUT touching the store. If either fails,
+        // refuse before any read/write.
+        let gate12_ok = runtime_ok && approval_ok;
+
+        // ---- Gate 3: live recompute hash (staleness) ------------------------
+        // Only recompute if gates 1+2 pass (else nothing to verify against).
+        let mut live_diff_hash = String::new();
+        let mut accepted_plan: Vec<Value> = Vec::new();
+        if gate12_ok {
+            let requested_scope = args
+                .get("scope")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
+            let scope_mode = MemorySearchScopeMode::parse(
+                args.get("scope_mode")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty()),
+                true,
+            );
+            let skip_tags =
+                memory_string_array_arg(&args, "skip_tags", &["auto_curated", "alert", "ttl:7d"]);
+            let skip_kinds =
+                memory_string_array_arg(&args, "skip_kinds", &["skill", "work_memory", "snapshot"]);
+            let max_records = args
+                .get("max_records")
+                .and_then(Value::as_u64)
+                .unwrap_or(1000)
+                .clamp(1, 10_000) as u32;
+            let options = MemoryConsolidationQueueOptions {
+                max_gated_actions: args
+                    .get("max_gated_actions")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(50)
+                    .clamp(1, 500) as usize,
+                large_content_chars: args
+                    .get("large_content_chars")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(2_400)
+                    .clamp(200, 20_000) as usize,
+                low_use_max_access_count: args
+                    .get("low_use_max_access_count")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(1)
+                    .min(100),
+                ..MemoryConsolidationQueueOptions::default()
+            };
+            let rows = store
+                .list_memories(None, MemoryListSort::Recent, max_records)
+                .await?;
+            let records: Vec<MemoryRecord> = rows
+                .into_iter()
+                .filter(|rec| {
+                    memory_record_active(rec)
+                        && !memory_has_any_tag(rec, &skip_tags)
+                        && !memory_kind_is_any(rec, &skip_kinds)
+                        && requested_scope
+                            .map(|scope| memory_search_scope_mode_matches(rec, scope, scope_mode))
+                            .unwrap_or(true)
+                })
+                .collect();
+            let mut edges_by_key: HashMap<String, Vec<MemoryEdge>> = HashMap::new();
+            for rec in &records {
+                if let Ok(edges) = store.memory_neighbors(&rec.key).await {
+                    edges_by_key.insert(rec.key.clone(), edges);
+                }
+            }
+            let (plan, canonical) =
+                outcome_gated_recompute_plan(&records, &edges_by_key, options, min_sim);
+            live_diff_hash = memory_biocortex_sha256_json(&canonical);
+            accepted_plan = plan
+                .into_iter()
+                .filter(|p| p.get("decision").and_then(Value::as_str) == Some("accepted"))
+                .collect();
+        }
+        let diff_hash_matches = gate12_ok
+            && !live_diff_hash.is_empty()
+            && live_diff_hash == frozen_diff_hash;
+
+        // ---- Decision -------------------------------------------------------
+        let verified = gate12_ok && diff_hash_matches;
+        let will_write = verified && confirm_apply;
+
+        let mut applied: Vec<Value> = Vec::new();
+        let mut failed: Vec<Value> = Vec::new();
+        let mut archived_n = 0u64;
+        let mut supersedes_n = 0u64;
+        let accepted_total = accepted_plan.len();
+        let mut skipped_over_cap = 0usize;
+
+        if will_write {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            for (i, p) in accepted_plan.iter().enumerate() {
+                if i >= max_apply_per_pass {
+                    skipped_over_cap = accepted_total - max_apply_per_pass;
+                    break;
+                }
+                let pm = &p["planned_mutation"];
+                match pm.get("op").and_then(Value::as_str) {
+                    Some("archive_status") => {
+                        let key = pm.get("target").and_then(Value::as_str).unwrap_or("");
+                        match store.memory_get(key).await {
+                            Ok(Some(mut rec)) => {
+                                rec.status = "archived".to_string();
+                                rec.updated_at = now;
+                                if store.memory_save(&rec).await.is_ok() {
+                                    archived_n += 1;
+                                    applied.push(json!({ "op": "archive_status", "target": key }));
+                                } else {
+                                    failed.push(json!({ "op": "archive_status", "target": key, "reason": "save_failed" }));
+                                }
+                            }
+                            _ => failed.push(json!({ "op": "archive_status", "target": key, "reason": "not_found" })),
+                        }
+                    }
+                    Some("memory_consolidate") => {
+                        let winner = pm.get("winner").and_then(Value::as_str).unwrap_or("");
+                        let loser = pm.get("loser").and_then(Value::as_str).unwrap_or("");
+                        match store.memory_get(loser).await {
+                            Ok(Some(mut rec)) => {
+                                rec.status = "archived".to_string();
+                                rec.updated_at = now;
+                                if store.memory_save(&rec).await.is_ok() {
+                                    archived_n += 1;
+                                    if store.memory_link(winner, loser, "supersedes", 1.0).await.is_ok() {
+                                        supersedes_n += 1;
+                                    }
+                                    applied.push(json!({ "op": "memory_consolidate", "winner": winner, "loser": loser }));
+                                } else {
+                                    failed.push(json!({ "op": "memory_consolidate", "loser": loser, "reason": "save_failed" }));
+                                }
+                            }
+                            _ => failed.push(json!({ "op": "memory_consolidate", "loser": loser, "reason": "not_found" })),
+                        }
+                    }
+                    other => failed.push(json!({ "op": other, "reason": "unknown_op" })),
+                }
+            }
+        } else if verified {
+            // Verified but not confirmed: report how many WOULD apply.
+            skipped_over_cap = accepted_total.saturating_sub(max_apply_per_pass);
+        }
+
+        let status = if will_write {
+            "applied"
+        } else if !runtime_ok {
+            "blocked_by_runtime_gate"
+        } else if !approval_ok {
+            "blocked_invalid_approval"
+        } else if !diff_hash_matches {
+            "blocked_diff_hash_stale"
+        } else {
+            "verified_preview_awaiting_confirm"
+        };
+
+        let payload = json!({
+            "schema": OUTCOME_GATED_CONSOLIDATION_APPLY_SCHEMA,
+            "generated_at": unix_now_secs(),
+            "applied": will_write,
+            "dry_run": !will_write,
+            "status": status,
+            "runtime_gate": {
+                "runtime_enable_env": OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV,
+                "runtime_enabled": runtime_enabled,
+                "operator_disabled": operator_disabled,
+                "per_call_opt_in": per_call_opt_in,
+                "regression_anchor_matches": anchor_ok,
+                "feature_flag_default_off": true,
+                "accepted": runtime_ok,
+                "blockers": runtime_blockers
+            },
+            "approval_check": {
+                "schema_matches": pkt_schema == OUTCOME_GATED_CONSOLIDATION_APPROVAL_PACKET_SCHEMA,
+                "status": pkt_status,
+                "read_only": pkt_read_only,
+                "has_diff_hash": !frozen_diff_hash.is_empty(),
+                "token_matches": token_matches,
+                "approval_packet_included": false,
+                "accepted": approval_ok,
+                "blockers": approval_blockers
+            },
+            "diff_verification": {
+                "frozen_diff_hash": if frozen_diff_hash.is_empty() { Value::Null } else { json!(frozen_diff_hash) },
+                "live_diff_hash": if live_diff_hash.is_empty() { Value::Null } else { json!(live_diff_hash) },
+                "matches": diff_hash_matches,
+                "note": "A live recompute that no longer matches the frozen hash means the store drifted since approval; re-run the trial+approval."
+            },
+            "apply": {
+                "confirm_apply": confirm_apply,
+                "max_apply_per_pass": max_apply_per_pass,
+                "accepted_total": accepted_total,
+                "applied_count": applied.len(),
+                "failed_count": failed.len(),
+                "skipped_over_cap": skipped_over_cap,
+                "applied": applied,
+                "failed": failed
+            },
+            "finalize_readback": {
+                "wrote_to_store": will_write,
+                "archived_memories": archived_n,
+                "supersedes_edges_written": supersedes_n,
+                "verified": verified
+            }
+        });
+        Ok(ToolResult::json_text(&payload))
+    }
+}
+
 fn memory_biocortex_sha256_json(value: &Value) -> String {
     let encoded = serde_json::to_vec(value).unwrap_or_default();
     let mut hasher = Sha256::new();
@@ -58644,6 +59049,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
+        Tier::Niche,
+        Arc::new(OutcomeGatedConsolidationApplyTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
         Tier::Standard,
         Arc::new(MemoryBioCortexShadowTrialTool::new(hub.clone())),
     );
@@ -78132,6 +78543,273 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             .expect("properties");
         assert!(props.get("apply").is_none());
         assert!(props.get("execute").is_none());
+
+        let names: Vec<String> = build_registry_with_policy(
+            Hub::builder().build(),
+            ToolPolicy {
+                set: ToolSet::Profile,
+                profile: ToolProfile::All,
+            },
+        )
+        .list()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
+        assert!(names.contains(&schema.name));
+    }
+
+    // --- Stage 5: outcome_gated_consolidation_apply (WRITE executor) -------
+
+    // Runs apply_trial → approval_packet through the real tools (env assumed on)
+    // and returns the approved packet. Refs are fixed so the apply step can
+    // reproduce the token.
+    async fn ogc_build_approval(hub: &Hub) -> Value {
+        let trial = result_text_as_json(
+            &OutcomeGatedConsolidationApplyTrialTool::new(hub.clone())
+                .execute(
+                    json!({
+                        "transition_gate_packet": ogc_allowed_transition_packet(),
+                        "per_call_opt_in": true,
+                        "max_records": 50
+                    }),
+                    &ToolContext::default(),
+                )
+                .await
+                .expect("trial exec"),
+        );
+        assert_eq!(trial["status"], json!("trial_complete"), "precondition: trial complete");
+        let appr = result_text_as_json(
+            &OutcomeGatedConsolidationApprovalPacketTool::new()
+                .execute(
+                    json!({
+                        "apply_trial_packet": trial,
+                        "reviewer": "alice",
+                        "commit": "abc1234",
+                        "forum_post_id": "forum:42",
+                        "memory_key": "decision:approve",
+                        "regression_anchor": OUTCOME_GATED_CONSOLIDATION_ANCHOR,
+                        "per_call_opt_in": true
+                    }),
+                    &ToolContext::default(),
+                )
+                .await
+                .expect("approval exec"),
+        );
+        assert_eq!(appr["status"], json!("approved"), "precondition: approved");
+        appr
+    }
+
+    fn ogc_apply_args(approval: Value, confirm: bool) -> Value {
+        json!({
+            "approval_packet": approval,
+            "reviewer": "alice",
+            "commit": "abc1234",
+            "forum_post_id": "forum:42",
+            "memory_key": "decision:approve",
+            "regression_anchor": OUTCOME_GATED_CONSOLIDATION_ANCHOR,
+            "per_call_opt_in": true,
+            "confirm_apply": confirm,
+            "max_records": 50
+        })
+    }
+
+    #[tokio::test]
+    async fn outcome_gated_apply_executes_when_fully_gated_and_confirmed() {
+        let _lock = frontend_env_test_setup();
+        let pe = std::env::var(OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV).ok();
+        let pd = std::env::var(OUTCOME_GATED_CONSOLIDATION_DISABLE_ENV).ok();
+        std::env::set_var(OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV, "1");
+        std::env::remove_var(OUTCOME_GATED_CONSOLIDATION_DISABLE_ENV);
+
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        ogc_seed_harmful_target(&store).await;
+        let approval = ogc_build_approval(&hub).await;
+
+        let out = OutcomeGatedConsolidationApplyTool::new(hub.clone())
+            .execute(ogc_apply_args(approval, true), &ToolContext::default())
+            .await
+            .expect("apply exec");
+        let res = result_text_as_json(&out);
+        assert_eq!(res["status"], json!("applied"));
+        assert_eq!(res["applied"], json!(true));
+        assert_eq!(res["diff_verification"]["matches"], json!(true));
+        assert!(res["finalize_readback"]["archived_memories"].as_u64().unwrap() >= 1);
+        // The target is now actually archived in the store.
+        let after = store.memory_get("apply_target").await.expect("get").expect("present");
+        assert_eq!(after.status, "archived");
+
+        restore_env_var(OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV, pe);
+        restore_env_var(OUTCOME_GATED_CONSOLIDATION_DISABLE_ENV, pd);
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn outcome_gated_apply_preview_when_not_confirmed_writes_nothing() {
+        let _lock = frontend_env_test_setup();
+        let pe = std::env::var(OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV).ok();
+        let pd = std::env::var(OUTCOME_GATED_CONSOLIDATION_DISABLE_ENV).ok();
+        std::env::set_var(OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV, "1");
+        std::env::remove_var(OUTCOME_GATED_CONSOLIDATION_DISABLE_ENV);
+
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        ogc_seed_harmful_target(&store).await;
+        let approval = ogc_build_approval(&hub).await;
+
+        // confirm_apply defaults false ⇒ verified preview, no writes.
+        let out = OutcomeGatedConsolidationApplyTool::new(hub.clone())
+            .execute(ogc_apply_args(approval, false), &ToolContext::default())
+            .await
+            .expect("apply exec");
+        let res = result_text_as_json(&out);
+        assert_eq!(res["status"], json!("verified_preview_awaiting_confirm"));
+        assert_eq!(res["applied"], json!(false));
+        assert_eq!(res["diff_verification"]["matches"], json!(true));
+        assert_eq!(res["finalize_readback"]["wrote_to_store"], json!(false));
+        let after = store.memory_get("apply_target").await.expect("get").expect("present");
+        assert_eq!(after.status, "active", "preview must not archive");
+
+        restore_env_var(OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV, pe);
+        restore_env_var(OUTCOME_GATED_CONSOLIDATION_DISABLE_ENV, pd);
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn outcome_gated_apply_default_off_writes_nothing_even_with_confirm() {
+        let _lock = frontend_env_test_setup();
+        let pe = std::env::var(OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV).ok();
+        let pd = std::env::var(OUTCOME_GATED_CONSOLIDATION_DISABLE_ENV).ok();
+        std::env::set_var(OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV, "1");
+        std::env::remove_var(OUTCOME_GATED_CONSOLIDATION_DISABLE_ENV);
+
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        ogc_seed_harmful_target(&store).await;
+        let approval = ogc_build_approval(&hub).await;
+
+        // Disable the feature AFTER approval; apply must refuse to write.
+        std::env::remove_var(OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV);
+        let out = OutcomeGatedConsolidationApplyTool::new(hub.clone())
+            .execute(ogc_apply_args(approval, true), &ToolContext::default())
+            .await
+            .expect("apply exec");
+        let res = result_text_as_json(&out);
+        assert_eq!(res["status"], json!("blocked_by_runtime_gate"));
+        assert_eq!(res["applied"], json!(false));
+        let after = store.memory_get("apply_target").await.expect("get").expect("present");
+        assert_eq!(after.status, "active");
+
+        restore_env_var(OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV, pe);
+        restore_env_var(OUTCOME_GATED_CONSOLIDATION_DISABLE_ENV, pd);
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn outcome_gated_apply_stale_store_blocks_and_writes_nothing() {
+        let _lock = frontend_env_test_setup();
+        let pe = std::env::var(OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV).ok();
+        let pd = std::env::var(OUTCOME_GATED_CONSOLIDATION_DISABLE_ENV).ok();
+        std::env::set_var(OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV, "1");
+        std::env::remove_var(OUTCOME_GATED_CONSOLIDATION_DISABLE_ENV);
+
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        ogc_seed_harmful_target(&store).await;
+        let approval = ogc_build_approval(&hub).await;
+
+        // Drift the store after approval: a second harmful target with quorum
+        // changes the recomputed plan ⇒ live diff_hash no longer matches.
+        store
+            .memory_save(&t4_memory_record("apply_target2", "lesson", "another bad memory", &[], &[], 0, 0.5))
+            .await
+            .expect("seed t2");
+        for (fb, src) in [("fb3", "agentA"), ("fb4", "agentB")] {
+            store
+                .memory_save(&t4_memory_record(
+                    fb,
+                    "feedback",
+                    "outcome: harmful",
+                    &["retrieval_feedback", "retrieval_feedback:harmful", &format!("retrieval_source:{src}")],
+                    &["apply_target2"],
+                    0,
+                    0.6,
+                ))
+                .await
+                .expect("seed fb");
+        }
+
+        let out = OutcomeGatedConsolidationApplyTool::new(hub.clone())
+            .execute(ogc_apply_args(approval, true), &ToolContext::default())
+            .await
+            .expect("apply exec");
+        let res = result_text_as_json(&out);
+        assert_eq!(res["status"], json!("blocked_diff_hash_stale"));
+        assert_eq!(res["applied"], json!(false));
+        assert_eq!(res["diff_verification"]["matches"], json!(false));
+        // The originally-approved target was NOT archived.
+        let after = store.memory_get("apply_target").await.expect("get").expect("present");
+        assert_eq!(after.status, "active");
+
+        restore_env_var(OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV, pe);
+        restore_env_var(OUTCOME_GATED_CONSOLIDATION_DISABLE_ENV, pd);
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn outcome_gated_apply_wrong_refs_token_mismatch_writes_nothing() {
+        let _lock = frontend_env_test_setup();
+        let pe = std::env::var(OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV).ok();
+        let pd = std::env::var(OUTCOME_GATED_CONSOLIDATION_DISABLE_ENV).ok();
+        std::env::set_var(OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV, "1");
+        std::env::remove_var(OUTCOME_GATED_CONSOLIDATION_DISABLE_ENV);
+
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        ogc_seed_harmful_target(&store).await;
+        let approval = ogc_build_approval(&hub).await;
+
+        // Different reviewer ⇒ cannot reproduce the apply_token.
+        let mut args = ogc_apply_args(approval, true);
+        args["reviewer"] = json!("mallory");
+        let out = OutcomeGatedConsolidationApplyTool::new(hub.clone())
+            .execute(args, &ToolContext::default())
+            .await
+            .expect("apply exec");
+        let res = result_text_as_json(&out);
+        assert_eq!(res["status"], json!("blocked_invalid_approval"));
+        assert_eq!(res["approval_check"]["token_matches"], json!(false));
+        assert_eq!(res["applied"], json!(false));
+        let after = store.memory_get("apply_target").await.expect("get").expect("present");
+        assert_eq!(after.status, "active");
+
+        restore_env_var(OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV, pe);
+        restore_env_var(OUTCOME_GATED_CONSOLIDATION_DISABLE_ENV, pd);
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[test]
+    fn outcome_gated_apply_schema_and_registered() {
+        let tool = OutcomeGatedConsolidationApplyTool::new(Hub::builder().build());
+        let schema = tool.schema();
+        assert_eq!(schema.name, "outcome_gated_consolidation_apply");
+        assert!(schema.description.contains("WRITE executor"));
+        assert!(schema.description.contains("confirm_apply=true"));
+        let required = schema
+            .input_schema
+            .get("required")
+            .and_then(Value::as_array)
+            .expect("required");
+        for r in ["approval_packet", "reviewer", "commit", "forum_post_id", "memory_key"] {
+            assert!(required.contains(&json!(r)), "{r} must be required");
+        }
+        let props = schema
+            .input_schema
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("properties");
+        assert!(props.get("confirm_apply").is_some());
+        assert!(props.get("max_apply_per_pass").is_some());
 
         let names: Vec<String> = build_registry_with_policy(
             Hub::builder().build(),

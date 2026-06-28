@@ -265,13 +265,33 @@ rather than forcing a merge. Keep `Missing` as a corpus-gap counter.
   `valid_only_if_diff_hash_matches_live_recompute` + `apply_token_single_use`.
   Registered `Tier::Niche`; default-OFF. Models the house `*_approval_packet` /
   `enforce_hold_approval_packet` tools.
-- **Stage 5 — Execution in `session_finalize`:** add
-  `apply_outcome_gated: bool = false` + `approval_packet` args. **Default false
-  ⇒ zero behavior change** (only an added read-only `follow_up` hint next to
-  the existing `suggest_memory_consolidate` nudge). When
-  `true + valid packet + dry_run=false`: re-run the gate chain, re-verify
-  diff-hash, apply via existing primitives capped at `max_apply_per_pass`,
-  record Verified `finalize_readback` with applied counts.
+- **Stage 5 — Gated WRITE executor — LANDED 2026-06-28:** the first and only
+  stage that mutates memory. Shipped as a **dedicated tool**
+  `outcome_gated_consolidation_apply` (not yet wired into `session_finalize` —
+  see below) to keep the first write path on-demand, isolated, and fully
+  testable rather than embedded in the Stop-hook pipeline. It writes ONLY when
+  **four independent gates** all hold: (1) runtime env on + operator not
+  disabled + `per_call_opt_in` + anchor matches; (2) the Stage 4 approval packet
+  is schema-valid + `status==approved` and its `apply_token` is **reproduced**
+  from the re-supplied owner refs (`sha256({frozen_diff_hash, reviewer, commit,
+  forum_post_id, memory_key, anchor})`); (3) a **LIVE recompute** of the plan
+  (`outcome_gated_recompute_plan` → same Stage 3 planner + Stage 4 canonical
+  projection) still hashes to the frozen `diff_hash` — the staleness defense;
+  and (4) `confirm_apply==true`. Any failure ⇒ a no-write **verified preview**
+  (`verified_preview_awaiting_confirm` / `blocked_by_runtime_gate` /
+  `blocked_invalid_approval` / `blocked_diff_hash_stale`). Applies accepted
+  actions via existing primitives — `archive_status` (status→archived) and
+  `memory_consolidate` (archive loser + `memory_link` supersedes winner→loser) —
+  capped at `max_apply_per_pass`; gates 1+2 are checked **before any store
+  read/write**. Returns a `finalize_readback` with `archived_memories` /
+  `supersedes_edges_written` / `verified`. Registered `Tier::Niche`; default-OFF.
+  Scoping args must match the trial (enforced by the diff_hash check).
+  - **Deferred follow-up (Stage 5b):** wire `apply_outcome_gated: bool = false`
+    + `approval_packet` into `session_finalize` (default false ⇒ **zero behavior
+    change**, only an added read-only `follow_up` hint beside the existing
+    `suggest_memory_consolidate` nudge), delegating to the same executor. Kept
+    out of this PR so the Stop-hook hot path is touched only after the executor
+    is proven.
 
 ## 8. Noise / poison-feedback safety (defense in depth)
 
