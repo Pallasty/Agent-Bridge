@@ -204,10 +204,19 @@ fn snapshot_candidates(explicit_path: Option<&str>, cwd: Option<&Path>) -> Vec<S
     }
 
     if let Ok(home) = std::env::var("HOME") {
+        let home = PathBuf::from(home);
+        // Per-OS data dir (mirror of setup::agent_bridge_data_dir): macOS uses
+        // ~/Library/Application Support; Linux honours XDG_DATA_HOME, then falls
+        // back to ~/.local/share. Without the macOS branch the snapshot under
+        // ~/Library/Application Support is never found on a Mac.
+        #[cfg(target_os = "macos")]
+        let data_dir = home.join("Library/Application Support/agent-bridge");
+        #[cfg(not(target_os = "macos"))]
+        let data_dir = std::env::var("XDG_DATA_HOME")
+            .map(|x| PathBuf::from(x).join("agent-bridge"))
+            .unwrap_or_else(|_| home.join(".local/share/agent-bridge"));
         out.push(SnapshotSource {
-            path: PathBuf::from(home)
-                .join(".local/share/agent-bridge")
-                .join("ide-snapshot.json"),
+            path: data_dir.join("ide-snapshot.json"),
             source_kind: "data",
         });
     }

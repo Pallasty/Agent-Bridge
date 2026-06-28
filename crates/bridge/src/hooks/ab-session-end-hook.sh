@@ -101,7 +101,20 @@ _ab_pet_auto_tts_emit() {
     esac
 
     (
-        env \
+        # Local-only MCP call (pet_state_ritual on the on-disk store); strip the
+        # parent session's OAuth/API creds. Enumerate via bash builtins and use
+        # absolute /usr/bin/env (~/.local/bin/env may be a non-coreutils shim).
+        _AB_ENV_PASS=()
+        for _k in ${!AGENT_BRIDGE_@}; do
+            _AB_ENV_PASS+=("$_k=${!_k}")
+        done
+        for _k in XDG_DATA_HOME XDG_CONFIG_HOME XDG_RUNTIME_DIR; do
+            [[ -n "${!_k:-}" ]] && _AB_ENV_PASS+=("$_k=${!_k}")
+        done
+        /usr/bin/env -i \
+            PATH="$PATH" HOME="$HOME" USER="${USER:-}" LOGNAME="${LOGNAME:-}" \
+            LANG="${LANG:-}" LC_ALL="${LC_ALL:-}" TERM="${TERM:-}" TMPDIR="${TMPDIR:-}" \
+            "${_AB_ENV_PASS[@]}" \
             AGENT_BRIDGE_CLIENT=hook \
             AGENT_BRIDGE_MCP_SOURCE=hook \
             AGENT_BRIDGE_TOOLSET=hook-lifecycle \
@@ -216,7 +229,26 @@ fi
 # The hook only needs lifecycle-safe tools. Keep this child on the
 # hook-lifecycle toolset instead of exposing the full developer registry.
 if [[ -x "$AB" ]]; then
-    env \
+    # Local-only MCP call (memory_compact on the on-disk store, no Anthropic
+    # API call), so strip the parent session's OAuth/API credentials: start
+    # from env -i and pass through only a safe base + agent-bridge's own
+    # non-secret AGENT_BRIDGE_*/XDG_* config. (The `agent-bridge sync` below is
+    # separate and intentionally keeps git/push credentials.)
+    # Enumerate via bash builtins (${!PREFIX@}) — never via `env`, which a user
+    # PATH shim (~/.local/bin/env) can shadow with a non-coreutils wrapper. Use
+    # absolute /usr/bin/env (real coreutils on Linux + macOS) for `-i` isolation.
+    _AB_ENV_PASS=()
+    for _k in ${!AGENT_BRIDGE_@}; do
+        _AB_ENV_PASS+=("$_k=${!_k}")
+    done
+    for _k in XDG_DATA_HOME XDG_CONFIG_HOME XDG_RUNTIME_DIR; do
+        [[ -n "${!_k:-}" ]] && _AB_ENV_PASS+=("$_k=${!_k}")
+    done
+
+    /usr/bin/env -i \
+        PATH="$PATH" HOME="$HOME" USER="${USER:-}" LOGNAME="${LOGNAME:-}" \
+        LANG="${LANG:-}" LC_ALL="${LC_ALL:-}" TERM="${TERM:-}" TMPDIR="${TMPDIR:-}" \
+        "${_AB_ENV_PASS[@]}" \
         AGENT_BRIDGE_CLIENT=hook \
         AGENT_BRIDGE_MCP_SOURCE=hook \
         AGENT_BRIDGE_TOOLSET=hook-lifecycle \

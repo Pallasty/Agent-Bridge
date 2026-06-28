@@ -242,7 +242,28 @@ PY
 DB="${AGENT_BRIDGE_DB:-$_AB_STATE_DIR/state.db}"
 COUNT_BEFORE=$(sqlite3 "$DB" "SELECT COUNT(*) FROM memories;" 2>/dev/null || echo 0)
 
-env \
+# The curator only runs the LOCAL `agent-bridge mcp` server against the on-disk
+# store (session_lifecycle_step → curate/finalize); it makes no Anthropic API
+# call, so it must NOT inherit the parent session's OAuth/API credentials.
+# Start from an empty environment (env -i) and pass through only a safe base
+# plus agent-bridge's own non-secret config (AGENT_BRIDGE_*, including the
+# AGENT_BRIDGE_CURATE_* tuning knobs, and XDG_* so the child resolves the same
+# store path the COUNT queries use). CLAUDE_*, ANTHROPIC_*, *_TOKEN, *_KEY drop.
+# Enumerate via bash builtins (${!PREFIX@}) — never via `env`, which a user
+# PATH shim (~/.local/bin/env) can shadow with a non-coreutils wrapper. Use the
+# absolute /usr/bin/env (real coreutils on Linux + macOS) for `-i` isolation.
+_AB_ENV_PASS=()
+for _k in ${!AGENT_BRIDGE_@}; do
+    _AB_ENV_PASS+=("$_k=${!_k}")
+done
+for _k in XDG_DATA_HOME XDG_CONFIG_HOME XDG_RUNTIME_DIR; do
+    [[ -n "${!_k:-}" ]] && _AB_ENV_PASS+=("$_k=${!_k}")
+done
+
+/usr/bin/env -i \
+    PATH="$PATH" HOME="$HOME" USER="${USER:-}" LOGNAME="${LOGNAME:-}" \
+    LANG="${LANG:-}" LC_ALL="${LC_ALL:-}" TERM="${TERM:-}" TMPDIR="${TMPDIR:-}" \
+    "${_AB_ENV_PASS[@]}" \
     AGENT_BRIDGE_CLIENT=hook \
     AGENT_BRIDGE_MCP_SOURCE=hook \
     AGENT_BRIDGE_TOOLSET=hook-lifecycle \

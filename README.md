@@ -96,8 +96,10 @@ fish_add_path ~/.local/bin
 agent-bridge daemon &
 
 # 4. Register as an MCP server (Claude Code only — other frontends were
-#    auto-configured in step 1).
-claude mcp add agent-bridge agent-bridge mcp
+#    auto-configured in step 1). `-s user` registers it at user scope so the
+#    server is reachable from any directory; without it the default is
+#    project scope and the server is invisible when Claude Code starts from $HOME.
+claude mcp add -s user agent-bridge agent-bridge mcp
 
 # 5. (Optional) Bootstrap cross-device memory sync via GitHub. Creates
 #    (or reuses) a private `<your-user>/agent-bridge-memory` repo, clones
@@ -586,7 +588,8 @@ Optional JSON report:
 
 ### Cross-machine memory sync
 
-Memory is stored in SQLite at `~/.local/share/agent-bridge/state.db`.
+Memory is stored in SQLite at `~/.local/share/agent-bridge/state.db`
+(macOS: `~/Library/Application Support/agent-bridge/state.db`).
 The companion repo **[pallasting/agent-bridge-memory](https://github.com/pallasting/agent-bridge-memory)**
 (private) holds exported JSONL / sync scripts for git-backed backup across machines.
 
@@ -594,12 +597,17 @@ The companion repo **[pallasting/agent-bridge-memory](https://github.com/pallast
 # Clone (requires GitHub access to the private repo)
 git clone git@github.com:pallasting/agent-bridge-memory.git ~/agent-bridge-memory
 
-# Sync manually — writes into that repo; commit & push from there as you prefer
-AGENT_BRIDGE_BIN=agent-bridge bash ~/agent-bridge-memory/sync.sh
+# Sync manually — native command; round-trips memories + edges + forum with a
+# version-vector merge (concurrent edits become non-destructive conflict copies).
+agent-bridge sync
 
-# Automatic: the Stop hook runs sync.sh in the background on every session end
+# Automatic: the Stop hook calls `agent-bridge sync` in the background on every
+# session end (a systemd timer / macOS LaunchAgent also runs it on a cadence).
 # Point at a custom checkout path:
 export AGENT_BRIDGE_MEMORY_REPO=~/agent-bridge-memory
+
+# The legacy ~/agent-bridge-memory/sync.sh (bash, newer-wins) is superseded by
+# the native `agent-bridge sync` above.
 ```
 
 ### Cross-machine forum + presence (v20a — Tailscale daemon)
