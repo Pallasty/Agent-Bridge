@@ -36577,6 +36577,10 @@ impl McpTool for MemoryOrphanInventoryTool {
 #[derive(Clone, Copy, Debug)]
 struct MemoryConsolidationQueueOptions {
     max_per_bucket: usize,
+    /// Cap on the flat `gated_actions` list (Stage 0). Distinct from
+    /// `max_per_bucket` because gated_actions aggregate negative feedback across
+    /// buckets into one entry per target, so the two contracts can diverge.
+    max_gated_actions: usize,
     preview_chars: usize,
     large_content_chars: usize,
     low_use_max_access_count: u64,
@@ -36586,6 +36590,7 @@ impl Default for MemoryConsolidationQueueOptions {
     fn default() -> Self {
         Self {
             max_per_bucket: 20,
+            max_gated_actions: 50,
             preview_chars: 180,
             large_content_chars: 2_400,
             low_use_max_access_count: 1,
@@ -36705,6 +36710,143 @@ fn memory_consolidation_sort_and_truncate(
         });
         rows.truncate(max_per_bucket);
     }
+}
+
+/// Stage 0 (outcome-gated consolidation, read-only shadow): for each memory that
+/// has negative retrieval feedback, emit a structured `gated_action` — the verb a
+/// future gated apply WOULD take, plus corroboration/source counts and the
+/// blockers that currently prevent it. Purely advisory: no row is mutated and no
+/// gate decision is made here (Stage 1 `status` owns `may_apply`). See
+/// docs/design/DESIGN-outcome-gated-consolidation-2026-06-28.md.
+fn memory_consolidation_gated_actions(
+    active: &[&MemoryRecord],
+    by_key: &HashMap<String, &MemoryRecord>,
+    edges_by_key: &HashMap<String, Vec<MemoryEdge>>,
+    max_actions: usize,
+) -> Vec<Value> {
+    use std::collections::BTreeSet;
+    #[derive(Default)]
+    struct NegAgg {
+        outcomes: BTreeSet<String>,
+        evidence: Vec<String>,
+        sources: BTreeSet<String>,
+        score: f64,
+    }
+    // Negative feedback outcomes that warrant a consolidation/archival action.
+    // (used/ignored are not actionable here.)
+    const NEG: [(&str, &str); 4] = [
+        ("retrieval_feedback:stale", "stale"),
+        ("retrieval_feedback:duplicate", "duplicate"),
+        ("retrieval_feedback:harmful", "harmful"),
+        ("retrieval_feedback:too_large", "too_large"),
+    ];
+
+    let mut agg: BTreeMap<String, NegAgg> = BTreeMap::new();
+    for rec in active {
+        if rec.kind != "feedback" || !rec.tags.iter().any(|tag| tag == "retrieval_feedback") {
+            continue;
+        }
+        let Some(target) = memory_consolidation_feedback_target(rec, by_key) else {
+            continue;
+        };
+        let source = rec
+            .tags
+            .iter()
+            .find_map(|tag| tag.strip_prefix("retrieval_source:"))
+            .map(|s| s.to_string());
+        let mut matched = false;
+        for (tag, name) in NEG {
+            if rec.tags.iter().any(|t| t == tag) {
+                matched = true;
+                let entry = agg.entry(target.key.clone()).or_default();
+                entry.outcomes.insert(name.to_string());
+                entry.score += rec.importance + target.importance;
+                if let Some(src) = &source {
+                    entry.sources.insert(src.clone());
+                }
+            }
+        }
+        if matched {
+            if let Some(entry) = agg.get_mut(&target.key) {
+                if !entry.evidence.contains(&rec.key) {
+                    entry.evidence.push(rec.key.clone());
+                }
+            }
+        }
+    }
+
+    let mut actions: Vec<Value> = agg
+        .iter()
+        .map(|(target_key, a)| {
+            // Verb precedence: harmful is the most severe (archive directly, never
+            // tombstone); stale/duplicate route to the reversible consolidate
+            // executor; too_large is rewrite-only — shrinking content is a content
+            // decision, not a lifecycle one, so it never auto-archives.
+            let verb = if a.outcomes.contains("harmful") {
+                "archive_direct"
+            } else if a.outcomes.contains("duplicate") || a.outcomes.contains("stale") {
+                "archive_via_consolidate"
+            } else {
+                "queue_rewrite"
+            };
+            let corroboration_count = a.evidence.len();
+            let distinct_sources = a.sources.len();
+            // A target is durable (the existing guard would refuse to archive it)
+            // if it is author-linked OR has any non-retrieval semantic edge.
+            let durable_hub = by_key
+                .get(target_key)
+                .map(|t| !t.related_keys.is_empty())
+                .unwrap_or(false)
+                || edges_by_key
+                    .get(target_key)
+                    .map(|edges| edges.iter().any(|e| !e.edge_type.starts_with("retrieval")))
+                    .unwrap_or(false);
+
+            let mut blockers: Vec<String> = Vec::new();
+            if corroboration_count < 2 {
+                blockers.push("QuorumNotMet".to_string());
+            }
+            if distinct_sources < 2 {
+                blockers.push("SingleSourceOnly".to_string());
+            }
+            if verb != "queue_rewrite" && durable_hub {
+                blockers.push("DurableGuardWouldArchiveHub".to_string());
+            }
+            if verb == "archive_via_consolidate" && a.outcomes.contains("duplicate") {
+                // memory_consolidate is content-Jaccard + by_kind only; a
+                // feedback-named duplicate is not a merge guarantee.
+                blockers.push("ContentMergeUnverified".to_string());
+            }
+
+            json!({
+                "target_key": target_key,
+                "verb": verb,
+                "outcomes": a.outcomes.iter().cloned().collect::<Vec<String>>(),
+                "corroboration_count": corroboration_count,
+                "distinct_sources": distinct_sources,
+                "score": (a.score * 100.0).round() / 100.0,
+                "evidence_feedback_keys": a.evidence.clone(),
+                "candidate_blockers": blockers.clone(),
+                "shadow_eligible": blockers.is_empty(),
+            })
+        })
+        .collect();
+
+    actions.sort_by(|a, b| {
+        let score_a = a.get("score").and_then(Value::as_f64).unwrap_or(0.0);
+        let score_b = b.get("score").and_then(Value::as_f64).unwrap_or(0.0);
+        score_b
+            .partial_cmp(&score_a)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                a.get("target_key")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .cmp(b.get("target_key").and_then(Value::as_str).unwrap_or(""))
+            })
+    });
+    actions.truncate(max_actions);
+    actions
 }
 
 fn memory_consolidation_queue_from_records(
@@ -36828,19 +36970,23 @@ fn memory_consolidation_queue_from_records(
         .iter()
         .map(|(bucket, rows)| (bucket.clone(), rows.len()))
         .collect();
+    let gated_actions =
+        memory_consolidation_gated_actions(&active, &by_key, edges_by_key, options.max_gated_actions);
 
     json!({
-        "schema": "agent_bridge.memory_consolidation_queue.v0",
+        "schema": "agent_bridge.memory_consolidation_queue.v1",
         "read_only": true,
         "summary": {
             "scanned_records": records.len(),
             "active_records": active.len(),
             "bucket_counts": bucket_counts,
+            "gated_action_count": gated_actions.len(),
             "max_per_bucket": options.max_per_bucket,
             "large_content_chars": options.large_content_chars,
             "low_use_max_access_count": options.low_use_max_access_count,
         },
         "buckets": buckets,
+        "gated_actions": gated_actions,
         "next_actions": [
             "Review stale/duplicate/harmful/too_large buckets before mutating memory state.",
             "Promote useful handoff content into decision/lesson memories.",
@@ -36849,7 +36995,8 @@ fn memory_consolidation_queue_from_records(
         "non_goals": [
             "No memory rows are archived or superseded by this report.",
             "No graph edges are created by this report.",
-            "No retrieval ranking or bootstrap selection changes are applied."
+            "No retrieval ranking or bootstrap selection changes are applied.",
+            "gated_actions are a read-only shadow: they propose a verb and surface blockers but apply nothing; Stage 1 status owns may_apply."
         ],
     })
 }
@@ -36918,6 +37065,13 @@ impl McpTool for MemoryConsolidationQueueTool {
                         "default": 20,
                         "description": "Maximum candidate rows returned per bucket."
                     },
+                    "max_gated_actions": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 500,
+                        "default": 50,
+                        "description": "Maximum entries in the flat gated_actions list (Stage 0 shadow)."
+                    },
                     "preview_chars": {
                         "type": "integer",
                         "minimum": 0,
@@ -36975,6 +37129,11 @@ impl McpTool for MemoryConsolidationQueueTool {
                 .and_then(Value::as_u64)
                 .unwrap_or(20)
                 .clamp(1, 100) as usize,
+            max_gated_actions: args
+                .get("max_gated_actions")
+                .and_then(Value::as_u64)
+                .unwrap_or(50)
+                .clamp(1, 500) as usize,
             preview_chars: args
                 .get("preview_chars")
                 .and_then(Value::as_u64)
@@ -37316,6 +37475,7 @@ impl McpTool for MemoryBioCortexShadowTrialTool {
             &queue_edges_by_key,
             MemoryConsolidationQueueOptions {
                 max_per_bucket: queue_max_per_bucket,
+                max_gated_actions: 50,
                 preview_chars: 0,
                 large_content_chars: 2_400,
                 low_use_max_access_count: 1,
@@ -75078,13 +75238,14 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             &edges_by_key,
             MemoryConsolidationQueueOptions {
                 max_per_bucket: 10,
+                max_gated_actions: 10,
                 preview_chars: 80,
                 large_content_chars: 1_000,
                 low_use_max_access_count: 1,
             },
         );
 
-        assert_eq!(queue["schema"], json!("agent_bridge.memory_consolidation_queue.v0"));
+        assert_eq!(queue["schema"], json!("agent_bridge.memory_consolidation_queue.v1"));
         assert_eq!(
             t4_bucket_keys(&queue, "handoff_to_decision"),
             vec!["handoff_next"]
@@ -75106,6 +75267,119 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             !t4_bucket_keys(&queue, "intentional_orphans")
                 .contains(&"ordinary_connected".to_string())
         );
+    }
+
+    #[test]
+    fn memory_consolidation_queue_emits_gated_actions_with_blockers() {
+        // Stage 0: each negatively-flagged target gets a gated_action with the
+        // verb a future apply would take + the blockers currently preventing it.
+        let records = vec![
+            t4_memory_record("tgt_stale", "lesson", "stale target", &[], &[], 2, 0.5),
+            t4_memory_record("tgt_dup", "lesson", "dup target", &[], &[], 2, 0.5),
+            t4_memory_record("tgt_big", "fact", "big target", &[], &[], 0, 0.5),
+            // hub target is author-linked → durable; archival verbs are blocked.
+            t4_memory_record("tgt_hub", "lesson", "hub target", &[], &["tgt_stale"], 2, 0.5),
+            // two distinct-source stale feedbacks → quorum met, multi-source.
+            t4_memory_record(
+                "fb_stale_1",
+                "feedback",
+                "outcome: stale",
+                &["retrieval_feedback", "retrieval_feedback:stale", "retrieval_source:memory_search"],
+                &["tgt_stale"],
+                0,
+                0.6,
+            ),
+            t4_memory_record(
+                "fb_stale_2",
+                "feedback",
+                "outcome: stale",
+                &["retrieval_feedback", "retrieval_feedback:stale", "retrieval_source:memory_get"],
+                &["tgt_stale"],
+                0,
+                0.6,
+            ),
+            // single duplicate feedback → quorum/single-source + content-merge blockers.
+            t4_memory_record(
+                "fb_dup_1",
+                "feedback",
+                "outcome: duplicate",
+                &["retrieval_feedback", "retrieval_feedback:duplicate", "retrieval_source:manual"],
+                &["tgt_dup"],
+                0,
+                0.6,
+            ),
+            // harmful feedback on a durable hub → archive_direct but hub-blocked.
+            t4_memory_record(
+                "fb_harm_1",
+                "feedback",
+                "outcome: harmful",
+                &["retrieval_feedback", "retrieval_feedback:harmful", "retrieval_source:memory_search"],
+                &["tgt_hub"],
+                0,
+                0.6,
+            ),
+            // too_large feedback → queue_rewrite (never archive).
+            t4_memory_record(
+                "fb_big_1",
+                "feedback",
+                "outcome: too_large",
+                &["retrieval_feedback", "retrieval_feedback:too_large", "retrieval_source:memory_search"],
+                &["tgt_big"],
+                0,
+                0.6,
+            ),
+        ];
+        let edges_by_key: HashMap<String, Vec<MemoryEdge>> = HashMap::new();
+        let queue = memory_consolidation_queue_from_records(
+            &records,
+            &edges_by_key,
+            MemoryConsolidationQueueOptions::default(),
+        );
+
+        assert_eq!(queue["schema"], json!("agent_bridge.memory_consolidation_queue.v1"));
+        assert_eq!(queue["summary"]["gated_action_count"], json!(4));
+        let actions = queue["gated_actions"].as_array().expect("gated_actions array");
+        let find = |tk: &str| {
+            actions
+                .iter()
+                .find(|a| a["target_key"] == json!(tk))
+                .unwrap_or_else(|| panic!("no gated_action for {tk}"))
+        };
+        let blockers = |a: &Value| {
+            a["candidate_blockers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|b| b.as_str().unwrap().to_string())
+                .collect::<Vec<String>>()
+        };
+
+        // stale: 2 distinct-source feedbacks, no edges → eligible, no blockers.
+        let stale = find("tgt_stale");
+        assert_eq!(stale["verb"], json!("archive_via_consolidate"));
+        assert_eq!(stale["corroboration_count"], json!(2));
+        assert_eq!(stale["distinct_sources"], json!(2));
+        assert_eq!(stale["shadow_eligible"], json!(true));
+        assert!(blockers(stale).is_empty(), "stale target has no blockers");
+
+        // duplicate: single source → quorum + single-source + content-merge blockers.
+        let dup = find("tgt_dup");
+        assert_eq!(dup["verb"], json!("archive_via_consolidate"));
+        let db = blockers(dup);
+        assert!(db.contains(&"QuorumNotMet".to_string()));
+        assert!(db.contains(&"SingleSourceOnly".to_string()));
+        assert!(db.contains(&"ContentMergeUnverified".to_string()));
+        assert_eq!(dup["shadow_eligible"], json!(false));
+
+        // harmful on a durable hub → archive_direct, hub blocker present.
+        let harm = find("tgt_hub");
+        assert_eq!(harm["verb"], json!("archive_direct"));
+        assert!(blockers(&harm.clone()).contains(&"DurableGuardWouldArchiveHub".to_string()));
+
+        // too_large → queue_rewrite, and the hub guard does NOT apply to rewrite.
+        let big = find("tgt_big");
+        assert_eq!(big["verb"], json!("queue_rewrite"));
+        assert!(!blockers(big).contains(&"DurableGuardWouldArchiveHub".to_string()));
     }
 
     #[tokio::test]
@@ -75138,7 +75412,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             .await
             .expect("execute");
         let payload = result_text_as_json(&out);
-        assert_eq!(payload["schema"], json!("agent_bridge.memory_consolidation_queue.v0"));
+        assert_eq!(payload["schema"], json!("agent_bridge.memory_consolidation_queue.v1"));
         assert_eq!(
             t4_bucket_keys(&payload, "handoff_to_decision"),
             vec!["tests:queue_handoff"]
