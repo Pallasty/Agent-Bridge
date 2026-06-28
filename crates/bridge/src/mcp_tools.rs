@@ -37572,6 +37572,12 @@ struct OutcomeGatedConsolidationTransitionFlags {
     operator_disabled: bool,
     per_call_opt_in: bool,
     anchor_ok: bool,
+    /// True when raw memory keys/content appeared in the *outer* tool args
+    /// (outside the known wrapper fields). Detected in `execute()` over the
+    /// whole `args`, mirroring `trigger_recall_opt_in_runtime_transition_gate`,
+    /// so an unknown raw field cannot bypass the no-content-side-channel
+    /// contract by sitting beside `status_packet` instead of inside it.
+    outer_raw_payload_present: bool,
     reviewer: Option<String>,
     commit: Option<String>,
     forum_post_id: Option<String>,
@@ -37628,6 +37634,10 @@ fn outcome_gated_consolidation_transition_gate_eval(
     }
     if source_contains_raw {
         blockers.push("status_packet_contains_raw_payload".to_string());
+    }
+    if flags.outer_raw_payload_present {
+        // Raw memory keys/content sat beside `status_packet` in the args.
+        blockers.push("raw_payload_fields_present".to_string());
     }
     if !source_side_effects_safe {
         blockers.push("status_packet_side_effect_contract_invalid".to_string());
@@ -37704,7 +37714,8 @@ fn outcome_gated_consolidation_transition_gate_eval(
         },
         "input_contract": {
             "status_packet_included": false,
-            "raw_payload_fields_present": source_contains_raw,
+            "raw_payload_fields_present": flags.outer_raw_payload_present,
+            "status_packet_contains_raw_payload": source_contains_raw,
             "unknown_fields_ignored": true
         },
         "side_effects": {
@@ -37783,6 +37794,25 @@ impl McpTool for OutcomeGatedConsolidationTransitionGateTool {
             .get("regression_anchor")
             .and_then(Value::as_str)
             .unwrap_or("");
+        // Detect raw memory keys/content anywhere in the OUTER args, not just
+        // inside `status_packet` — drop the known wrapper fields first so an
+        // unknown raw field beside the packet still trips the contract.
+        let mut outer = args.clone();
+        if let Some(obj) = outer.as_object_mut() {
+            for known in [
+                "status_packet",
+                "per_call_opt_in",
+                "operator_disabled",
+                "regression_anchor",
+                "reviewer",
+                "commit",
+                "forum_post_id",
+                "memory_key",
+            ] {
+                obj.remove(known);
+            }
+        }
+        let outer_raw_payload_present = outcome_gated_packet_contains_raw(&outer);
         let flags = OutcomeGatedConsolidationTransitionFlags {
             runtime_enabled: mcp_env_truthy(OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV),
             operator_disabled,
@@ -37791,6 +37821,7 @@ impl McpTool for OutcomeGatedConsolidationTransitionGateTool {
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
             anchor_ok: anchor == OUTCOME_GATED_CONSOLIDATION_ANCHOR,
+            outer_raw_payload_present,
             reviewer: args.get("reviewer").and_then(Value::as_str).map(str::to_string),
             commit: args.get("commit").and_then(Value::as_str).map(str::to_string),
             forum_post_id: args
@@ -76313,6 +76344,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             operator_disabled: false,
             per_call_opt_in: true,
             anchor_ok,
+            outer_raw_payload_present: false,
             reviewer: None,
             commit: None,
             forum_post_id: None,
@@ -76445,6 +76477,49 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         // The gate never echoes the raw field back.
         assert!(gate.get("gated_actions").is_none());
         assert_eq!(gate["source_status"]["raw_payload_fields_present"], json!(true));
+        ogc_assert_transition_no_side_effects(&gate);
+    }
+
+    #[test]
+    fn outcome_gated_transition_outer_raw_payload_blocks_even_with_gates_open() {
+        // Ready packet + ALL gates open, but raw keys sit in the OUTER args
+        // (beside status_packet). The gate must still refuse.
+        let mut flags = ogc_transition_flags(true);
+        flags.outer_raw_payload_present = true;
+        let gate =
+            outcome_gated_consolidation_transition_gate_eval(&ogc_ready_status_packet(), flags);
+        assert_eq!(gate["status"], json!("blocked"));
+        assert!(ogc_transition_blockers(&gate).contains(&"raw_payload_fields_present".to_string()));
+        assert_eq!(gate["input_contract"]["raw_payload_fields_present"], json!(true));
+        ogc_assert_transition_no_side_effects(&gate);
+    }
+
+    #[tokio::test]
+    async fn outcome_gated_transition_tool_detects_raw_keys_in_outer_args() {
+        // Exercises execute(): raw keys beside status_packet must be detected
+        // over the whole args, not just inside the packet. Runtime stays OFF
+        // here (no env needed) — we assert the raw-detection wiring specifically.
+        let tool = OutcomeGatedConsolidationTransitionGateTool::new();
+        let out = tool
+            .execute(
+                json!({
+                    "status_packet": ogc_ready_status_packet(),
+                    "regression_anchor": OUTCOME_GATED_CONSOLIDATION_ANCHOR,
+                    "per_call_opt_in": true,
+                    "content": "leaked memory body",
+                    "target_key": "secret_key"
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute ok");
+        let gate = result_text_as_json(&out);
+        assert_eq!(gate["input_contract"]["raw_payload_fields_present"], json!(true));
+        assert!(ogc_transition_blockers(&gate).contains(&"raw_payload_fields_present".to_string()));
+        assert_eq!(gate["status"], json!("blocked"));
+        // The raw outer fields are never echoed back.
+        assert!(gate.get("content").is_none());
+        assert!(gate.get("target_key").is_none());
         ogc_assert_transition_no_side_effects(&gate);
     }
 

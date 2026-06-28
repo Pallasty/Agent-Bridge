@@ -201,8 +201,11 @@ rather than forcing a merge. Keep `Missing` as a corpus-gap counter.
   apply trial may be requested. Pure
   `outcome_gated_consolidation_transition_gate_eval()` validates: `schema ==
   v1`, `read_only`, **no raw payload** (`outcome_gated_packet_contains_raw`
-  rejects a packet carrying `content`/`target_key`/`gated_actions`/`buckets`/…
-  — the gate must never become a content side-channel), packet `side_effects`
+  rejects `content`/`target_key`/`gated_actions`/`buckets`/… both *inside* the
+  packet **and** in the *outer* `args` beside it — `execute()` strips the known
+  wrapper fields then scans the remainder, so a raw field cannot bypass the
+  contract by sitting next to `status_packet`; the gate must never become a
+  content side-channel), packet `side_effects`
   all-false **AND** `data_access.mutates_state==false` (a packet missing those
   **fails closed**), `boundary_check.may_apply==true`, then **re-checks**
   runtime/operator/per-call independently of the packet (a stale "ready" packet
