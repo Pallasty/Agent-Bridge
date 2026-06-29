@@ -49857,7 +49857,10 @@ impl McpTool for SessionFinalizeTool {
                             disabled + per_call_opt_in + anchor; approval_packet approved + \
                             apply_token reproduced from refs; live diff_hash match; confirm_apply). \
                             If this finalize call is dry_run, the sub-call is forced to preview (no \
-                            writes). Any Stage 5 scoping args present (scope, scope_mode, skip_tags, \
+                            writes). The delegation runs BEFORE this call's own decay/compact \
+                            maintenance, so those passes never self-invalidate a just-approved plan \
+                            (external drift since approval is still caught by the live diff_hash gate). \
+                            Any Stage 5 scoping args present (scope, scope_mode, skip_tags, \
                             skip_kinds, min_similarity, …) are forwarded and MUST match the trial \
                             that produced the approval, or the diff_hash check fails closed. The full \
                             executor result is returned under `outcome_gated_consolidation`."
@@ -49906,6 +49909,41 @@ impl McpTool for SessionFinalizeTool {
             .get("skip_decay")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
+
+        // Stage 5b: optional delegation to the Stage 5 outcome-gated WRITE
+        // executor. Runs BEFORE the decay/compact maintenance passes below, on
+        // purpose: a freshly-approved consolidation plan is then evaluated against
+        // the same pre-maintenance store the operator approved against, so
+        // finalize's OWN decay (which mutates importance → consolidate rank) and
+        // compact (which can tombstone a plan participant) can never
+        // self-invalidate the approval's frozen diff_hash within this one call.
+        // (External drift since approval is still caught by the executor's live
+        // diff_hash gate → blocked_diff_hash_stale.) Housekeeping then runs on the
+        // post-apply result. Default-OFF: when apply_outcome_gated is absent/false
+        // this is a no-op and the response is byte-identical (the
+        // `outcome_gated_consolidation` key is omitted). When true, session_finalize
+        // adds NOTHING of its own — it forwards args to the executor, which
+        // independently enforces ALL of its gates (runtime env, approval-packet
+        // validity + apply_token reproduction, live diff_hash match, confirm_apply).
+        // A dry_run finalize forces the sub-call to preview, so finalize(dry_run)
+        // never mutates memory.
+        let apply_outcome_gated = args
+            .get("apply_outcome_gated")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let outcome_gated_consolidation = if apply_outcome_gated {
+            let mut sub_args = args.clone();
+            if dry_run {
+                sub_args["confirm_apply"] = json!(false);
+            }
+            let apply_tool = OutcomeGatedConsolidationApplyTool::new(self.hub.clone());
+            match apply_tool.execute(sub_args, _ctx).await {
+                Ok(res) => tool_result_first_json(&res).unwrap_or(Value::Null),
+                Err(e) => json!({ "error": e.to_string() }),
+            }
+        } else {
+            Value::Null
+        };
 
         // 1. Importance decay pass (unless skipped or dry_run)
         let decay_archived = if skip_decay || dry_run {
@@ -49983,33 +50021,6 @@ impl McpTool for SessionFinalizeTool {
                 "hint": Value::Null,
                 "outcome_gated_apply": Value::Null,
             }),
-        };
-
-        // Stage 5b: optional delegation to the Stage 5 outcome-gated WRITE
-        // executor. Default-OFF — when apply_outcome_gated is absent/false this is
-        // a no-op and the response shape is byte-identical to before (the
-        // `outcome_gated_consolidation` key is omitted entirely). When true,
-        // session_finalize adds NOTHING of its own: it forwards args to the
-        // executor, which independently enforces ALL of its gates (runtime env,
-        // approval-packet validity + apply_token reproduction, live diff_hash
-        // match, confirm_apply). A dry_run finalize forces the sub-call to preview
-        // so finalize(dry_run) never mutates memory.
-        let apply_outcome_gated = args
-            .get("apply_outcome_gated")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let outcome_gated_consolidation = if apply_outcome_gated {
-            let mut sub_args = args.clone();
-            if dry_run {
-                sub_args["confirm_apply"] = json!(false);
-            }
-            let apply_tool = OutcomeGatedConsolidationApplyTool::new(self.hub.clone());
-            match apply_tool.execute(sub_args, _ctx).await {
-                Ok(res) => tool_result_first_json(&res).unwrap_or(Value::Null),
-                Err(e) => json!({ "error": e.to_string() }),
-            }
-        } else {
-            Value::Null
         };
 
         // Optional: persist user profile to USER.md for future session_bootstrap.
@@ -50983,6 +50994,11 @@ impl McpTool for SessionLifecycleStepTool {
             }
             "finalize" | "end" => {
                 let mut sub = json!({});
+                // NOTE: this allowlist deliberately EXCLUDES `apply_outcome_gated`
+                // (and the approval_packet/owner refs) so the lifecycle / Stop-hook
+                // path can never auto-arm the Stage 5 gated WRITE. The gated apply is
+                // reachable only via an explicit human session_finalize call. Do not
+                // add apply_outcome_gated here.
                 for k in [
                     "older_than_days",
                     "min_uses",
@@ -51052,6 +51068,9 @@ impl McpTool for SessionLifecycleStepTool {
                     .await?;
 
                 let mut fin_args = json!({});
+                // Same as the "finalize" step: this allowlist deliberately EXCLUDES
+                // `apply_outcome_gated` so the precompact / Stop-hook path can never
+                // auto-arm the Stage 5 gated WRITE. Do not add it here.
                 for k in [
                     "older_than_days",
                     "min_uses",
@@ -79019,6 +79038,46 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert_eq!(gated["applied"], json!(true));
         assert!(gated["finalize_readback"]["archived_memories"].as_u64().unwrap() >= 1);
         // The delegation actually archived the target in the store.
+        let after = store.memory_get("apply_target").await.expect("get").expect("present");
+        assert_eq!(after.status, "archived");
+
+        restore_env_var(OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV, pe);
+        restore_env_var(OUTCOME_GATED_CONSOLIDATION_DISABLE_ENV, pd);
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn session_finalize_optin_applies_in_band_without_skip_decay() {
+        // Reorder guarantee: the gated apply runs BEFORE finalize's own
+        // decay/compact maintenance, so a single session_finalize(apply_outcome_
+        // gated:true, confirm_apply:true) call WITHOUT skip_decay still applies —
+        // finalize's own maintenance can no longer self-invalidate the just-built
+        // approval's frozen diff_hash within the same call.
+        let _lock = frontend_env_test_setup();
+        let pe = std::env::var(OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV).ok();
+        let pd = std::env::var(OUTCOME_GATED_CONSOLIDATION_DISABLE_ENV).ok();
+        std::env::set_var(OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV, "1");
+        std::env::remove_var(OUTCOME_GATED_CONSOLIDATION_DISABLE_ENV);
+
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        ogc_seed_harmful_target(&store).await;
+        let approval = ogc_build_approval(&hub).await;
+
+        // No skip_decay and no dry_run: finalize's decay + compact passes run this
+        // call, but because the delegation is ordered ahead of them the approved
+        // plan still applies.
+        let mut args = ogc_apply_args(approval, true);
+        args["apply_outcome_gated"] = json!(true);
+        let out = SessionFinalizeTool::new(hub.clone())
+            .execute(args, &ToolContext::default())
+            .await
+            .expect("finalize exec");
+        let res = result_text_as_json(&out);
+        let gated = &res["outcome_gated_consolidation"];
+        assert_eq!(gated["status"], json!("applied"), "in-band apply must not self-invalidate");
+        assert_eq!(gated["applied"], json!(true));
+        assert!(gated["finalize_readback"]["archived_memories"].as_u64().unwrap() >= 1);
         let after = store.memory_get("apply_target").await.expect("get").expect("present");
         assert_eq!(after.status, "archived");
 

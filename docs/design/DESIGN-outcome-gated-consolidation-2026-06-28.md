@@ -297,9 +297,19 @@ rather than forcing a merge. Keep `Missing` as a corpus-gap counter.
     independently enforces all four gates; the full executor result is returned
     under `outcome_gated_consolidation`. A `dry_run` finalize **forces the
     sub-call to preview** (`confirm_apply→false`), so `session_finalize(dry_run)`
-    can never mutate memory. Covered by 5 store-backed tests (schema/opt-in,
+    can never mutate memory. The delegation runs **before** this call's own
+    decay/compact maintenance, so finalize's own importance-decay (which feeds the
+    consolidate rank) and compaction can never self-invalidate a just-approved
+    plan within the same call — external drift since approval is still caught by
+    the executor's live `diff_hash` gate. The two `session_lifecycle_step`
+    forward-allowlists (the Stop-hook path) deliberately **exclude**
+    `apply_outcome_gated`, so the gated WRITE is reachable only via an explicit
+    human `session_finalize` call. Covered by 6 store-backed tests (schema/opt-in,
     default-off omits the block + no writes, delegates+applies when fully gated,
-    dry-run forces preview, env-off blocks).
+    in-band apply succeeds without `skip_decay`, dry-run forces preview, env-off
+    blocks). Two adversarial workflows (4-lens refutation + 6-hypothesis
+    prove-or-disprove panel) found **0 unsafe behaviors**; the ordering refinement
+    above came out of the hypothesis panel.
 
 ## 8. Noise / poison-feedback safety (defense in depth)
 
