@@ -1532,6 +1532,51 @@ impl SqliteStore {
                 }
                 let _ = c.execute("UPDATE schema_meta SET value='37' WHERE key='version'", []);
             }
+
+            // ── v38: bounded coactivation-latch — last_cofire_at (warmth signal).
+            // ADDITIVE column; the BEHAVIOR change (recency-conditioned immunity)
+            // lives in record_coactivation / decay_coactivation_once /
+            // memory_prune_coactivation_noise (design
+            // docs/design/BOUNDED_COACTIVATION_LATCH_2026_06_28.md §3-§5.1).
+            //   * last_cofire_at = unix-seconds of the most recent REAL co-fire,
+            //     written ONLY by record_coactivation, NEVER by decay. This is the
+            //     "currently active" signal that makes immunity a function of
+            //     CURRENT state (bounded, snapshot-measurable) instead of the
+            //     reverted-L2 monotonic ratchet (unbounded, cumulative).
+            // Full version-gated rung (gate on cur=="37", bump to "38") so the
+            // one-time backfill runs EXACTLY once — driven by the version bump,
+            // not a fragile column-value WHERE.
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "37".to_string());
+            if cur.as_str() == "37" {
+                let exists: i64 = c
+                    .query_row(
+                        "SELECT COUNT(*) FROM pragma_table_info('memory_coactivation') \
+                         WHERE name='last_cofire_at'",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .unwrap_or(0);
+                if exists == 0 {
+                    c.execute(
+                        "ALTER TABLE memory_coactivation \
+                         ADD COLUMN last_cofire_at INTEGER NOT NULL DEFAULT 0",
+                        [],
+                    )?;
+                }
+                // One-time cosmetic backfill: seed from `first_at` (a REAL first
+                // co-fire timestamp), NOT the decay-bumped `last_at`. Immaterial to
+                // immunity — `consolidated` is uniformly 0 at v38 start (the v37
+                // column was never written; L2 was reverted), so is_immune is false
+                // for every legacy row regardless. This is honesty, not correctness.
+                c.execute("UPDATE memory_coactivation SET last_cofire_at = first_at", [])?;
+                let _ = c.execute("UPDATE schema_meta SET value='38' WHERE key='version'", []);
+            }
             Ok(())
         })
         .await
@@ -4124,25 +4169,37 @@ impl StateStore for SqliteStore {
     ) -> Result<u64> {
         let max_count = max_count.max(0);
         let days = older_than_days.max(0);
-        let cutoff = now_secs() - days.saturating_mul(86_400);
+        let now = now_secs();
+        let cutoff = now - days.saturating_mul(86_400);
+        // v38: same recency-conditioned immunity predicate as decay_coactivation_once,
+        // so a warm latched edge is immune in BOTH prune paths and a cold latched edge
+        // is reclaimable in BOTH (design §4.3 — the MAJOR-2 consistency fix). The
+        // maintenance tool keeps its role (operators can purge genuine noise) but can
+        // no longer silently delete a currently-important edge. Knob from LatchConfig.
+        let stale_window_secs: i64 =
+            crate::coactivation_latch::LatchConfig::default().stale_window_secs;
         let pruned = self
             .conn
             .call(move |c| -> RusqliteResult<u64> {
                 let tx = c.unchecked_transaction()?;
-                // Count first so dry-run reports the same number a live run
-                // would actually delete. Single WHERE clause used twice keeps
-                // the two paths consistent.
+                // Count first so dry-run reports the same number a live run would
+                // actually delete. Single WHERE clause (with the immunity guard) used
+                // twice keeps the two paths consistent.
                 let n: i64 = tx.query_row(
                     "SELECT COUNT(*) FROM memory_coactivation
-                      WHERE count <= ?1 AND last_at <= ?2",
-                    params![max_count, cutoff],
+                      WHERE count <= ?1 AND last_at <= ?2
+                        AND NOT (consolidated = 1
+                                 AND last_cofire_at >= ?3 - ?4)",
+                    params![max_count, cutoff, now, stale_window_secs],
                     |row| row.get(0),
                 )?;
                 if !dry_run {
                     tx.execute(
                         "DELETE FROM memory_coactivation
-                          WHERE count <= ?1 AND last_at <= ?2",
-                        params![max_count, cutoff],
+                          WHERE count <= ?1 AND last_at <= ?2
+                            AND NOT (consolidated = 1
+                                     AND last_cofire_at >= ?3 - ?4)",
+                        params![max_count, cutoff, now, stale_window_secs],
                     )?;
                 }
                 tx.commit()?;
@@ -6206,6 +6263,13 @@ impl StateStore for SqliteStore {
         let res = self
             .conn
             .call(move |c| -> RusqliteResult<()> {
+                // v38: the consolidation threshold is sourced from LatchConfig (single
+                // source of truth) and bound into the SQL — never hardcoded. A fresh
+                // edge inserts at count=1 and latches iff 1 >= threshold (default 5 ⇒
+                // never on first co-fire), keeping the INSERT path in lockstep with the
+                // pure kernel `decide(1,false)` (design §4.1 agreement clause).
+                let consolidate_at_count: i64 =
+                    crate::coactivation_latch::LatchConfig::default().consolidate_at_count as i64;
                 let tx = c.transaction()?;
                 for (a, b) in &pairs {
                     // Read existing row (if any) to compute rolling-mean.
@@ -6243,13 +6307,18 @@ impl StateStore for SqliteStore {
 
                     tx.execute(
                         "INSERT INTO memory_coactivation
-                            (key_a, key_b, count, first_at, last_at, ctx_centroid)
-                         VALUES (?1, ?2, 1, ?3, ?3, ?4)
+                            (key_a, key_b, count, first_at, last_at, ctx_centroid,
+                             last_cofire_at, consolidated)
+                         VALUES (?1, ?2, 1, ?3, ?3, ?4, ?3,
+                                 CASE WHEN 1 >= ?5 THEN 1 ELSE 0 END)
                          ON CONFLICT(key_a, key_b) DO UPDATE SET
-                            count    = count + 1,
-                            last_at  = ?3,
-                            ctx_centroid = ?4",
-                        rusqlite::params![a, b, now, new_blob],
+                            count          = count + 1,
+                            last_at        = ?3,
+                            last_cofire_at = ?3,
+                            ctx_centroid   = ?4,
+                            consolidated   =
+                                CASE WHEN count + 1 >= ?5 THEN 1 ELSE consolidated END",
+                        rusqlite::params![a, b, now, new_blob, consolidate_at_count],
                     )?;
                 }
                 tx.commit()?;
@@ -8202,15 +8271,27 @@ impl StateStore for SqliteStore {
 
         self.conn
             .call(move |c| -> RusqliteResult<crate::DecayCoactivationStats> {
+                // v38 bounded latch: immunity = consolidated AND warm (co-fired within
+                // stale_window_secs). The reap gates on NOT-immune; a hard size cap then
+                // evicts the coldest latched edges so |immune| ≤ max_latched_edges
+                // (design §4.2 + §5.1). Knobs come from LatchConfig (single source).
+                let cfg = crate::coactivation_latch::LatchConfig::default();
+                let stale_window_secs: i64 = cfg.stale_window_secs;
+                let max_latched_edges: i64 = cfg.max_latched_edges as i64;
                 let mut swept_total: u64 = 0;
                 let mut iters: u32 = 0;
                 let tx = c.unchecked_transaction()?;
                 for _ in 0..max_iter {
+                    // `AND count >= 1` guard (v38): behavior-neutral for LIVE rows
+                    // (0/2 == 0), but stops `last_at` drift on dead-but-immune rows
+                    // and keeps `swept` honest. A pre-existing count=0 stale row is no
+                    // longer counted in `swept` (it was a 0/2 no-op anyway); it is still
+                    // reaped, so `pruned` is unchanged (design §4.2).
                     let n: usize = tx.execute(
                         "UPDATE memory_coactivation
                             SET count   = count / 2,
                                 last_at = last_at + ?1
-                          WHERE last_at + ?1 <= ?2",
+                          WHERE last_at + ?1 <= ?2 AND count >= 1",
                         rusqlite::params![tau, now_clamped],
                     )?;
                     iters += 1;
@@ -8223,9 +8304,43 @@ impl StateStore for SqliteStore {
                     }
                     swept_total = swept_total.saturating_add(n as u64);
                 }
-                // Reap dead rows after all halvings complete.
-                let pruned: usize =
-                    tx.execute("DELETE FROM memory_coactivation WHERE count < 1", [])?;
+                // Reap dead rows after all halvings — but only NON-IMMUNE ones. A warm
+                // latched edge (consolidated AND co-fired within the stale window)
+                // survives at count 0; a cold latched edge is reaped (the reaping IS
+                // the un-latch); an un-latched edge (consolidated=0 ⇒ predicate false ⇒
+                // NOT false = true) is reaped exactly as pre-v38. Inclusive boundary:
+                // last_cofire_at == now-stale is still warm (design §4.2, §10 gate 2).
+                let pruned: usize = tx.execute(
+                    "DELETE FROM memory_coactivation
+                      WHERE count < 1
+                        AND NOT (consolidated = 1
+                                 AND last_cofire_at >= ?1 - ?2)",
+                    rusqlite::params![now_clamped, stale_window_secs],
+                )?;
+                // §5.1 STRUCTURAL size cap (cheap — once per sweep, not per co-fire):
+                // if the latched set exceeds the cap, un-consolidate the COLDEST-
+                // co-fired latched edges (lowest last_cofire_at) down to the cap.
+                // MAX(0, …) guards SQLite's "negative LIMIT = no limit" footgun.
+                // Un-consolidated rows lose immunity and are reaped by a later sweep
+                // once count decays < 1. So |immune| ≤ max_latched_edges holds at every
+                // SWEEP BOUNDARY; between sweeps a batch co-fire can transiently latch
+                // more, but the set is still bounded in time by stale_window_secs and by
+                // P (finite pairs) and is reclaimed to the cap at the next sweep — no
+                // unbounded ratchet (only record_coactivation re-sets consolidated=1;
+                // decay never does). The secondary ORDER BY keys make the tie-break at
+                // the cap boundary deterministic (else SQLite picks by arbitrary rowid).
+                tx.execute(
+                    "UPDATE memory_coactivation SET consolidated = 0
+                      WHERE rowid IN (
+                          SELECT rowid FROM memory_coactivation
+                           WHERE consolidated = 1
+                           ORDER BY last_cofire_at ASC, count ASC, rowid ASC
+                           LIMIT MAX(0,
+                               (SELECT COUNT(*) FROM memory_coactivation
+                                 WHERE consolidated = 1) - ?1)
+                      )",
+                    rusqlite::params![max_latched_edges],
+                )?;
                 tx.commit()?;
                 Ok(crate::DecayCoactivationStats {
                     swept: swept_total,
@@ -16372,7 +16487,7 @@ mod tests {
             .await
             .expect("inspect migrated rows");
 
-        assert_eq!(version, "37"); // v37 = INT8 shadow + coactivation consolidated-latch columns; latest after all migrations
+        assert_eq!(version, "38"); // v38 = bounded coactivation-latch (last_cofire_at warmth signal); latest after all migrations
         assert_eq!(bad_count, 0);
         assert_eq!(mem_created, 1_779_641_229_i64);
         assert_eq!(post_created, 1_779_641_229_i64);
@@ -17618,6 +17733,401 @@ mod tests {
         let (count, _) = read_pair(&store, "a", "b").await.expect("row present");
         assert_eq!(count, 2, "decayed exactly once across two calls");
 
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    // ── v38: bounded coactivation-latch (recency-conditioned immunity + size cap) ──
+    //
+    // v38 adds `last_cofire_at` (warmth, written only by record_coactivation) beside
+    // v37's sticky `consolidated`. is_immune := consolidated=1 AND last_cofire_at >=
+    // now - stale_window_secs, applied identically by decay_coactivation_once and
+    // memory_prune_coactivation_noise; §5.1 caps the latched set at max_latched_edges
+    // via coldest-first eviction in the decay sweep.
+
+    fn mk_active(key: &str) -> crate::MemoryRecord {
+        crate::MemoryRecord {
+            key: key.into(),
+            kind: "lesson".into(),
+            content: format!("c {key}"),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".into(),
+            trigger_pattern: None,
+            superseded_by: None,
+        }
+    }
+
+    /// Seed a coactivation edge with explicit `consolidated` and `last_cofire_at`
+    /// (creates the FK-required memory endpoints first; orders keys lexically).
+    #[allow(clippy::too_many_arguments)]
+    async fn seed_latched_pair(
+        store: &SqliteStore,
+        a: &str,
+        b: &str,
+        count: i64,
+        last_at: i64,
+        consolidated: i64,
+        last_cofire_at: i64,
+    ) {
+        for k in [a, b] {
+            store
+                .memory_save(&mk_active(k))
+                .await
+                .expect("save endpoint");
+        }
+        let (lo, hi) = if a < b { (a, b) } else { (b, a) };
+        let lo = lo.to_string();
+        let hi = hi.to_string();
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<()> {
+                c.execute(
+                    "INSERT INTO memory_coactivation
+                       (key_a, key_b, count, first_at, last_at, consolidated, last_cofire_at)
+                     VALUES (?1, ?2, ?3, ?4, ?4, ?5, ?6)",
+                    params![lo, hi, count, last_at, consolidated, last_cofire_at],
+                )?;
+                Ok(())
+            })
+            .await
+            .expect("seed latched coactivation row");
+    }
+
+    async fn count_consolidated(store: &SqliteStore) -> i64 {
+        store
+            .conn
+            .call(|c| -> RusqliteResult<i64> {
+                c.query_row(
+                    "SELECT COUNT(*) FROM memory_coactivation WHERE consolidated = 1",
+                    [],
+                    |r| r.get(0),
+                )
+            })
+            .await
+            .expect("count consolidated")
+    }
+
+    async fn read_latch_row(store: &SqliteStore, a: &str, b: &str) -> (i64, i64, i64) {
+        let (lo, hi) = if a < b { (a, b) } else { (b, a) };
+        let lo = lo.to_string();
+        let hi = hi.to_string();
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<(i64, i64, i64)> {
+                c.query_row(
+                    "SELECT count, consolidated, last_cofire_at FROM memory_coactivation
+                      WHERE key_a = ?1 AND key_b = ?2",
+                    params![lo, hi],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+            })
+            .await
+            .expect("read latch row")
+    }
+
+    #[tokio::test]
+    async fn v38_schema_adds_last_cofire_at_column() {
+        // Fresh open runs the full ladder incl v38; last_cofire_at present exactly
+        // once and NOT NULL DEFAULT 0 (a v37-shaped insert without it gets 0).
+        let (dir, store) = fresh_store("v38-col").await;
+        let (v, n): (String, i64) = store
+            .conn
+            .call(|c| -> RusqliteResult<(String, i64)> {
+                let v: String = c.query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                let n: i64 = c.query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('memory_coactivation') \
+                     WHERE name='last_cofire_at'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                Ok((v, n))
+            })
+            .await
+            .expect("probe schema");
+        assert_eq!(v, "38", "schema at v38");
+        assert_eq!(n, 1, "last_cofire_at present exactly once");
+
+        seed_pair_for_decay(&store, "a", "b", 3, 1_000).await; // insert without last_cofire_at
+        let (_, _, lcf) = read_latch_row(&store, "a", "b").await;
+        assert_eq!(
+            lcf, 0,
+            "insert without last_cofire_at uses NOT NULL DEFAULT 0"
+        );
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn v38_backfill_seeds_last_cofire_at_from_first_at_on_upgrade() {
+        // Faithfully exercise the one-time backfill: rewind the version to 37 (column
+        // kept, value clobbered) so re-open replays the v38 rung — the guarded ALTER
+        // is correctly skipped and the backfill copies first_at → last_cofire_at once.
+        let (dir, store) = fresh_store("v38-backfill").await;
+        seed_pair_for_decay(&store, "a", "b", 4, 5_000).await; // first_at = last_at = 5000
+        store
+            .conn
+            .call(|c| -> RusqliteResult<()> {
+                c.execute("UPDATE memory_coactivation SET last_cofire_at = 0", [])?;
+                c.execute("UPDATE schema_meta SET value='37' WHERE key='version'", [])?;
+                Ok(())
+            })
+            .await
+            .expect("rewind to v37 version");
+        drop(store);
+
+        let store2 = SqliteStore::open(&dir.join("state.db"))
+            .await
+            .expect("reopen replays v38");
+        let (v, lcf): (String, i64) = store2
+            .conn
+            .call(|c| -> RusqliteResult<(String, i64)> {
+                let v: String = c.query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                let lcf: i64 = c.query_row(
+                    "SELECT last_cofire_at FROM memory_coactivation WHERE key_a='a' AND key_b='b'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                Ok((v, lcf))
+            })
+            .await
+            .expect("probe after upgrade");
+        assert_eq!(v, "38", "re-open ran the v38 rung");
+        assert_eq!(lcf, 5_000, "backfill seeded last_cofire_at from first_at");
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn v38_record_coactivation_stamps_warmth_and_latches_at_threshold() {
+        // record_coactivation stamps last_cofire_at on every co-fire and sets
+        // consolidated=1 EXACTLY when the new count reaches consolidate_at_count
+        // (INSERT path agrees with the kernel: a fresh count=1 edge never latches).
+        let (dir, store) = fresh_store("v38-record").await;
+        let threshold = crate::coactivation_latch::LatchConfig::default().consolidate_at_count;
+        for k in ["x", "y"] {
+            store.memory_save(&mk_active(k)).await.expect("save");
+        }
+        for _ in 0..(threshold - 1) {
+            store
+                .record_coactivation(&["x".into(), "y".into()], None)
+                .await
+                .expect("cofire");
+        }
+        let (cnt, cons, lcf) = read_latch_row(&store, "x", "y").await;
+        assert_eq!(cnt, (threshold - 1) as i64, "count one below threshold");
+        assert_eq!(cons, 0, "not yet consolidated below threshold");
+        assert!(lcf > 0, "last_cofire_at stamped on every co-fire");
+
+        store
+            .record_coactivation(&["x".into(), "y".into()], None)
+            .await
+            .expect("cofire");
+        let (cnt2, cons2, _) = read_latch_row(&store, "x", "y").await;
+        assert_eq!(cnt2, threshold as i64, "count reaches threshold");
+        assert_eq!(cons2, 1, "edge latches exactly at threshold");
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn v38_unlatched_edge_prunes_exactly_as_pre_v38() {
+        // consolidated=0 ⇒ immunity predicate always false ⇒ reaped exactly as
+        // pre-v38, even with last_cofire_at maximally warm. Immunity REQUIRES
+        // consolidated=1 (the gate-#4 no-regression invariant, pinned explicitly).
+        let (dir, store) = fresh_store("v38-unlatched").await;
+        let tau = 7 * 86_400_i64;
+        let last_at = 1_000_000_i64;
+        let now = last_at + tau;
+        seed_latched_pair(&store, "a", "b", 1, last_at, 0, now).await; // consolidated=0, warm
+        let s = store
+            .decay_coactivation_once(tau, now, 10)
+            .await
+            .expect("decay");
+        assert_eq!(s.pruned, 1, "un-latched edge reaped exactly as pre-v38");
+        assert!(read_pair(&store, "a", "b").await.is_none(), "row gone");
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn v38_cold_latched_edge_reaped_by_both_prune_paths() {
+        // gate #2 (cold half): a consolidated edge gone COLD (last_cofire_at older
+        // than the window — the inclusive boundary minus 1) is reclaimable by BOTH
+        // decay_coactivation_once AND memory_prune_coactivation_noise.
+        let stale = crate::coactivation_latch::LatchConfig::default().stale_window_secs;
+
+        // decay path: count 1 → 0 (halved), cold ⇒ reaped.
+        let (dir1, store1) = fresh_store("v38-cold-decay").await;
+        let tau = 7 * 86_400_i64;
+        let last_at = 1_000_000_i64;
+        let now1 = last_at + tau;
+        seed_latched_pair(&store1, "a", "b", 1, last_at, 1, now1 - stale - 1).await;
+        let s = store1
+            .decay_coactivation_once(tau, now1, 10)
+            .await
+            .expect("decay");
+        assert_eq!(s.pruned, 1, "cold latched edge reaped by decay");
+        assert!(
+            read_pair(&store1, "a", "b").await.is_none(),
+            "row gone (decay)"
+        );
+        let _ = tokio::fs::remove_dir_all(&dir1).await;
+
+        // noise-prune path: low count + aged + cold ⇒ reaped.
+        let (dir2, store2) = fresh_store("v38-cold-noise").await;
+        let now2 = now_secs();
+        let old = now2 - 60 * 86_400;
+        seed_latched_pair(&store2, "a", "b", 1, old, 1, now2 - stale - 1).await;
+        let pruned = store2
+            .memory_prune_coactivation_noise(1, 30, false)
+            .await
+            .expect("prune");
+        assert_eq!(pruned, 1, "cold latched edge reaped by noise-prune");
+        assert!(
+            read_pair(&store2, "a", "b").await.is_none(),
+            "row gone (noise)"
+        );
+        let _ = tokio::fs::remove_dir_all(&dir2).await;
+    }
+
+    #[tokio::test]
+    async fn v38_warm_latched_edge_immune_in_both_paths_inclusive_boundary() {
+        // gate #2 (warm half + inclusive boundary): a consolidated edge co-fired
+        // EXACTLY at now - stale is still warm (>= is inclusive) and survives BOTH
+        // prune paths — in decay it sits immune at count 0.
+        let stale = crate::coactivation_latch::LatchConfig::default().stale_window_secs;
+
+        // decay path: count 1 → 0 but warm ⇒ survives at count 0.
+        let (dir1, store1) = fresh_store("v38-warm-decay").await;
+        let tau = 7 * 86_400_i64;
+        let last_at = 1_000_000_i64;
+        let now1 = last_at + tau;
+        seed_latched_pair(&store1, "a", "b", 1, last_at, 1, now1 - stale).await; // inclusive
+        let s = store1
+            .decay_coactivation_once(tau, now1, 10)
+            .await
+            .expect("decay");
+        assert_eq!(s.pruned, 0, "warm latched edge NOT reaped by decay");
+        let (cnt, _) = read_pair(&store1, "a", "b").await.expect("row present");
+        assert_eq!(cnt, 0, "decayed to 0 but survives (immune)");
+        let _ = tokio::fs::remove_dir_all(&dir1).await;
+
+        // noise-prune path: low count + aged but warm ⇒ survives.
+        let (dir2, store2) = fresh_store("v38-warm-noise").await;
+        let now2 = now_secs();
+        let old = now2 - 60 * 86_400;
+        seed_latched_pair(&store2, "a", "b", 1, old, 1, now2 - stale).await; // inclusive
+        let pruned = store2
+            .memory_prune_coactivation_noise(1, 30, false)
+            .await
+            .expect("prune");
+        assert_eq!(pruned, 0, "warm latched edge immune to noise-prune");
+        assert!(
+            read_pair(&store2, "a", "b").await.is_some(),
+            "row present (noise)"
+        );
+        let _ = tokio::fs::remove_dir_all(&dir2).await;
+    }
+
+    #[tokio::test]
+    async fn v38_eviction_cap_bounds_latched_set_and_evicts_coldest_first() {
+        // gate #1 (STRUCTURAL bound): drive the latched set past max_latched_edges and
+        // assert one decay sweep evicts the COLDEST-co-fired latched edges down to the
+        // cap. count high + last_at recent ⇒ no halving/reap this sweep; only §5.1 acts.
+        let (dir, store) = fresh_store("v38-evict").await;
+        let cap = crate::coactivation_latch::LatchConfig::default().max_latched_edges as i64;
+        let over = cap + 5;
+        let now = 10_000_000_i64;
+
+        // 10 memories → 45 distinct pairs (10*9/2 ≥ over for the default cap of 40).
+        let keys: Vec<String> = (0..10).map(|i| format!("m{i:02}")).collect();
+        for k in &keys {
+            store.memory_save(&mk_active(k)).await.expect("save");
+        }
+        let mut pairs: Vec<(String, String)> = Vec::new();
+        for i in 0..keys.len() {
+            for j in (i + 1)..keys.len() {
+                pairs.push((keys[i].clone(), keys[j].clone()));
+            }
+        }
+        assert!(pairs.len() as i64 >= over, "enough pairs to exceed the cap");
+        let chosen: Vec<(String, String)> = pairs.into_iter().take(over as usize).collect();
+
+        // last_cofire_at = now - (over - idx): idx 0 is the COLDEST, all within the
+        // (large) stale window so every row is warm — the cap must still evict the
+        // coldest, proving the bound is structural (independent of warmth).
+        let chosen_ins = chosen.clone();
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<()> {
+                let tx = c.unchecked_transaction()?;
+                for (idx, (a, b)) in chosen_ins.iter().enumerate() {
+                    let (lo, hi) = if a < b { (a, b) } else { (b, a) };
+                    let lcf = now - (over - idx as i64);
+                    tx.execute(
+                        "INSERT INTO memory_coactivation
+                           (key_a,key_b,count,first_at,last_at,consolidated,last_cofire_at)
+                         VALUES (?1,?2,100,?3,?3,1,?4)",
+                        params![lo, hi, now, lcf],
+                    )?;
+                }
+                tx.commit()?;
+                Ok(())
+            })
+            .await
+            .expect("seed over-cap latched edges");
+        assert_eq!(
+            count_consolidated(&store).await,
+            over,
+            "over-cap latched before sweep"
+        );
+
+        store
+            .decay_coactivation_once(7 * 86_400, now, 10)
+            .await
+            .expect("decay sweep evicts");
+
+        assert_eq!(
+            count_consolidated(&store).await,
+            cap,
+            "eviction bounds the latched set to max_latched_edges"
+        );
+        // The (over - cap) coldest edges (idx 0..) must be the ones un-consolidated.
+        let n_cold = (over - cap) as usize;
+        let coldest = chosen;
+        let still_latched: i64 = store
+            .conn
+            .call(move |c| -> RusqliteResult<i64> {
+                let mut n = 0i64;
+                for (a, b) in coldest.iter().take(n_cold) {
+                    let (lo, hi) = if a < b { (a, b) } else { (b, a) };
+                    let lo = lo.to_string();
+                    let hi = hi.to_string();
+                    let cons: i64 = c.query_row(
+                        "SELECT consolidated FROM memory_coactivation WHERE key_a=?1 AND key_b=?2",
+                        params![lo, hi],
+                        |r| r.get(0),
+                    )?;
+                    n += cons;
+                }
+                Ok(n)
+            })
+            .await
+            .expect("probe coldest");
+        assert_eq!(
+            still_latched, 0,
+            "the coldest edges were evicted, not warmer ones"
+        );
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
@@ -20609,7 +21119,7 @@ mod tests {
         let v = store.schema_meta_version().await.expect("query");
         assert_eq!(
             v.as_deref(),
-            Some("37"),
+            Some("38"),
             "if schema bumped, update both this assertion and S5 docs"
         );
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
@@ -21072,7 +21582,7 @@ mod tests {
             })
             .await
             .expect("probe schema");
-        assert_eq!(probe.0, "37", "schema must be at v37");
+        assert_eq!(probe.0, "38", "schema must be at v38");
         assert_eq!(
             (probe.1, probe.2, probe.3),
             (1, 1, 1),
@@ -21105,8 +21615,8 @@ mod tests {
             .expect("probe after reopen");
         assert_eq!(
             again,
-            ("37".to_string(), 2),
-            "re-open stays at v37 with both columns, no duplicate ALTER"
+            ("38".to_string(), 2),
+            "re-open stays at v38 with both columns, no duplicate ALTER"
         );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;

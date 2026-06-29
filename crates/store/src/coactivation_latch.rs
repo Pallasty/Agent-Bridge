@@ -36,6 +36,23 @@ pub struct LatchConfig {
     pub prune_below_count: u32,
     /// Event steps a pruned edge stays suppressed before it may be re-established.
     pub regrowth_cooldown_steps: u32,
+    /// Seconds since the last REAL co-fire after which a consolidated edge loses
+    /// immunity (recency gate, v38). A proven edge co-fired within this window is
+    /// immune to reaping; one idle longer is reaped — the reaping *is* the un-latch.
+    /// Trades churn-suppression (larger) against immune-set size (smaller). Start
+    /// ≈ 4·tau (a few days on the daily-ish decay cadence); confirm via the live
+    /// immune-set-size time series (design §5/§7).
+    pub stale_window_secs: i64,
+    /// Hard STRUCTURAL ceiling on the consolidated (latched) set size (v38). The
+    /// periodic decay sweep un-consolidates the coldest-co-fired latched edges
+    /// (lowest `last_cofire_at`) back to this cap, so `|immune| ≤ max_latched_edges`
+    /// holds at every sweep boundary — independent of the `k(k-1)/2` co-fire pair
+    /// explosion. (Between sweeps a batch co-fire can transiently latch more; the set
+    /// stays bounded in time by `stale_window_secs` and by P, and is reclaimed to the
+    /// cap at the next sweep — design §5.1.) Start ≈ the snapshot's
+    /// `count >= consolidate_at_count` cohort (~6.3% of the ~652-edge store ≈ 40);
+    /// confirm via measurement.
+    pub max_latched_edges: u32,
 }
 
 impl Default for LatchConfig {
@@ -47,6 +64,10 @@ impl Default for LatchConfig {
             consolidate_at_count: 5,
             prune_below_count: 1,
             regrowth_cooldown_steps: 3,
+            // v38 bounded-latch knobs (starting points, to be confirmed by the
+            // live §5(A) immune-set time series before promotion — design §7).
+            stale_window_secs: 4 * 86_400, // ≈ 4·tau (≈ 4 days) on the daily-ish decay cadence
+            max_latched_edges: 40,         // ≈ snapshot count>=5 cohort on the ~652-edge store
         }
     }
 }
@@ -197,6 +218,61 @@ mod tests {
         assert!(cfg.in_cooldown(Some(10), 12));
         assert!(!cfg.in_cooldown(Some(10), 13));
         assert!(!cfg.in_cooldown(None, 100));
+    }
+
+    #[test]
+    fn v38_latch_only_churn_drops_vs_baseline_with_cooldown_disabled() {
+        // §6.1/§10.3: v38 ships the latch half ONLY (cooldown is out of scope), so the
+        // churn-acceptance baseline must be a LATCH-ONLY simulation with cooldown
+        // disabled (regrowth_cooldown_steps = 0) — NOT measure_churn's cooldown-
+        // inclusive figure. The latch alone still eliminates the bursty edge's churn.
+        let cfg = LatchConfig {
+            regrowth_cooldown_steps: 0, // cooldown OFF: isolate the latch's own contribution
+            ..LatchConfig::default()
+        };
+        // Rises to 6 (latches at the consolidation threshold), then dips to 0 thrice.
+        let traj = [1u32, 3, 5, 6, 0, 4, 0, 5, 0];
+        let baseline = simulate_prunes(&traj, &cfg, false);
+        let latch_only = simulate_prunes(&traj, &cfg, true);
+        assert_eq!(
+            baseline, 3,
+            "un-latched baseline prunes once per below-floor dip"
+        );
+        assert_eq!(
+            latch_only, 0,
+            "latch alone (cooldown disabled) eliminates the bursty edge's churn"
+        );
+        assert!(
+            latch_only < baseline,
+            "latch-only churn is strictly lower than baseline"
+        );
+    }
+
+    #[test]
+    fn v38_bounded_knobs_have_sane_defaults_and_fresh_edge_never_latches() {
+        // The bounded-latch (v38) knobs must be positive durations/sizes, and the
+        // default consolidate threshold must be >= 2 so a FRESH edge (count == 1 on
+        // INSERT) is never eligible to latch on its first co-fire — this keeps the
+        // SQL INSERT path (`consolidated = CASE WHEN 1 >= threshold ...`) in lockstep
+        // with the pure kernel `decide(1, false)` (design §4.1 agreement clause).
+        let cfg = LatchConfig::default();
+        assert!(
+            cfg.stale_window_secs > 0,
+            "stale window must be a positive duration"
+        );
+        assert!(
+            cfg.max_latched_edges > 0,
+            "latched-set cap must be positive"
+        );
+        assert!(
+            cfg.consolidate_at_count >= 2,
+            "a fresh count=1 edge must not be eligible to latch (INSERT-vs-kernel agreement)"
+        );
+        assert_ne!(
+            cfg.decide(1, false),
+            LatchDecision::Latch,
+            "kernel agrees: a single co-fire (count=1) never latches at default config"
+        );
     }
 
     #[test]
