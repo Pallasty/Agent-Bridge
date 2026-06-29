@@ -14,6 +14,7 @@ pub mod avatar_renderer;
 pub mod avatar_seed;
 pub mod avatar_surface;
 pub mod biocortex_capability_ledger;
+pub mod biocortex_composed_limit_cycle;
 pub mod biocortex_relevance_eval;
 pub mod biocortex_shadow;
 pub mod bootstrap_bfs;
