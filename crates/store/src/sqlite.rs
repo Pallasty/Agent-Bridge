@@ -1480,6 +1480,58 @@ impl SqliteStore {
                 c.execute_batch(SCHEMA_V36_FTS_TRIGGERS)?;
                 let _ = c.execute("UPDATE schema_meta SET value='36' WHERE key='version'", []);
             }
+
+            // ── v37: INT8 shadow embedding columns (memories) + coactivation
+            // consolidation-latch flag (memory_coactivation). ADDITIVE, idempotent,
+            // behavior-neutral: nothing reads these at runtime yet.
+            //   * memories.embedding_i8 / embedding_i8_scale — the per-row INT8
+            //     storage codec the (separately gated) INT8-column proposal pins
+            //     (docs/design/INT8_EMBEDDING_COLUMN_SHADOW_PROPOSAL_2026_06_28.md).
+            //     embedding_i8 is raw i8 codes (1 byte/code, no framing,
+            //     LENGTH == vector_dim()); embedding_i8_scale is the per-row absmax
+            //     dequant scale. The f32 `embedding` BLOB stays SOURCE OF TRUTH; the
+            //     i8 pair is a shadow populated by memory_save dual-write.
+            //   * memory_coactivation.consolidated — the latch flag
+            //     `coactivation_latch::LatchConfig::decide` consumes. Added here so a
+            //     future, separately-gated decay-skip wiring exists; it is NOT wired
+            //     into decay_coactivation_once yet (the module requires the latch
+            //     threshold to be corpus-tuned before runtime wiring).
+            // Owner-approved on forum #102 (borrowed-patterns kanban). Landed under
+            // the lswr-discipline gated process — note the literal
+            // lswr_outcome_admissions_* tools are a present_outcome persistence
+            // pipeline, not a schema-migration gate.
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "36".to_string());
+            if cur.as_str() == "36" {
+                for (table, name, ddl_type) in [
+                    ("memories", "embedding_i8", "BLOB"),
+                    ("memories", "embedding_i8_scale", "REAL"),
+                    ("memory_coactivation", "consolidated", "INTEGER NOT NULL DEFAULT 0"),
+                ] {
+                    let col_exists: i64 = c
+                        .query_row(
+                            &format!(
+                                "SELECT COUNT(*) FROM pragma_table_info('{table}') \
+                                 WHERE name=?1"
+                            ),
+                            params![name],
+                            |r| r.get(0),
+                        )
+                        .unwrap_or(0);
+                    if col_exists == 0 {
+                        c.execute(
+                            &format!("ALTER TABLE {table} ADD COLUMN {name} {ddl_type}"),
+                            [],
+                        )?;
+                    }
+                }
+                let _ = c.execute("UPDATE schema_meta SET value='37' WHERE key='version'", []);
+            }
             Ok(())
         })
         .await
@@ -3129,11 +3181,20 @@ impl StateStore for SqliteStore {
 
         // P9: fresh computes stamp current backend name; reused
         // embeddings keep their prior tag (None signals "leave").
-        let (embedding_bytes, fresh_backend_name): (Vec<u8>, Option<String>) = match existing {
+        // v37: a fresh f32 vector also yields the INT8 shadow (embedding_i8 +
+        // scale) from the SAME vector; a reused embedding emits None/None so the
+        // INSERT's COALESCE preserves any prior shadow (mirrors embedding_backend).
+        #[allow(clippy::type_complexity)]
+        let (embedding_bytes, fresh_backend_name, embedding_i8_blob, embedding_i8_scale): (
+            Vec<u8>,
+            Option<String>,
+            Option<Vec<u8>>,
+            Option<f32>,
+        ) = match existing {
             Some((existing_content, existing_emb, _))
                 if existing_content == content && existing_emb.len() == expected_embed_bytes =>
             {
-                (existing_emb, None)
+                (existing_emb, None, None, None)
             }
             _ => {
                 let backend = crate::embedding::default_backend();
@@ -3143,6 +3204,10 @@ impl StateStore for SqliteStore {
                 // and behaves identically to pre-P-γ `embed()`.
                 let (vec, actual_name) =
                     perceive_with_cold_fallback_retry(&backend, &content, &key).await;
+                // v37 shadow: per-row symmetric INT8 of the same f32 vector.
+                // Codec only (crate::quant); the f32 `embedding` stays authoritative.
+                let q = crate::quant::quantize_row_i8(&vec);
+                let i8_blob = crate::quant::codes_to_blob(&q.codes);
                 // Stamp the backend that ACTUALLY produced this vector, not the
                 // configured name. A cold/short-lived embed context (e.g. the
                 // precompact / curate hook subprocess) silently falls back to
@@ -3152,7 +3217,12 @@ impl StateStore for SqliteStore {
                 // reindex sweep, so they are never repaired. Reusing the same
                 // detector the reindex path uses keeps the labels honest, so the
                 // sweep can find and fix these rows later.
-                (crate::vector::encode_embedding(&vec), Some(actual_name))
+                (
+                    crate::vector::encode_embedding(&vec),
+                    Some(actual_name),
+                    Some(i8_blob),
+                    Some(q.scale),
+                )
             }
         };
 
@@ -3183,8 +3253,9 @@ impl StateStore for SqliteStore {
                        (key, kind, content, tags, related_keys, scope,
                         created_at, updated_at, last_accessed_at, access_count,
                         importance, status, trigger_pattern, embedding, dedupe_key,
-                        fts_content, embedding_backend, version_vector, last_decayed_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?7, 0, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?7)
+                        fts_content, embedding_backend, version_vector, last_decayed_at,
+                        embedding_i8, embedding_i8_scale)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7, ?7, 0, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?7, ?16, ?17)
                      ON CONFLICT(key) DO UPDATE SET
                         kind          = excluded.kind,
                         content       = excluded.content,
@@ -3203,6 +3274,8 @@ impl StateStore for SqliteStore {
                         dedupe_key    = excluded.dedupe_key,
                         fts_content   = excluded.fts_content,
                         embedding_backend = COALESCE(excluded.embedding_backend, memories.embedding_backend),
+                        embedding_i8       = COALESCE(excluded.embedding_i8,       memories.embedding_i8),
+                        embedding_i8_scale = COALESCE(excluded.embedding_i8_scale, memories.embedding_i8_scale),
                         version_vector = excluded.version_vector,
                         -- re-anchor decay: a re-saved row carries a fresh
                         -- importance, so decay should restart from now (F5).
@@ -3223,6 +3296,8 @@ impl StateStore for SqliteStore {
                         fts_content,
                         fresh_backend_name,
                         new_vv_str,
+                        embedding_i8_blob,
+                        embedding_i8_scale,
                     ],
                 )?;
 
@@ -14303,10 +14378,18 @@ mod tests {
                 .find(|(key, _)| key == k)
                 .map(|(_, s)| s.as_str())
         };
-        assert_eq!(get("stale_junk"), Some("tombstoned"), "retrieval-only row compacted");
+        assert_eq!(
+            get("stale_junk"),
+            Some("tombstoned"),
+            "retrieval-only row compacted"
+        );
         assert_eq!(get("real_a"), Some("active"), "real-edged row protected");
         assert_eq!(get("real_b"), Some("active"), "real-edged row protected");
-        assert_eq!(get("mixed"), Some("active"), "row with a real edge protected");
+        assert_eq!(
+            get("mixed"),
+            Some("active"),
+            "row with a real edge protected"
+        );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
@@ -16289,7 +16372,7 @@ mod tests {
             .await
             .expect("inspect migrated rows");
 
-        assert_eq!(version, "36"); // v36 = memory FTS indexed projection; latest after all migrations
+        assert_eq!(version, "37"); // v37 = INT8 shadow + coactivation consolidated-latch columns; latest after all migrations
         assert_eq!(bad_count, 0);
         assert_eq!(mem_created, 1_779_641_229_i64);
         assert_eq!(post_created, 1_779_641_229_i64);
@@ -20526,7 +20609,7 @@ mod tests {
         let v = store.schema_meta_version().await.expect("query");
         assert_eq!(
             v.as_deref(),
-            Some("36"),
+            Some("37"),
             "if schema bumped, update both this assertion and S5 docs"
         );
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
@@ -20942,6 +21025,179 @@ mod tests {
                 filtered.spearman_r,
             );
         }
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    // ── v37: INT8 shadow + coactivation consolidated-latch columns ──────────
+
+    #[tokio::test]
+    async fn v37_adds_int8_and_consolidated_columns_idempotently() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-v37-cols-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let db_path = temp_dir.join("state.db");
+
+        // First open runs the full migration ladder including v37.
+        let store = SqliteStore::open(&db_path).await.expect("open store");
+        let probe = store
+            .conn
+            .call(|c| -> RusqliteResult<(String, i64, i64, i64)> {
+                let v: String = c.query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                let a: i64 = c.query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('memories') WHERE name='embedding_i8'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                let b: i64 = c.query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('memories') WHERE name='embedding_i8_scale'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                let d: i64 = c.query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('memory_coactivation') WHERE name='consolidated'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                Ok((v, a, b, d))
+            })
+            .await
+            .expect("probe schema");
+        assert_eq!(probe.0, "37", "schema must be at v37");
+        assert_eq!(
+            (probe.1, probe.2, probe.3),
+            (1, 1, 1),
+            "all three v37 columns present exactly once"
+        );
+        drop(store);
+
+        // Re-open must be a no-op (idempotent): the guarded ALTER is skipped and
+        // open does not error; columns are still present exactly once.
+        let store2 = SqliteStore::open(&db_path)
+            .await
+            .expect("re-open store (idempotent)");
+        let again = store2
+            .conn
+            .call(|c| -> RusqliteResult<(String, i64)> {
+                let v: String = c.query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                let n: i64 = c.query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('memories') \
+                     WHERE name IN ('embedding_i8','embedding_i8_scale')",
+                    [],
+                    |r| r.get(0),
+                )?;
+                Ok((v, n))
+            })
+            .await
+            .expect("probe after reopen");
+        assert_eq!(
+            again,
+            ("37".to_string(), 2),
+            "re-open stays at v37 with both columns, no duplicate ALTER"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_save_dual_writes_int8_shadow_and_reuse_preserves() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-v37-dualwrite-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+
+        let rec = MemoryRecord {
+            key: "k_i8".into(),
+            kind: "fact".into(),
+            content: "the quick brown fox jumps over the lazy dog".into(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 1_700_000_000,
+            updated_at: 1_700_000_000,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".into(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store.memory_save(&rec).await.expect("save");
+
+        // Fresh save populates the INT8 shadow. embedding_i8 is raw i8 (1 byte per
+        // code), the f32 embedding is 4 bytes per element, so the f32 byte length
+        // is exactly 4x the i8 byte length, and the scale is set.
+        let (emb_len, i8_len, scale_set) = store
+            .conn
+            .call(|c| -> RusqliteResult<(i64, i64, bool)> {
+                c.query_row(
+                    "SELECT LENGTH(embedding), LENGTH(embedding_i8), \
+                            embedding_i8_scale IS NOT NULL \
+                       FROM memories WHERE key='k_i8'",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get::<_, i64>(2)? == 1)),
+                )
+            })
+            .await
+            .expect("probe shadow");
+        assert!(emb_len > 0, "f32 embedding present");
+        assert_eq!(
+            i8_len * 4,
+            emb_len,
+            "LENGTH(embedding_i8)*4 == LENGTH(embedding): 1 byte/code vs 4 bytes/f32"
+        );
+        assert!(scale_set, "embedding_i8_scale populated on fresh save");
+
+        // Re-saving the SAME content takes the reuse path (None shadow), so the
+        // INSERT's COALESCE must preserve the prior shadow byte-for-byte.
+        let before = store
+            .conn
+            .call(|c| -> RusqliteResult<Vec<u8>> {
+                c.query_row(
+                    "SELECT embedding_i8 FROM memories WHERE key='k_i8'",
+                    [],
+                    |r| r.get(0),
+                )
+            })
+            .await
+            .expect("read i8 before");
+        store.memory_save(&rec).await.expect("re-save same content");
+        let after = store
+            .conn
+            .call(|c| -> RusqliteResult<Vec<u8>> {
+                c.query_row(
+                    "SELECT embedding_i8 FROM memories WHERE key='k_i8'",
+                    [],
+                    |r| r.get(0),
+                )
+            })
+            .await
+            .expect("read i8 after");
+        assert_eq!(
+            before, after,
+            "reuse path preserves the prior INT8 shadow (COALESCE(None, prior))"
+        );
+        assert!(!before.is_empty(), "shadow is non-empty");
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
