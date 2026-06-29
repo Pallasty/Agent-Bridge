@@ -3,7 +3,7 @@
 //! See `docs/DESIGN-warp-first-agent-shell.md` — no tree-sitter (D10).
 
 use ab_core::{Error, Result};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -329,7 +329,11 @@ pub fn changes_digest(cwd: &Path, scope: &str) -> Result<Value> {
     let numstat = match scope {
         "working_tree" => git_output_joined(cwd, &["diff", "--numstat"], &[])?,
         "staged" => git_output_joined(cwd, &["diff", "--cached", "--numstat"], &[])?,
-        "last_commit" => git_output_joined(cwd, &["show", "--numstat", "--pretty=format:"], &[])?,
+        "last_commit" => git_output_joined(
+            cwd,
+            &["show", "--first-parent", "--numstat", "--pretty=format:"],
+            &[],
+        )?,
         "branch_vs_main" => {
             if let Some(range) = branch_range.as_ref().map(|s| s.as_str()) {
                 git_output_joined(cwd, &["diff", "--numstat"], &[range])?
@@ -347,9 +351,16 @@ pub fn changes_digest(cwd: &Path, scope: &str) -> Result<Value> {
     let name_stat = match scope {
         "working_tree" => git_output_joined(cwd, &["diff", "--name-status"], &[])?,
         "staged" => git_output_joined(cwd, &["diff", "--cached", "--name-status"], &[])?,
-        "last_commit" => {
-            git_output_joined(cwd, &["show", "--name-status", "--pretty=format:"], &[])?
-        }
+        "last_commit" => git_output_joined(
+            cwd,
+            &[
+                "show",
+                "--first-parent",
+                "--name-status",
+                "--pretty=format:",
+            ],
+            &[],
+        )?,
         "branch_vs_main" => {
             if let Some(range) = branch_range.as_ref().map(|s| s.as_str()) {
                 git_output_joined(cwd, &["diff", "--name-status"], &[range])?
@@ -390,7 +401,9 @@ pub fn changes_digest(cwd: &Path, scope: &str) -> Result<Value> {
     let patch_raw = match scope {
         "working_tree" => git_output_joined(cwd, &["diff"], &[])?,
         "staged" => git_output_joined(cwd, &["diff", "--cached"], &[])?,
-        "last_commit" => git_output_joined(cwd, &["show", "--pretty=format:"], &[])?,
+        "last_commit" => {
+            git_output_joined(cwd, &["show", "--first-parent", "--pretty=format:"], &[])?
+        }
         "branch_vs_main" => {
             if let Some(range) = branch_range.as_ref().map(|s| s.as_str()) {
                 git_output_joined(cwd, &["diff"], &[range])?
@@ -797,14 +810,50 @@ mod tests {
         );
         let first = &patches[0];
         assert!(first["file"].is_string());
-        assert!(
-            first["patch"]
-                .as_str()
-                .unwrap_or_default()
-                .contains("diff --git")
-        );
+        assert!(first["patch"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("diff --git"));
         assert!(first["truncated"].is_boolean());
         assert!(v["patch_truncated"].is_boolean());
+    }
+
+    #[test]
+    fn changes_digest_last_commit_merge_head_uses_first_parent_patch() {
+        let tmp = tempfile::tempdir().expect("tmp");
+        init_git_repo(tmp.path());
+        git_ok(tmp.path(), &["checkout", "-b", "main"]);
+        write_file(tmp.path().join("README.md"), "base\n");
+        git_ok(tmp.path(), &["add", "README.md"]);
+        git_ok(tmp.path(), &["commit", "-m", "base"]);
+
+        git_ok(tmp.path(), &["checkout", "-b", "feature"]);
+        write_file(tmp.path().join("feature.txt"), "feature\n");
+        git_ok(tmp.path(), &["add", "feature.txt"]);
+        git_ok(tmp.path(), &["commit", "-m", "feature"]);
+
+        git_ok(tmp.path(), &["checkout", "main"]);
+        write_file(tmp.path().join("main.txt"), "main\n");
+        git_ok(tmp.path(), &["add", "main.txt"]);
+        git_ok(tmp.path(), &["commit", "-m", "main"]);
+        git_ok(
+            tmp.path(),
+            &["merge", "--no-ff", "feature", "-m", "merge feature"],
+        );
+
+        let v = changes_digest(tmp.path(), "last_commit").expect("digest");
+        let patches = v["patches"].as_array().expect("patches array");
+
+        assert_eq!(v["scope"], "last_commit");
+        assert_eq!(v["files_changed"], 1);
+        assert_eq!(v["insertions"], 1);
+        assert!(patches.iter().any(|patch| {
+            patch["file"].as_str() == Some("feature.txt")
+                && patch["patch"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("diff --git a/feature.txt b/feature.txt")
+        }));
     }
 
     #[test]
@@ -907,13 +956,11 @@ mod tests {
 
         assert_eq!(v["status"], "blocked");
         assert_eq!(v["merge_base_found"], false);
-        assert!(
-            v["warnings"]
-                .as_array()
-                .expect("warnings")
-                .iter()
-                .any(|w| w.as_str().unwrap_or("").contains("no merge-base"))
-        );
+        assert!(v["warnings"]
+            .as_array()
+            .expect("warnings")
+            .iter()
+            .any(|w| w.as_str().unwrap_or("").contains("no merge-base")));
     }
 
     #[test]
