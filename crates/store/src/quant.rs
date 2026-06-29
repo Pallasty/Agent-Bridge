@@ -1,6 +1,6 @@
 //! Read-only INT8 quantization codec for stored embeddings (ArrowQuant V2 — T2 borrow).
 //!
-//! **STATUS: landed + tested (wired via `pub mod quant;`).** Shadow / measurement only —
+//! **STATUS: landed + tested (codec + measurement only; no store column, not on the write path).** Shadow / measurement only —
 //! there is still no INT8 column in the store; this measures whether one would be safe.
 //! Two read-only surfaces: [`measure_drift`] (per-row round-trip cosine fidelity) and
 //! [`recall_regression_gate`] (does INT8 preserve the top-K neighbor *ranking* that actually
@@ -15,6 +15,14 @@
 //! A stored row of `f32[D]` (D*4 bytes; 3072 B for gte-768) projects to `i8[D]` + one `f32`
 //! scale (D + 4 bytes; 772 B for gte-768 ≈ **3.98×** smaller) for footprint estimation and
 //! recall-drift checks before any real INT8 column is ever proposed (gated separately).
+//!
+//! **i8↔BLOB storage codec (Phase-A groundwork).** [`codes_to_blob`] / [`blob_to_codes`]
+//! (and [`QuantizedRow::to_blob`] / [`QuantizedRow::from_blob`]) serialize the codes as raw
+//! bytes — **one byte per code, no length prefix, no framing** — the storage contract pinned
+//! by the INT8-column proposal (`docs/design/INT8_EMBEDDING_COLUMN_SHADOW_PROPOSAL_2026_06_28.md`
+//! §3.1), so a populated column would satisfy `LENGTH(embedding_i8) == vector_dim()`. This is
+//! still **shadow only**: there is no `embedding_i8` column and nothing here is wired into the
+//! store write path — it is the codec a future, separately-gated column *would* use.
 //!
 //! The `eps` max-floor is **load-bearing**: AB stores all-zero hash-fallback rows
 //! (`embedding_result_is_hash_fallback`), and without the floor the per-row scale would
@@ -38,6 +46,23 @@ impl QuantizedRow {
     /// Bytes this row occupies in the quantized representation: `i8` codes + one `f32` scale.
     pub fn encoded_len(&self) -> usize {
         self.codes.len() + std::mem::size_of::<f32>()
+    }
+
+    /// Split into the two BLOB-storable parts: the raw `i8`-codes bytes (see
+    /// [`codes_to_blob`]) and the per-row dequant `scale`. The pair maps 1:1 onto the
+    /// proposed `(embedding_i8 BLOB, embedding_i8_scale REAL)` columns — codec only,
+    /// nothing is stored here.
+    pub fn to_blob(&self) -> (Vec<u8>, f32) {
+        (codes_to_blob(&self.codes), self.scale)
+    }
+
+    /// Reconstruct from stored BLOB bytes + scale. Exact inverse of [`to_blob`]:
+    /// `QuantizedRow::from_blob(&blob, scale)` where `(blob, scale) = q.to_blob()` yields `q`.
+    pub fn from_blob(codes_blob: &[u8], scale: f32) -> Self {
+        QuantizedRow {
+            codes: blob_to_codes(codes_blob),
+            scale,
+        }
     }
 }
 
@@ -71,6 +96,24 @@ pub fn roundtrip_cosine(row: &[f32]) -> f32 {
 /// Byte length of the raw little-endian `f32` encoding (matches `encode_embedding`).
 pub fn f32_encoded_len(dim: usize) -> usize {
     dim * std::mem::size_of::<f32>()
+}
+
+/// Serialize INT8 codes to raw BLOB bytes: **one byte per code, no length prefix,
+/// no framing** — a direct two's-complement reinterpret of each `i8` as `u8`
+/// (`c as u8`). Therefore `codes_to_blob(c).len() == c.len()`, which is the
+/// `LENGTH(embedding_i8) == vector_dim()` invariant the INT8-column proposal pins
+/// (`docs/design/INT8_EMBEDDING_COLUMN_SHADOW_PROPOSAL_2026_06_28.md` §3.1). The exact
+/// inverse is [`blob_to_codes`]; no serde / bincode / length-prefixed encoding is
+/// permitted or that invariant would break.
+pub fn codes_to_blob(codes: &[i8]) -> Vec<u8> {
+    codes.iter().map(|&c| c as u8).collect()
+}
+
+/// Inverse of [`codes_to_blob`]: reinterpret raw BLOB bytes back to two's-complement
+/// `i8` codes (`b as i8`), one code per byte. Lossless for every input — the `i8`↔`u8`
+/// cast is a bijection — so `blob_to_codes(codes_to_blob(c)) == c`.
+pub fn blob_to_codes(bytes: &[u8]) -> Vec<i8> {
+    bytes.iter().map(|&b| b as i8).collect()
 }
 
 fn cosine(a: &[f32], b: &[f32]) -> f32 {
@@ -424,5 +467,52 @@ mod tests {
     fn quantize_is_deterministic() {
         let row: Vec<f32> = (0..768).map(|i| i as f32 * 0.001 - 0.3).collect();
         assert_eq!(quantize_row_i8(&row), quantize_row_i8(&row));
+    }
+
+    #[test]
+    fn codes_blob_roundtrips_including_sign_endpoints() {
+        // i8<->u8 is a bijection; every code, including the two's-complement
+        // endpoints, must survive the BLOB round-trip with exact bytes.
+        let codes: [i8; 9] = [0, 1, -1, 127, -128, 42, -42, 100, -100];
+        let blob = codes_to_blob(&codes);
+        assert_eq!(blob.len(), codes.len(), "one byte per code, no framing");
+        assert_eq!(blob[2], 0xFF, "-1 -> 0xFF");
+        assert_eq!(blob[3], 0x7F, "127 -> 0x7F");
+        assert_eq!(blob[4], 0x80, "-128 -> 0x80");
+        assert_eq!(blob_to_codes(&blob), codes, "lossless inverse");
+    }
+
+    #[test]
+    fn codes_blob_length_equals_dim() {
+        // The column length invariant: LENGTH(embedding_i8) == vector_dim().
+        for dim in [384usize, 768] {
+            let row: Vec<f32> = (0..dim).map(|i| (i as f32 * 0.01).sin()).collect();
+            let (blob, _scale) = quantize_row_i8(&row).to_blob();
+            assert_eq!(blob.len(), dim, "blob byte-len must equal embedding dim");
+        }
+    }
+
+    #[test]
+    fn quantized_row_survives_blob_roundtrip_bitexact() {
+        let row: Vec<f32> = (0..768)
+            .map(|i| ((i as f32) * 0.003 - 1.1).tanh())
+            .collect();
+        let q = quantize_row_i8(&row);
+        let (blob, scale) = q.to_blob();
+        let back = QuantizedRow::from_blob(&blob, scale);
+        assert_eq!(back, q, "BLOB round-trip must be bit-exact");
+        assert_eq!(
+            dequantize_row_i8(&back),
+            dequantize_row_i8(&q),
+            "reconstructed row dequantizes identically"
+        );
+    }
+
+    #[test]
+    fn empty_codes_blob_is_empty_and_roundtrips() {
+        let q = quantize_row_i8(&[]);
+        let (blob, scale) = q.to_blob();
+        assert!(blob.is_empty(), "empty row -> empty blob");
+        assert_eq!(QuantizedRow::from_blob(&blob, scale), q);
     }
 }

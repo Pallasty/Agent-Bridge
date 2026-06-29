@@ -59,7 +59,7 @@ The scope below is the contract for Phases A and B. Anything not explicitly list
 
 - Add **one additive shadow** in a future `v37` migration — two nullable columns `embedding_i8 BLOB` + `embedding_i8_scale REAL` (per-row INT8 codes + scale), following the post-v26 idempotent migration idiom (`pragma_table_info` COUNT guard before `ALTER TABLE ADD COLUMN`, e.g. v27/v31; `sqlite.rs:1196-1227`, `:1309-1336`), never the bare-batch v26 style.
 - **Dual-write**: on `memory_save`, alongside the existing f32 `embedding` BLOB, compute and store the INT8 projection of the *same* vector. f32 remains written and authoritative.
-- **Add a new i8↔BLOB serialization helper** (§3.3) — this does **not** exist in `quant.rs` today; `quant.rs` ships only the read-only quantize/dequantize half. The helper plus its round-trip unit test are part of Phase A scope.
+- **i8↔BLOB serialization helper** (§3.1) — **landed as Phase-A groundwork** (`codes_to_blob`/`blob_to_codes` free fns + `QuantizedRow::to_blob`/`from_blob`, with round-trip / `LENGTH==dim` / sign-endpoint tests in `quant::tests`). Codec only — it adds no `embedding_i8` column and is not wired into the store write path.
 - **Shadow measurement**: keep producing the read-only drift / recall-gate reports (`quant.rs` `measure_drift`, `recall_regression_gate`) against real stored rows to confirm in-store fidelity matches the in-memory eval.
 
 **This proposal DOES NOT:**
@@ -84,12 +84,15 @@ This proposal adds **two nullable columns** to `memories`, behind the project's 
 
 **Serialization contract (pin it — load-bearing for §6.2):** `embedding_i8` stores the `Vec<i8>` codes as **raw bytes, one byte per code, no length prefix, no framing** — i.e. a reinterpret of `&[i8]` as `&[u8]` (e.g. per-element `c as u8`, or a `bytemuck`/transmute of the slice). Therefore `LENGTH(embedding_i8) == vector_dim()` for a populated row (768 at the gte default, 384 otherwise). No serde/bincode/length-prefixed encoding is permitted, or §6.2's length invariant would false-positive on every healthy row.
 
-**This serialization helper does NOT exist yet.** `quant.rs` exposes only `codes: Vec<i8>`, `scale: f32`, and `encoded_len()` (`quant.rs:32-41`) — there is **no `codes_as_bytes` method and no i8→BLOB encoder anywhere in the crate**. Phase A must ADD:
-- an encoder `fn codes_to_blob(codes: &[i8]) -> Vec<u8>` (per-byte `as u8`, raw layout above), and
+**This serialization helper is now LANDED (codec-only — Phase-A groundwork).** Originally `quant.rs` shipped only the read-only quantize/dequantize half (`codes: Vec<i8>`, `scale: f32`, `encoded_len()`); the codec described here has since been added to `quant.rs`:
+- encoder `fn codes_to_blob(codes: &[i8]) -> Vec<u8>` (per-byte `as u8`, raw layout above), and
 - the inverse `fn blob_to_codes(bytes: &[u8]) -> Vec<i8>`,
-- with a round-trip unit test (`blob_to_codes(codes_to_blob(c)) == c`) and a `LENGTH == dim` assertion.
+- plus `QuantizedRow::to_blob(&self) -> (Vec<u8>, f32)` / `QuantizedRow::from_blob(&[u8], f32) -> QuantizedRow` mapping 1:1 onto the proposed `(embedding_i8, embedding_i8_scale)` pair,
+- with round-trip (`blob_to_codes(codes_to_blob(c)) == c`), `LENGTH == dim`, sign-endpoint (`-128`→`0x80`, `127`→`0x7F`), and bit-exact `QuantizedRow` round-trip tests in `quant::tests`.
 
-The read/dequant path is `dequantize_row_i8(&QuantizedRow) -> Vec<f32>` (single struct argument, `quant.rs:60`) — **not** `dequantize_row_i8(codes, scale)`. It is symmetric absmax; no zero-point column is needed.
+It remains **codec only**: no `embedding_i8` column exists and nothing is wired into the store write path. The remaining Phase-A work (still un-landed, owner-gated) is the v37 migration (§3.2) and the `memory_save` dual-write hook (§3.3). This satisfies the lswr `write_preflight` precondition (§8) that "the i8↔BLOB serializer + its round-trip test exist" — by pointer, not by quoted line number.
+
+The read/dequant path is `dequantize_row_i8(&QuantizedRow) -> Vec<f32>` (single struct argument) — **not** `dequantize_row_i8(codes, scale)`. It is symmetric absmax; no zero-point column is needed.
 
 `NULL`/`NULL` is the explicit "shadow not yet populated" state for a row — a legal, queryable steady state for any row whose f32 `embedding` predates dual-write or was reused (see §3.3).
 
