@@ -38,6 +38,7 @@ use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::arrow::ArrowWriter;
+use parquet::basic::{Compression, ZstdLevel};
 use parquet::file::properties::WriterProperties;
 use parquet::format::KeyValue;
 use sha2::{Digest, Sha256};
@@ -368,6 +369,26 @@ pub fn read_contract(path: &Path) -> Result<Option<String>, MemoryColumnarError>
     Ok(found)
 }
 
+/// Total `(compressed, uncompressed)` column-chunk bytes, read from the Parquet
+/// footer without decoding any row group. `uncompressed / compressed` is the
+/// realized ZSTD archival ratio — the "compressed storage" claim, measured.
+pub fn compression_stats(path: &Path) -> Result<(u64, u64), MemoryColumnarError> {
+    let file = std::fs::File::open(path)?;
+    let builder = ParquetRecordBatchReaderBuilder::try_new(file)?;
+    let md = builder.metadata();
+    let mut compressed = 0u64;
+    let mut uncompressed = 0u64;
+    for rg in 0..md.num_row_groups() {
+        let rgm = md.row_group(rg);
+        for c in 0..rgm.num_columns() {
+            let col = rgm.column(c);
+            compressed = compressed.saturating_add(col.compressed_size().max(0) as u64);
+            uncompressed = uncompressed.saturating_add(col.uncompressed_size().max(0) as u64);
+        }
+    }
+    Ok((compressed, uncompressed))
+}
+
 fn verify_contract(kvs: Option<&Vec<KeyValue>>) -> Result<(), MemoryColumnarError> {
     let found = kvs.and_then(|kvs| {
         kvs.iter()
@@ -388,8 +409,10 @@ fn verify_contract(kvs: Option<&Vec<KeyValue>>) -> Result<(), MemoryColumnarErro
 }
 
 /// Write all rows to `path`, overwriting prior contents. Embeds the schema
-/// contract + provenance in the Parquet footer KV metadata. Atomic via
-/// tmp+rename so a crash mid-write can't truncate a prior archive.
+/// contract + provenance in the Parquet footer KV metadata, and ZSTD-compresses
+/// the column chunks (the "compressed storage" half of the long-term-library
+/// role). Atomic via tmp+rename so a crash mid-write can't truncate a prior
+/// archive.
 pub fn write_parquet(path: &Path, rows: &[MemoryColumnarRow]) -> Result<(), MemoryColumnarError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -411,6 +434,14 @@ pub fn write_parquet(path: &Path, rows: &[MemoryColumnarRow]) -> Result<(), Memo
         let file = std::fs::File::create(&tmp)?;
         let props = WriterProperties::builder()
             .set_key_value_metadata(Some(kv))
+            // ZSTD column compression — the "compressed storage" half of the
+            // long-term-library pitch. Deterministic for a fixed codec+level;
+            // the cross-machine equivalence primitive is the per-row
+            // `fingerprint` (row data, not file bytes), so compression never
+            // affects equivalence.
+            .set_compression(Compression::ZSTD(
+                ZstdLevel::try_new(3).expect("3 is a valid zstd level"),
+            ))
             .build();
         let mut writer = ArrowWriter::try_new(file, arrow_schema(), Some(props))?;
         if !rows.is_empty() {
@@ -623,6 +654,54 @@ mod tests {
         write_parquet(&path, &[sample("k", Some(8))]).unwrap();
         let c = read_contract(&path).unwrap();
         assert_eq!(c.as_deref(), Some(MEMORY_COLUMNAR_SCHEMA_CONTRACT));
+    }
+
+    #[test]
+    fn parquet_column_chunks_are_zstd_compressed() {
+        // The "compressed storage" half of the long-term-library pitch: every
+        // column chunk must be written with the ZSTD codec. (Parquet records the
+        // codec, not the zstd level, so match only the variant.) This also
+        // confirms the parquet `zstd` feature is actually compiled in — without
+        // it, write_parquet would error before this read.
+        use parquet::basic::Compression;
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("z.parquet");
+        let rows: Vec<MemoryColumnarRow> = (0..64)
+            .map(|i| sample(&format!("k{i:03}"), Some(384)))
+            .collect();
+        write_parquet(&path, &rows).unwrap();
+        let file = std::fs::File::open(&path).unwrap();
+        let builder = ParquetRecordBatchReaderBuilder::try_new(file).unwrap();
+        let md = builder.metadata();
+        assert!(md.num_row_groups() >= 1);
+        for rg in 0..md.num_row_groups() {
+            let rgm = md.row_group(rg);
+            for c in 0..rgm.num_columns() {
+                assert!(
+                    matches!(rgm.column(c).compression(), Compression::ZSTD(_)),
+                    "column {c} in row group {rg} is not ZSTD-compressed"
+                );
+            }
+        }
+        // and the compressed archive still round-trips bit-exactly
+        assert_eq!(read_parquet(&path).unwrap(), rows);
+    }
+
+    #[test]
+    fn compression_stats_reports_zstd_shrink_on_compressible_data() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("c.parquet");
+        // Highly compressible: repeated content prefix + smooth embeddings.
+        let rows: Vec<MemoryColumnarRow> = (0..256)
+            .map(|i| sample(&format!("k{i:04}"), Some(384)))
+            .collect();
+        write_parquet(&path, &rows).unwrap();
+        let (compressed, uncompressed) = compression_stats(&path).unwrap();
+        assert!(compressed > 0 && uncompressed > 0);
+        assert!(
+            compressed < uncompressed,
+            "zstd should shrink column chunks: {uncompressed} -> {compressed}"
+        );
     }
 
     #[test]

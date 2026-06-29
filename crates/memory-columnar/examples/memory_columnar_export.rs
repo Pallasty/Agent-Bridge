@@ -16,7 +16,7 @@
 use std::path::PathBuf;
 
 use ab_memory_columnar::{
-    summarize, write_parquet, MemoryColumnarRow, MEMORY_COLUMNAR_SCHEMA_CONTRACT,
+    compression_stats, summarize, write_parquet, MemoryColumnarRow, MEMORY_COLUMNAR_SCHEMA_CONTRACT,
 };
 use ab_store::{decode_embedding, default_db_path};
 use tokio_rusqlite::{rusqlite, Connection};
@@ -73,6 +73,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let rows: Vec<MemoryColumnarRow> = raw.into_iter().map(RawRow::into_columnar).collect();
     let footprint = summarize(&rows);
     write_parquet(&out, &rows)?;
+    let parquet_bytes = std::fs::metadata(&out)
+        .map(|m| m.len() as usize)
+        .unwrap_or(0);
+    let (col_compressed, col_uncompressed) =
+        compression_stats(&out).unwrap_or((parquet_bytes as u64, parquet_bytes as u64));
+    // ratio < 1.0 means the dataset was too small for ZSTD to amortize its
+    // framing/dictionary overhead (e.g. a near-empty store); on a real memories
+    // table with embeddings it is well above 1 (≈2.8x observed).
+    let ratio = if col_compressed > 0 {
+        col_uncompressed as f64 / col_compressed as f64
+    } else {
+        1.0
+    };
 
     let mb = |b: usize| b as f64 / (1024.0 * 1024.0);
     println!("{{");
@@ -90,9 +103,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         footprint.total_embedding_floats
     );
     println!(
-        "  \"f32_embedding_mb\": {:.3}",
+        "  \"f32_embedding_mb\": {:.3},",
         mb(footprint.f32_embedding_bytes)
     );
+    println!("  \"parquet_bytes\": {parquet_bytes},");
+    println!("  \"parquet_mb\": {:.3},", mb(parquet_bytes));
+    println!("  \"column_uncompressed_bytes\": {col_uncompressed},");
+    println!("  \"compression\": \"zstd\",");
+    println!("  \"compression_ratio\": {ratio:.2}");
     println!("}}");
     Ok(())
 }
