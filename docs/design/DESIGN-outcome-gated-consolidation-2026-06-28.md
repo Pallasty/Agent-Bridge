@@ -266,9 +266,9 @@ rather than forcing a merge. Keep `Missing` as a corpus-gap counter.
   Registered `Tier::Niche`; default-OFF. Models the house `*_approval_packet` /
   `enforce_hold_approval_packet` tools.
 - **Stage 5 — Gated WRITE executor — LANDED 2026-06-28:** the first and only
-  stage that mutates memory. Shipped as a **dedicated tool**
-  `outcome_gated_consolidation_apply` (not yet wired into `session_finalize` —
-  see below) to keep the first write path on-demand, isolated, and fully
+  stage that mutates memory. Shipped first as a **dedicated tool**
+  `outcome_gated_consolidation_apply` (also reachable via `session_finalize`,
+  Stage 5b below) to keep the first write path on-demand, isolated, and fully
   testable rather than embedded in the Stop-hook pipeline. It writes ONLY when
   **four independent gates** all hold: (1) runtime env on + operator not
   disabled + `per_call_opt_in` + anchor matches; (2) the Stage 4 approval packet
@@ -286,12 +286,30 @@ rather than forcing a merge. Keep `Missing` as a corpus-gap counter.
   read/write**. Returns a `finalize_readback` with `archived_memories` /
   `supersedes_edges_written` / `verified`. Registered `Tier::Niche`; default-OFF.
   Scoping args must match the trial (enforced by the diff_hash check).
-  - **Deferred follow-up (Stage 5b):** wire `apply_outcome_gated: bool = false`
-    + `approval_packet` into `session_finalize` (default false ⇒ **zero behavior
-    change**, only an added read-only `follow_up` hint beside the existing
-    `suggest_memory_consolidate` nudge), delegating to the same executor. Kept
-    out of this PR so the Stop-hook hot path is touched only after the executor
-    is proven.
+  - **Stage 5b — `session_finalize` delegation — LANDED 2026-06-28:**
+    `apply_outcome_gated: bool = false` + `approval_packet` (and forwarded owner
+    refs / scoping args) wired into `session_finalize`. Default false ⇒ **zero
+    behavior change**: the gated path is not invoked and the response is
+    byte-identical except for one added read-only `follow_up.outcome_gated_apply`
+    pointer (non-null only when the existing `suggest_memory_consolidate` nudge
+    fires). When `true`, `session_finalize` adds **nothing of its own** — it
+    forwards args to the same `outcome_gated_consolidation_apply` executor, which
+    independently enforces all four gates; the full executor result is returned
+    under `outcome_gated_consolidation`. A `dry_run` finalize **forces the
+    sub-call to preview** (`confirm_apply→false`), so `session_finalize(dry_run)`
+    can never mutate memory. The delegation runs **before** this call's own
+    decay/compact maintenance, so finalize's own importance-decay (which feeds the
+    consolidate rank) and compaction can never self-invalidate a just-approved
+    plan within the same call — external drift since approval is still caught by
+    the executor's live `diff_hash` gate. The two `session_lifecycle_step`
+    forward-allowlists (the Stop-hook path) deliberately **exclude**
+    `apply_outcome_gated`, so the gated WRITE is reachable only via an explicit
+    human `session_finalize` call. Covered by 6 store-backed tests (schema/opt-in,
+    default-off omits the block + no writes, delegates+applies when fully gated,
+    in-band apply succeeds without `skip_decay`, dry-run forces preview, env-off
+    blocks). Two adversarial workflows (4-lens refutation + 6-hypothesis
+    prove-or-disprove panel) found **0 unsafe behaviors**; the ordering refinement
+    above came out of the hypothesis panel.
 
 ## 8. Noise / poison-feedback safety (defense in depth)
 
