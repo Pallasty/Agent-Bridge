@@ -21071,6 +21071,7 @@ impl McpTool for MemoryExportTool {
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
             stable_sync_metadata: false,
+            exclude_tombstoned_older_than_secs: None,
         };
         match store.memory_export(&filter, &path).await {
             Ok(res) => Ok(ToolResult::json_text(&json!({

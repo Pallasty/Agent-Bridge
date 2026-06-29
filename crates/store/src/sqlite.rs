@@ -5481,6 +5481,20 @@ impl StateStore for SqliteStore {
         let tags = filter.tags_any.clone();
         let since = filter.since_ts;
         let stable_sync_metadata = filter.stable_sync_metadata;
+        // Precompute the tombstone-export cutoff (now - window). The raw
+        // `updated_at <= cutoff` compare in the predicate below is integer-safe:
+        // the SCHEMA_V32 guard triggers reject any non-integer `updated_at`
+        // (and the v32 migration coerced legacy TEXT → int on open); tombstoning
+        // paths set now_secs() anyway. Even a hypothetical TEXT value fails safe
+        // (TEXT sorts after INTEGER, so it stays > cutoff and is never wrongly
+        // dropped). Excluding aged tombstones breaks the import-resurrection
+        // loop that otherwise defeats `purge-tombstones` (memory_import Inserts
+        // any absent-key row, so a tombstone still in the export is re-created
+        // right after it is purged; nothing bumps a tombstone's updated_at, so
+        // it ages out monotonically and converges within one sync cycle).
+        let tomb_cutoff: Option<i64> = filter
+            .exclude_tombstoned_older_than_secs
+            .map(|w| now_secs() - w.max(0));
 
         let rows: Vec<SyncEnvelope> = self
             .conn
@@ -5516,10 +5530,12 @@ impl StateStore for SqliteStore {
                                 THEN CAST(strftime('%s', updated_at) AS INTEGER)
                                 ELSE updated_at
                             END >= ?2)
+                       AND (?3 IS NULL
+                            OR NOT (status = 'tombstoned' AND updated_at <= ?3))
                      ORDER BY created_at ASC, key ASC",
                 )?;
                 let rows = stmt
-                    .query_map(params![kind, since], |row| {
+                    .query_map(params![kind, since, tomb_cutoff], |row| {
                         let tags_s: String = row.get(3)?;
                         let related_s: String = row.get(4)?;
                         let mut record = MemoryRecord {
@@ -10602,6 +10618,7 @@ mod tests {
             edges_out_path: None,
             loose_edges: false,
             stable_sync_metadata: false,
+            exclude_tombstoned_older_than_secs: None,
         }
     }
 
@@ -13341,6 +13358,119 @@ mod tests {
             .expect("get post-resurrect");
         assert!(resurrected.is_some(), "save with same key resurrects");
         assert_eq!(resurrected.unwrap().status, "active");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_export_excludes_aged_tombstones_only_when_window_set() {
+        // Export-side half of the tombstone-resurrection fix: with
+        // exclude_tombstoned_older_than_secs set, an aged tombstone (past the
+        // sync window) is dropped from the export so memory_import cannot
+        // resurrect it after purge-tombstones deletes it. Active rows and
+        // RECENT tombstones (still inside the window, so the deletion still
+        // propagates) survive; with the window unset (None) every row is
+        // exported (full-backup contract).
+        use crate::MemoryRecord;
+        fn keys_in(text: &str) -> std::collections::BTreeSet<String> {
+            text.lines()
+                .filter(|l| !l.trim().is_empty())
+                .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+                .filter_map(|v| {
+                    // SyncEnvelope serializes the record FLAT (serde flatten):
+                    // top-level `key` alongside `version_vector`.
+                    v.get("key")
+                        .or_else(|| v.get("record").and_then(|r| r.get("key")))
+                        .and_then(|k| k.as_str())
+                        .map(String::from)
+                })
+                .collect()
+        }
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-exp-tomb-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("exp.db"))
+            .await
+            .expect("open");
+
+        let mk = |key: &str| MemoryRecord {
+            key: key.to_string(),
+            kind: "fact".into(),
+            content: format!("body-{key}"),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 1700000000,
+            updated_at: 1700000000,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        for k in ["alive", "old_tomb", "fresh_tomb"] {
+            store.memory_save(&mk(k)).await.expect("save");
+        }
+        store.memory_delete("old_tomb").await.expect("del old");
+        store.memory_delete("fresh_tomb").await.expect("del fresh");
+        // Backdate old_tomb ~30d so it is outside a 7-day window; fresh_tomb
+        // keeps its just-now updated_at and stays inside it.
+        let backdate = now_secs() - 30 * 86_400;
+        store
+            .conn
+            .call(move |c| -> RusqliteResult<usize> {
+                c.execute(
+                    "UPDATE memories SET updated_at = ?1 WHERE key = 'old_tomb'",
+                    params![backdate],
+                )
+            })
+            .await
+            .expect("backdate");
+
+        // (1) window set (7d): aged tombstone dropped; active + fresh kept.
+        let windowed = MemoryExportFilter {
+            exclude_tombstoned_older_than_secs: Some(7 * 86_400),
+            ..MemoryExportFilter::default()
+        };
+        let out_w = temp_dir.join("windowed.jsonl");
+        store
+            .memory_export(&windowed, &out_w)
+            .await
+            .expect("export windowed");
+        let keys_w = keys_in(&tokio::fs::read_to_string(&out_w).await.unwrap_or_default());
+        assert!(keys_w.contains("alive"), "active row must be exported");
+        assert!(
+            keys_w.contains("fresh_tomb"),
+            "recent tombstone (in window) must still propagate"
+        );
+        assert!(
+            !keys_w.contains("old_tomb"),
+            "aged tombstone must be excluded from the sync export (breaks the resurrection loop)"
+        );
+
+        // (2) window unset (None): full-backup contract — every row exported.
+        let out_all = temp_dir.join("all.jsonl");
+        store
+            .memory_export(&MemoryExportFilter::default(), &out_all)
+            .await
+            .expect("export all");
+        let keys_all = keys_in(
+            &tokio::fs::read_to_string(&out_all)
+                .await
+                .unwrap_or_default(),
+        );
+        assert!(
+            keys_all.contains("old_tomb")
+                && keys_all.contains("fresh_tomb")
+                && keys_all.contains("alive"),
+            "None window must export everything incl. aged tombstones (backup contract)"
+        );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

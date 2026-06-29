@@ -2113,6 +2113,15 @@ pub struct MemoryExportFilter {
     /// are local signals; serializing them verbatim makes otherwise unchanged
     /// peers rewrite `memory.jsonl` every sync cycle.
     pub stable_sync_metadata: bool,
+    /// When `Some(secs)`, exclude tombstoned rows whose `updated_at` is older
+    /// than `secs` ago (a sync-window cutoff). The sync transport sets this to
+    /// the purge window so the exported `memory.jsonl` stops carrying zombie
+    /// tombstones: `memory_import` Inserts any absent-key row (incl. a
+    /// tombstone), so without this an aged tombstone is resurrected from the
+    /// export on the next sync — right after `purge-tombstones` deleted it —
+    /// and the deletion never converges (the export grows unbounded with dead
+    /// rows). `None` = export everything (full backups).
+    pub exclude_tombstoned_older_than_secs: Option<i64>,
 }
 
 /// Result of [`StateStore::memory_export`].
