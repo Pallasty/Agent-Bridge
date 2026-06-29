@@ -78375,6 +78375,68 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         }
     }
 
+    // Seed a STALE target that consolidates into a higher-ranked same-kind peer,
+    // exercising the executor's memory_consolidate (edge-first) WRITE branch.
+    //
+    // The contents are engineered to clear the planner's similarity gate while
+    // dodging the store's save-time contradiction auto-supersede — the two use
+    // DIFFERENT tokenizers: the planner's word bag keeps words of length >= 3
+    // (memory_consolidate_word_bag) while the store's overlap only keeps tokens of
+    // length >= 4 (overlap_tokens). So the pair shares many 3-char words (high
+    // planner jaccard, ~0.8) but each has only a single distinct >= 4-char token
+    // ("cobra"/"viper") — the store's `new_tokens.len() >= 3` guard isn't even met,
+    // so neither save supersedes the other and the loser keeps no non-retrieval
+    // edge (stays shadow-eligible). The winner outranks the loser via importance
+    // (rank = importance*(1+access_count)): 0.7 > 0.3.
+    async fn ogc_seed_consolidate_pair(store: &Arc<dyn StateStore>) {
+        // Loser (the stale target) — saved first.
+        store
+            .memory_save(&t4_memory_record(
+                "merge_loser",
+                "lesson",
+                "red box sun the cat dog hen pig owl cobra",
+                &[],
+                &[],
+                0,
+                0.3,
+            ))
+            .await
+            .expect("seed loser");
+        // Winner (higher-ranked similar peer) — shares all 3-char words, differs
+        // only in the single >= 4-char token, so the store does not auto-supersede.
+        store
+            .memory_save(&t4_memory_record(
+                "merge_winner",
+                "lesson",
+                "red box sun the cat dog hen pig owl viper",
+                &[],
+                &[],
+                0,
+                0.7,
+            ))
+            .await
+            .expect("seed winner");
+        // Two distinct-source stale feedbacks on the loser → quorum met, eligible.
+        for (fb, src) in [("fbs1", "memory_search"), ("fbs2", "memory_get")] {
+            store
+                .memory_save(&t4_memory_record(
+                    fb,
+                    "feedback",
+                    "outcome: stale",
+                    &[
+                        "retrieval_feedback",
+                        "retrieval_feedback:stale",
+                        &format!("retrieval_source:{src}"),
+                    ],
+                    &["merge_loser"],
+                    0,
+                    0.6,
+                ))
+                .await
+                .expect("seed stale feedback");
+        }
+    }
+
     #[tokio::test]
     async fn outcome_gated_apply_trial_tool_default_off_blocks_and_mutates_nothing() {
         let _lock = frontend_env_test_setup();
@@ -78902,16 +78964,73 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
-    // NOTE: an end-to-end consolidate-APPLY test (seed a stale-feedback loser +
-    // higher-rank similar winner, then apply) is a deferred follow-up — the
-    // seeded loser came back shadow-ineligible (empty plan) and the root cause
-    // wasn't pinned down within the slow recompile loop. The edge-first
-    // consolidate WRITE branch is exercised in review; the planner's consolidate
-    // winner/loser logic is covered by the pure-fn tests
-    // (outcome_gated_apply_trial_plans_each_verb_when_allowed and
-    // outcome_gated_apply_trial_consolidate_picks_outranking_peer_not_highest_sim),
-    // and the archive_status WRITE path is covered end-to-end by
-    // outcome_gated_apply_executes_when_fully_gated_and_confirmed.
+    #[tokio::test]
+    async fn outcome_gated_apply_consolidate_executes_edge_first_when_gated() {
+        // End-to-end coverage of the executor's memory_consolidate WRITE branch
+        // (edge-first: supersedes edge THEN archive loser). See
+        // ogc_seed_consolidate_pair for how the seed clears the planner's jaccard
+        // gate yet dodges the store's save-time auto-supersede (the prior blocker).
+        let _lock = frontend_env_test_setup();
+        let pe = std::env::var(OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV).ok();
+        let pd = std::env::var(OUTCOME_GATED_CONSOLIDATION_DISABLE_ENV).ok();
+        std::env::set_var(OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV, "1");
+        std::env::remove_var(OUTCOME_GATED_CONSOLIDATION_DISABLE_ENV);
+
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        ogc_seed_consolidate_pair(&store).await;
+
+        // Both peers survive save (no auto-supersede) and stay active.
+        assert_eq!(
+            store.memory_get("merge_winner").await.expect("get").expect("present").status,
+            "active",
+            "winner must not be auto-superseded at save (would empty the plan)"
+        );
+        assert_eq!(
+            store.memory_get("merge_loser").await.expect("get").expect("present").status,
+            "active"
+        );
+
+        let approval = ogc_build_approval(&hub).await;
+        let out = OutcomeGatedConsolidationApplyTool::new(hub.clone())
+            .execute(ogc_apply_args(approval, true), &ToolContext::default())
+            .await
+            .expect("apply exec");
+        let res = result_text_as_json(&out);
+        assert_eq!(res["status"], json!("applied"));
+        assert_eq!(res["diff_verification"]["matches"], json!(true));
+        // The consolidate branch wrote BOTH a supersedes edge and an archive.
+        assert!(res["finalize_readback"]["supersedes_edges_written"].as_u64().unwrap() >= 1);
+        assert!(res["finalize_readback"]["archived_memories"].as_u64().unwrap() >= 1);
+        let applied = res["apply"]["applied"].as_array().expect("applied array");
+        assert!(
+            applied.iter().any(|a| a["op"] == json!("memory_consolidate")
+                && a["winner"] == json!("merge_winner")
+                && a["loser"] == json!("merge_loser")),
+            "applied must record the winner→loser consolidate"
+        );
+        // Store reflects it: loser archived, winner still active, supersedes edge
+        // winner→loser present (edge-first guarantee: never an archived loser
+        // without provenance).
+        assert_eq!(
+            store.memory_get("merge_loser").await.expect("get").expect("present").status,
+            "archived"
+        );
+        assert_eq!(
+            store.memory_get("merge_winner").await.expect("get").expect("present").status,
+            "active"
+        );
+        let edges = store.memory_neighbors("merge_winner").await.expect("neighbors");
+        assert!(
+            edges.iter().any(|e| e.edge_type == "supersedes"
+                && (e.to_key == "merge_loser" || e.from_key == "merge_winner")),
+            "a supersedes edge from winner→loser must exist"
+        );
+
+        restore_env_var(OUTCOME_GATED_CONSOLIDATION_ENABLE_ENV, pe);
+        restore_env_var(OUTCOME_GATED_CONSOLIDATION_DISABLE_ENV, pd);
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
 
     #[test]
     fn outcome_gated_apply_schema_and_registered() {
