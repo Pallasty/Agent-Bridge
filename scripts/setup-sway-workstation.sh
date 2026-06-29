@@ -236,6 +236,98 @@ open_agent_audit() {
     fi
 }
 
+# --- On-demand block details (computed only when a block is clicked) ---
+notify_detail() {
+    notify-send -a sway "$1" "$2" >/dev/null 2>&1 || true
+}
+
+cpu_sample() {
+    local _l u n s i io ir so st rest idle total
+    read -r _l u n s i io ir so st rest < /proc/stat
+    idle=$((i + io))
+    total=$((u + n + s + i + io + ir + so + st))
+    printf '%s %s' "$idle" "$total"
+}
+
+detail_cpu() {
+    local s1 s2 i1 t1 i2 t2 dt di pct cores load
+    cores=$(nproc 2>/dev/null || echo '?')
+    load=$(cut -d' ' -f1-3 /proc/loadavg 2>/dev/null)
+    s1=$(cpu_sample); i1=${s1% *}; t1=${s1#* }
+    sleep 0.3
+    s2=$(cpu_sample); i2=${s2% *}; t2=${s2#* }
+    dt=$((t2 - t1)); di=$((i2 - i1))
+    if [ "$dt" -gt 0 ]; then pct=$((100 * (dt - di) / dt)); else pct=0; fi
+    notify_detail "CPU ${pct}%" "load (1/5/15m): ${load}
+cores: ${cores}"
+}
+
+detail_ram() {
+    local total avail used pct swt swf gb_used gb_total body
+    total=$(awk '/^MemTotal:/{print $2}' /proc/meminfo)
+    avail=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo)
+    used=$((total - avail)); pct=$((100 * used / total))
+    gb_used=$(awk -v k="$used" 'BEGIN{printf "%.1f", k/1048576}')
+    gb_total=$(awk -v k="$total" 'BEGIN{printf "%.1f", k/1048576}')
+    body="used: ${gb_used} / ${gb_total} GiB (${pct}%)"
+    swt=$(awk '/^SwapTotal:/{print $2}' /proc/meminfo)
+    swf=$(awk '/^SwapFree:/{print $2}' /proc/meminfo)
+    if [ "${swt:-0}" -gt 0 ]; then
+        local swu swgb swtgb
+        swu=$((swt - swf))
+        swgb=$(awk -v k="$swu" 'BEGIN{printf "%.1f", k/1048576}')
+        swtgb=$(awk -v k="$swt" 'BEGIN{printf "%.1f", k/1048576}')
+        body="${body}
+swap: ${swgb} / ${swtgb} GiB"
+    fi
+    notify_detail "RAM ${pct}%" "$body"
+}
+
+detail_battery() {
+    local bat info pct state tte ttf body
+    if ! command -v upower >/dev/null 2>&1; then
+        notify_detail "Battery" "upower not available"; return
+    fi
+    bat=$(upower -e 2>/dev/null | awk '/battery/{print; exit}')
+    if [ -z "$bat" ]; then notify_detail "Battery" "no battery detected"; return; fi
+    info=$(upower -i "$bat" 2>/dev/null)
+    pct=$(printf '%s\n' "$info" | awk -F': *' '/percentage:/{print $2; exit}')
+    state=$(printf '%s\n' "$info" | awk -F': *' '/state:/{print $2; exit}')
+    tte=$(printf '%s\n' "$info" | awk -F': *' '/time to empty:/{print $2; exit}')
+    ttf=$(printf '%s\n' "$info" | awk -F': *' '/time to full:/{print $2; exit}')
+    body="state: ${state:-unknown}"
+    [ -n "$tte" ] && body="${body}
+time to empty: ${tte}"
+    [ -n "$ttf" ] && body="${body}
+time to full: ${ttf}"
+    notify_detail "Battery ${pct:-?}" "$body"
+}
+
+detail_warp() {
+    local st
+    if ! command -v warp-cli >/dev/null 2>&1; then
+        notify_detail "WARP" "warp-cli not installed"; return
+    fi
+    st=$(warp-cli status 2>/dev/null | sed 's/^[[:space:]]*//' | grep -v '^$' | head -4)
+    notify_detail "WARP" "${st:-unknown}"
+}
+
+detail_ime() {
+    local name state label
+    if ! command -v fcitx5-remote >/dev/null 2>&1; then
+        notify_detail "Input method" "fcitx5 not available"; return
+    fi
+    name=$(fcitx5-remote -n 2>/dev/null)
+    state=$(fcitx5-remote 2>/dev/null)
+    case "$state" in
+        1) label="inactive (latin)" ;;
+        2) label="active" ;;
+        *) label="state ${state:-?}" ;;
+    esac
+    notify_detail "Input method" "current: ${name:-unknown}
+status: ${label}"
+}
+
 handle_clicks() {
     while IFS= read -r event; do
         printf '%s %s\n' "$(date '+%F %T')" "$event" >>"$click_log" 2>/dev/null || true
@@ -253,6 +345,21 @@ handle_clicks() {
                     *"\"button\": 2"*|*"\"button\":2"*) log_event click "block=wifi button=2 action=nmtui"; open_wifi_terminal ;;
                     *"\"button\": 3"*|*"\"button\":3"*) log_event click "block=wifi button=3 action=actions"; open_wifi_actions ;;
                 esac
+                ;;
+            *"\"name\": \"cpu\""*|*"\"name\":\"cpu\""*)
+                case "$event" in *"\"button\": 1"*|*"\"button\":1"*) log_event click "block=cpu button=1 action=detail"; detail_cpu & ;; esac
+                ;;
+            *"\"name\": \"ram\""*|*"\"name\":\"ram\""*)
+                case "$event" in *"\"button\": 1"*|*"\"button\":1"*) log_event click "block=ram button=1 action=detail"; detail_ram & ;; esac
+                ;;
+            *"\"name\": \"battery\""*|*"\"name\":\"battery\""*)
+                case "$event" in *"\"button\": 1"*|*"\"button\":1"*) log_event click "block=battery button=1 action=detail"; detail_battery & ;; esac
+                ;;
+            *"\"name\": \"warp\""*|*"\"name\":\"warp\""*)
+                case "$event" in *"\"button\": 1"*|*"\"button\":1"*) log_event click "block=warp button=1 action=detail"; detail_warp & ;; esac
+                ;;
+            *"\"name\": \"ime\""*|*"\"name\":\"ime\""*)
+                case "$event" in *"\"button\": 1"*|*"\"button\":1"*) log_event click "block=ime button=1 action=detail"; detail_ime & ;; esac
                 ;;
         esac
     done
