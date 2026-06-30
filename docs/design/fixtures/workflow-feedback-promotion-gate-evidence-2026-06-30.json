@@ -1,0 +1,39 @@
+{
+  "schema": "agent_bridge.workflow_feedback_promotion_gate_evidence.v0",
+  "read_only": true,
+  "purpose": "Review fixture for the read-only workflow-feedback promotion gate. It describes how repeated shadow-score reports become a promotion review packet without granting runtime, retrieval, memory, skill, or tool-routing influence.",
+  "source_shadow_score_schema": "agent_bridge.workflow_feedback_shadow_score.v0",
+  "promotion_gate_schema": "agent_bridge.workflow_feedback_promotion_gate.v0",
+  "recommended_shadow_score_command": "agent-bridge workflow-feedback-shadow-score --fixture docs/design/fixtures/workflow-feedback-experience-agent-send-input-2026-06-30.json --fixture docs/design/fixtures/workflow-feedback-experience-report-cli-2026-06-30.json --scenario '<held-out scenario A>' --scenario '<held-out scenario B>' --json > /tmp/workflow-feedback-shadow-score-run-1.json",
+  "recommended_gate_command": "agent-bridge workflow-feedback-promotion-gate --shadow-score /tmp/workflow-feedback-shadow-score-run-1.json --shadow-score /tmp/workflow-feedback-shadow-score-run-2.json --behavior-lift-ref '<metric anchor>' --rollback-ref '<rollback handle>' [--owner-approval-ref '<owner approval ref>'] --json",
+  "default_thresholds": {
+    "min_shadow_reports": 2,
+    "min_scenarios": 2,
+    "min_strong_scenarios": 2,
+    "min_top_shadow_score": 65
+  },
+  "current_project_expectation": {
+    "without_behavior_lift_ref": "blocked_behavior_lift_anchor_required",
+    "without_rollback_ref": "blocked_rollback_evidence_required",
+    "without_owner_approval_ref": "ready_for_owner_review",
+    "with_all_refs": "owner_review_packet_complete"
+  },
+  "expected_summary_contract": {
+    "schema": "agent_bridge.workflow_feedback_promotion_gate.v0",
+    "read_only": true,
+    "boundary.writes_memory": false,
+    "boundary.mutates_runtime_policy": false,
+    "boundary.changes_retrieval_order": false,
+    "boundary.runtime_influence_allowed": false,
+    "advisory_only": true
+  },
+  "safety": {
+    "gate_writes_memory": false,
+    "gate_promotes_runbook": false,
+    "gate_promotes_skill": false,
+    "gate_changes_runtime": false,
+    "gate_changes_retrieval_order": false,
+    "gate_changes_tool_routing": false,
+    "gate_authorizes_future_runtime_influence": false
+  }
+}

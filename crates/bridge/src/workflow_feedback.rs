@@ -10,13 +10,15 @@ use ab_store::{McpToolCallStats, StateStore};
 use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use serde_json::{Value, json};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 pub const WORKFLOW_FEEDBACK_REPORT_SCHEMA: &str = "agent_bridge.workflow_feedback_report.v0";
 pub const EXPERIENCE_OBJECT_SCHEMA: &str = "agent_bridge.experience.v0";
 pub const WORKFLOW_FEEDBACK_SHADOW_SCORE_SCHEMA: &str =
     "agent_bridge.workflow_feedback_shadow_score.v0";
+pub const WORKFLOW_FEEDBACK_PROMOTION_GATE_SCHEMA: &str =
+    "agent_bridge.workflow_feedback_promotion_gate.v0";
 
 #[derive(Debug, Clone)]
 pub struct WorkflowFeedbackReportOptions {
@@ -149,6 +151,87 @@ pub struct ShadowCandidateScore {
     pub lesson: Option<String>,
     pub falsifier: Option<String>,
     pub runtime_influence_allowed: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct WorkflowFeedbackPromotionGateOptions {
+    pub owner_approval_refs: Vec<String>,
+    pub rollback_refs: Vec<String>,
+    pub behavior_lift_refs: Vec<String>,
+    pub min_shadow_reports: usize,
+    pub min_scenarios: usize,
+    pub min_strong_scenarios: usize,
+    pub min_top_shadow_score: u32,
+}
+
+impl Default for WorkflowFeedbackPromotionGateOptions {
+    fn default() -> Self {
+        Self {
+            owner_approval_refs: Vec::new(),
+            rollback_refs: Vec::new(),
+            behavior_lift_refs: Vec::new(),
+            min_shadow_reports: 2,
+            min_scenarios: 2,
+            min_strong_scenarios: 2,
+            min_top_shadow_score: 65,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkflowFeedbackPromotionGateReport {
+    pub schema: &'static str,
+    pub read_only: bool,
+    pub boundary: WorkflowFeedbackBoundary,
+    pub gate_verdict: &'static str,
+    pub ready_for_owner_review: bool,
+    pub advisory_promotion_ready: bool,
+    pub evidence: PromotionGateEvidence,
+    pub checks: Vec<PromotionGateCheck>,
+    pub scenario_evidence: Vec<PromotionGateScenarioEvidence>,
+    pub recommended_next_actions: Vec<&'static str>,
+    pub non_goals: Vec<&'static str>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PromotionGateEvidence {
+    pub shadow_report_count: usize,
+    pub scenario_count: usize,
+    pub strong_shadow_match_count: usize,
+    pub unsafe_shadow_report_count: usize,
+    pub min_required_shadow_reports: usize,
+    pub min_required_scenarios: usize,
+    pub min_required_strong_scenarios: usize,
+    pub min_required_top_shadow_score: u32,
+    pub top_experience_counts: Vec<PromotionGateExperienceCount>,
+    pub owner_approval_refs: Vec<String>,
+    pub rollback_refs: Vec<String>,
+    pub behavior_lift_refs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PromotionGateCheck {
+    pub id: &'static str,
+    pub passed: bool,
+    pub evidence: String,
+    pub required: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PromotionGateScenarioEvidence {
+    pub source_path: Option<String>,
+    pub scenario: String,
+    pub top_experience_id: String,
+    pub shadow_score: u32,
+    pub verdict: String,
+    pub runtime_influence_allowed: bool,
+    pub strong_match: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PromotionGateExperienceCount {
+    pub experience_id: String,
+    pub top_rank_count: usize,
 }
 
 pub async fn build_report(
@@ -372,6 +455,100 @@ impl WorkflowFeedbackShadowScoreReport {
     }
 }
 
+impl WorkflowFeedbackPromotionGateReport {
+    pub fn to_json_value(&self) -> Value {
+        serde_json::to_value(self).unwrap_or_else(|_| {
+            json!({
+                "schema": WORKFLOW_FEEDBACK_PROMOTION_GATE_SCHEMA,
+                "read_only": true,
+                "serialization_error": true
+            })
+        })
+    }
+
+    pub fn render_markdown(&self) -> String {
+        let mut out = String::new();
+        out.push_str("# Workflow Feedback Promotion Gate\n");
+        out.push_str(&format!("schema: {}\n", self.schema));
+        out.push_str(&format!("verdict: {}\n", self.gate_verdict));
+        out.push_str("mode: read-only promotion review packet; no memory writes, no retrieval change, no tool-routing change, no runtime policy mutation\n\n");
+
+        out.push_str("## Evidence\n");
+        out.push_str(&format!(
+            "- shadow reports: {} (required {})\n",
+            self.evidence.shadow_report_count, self.evidence.min_required_shadow_reports
+        ));
+        out.push_str(&format!(
+            "- scenarios: {} (required {})\n",
+            self.evidence.scenario_count, self.evidence.min_required_scenarios
+        ));
+        out.push_str(&format!(
+            "- strong shadow matches: {} (required {}, min top score {})\n",
+            self.evidence.strong_shadow_match_count,
+            self.evidence.min_required_strong_scenarios,
+            self.evidence.min_required_top_shadow_score
+        ));
+        out.push_str(&format!(
+            "- unsafe shadow reports: {}\n\n",
+            self.evidence.unsafe_shadow_report_count
+        ));
+
+        out.push_str("## Checks\n");
+        out.push_str("| Check | Status | Evidence | Required |\n");
+        out.push_str("| --- | --- | --- | --- |\n");
+        for check in &self.checks {
+            out.push_str(&format!(
+                "| {} | {} | {} | {} |\n",
+                check.id,
+                if check.passed { "pass" } else { "blocked" },
+                pipe_safe(&check.evidence),
+                pipe_safe(&check.required)
+            ));
+        }
+        out.push('\n');
+
+        out.push_str("## Top Experience Counts\n");
+        if self.evidence.top_experience_counts.is_empty() {
+            out.push_str("- no top-ranked experience evidence\n");
+        } else {
+            for count in &self.evidence.top_experience_counts {
+                out.push_str(&format!(
+                    "- {}: {} top-ranked scenario(s)\n",
+                    count.experience_id, count.top_rank_count
+                ));
+            }
+        }
+        out.push('\n');
+
+        out.push_str("## Scenario Evidence\n");
+        out.push_str("| Scenario | Top Experience | Score | Verdict | Strong |\n");
+        out.push_str("| --- | --- | ---: | --- | --- |\n");
+        for scenario in &self.scenario_evidence {
+            out.push_str(&format!(
+                "| {} | {} | {} | {} | {} |\n",
+                pipe_safe(&scenario.scenario),
+                pipe_safe(&scenario.top_experience_id),
+                scenario.shadow_score,
+                pipe_safe(&scenario.verdict),
+                scenario.strong_match
+            ));
+        }
+        out.push('\n');
+
+        out.push_str("## Recommended Next Actions\n");
+        for action in &self.recommended_next_actions {
+            out.push_str(&format!("- {action}\n"));
+        }
+        out.push('\n');
+
+        out.push_str("## Non-goals\n");
+        for non_goal in &self.non_goals {
+            out.push_str(&format!("- {non_goal}\n"));
+        }
+        out
+    }
+}
+
 pub fn build_shadow_score_report_from_paths(
     fixture_paths: &[PathBuf],
     scenarios: Vec<String>,
@@ -388,6 +565,27 @@ pub fn build_shadow_score_report_from_paths(
         )?);
     }
     build_shadow_score_report(experiences, scenarios)
+}
+
+pub fn build_promotion_gate_report_from_paths(
+    shadow_score_paths: &[PathBuf],
+    options: WorkflowFeedbackPromotionGateOptions,
+) -> Result<WorkflowFeedbackPromotionGateReport> {
+    if shadow_score_paths.is_empty() {
+        bail!("at least one shadow score report is required");
+    }
+    let mut shadow_reports = Vec::new();
+    for path in shadow_score_paths {
+        let raw = std::fs::read_to_string(path)
+            .with_context(|| format!("reading shadow score report {}", path.display()))?;
+        let value: Value = serde_json::from_str(&raw)
+            .with_context(|| format!("parsing shadow score report {}", path.display()))?;
+        shadow_reports.push(ShadowScoreReportEvidence::from_value(
+            value,
+            Some(path.display().to_string()),
+        )?);
+    }
+    build_promotion_gate_report(shadow_reports, options)
 }
 
 fn build_shadow_score_report(
@@ -428,6 +626,181 @@ fn build_shadow_score_report(
     })
 }
 
+fn build_promotion_gate_report(
+    shadow_reports: Vec<ShadowScoreReportEvidence>,
+    options: WorkflowFeedbackPromotionGateOptions,
+) -> Result<WorkflowFeedbackPromotionGateReport> {
+    if shadow_reports.is_empty() {
+        bail!("at least one shadow score report is required");
+    }
+
+    let min_shadow_reports = options.min_shadow_reports.max(1);
+    let min_scenarios = options.min_scenarios.max(1);
+    let min_strong_scenarios = options.min_strong_scenarios.max(1);
+    let min_top_shadow_score = options.min_top_shadow_score.min(100);
+    let owner_approval_refs = clean_refs(options.owner_approval_refs);
+    let rollback_refs = clean_refs(options.rollback_refs);
+    let behavior_lift_refs = clean_refs(options.behavior_lift_refs);
+
+    let mut scenario_evidence = Vec::new();
+    let mut top_counts = BTreeMap::<String, usize>::new();
+    let mut unsafe_shadow_report_count = 0_usize;
+
+    for report in &shadow_reports {
+        if !report.boundary_safe {
+            unsafe_shadow_report_count += 1;
+        }
+        for top in &report.top_candidates {
+            let strong_match = !top.runtime_influence_allowed
+                && top.shadow_score >= min_top_shadow_score
+                && top.verdict == "likely_helpful_shadow_candidate";
+            *top_counts.entry(top.experience_id.clone()).or_insert(0) += 1;
+            scenario_evidence.push(PromotionGateScenarioEvidence {
+                source_path: report.source_path.clone(),
+                scenario: top.scenario.clone(),
+                top_experience_id: top.experience_id.clone(),
+                shadow_score: top.shadow_score,
+                verdict: top.verdict.clone(),
+                runtime_influence_allowed: top.runtime_influence_allowed,
+                strong_match,
+            });
+        }
+    }
+
+    let shadow_report_count = shadow_reports.len();
+    let scenario_count = scenario_evidence.len();
+    let strong_shadow_match_count = scenario_evidence
+        .iter()
+        .filter(|scenario| scenario.strong_match)
+        .count();
+    let top_experience_counts = top_experience_counts(top_counts);
+
+    let safe_boundaries = unsafe_shadow_report_count == 0
+        && scenario_evidence
+            .iter()
+            .all(|scenario| !scenario.runtime_influence_allowed);
+    let repeated_shadow_reports = shadow_report_count >= min_shadow_reports;
+    let scenario_coverage = scenario_count >= min_scenarios;
+    let strong_shadow_matches = strong_shadow_match_count >= min_strong_scenarios;
+    let behavior_lift_anchor = !behavior_lift_refs.is_empty();
+    let rollback_evidence = !rollback_refs.is_empty();
+    let owner_approval = !owner_approval_refs.is_empty();
+
+    let checks = vec![
+        PromotionGateCheck {
+            id: "shadow_boundaries_safe",
+            passed: safe_boundaries,
+            evidence: format!(
+                "{unsafe_shadow_report_count} unsafe report(s); {} top candidate(s) allow runtime influence",
+                scenario_evidence
+                    .iter()
+                    .filter(|scenario| scenario.runtime_influence_allowed)
+                    .count()
+            ),
+            required:
+                "all shadow reports read_only=true and all boundary/runtime influence flags safe"
+                    .to_string(),
+        },
+        PromotionGateCheck {
+            id: "repeated_shadow_reports",
+            passed: repeated_shadow_reports,
+            evidence: format!("{shadow_report_count} shadow report(s) supplied"),
+            required: format!("at least {min_shadow_reports} shadow report(s)"),
+        },
+        PromotionGateCheck {
+            id: "scenario_coverage",
+            passed: scenario_coverage,
+            evidence: format!("{scenario_count} scenario(s) scored"),
+            required: format!("at least {min_scenarios} held-out scenario(s)"),
+        },
+        PromotionGateCheck {
+            id: "strong_shadow_matches",
+            passed: strong_shadow_matches,
+            evidence: format!(
+                "{strong_shadow_match_count} strong top match(es) at score >= {min_top_shadow_score}"
+            ),
+            required: format!("at least {min_strong_scenarios} likely_helpful top candidate(s)"),
+        },
+        PromotionGateCheck {
+            id: "behavior_lift_anchor",
+            passed: behavior_lift_anchor,
+            evidence: format!("{} behavior-lift ref(s)", behavior_lift_refs.len()),
+            required: "measured behavior-lift evidence or falsifiable metric anchor".to_string(),
+        },
+        PromotionGateCheck {
+            id: "rollback_evidence",
+            passed: rollback_evidence,
+            evidence: format!("{} rollback ref(s)", rollback_refs.len()),
+            required: "explicit rollback path or revert handle".to_string(),
+        },
+        PromotionGateCheck {
+            id: "owner_approval",
+            passed: owner_approval,
+            evidence: format!("{} owner approval ref(s)", owner_approval_refs.len()),
+            required: "explicit owner approval reference".to_string(),
+        },
+    ];
+
+    let shadow_evidence_passed =
+        safe_boundaries && repeated_shadow_reports && scenario_coverage && strong_shadow_matches;
+    let ready_for_owner_review =
+        shadow_evidence_passed && behavior_lift_anchor && rollback_evidence;
+    let advisory_promotion_ready = ready_for_owner_review && owner_approval;
+    let gate_verdict = if !safe_boundaries {
+        "blocked_shadow_boundary_violation"
+    } else if !repeated_shadow_reports {
+        "blocked_insufficient_shadow_runs"
+    } else if !scenario_coverage || !strong_shadow_matches {
+        "blocked_insufficient_shadow_evidence"
+    } else if !behavior_lift_anchor {
+        "blocked_behavior_lift_anchor_required"
+    } else if !rollback_evidence {
+        "blocked_rollback_evidence_required"
+    } else if !owner_approval {
+        "ready_for_owner_review"
+    } else {
+        "owner_review_packet_complete"
+    };
+
+    Ok(WorkflowFeedbackPromotionGateReport {
+        schema: WORKFLOW_FEEDBACK_PROMOTION_GATE_SCHEMA,
+        read_only: true,
+        boundary: WorkflowFeedbackBoundary {
+            writes_memory: false,
+            mutates_runtime_policy: false,
+            changes_retrieval_order: false,
+            runtime_influence_allowed: false,
+            owner_gated_runtime_influence: true,
+        },
+        gate_verdict,
+        ready_for_owner_review,
+        advisory_promotion_ready,
+        evidence: PromotionGateEvidence {
+            shadow_report_count,
+            scenario_count,
+            strong_shadow_match_count,
+            unsafe_shadow_report_count,
+            min_required_shadow_reports: min_shadow_reports,
+            min_required_scenarios: min_scenarios,
+            min_required_strong_scenarios: min_strong_scenarios,
+            min_required_top_shadow_score: min_top_shadow_score,
+            top_experience_counts,
+            owner_approval_refs,
+            rollback_refs,
+            behavior_lift_refs,
+        },
+        checks,
+        scenario_evidence,
+        recommended_next_actions: recommended_next_actions(gate_verdict),
+        non_goals: vec![
+            "Does not promote memories, runbooks, skills, or retrieval rules.",
+            "Does not write owner approval or infer it from local evidence.",
+            "Does not mutate runtime policy, tool routing, prompts, profiles, or bootstrap.",
+            "Does not treat shadow-score correlation as causal behavior lift.",
+        ],
+    })
+}
+
 #[derive(Debug, Clone)]
 struct ExperienceCandidate {
     source_path: Option<String>,
@@ -438,6 +811,175 @@ struct ExperienceCandidate {
     runtime_influence_allowed: bool,
     readiness_score: u32,
     search_text: String,
+}
+
+#[derive(Debug, Clone)]
+struct ShadowScoreReportEvidence {
+    source_path: Option<String>,
+    boundary_safe: bool,
+    top_candidates: Vec<TopShadowCandidate>,
+}
+
+#[derive(Debug, Clone)]
+struct TopShadowCandidate {
+    scenario: String,
+    experience_id: String,
+    shadow_score: u32,
+    verdict: String,
+    runtime_influence_allowed: bool,
+}
+
+impl ShadowScoreReportEvidence {
+    fn from_value(value: Value, source_path: Option<String>) -> Result<Self> {
+        let schema = value
+            .get("schema")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if schema != WORKFLOW_FEEDBACK_SHADOW_SCORE_SCHEMA {
+            bail!(
+                "shadow score report {} has schema {schema:?}, expected {WORKFLOW_FEEDBACK_SHADOW_SCORE_SCHEMA}",
+                source_path.as_deref().unwrap_or("<inline>")
+            );
+        }
+
+        let read_only = value
+            .get("read_only")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let boundary_safe = read_only
+            && value
+                .pointer("/boundary/writes_memory")
+                .and_then(Value::as_bool)
+                == Some(false)
+            && value
+                .pointer("/boundary/mutates_runtime_policy")
+                .and_then(Value::as_bool)
+                == Some(false)
+            && value
+                .pointer("/boundary/changes_retrieval_order")
+                .and_then(Value::as_bool)
+                == Some(false)
+            && value
+                .pointer("/boundary/runtime_influence_allowed")
+                .and_then(Value::as_bool)
+                == Some(false)
+            && value
+                .pointer("/boundary/owner_gated_runtime_influence")
+                .and_then(Value::as_bool)
+                == Some(true);
+
+        let rankings = value
+            .get("rankings")
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "shadow score report {} missing rankings array",
+                    source_path.as_deref().unwrap_or("<inline>")
+                )
+            })?;
+        let mut top_candidates = Vec::new();
+        for ranking in rankings {
+            let scenario = ranking
+                .get("scenario")
+                .and_then(Value::as_str)
+                .unwrap_or("<missing scenario>")
+                .to_string();
+            let Some(top) = ranking
+                .get("ranked_candidates")
+                .and_then(Value::as_array)
+                .and_then(|items| items.first())
+            else {
+                continue;
+            };
+            top_candidates.push(TopShadowCandidate {
+                scenario,
+                experience_id: top
+                    .get("experience_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("<missing experience_id>")
+                    .to_string(),
+                shadow_score: top
+                    .get("shadow_score")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0)
+                    .min(100) as u32,
+                verdict: top
+                    .get("verdict")
+                    .and_then(Value::as_str)
+                    .unwrap_or("<missing verdict>")
+                    .to_string(),
+                runtime_influence_allowed: top
+                    .get("runtime_influence_allowed")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(true),
+            });
+        }
+
+        Ok(Self {
+            source_path,
+            boundary_safe,
+            top_candidates,
+        })
+    }
+}
+
+fn clean_refs(refs: Vec<String>) -> Vec<String> {
+    refs.into_iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn top_experience_counts(counts: BTreeMap<String, usize>) -> Vec<PromotionGateExperienceCount> {
+    let mut rows = counts
+        .into_iter()
+        .map(
+            |(experience_id, top_rank_count)| PromotionGateExperienceCount {
+                experience_id,
+                top_rank_count,
+            },
+        )
+        .collect::<Vec<_>>();
+    rows.sort_by(|a, b| {
+        b.top_rank_count
+            .cmp(&a.top_rank_count)
+            .then_with(|| a.experience_id.cmp(&b.experience_id))
+    });
+    rows
+}
+
+fn recommended_next_actions(gate_verdict: &str) -> Vec<&'static str> {
+    match gate_verdict {
+        "blocked_shadow_boundary_violation" => vec![
+            "Reject or repair unsafe shadow-score evidence before considering promotion.",
+            "Re-run shadow scoring from read-only fixtures with runtime influence disabled.",
+        ],
+        "blocked_insufficient_shadow_runs" => vec![
+            "Collect at least one more independent shadow-score report over held-out scenarios.",
+            "Keep the experience as audit-only until repeated evidence exists.",
+        ],
+        "blocked_insufficient_shadow_evidence" => vec![
+            "Add held-out scenarios that exercise the proposed lesson's actual trigger conditions.",
+            "Require likely_helpful top rankings before preparing an owner review packet.",
+        ],
+        "blocked_behavior_lift_anchor_required" => vec![
+            "Attach a measured behavior-lift anchor such as reduced recovery time, fewer failed tool loops, or improved held-out task completion.",
+            "Keep shadow scores as correlation evidence, not causal proof.",
+        ],
+        "blocked_rollback_evidence_required" => vec![
+            "Attach an explicit rollback path, revert handle, or disable switch for the proposed promotion.",
+            "Prefer scoped runbook or memory promotion before any retrieval/tool/runtime influence.",
+        ],
+        "ready_for_owner_review" => vec![
+            "Send the packet for explicit owner approval with the shadow, lift, and rollback evidence attached.",
+            "Do not apply promotion until the owner approval reference is recorded.",
+        ],
+        "owner_review_packet_complete" => vec![
+            "Apply any promotion only through a separate authorized lane and keep runtime influence off by default.",
+            "Record the manual promotion result and rollback handle as durable memory after review.",
+        ],
+        _ => vec!["Review the gate packet manually before taking any promotion action."],
+    }
 }
 
 impl ExperienceCandidate {
@@ -1174,6 +1716,129 @@ mod tests {
     }
 
     #[test]
+    fn promotion_gate_prepares_owner_review_without_inventing_approval() {
+        let workflow = ExperienceCandidate::from_value(
+            fixture_value(
+                "exp_workflow_report",
+                "workflow_feedback",
+                "Workflow feedback should mature from research to read-only report to fixture before default influence.",
+                "workflow feedback report shadow scoring promotion evidence",
+            ),
+            Some("workflow.json".to_string()),
+        )
+        .expect("workflow fixture");
+        let agent = ExperienceCandidate::from_value(
+            fixture_value(
+                "exp_agent_input",
+                "agent_send_input",
+                "Interactive agent runtime send_input fixes need post-reconnect binary verification and no chrome prompt.",
+                "interactive claude code send_input runtime prompt",
+            ),
+            Some("agent.json".to_string()),
+        )
+        .expect("agent fixture");
+        let shadow = build_shadow_score_report(
+            vec![workflow, agent],
+            vec![
+                "workflow feedback report shadow scoring promotion evidence before default influence"
+                    .to_string(),
+                "workflow feedback lesson needs rollback evidence and behavior lift before promotion"
+                    .to_string(),
+            ],
+        )
+        .expect("shadow report");
+        let evidence = ShadowScoreReportEvidence::from_value(
+            shadow.to_json_value(),
+            Some("shadow-a.json".to_string()),
+        )
+        .expect("shadow evidence");
+
+        let gate = build_promotion_gate_report(
+            vec![evidence.clone(), evidence],
+            WorkflowFeedbackPromotionGateOptions {
+                behavior_lift_refs: vec![
+                    "metric:held-out workflow recovery time improved in replay".to_string(),
+                ],
+                rollback_refs: vec!["rollback:remove promoted runbook/memory key".to_string()],
+                ..Default::default()
+            },
+        )
+        .expect("promotion gate");
+
+        assert_eq!(gate.schema, WORKFLOW_FEEDBACK_PROMOTION_GATE_SCHEMA);
+        assert!(gate.read_only);
+        assert!(!gate.boundary.writes_memory);
+        assert!(!gate.boundary.mutates_runtime_policy);
+        assert!(!gate.boundary.changes_retrieval_order);
+        assert!(!gate.boundary.runtime_influence_allowed);
+        assert!(gate.ready_for_owner_review);
+        assert!(!gate.advisory_promotion_ready);
+        assert_eq!(gate.gate_verdict, "ready_for_owner_review");
+        assert_eq!(gate.evidence.shadow_report_count, 2);
+        assert_eq!(gate.evidence.scenario_count, 4);
+        assert!(gate.evidence.strong_shadow_match_count >= 2);
+        assert!(gate.evidence.owner_approval_refs.is_empty());
+        let owner_check = gate
+            .checks
+            .iter()
+            .find(|check| check.id == "owner_approval")
+            .expect("owner approval check");
+        assert!(!owner_check.passed);
+        assert!(gate.render_markdown().contains("ready_for_owner_review"));
+    }
+
+    #[test]
+    fn promotion_gate_blocks_unsafe_shadow_boundary() {
+        let workflow = ExperienceCandidate::from_value(
+            fixture_value(
+                "exp_workflow_report",
+                "workflow_feedback",
+                "Workflow feedback should mature from research to read-only report to fixture before default influence.",
+                "workflow feedback report shadow scoring promotion evidence",
+            ),
+            Some("workflow.json".to_string()),
+        )
+        .expect("workflow fixture");
+        let mut shadow_value = build_shadow_score_report(
+            vec![workflow],
+            vec!["workflow feedback report shadow scoring promotion evidence".to_string()],
+        )
+        .expect("shadow report")
+        .to_json_value();
+        shadow_value["boundary"]["runtime_influence_allowed"] = json!(true);
+        let evidence = ShadowScoreReportEvidence::from_value(
+            shadow_value,
+            Some("unsafe-shadow.json".to_string()),
+        )
+        .expect("shadow evidence");
+
+        let gate = build_promotion_gate_report(
+            vec![evidence],
+            WorkflowFeedbackPromotionGateOptions {
+                owner_approval_refs: vec!["forum:#108/#owner-approval".to_string()],
+                rollback_refs: vec!["rollback:disable promoted artifact".to_string()],
+                behavior_lift_refs: vec!["metric:held-out replay lift".to_string()],
+                min_shadow_reports: 1,
+                min_scenarios: 1,
+                min_strong_scenarios: 1,
+                min_top_shadow_score: 65,
+            },
+        )
+        .expect("promotion gate");
+
+        assert_eq!(gate.gate_verdict, "blocked_shadow_boundary_violation");
+        assert!(!gate.ready_for_owner_review);
+        assert!(!gate.advisory_promotion_ready);
+        assert_eq!(gate.evidence.unsafe_shadow_report_count, 1);
+        let boundary_check = gate
+            .checks
+            .iter()
+            .find(|check| check.id == "shadow_boundaries_safe")
+            .expect("boundary check");
+        assert!(!boundary_check.passed);
+    }
+
+    #[test]
     fn shadow_score_rejects_non_experience_schema() {
         let err = ExperienceCandidate::from_value(
             json!({"schema": "wrong.schema", "experience_id": "bad"}),
@@ -1183,6 +1848,121 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("expected agent_bridge.experience.v0")
+        );
+    }
+
+    fn two_scenario_shadow_score_value() -> Value {
+        let agent = ExperienceCandidate::from_value(
+            fixture_value(
+                "exp_agent_input",
+                "agent_send_input",
+                "Interactive agent runtime send_input fixes need post-reconnect binary verification and no chrome prompt.",
+                "interactive claude code send_input runtime prompt",
+            ),
+            Some("agent.json".to_string()),
+        )
+        .expect("agent fixture");
+        let report = ExperienceCandidate::from_value(
+            fixture_value(
+                "exp_workflow_report",
+                "workflow_feedback",
+                "Workflow feedback should mature from research to read-only report to fixture before default influence.",
+                "workflow feedback report shadow scoring owner gate",
+            ),
+            Some("report.json".to_string()),
+        )
+        .expect("report fixture");
+
+        build_shadow_score_report(
+            vec![agent, report],
+            vec![
+                "interactive Claude Code send_input stalls on chrome prompt after reconnect"
+                    .to_string(),
+                "workflow feedback lessons should stay report first with shadow scoring and owner gate"
+                    .to_string(),
+            ],
+        )
+        .expect("shadow report")
+        .to_json_value()
+    }
+
+    #[test]
+    fn promotion_gate_blocks_without_lift_rollback_and_owner_refs() {
+        let shadow = ShadowScoreReportEvidence::from_value(
+            two_scenario_shadow_score_value(),
+            Some("shadow.json".to_string()),
+        )
+        .expect("shadow evidence");
+        let gate = build_promotion_gate_report(
+            vec![shadow],
+            WorkflowFeedbackPromotionGateOptions {
+                min_shadow_reports: 1,
+                min_scenarios: 2,
+                min_strong_scenarios: 2,
+                min_top_shadow_score: 60,
+                ..WorkflowFeedbackPromotionGateOptions::default()
+            },
+        )
+        .expect("promotion gate");
+
+        assert_eq!(gate.schema, WORKFLOW_FEEDBACK_PROMOTION_GATE_SCHEMA);
+        assert!(gate.read_only);
+        assert!(!gate.boundary.writes_memory);
+        assert!(!gate.boundary.mutates_runtime_policy);
+        assert!(!gate.boundary.changes_retrieval_order);
+        assert!(!gate.boundary.runtime_influence_allowed);
+        assert_eq!(gate.gate_verdict, "blocked_behavior_lift_anchor_required");
+        assert!(!gate.ready_for_owner_review);
+        assert!(!gate.advisory_promotion_ready);
+    }
+
+    #[test]
+    fn promotion_gate_completes_packet_but_keeps_runtime_influence_false() {
+        let shadow_one = ShadowScoreReportEvidence::from_value(
+            two_scenario_shadow_score_value(),
+            Some("shadow-one.json".to_string()),
+        )
+        .expect("shadow one");
+        let shadow_two = ShadowScoreReportEvidence::from_value(
+            two_scenario_shadow_score_value(),
+            Some("shadow-two.json".to_string()),
+        )
+        .expect("shadow two");
+        let gate = build_promotion_gate_report(
+            vec![shadow_one, shadow_two],
+            WorkflowFeedbackPromotionGateOptions {
+                owner_approval_refs: vec!["forum:#108-owner-review".to_string()],
+                rollback_refs: vec!["git revert 7d3d01d".to_string()],
+                behavior_lift_refs: vec![
+                    "metric: held-out recovery path 2/2 top-ranked".to_string(),
+                ],
+                min_shadow_reports: 2,
+                min_scenarios: 2,
+                min_strong_scenarios: 2,
+                min_top_shadow_score: 60,
+            },
+        )
+        .expect("promotion gate");
+
+        assert_eq!(gate.gate_verdict, "owner_review_packet_complete");
+        assert!(gate.ready_for_owner_review);
+        assert!(gate.advisory_promotion_ready);
+        assert!(!gate.boundary.runtime_influence_allowed);
+        assert!(gate.checks.iter().all(|check| check.passed));
+        assert_eq!(gate.evidence.shadow_report_count, 2);
+        assert!(gate.evidence.strong_shadow_match_count >= 2);
+    }
+
+    #[test]
+    fn promotion_gate_rejects_non_shadow_score_schema() {
+        let err = ShadowScoreReportEvidence::from_value(
+            json!({"schema": "wrong.schema", "read_only": true}),
+            None,
+        )
+        .expect_err("wrong schema must fail");
+        assert!(
+            err.to_string()
+                .contains("expected agent_bridge.workflow_feedback_shadow_score.v0")
         );
     }
 }

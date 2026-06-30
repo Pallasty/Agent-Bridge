@@ -316,6 +316,24 @@ rankings and evidence.
 
 ### Slice 5 - Promotion Gate
 
+Status: landed as read-only CLI gate packet.
+
+Command:
+
+```text
+agent-bridge workflow-feedback-promotion-gate \
+  --shadow-score /tmp/workflow-feedback-shadow-score-run-1.json \
+  --shadow-score /tmp/workflow-feedback-shadow-score-run-2.json \
+  --behavior-lift-ref "<metric or falsifiable behavior-lift anchor>" \
+  --rollback-ref "<rollback path or revert handle>" \
+  [--owner-approval-ref "<explicit owner approval ref>"] \
+  --json
+```
+
+Evidence fixture:
+
+- `docs/design/fixtures/workflow-feedback-promotion-gate-evidence-2026-06-30.json`
+
 Only repeated, measured wins should promote an experience into:
 
 - a durable memory with higher actionability
@@ -324,6 +342,15 @@ Only repeated, measured wins should promote an experience into:
 - a bounded retrieval influence rule
 
 Runtime influence requires owner approval and rollback evidence.
+
+The gate consumes previously emitted `workflow-feedback-shadow-score --json`
+reports and checks:
+
+- all shadow reports are read-only and boundary-safe
+- repeated independent shadow-score reports exist
+- held-out scenarios have strong top-ranked matches
+- behavior-lift and rollback refs are present
+- owner approval is explicit, never inferred from local evidence
 
 ## Non-Goals
 
@@ -335,7 +362,8 @@ Runtime influence requires owner approval and rollback evidence.
 
 ## Immediate Next Step
 
-Use repeated shadow-scoring runs to decide whether a lesson is stable enough to
-enter the promotion gate. Promotion still requires owner approval, rollback
-evidence, and a measured behavior-lift anchor before any runtime, retrieval, or
-tool-routing influence.
+Use the promotion-gate packet to collect real repeated shadow-score reports,
+behavior-lift anchors, rollback handles, and owner approval refs. The gate can
+mark a packet complete for review, but any actual memory/runbook/skill/retrieval
+promotion must happen in a separate authorized lane; runtime, retrieval, and
+tool-routing influence remain blocked by default.

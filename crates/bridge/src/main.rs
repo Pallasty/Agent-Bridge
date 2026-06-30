@@ -364,6 +364,41 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Read-only promotion gate over workflow feedback shadow-score reports.
+    ///
+    /// Consumes previously emitted `workflow-feedback-shadow-score --json`
+    /// reports and checks whether repeated evidence is strong enough for owner
+    /// review. It does not promote memories, runbooks, skills, retrieval rules,
+    /// tool routing, or runtime policy.
+    WorkflowFeedbackPromotionGate {
+        /// Shadow-score JSON report. Repeat for independent shadow runs.
+        #[arg(long = "shadow-score", required = true)]
+        shadow_scores: Vec<PathBuf>,
+        /// Explicit owner approval reference. Repeat when multiple refs exist.
+        #[arg(long = "owner-approval-ref")]
+        owner_approval_refs: Vec<String>,
+        /// Rollback path, revert handle, or disable-switch reference.
+        #[arg(long = "rollback-ref")]
+        rollback_refs: Vec<String>,
+        /// Measured behavior-lift anchor or falsifiable metric reference.
+        #[arg(long = "behavior-lift-ref")]
+        behavior_lift_refs: Vec<String>,
+        /// Minimum independent shadow-score reports required.
+        #[arg(long, default_value_t = 2)]
+        min_shadow_reports: usize,
+        /// Minimum held-out scenarios required across the reports.
+        #[arg(long, default_value_t = 2)]
+        min_scenarios: usize,
+        /// Minimum strong top-ranked scenario matches required.
+        #[arg(long, default_value_t = 2)]
+        min_strong_scenarios: usize,
+        /// Minimum top-candidate shadow score for a strong match.
+        #[arg(long, default_value_t = 65)]
+        min_top_shadow_score: u32,
+        /// Emit the machine-readable JSON snapshot instead of Markdown.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -6879,6 +6914,31 @@ async fn real_main() -> Result<()> {
         return run_workflow_feedback_shadow_score(fixtures, scenarios, *json);
     }
 
+    if let Cmd::WorkflowFeedbackPromotionGate {
+        shadow_scores,
+        owner_approval_refs,
+        rollback_refs,
+        behavior_lift_refs,
+        min_shadow_reports,
+        min_scenarios,
+        min_strong_scenarios,
+        min_top_shadow_score,
+        json,
+    } = &cmd
+    {
+        return run_workflow_feedback_promotion_gate(
+            shadow_scores,
+            owner_approval_refs,
+            rollback_refs,
+            behavior_lift_refs,
+            *min_shadow_reports,
+            *min_scenarios,
+            *min_strong_scenarios,
+            *min_top_shadow_score,
+            *json,
+        );
+    }
+
     // Palace viewer: short-lived HTTP server, opens store directly (no Hub).
     if let Cmd::Palace { op } = &cmd {
         return match op {
@@ -7250,6 +7310,7 @@ async fn real_main() -> Result<()> {
         | Cmd::ContinuityReport { .. }
         | Cmd::WorkflowFeedbackReport { .. }
         | Cmd::WorkflowFeedbackShadowScore { .. }
+        | Cmd::WorkflowFeedbackPromotionGate { .. }
         | Cmd::Instinct { .. } => unreachable!(),
     }
 }
@@ -7319,6 +7380,39 @@ fn run_workflow_feedback_shadow_score(
         scenarios.to_vec(),
     )
     .context("building workflow feedback shadow score")?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&report.to_json_value())?);
+    } else {
+        print!("{}", report.render_markdown());
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_workflow_feedback_promotion_gate(
+    shadow_scores: &[PathBuf],
+    owner_approval_refs: &[String],
+    rollback_refs: &[String],
+    behavior_lift_refs: &[String],
+    min_shadow_reports: usize,
+    min_scenarios: usize,
+    min_strong_scenarios: usize,
+    min_top_shadow_score: u32,
+    as_json: bool,
+) -> Result<()> {
+    let report = ab_bridge::workflow_feedback::build_promotion_gate_report_from_paths(
+        shadow_scores,
+        ab_bridge::workflow_feedback::WorkflowFeedbackPromotionGateOptions {
+            owner_approval_refs: owner_approval_refs.to_vec(),
+            rollback_refs: rollback_refs.to_vec(),
+            behavior_lift_refs: behavior_lift_refs.to_vec(),
+            min_shadow_reports,
+            min_scenarios,
+            min_strong_scenarios,
+            min_top_shadow_score,
+        },
+    )
+    .context("building workflow feedback promotion gate")?;
     if as_json {
         println!("{}", serde_json::to_string_pretty(&report.to_json_value())?);
     } else {
