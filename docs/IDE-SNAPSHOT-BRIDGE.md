@@ -73,6 +73,19 @@ Line and character values should use the IDE/LSP convention: zero-based lines
 and UTF-16-ish editor characters are acceptable as long as the writer is
 consistent. The agent treats ranges as hints, not as authoritative byte offsets.
 
+## Workspace Boundary Evidence
+
+`ide_snapshot` adds a read-only `workspace_boundary` object to the normalized
+output. IDE writers do not need to provide this field. Agent-Bridge derives it
+from `workspace_root`, `active_file`, `selection.file` / `selection.path` /
+`selection.uri`, `open_files[*].path` / `file` / `uri`, and
+`diagnostics[*].file` / `path` / `uri`.
+
+The evidence canonicalizes the workspace root and candidate paths before
+reporting containment. It reports relations such as `inside_workspace`,
+`outside_workspace`, `missing_path`, and `no_workspace_root`; it does not block,
+rewrite, or hide any snapshot field.
+
 ## Recommended Implementation Path
 
 ## Command Bridge
@@ -137,6 +150,7 @@ commands remain visible on disk and the MCP call returns `status=queued` or
 Phase 1, landed:
 
 - `ide_snapshot` MCP tool reads, normalizes, truncates, and marks stale snapshots.
+- `ide_snapshot` adds read-only workspace-boundary evidence for snapshot paths.
 - The tool is editor-agnostic and registered in the Essential profile.
 
 Phase 2, landed:

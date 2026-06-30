@@ -1,6 +1,7 @@
 # AB Workspace Boundary Evidence Plan - 2026-06-30
 
-Status: AB-BORROW-2 planning artifact. No runtime behavior change.
+Status: AB-BORROW-2 planning artifact. The first read-only `ide_snapshot`
+evidence slice is implemented; `ide_command` follow-up remains pending.
 
 This note closes the planning step for the borrowed workspace-boundary pattern
 from `docs/design/BORROWED_PATTERNS_BACKLOG_2026_06_09.md`. It turns the
@@ -15,19 +16,19 @@ borrow into an Agent-Bridge-native evidence contract for `ide_snapshot`,
   ancestor `.agent-bridge/ide-snapshot.json`, runtime-dir snapshot, or data-dir
   snapshot.
 - `ide_snapshot` is read-only and returns source path, age/staleness, raw
-  `workspace_root`, active file, selection, open files, diagnostics, and tasks.
+  `workspace_root`, active file, selection, open files, diagnostics, tasks, and
+  derived `workspace_boundary` evidence.
 - `ide_command` appends JSONL requests to an IDE command directory and can wait
   for a matching response.
 - The command queue supports read/navigation commands and richer future commands
   such as `apply_workspace_edit`, `save_file`, and `format_document`.
 
-The missing part is explicit workspace-boundary evidence:
+The remaining part is command-side use of explicit workspace-boundary evidence:
 
-- raw `workspace_root` and path fields are currently passed through;
 - command directory resolution does not prove that queued command paths are
   under the workspace;
-- symlink and `..` behavior is not reported;
-- exclude or `.gitignore` evidence is not surfaced.
+- exclude or `.gitignore` evidence is surfaced as advisory `not_evaluated`;
+- mutating IDE commands do not yet require contained paths before queueing.
 
 ## Evidence Contract
 
@@ -74,7 +75,7 @@ The evidence must be conservative:
 
 ## First Code Slice
 
-The smallest code slice should be read-only:
+The first code slice is read-only:
 
 1. Add a helper that resolves `workspace_root` and candidate paths into the
    evidence shape above.

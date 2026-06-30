@@ -21,6 +21,7 @@ const DEFAULT_MAX_SELECTION_CHARS: usize = 20_000;
 const DEFAULT_MAX_MESSAGE_CHARS: usize = 1_000;
 const COMMANDS_FILE: &str = "ide-commands.jsonl";
 const RESPONSES_FILE: &str = "ide-responses.jsonl";
+const WORKSPACE_BOUNDARY_SCHEMA: &str = "agent_bridge.workspace_boundary_evidence.v0";
 
 static COMMAND_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -336,6 +337,13 @@ fn normalise_snapshot(
     let tasks = get_first(&raw, &["tasks", "recent_tasks", "recentTasks"])
         .map(|v| sanitise_tasks(v, 20))
         .unwrap_or_else(|| json!([]));
+    let workspace_boundary = workspace_boundary_evidence(
+        workspace_root.as_ref(),
+        active_file.as_ref(),
+        &selection,
+        &open_files,
+        &diagnostics,
+    );
 
     Ok(json!({
         "available": true,
@@ -356,6 +364,7 @@ fn normalise_snapshot(
         "diagnostics": diagnostics,
         "diagnostic_counts": diagnostic_counts,
         "tasks": tasks,
+        "workspace_boundary": workspace_boundary,
         "limits": {
             "max_open_files": options.max_open_files,
             "max_diagnostics": options.max_diagnostics,
@@ -497,6 +506,267 @@ fn diagnostic_counts(diagnostics: &Value) -> Value {
     json!(counts)
 }
 
+#[derive(Debug, Clone)]
+struct PathInput {
+    input: String,
+    path: PathBuf,
+}
+
+fn workspace_boundary_evidence(
+    workspace_root: Option<&Value>,
+    active_file: Option<&Value>,
+    selection: &Value,
+    open_files: &Value,
+    diagnostics: &Value,
+) -> Value {
+    let root_input = workspace_root.and_then(path_input_from_value);
+    let (root_evidence, root_canonical) = workspace_root_evidence(root_input.as_ref());
+    let mut candidates = Vec::new();
+
+    if let Some(active_file) = active_file {
+        push_path_candidate(&mut candidates, "active_file", active_file);
+    }
+    push_object_path_candidates(
+        &mut candidates,
+        "selection",
+        selection,
+        &["file", "path", "uri"],
+    );
+    push_array_item_path_candidates(
+        &mut candidates,
+        "open_files",
+        open_files,
+        &["path", "file", "uri"],
+    );
+    push_array_item_path_candidates(
+        &mut candidates,
+        "diagnostics",
+        diagnostics,
+        &["file", "path", "uri"],
+    );
+
+    let paths: Vec<Value> = candidates
+        .iter()
+        .map(|(role, input)| path_boundary_evidence(role, input, root_canonical.as_deref()))
+        .collect();
+    let verdict = workspace_boundary_verdict(root_input.as_ref(), root_canonical.as_ref(), &paths);
+
+    json!({
+        "schema": WORKSPACE_BOUNDARY_SCHEMA,
+        "mode": "read_only_evidence",
+        "workspace_root": root_evidence,
+        "paths": paths,
+        "excludes": {
+            "status": "not_evaluated",
+            "sources": []
+        },
+        "verdict": verdict,
+    })
+}
+
+fn workspace_root_evidence(root: Option<&PathInput>) -> (Value, Option<PathBuf>) {
+    let Some(root) = root else {
+        return (
+            json!({
+                "input": Value::Null,
+                "canonical": Value::Null,
+                "exists": false,
+                "is_dir": false,
+                "reason": "workspace_root was not provided",
+            }),
+            None,
+        );
+    };
+
+    let metadata = std::fs::metadata(&root.path).ok();
+    let exists = metadata.is_some();
+    let is_dir = metadata.as_ref().is_some_and(|m| m.is_dir());
+    let canonical = if exists {
+        std::fs::canonicalize(&root.path).ok()
+    } else {
+        None
+    };
+    let reason = match (exists, is_dir, canonical.is_some()) {
+        (true, true, true) => "canonical workspace root resolved",
+        (true, true, false) => "workspace_root could not be canonicalized",
+        (true, false, _) => "workspace_root is not a directory",
+        (false, _, _) => "workspace_root does not exist",
+    };
+    let usable_canonical = if is_dir { canonical.clone() } else { None };
+
+    (
+        json!({
+            "input": root.input.as_str(),
+            "canonical": canonical.as_ref().map(|p| p.display().to_string()),
+            "exists": exists,
+            "is_dir": is_dir,
+            "reason": reason,
+        }),
+        usable_canonical,
+    )
+}
+
+fn path_boundary_evidence(role: &str, input: &PathInput, workspace_root: Option<&Path>) -> Value {
+    let candidate_path = match workspace_root {
+        Some(root) if !input.path.is_absolute() => root.join(&input.path),
+        _ => input.path.clone(),
+    };
+    let metadata = std::fs::metadata(&candidate_path).ok();
+    let exists = metadata.is_some();
+
+    let Some(root) = workspace_root else {
+        let canonical = if input.path.is_absolute() && exists {
+            std::fs::canonicalize(&candidate_path).ok()
+        } else {
+            None
+        };
+        return json!({
+            "role": role,
+            "input": input.input.as_str(),
+            "canonical": canonical.as_ref().map(|p| p.display().to_string()),
+            "exists": exists,
+            "contained": false,
+            "relation": "no_workspace_root",
+            "reason": "workspace root was not provided or could not be canonicalized",
+        });
+    };
+
+    if !exists {
+        return json!({
+            "role": role,
+            "input": input.input.as_str(),
+            "canonical": Value::Null,
+            "exists": false,
+            "contained": false,
+            "relation": "missing_path",
+            "reason": "candidate path does not exist; containment was not guessed",
+        });
+    }
+
+    let Ok(canonical) = std::fs::canonicalize(&candidate_path) else {
+        return json!({
+            "role": role,
+            "input": input.input.as_str(),
+            "canonical": Value::Null,
+            "exists": true,
+            "contained": false,
+            "relation": "canonicalize_failed",
+            "reason": "candidate path exists but could not be canonicalized",
+        });
+    };
+    let contained = canonical == root || canonical.starts_with(root);
+    let relation = if contained {
+        "inside_workspace"
+    } else {
+        "outside_workspace"
+    };
+    let reason = if contained {
+        "canonical path has workspace root as ancestor"
+    } else {
+        "canonical path is outside the workspace root"
+    };
+
+    json!({
+        "role": role,
+        "input": input.input.as_str(),
+        "canonical": canonical.display().to_string(),
+        "exists": true,
+        "contained": contained,
+        "relation": relation,
+        "reason": reason,
+    })
+}
+
+fn workspace_boundary_verdict(
+    root_input: Option<&PathInput>,
+    root_canonical: Option<&PathBuf>,
+    paths: &[Value],
+) -> &'static str {
+    if root_input.is_none() || root_canonical.is_none() {
+        return "no_workspace_root";
+    }
+    if paths.is_empty() {
+        return "no_candidate_paths";
+    }
+    if paths
+        .iter()
+        .any(|p| p.get("relation").and_then(Value::as_str) == Some("outside_workspace"))
+    {
+        return "outside_workspace";
+    }
+    if paths.iter().any(|p| {
+        matches!(
+            p.get("relation").and_then(Value::as_str),
+            Some("missing_path" | "canonicalize_failed")
+        )
+    }) {
+        return "needs_review";
+    }
+    "contained"
+}
+
+fn push_object_path_candidates(
+    out: &mut Vec<(String, PathInput)>,
+    prefix: &str,
+    value: &Value,
+    keys: &[&str],
+) {
+    let Some(map) = value.as_object() else {
+        return;
+    };
+    for key in keys {
+        if let Some(value) = map.get(*key) {
+            push_path_candidate(out, &format!("{prefix}.{key}"), value);
+        }
+    }
+}
+
+fn push_array_item_path_candidates(
+    out: &mut Vec<(String, PathInput)>,
+    prefix: &str,
+    value: &Value,
+    keys: &[&str],
+) {
+    let Some(items) = value.get("items").and_then(Value::as_array) else {
+        return;
+    };
+    for (idx, item) in items.iter().enumerate() {
+        if item.is_string() {
+            push_path_candidate(out, &format!("{prefix}[{idx}]"), item);
+        } else if let Some(map) = item.as_object() {
+            for key in keys {
+                if let Some(value) = map.get(*key) {
+                    push_path_candidate(out, &format!("{prefix}[{idx}].{key}"), value);
+                }
+            }
+        }
+    }
+}
+
+fn push_path_candidate(out: &mut Vec<(String, PathInput)>, role: &str, value: &Value) {
+    if let Some(path_input) = path_input_from_value(value) {
+        out.push((role.to_string(), path_input));
+    }
+}
+
+fn path_input_from_value(value: &Value) -> Option<PathInput> {
+    let raw = value.as_str()?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let path_text = file_uri_to_path(raw).unwrap_or(raw);
+    Some(PathInput {
+        input: raw.to_string(),
+        path: PathBuf::from(path_text),
+    })
+}
+
+fn file_uri_to_path(s: &str) -> Option<&str> {
+    s.strip_prefix("file://localhost")
+        .or_else(|| s.strip_prefix("file://"))
+        .filter(|path| path.starts_with('/'))
+}
+
 fn normalise_severity(v: &Value) -> String {
     if let Some(s) = v.as_str() {
         return match s.trim().to_lowercase().as_str() {
@@ -592,6 +862,15 @@ mod tests {
         ))
     }
 
+    fn path_entry_by_role<'a>(boundary: &'a Value, role: &str) -> &'a Value {
+        boundary["paths"]
+            .as_array()
+            .expect("paths array")
+            .iter()
+            .find(|entry| entry["role"] == role)
+            .unwrap_or_else(|| panic!("missing path role: {role}"))
+    }
+
     #[test]
     fn missing_snapshot_returns_contract() {
         let path = temp_snapshot_path("missing");
@@ -648,6 +927,146 @@ mod tests {
         assert_eq!(v["open_files"]["truncated"], true);
         assert_eq!(v["diagnostic_counts"]["error"], 1);
         assert_eq!(v["diagnostic_counts"]["warning"], 1);
+        assert_eq!(v["workspace_boundary"]["schema"], WORKSPACE_BOUNDARY_SCHEMA);
+    }
+
+    #[test]
+    fn snapshot_workspace_boundary_reports_containment_and_missing_paths() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("project");
+        let src = root.join("src");
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&src).expect("mkdir src");
+        std::fs::create_dir_all(&outside).expect("mkdir outside");
+        let lib = src.join("lib.rs");
+        let main = src.join("main.rs");
+        let outside_file = outside.join("note.txt");
+        std::fs::write(&lib, "pub fn lib() {}\n").expect("write lib");
+        std::fs::write(&main, "fn main() {}\n").expect("write main");
+        std::fs::write(&outside_file, "outside\n").expect("write outside");
+
+        let inside_dotdot = root.join("src").join("..").join("src").join("lib.rs");
+        let outside_dotdot = root
+            .join("src")
+            .join("..")
+            .join("..")
+            .join("outside")
+            .join("note.txt");
+        let missing = root.join("missing.rs");
+        let snapshot = tmp.path().join("snapshot.json");
+        let body = json!({
+            "schema_version": 1,
+            "workspace_root": root.display().to_string(),
+            "active_file": lib.display().to_string(),
+            "selection": {
+                "file": inside_dotdot.display().to_string(),
+                "text": "selected"
+            },
+            "open_files": [
+                { "path": outside_dotdot.display().to_string() },
+                { "path": missing.display().to_string() }
+            ],
+            "diagnostics": [
+                { "file": main.display().to_string(), "severity": "warning", "message": "warn" }
+            ]
+        });
+        std::fs::write(&snapshot, serde_json::to_string(&body).unwrap()).expect("write snapshot");
+
+        let v = read_ide_snapshot(
+            Some(snapshot.to_str().unwrap()),
+            None,
+            IdeSnapshotOptions::default(),
+        )
+        .expect("snapshot read");
+        let boundary = &v["workspace_boundary"];
+
+        assert_eq!(boundary["workspace_root"]["exists"], true);
+        assert_eq!(boundary["workspace_root"]["is_dir"], true);
+        assert_eq!(boundary["verdict"], "outside_workspace");
+        assert_eq!(
+            path_entry_by_role(boundary, "active_file")["relation"],
+            "inside_workspace"
+        );
+        assert_eq!(
+            path_entry_by_role(boundary, "selection.file")["relation"],
+            "inside_workspace"
+        );
+        assert_eq!(
+            path_entry_by_role(boundary, "open_files[0].path")["relation"],
+            "outside_workspace"
+        );
+        assert_eq!(
+            path_entry_by_role(boundary, "open_files[1].path")["relation"],
+            "missing_path"
+        );
+        assert_eq!(
+            path_entry_by_role(boundary, "diagnostics[0].file")["relation"],
+            "inside_workspace"
+        );
+    }
+
+    #[test]
+    fn snapshot_workspace_boundary_reports_no_workspace_root() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let file = tmp.path().join("src.rs");
+        std::fs::write(&file, "fn main() {}\n").expect("write file");
+        let snapshot = tmp.path().join("snapshot.json");
+        let body = json!({
+            "schema_version": 1,
+            "active_file": file.display().to_string(),
+        });
+        std::fs::write(&snapshot, serde_json::to_string(&body).unwrap()).expect("write snapshot");
+
+        let v = read_ide_snapshot(
+            Some(snapshot.to_str().unwrap()),
+            None,
+            IdeSnapshotOptions::default(),
+        )
+        .expect("snapshot read");
+        let boundary = &v["workspace_boundary"];
+
+        assert_eq!(boundary["verdict"], "no_workspace_root");
+        assert_eq!(boundary["workspace_root"]["input"], Value::Null);
+        assert_eq!(
+            path_entry_by_role(boundary, "active_file")["relation"],
+            "no_workspace_root"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn snapshot_workspace_boundary_canonicalizes_symlink_escape() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("project");
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&root).expect("mkdir root");
+        std::fs::create_dir_all(&outside).expect("mkdir outside");
+        let outside_file = outside.join("note.txt");
+        let link = root.join("linked-note.txt");
+        std::fs::write(&outside_file, "outside\n").expect("write outside");
+        std::os::unix::fs::symlink(&outside_file, &link).expect("symlink");
+
+        let snapshot = tmp.path().join("snapshot.json");
+        let body = json!({
+            "schema_version": 1,
+            "workspace_root": root.display().to_string(),
+            "active_file": link.display().to_string(),
+        });
+        std::fs::write(&snapshot, serde_json::to_string(&body).unwrap()).expect("write snapshot");
+
+        let v = read_ide_snapshot(
+            Some(snapshot.to_str().unwrap()),
+            None,
+            IdeSnapshotOptions::default(),
+        )
+        .expect("snapshot read");
+        let boundary = &v["workspace_boundary"];
+
+        assert_eq!(boundary["verdict"], "outside_workspace");
+        assert_eq!(
+            path_entry_by_role(boundary, "active_file")["relation"],
+            "outside_workspace"
+        );
     }
 
     #[test]
