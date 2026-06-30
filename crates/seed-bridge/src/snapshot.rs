@@ -19,8 +19,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use arrow::array::{
-    Array, Float32Array, Int32Array, Int64Array, ListArray, ListBuilder,
-    Float32Builder, Int64Builder, StringArray, StringBuilder,
+    Array, Float32Array, Float32Builder, Int32Array, Int64Array, Int64Builder, ListArray,
+    ListBuilder, StringArray, StringBuilder,
 };
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
@@ -136,31 +136,31 @@ pub fn arrow_schema() -> Arc<Schema> {
     Arc::new(Schema::new_with_metadata(
         vec![
             Field::new("step", DataType::Int64, false),
-        Field::new("cycle_ts", DataType::Int64, false),
-        Field::new("tier", DataType::Utf8, false),
-        Field::new("n_alive", DataType::Int32, false),
-        Field::new(
-            "in_strengths",
-            DataType::List(Arc::new(Field::new("item", DataType::Float32, true))),
-            false,
-        ),
-        Field::new(
-            "last_perceived_key",
-            DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
-            false,
-        ),
-        Field::new(
-            "last_perceived_ts",
-            DataType::List(Arc::new(Field::new("item", DataType::Int64, true))),
-            false,
-        ),
-        Field::new("trailing_surprise_mean_short", DataType::Float32, false),
-        Field::new("trailing_surprise_mean_long", DataType::Float32, false),
-        Field::new(
-            "connection_logits",
-            DataType::List(Arc::new(Field::new("item", DataType::Float32, true))),
-            false,
-        ),
+            Field::new("cycle_ts", DataType::Int64, false),
+            Field::new("tier", DataType::Utf8, false),
+            Field::new("n_alive", DataType::Int32, false),
+            Field::new(
+                "in_strengths",
+                DataType::List(Arc::new(Field::new("item", DataType::Float32, true))),
+                false,
+            ),
+            Field::new(
+                "last_perceived_key",
+                DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
+                false,
+            ),
+            Field::new(
+                "last_perceived_ts",
+                DataType::List(Arc::new(Field::new("item", DataType::Int64, true))),
+                false,
+            ),
+            Field::new("trailing_surprise_mean_short", DataType::Float32, false),
+            Field::new("trailing_surprise_mean_long", DataType::Float32, false),
+            Field::new(
+                "connection_logits",
+                DataType::List(Arc::new(Field::new("item", DataType::Float32, true))),
+                false,
+            ),
         ],
         meta,
     ))
@@ -279,7 +279,9 @@ pub fn batch_to_rows(batch: &RecordBatch) -> Result<Vec<SnapshotRow>, arrow::err
         .column(7)
         .as_any()
         .downcast_ref::<Float32Array>()
-        .ok_or_else(|| arrow::error::ArrowError::CastError("trailing_surprise_mean_short".into()))?;
+        .ok_or_else(|| {
+            arrow::error::ArrowError::CastError("trailing_surprise_mean_short".into())
+        })?;
     let trailing_long = batch
         .column(8)
         .as_any()
@@ -614,7 +616,10 @@ mod tests {
         assert_eq!(back.len(), MAX_SNAPSHOTS);
         // The oldest surviving row should have step == extra (front-dropped).
         assert_eq!(back[0].step, extra as i64);
-        assert_eq!(back[MAX_SNAPSHOTS - 1].step, (MAX_SNAPSHOTS + extra - 1) as i64);
+        assert_eq!(
+            back[MAX_SNAPSHOTS - 1].step,
+            (MAX_SNAPSHOTS + extra - 1) as i64
+        );
     }
 
     #[test]
@@ -658,7 +663,9 @@ mod tests {
         assert_eq!(s.field(9).name(), "connection_logits");
         // The schema metadata carries the explicit contract version + provenance.
         assert_eq!(
-            s.metadata().get(SCHEMA_CONTRACT_META_KEY).map(String::as_str),
+            s.metadata()
+                .get(SCHEMA_CONTRACT_META_KEY)
+                .map(String::as_str),
             Some(SUBSTRATE_SNAPSHOT_SCHEMA_CONTRACT)
         );
         assert!(s.metadata().contains_key(PROVENANCE_META_KEY));
