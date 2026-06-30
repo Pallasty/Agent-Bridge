@@ -1,0 +1,208 @@
+{
+  "schema": "agent_bridge.experience.v0",
+  "experience_id": "exp_20260630_workflow_feedback_report_cli",
+  "created_at": "2026-06-30T15:00:00Z",
+  "scope": "project:/Data/CascadeProjects/agent-bridge",
+  "lane": "workflow_feedback_research_to_report_cli",
+  "goal": "Turn external workflow-feedback research into Agent-Bridge memory, docs, board state, a read-only maturity report, and a repeatable CLI that emits an Experience Object v0 fixture.",
+  "plan": [
+    "land the external workflow-feedback research synthesis in docs, memory, and forum",
+    "measure current AB workflow-feedback maturity with read-only local evidence",
+    "write a Goal C U report with scorecard, evidence, limitations, and next steps",
+    "implement a repeatable read-only workflow-feedback-report CLI",
+    "verify the CLI with focused tests, live smoke, all-target check, and scoped rustfmt",
+    "record the next step as manually reviewed Experience Object v0 fixtures"
+  ],
+  "trajectory": {
+    "source_commits": [
+      {
+        "commit": "b9f0091",
+        "subject": "docs: land workflow feedback loop research",
+        "role": "research synthesis landing"
+      },
+      {
+        "commit": "6d1f9ec",
+        "subject": "docs: add workflow feedback report",
+        "role": "read-only maturity report landing"
+      },
+      {
+        "commit": "4d622e3",
+        "subject": "feat(workflow): add read-only feedback report",
+        "role": "repeatable CLI implementation"
+      }
+    ],
+    "tool_spans": [
+      {
+        "tool": "web research",
+        "purpose": "identify external feedback-loop systems to borrow from",
+        "outcome": "success",
+        "evidence": [
+          "Reflexion",
+          "Self-Refine",
+          "ExpeL",
+          "Voyager",
+          "MemGPT/Letta",
+          "mem0",
+          "Zep/Graphiti",
+          "A-MEM",
+          "DSPy",
+          "TextGrad",
+          "Agent Lightning",
+          "OpenInference/Phoenix",
+          "Langfuse",
+          "OpenTelemetry GenAI"
+        ]
+      },
+      {
+        "tool": "mcp_lifecycle_digest",
+        "purpose": "verify AB readiness before report claims",
+        "outcome": "success",
+        "observation": "lifecycle/readiness ready, warnings 0, compact tool count 97"
+      },
+      {
+        "tool": "memory_graph_topology",
+        "purpose": "measure whether memory graph can support bounded shadow scoring",
+        "outcome": "success",
+        "observation": "project plus global orphan fraction 4.8%, P4 evolved coverage 81.2%"
+      },
+      {
+        "tool": "memory_consolidation_queue",
+        "purpose": "check stale/duplicate/harmful/high-token pressure",
+        "outcome": "success",
+        "observation": "handoff-to-decision and high-token-low-use buckets existed; harmful/stale/duplicate buckets were quiet"
+      },
+      {
+        "tool": "mcp_dispatch_audit",
+        "purpose": "measure workflow tool traffic and friction",
+        "outcome": "success",
+        "observation": "7-day window had about 1320 MCP calls, 10 errors, and 54 observed tools"
+      },
+      {
+        "tool": "event_spine_snapshot",
+        "purpose": "verify replayability evidence",
+        "outcome": "success",
+        "observation": "7-day hash chain verified with chain head cf980cbb40b71ad472961d33dc3082294537dcb618a501979b7f7d1287a28e07"
+      },
+      {
+        "tool": "read-only SQLite aggregation",
+        "purpose": "cross-check memory, tool, forum, query, and coactivation counts",
+        "outcome": "success",
+        "observation": "feedback density was low: 7 active dedicated feedback rows in a 615+ active-memory store"
+      },
+      {
+        "tool": "cargo test",
+        "purpose": "verify workflow_feedback module behavior",
+        "outcome": "success",
+        "command": "cargo test -p ab-bridge workflow_feedback -- --nocapture"
+      },
+      {
+        "tool": "CLI smoke",
+        "purpose": "verify agent-bridge workflow-feedback-report can emit JSON and boundaries",
+        "outcome": "success",
+        "command": "cargo run -p ab-bridge -- workflow-feedback-report --json --window-secs 604800 --top-tools 3"
+      },
+      {
+        "tool": "cargo check",
+        "purpose": "verify ab-bridge targets after CLI landing",
+        "outcome": "success",
+        "command": "CARGO_BUILD_JOBS=2 cargo check -p ab-bridge --all-targets"
+      },
+      {
+        "tool": "rustfmt",
+        "purpose": "format-check the touched workflow_feedback module",
+        "outcome": "success",
+        "command": "rustfmt --edition 2024 --check crates/bridge/src/workflow_feedback.rs"
+      }
+    ],
+    "decision_points": [
+      {
+        "question": "Should AB jump directly to RL or automatic policy mutation?",
+        "decision": "No. Close the trajectory/outcome/reflection/retrieval loop through read-only reports and fixtures first.",
+        "reason": "Feedback density and behavior-lift evidence are not yet strong enough for automatic influence."
+      },
+      {
+        "question": "Should the first report become a new MCP surface immediately?",
+        "decision": "No. Land a CLI/script-style read-only report first; consider MCP only after repeated use proves the surface is worth exposing.",
+        "reason": "This avoids expanding the tool surface before there is demonstrated repeated value."
+      },
+      {
+        "question": "Should full cargo fmt --check block this slice?",
+        "decision": "No. Use scoped rustfmt for touched files because full repo formatting currently reports unrelated historical diffs and rustfmt OOMed while rendering a huge diff.",
+        "reason": "A whole-repo formatting cleanup is a separate lane and should not be mixed into this workflow-feedback slice."
+      }
+    ]
+  },
+  "outcome": {
+    "status": "success",
+    "behavior_change": "AB now has a repeatable read-only CLI for workflow-feedback maturity reporting and Experience Object v0 fixture emission.",
+    "evidence": [
+      "research doc landed at docs/design/WORKFLOW_FEEDBACK_LOOP_RESEARCH_2026_06_30.md",
+      "Goal C report landed at docs/reports/goal-c-u/2026-06-30-workflow-feedback-report.md",
+      "CLI command agent-bridge workflow-feedback-report landed in commit 4d622e3",
+      "focused workflow_feedback tests passed 2/2",
+      "live CLI smoke emitted schema agent_bridge.workflow_feedback_report.v0",
+      "CLI output kept writes_memory=false, changes_retrieval_order=false, runtime_influence_allowed=false",
+      "ab-bridge all-target check passed with existing warnings only",
+      "memory and forum anchors were synchronized"
+    ],
+    "known_limits": [
+      "The emitted fixture is a scaffold unless manually reviewed against a completed AB lane.",
+      "The scorecard is heuristic and descriptive, not a causal behavior-lift metric.",
+      "The CLI reads current store statistics; counts drift as new memories and tool calls are recorded."
+    ]
+  },
+  "reflection": {
+    "lesson": "AB's self-improvement loop should mature from research to read-only report to fixture before any default influence. The system can observe work well enough to score maturity, but feedback density and behavior-lift evidence must improve before optimization is trusted.",
+    "reusable_workflow": [
+      "land research in docs, memory, and board",
+      "measure current state with read-only telemetry",
+      "write a report with boundaries and falsifiers",
+      "turn the report into a repeatable read-only CLI",
+      "verify tests, live smoke, build/check, and scoped formatting",
+      "promote only manually reviewed fixtures toward shadow scoring"
+    ],
+    "falsifier": "If repeated workflow-feedback reports do not produce adopted improvements or measurable behavior lift, keep the CLI as an audit tool and redesign the feedback loop before adding influence."
+  },
+  "promotion": {
+    "skill_candidate": false,
+    "runbook_candidate": true,
+    "memory_lesson_candidate": true,
+    "runtime_influence_allowed": false,
+    "owner_gate_required": true,
+    "suggested_trigger": "When planning AB workflow-feedback measurement, Experience Object fixtures, or self-improvement policy gates."
+  },
+  "source_anchors": {
+    "memory_keys": [
+      "workflow_feedback_loop_research_20260630",
+      "workflow_feedback_report_20260630",
+      "workflow_feedback_report_cli_landed_20260630"
+    ],
+    "forum": [
+      {
+        "thread": 108,
+        "posts": [
+          2658,
+          2659,
+          2661,
+          2666
+        ]
+      }
+    ],
+    "commits": [
+      "b9f0091",
+      "6d1f9ec",
+      "4d622e3"
+    ],
+    "files": [
+      "docs/design/WORKFLOW_FEEDBACK_LOOP_RESEARCH_2026_06_30.md",
+      "docs/reports/goal-c-u/2026-06-30-workflow-feedback-report.md",
+      "crates/bridge/src/workflow_feedback.rs"
+    ]
+  },
+  "safety": {
+    "fixture_writes_memory": false,
+    "fixture_changes_runtime": false,
+    "fixture_changes_retrieval_order": false,
+    "fixture_authorizes_future_runtime_influence": false
+  }
+}
