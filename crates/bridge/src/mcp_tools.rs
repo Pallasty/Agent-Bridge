@@ -19359,7 +19359,7 @@ impl McpTool for MemorySearchTool {
         // cost is at most one `memory_neighbors` lookup per visible result, and a
         // page with no corrected original is left untouched.
         if correction_cosurface_enabled() {
-            cosurface_corrections(&store, &mut hits, limit as usize).await;
+            cosurface_corrections(&store, &mut hits, limit as usize, &exclude_kinds).await;
         }
         hits.truncate(limit as usize);
 
@@ -19434,11 +19434,14 @@ fn correction_cosurface_enabled() -> bool {
 /// rather than growing the page. Bounded: only the top-`anchor_limit` results are
 /// probed (one `memory_neighbors` call each), and at most `MAX_CORRECTORS_PER_ANCHOR`
 /// correctors are pulled per original (guards against a pathological fan-in of
-/// `corrects` edges to one hot record). Reuses existing store methods — no new SQL.
+/// `corrects` edges to one hot record). `excluded_kinds` preserves the
+/// memory_search output filter contract even after gated co-surfacing. Reuses
+/// existing store methods — no new SQL.
 async fn cosurface_corrections(
     store: &Arc<dyn StateStore>,
     hits: &mut Vec<MemorySearchHit>,
     anchor_limit: usize,
+    excluded_kinds: &[String],
 ) {
     if hits.is_empty() {
         return;
@@ -19474,7 +19477,7 @@ async fn cosurface_corrections(
                 continue;
             }
             if let Ok(Some(rec)) = store.memory_get(&e.from_key).await {
-                if rec.status == "active" {
+                if rec.status == "active" && !excluded_kinds.iter().any(|k| k == &rec.kind) {
                     present.insert(e.from_key.clone());
                     out.push(MemorySearchHit {
                         score: anchor_score,
@@ -78771,7 +78774,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
                 cosine: None,
             },
         ];
-        cosurface_corrections(&store, &mut hits, 10).await;
+        cosurface_corrections(&store, &mut hits, 10, &[]).await;
         let keys: Vec<&str> = hits.iter().map(|h| h.record.key.as_str()).collect();
         assert_eq!(
             keys,
@@ -78780,7 +78783,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         );
 
         // Idempotent: re-running must not insert a second copy.
-        cosurface_corrections(&store, &mut hits, 10).await;
+        cosurface_corrections(&store, &mut hits, 10, &[]).await;
         assert_eq!(
             hits.iter().filter(|h| h.record.key == corrector.key).count(),
             1,
@@ -78793,8 +78796,31 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             record: other.clone(),
             cosine: None,
         }];
-        cosurface_corrections(&store, &mut plain, 10).await;
+        cosurface_corrections(&store, &mut plain, 10, &[]).await;
         assert_eq!(plain.len(), 1, "page without a corrects target is untouched");
+
+        // Output-filter contract: even when the co-surface gate is enabled,
+        // excluded kinds must not be reintroduced after the normal search filter.
+        let mut exclude_feedback = vec![MemorySearchHit {
+            score: 2.0,
+            record: original.clone(),
+            cosine: None,
+        }];
+        cosurface_corrections(
+            &store,
+            &mut exclude_feedback,
+            10,
+            &["feedback".to_string()],
+        )
+        .await;
+        assert_eq!(
+            exclude_feedback
+                .iter()
+                .map(|h| h.record.key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["b1:original"],
+            "exclude_kinds must still apply to co-surfaced corrections"
+        );
 
         // Gap coverage (review): MULTIPLE correctors on one original — all surface.
         let corr2 = MemoryRecord {
@@ -78812,7 +78838,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             record: original.clone(),
             cosine: None,
         }];
-        cosurface_corrections(&store, &mut multi, 10).await;
+        cosurface_corrections(&store, &mut multi, 10, &[]).await;
         let mkeys: std::collections::HashSet<&str> =
             multi.iter().map(|h| h.record.key.as_str()).collect();
         assert!(
@@ -78838,7 +78864,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             record: original.clone(),
             cosine: None,
         }];
-        cosurface_corrections(&store, &mut withdead, 10).await;
+        cosurface_corrections(&store, &mut withdead, 10, &[]).await;
         assert!(
             withdead.iter().all(|h| h.record.key != dead_corr.key),
             "an inactive corrector must be skipped"
@@ -78857,7 +78883,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
                 cosine: None,
             },
         ];
-        cosurface_corrections(&store, &mut already, 10).await;
+        cosurface_corrections(&store, &mut already, 10, &[]).await;
         assert_eq!(
             already
                 .iter()

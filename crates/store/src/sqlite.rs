@@ -3293,19 +3293,21 @@ impl StateStore for SqliteStore {
         // feedback memory is persisted, auto-link the `corrects` edge to the
         // memory it corrects, so the correction can co-surface with its target
         // even when the record is saved OUTSIDE the `memory_correction` MCP tool
-        // (which links explicitly). The target is read from `related_keys`: the
-        // canonical tool sets `related_keys = [target]`, and out-of-tool saves
-        // (e.g. the present_voice handoff correction) carry the same single
-        // pointer. Computed here as an owned value so the `move` closure below
+        // (which links explicitly). The target is read from `related_keys[0]`:
+        // the canonical tool sets `related_keys = [target]`, while out-of-tool
+        // saves can carry extra related context after that first pointer.
+        // Computed here as an owned value so the `move` closure below
         // can capture it — `mem` is a borrow and cannot cross into the closure.
-        let correction_target: Option<String> = if kind == "feedback"
-            && key.starts_with("correction:")
-            && mem.related_keys.len() == 1
-        {
-            Some(mem.related_keys[0].clone())
-        } else {
-            None
-        };
+        let correction_target: Option<String> =
+            if kind == "feedback" && key.starts_with("correction:") {
+                mem.related_keys
+                    .first()
+                    .map(|target| target.trim())
+                    .filter(|target| !target.is_empty())
+                    .map(str::to_string)
+            } else {
+                None
+            };
 
         self.conn
             .call(move |c| -> RusqliteResult<()> {
@@ -10434,7 +10436,10 @@ mod tests {
         let mut plain = mk_record("feedback_note_general_20260601", 1_700_000_400);
         plain.kind = "feedback".into();
         plain.related_keys = vec![target.key.clone()];
-        store.memory_save(&plain).await.expect("save plain feedback");
+        store
+            .memory_save(&plain)
+            .await
+            .expect("save plain feedback");
         let pedges = store
             .memory_neighbors(&plain.key)
             .await
@@ -10461,22 +10466,37 @@ mod tests {
             "no corrects edge when related_keys is empty, got {eedges:?}"
         );
 
-        // Negative (review gap): a correction with 2+ related_keys is skipped
-        // (ambiguous target — only a single-pointer correction auto-links).
+        // Review fix: a correction with 2+ related_keys still auto-links to the
+        // first key. Extra keys are supporting context, not alternate targets.
+        let mut context = mk_record("another_key", 1_700_000_590);
+        context.kind = "context".into();
+        store.memory_save(&context).await.expect("save context");
         let mut multi_rk = mk_record("correction:some_target_y:eeeeffff00001111", 1_700_000_600);
         multi_rk.kind = "feedback".into();
-        multi_rk.related_keys = vec![target.key.clone(), "another_key".into()];
+        multi_rk.related_keys = vec![target.key.clone(), context.key.clone()];
         store
             .memory_save(&multi_rk)
             .await
             .expect("save multi-rk correction");
-        let medges = store
-            .memory_neighbors(&multi_rk.key)
+        let target_edges = store
+            .memory_neighbors(&target.key)
             .await
-            .expect("multi-rk neighbors");
+            .expect("target neighbors");
         assert!(
-            medges.iter().all(|e| e.edge_type != "corrects"),
-            "no corrects edge when related_keys has >1 entry, got {medges:?}"
+            target_edges.iter().any(|e| {
+                e.edge_type == "corrects" && e.from_key == multi_rk.key && e.to_key == target.key
+            }),
+            "multi-related correction must auto-link to related_keys[0], got {target_edges:?}"
+        );
+        let context_edges = store
+            .memory_neighbors(&context.key)
+            .await
+            .expect("context neighbors");
+        assert!(
+            context_edges
+                .iter()
+                .all(|e| !(e.edge_type == "corrects" && e.from_key == multi_rk.key)),
+            "multi-related correction must not auto-link to related_keys[1], got {context_edges:?}"
         );
 
         // Behavior lock (review gap): the existence check is status-agnostic — a
