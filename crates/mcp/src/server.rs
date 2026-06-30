@@ -5,11 +5,12 @@
 //! Logs go to stderr (so they never collide with the protocol stream).
 
 use crate::protocol::{
-    InitializeResult, McpRequest, McpResponse, ResourcesCapability, ServerCapabilities, ServerInfo,
-    ToolsCapability, INTERNAL_ERROR, INVALID_PARAMS, INVALID_REQUEST, METHOD_NOT_FOUND,
-    PARSE_ERROR, PROTOCOL_VERSION,
+    InitializeResult, ListToolsParams, ListToolsResult, McpRequest, McpResponse,
+    ResourcesCapability, ServerCapabilities, ServerInfo, ToolDefinition, ToolsCapability,
+    INTERNAL_ERROR, INVALID_PARAMS, INVALID_REQUEST, METHOD_NOT_FOUND, NOTIFICATION_CANCELLED,
+    NOTIFICATION_INITIALIZED, NOTIFICATION_TOOLS_LIST_CHANGED, PARSE_ERROR, PROTOCOL_VERSION,
 };
-use crate::{ContentBlock, ToolContext, ToolRegistry, ToolResult};
+use crate::{ContentBlock, ToolContext, ToolRegistry, ToolResult, ToolSchema};
 use ab_core::SessionId;
 use ab_store::{prioritize_session_handoff, MemoryListSort, StateStore};
 use serde_json::{json, Value};
@@ -233,17 +234,23 @@ async fn run_dispatch_loop(
         // Notifications (no id) → never respond. Honour cancellation: abort the
         // in-flight tools/call task whose requestId matches.
         if req.id.is_none() {
-            if req.method == "notifications/cancelled" {
-                if let Some(rid) = req.params.as_ref().and_then(|p| p.get("requestId")) {
-                    let key = rid.to_string();
-                    let handle = inflight.lock().unwrap().remove(&key);
-                    if let Some(h) = handle {
-                        warn!(request_id = %key, "client cancelled in-flight tool call — aborting");
-                        h.abort();
+            match req.method.as_str() {
+                NOTIFICATION_CANCELLED => {
+                    if let Some(rid) = req.params.as_ref().and_then(|p| p.get("requestId")) {
+                        let key = rid.to_string();
+                        let handle = inflight.lock().unwrap().remove(&key);
+                        if let Some(h) = handle {
+                            warn!(request_id = %key, "client cancelled in-flight tool call — aborting");
+                            h.abort();
+                        }
                     }
                 }
-            } else {
-                debug!(method = %req.method, "received notification");
+                NOTIFICATION_INITIALIZED | NOTIFICATION_TOOLS_LIST_CHANGED => {
+                    debug!(method = %req.method, "received notification");
+                }
+                _ => {
+                    debug!(method = %req.method, "received notification");
+                }
             }
             continue;
         }
@@ -577,6 +584,83 @@ fn normalize_mcp_source(value: &str) -> Option<&'static str> {
     }
 }
 
+const TOOLS_LIST_CURSOR_PREFIX: &str = "tools:v1:";
+const DEFAULT_TOOLS_LIST_PAGE_SIZE: usize = 250;
+const MAX_TOOLS_LIST_PAGE_SIZE: usize = 1000;
+
+fn tools_list_page_size() -> usize {
+    std::env::var("AGENT_BRIDGE_MCP_TOOLS_PAGE_SIZE")
+        .ok()
+        .and_then(|s| s.trim().parse::<usize>().ok())
+        .filter(|n| *n > 0)
+        .map(|n| n.min(MAX_TOOLS_LIST_PAGE_SIZE))
+        .unwrap_or(DEFAULT_TOOLS_LIST_PAGE_SIZE)
+}
+
+fn encode_tools_cursor(offset: usize) -> String {
+    format!("{TOOLS_LIST_CURSOR_PREFIX}{offset}")
+}
+
+fn decode_tools_cursor(raw: &str) -> Result<usize, String> {
+    let cursor = raw.trim();
+    if cursor.is_empty() {
+        return Err("tools/list cursor is empty".to_string());
+    }
+    let offset = cursor
+        .strip_prefix(TOOLS_LIST_CURSOR_PREFIX)
+        .unwrap_or(cursor);
+    offset
+        .parse::<usize>()
+        .map_err(|_| "invalid tools/list cursor".to_string())
+}
+
+fn tools_list_start(params: Option<&Value>, tools_len: usize) -> Result<usize, String> {
+    let params = match params {
+        None | Some(Value::Null) => ListToolsParams::default(),
+        Some(value) => serde_json::from_value::<ListToolsParams>(value.clone())
+            .map_err(|e| format!("invalid tools/list params: {e}"))?,
+    };
+
+    let Some(cursor) = params.cursor else {
+        return Ok(0);
+    };
+    let offset = decode_tools_cursor(&cursor)?;
+    if offset > tools_len {
+        return Err("tools/list cursor is beyond the current tool list".to_string());
+    }
+    Ok(offset)
+}
+
+fn tools_list_result_from_schemas(
+    tools: &[ToolSchema],
+    params: Option<&Value>,
+    page_size: usize,
+) -> Result<Value, String> {
+    let page_size = page_size.clamp(1, MAX_TOOLS_LIST_PAGE_SIZE);
+    let start = tools_list_start(params, tools.len())?;
+    let end = start.saturating_add(page_size).min(tools.len());
+    let next_cursor = (end < tools.len()).then(|| encode_tools_cursor(end));
+    let page_tools = tools[start..end]
+        .iter()
+        .map(|t| ToolDefinition {
+            name: t.name.clone(),
+            description: t.description.clone(),
+            input_schema: t.input_schema.clone(),
+        })
+        .collect();
+
+    serde_json::to_value(ListToolsResult {
+        tools: page_tools,
+        next_cursor,
+    })
+    .map_err(|e| format!("serialize tools/list result: {e}"))
+}
+
+fn tools_list_response(registry: &ToolRegistry, params: Option<&Value>) -> Result<Value, String> {
+    let tools = registry.list();
+    tools_list_result_from_schemas(&tools, params, tools_list_page_size())
+}
+
 /// v17 telemetry — record every `tools/call` (success + failure) with timing
 /// and size. Fire-and-forget; failures are logged but do not fail the call.
 async fn record_mcp_tool_call_telemetry(
@@ -630,7 +714,9 @@ async fn handle(
             let result = InitializeResult {
                 protocol_version: PROTOCOL_VERSION.into(),
                 capabilities: ServerCapabilities {
-                    tools: Some(ToolsCapability { list_changed: None }),
+                    tools: Some(ToolsCapability {
+                        list_changed: Some(true),
+                    }),
                     resources: store.map(|_| ResourcesCapability::default()),
                 },
                 server_info: ServerInfo {
@@ -646,20 +732,10 @@ async fn handle(
 
         "ping" => McpResponse::success(id, json!({})),
 
-        "tools/list" => {
-            let tools = registry.list();
-            let tools_json: Vec<Value> = tools
-                .iter()
-                .map(|t| {
-                    json!({
-                        "name": t.name,
-                        "description": t.description,
-                        "inputSchema": t.input_schema,
-                    })
-                })
-                .collect();
-            McpResponse::success(id, json!({ "tools": tools_json }))
-        }
+        "tools/list" => match tools_list_response(registry, req.params.as_ref()) {
+            Ok(v) => McpResponse::success(id, v),
+            Err(e) => McpResponse::error(id, INVALID_PARAMS, e),
+        },
 
         "tools/call" => {
             let call_start = std::time::Instant::now();
@@ -1083,6 +1159,76 @@ mod tests {
             out.push(r);
         }
         out
+    }
+
+    fn numbered_tool_schema(i: usize) -> ToolSchema {
+        ToolSchema {
+            name: format!("tool_{i:03}"),
+            description: format!("test tool {i}"),
+            input_schema: json!({ "type": "object" }),
+        }
+    }
+
+    #[tokio::test]
+    async fn initialize_advertises_tools_list_changed() {
+        let init = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {}
+        })
+        .to_string();
+
+        let resps = drive(ToolRegistry::default(), vec![init]).await;
+
+        assert_eq!(resps.len(), 1);
+        assert_eq!(
+            resps[0]
+                .result
+                .as_ref()
+                .and_then(|v| v.get("capabilities"))
+                .and_then(|v| v.get("tools"))
+                .and_then(|v| v.get("listChanged")),
+            Some(&json!(true))
+        );
+    }
+
+    #[test]
+    fn tools_list_result_paginates_with_opaque_cursor() {
+        let tools: Vec<ToolSchema> = (0..253).map(numbered_tool_schema).collect();
+
+        let first = tools_list_result_from_schemas(&tools, Some(&json!({})), 250).unwrap();
+
+        assert_eq!(first["tools"].as_array().unwrap().len(), 250);
+        assert_eq!(first["nextCursor"], json!("tools:v1:250"));
+
+        let second = tools_list_result_from_schemas(
+            &tools,
+            Some(&json!({ "cursor": first["nextCursor"].as_str().unwrap() })),
+            250,
+        )
+        .unwrap();
+
+        assert_eq!(second["tools"].as_array().unwrap().len(), 3);
+        assert!(second.get("nextCursor").is_none());
+        assert_eq!(second["tools"][0]["name"], json!("tool_250"));
+    }
+
+    #[test]
+    fn tools_list_result_accepts_numeric_cursor_and_rejects_bad_cursor() {
+        let tools: Vec<ToolSchema> = (0..5).map(numbered_tool_schema).collect();
+
+        let page =
+            tools_list_result_from_schemas(&tools, Some(&json!({ "cursor": "2" })), 2).unwrap();
+
+        assert_eq!(page["tools"].as_array().unwrap().len(), 2);
+        assert_eq!(page["tools"][0]["name"], json!("tool_002"));
+        assert_eq!(page["nextCursor"], json!("tools:v1:4"));
+
+        let err =
+            tools_list_result_from_schemas(&tools, Some(&json!({ "cursor": "not-a-cursor" })), 2)
+                .unwrap_err();
+        assert!(err.contains("invalid tools/list cursor"));
     }
 
     #[tokio::test]

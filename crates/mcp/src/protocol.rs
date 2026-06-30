@@ -8,6 +8,9 @@ use serde_json::Value;
 
 /// Protocol version we advertise. MCP clients negotiate down on mismatch.
 pub const PROTOCOL_VERSION: &str = "2024-11-05";
+pub const NOTIFICATION_INITIALIZED: &str = "notifications/initialized";
+pub const NOTIFICATION_CANCELLED: &str = "notifications/cancelled";
+pub const NOTIFICATION_TOOLS_LIST_CHANGED: &str = "notifications/tools/list_changed";
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct McpRequest {
@@ -28,6 +31,24 @@ pub struct McpResponse {
     pub result: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<McpError>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct McpNotification {
+    pub jsonrpc: &'static str,
+    pub method: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub params: Option<Value>,
+}
+
+impl McpNotification {
+    pub fn tools_list_changed() -> Self {
+        Self {
+            jsonrpc: "2.0",
+            method: NOTIFICATION_TOOLS_LIST_CHANGED,
+            params: None,
+        }
+    }
 }
 
 impl McpResponse {
@@ -90,9 +111,29 @@ pub struct ResourcesCapability {
 
 #[derive(Debug, Clone, Serialize, Default)]
 pub struct ToolsCapability {
-    /// Set true once we implement `notifications/tools/list_changed`.
     #[serde(rename = "listChanged", skip_serializing_if = "Option::is_none")]
     pub list_changed: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ListToolsParams {
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ToolDefinition {
+    pub name: String,
+    pub description: String,
+    #[serde(rename = "inputSchema")]
+    pub input_schema: Value,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ListToolsResult {
+    pub tools: Vec<ToolDefinition>,
+    #[serde(rename = "nextCursor", skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
