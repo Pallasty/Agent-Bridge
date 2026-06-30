@@ -106,6 +106,8 @@ impl AgentRuntime for AuggieRuntime {
     }
 
     async fn spawn(&self, cfg: SpawnConfig) -> Result<AgentSession> {
+        cfg.reject_unsupported_interactive(self.id())?;
+
         let prompt = cfg.initial_prompt.clone().unwrap_or_default();
         if prompt.is_empty() {
             return Err(Error::InvalidArgument(
@@ -318,6 +320,24 @@ mod tests {
             .await
             .expect_err("empty prompt must fail");
         assert!(matches!(err, Error::InvalidArgument(_)));
+    }
+
+    #[tokio::test]
+    async fn spawn_rejects_interactive_mode() {
+        let rt = AuggieRuntime::with_binary("/no/such/auggie");
+        let err = rt
+            .spawn(SpawnConfig {
+                cwd: "/tmp".into(),
+                env: HashMap::new(),
+                initial_prompt: Some("hello".into()),
+                model: None,
+                node: None,
+                user: None,
+                interactive: true,
+            })
+            .await
+            .expect_err("unsupported interactive mode must fail before spawn");
+        assert!(format!("{err}").contains("interactive sessions are not supported"));
     }
 
     #[tokio::test]

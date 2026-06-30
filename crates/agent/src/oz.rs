@@ -161,6 +161,8 @@ impl AgentRuntime for OzAgentRuntime {
     }
 
     async fn spawn(&self, cfg: SpawnConfig) -> Result<AgentSession> {
+        cfg.reject_unsupported_interactive(self.id())?;
+
         let prompt = cfg.initial_prompt.clone().unwrap_or_default();
         if prompt.is_empty() {
             return Err(Error::InvalidArgument(
@@ -656,6 +658,25 @@ mod tests {
             }
             other => panic!("expected InvalidArgument, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn spawn_rejects_interactive_mode() {
+        let runtime = OzAgentRuntime::with_binary("/no/such/oz");
+        let cfg = SpawnConfig {
+            cwd: "/tmp".into(),
+            env: HashMap::new(),
+            initial_prompt: Some("hello".into()),
+            model: None,
+            node: None,
+            user: None,
+            interactive: true,
+        };
+        let err = runtime
+            .spawn(cfg)
+            .await
+            .expect_err("unsupported interactive mode must fail before spawn");
+        assert!(format!("{err}").contains("interactive sessions are not supported"));
     }
 
     #[tokio::test]

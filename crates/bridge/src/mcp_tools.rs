@@ -16652,8 +16652,8 @@ impl McpTool for AgentSpawnTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Spawn a sibling AI agent (one-shot by default; set `interactive` for a \
-                 live claude-code PTY session). Pass prompt + cwd; runs to \
+            description: "Spawn a sibling AI agent (one-shot by default; set `interactive` with \
+                 backend=claude-code for a live PTY session). Pass prompt + cwd; runs to \
                  completion, returns session id. Pick a backend explicitly, or a policy \
                  ('cheap'=kilo, 'second_opinion'/'openai'=codex). backend takes precedence \
                  over policy; both omitted = daemon default. Set `node` (+`user`) to dispatch \
@@ -16690,7 +16690,7 @@ impl McpTool for AgentSpawnTool {
                     },
                     "interactive": {
                         "type": "boolean",
-                        "description": "Open a live PTY-backed session (claude-code) instead of a one-shot run; the child stays alive so follow-up turns can be sent with send_input. `prompt` is submitted as the first turn. Other backends ignore this and run one-shot."
+                        "description": "Open a live PTY-backed session instead of a one-shot run. Currently supported only by backend=claude-code; unsupported backends reject this flag before spawning. The child stays alive so follow-up turns can be sent with send_input, and `prompt` is submitted as the first turn."
                     }
                 },
                 "required": ["cwd", "prompt"]
@@ -70986,6 +70986,10 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             .as_str()
             .expect("interactive description")
             .contains("send_input"));
+        assert!(interactive["description"]
+            .as_str()
+            .expect("interactive description")
+            .contains("reject"));
     }
 
     #[test]

@@ -12,7 +12,7 @@
 //!   a working directory; same one-shot model as `ClaudeCodeRuntime`.
 //! - [`GitWorktreeManager`]: thin wrapper around `git worktree {add,list,remove}`.
 
-use ab_core::{Result, SessionId};
+use ab_core::{Error, Result, SessionId};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -63,9 +63,23 @@ pub struct SpawnConfig {
     /// pseudo-terminal it owns and keeps it alive so callers can drive
     /// successive turns via [`AgentRuntime::send_input`]; `initial_prompt`, if
     /// present, is typed and submitted as the first turn. Runtimes that have
-    /// not implemented interactive mode ignore this flag and run one-shot.
+    /// not implemented interactive mode must reject this flag before spawning.
     #[serde(default)]
     pub interactive: bool,
+}
+
+impl SpawnConfig {
+    /// Fail closed when a runtime has not implemented live interactive mode.
+    pub fn reject_unsupported_interactive(&self, runtime_id: &str) -> Result<()> {
+        if self.interactive {
+            Err(Error::InvalidArgument(format!(
+                "{runtime_id}: interactive sessions are not supported by this runtime yet; \
+                 use backend 'claude-code' for live PTY sessions or omit interactive for one-shot."
+            )))
+        } else {
+            Ok(())
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -119,6 +119,8 @@ impl AgentRuntime for GeminiRuntime {
     }
 
     async fn spawn(&self, cfg: SpawnConfig) -> Result<AgentSession> {
+        cfg.reject_unsupported_interactive(self.id())?;
+
         let prompt = cfg.initial_prompt.clone().unwrap_or_default();
         if prompt.is_empty() {
             return Err(Error::InvalidArgument(
@@ -344,5 +346,29 @@ fn truncate(s: &str, max: usize) -> String {
             .collect::<String>()
             .replace('\n', " ⏎ ");
         format!("{head}…")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn spawn_rejects_interactive_mode() {
+        let rt = GeminiRuntime::new().with_binary("/no/such/gemini");
+        let err = rt
+            .spawn(SpawnConfig {
+                cwd: "/tmp".into(),
+                env: HashMap::new(),
+                initial_prompt: Some("hello".into()),
+                model: None,
+                node: None,
+                user: None,
+                interactive: true,
+            })
+            .await
+            .expect_err("unsupported interactive mode must fail before spawn");
+
+        assert!(format!("{err}").contains("interactive sessions are not supported"));
     }
 }
