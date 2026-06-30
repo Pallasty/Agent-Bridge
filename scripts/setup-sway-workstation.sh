@@ -41,7 +41,7 @@ if command -v apt-get >/dev/null 2>&1; then
         mate-calc thunar rhythmbox xfce4-settings wmenu network-manager-gnome || true
 fi
 
-as_user mkdir -p "$target_home/.config/sway" "$target_home/.config/mako" "$target_home/.config/systemd/user" "$target_home/.local/bin"
+as_user mkdir -p "$target_home/.config/sway" "$target_home/.config/mako" "$target_home/.config/systemd/user" "$target_home/.config/Thunar" "$target_home/.local/bin"
 
 if [ -f "$target_home/.config/sway/config" ] && \
    ! grep -q "agent-bridge-sway-workstation" "$target_home/.config/sway/config"; then
@@ -136,7 +136,8 @@ set -u
 # (otherwise pango may fall back to a colored emoji glyph and ignore color).
 ic_agent=$'⬢'            # ⬢ agent-bridge node
 ic_warp=$'☁︎'       # ☁ WARP (cloud tunnel)
-ic_wifi=')'                  # ) Wi-Fi radio wave; repeated for signal strength
+ic_wifi=$'\U0001f4f6\ufe0e' # Wi-Fi signal
+ic_lan=$'↔'             # wired LAN
 ic_ime_py=$'中'          # 中 pinyin / Chinese input
 ic_ime_en='A'                # A latin/ascii input
 ic_ime_im=$'文'          # 文 other input method
@@ -144,17 +145,20 @@ ic_bat=$'\U0001f50b︎'   # 🔋 battery (on battery)
 ic_chg=$'⚡︎'       # ⚡ charging
 ic_cpu=$'⚙︎'       # ⚙ CPU
 ic_ram=$'▦'             # ▦ RAM
+level_marks=(▁ ▃ ▅ ▇)
 
 prev_total=0
 prev_idle=0
 cpu_percent=0
 warp_text="$ic_warp"
 wifi_text="$ic_wifi"
+lan_text="$ic_lan"
 ime_text="$ic_ime_en"
 battery_text="$ic_bat"
 agent_text="$ic_agent"
 warp_tick=99
 wifi_tick=99
+lan_tick=99
 ime_tick=99
 battery_tick=99
 click_log="${XDG_RUNTIME_DIR:-/tmp}/sway-status-click.log"
@@ -173,9 +177,6 @@ block() {
         "$(json_string "$color")"
 }
 
-# Map a 0-100 value to a 1..4 magnitude (rough "at a glance" level). Level is
-# shown by how many times the block's icon is repeated; severity is shown by
-# color. Always >=1 so the icon never disappears.
 level_of() {
     local p="$1"
     if   [ "$p" -le 25 ]; then printf 1
@@ -185,11 +186,27 @@ level_of() {
     fi
 }
 
-# Repeat a (possibly multibyte) glyph N times.
-repeat_glyph() {
-    local g="$1" n="$2" out="" i
-    for (( i = 0; i < n; i++ )); do out+="$g"; done
-    printf '%s' "$out"
+level_mark() {
+    local level
+    level="$(level_of "$1")"
+    printf '%s' "${level_marks[$((level - 1))]}"
+}
+
+level_color() {
+    local p="$1" inverted="${2:-normal}"
+    if [ "$inverted" = inverted ]; then
+        if   [ "$p" -le 25 ]; then printf '#a6e3a1ff'
+        elif [ "$p" -le 50 ]; then printf '#89b4faff'
+        elif [ "$p" -le 75 ]; then printf '#f9e2afff'
+        else printf '#f38ba8ff'
+        fi
+    else
+        if   [ "$p" -le 25 ]; then printf '#f38ba8ff'
+        elif [ "$p" -le 50 ]; then printf '#f9e2afff'
+        elif [ "$p" -le 75 ]; then printf '#89b4faff'
+        else printf '#a6e3a1ff'
+        fi
+    fi
 }
 
 log_event() {
@@ -215,6 +232,12 @@ open_wifi_actions() {
 open_wifi_terminal() {
     if command -v "$HOME/.local/bin/ab-system-control" >/dev/null 2>&1; then
         setsid "$HOME/.local/bin/ab-system-control" wifi nmtui >>"$click_log" 2>&1 &
+    fi
+}
+
+open_battery_actions() {
+    if command -v "$HOME/.local/bin/sway-battery-menu" >/dev/null 2>&1; then
+        setsid "$HOME/.local/bin/sway-battery-menu" actions >>"$click_log" 2>&1 &
     fi
 }
 
@@ -284,7 +307,7 @@ swap: ${swgb} / ${swtgb} GiB"
 }
 
 detail_battery() {
-    local bat info pct state tte ttf body
+    local bat info pct state tte ttf body threshold threshold_value conservation conservation_value conservation_label
     if ! command -v upower >/dev/null 2>&1; then
         notify_detail "Battery" "upower not available"; return
     fi
@@ -300,6 +323,24 @@ detail_battery() {
 time to empty: ${tte}"
     [ -n "$ttf" ] && body="${body}
 time to full: ${ttf}"
+    for threshold in /sys/class/power_supply/BAT*/charge_control_end_threshold /sys/class/power_supply/BAT*/charge_stop_threshold; do
+        [ -e "$threshold" ] || continue
+        threshold_value="$(cat "$threshold" 2>/dev/null || true)"
+        [ -n "$threshold_value" ] && body="${body}
+charge limit: ${threshold_value}%"
+        break
+    done
+    conservation="$(find /sys/devices -path '*/VPC2004:00/conservation_mode' -type f 2>/dev/null | head -1)"
+    if [ -n "$conservation" ]; then
+        conservation_value="$(cat "$conservation" 2>/dev/null || true)"
+        case "$conservation_value" in
+            1) conservation_label="on" ;;
+            0) conservation_label="off" ;;
+            *) conservation_label="${conservation_value:-unknown}" ;;
+        esac
+        body="${body}
+maintenance mode: ${conservation_label}"
+    fi
     notify_detail "Battery ${pct:-?}" "$body"
 }
 
@@ -353,7 +394,10 @@ handle_clicks() {
                 case "$event" in *"\"button\": 1"*|*"\"button\":1"*) log_event click "block=ram button=1 action=detail"; detail_ram & ;; esac
                 ;;
             *"\"name\": \"battery\""*|*"\"name\":\"battery\""*)
-                case "$event" in *"\"button\": 1"*|*"\"button\":1"*) log_event click "block=battery button=1 action=detail"; detail_battery & ;; esac
+                case "$event" in
+                    *"\"button\": 1"*|*"\"button\":1"*) log_event click "block=battery button=1 action=detail"; detail_battery & ;;
+                    *"\"button\": 3"*|*"\"button\":3"*) log_event click "block=battery button=3 action=actions"; open_battery_actions ;;
+                esac
                 ;;
             *"\"name\": \"warp\""*|*"\"name\":\"warp\""*)
                 case "$event" in *"\"button\": 1"*|*"\"button\":1"*) log_event click "block=warp button=1 action=detail"; detail_warp & ;; esac
@@ -392,21 +436,13 @@ read_cpu() {
 }
 
 read_ram() {
-    local total available used pct color
+    local total available used pct
     total=$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)
     available=$(awk '/^MemAvailable:/ {print $2}' /proc/meminfo)
     used=$((total - available))
     pct=$((100 * used / total))
 
-    if [ "$pct" -ge 90 ]; then
-        color="#f38ba8ff"
-    elif [ "$pct" -ge 75 ]; then
-        color="#f9e2afff"
-    else
-        color="#cba6f7ff"
-    fi
-
-    printf '%s|%s' "$(repeat_glyph "$ic_ram" "$(level_of "$pct")")" "$color"
+    printf '%s%s|%s' "$ic_ram" "$(level_mark "$pct")" "$(level_color "$pct" inverted)"
 }
 
 read_warp() {
@@ -436,19 +472,19 @@ read_warp() {
 read_wifi() {
     local radio active_line device type state ssid signal
     if ! command -v nmcli >/dev/null 2>&1; then
-        printf '%s|#6c7086ff' "$ic_wifi"
+        printf '%s×|#6c7086ff' "$ic_wifi"
         return
     fi
 
     radio=$(nmcli -t -f WIFI general 2>/dev/null || true)
     if [ "$radio" != "enabled" ]; then
-        printf '%s|#6c7086ff' "$ic_wifi"
+        printf '%s×|#6c7086ff' "$ic_wifi"
         return
     fi
 
     active_line=$(nmcli -t -f DEVICE,TYPE,STATE,CONNECTION dev status 2>/dev/null | awk -F: '$2 == "wifi" && $3 == "connected" {print; exit}')
     if [ -z "$active_line" ]; then
-        printf '%s|#f38ba8ff' "$ic_wifi"
+        printf '%s×|#6c7086ff' "$ic_wifi"
         return
     fi
 
@@ -456,11 +492,28 @@ read_wifi() {
 $active_line
 EOF
     signal=$(nmcli -t -f ACTIVE,SSID,SIGNAL dev wifi 2>/dev/null | awk -F: -v ssid="$ssid" '$1 == "yes" || $2 == ssid {print $3; exit}')
-    if [ -n "$signal" ]; then
-        printf '%s|#89b4faff' "$(repeat_glyph "$ic_wifi" "$(level_of "$signal")")"
-    else
-        printf '%s|#89b4faff' "$ic_wifi"
+    case "$signal" in ''|*[!0-9]*) signal=50 ;; esac
+    printf '%s%s|%s' "$ic_wifi" "$(level_mark "$signal")" "$(level_color "$signal")"
+}
+
+read_lan() {
+    local line device type state connection speed
+    if command -v nmcli >/dev/null 2>&1; then
+        line=$(nmcli -t -f DEVICE,TYPE,STATE,CONNECTION dev status 2>/dev/null | awk -F: '$2 == "ethernet" && $3 == "connected" {print; exit}')
+        if [ -n "$line" ]; then
+            IFS=: read -r device type state connection <<EOF
+$line
+EOF
+            speed=$(cat "/sys/class/net/$device/speed" 2>/dev/null || true)
+            case "$speed" in
+                ''|*[!0-9]*) printf '%s?|#f9e2afff' "$ic_lan" ;;
+                [0-9]|[0-9][0-9]|100) printf '%s100|#f9e2afff' "$ic_lan" ;;
+                *) printf '%s1G|#a6e3a1ff' "$ic_lan" ;;
+            esac
+            return
+        fi
     fi
+    printf '%s×|#6c7086ff' "$ic_lan"
 }
 
 read_ime() {
@@ -492,7 +545,7 @@ read_ime() {
 }
 
 read_battery() {
-    local battery info state percent pct color label
+    local battery info state percent pct color label conservation conservation_value
     if ! command -v upower >/dev/null 2>&1; then
         printf '%s|#6c7086ff' "$ic_bat"
         return
@@ -514,15 +567,22 @@ read_battery() {
     fi
 
     case "$state:$pct" in
-        charging:*|fully-charged:*)
+        charging:*|fully-charged:*|not\ charging:*|pending-charge:*)
             label="$ic_chg"
-            color="#94e2d5ff"
+            conservation="$(find /sys/devices -path '*/VPC2004:00/conservation_mode' -type f 2>/dev/null | head -1)"
+            conservation_value=""
+            [ -n "$conservation" ] && conservation_value="$(cat "$conservation" 2>/dev/null || true)"
+            if [ "$conservation_value" = 1 ]; then
+                color="#f9e2afff"
+            else
+                color="#94e2d5ff"
+            fi
             ;;
         *:[0-9]|*:1[0-5]) color="#f38ba8ff" ;;
         *:1[6-9]|*:2[0-9]|*:3[0-5]) color="#f9e2afff" ;;
         *) color="#a6e3a1ff" ;;
     esac
-    printf '%s|%s' "$(repeat_glyph "${label:-$ic_bat}" "$(level_of "$pct")")" "$color"
+    printf '%s|%s' "${label:-$ic_bat}" "$color"
 }
 
 run_status_loop() {
@@ -532,10 +592,8 @@ run_status_loop() {
     first=1
     while true; do
         read_cpu
-        cpu_color="#a6e3a1ff"
-        [ "$cpu_percent" -ge 50 ] && cpu_color="#f9e2afff"
-        [ "$cpu_percent" -ge 80 ] && cpu_color="#f38ba8ff"
-        cpu_text=$(repeat_glyph "$ic_cpu" "$(level_of "$cpu_percent")")
+        cpu_color="$(level_color "$cpu_percent" inverted)"
+        cpu_text="${ic_cpu}$(level_mark "$cpu_percent")"
         IFS='|' read -r ram_text ram_color <<<"$(read_ram)"
 
         if [ "$warp_tick" -ge 5 ]; then
@@ -550,6 +608,13 @@ run_status_loop() {
             wifi_tick=0
         else
             wifi_tick=$((wifi_tick + 1))
+        fi
+
+        if [ "$lan_tick" -ge 5 ]; then
+            IFS='|' read -r lan_text lan_color <<<"$(read_lan)"
+            lan_tick=0
+        else
+            lan_tick=$((lan_tick + 1))
         fi
 
         if [ "$ime_tick" -ge 1 ]; then
@@ -572,10 +637,11 @@ run_status_loop() {
             printf ','
         fi
 
-        printf '[%s,%s,%s,%s,%s,%s,%s,%s]\n' \
+        printf '[%s,%s,%s,%s,%s,%s,%s,%s,%s]\n' \
             "$(block agent "$agent_text" "#94e2d5ff")" \
             "$(block warp "$warp_text" "${warp_color:-#ffffffff}")" \
             "$(block wifi "$wifi_text" "${wifi_color:-#ffffffff}")" \
+            "$(block lan "$lan_text" "${lan_color:-#ffffffff}")" \
             "$(block ime "$ime_text" "${ime_color:-#ffffffff}")" \
             "$(block battery "$battery_text" "${battery_color:-#ffffffff}")" \
             "$(block cpu "$cpu_text" "$cpu_color")" \
@@ -2408,6 +2474,256 @@ exec "$HOME/.local/bin/ab-system-control" power press
 
 SWAY_POWER_BUTTON
 
+cat > "$target_home/.local/bin/sway-battery-charge-limit" <<'SWAY_BATTERY_CHARGE_LIMIT'
+#!/usr/bin/env bash
+set -euo pipefail
+
+notify() {
+    notify-send -a Battery "$1" "${2:-}" >/dev/null 2>&1 || true
+}
+
+find_conservation_mode() {
+    find /sys/devices -path '*/VPC2004:00/conservation_mode' -type f 2>/dev/null | head -1
+}
+
+find_end_threshold() {
+    for bat in /sys/class/power_supply/BAT*; do
+        [ -d "$bat" ] || continue
+        for name in charge_control_end_threshold charge_stop_threshold; do
+            [ -e "$bat/$name" ] && printf '%s\n' "$bat/$name" && return 0
+        done
+    done
+    return 1
+}
+
+write_root_file() {
+    local path="$1" value="$2" label="${3:-value}"
+    if [ -w "$path" ]; then
+        printf '%s\n' "$value" >"$path"
+        return
+    fi
+    if sudo -n true >/dev/null 2>&1 || [ -t 0 ]; then
+        sudo sh -c 'printf "%s\n" "$1" > "$2"' sh "$value" "$path"
+        return
+    fi
+    if command -v xfce4-terminal >/dev/null 2>&1 && [ -n "${SWAYSOCK:-}" ]; then
+        swaymsg exec "xfce4-terminal --title='Battery charge limit' --command=\"bash -lc 'if sudo sh -c '\\''printf \\\"%s\\\\n\\\" $value > $path'\\''; then echo; echo $label 已设置; sleep 1; else echo; echo 设置失败，按回车关闭; read; fi'\"" >/dev/null
+        return
+    fi
+    echo "Need sudo to write $path" >&2
+    return 1
+}
+
+status() {
+    local threshold conservation value capacity state
+    capacity="$(cat /sys/class/power_supply/BAT*/capacity 2>/dev/null | head -1 || true)"
+    state="$(cat /sys/class/power_supply/BAT*/status 2>/dev/null | head -1 || true)"
+    printf 'battery: %s%% %s\n' "${capacity:-?}" "${state:-unknown}"
+
+    if threshold="$(find_end_threshold)"; then
+        value="$(cat "$threshold" 2>/dev/null || true)"
+        printf 'threshold: %s (%s)\n' "${value:-?}" "$threshold"
+    else
+        printf 'threshold: unsupported by current BAT sysfs\n'
+    fi
+
+    if conservation="$(find_conservation_mode)"; then
+        value="$(cat "$conservation" 2>/dev/null || true)"
+        printf 'lenovo conservation_mode: %s (%s)\n' "${value:-?}" "$conservation"
+    else
+        printf 'lenovo conservation_mode: unavailable\n'
+    fi
+}
+
+set_conservation() {
+    local value="$1" path
+    path="$(find_conservation_mode || true)"
+    if [ -z "$path" ]; then
+        notify "Battery conservation" "This machine does not expose Lenovo conservation_mode"
+        echo "Lenovo conservation_mode is unavailable" >&2
+        return 2
+    fi
+    write_root_file "$path" "$value" "conservation_mode"
+    if [ "$value" = 1 ]; then
+        notify "Battery conservation on" "Charging will be limited by Lenovo firmware"
+    else
+        notify "Battery conservation off" "Normal charging restored"
+    fi
+}
+
+set_percent() {
+    local pct="$1" threshold
+    case "$pct" in
+        ''|*[!0-9]*) echo "usage: sway-battery-charge-limit set <50-100>" >&2; return 2 ;;
+    esac
+    if [ "$pct" -lt 50 ] || [ "$pct" -gt 100 ]; then
+        echo "percentage must be 50..100" >&2
+        return 2
+    fi
+
+    if threshold="$(find_end_threshold)"; then
+        write_root_file "$threshold" "$pct" "charge threshold"
+        notify "Battery charge limit" "Set charge threshold to ${pct}%"
+        return
+    fi
+
+    if [ "$pct" -le 60 ]; then
+        set_conservation 1
+        echo "Precise ${pct}% threshold is not exposed; enabled Lenovo conservation mode instead."
+        return
+    fi
+
+    notify "Battery charge limit unsupported" "This machine exposes only Lenovo conservation mode, not a precise ${pct}% threshold"
+    echo "Precise ${pct}% threshold is not supported by the current kernel/hardware interface." >&2
+    echo "Use: sway-battery-charge-limit conservation on" >&2
+    return 4
+}
+
+case "${1:-status}" in
+    status) status ;;
+    set) set_percent "${2:-}" ;;
+    conservation)
+        case "${2:-}" in
+            on|1|enable|enabled) set_conservation 1 ;;
+            off|0|disable|disabled) set_conservation 0 ;;
+            toggle)
+                path="$(find_conservation_mode || true)"
+                [ -n "$path" ] || { echo "Lenovo conservation_mode is unavailable" >&2; exit 2; }
+                current="$(cat "$path" 2>/dev/null || echo 0)"
+                [ "$current" = 1 ] && set_conservation 0 || set_conservation 1
+                ;;
+            *) echo "usage: sway-battery-charge-limit conservation on|off|toggle" >&2; exit 2 ;;
+        esac
+        ;;
+    *) echo "usage: sway-battery-charge-limit [status|set <percent>|conservation on|off|toggle]" >&2; exit 2 ;;
+esac
+SWAY_BATTERY_CHARGE_LIMIT
+
+cat > "$target_home/.local/bin/sway-battery-menu" <<'SWAY_BATTERY_MENU'
+#!/usr/bin/env bash
+set -u
+
+tool="$HOME/.local/bin/sway-battery-charge-limit"
+
+notify() {
+    notify-send -a Battery "$1" "${2:-}" >/dev/null 2>&1 || true
+}
+
+menu() {
+    if command -v wmenu >/dev/null 2>&1; then
+        wmenu -i -l 8 -p "${1:-Battery}"
+    else
+        return 1
+    fi
+}
+
+status_text() {
+    if [ -x "$tool" ]; then
+        "$tool" status 2>/dev/null
+    else
+        printf 'battery charge limit helper is not installed\n'
+    fi
+}
+
+show_status() {
+    notify "Battery" "$(status_text)"
+}
+
+actions_menu() {
+    if ! command -v wmenu >/dev/null 2>&1; then
+        show_status
+        return 0
+    fi
+
+    local selected
+    selected="$(printf '%s\n' \
+        "Status" \
+        "Enable conservation mode" \
+        "Disable conservation mode" \
+        "Toggle conservation mode" \
+        "Try precise 50% limit" \
+        "Try precise 80% limit" |
+        menu "Battery")" || return 0
+
+    case "$selected" in
+        "Status") show_status ;;
+        "Enable conservation mode") "$tool" conservation on ;;
+        "Disable conservation mode") "$tool" conservation off ;;
+        "Toggle conservation mode") "$tool" conservation toggle ;;
+        "Try precise 50% limit") "$tool" set 50 ;;
+        "Try precise 80% limit") "$tool" set 80 || notify "Battery" "This machine does not expose a precise 80% threshold" ;;
+    esac
+}
+
+case "${1:-actions}" in
+    actions) actions_menu ;;
+    status) show_status ;;
+    *) echo "usage: sway-battery-menu [actions|status]" >&2; exit 2 ;;
+esac
+SWAY_BATTERY_MENU
+
+cat > "$target_home/.local/bin/thunar-copy-file-address" <<'THUNAR_COPY_FILE_ADDRESS'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ "$#" -eq 0 ]; then
+    notify-send -a Thunar "复制文件地址" "没有选中文件" >/dev/null 2>&1 || true
+    exit 0
+fi
+
+if command -v wl-copy >/dev/null 2>&1; then
+    printf '%s\n' "$@" | wl-copy
+elif command -v xclip >/dev/null 2>&1; then
+    printf '%s\n' "$@" | xclip -selection clipboard
+elif command -v xsel >/dev/null 2>&1; then
+    printf '%s\n' "$@" | xsel --clipboard --input
+else
+    notify-send -a Thunar "复制文件地址失败" "未找到 wl-copy/xclip/xsel" >/dev/null 2>&1 || true
+    exit 1
+fi
+
+if [ "$#" -eq 1 ]; then
+    notify-send -a Thunar "已复制文件地址" "$1" >/dev/null 2>&1 || true
+else
+    notify-send -a Thunar "已复制文件地址" "已复制 $# 个路径" >/dev/null 2>&1 || true
+fi
+THUNAR_COPY_FILE_ADDRESS
+
+cat > "$target_home/.config/Thunar/uca.xml" <<'THUNAR_UCA'
+<?xml version="1.0" encoding="UTF-8"?>
+<actions>
+<action>
+	<icon>utilities-terminal</icon>
+	<name>Open Terminal Here</name>
+	<submenu></submenu>
+	<unique-id>1781071470589882-1</unique-id>
+	<command>exo-open --working-directory %f --launch TerminalEmulator</command>
+	<description>Open a terminal in the selected directory</description>
+	<range></range>
+	<patterns>*</patterns>
+	<startup-notify/>
+	<directories/>
+</action>
+<action>
+	<icon>edit-copy</icon>
+	<name>复制文件地址</name>
+	<submenu></submenu>
+	<unique-id>1781071470589882-2</unique-id>
+	<command>sh -c &apos;&quot;$HOME/.local/bin/thunar-copy-file-address&quot; &quot;$@&quot;&apos; thunar-copy-file-address %F</command>
+	<description>复制所选文件的绝对路径及完整文件名</description>
+	<range></range>
+	<patterns>*</patterns>
+	<startup-notify/>
+	<directories/>
+	<text-files/>
+	<image-files/>
+	<audio-files/>
+	<video-files/>
+	<other-files/>
+</action>
+</actions>
+THUNAR_UCA
+
 cat > "$target_home/.config/systemd/user/sway-desktop-watchdog.service" <<'SWAY_DESKTOP_WATCHDOG_SERVICE'
 [Unit]
 Description=Sway desktop watchdog (Agent-Bridge)
@@ -2466,7 +2782,7 @@ for brightness_node in /sys/class/backlight/*/brightness; do
     need_sudo chmod 0666 "$brightness_node" || true
 done
 
-need_sudo chown -R "$target_user:$target_user" "$target_home/.config/sway" "$target_home/.config/mako" "$target_home/.config/systemd"
+need_sudo chown -R "$target_user:$target_user" "$target_home/.config/sway" "$target_home/.config/mako" "$target_home/.config/systemd" "$target_home/.config/Thunar"
 need_sudo chown "$target_user:$target_user" \
     "$target_home/.local/bin/ab-system-control" \
     "$target_home/.local/bin/sway-status" \
@@ -2482,8 +2798,11 @@ need_sudo chown "$target_user:$target_user" \
     "$target_home/.local/bin/sway-wifi-menu" \
     "$target_home/.local/bin/sway-idle-display" \
     "$target_home/.local/bin/sway-lid-display" \
-    "$target_home/.local/bin/sway-power-button"
-need_sudo chmod 755 "$target_home/.config/sway" "$target_home/.config/mako"
+    "$target_home/.local/bin/sway-power-button" \
+    "$target_home/.local/bin/sway-battery-charge-limit" \
+    "$target_home/.local/bin/sway-battery-menu" \
+    "$target_home/.local/bin/thunar-copy-file-address"
+need_sudo chmod 755 "$target_home/.config/sway" "$target_home/.config/mako" "$target_home/.config/Thunar"
 need_sudo chmod 755 \
     "$target_home/.local/bin/ab-system-control" \
     "$target_home/.local/bin/sway-status" \
@@ -2499,9 +2818,13 @@ need_sudo chmod 755 \
     "$target_home/.local/bin/sway-wifi-menu" \
     "$target_home/.local/bin/sway-idle-display" \
     "$target_home/.local/bin/sway-lid-display" \
-    "$target_home/.local/bin/sway-power-button"
+    "$target_home/.local/bin/sway-power-button" \
+    "$target_home/.local/bin/sway-battery-charge-limit" \
+    "$target_home/.local/bin/sway-battery-menu" \
+    "$target_home/.local/bin/thunar-copy-file-address"
 need_sudo chmod 644 "$target_home/.config/sway/config"
 need_sudo chmod 644 "$target_home/.config/mako/config"
+need_sudo chmod 644 "$target_home/.config/Thunar/uca.xml"
 need_sudo chmod 644 \
     "$target_home/.config/systemd/user/sway-desktop-watchdog.service" \
     "$target_home/.config/systemd/user/sway-desktop-watchdog.timer"
@@ -2519,6 +2842,9 @@ as_user bash -n "$target_home/.local/bin/sway-agent-menu"
 as_user sh -n "$target_home/.local/bin/sway-idle-display"
 as_user sh -n "$target_home/.local/bin/sway-lid-display"
 as_user sh -n "$target_home/.local/bin/sway-power-button"
+as_user bash -n "$target_home/.local/bin/sway-battery-charge-limit"
+as_user bash -n "$target_home/.local/bin/sway-battery-menu"
+as_user bash -n "$target_home/.local/bin/thunar-copy-file-address"
 as_user bash -n "$target_home/.local/bin/sway-wifi-menu"
 as_user python3 -m py_compile "$target_home/.local/bin/sway-display-cycle"
 
