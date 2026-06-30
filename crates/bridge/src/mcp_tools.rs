@@ -19348,7 +19348,21 @@ impl McpTool for MemorySearchTool {
         if !exclude_kinds.is_empty() {
             hits.retain(|h| !exclude_kinds.iter().any(|k| k == &h.record.kind));
         }
+        // B1 — correction co-surface (gated; default-OFF → byte-identical to the
+        // pure ranking above). When AGENT_BRIDGE_CORRECTION_COSURFACE is enabled,
+        // any result that is the target of an INBOUND active `corrects` edge gets
+        // its corrector pulled in immediately after it, so a stale original never
+        // surfaces without the correction that supersedes its claim. Runs BEFORE
+        // the final truncate so the page stays within `limit` — a surfaced
+        // correction DISPLACES the weakest tail result rather than growing the
+        // page. Anchors are bounded to the prospective top-`limit`, so switch-on
+        // cost is at most one `memory_neighbors` lookup per visible result, and a
+        // page with no corrected original is left untouched.
+        if correction_cosurface_enabled() {
+            cosurface_corrections(&store, &mut hits, limit as usize).await;
+        }
         hits.truncate(limit as usize);
+
         let elapsed = started.elapsed();
 
         // Phase 0 telemetry: log hit count + top-hit age (post-filter, what the
@@ -19398,6 +19412,81 @@ impl McpTool for MemorySearchTool {
                 .collect(),
         )))
     }
+}
+
+/// True when the B1 correction co-surface read-path is enabled. Default-OFF:
+/// when unset / `0` / `false` the search path is byte-identical to pure ranking.
+/// Mirrors the existing `AGENT_BRIDGE_*` boolean-switch idiom (e.g. main.rs).
+fn correction_cosurface_enabled() -> bool {
+    std::env::var("AGENT_BRIDGE_CORRECTION_COSURFACE")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
+/// B1 — co-surface corrections next to the originals they correct.
+///
+/// For each result within the prospective top-`anchor_limit` that is the `to_key`
+/// of an active `corrects` edge (`corrector --corrects--> result`), insert the
+/// active corrector immediately after it, unless it is already on the page.
+/// Topology-independent (unlike generic hybrid graph expansion, which buries the
+/// single `corrects` edge under dense neighbours). The caller truncates back to
+/// the page size, so a surfaced correction displaces the weakest tail result
+/// rather than growing the page. Bounded: only the top-`anchor_limit` results are
+/// probed (one `memory_neighbors` call each), and at most `MAX_CORRECTORS_PER_ANCHOR`
+/// correctors are pulled per original (guards against a pathological fan-in of
+/// `corrects` edges to one hot record). Reuses existing store methods — no new SQL.
+async fn cosurface_corrections(
+    store: &Arc<dyn StateStore>,
+    hits: &mut Vec<MemorySearchHit>,
+    anchor_limit: usize,
+) {
+    if hits.is_empty() {
+        return;
+    }
+    const MAX_CORRECTORS_PER_ANCHOR: usize = 4;
+    let mut present: HashSet<String> = hits.iter().map(|h| h.record.key.clone()).collect();
+    let drained: Vec<MemorySearchHit> = std::mem::take(hits);
+    let mut out: Vec<MemorySearchHit> = Vec::with_capacity(drained.len() + 2);
+    for (i, h) in drained.into_iter().enumerate() {
+        let anchor_key = h.record.key.clone();
+        let anchor_score = h.score;
+        out.push(h);
+        // Only anchors that will survive the caller's top-`anchor_limit` truncate
+        // are probed — bounds the neighbour lookups to the visible page.
+        if i >= anchor_limit {
+            continue;
+        }
+        let edges = match store.memory_neighbors(&anchor_key).await {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        let mut added_here = 0usize;
+        for e in edges {
+            if added_here >= MAX_CORRECTORS_PER_ANCHOR {
+                break;
+            }
+            // INBOUND `corrects` only: corrector --corrects--> anchor. A correction
+            // anchor's OUTBOUND edge (from_key == anchor) is correctly skipped.
+            if e.edge_type != "corrects" || e.to_key != anchor_key {
+                continue;
+            }
+            if present.contains(&e.from_key) {
+                continue;
+            }
+            if let Ok(Some(rec)) = store.memory_get(&e.from_key).await {
+                if rec.status == "active" {
+                    present.insert(e.from_key.clone());
+                    out.push(MemorySearchHit {
+                        score: anchor_score,
+                        record: rec,
+                        cosine: None,
+                    });
+                    added_here += 1;
+                }
+            }
+        }
+    }
+    *hits = out;
 }
 
 pub struct MemoryListTool {
@@ -78616,6 +78705,166 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
                 .iter()
                 .any(|e| e.edge_type == "corrects" && e.to_key == "tests:target_for_correction"),
             "expected corrects edge to target, got {edges:?}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn b1_cosurface_inserts_corrector_after_corrected_original() {
+        // B1: cosurface_corrections must pull an active corrector in directly
+        // after the original it corrects (inbound `corrects` edge), leave other
+        // results untouched, never duplicate, and no-op when there is nothing to
+        // co-surface. Exercised directly (not via the env-gated search path) so
+        // the assertion is deterministic and independent of process env.
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+
+        let original = MemoryRecord {
+            key: "b1:original".into(),
+            kind: "observation".into(),
+            content: "the original possibly-stale claim".into(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".into(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        let other = MemoryRecord {
+            key: "b1:other".into(),
+            content: "an unrelated result".into(),
+            ..original.clone()
+        };
+        let corrector = MemoryRecord {
+            key: "correction:b1:original:abc123abc123abc1".into(),
+            kind: "feedback".into(),
+            content: "actually the corrected claim".into(),
+            related_keys: vec!["b1:original".into()],
+            ..original.clone()
+        };
+        store.memory_save(&original).await.expect("save original");
+        store.memory_save(&other).await.expect("save other");
+        store.memory_save(&corrector).await.expect("save corrector");
+        // Inbound corrects edge corrector --corrects--> original. (memory_save's
+        // A1 hook also creates this; we link explicitly to keep B1 independent.)
+        store
+            .memory_link(&corrector.key, &original.key, "corrects", 1.0)
+            .await
+            .expect("link");
+
+        // A ranked page where the corrected original is a hit.
+        let mut hits = vec![
+            MemorySearchHit {
+                score: 2.0,
+                record: original.clone(),
+                cosine: None,
+            },
+            MemorySearchHit {
+                score: 1.0,
+                record: other.clone(),
+                cosine: None,
+            },
+        ];
+        cosurface_corrections(&store, &mut hits, 10).await;
+        let keys: Vec<&str> = hits.iter().map(|h| h.record.key.as_str()).collect();
+        assert_eq!(
+            keys,
+            vec!["b1:original", "correction:b1:original:abc123abc123abc1", "b1:other"],
+            "corrector must sit directly after the corrected original"
+        );
+
+        // Idempotent: re-running must not insert a second copy.
+        cosurface_corrections(&store, &mut hits, 10).await;
+        assert_eq!(
+            hits.iter().filter(|h| h.record.key == corrector.key).count(),
+            1,
+            "no duplicate corrector on re-run"
+        );
+
+        // No-op: a page with no corrected original is returned unchanged.
+        let mut plain = vec![MemorySearchHit {
+            score: 1.0,
+            record: other.clone(),
+            cosine: None,
+        }];
+        cosurface_corrections(&store, &mut plain, 10).await;
+        assert_eq!(plain.len(), 1, "page without a corrects target is untouched");
+
+        // Gap coverage (review): MULTIPLE correctors on one original — all surface.
+        let corr2 = MemoryRecord {
+            key: "correction:b1:original:def456def456def4".into(),
+            content: "a second, independent correction".into(),
+            ..corrector.clone()
+        };
+        store.memory_save(&corr2).await.expect("save corr2");
+        store
+            .memory_link(&corr2.key, &original.key, "corrects", 1.0)
+            .await
+            .expect("link corr2");
+        let mut multi = vec![MemorySearchHit {
+            score: 2.0,
+            record: original.clone(),
+            cosine: None,
+        }];
+        cosurface_corrections(&store, &mut multi, 10).await;
+        let mkeys: std::collections::HashSet<&str> =
+            multi.iter().map(|h| h.record.key.as_str()).collect();
+        assert!(
+            mkeys.contains(corrector.key.as_str()) && mkeys.contains(corr2.key.as_str()),
+            "both correctors of one original must surface, got {mkeys:?}"
+        );
+        assert_eq!(multi[0].record.key, "b1:original", "original stays first");
+
+        // Gap coverage (review): an INACTIVE corrector is skipped even with an edge.
+        let mut dead_corr = MemoryRecord {
+            key: "correction:b1:original:0000dead0000dead".into(),
+            content: "a superseded correction".into(),
+            ..corrector.clone()
+        };
+        dead_corr.status = "superseded".into();
+        store.memory_save(&dead_corr).await.expect("save dead corr");
+        store
+            .memory_link(&dead_corr.key, &original.key, "corrects", 1.0)
+            .await
+            .expect("link dead corr");
+        let mut withdead = vec![MemorySearchHit {
+            score: 2.0,
+            record: original.clone(),
+            cosine: None,
+        }];
+        cosurface_corrections(&store, &mut withdead, 10).await;
+        assert!(
+            withdead.iter().all(|h| h.record.key != dead_corr.key),
+            "an inactive corrector must be skipped"
+        );
+
+        // Gap coverage (review): a corrector already on the page is not duplicated.
+        let mut already = vec![
+            MemorySearchHit {
+                score: 2.0,
+                record: original.clone(),
+                cosine: None,
+            },
+            MemorySearchHit {
+                score: 1.5,
+                record: corrector.clone(),
+                cosine: None,
+            },
+        ];
+        cosurface_corrections(&store, &mut already, 10).await;
+        assert_eq!(
+            already
+                .iter()
+                .filter(|h| h.record.key == corrector.key)
+                .count(),
+            1,
+            "a pre-existing corrector must not be duplicated"
         );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
