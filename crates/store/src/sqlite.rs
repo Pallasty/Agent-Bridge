@@ -2151,8 +2151,9 @@ fn importance_for_kind(kind: &str) -> f64 {
 ///
 /// - `fts_score_boost`: typical FTS path score 1.5..7.5 → +1.0 = 13-67%
 ///   promotion (visible but not overwhelming)
-/// - `semantic_score_boost`: typical semantic path score 0.5..1.5 →
-///   +0.2 = same proportional range, scaled to that path's units
+/// - semantic path: the feedback boost is now one component of the
+///   configurable [`semantic_rank_weights`] vector (default `w_fb` = 0.03);
+///   see that fn for the owner-signed-off rebalance rationale.
 fn feedback_kind_boost_fts(kind: &str) -> f64 {
     if kind == "feedback" {
         1.0
@@ -2161,12 +2162,61 @@ fn feedback_kind_boost_fts(kind: &str) -> f64 {
     }
 }
 
-fn feedback_kind_boost_semantic(kind: &str) -> f64 {
-    if kind == "feedback" {
-        0.2
-    } else {
-        0.0
+/// Ranking weights for the semantic retrieval composite
+/// (`memory_search_semantic`): `(w_cos, w_imp, w_mem, w_fb)`.
+///
+/// Owner-signed-off rebalance — 2026-06-30, forum #102 (posts #2634 / #2646),
+/// memory `finding_semantic_rebalance_gate_executed_20260630`. The legacy
+/// weights `(1, 0.2, 0.1, 0.2)` let the importance / recency / feedback bonuses
+/// (absolute ~0.2..0.7) swamp the cosine relevance gap among top hits
+/// (~0.1..0.3), so a high-importance/recent/feedback record routinely outranked
+/// the semantically-correct answer (offline curated-9 MRR 0.025). The
+/// conservative point demotes the bonuses to near-tie tie-breakers (curated-9
+/// MRR ~0.757; importance-surfacing 0.84 preserved; bonuses never override a
+/// clear cosine gap) while keeping cosine in the lead.
+///
+/// Runtime-overridable without recompile (A/B + instant revert / disable):
+///   `AGENT_BRIDGE_SEMANTIC_RANK_LEGACY=1` → restore legacy `(1, 0.2, 0.1, 0.2)`
+///   `AGENT_BRIDGE_SEMANTIC_W_{COS,IMP,MEM,FB}=<f64>` → override one weight
+/// Negative / non-finite overrides are ignored (fall back to the default).
+fn semantic_rank_weights() -> (f64, f64, f64, f64) {
+    let legacy = std::env::var("AGENT_BRIDGE_SEMANTIC_RANK_LEGACY")
+        .map(|v| {
+            let v = v.trim();
+            v == "1" || v.eq_ignore_ascii_case("true")
+        })
+        .unwrap_or(false);
+    let ov = |name: &str| -> Option<f64> {
+        std::env::var(name)
+            .ok()
+            .and_then(|v| v.trim().parse::<f64>().ok())
+            .filter(|x| x.is_finite() && *x >= 0.0)
+    };
+    resolve_semantic_weights(
+        legacy,
+        [
+            ov("AGENT_BRIDGE_SEMANTIC_W_COS"),
+            ov("AGENT_BRIDGE_SEMANTIC_W_IMP"),
+            ov("AGENT_BRIDGE_SEMANTIC_W_MEM"),
+            ov("AGENT_BRIDGE_SEMANTIC_W_FB"),
+        ],
+    )
+}
+
+/// Pure resolver for [`semantic_rank_weights`] — testable without touching
+/// process env. `legacy` wins over any per-weight `overrides`.
+fn resolve_semantic_weights(legacy: bool, overrides: [Option<f64>; 4]) -> (f64, f64, f64, f64) {
+    const CONSERVATIVE: (f64, f64, f64, f64) = (1.0, 0.05, 0.02, 0.03);
+    const LEGACY: (f64, f64, f64, f64) = (1.0, 0.2, 0.1, 0.2);
+    if legacy {
+        return LEGACY;
     }
+    (
+        overrides[0].unwrap_or(CONSERVATIVE.0),
+        overrides[1].unwrap_or(CONSERVATIVE.1),
+        overrides[2].unwrap_or(CONSERVATIVE.2),
+        overrides[3].unwrap_or(CONSERVATIVE.3),
+    )
 }
 
 /// Tokenise content for contradiction-overlap detection.
@@ -6261,6 +6311,10 @@ impl StateStore for SqliteStore {
             .await
             .map_err(|e| Error::Backend(format!("memory_search_semantic: {e}")))?;
 
+        // Resolve the ranking weights once per query (env-overridable; see
+        // [`semantic_rank_weights`] for the owner-signed-off rebalance).
+        let (w_cos, w_imp, w_mem, w_fb) = semantic_rank_weights();
+
         let mut hits: Vec<MemorySearchHit> = rows
             .into_iter()
             .filter_map(|(rec, emb_bytes)| {
@@ -6272,13 +6326,14 @@ impl StateStore for SqliteStore {
                 if cosine < threshold {
                     return None;
                 }
-                // Blend cosine similarity with recency / importance bonus.
-                // L5 P1 — feedback boost (additive, magnitude matched to
-                // semantic path's score range; see [`feedback_kind_boost_semantic`]).
-                let score = cosine as f64
-                    + 0.2 * rec.importance
-                    + 0.1 * memory_score(rec.last_accessed_at, rec.access_count, now, &rec.kind)
-                    + feedback_kind_boost_semantic(&rec.kind);
+                // Blend cosine relevance with small importance / recency /
+                // feedback tie-breakers. Cosine leads; the bonuses only break
+                // near-ties (owner-signed-off rebalance, see semantic_rank_weights).
+                let fb_kind = if rec.kind == "feedback" { 1.0 } else { 0.0 };
+                let score = w_cos * cosine as f64
+                    + w_imp * rec.importance
+                    + w_mem * memory_score(rec.last_accessed_at, rec.access_count, now, &rec.kind)
+                    + w_fb * fb_kind;
                 Some(MemorySearchHit {
                     record: rec,
                     score,
@@ -21769,8 +21824,30 @@ mod tests {
         assert_eq!(feedback_kind_boost_fts("lesson"), 0.0);
         assert_eq!(feedback_kind_boost_fts("fact"), 0.0);
         assert_eq!(feedback_kind_boost_fts(""), 0.0);
-        assert_eq!(feedback_kind_boost_semantic("feedback"), 0.2);
-        assert_eq!(feedback_kind_boost_semantic("decision"), 0.0);
+    }
+
+    #[test]
+    fn semantic_rank_weights_resolve() {
+        // Default (no legacy, no overrides) = the owner-signed-off conservative point.
+        assert_eq!(
+            resolve_semantic_weights(false, [None; 4]),
+            (1.0, 0.05, 0.02, 0.03)
+        );
+        // Legacy escape hatch restores the pre-rebalance weights …
+        assert_eq!(
+            resolve_semantic_weights(true, [None; 4]),
+            (1.0, 0.2, 0.1, 0.2)
+        );
+        // … and wins over any individual overrides.
+        assert_eq!(
+            resolve_semantic_weights(true, [Some(9.0); 4]),
+            (1.0, 0.2, 0.1, 0.2)
+        );
+        // Individual overrides apply only when not legacy; unset weights keep the default.
+        assert_eq!(
+            resolve_semantic_weights(false, [Some(2.0), Some(0.1), None, Some(0.0)]),
+            (2.0, 0.1, 0.02, 0.0)
+        );
     }
 
     #[tokio::test]
