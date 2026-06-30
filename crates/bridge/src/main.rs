@@ -448,6 +448,49 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Read-only owner-review packet over baseline, lift, and promotion gates.
+    ///
+    /// Composes baseline observations, shadow-score reports, measured lift
+    /// evidence, and promotion-gate checks into a single review packet. It does
+    /// not promote anything or change runtime, retrieval, memory, or routing.
+    WorkflowFeedbackOwnerReviewPacket {
+        /// Scenario fixture containing expected top experience ids.
+        #[arg(long = "scenario-fixture")]
+        scenario_fixture: PathBuf,
+        /// Baseline observation fixture. Repeat for independent baselines.
+        #[arg(long = "baseline-observation", required = true)]
+        baseline_observations: Vec<PathBuf>,
+        /// Shadow-score JSON report. Repeat for independent shadow runs.
+        #[arg(long = "shadow-score", required = true)]
+        shadow_scores: Vec<PathBuf>,
+        /// Rollback path, revert handle, or disable-switch reference.
+        #[arg(long = "rollback-ref")]
+        rollback_refs: Vec<String>,
+        /// Explicit owner approval reference. Repeat when multiple refs exist.
+        #[arg(long = "owner-approval-ref")]
+        owner_approval_refs: Vec<String>,
+        /// Minimum expected-top accuracy required for the proxy anchor.
+        #[arg(long, default_value_t = 0.75)]
+        min_accuracy: f64,
+        /// Minimum absolute lift over baseline required when baseline is supplied.
+        #[arg(long, default_value_t = 0.10)]
+        min_lift: f64,
+        /// Minimum independent shadow-score reports required.
+        #[arg(long, default_value_t = 2)]
+        min_shadow_reports: usize,
+        /// Minimum held-out scenarios required across the reports.
+        #[arg(long, default_value_t = 2)]
+        min_scenarios: usize,
+        /// Minimum strong top-ranked scenario matches required.
+        #[arg(long, default_value_t = 2)]
+        min_strong_scenarios: usize,
+        /// Minimum top-candidate shadow score for a strong match.
+        #[arg(long, default_value_t = 65)]
+        min_top_shadow_score: u32,
+        /// Emit the machine-readable JSON snapshot instead of Markdown.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -7024,6 +7067,37 @@ async fn real_main() -> Result<()> {
         );
     }
 
+    if let Cmd::WorkflowFeedbackOwnerReviewPacket {
+        scenario_fixture,
+        baseline_observations,
+        shadow_scores,
+        rollback_refs,
+        owner_approval_refs,
+        min_accuracy,
+        min_lift,
+        min_shadow_reports,
+        min_scenarios,
+        min_strong_scenarios,
+        min_top_shadow_score,
+        json,
+    } = &cmd
+    {
+        return run_workflow_feedback_owner_review_packet(
+            scenario_fixture,
+            baseline_observations,
+            shadow_scores,
+            rollback_refs,
+            owner_approval_refs,
+            *min_accuracy,
+            *min_lift,
+            *min_shadow_reports,
+            *min_scenarios,
+            *min_strong_scenarios,
+            *min_top_shadow_score,
+            *json,
+        );
+    }
+
     // Palace viewer: short-lived HTTP server, opens store directly (no Hub).
     if let Cmd::Palace { op } = &cmd {
         return match op {
@@ -7398,6 +7472,7 @@ async fn real_main() -> Result<()> {
         | Cmd::WorkflowFeedbackPromotionGate { .. }
         | Cmd::WorkflowFeedbackLiftEvidence { .. }
         | Cmd::WorkflowFeedbackBaselineEvidence { .. }
+        | Cmd::WorkflowFeedbackOwnerReviewPacket { .. }
         | Cmd::Instinct { .. } => unreachable!(),
     }
 }
@@ -7551,6 +7626,45 @@ fn run_workflow_feedback_baseline_evidence(
         },
     )
     .context("building workflow feedback baseline evidence")?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&report.to_json_value())?);
+    } else {
+        print!("{}", report.render_markdown());
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_workflow_feedback_owner_review_packet(
+    scenario_fixture: &PathBuf,
+    baseline_observations: &[PathBuf],
+    shadow_scores: &[PathBuf],
+    rollback_refs: &[String],
+    owner_approval_refs: &[String],
+    min_accuracy: f64,
+    min_lift: f64,
+    min_shadow_reports: usize,
+    min_scenarios: usize,
+    min_strong_scenarios: usize,
+    min_top_shadow_score: u32,
+    as_json: bool,
+) -> Result<()> {
+    let report = ab_bridge::workflow_feedback::build_owner_review_packet_from_paths(
+        scenario_fixture,
+        baseline_observations,
+        shadow_scores,
+        ab_bridge::workflow_feedback::WorkflowFeedbackOwnerReviewPacketOptions {
+            rollback_refs: rollback_refs.to_vec(),
+            owner_approval_refs: owner_approval_refs.to_vec(),
+            min_accuracy,
+            min_lift,
+            min_shadow_reports,
+            min_scenarios,
+            min_strong_scenarios,
+            min_top_shadow_score,
+        },
+    )
+    .context("building workflow feedback owner review packet")?;
     if as_json {
         println!("{}", serde_json::to_string_pretty(&report.to_json_value())?);
     } else {

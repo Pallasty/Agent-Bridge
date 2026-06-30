@@ -409,6 +409,40 @@ The baseline evidence packet checks:
 - duplicate, unknown, or missing observations block the packet
 - rollback refs are present before promotion-gate readiness
 
+### Slice 8 - Owner Review Packet Assembly
+
+Status: landed as read-only CLI review packet.
+
+Command:
+
+```text
+agent-bridge workflow-feedback-owner-review-packet \
+  --scenario-fixture docs/design/fixtures/workflow-feedback-shadow-score-scenarios-2026-06-30.json \
+  --baseline-observation docs/design/fixtures/workflow-feedback-baseline-observations-2026-06-30.json \
+  --shadow-score /tmp/workflow-feedback-shadow-score-run-1.json \
+  --shadow-score /tmp/workflow-feedback-shadow-score-run-2.json \
+  --rollback-ref "<rollback handle>" \
+  [--owner-approval-ref "<owner approval ref>"] \
+  --json
+```
+
+Evidence fixture:
+
+- `docs/design/fixtures/workflow-feedback-owner-review-packet-2026-06-30.json`
+
+This packet composes Slice 7 baseline evidence, Slice 6 measured lift evidence,
+and Slice 5 promotion-gate checks into one owner-review artifact. It embeds the
+nested packets and surfaces the final review posture. Without an owner approval
+ref it can reach `ready_for_owner_review`, but it must not claim
+`owner_review_packet_complete` or authorize promotion.
+
+The owner-review packet checks:
+
+- baseline evidence is complete, safe, unambiguous, and carries rollback refs
+- lift evidence emits `measured_lift_anchor` against that baseline
+- promotion gate has shadow, behavior-lift, and rollback evidence
+- owner approval is explicit and never inferred
+
 ## Non-Goals
 
 - No automatic RL training path in the near term.
@@ -419,9 +453,7 @@ The baseline evidence packet checks:
 
 ## Immediate Next Step
 
-Use the baseline-evidence output to pass `baseline_correct` and `baseline_total`
-into `workflow-feedback-lift-evidence`, then feed the resulting
-`metric_anchor_ref` plus rollback refs into the promotion-gate packet for owner
-review. Any actual memory/runbook/skill/retrieval promotion must happen in a
-separate authorized lane; runtime, retrieval, and tool-routing influence remain
-blocked by default.
+Send the owner-review packet for explicit owner approval. If approved, apply any
+memory/runbook/skill/retrieval promotion only through a separate authorized lane
+with the approval ref and rollback handle attached. Runtime, retrieval, and
+tool-routing influence remain blocked by default.

@@ -27,6 +27,8 @@ pub const WORKFLOW_FEEDBACK_BASELINE_EVIDENCE_SCHEMA: &str =
     "agent_bridge.workflow_feedback_baseline_evidence.v0";
 pub const WORKFLOW_FEEDBACK_BASELINE_OBSERVATIONS_SCHEMA: &str =
     "agent_bridge.workflow_feedback_baseline_observations.v0";
+pub const WORKFLOW_FEEDBACK_OWNER_REVIEW_PACKET_SCHEMA: &str =
+    "agent_bridge.workflow_feedback_owner_review_packet.v0";
 
 #[derive(Debug, Clone)]
 pub struct WorkflowFeedbackReportOptions {
@@ -266,6 +268,33 @@ pub struct WorkflowFeedbackBaselineEvidenceOptions {
     pub rollback_refs: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct WorkflowFeedbackOwnerReviewPacketOptions {
+    pub rollback_refs: Vec<String>,
+    pub owner_approval_refs: Vec<String>,
+    pub min_accuracy: f64,
+    pub min_lift: f64,
+    pub min_shadow_reports: usize,
+    pub min_scenarios: usize,
+    pub min_strong_scenarios: usize,
+    pub min_top_shadow_score: u32,
+}
+
+impl Default for WorkflowFeedbackOwnerReviewPacketOptions {
+    fn default() -> Self {
+        Self {
+            rollback_refs: Vec::new(),
+            owner_approval_refs: Vec::new(),
+            min_accuracy: 0.75,
+            min_lift: 0.10,
+            min_shadow_reports: 2,
+            min_scenarios: 2,
+            min_strong_scenarios: 2,
+            min_top_shadow_score: 65,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct WorkflowFeedbackBaselineEvidenceReport {
     pub schema: &'static str,
@@ -316,6 +345,51 @@ pub struct BaselineScenarioObservation {
     pub evidence_ref: Option<String>,
     pub matched_expected_top: bool,
     pub fixture_safe: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkflowFeedbackOwnerReviewPacketReport {
+    pub schema: &'static str,
+    pub read_only: bool,
+    pub boundary: WorkflowFeedbackBoundary,
+    pub owner_review_verdict: &'static str,
+    pub ready_for_owner_review: bool,
+    pub advisory_promotion_ready: bool,
+    pub evidence: OwnerReviewPacketEvidence,
+    pub checks: Vec<OwnerReviewPacketCheck>,
+    pub baseline_evidence: Value,
+    pub lift_evidence: Value,
+    pub promotion_gate: Value,
+    pub recommended_next_actions: Vec<&'static str>,
+    pub non_goals: Vec<&'static str>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OwnerReviewPacketEvidence {
+    pub baseline_verdict: &'static str,
+    pub baseline_ref: String,
+    pub baseline_correct: u32,
+    pub baseline_total: u32,
+    pub baseline_accuracy: f64,
+    pub lift_verdict: &'static str,
+    pub metric_anchor_ref: String,
+    pub measured_against_baseline: bool,
+    pub top1_accuracy: f64,
+    pub absolute_lift: Option<f64>,
+    pub promotion_gate_verdict: &'static str,
+    pub shadow_report_count: usize,
+    pub scenario_count: usize,
+    pub strong_shadow_match_count: usize,
+    pub rollback_refs: Vec<String>,
+    pub owner_approval_refs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OwnerReviewPacketCheck {
+    pub id: &'static str,
+    pub passed: bool,
+    pub evidence: String,
+    pub required: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -892,6 +966,97 @@ impl WorkflowFeedbackBaselineEvidenceReport {
     }
 }
 
+impl WorkflowFeedbackOwnerReviewPacketReport {
+    pub fn to_json_value(&self) -> Value {
+        serde_json::to_value(self).unwrap_or_else(|_| {
+            json!({
+                "schema": WORKFLOW_FEEDBACK_OWNER_REVIEW_PACKET_SCHEMA,
+                "read_only": true,
+                "serialization_error": true
+            })
+        })
+    }
+
+    pub fn render_markdown(&self) -> String {
+        let mut out = String::new();
+        out.push_str("# Workflow Feedback Owner Review Packet\n");
+        out.push_str(&format!("schema: {}\n", self.schema));
+        out.push_str(&format!("verdict: {}\n", self.owner_review_verdict));
+        out.push_str(&format!(
+            "ready_for_owner_review: {}\n",
+            self.ready_for_owner_review
+        ));
+        out.push_str(&format!(
+            "advisory_promotion_ready: {}\n",
+            self.advisory_promotion_ready
+        ));
+        out.push_str("mode: read-only owner-review packet; no memory writes, no retrieval change, no tool-routing change, no runtime policy mutation\n\n");
+
+        out.push_str("## Evidence\n");
+        out.push_str(&format!(
+            "- baseline: {} ({}/{}, {:.1}%)\n",
+            self.evidence.baseline_verdict,
+            self.evidence.baseline_correct,
+            self.evidence.baseline_total,
+            self.evidence.baseline_accuracy * 100.0
+        ));
+        out.push_str(&format!(
+            "- lift: {} top1={:.1}% absolute_lift={}\n",
+            self.evidence.lift_verdict,
+            self.evidence.top1_accuracy * 100.0,
+            self.evidence
+                .absolute_lift
+                .map(|lift| format!("{:.1}%", lift * 100.0))
+                .unwrap_or_else(|| "none".to_string())
+        ));
+        out.push_str(&format!(
+            "- promotion gate: {} shadow_reports={} scenarios={} strong_matches={}\n",
+            self.evidence.promotion_gate_verdict,
+            self.evidence.shadow_report_count,
+            self.evidence.scenario_count,
+            self.evidence.strong_shadow_match_count
+        ));
+        out.push_str(&format!(
+            "- rollback refs: {} owner approval refs: {}\n\n",
+            self.evidence.rollback_refs.len(),
+            self.evidence.owner_approval_refs.len()
+        ));
+
+        out.push_str("## References\n");
+        out.push_str(&format!("- baseline_ref: {}\n", self.evidence.baseline_ref));
+        out.push_str(&format!(
+            "- metric_anchor_ref: {}\n\n",
+            self.evidence.metric_anchor_ref
+        ));
+
+        out.push_str("## Checks\n");
+        out.push_str("| Check | Status | Evidence | Required |\n");
+        out.push_str("| --- | --- | --- | --- |\n");
+        for check in &self.checks {
+            out.push_str(&format!(
+                "| {} | {} | {} | {} |\n",
+                check.id,
+                if check.passed { "pass" } else { "blocked" },
+                pipe_safe(&check.evidence),
+                pipe_safe(&check.required)
+            ));
+        }
+        out.push('\n');
+
+        out.push_str("## Recommended Next Actions\n");
+        for action in &self.recommended_next_actions {
+            out.push_str(&format!("- {action}\n"));
+        }
+        out.push('\n');
+
+        out.push_str("## Non-goals\n");
+        for non_goal in &self.non_goals {
+            out.push_str(&format!("- {non_goal}\n"));
+        }
+        out
+    }
+}
+
 pub fn build_shadow_score_report_from_paths(
     fixture_paths: &[PathBuf],
     scenarios: Vec<String>,
@@ -1009,6 +1174,61 @@ pub fn build_baseline_evidence_report_from_paths(
     }
 
     build_baseline_evidence_report(scenario_fixture, baseline_fixtures, options)
+}
+
+pub fn build_owner_review_packet_from_paths(
+    scenario_fixture_path: &PathBuf,
+    baseline_observation_paths: &[PathBuf],
+    shadow_score_paths: &[PathBuf],
+    options: WorkflowFeedbackOwnerReviewPacketOptions,
+) -> Result<WorkflowFeedbackOwnerReviewPacketReport> {
+    if baseline_observation_paths.is_empty() {
+        bail!("at least one baseline observation fixture is required");
+    }
+    if shadow_score_paths.is_empty() {
+        bail!("at least one shadow score report is required");
+    }
+
+    let baseline = build_baseline_evidence_report_from_paths(
+        scenario_fixture_path,
+        baseline_observation_paths,
+        WorkflowFeedbackBaselineEvidenceOptions {
+            rollback_refs: options.rollback_refs.clone(),
+        },
+    )?;
+    let lift = build_lift_evidence_report_from_paths(
+        scenario_fixture_path,
+        shadow_score_paths,
+        WorkflowFeedbackLiftEvidenceOptions {
+            baseline_correct: Some(baseline.evidence.baseline_correct),
+            baseline_total: Some(baseline.evidence.baseline_total),
+            min_accuracy: options.min_accuracy,
+            min_lift: options.min_lift,
+        },
+    )?;
+    let behavior_lift_refs = if lift.lift_verdict == "measured_lift_anchor" {
+        vec![lift.metric_anchor_ref.clone()]
+    } else {
+        Vec::new()
+    };
+    let promotion_gate = build_promotion_gate_report_from_paths(
+        shadow_score_paths,
+        WorkflowFeedbackPromotionGateOptions {
+            owner_approval_refs: options.owner_approval_refs,
+            rollback_refs: options.rollback_refs,
+            behavior_lift_refs,
+            min_shadow_reports: options.min_shadow_reports,
+            min_scenarios: options.min_scenarios,
+            min_strong_scenarios: options.min_strong_scenarios,
+            min_top_shadow_score: options.min_top_shadow_score,
+        },
+    )?;
+
+    Ok(build_owner_review_packet_report(
+        baseline,
+        lift,
+        promotion_gate,
+    ))
 }
 
 fn build_shadow_score_report(
@@ -1231,6 +1451,114 @@ fn build_baseline_evidence_report(
             "Does not claim behavior lift; it only packages baseline counts and rollback handles for later gates.",
         ],
     })
+}
+
+fn build_owner_review_packet_report(
+    baseline: WorkflowFeedbackBaselineEvidenceReport,
+    lift: WorkflowFeedbackLiftEvidenceReport,
+    promotion_gate: WorkflowFeedbackPromotionGateReport,
+) -> WorkflowFeedbackOwnerReviewPacketReport {
+    let baseline_ready = baseline.baseline_verdict == "baseline_evidence_ready";
+    let measured_lift = lift.lift_verdict == "measured_lift_anchor";
+    let promotion_ready = promotion_gate.ready_for_owner_review;
+    let owner_approval_present = !promotion_gate.evidence.owner_approval_refs.is_empty();
+    let advisory_promotion_ready = baseline_ready
+        && measured_lift
+        && promotion_gate.ready_for_owner_review
+        && promotion_gate.advisory_promotion_ready;
+    let ready_for_owner_review = baseline_ready && measured_lift && promotion_ready;
+    let owner_review_verdict = if !baseline_ready {
+        "blocked_baseline_evidence_required"
+    } else if !measured_lift {
+        "blocked_measured_lift_required"
+    } else if !promotion_ready {
+        promotion_gate.gate_verdict
+    } else if !owner_approval_present {
+        "ready_for_owner_review"
+    } else {
+        "owner_review_packet_complete"
+    };
+
+    let checks = vec![
+        OwnerReviewPacketCheck {
+            id: "baseline_evidence_ready",
+            passed: baseline_ready,
+            evidence: baseline.baseline_verdict.to_string(),
+            required: "baseline evidence packet is complete, safe, unambiguous, and has rollback refs"
+                .to_string(),
+        },
+        OwnerReviewPacketCheck {
+            id: "measured_lift_anchor",
+            passed: measured_lift,
+            evidence: lift.lift_verdict.to_string(),
+            required: "lift evidence emits measured_lift_anchor against supplied baseline"
+                .to_string(),
+        },
+        OwnerReviewPacketCheck {
+            id: "promotion_gate_ready_for_owner_review",
+            passed: promotion_ready,
+            evidence: promotion_gate.gate_verdict.to_string(),
+            required:
+                "promotion gate has shadow, behavior-lift, and rollback evidence ready for owner review"
+                    .to_string(),
+        },
+        OwnerReviewPacketCheck {
+            id: "owner_approval_present",
+            passed: owner_approval_present,
+            evidence: format!(
+                "{} owner approval ref(s)",
+                promotion_gate.evidence.owner_approval_refs.len()
+            ),
+            required: "explicit owner approval ref for packet completion; not required for review readiness"
+                .to_string(),
+        },
+    ];
+
+    let evidence = OwnerReviewPacketEvidence {
+        baseline_verdict: baseline.baseline_verdict,
+        baseline_ref: baseline.baseline_ref.clone(),
+        baseline_correct: baseline.evidence.baseline_correct,
+        baseline_total: baseline.evidence.baseline_total,
+        baseline_accuracy: baseline.evidence.baseline_accuracy,
+        lift_verdict: lift.lift_verdict,
+        metric_anchor_ref: lift.metric_anchor_ref.clone(),
+        measured_against_baseline: lift.measured_against_baseline,
+        top1_accuracy: lift.evidence.top1_accuracy,
+        absolute_lift: lift.evidence.absolute_lift,
+        promotion_gate_verdict: promotion_gate.gate_verdict,
+        shadow_report_count: promotion_gate.evidence.shadow_report_count,
+        scenario_count: promotion_gate.evidence.scenario_count,
+        strong_shadow_match_count: promotion_gate.evidence.strong_shadow_match_count,
+        rollback_refs: promotion_gate.evidence.rollback_refs.clone(),
+        owner_approval_refs: promotion_gate.evidence.owner_approval_refs.clone(),
+    };
+
+    WorkflowFeedbackOwnerReviewPacketReport {
+        schema: WORKFLOW_FEEDBACK_OWNER_REVIEW_PACKET_SCHEMA,
+        read_only: true,
+        boundary: WorkflowFeedbackBoundary {
+            writes_memory: false,
+            mutates_runtime_policy: false,
+            changes_retrieval_order: false,
+            runtime_influence_allowed: false,
+            owner_gated_runtime_influence: true,
+        },
+        owner_review_verdict,
+        ready_for_owner_review,
+        advisory_promotion_ready,
+        evidence,
+        checks,
+        baseline_evidence: baseline.to_json_value(),
+        lift_evidence: lift.to_json_value(),
+        promotion_gate: promotion_gate.to_json_value(),
+        recommended_next_actions: owner_review_recommended_next_actions(owner_review_verdict),
+        non_goals: vec![
+            "Does not promote memories, runbooks, skills, retrieval rules, or tool routing.",
+            "Does not write owner approval or infer it from local evidence.",
+            "Does not mutate runtime policy, prompts, profiles, bootstrap, or memory.",
+            "Does not convert owner-review readiness into runtime influence.",
+        ],
+    }
 }
 
 fn build_lift_evidence_report(
@@ -1948,6 +2276,31 @@ fn baseline_recommended_next_actions(baseline_verdict: &str) -> Vec<&'static str
             "Use baseline_ref or rollback refs as evidence inputs for promotion-gate review.",
         ],
         _ => vec!["Review the baseline evidence packet manually before using it as a gate input."],
+    }
+}
+
+fn owner_review_recommended_next_actions(owner_review_verdict: &str) -> Vec<&'static str> {
+    match owner_review_verdict {
+        "blocked_baseline_evidence_required" => vec![
+            "Repair or regenerate the baseline evidence packet before owner review.",
+            "Do not use incomplete, unsafe, ambiguous, or rollback-free baseline evidence as a promotion input.",
+        ],
+        "blocked_measured_lift_required" => vec![
+            "Collect a measured lift anchor against the supplied baseline before owner review.",
+            "Keep the packet as audit-only until lift evidence emits measured_lift_anchor.",
+        ],
+        "ready_for_owner_review" => vec![
+            "Send this packet for explicit owner approval with baseline_ref, metric_anchor_ref, and rollback refs attached.",
+            "Do not apply any promotion until an owner approval ref is recorded.",
+        ],
+        "owner_review_packet_complete" => vec![
+            "Apply any promotion only through a separate authorized lane and keep runtime influence off by default.",
+            "Record the manual promotion result and rollback handle as durable memory after review.",
+        ],
+        _ => vec![
+            "Review the nested promotion gate packet and repair blocked checks before owner review.",
+            "Do not treat this owner-review packet as promotion authority.",
+        ],
     }
 }
 
@@ -3105,6 +3458,166 @@ mod tests {
             err.to_string()
                 .contains("expected agent_bridge.workflow_feedback_baseline_observations.v0")
         );
+    }
+
+    #[test]
+    fn owner_review_packet_is_ready_without_inventing_owner_approval() {
+        let scenarios = ShadowScoreScenarioFixture::from_value(
+            two_scenario_fixture_value(),
+            Some("scenarios.json".to_string()),
+        )
+        .expect("scenario fixture");
+        let baseline_fixture = BaselineObservationFixture::from_value(
+            baseline_observation_fixture_value(
+                "baseline_no_experience_selected",
+                "baseline_no_experience_selected",
+            ),
+            Some("baseline.json".to_string()),
+        )
+        .expect("baseline fixture");
+        let baseline = build_baseline_evidence_report(
+            scenarios.clone(),
+            vec![baseline_fixture],
+            WorkflowFeedbackBaselineEvidenceOptions {
+                rollback_refs: vec![
+                    "rollback:disable promoted workflow feedback artifact".to_string(),
+                ],
+            },
+        )
+        .expect("baseline evidence");
+        let shadow_one = ShadowScoreReportEvidence::from_value(
+            two_scenario_shadow_score_value(),
+            Some("shadow-one.json".to_string()),
+        )
+        .expect("shadow one");
+        let shadow_two = ShadowScoreReportEvidence::from_value(
+            two_scenario_shadow_score_value(),
+            Some("shadow-two.json".to_string()),
+        )
+        .expect("shadow two");
+        let lift = build_lift_evidence_report(
+            scenarios,
+            vec![shadow_one.clone(), shadow_two.clone()],
+            WorkflowFeedbackLiftEvidenceOptions {
+                baseline_correct: Some(baseline.evidence.baseline_correct),
+                baseline_total: Some(baseline.evidence.baseline_total),
+                min_accuracy: 0.75,
+                min_lift: 0.10,
+            },
+        )
+        .expect("lift evidence");
+        let promotion_gate = build_promotion_gate_report(
+            vec![shadow_one, shadow_two],
+            WorkflowFeedbackPromotionGateOptions {
+                rollback_refs: baseline.evidence.rollback_refs.clone(),
+                behavior_lift_refs: vec![lift.metric_anchor_ref.clone()],
+                min_shadow_reports: 2,
+                min_scenarios: 2,
+                min_strong_scenarios: 2,
+                min_top_shadow_score: 60,
+                ..WorkflowFeedbackPromotionGateOptions::default()
+            },
+        )
+        .expect("promotion gate");
+
+        let packet = build_owner_review_packet_report(baseline, lift, promotion_gate);
+
+        assert_eq!(packet.schema, WORKFLOW_FEEDBACK_OWNER_REVIEW_PACKET_SCHEMA);
+        assert!(packet.read_only);
+        assert!(!packet.boundary.writes_memory);
+        assert!(!packet.boundary.mutates_runtime_policy);
+        assert!(!packet.boundary.changes_retrieval_order);
+        assert!(!packet.boundary.runtime_influence_allowed);
+        assert_eq!(packet.owner_review_verdict, "ready_for_owner_review");
+        assert!(packet.ready_for_owner_review);
+        assert!(!packet.advisory_promotion_ready);
+        assert_eq!(
+            packet.evidence.promotion_gate_verdict,
+            "ready_for_owner_review"
+        );
+        let owner_check = packet
+            .checks
+            .iter()
+            .find(|check| check.id == "owner_approval_present")
+            .expect("owner approval check");
+        assert!(!owner_check.passed);
+        assert_eq!(
+            packet.baseline_evidence["schema"],
+            WORKFLOW_FEEDBACK_BASELINE_EVIDENCE_SCHEMA
+        );
+        assert_eq!(
+            packet.lift_evidence["schema"],
+            WORKFLOW_FEEDBACK_LIFT_EVIDENCE_SCHEMA
+        );
+        assert_eq!(
+            packet.promotion_gate["schema"],
+            WORKFLOW_FEEDBACK_PROMOTION_GATE_SCHEMA
+        );
+    }
+
+    #[test]
+    fn owner_review_packet_blocks_without_baseline_rollback() {
+        let scenarios = ShadowScoreScenarioFixture::from_value(
+            two_scenario_fixture_value(),
+            Some("scenarios.json".to_string()),
+        )
+        .expect("scenario fixture");
+        let baseline_fixture = BaselineObservationFixture::from_value(
+            baseline_observation_fixture_value(
+                "baseline_no_experience_selected",
+                "baseline_no_experience_selected",
+            ),
+            Some("baseline.json".to_string()),
+        )
+        .expect("baseline fixture");
+        let baseline = build_baseline_evidence_report(
+            scenarios.clone(),
+            vec![baseline_fixture],
+            WorkflowFeedbackBaselineEvidenceOptions::default(),
+        )
+        .expect("baseline evidence");
+        let shadow = ShadowScoreReportEvidence::from_value(
+            two_scenario_shadow_score_value(),
+            Some("shadow.json".to_string()),
+        )
+        .expect("shadow evidence");
+        let lift = build_lift_evidence_report(
+            scenarios,
+            vec![shadow.clone(), shadow.clone()],
+            WorkflowFeedbackLiftEvidenceOptions {
+                baseline_correct: Some(baseline.evidence.baseline_correct),
+                baseline_total: Some(baseline.evidence.baseline_total),
+                min_accuracy: 0.75,
+                min_lift: 0.10,
+            },
+        )
+        .expect("lift evidence");
+        let promotion_gate = build_promotion_gate_report(
+            vec![shadow.clone(), shadow],
+            WorkflowFeedbackPromotionGateOptions {
+                behavior_lift_refs: vec![lift.metric_anchor_ref.clone()],
+                min_shadow_reports: 2,
+                min_scenarios: 2,
+                min_strong_scenarios: 2,
+                min_top_shadow_score: 60,
+                ..WorkflowFeedbackPromotionGateOptions::default()
+            },
+        )
+        .expect("promotion gate");
+
+        let packet = build_owner_review_packet_report(baseline, lift, promotion_gate);
+
+        assert_eq!(
+            packet.owner_review_verdict,
+            "blocked_baseline_evidence_required"
+        );
+        assert!(!packet.ready_for_owner_review);
+        let baseline_check = packet
+            .checks
+            .iter()
+            .find(|check| check.id == "baseline_evidence_ready")
+            .expect("baseline check");
+        assert!(!baseline_check.passed);
     }
 
     #[test]

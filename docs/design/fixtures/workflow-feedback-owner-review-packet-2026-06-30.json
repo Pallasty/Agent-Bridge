@@ -1,0 +1,39 @@
+{
+  "schema": "agent_bridge.workflow_feedback_owner_review_packet_fixture.v0",
+  "read_only": true,
+  "purpose": "Review fixture for composing workflow-feedback baseline evidence, measured lift evidence, and promotion-gate checks into one owner-review packet. This fixture is not owner approval and does not authorize promotion.",
+  "source_schemas": {
+    "baseline_observations": "agent_bridge.workflow_feedback_baseline_observations.v0",
+    "baseline_evidence": "agent_bridge.workflow_feedback_baseline_evidence.v0",
+    "shadow_score": "agent_bridge.workflow_feedback_shadow_score.v0",
+    "lift_evidence": "agent_bridge.workflow_feedback_lift_evidence.v0",
+    "promotion_gate": "agent_bridge.workflow_feedback_promotion_gate.v0",
+    "owner_review_packet": "agent_bridge.workflow_feedback_owner_review_packet.v0"
+  },
+  "recommended_shadow_score_command": "agent-bridge workflow-feedback-shadow-score --fixture docs/design/fixtures/workflow-feedback-experience-agent-send-input-2026-06-30.json --fixture docs/design/fixtures/workflow-feedback-experience-report-cli-2026-06-30.json --scenario '<scenario_cases[0].scenario>' --scenario '<scenario_cases[1].scenario>' --json > /tmp/workflow-feedback-shadow-score-run-1.json",
+  "recommended_owner_review_packet_command": "agent-bridge workflow-feedback-owner-review-packet --scenario-fixture docs/design/fixtures/workflow-feedback-shadow-score-scenarios-2026-06-30.json --baseline-observation docs/design/fixtures/workflow-feedback-baseline-observations-2026-06-30.json --shadow-score /tmp/workflow-feedback-shadow-score-run-1.json --shadow-score /tmp/workflow-feedback-shadow-score-run-2.json --rollback-ref 'rollback:remove workflow feedback promoted artifact and keep runtime influence disabled' --json",
+  "expected_refs": {
+    "baseline_ref": "workflow-feedback-baseline-evidence:v0;verdict=baseline_evidence_ready;correct=0;total=2;accuracy=0.000;rollback_refs=1",
+    "metric_anchor_ref": "workflow-feedback-lift-evidence:v0;verdict=measured_lift_anchor;observations=4;top1_accuracy=1.000;baseline_accuracy=0.000;absolute_lift=1.000"
+  },
+  "expected_summary_contract": {
+    "schema": "agent_bridge.workflow_feedback_owner_review_packet.v0",
+    "read_only": true,
+    "owner_review_verdict_without_owner_approval": "ready_for_owner_review",
+    "ready_for_owner_review": true,
+    "advisory_promotion_ready_without_owner_approval": false,
+    "boundary.writes_memory": false,
+    "boundary.mutates_runtime_policy": false,
+    "boundary.changes_retrieval_order": false,
+    "boundary.runtime_influence_allowed": false
+  },
+  "safety": {
+    "packet_writes_memory": false,
+    "packet_promotes_runbook": false,
+    "packet_promotes_skill": false,
+    "packet_changes_runtime": false,
+    "packet_changes_retrieval_order": false,
+    "packet_changes_tool_routing": false,
+    "packet_authorizes_future_runtime_influence": false
+  }
+}
