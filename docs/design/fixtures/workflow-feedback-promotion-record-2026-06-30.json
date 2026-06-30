@@ -1,0 +1,43 @@
+{
+  "schema": "agent_bridge.workflow_feedback_promotion_record_fixture.v0",
+  "read_only": true,
+  "purpose": "Review fixture for converting a workflow-feedback owner-review packet plus explicit owner approval into a low-risk promotion record. This fixture does not write memory, create skills, change retrieval, route tools, or alter runtime policy.",
+  "source_schemas": {
+    "owner_review_packet": "agent_bridge.workflow_feedback_owner_review_packet.v0",
+    "promotion_record": "agent_bridge.workflow_feedback_promotion_record.v0"
+  },
+  "recommended_owner_review_packet_command": "agent-bridge workflow-feedback-owner-review-packet --scenario-fixture docs/design/fixtures/workflow-feedback-shadow-score-scenarios-2026-06-30.json --baseline-observation docs/design/fixtures/workflow-feedback-baseline-observations-2026-06-30.json --shadow-score /tmp/workflow-feedback-shadow-score-run-1.json --shadow-score /tmp/workflow-feedback-shadow-score-run-2.json --rollback-ref 'rollback:remove workflow feedback promoted artifact and keep runtime influence disabled' --json > /tmp/workflow-feedback-owner-review-packet.json",
+  "recommended_promotion_record_command": "agent-bridge workflow-feedback-promotion-record --owner-review-packet /tmp/workflow-feedback-owner-review-packet.json --promotion-scope documentation --promotion-scope durable_memory --promotion-scope runbook --owner-approval-ref 'user:2026-06-30 current thread: follow your thinking, you decide; limited to docs/memory/runbook promotion record' --rollback-ref 'rollback:remove docs/runbook edit and archive durable memory key' --json",
+  "allowed_scopes_in_this_lane": [
+    "documentation",
+    "durable_memory",
+    "runbook"
+  ],
+  "blocked_scopes_in_this_lane": [
+    "skill",
+    "retrieval",
+    "tool_routing",
+    "runtime_policy",
+    "prompt",
+    "profile",
+    "bootstrap"
+  ],
+  "expected_summary_contract": {
+    "schema": "agent_bridge.workflow_feedback_promotion_record.v0",
+    "read_only": true,
+    "promotion_record_verdict": "docs_memory_runbook_promotion_record_ready",
+    "promotion_record_ready": true,
+    "boundary.writes_memory": false,
+    "boundary.mutates_runtime_policy": false,
+    "boundary.changes_retrieval_order": false,
+    "boundary.runtime_influence_allowed": false
+  },
+  "safety": {
+    "record_writes_memory": false,
+    "record_creates_skill": false,
+    "record_changes_runtime": false,
+    "record_changes_retrieval_order": false,
+    "record_changes_tool_routing": false,
+    "record_authorizes_future_runtime_influence": false
+  }
+}

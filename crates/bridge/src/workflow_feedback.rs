@@ -29,6 +29,8 @@ pub const WORKFLOW_FEEDBACK_BASELINE_OBSERVATIONS_SCHEMA: &str =
     "agent_bridge.workflow_feedback_baseline_observations.v0";
 pub const WORKFLOW_FEEDBACK_OWNER_REVIEW_PACKET_SCHEMA: &str =
     "agent_bridge.workflow_feedback_owner_review_packet.v0";
+pub const WORKFLOW_FEEDBACK_PROMOTION_RECORD_SCHEMA: &str =
+    "agent_bridge.workflow_feedback_promotion_record.v0";
 
 #[derive(Debug, Clone)]
 pub struct WorkflowFeedbackReportOptions {
@@ -295,6 +297,13 @@ impl Default for WorkflowFeedbackOwnerReviewPacketOptions {
     }
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct WorkflowFeedbackPromotionRecordOptions {
+    pub owner_approval_refs: Vec<String>,
+    pub rollback_refs: Vec<String>,
+    pub promotion_scopes: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct WorkflowFeedbackBaselineEvidenceReport {
     pub schema: &'static str,
@@ -390,6 +399,50 @@ pub struct OwnerReviewPacketCheck {
     pub passed: bool,
     pub evidence: String,
     pub required: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkflowFeedbackPromotionRecordReport {
+    pub schema: &'static str,
+    pub read_only: bool,
+    pub boundary: WorkflowFeedbackBoundary,
+    pub promotion_record_verdict: &'static str,
+    pub promotion_record_ready: bool,
+    pub evidence: PromotionRecordEvidence,
+    pub checks: Vec<PromotionRecordCheck>,
+    pub accepted_scopes: Vec<PromotionScopeDecision>,
+    pub blocked_scopes: Vec<PromotionScopeDecision>,
+    pub source_owner_review_packet: Value,
+    pub recommended_next_actions: Vec<&'static str>,
+    pub non_goals: Vec<&'static str>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PromotionRecordEvidence {
+    pub owner_review_packet_path: Option<String>,
+    pub owner_review_verdict: String,
+    pub ready_for_owner_review: bool,
+    pub advisory_promotion_ready: bool,
+    pub owner_approval_refs: Vec<String>,
+    pub rollback_refs: Vec<String>,
+    pub baseline_ref: Option<String>,
+    pub metric_anchor_ref: Option<String>,
+    pub requested_scopes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PromotionRecordCheck {
+    pub id: &'static str,
+    pub passed: bool,
+    pub evidence: String,
+    pub required: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct PromotionScopeDecision {
+    pub scope: String,
+    pub accepted: bool,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1057,6 +1110,93 @@ impl WorkflowFeedbackOwnerReviewPacketReport {
     }
 }
 
+impl WorkflowFeedbackPromotionRecordReport {
+    pub fn to_json_value(&self) -> Value {
+        serde_json::to_value(self).unwrap_or_else(|_| {
+            json!({
+                "schema": WORKFLOW_FEEDBACK_PROMOTION_RECORD_SCHEMA,
+                "read_only": true,
+                "serialization_error": true
+            })
+        })
+    }
+
+    pub fn render_markdown(&self) -> String {
+        let mut out = String::new();
+        out.push_str("# Workflow Feedback Promotion Record\n");
+        out.push_str(&format!("schema: {}\n", self.schema));
+        out.push_str(&format!("verdict: {}\n", self.promotion_record_verdict));
+        out.push_str(&format!("ready: {}\n", self.promotion_record_ready));
+        out.push_str("mode: read-only promotion record; no memory writes, no retrieval change, no tool-routing change, no runtime policy mutation\n\n");
+
+        out.push_str("## Evidence\n");
+        out.push_str(&format!(
+            "- owner review: {} ready={} advisory_promotion_ready={}\n",
+            self.evidence.owner_review_verdict,
+            self.evidence.ready_for_owner_review,
+            self.evidence.advisory_promotion_ready
+        ));
+        out.push_str(&format!(
+            "- owner approval refs: {} rollback refs: {}\n",
+            self.evidence.owner_approval_refs.len(),
+            self.evidence.rollback_refs.len()
+        ));
+        if let Some(baseline_ref) = &self.evidence.baseline_ref {
+            out.push_str(&format!("- baseline_ref: {baseline_ref}\n"));
+        }
+        if let Some(metric_anchor_ref) = &self.evidence.metric_anchor_ref {
+            out.push_str(&format!("- metric_anchor_ref: {metric_anchor_ref}\n"));
+        }
+        out.push('\n');
+
+        out.push_str("## Checks\n");
+        out.push_str("| Check | Status | Evidence | Required |\n");
+        out.push_str("| --- | --- | --- | --- |\n");
+        for check in &self.checks {
+            out.push_str(&format!(
+                "| {} | {} | {} | {} |\n",
+                check.id,
+                if check.passed { "pass" } else { "blocked" },
+                pipe_safe(&check.evidence),
+                pipe_safe(&check.required)
+            ));
+        }
+        out.push('\n');
+
+        out.push_str("## Accepted Scopes\n");
+        if self.accepted_scopes.is_empty() {
+            out.push_str("- none\n");
+        } else {
+            for scope in &self.accepted_scopes {
+                out.push_str(&format!("- {}: {}\n", scope.scope, scope.reason));
+            }
+        }
+        out.push('\n');
+
+        out.push_str("## Blocked Scopes\n");
+        if self.blocked_scopes.is_empty() {
+            out.push_str("- none\n");
+        } else {
+            for scope in &self.blocked_scopes {
+                out.push_str(&format!("- {}: {}\n", scope.scope, scope.reason));
+            }
+        }
+        out.push('\n');
+
+        out.push_str("## Recommended Next Actions\n");
+        for action in &self.recommended_next_actions {
+            out.push_str(&format!("- {action}\n"));
+        }
+        out.push('\n');
+
+        out.push_str("## Non-goals\n");
+        for non_goal in &self.non_goals {
+            out.push_str(&format!("- {non_goal}\n"));
+        }
+        out
+    }
+}
+
 pub fn build_shadow_score_report_from_paths(
     fixture_paths: &[PathBuf],
     scenarios: Vec<String>,
@@ -1229,6 +1369,29 @@ pub fn build_owner_review_packet_from_paths(
         lift,
         promotion_gate,
     ))
+}
+
+pub fn build_promotion_record_from_path(
+    owner_review_packet_path: &PathBuf,
+    options: WorkflowFeedbackPromotionRecordOptions,
+) -> Result<WorkflowFeedbackPromotionRecordReport> {
+    let raw = std::fs::read_to_string(owner_review_packet_path).with_context(|| {
+        format!(
+            "reading owner review packet {}",
+            owner_review_packet_path.display()
+        )
+    })?;
+    let value: Value = serde_json::from_str(&raw).with_context(|| {
+        format!(
+            "parsing owner review packet {}",
+            owner_review_packet_path.display()
+        )
+    })?;
+    build_promotion_record_report(
+        value,
+        Some(owner_review_packet_path.display().to_string()),
+        options,
+    )
 }
 
 fn build_shadow_score_report(
@@ -1559,6 +1722,200 @@ fn build_owner_review_packet_report(
             "Does not convert owner-review readiness into runtime influence.",
         ],
     }
+}
+
+fn build_promotion_record_report(
+    owner_review_packet: Value,
+    source_path: Option<String>,
+    options: WorkflowFeedbackPromotionRecordOptions,
+) -> Result<WorkflowFeedbackPromotionRecordReport> {
+    let schema = owner_review_packet
+        .get("schema")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if schema != WORKFLOW_FEEDBACK_OWNER_REVIEW_PACKET_SCHEMA {
+        bail!(
+            "owner review packet {} has schema {schema:?}, expected {WORKFLOW_FEEDBACK_OWNER_REVIEW_PACKET_SCHEMA}",
+            source_path.as_deref().unwrap_or("<inline>")
+        );
+    }
+
+    let owner_review_verdict = owner_review_packet
+        .get("owner_review_verdict")
+        .and_then(Value::as_str)
+        .unwrap_or("<missing owner_review_verdict>")
+        .to_string();
+    let ready_for_owner_review = owner_review_packet
+        .get("ready_for_owner_review")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let advisory_promotion_ready = owner_review_packet
+        .get("advisory_promotion_ready")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let boundary_safe = owner_review_packet
+        .get("read_only")
+        .and_then(Value::as_bool)
+        == Some(true)
+        && owner_review_packet
+            .pointer("/boundary/writes_memory")
+            .and_then(Value::as_bool)
+            == Some(false)
+        && owner_review_packet
+            .pointer("/boundary/mutates_runtime_policy")
+            .and_then(Value::as_bool)
+            == Some(false)
+        && owner_review_packet
+            .pointer("/boundary/changes_retrieval_order")
+            .and_then(Value::as_bool)
+            == Some(false)
+        && owner_review_packet
+            .pointer("/boundary/runtime_influence_allowed")
+            .and_then(Value::as_bool)
+            == Some(false);
+
+    let owner_approval_refs = merged_refs(
+        json_string_array(owner_review_packet.pointer("/evidence/owner_approval_refs")),
+        options.owner_approval_refs,
+    );
+    let rollback_refs = merged_refs(
+        json_string_array(owner_review_packet.pointer("/evidence/rollback_refs")),
+        options.rollback_refs,
+    );
+    let requested_scopes = options
+        .promotion_scopes
+        .into_iter()
+        .map(|scope| scope.trim().to_string())
+        .filter(|scope| !scope.is_empty())
+        .collect::<Vec<_>>();
+    let scope_decisions = requested_scopes
+        .iter()
+        .map(|scope| promotion_scope_decision(scope))
+        .collect::<Vec<_>>();
+    let accepted_scopes = scope_decisions
+        .iter()
+        .filter(|decision| decision.accepted)
+        .cloned()
+        .collect::<Vec<_>>();
+    let blocked_scopes = scope_decisions
+        .iter()
+        .filter(|decision| !decision.accepted)
+        .cloned()
+        .collect::<Vec<_>>();
+
+    let owner_review_ready = ready_for_owner_review
+        && (owner_review_verdict == "ready_for_owner_review"
+            || owner_review_verdict == "owner_review_packet_complete");
+    let owner_approval_present = !owner_approval_refs.is_empty();
+    let rollback_present = !rollback_refs.is_empty();
+    let scopes_requested = !requested_scopes.is_empty();
+    let scopes_supported = scopes_requested && blocked_scopes.is_empty();
+
+    let promotion_record_verdict = if !boundary_safe {
+        "blocked_owner_review_boundary_violation"
+    } else if !owner_review_ready {
+        "blocked_owner_review_not_ready"
+    } else if !owner_approval_present {
+        "blocked_owner_approval_required"
+    } else if !rollback_present {
+        "blocked_rollback_required"
+    } else if !scopes_requested {
+        "blocked_no_promotion_scope"
+    } else if !scopes_supported {
+        "blocked_unsupported_promotion_scope"
+    } else {
+        "docs_memory_runbook_promotion_record_ready"
+    };
+    let promotion_record_ready =
+        promotion_record_verdict == "docs_memory_runbook_promotion_record_ready";
+
+    let checks = vec![
+        PromotionRecordCheck {
+            id: "owner_review_boundary_safe",
+            passed: boundary_safe,
+            evidence: format!("owner review packet boundary_safe={boundary_safe}"),
+            required:
+                "owner review packet is read-only and has runtime/retrieval/memory influence disabled"
+                    .to_string(),
+        },
+        PromotionRecordCheck {
+            id: "owner_review_ready",
+            passed: owner_review_ready,
+            evidence: owner_review_verdict.clone(),
+            required: "owner review packet is ready_for_owner_review or owner_review_packet_complete"
+                .to_string(),
+        },
+        PromotionRecordCheck {
+            id: "owner_approval_present",
+            passed: owner_approval_present,
+            evidence: format!("{} owner approval ref(s)", owner_approval_refs.len()),
+            required: "explicit owner approval ref for this separate promotion-record lane"
+                .to_string(),
+        },
+        PromotionRecordCheck {
+            id: "rollback_refs_present",
+            passed: rollback_present,
+            evidence: format!("{} rollback ref(s)", rollback_refs.len()),
+            required: "explicit rollback path or disable/revert handle".to_string(),
+        },
+        PromotionRecordCheck {
+            id: "promotion_scopes_supported",
+            passed: scopes_supported,
+            evidence: format!(
+                "{} accepted scope(s), {} blocked scope(s)",
+                accepted_scopes.len(),
+                blocked_scopes.len()
+            ),
+            required: "only documentation, durable_memory, and runbook scopes are allowed here"
+                .to_string(),
+        },
+    ];
+
+    let evidence = PromotionRecordEvidence {
+        owner_review_packet_path: source_path,
+        owner_review_verdict,
+        ready_for_owner_review,
+        advisory_promotion_ready,
+        owner_approval_refs,
+        rollback_refs,
+        baseline_ref: owner_review_packet
+            .pointer("/evidence/baseline_ref")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        metric_anchor_ref: owner_review_packet
+            .pointer("/evidence/metric_anchor_ref")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        requested_scopes,
+    };
+
+    Ok(WorkflowFeedbackPromotionRecordReport {
+        schema: WORKFLOW_FEEDBACK_PROMOTION_RECORD_SCHEMA,
+        read_only: true,
+        boundary: WorkflowFeedbackBoundary {
+            writes_memory: false,
+            mutates_runtime_policy: false,
+            changes_retrieval_order: false,
+            runtime_influence_allowed: false,
+            owner_gated_runtime_influence: true,
+        },
+        promotion_record_verdict,
+        promotion_record_ready,
+        evidence,
+        checks,
+        accepted_scopes,
+        blocked_scopes,
+        source_owner_review_packet: owner_review_packet,
+        recommended_next_actions: promotion_record_recommended_next_actions(
+            promotion_record_verdict,
+        ),
+        non_goals: vec![
+            "Does not write memory; it produces a reviewable record for a later memory_save or doc edit.",
+            "Does not create or install skills.",
+            "Does not change retrieval ranking, tool routing, runtime policy, prompts, profiles, or bootstrap.",
+            "Does not authorize runtime influence or default search behavior.",
+        ],
+    })
 }
 
 fn build_lift_evidence_report(
@@ -2210,6 +2567,58 @@ fn clean_refs(refs: Vec<String>) -> Vec<String> {
         .collect()
 }
 
+fn merged_refs(left: Vec<String>, right: Vec<String>) -> Vec<String> {
+    let mut seen = BTreeSet::new();
+    clean_refs(left.into_iter().chain(right).collect())
+        .into_iter()
+        .filter(|item| seen.insert(item.clone()))
+        .collect()
+}
+
+fn json_string_array(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn promotion_scope_decision(scope: &str) -> PromotionScopeDecision {
+    let normalized = scope.trim().to_ascii_lowercase().replace('-', "_");
+    match normalized.as_str() {
+        "documentation" | "docs" | "doc" => PromotionScopeDecision {
+            scope: "documentation".to_string(),
+            accepted: true,
+            reason: "Documentation-only promotion is reversible and does not alter runtime behavior."
+                .to_string(),
+        },
+        "durable_memory" | "memory" => PromotionScopeDecision {
+            scope: "durable_memory".to_string(),
+            accepted: true,
+            reason: "Durable memory promotion is allowed only as an explicit memory_save in a later step."
+                .to_string(),
+        },
+        "runbook" => PromotionScopeDecision {
+            scope: "runbook".to_string(),
+            accepted: true,
+            reason: "Runbook promotion is advisory documentation and keeps runtime influence disabled."
+                .to_string(),
+        },
+        _ => PromotionScopeDecision {
+            scope: scope.trim().to_string(),
+            accepted: false,
+            reason:
+                "This lane blocks skill, retrieval, tool-routing, runtime-policy, prompt, profile, or bootstrap promotion."
+                    .to_string(),
+        },
+    }
+}
+
 fn top_experience_counts(counts: BTreeMap<String, usize>) -> Vec<PromotionGateExperienceCount> {
     let mut rows = counts
         .into_iter()
@@ -2301,6 +2710,40 @@ fn owner_review_recommended_next_actions(owner_review_verdict: &str) -> Vec<&'st
             "Review the nested promotion gate packet and repair blocked checks before owner review.",
             "Do not treat this owner-review packet as promotion authority.",
         ],
+    }
+}
+
+fn promotion_record_recommended_next_actions(promotion_record_verdict: &str) -> Vec<&'static str> {
+    match promotion_record_verdict {
+        "docs_memory_runbook_promotion_record_ready" => vec![
+            "Apply documentation, durable-memory, or runbook promotion in a small explicit follow-up step.",
+            "Carry the owner approval ref and rollback handle into any memory_save or doc/runbook edit.",
+        ],
+        "blocked_owner_review_boundary_violation" => vec![
+            "Reject the promotion record until the owner-review packet is read-only and boundary-safe.",
+            "Regenerate the owner-review packet from safe baseline, lift, and promotion-gate evidence.",
+        ],
+        "blocked_owner_review_not_ready" => vec![
+            "Do not create a promotion record until the owner-review packet reaches ready_for_owner_review.",
+            "Repair blocked baseline, lift, or promotion-gate checks first.",
+        ],
+        "blocked_owner_approval_required" => vec![
+            "Ask for an explicit owner approval ref for this separate promotion-record lane.",
+            "Do not treat review readiness as approval.",
+        ],
+        "blocked_rollback_required" => vec![
+            "Attach a rollback path, revert handle, or disable switch before applying promotion.",
+            "Keep the packet audit-only until rollback is explicit.",
+        ],
+        "blocked_no_promotion_scope" => vec![
+            "Name the intended low-risk promotion scope explicitly.",
+            "Use only documentation, durable_memory, or runbook in this lane.",
+        ],
+        "blocked_unsupported_promotion_scope" => vec![
+            "Remove skill, retrieval, tool-routing, runtime-policy, prompt, profile, or bootstrap scopes from this lane.",
+            "Use a separate stronger authorization process for any higher-blast-radius scope.",
+        ],
+        _ => vec!["Review the promotion record manually before applying any follow-up action."],
     }
 }
 
@@ -3618,6 +4061,138 @@ mod tests {
             .find(|check| check.id == "baseline_evidence_ready")
             .expect("baseline check");
         assert!(!baseline_check.passed);
+    }
+
+    fn owner_review_packet_value_with_optional_approval(owner_approval: bool) -> Value {
+        let scenarios = ShadowScoreScenarioFixture::from_value(
+            two_scenario_fixture_value(),
+            Some("scenarios.json".to_string()),
+        )
+        .expect("scenario fixture");
+        let baseline_fixture = BaselineObservationFixture::from_value(
+            baseline_observation_fixture_value(
+                "baseline_no_experience_selected",
+                "baseline_no_experience_selected",
+            ),
+            Some("baseline.json".to_string()),
+        )
+        .expect("baseline fixture");
+        let baseline = build_baseline_evidence_report(
+            scenarios.clone(),
+            vec![baseline_fixture],
+            WorkflowFeedbackBaselineEvidenceOptions {
+                rollback_refs: vec![
+                    "rollback:disable promoted workflow feedback artifact".to_string(),
+                ],
+            },
+        )
+        .expect("baseline evidence");
+        let shadow = ShadowScoreReportEvidence::from_value(
+            two_scenario_shadow_score_value(),
+            Some("shadow.json".to_string()),
+        )
+        .expect("shadow evidence");
+        let lift = build_lift_evidence_report(
+            scenarios,
+            vec![shadow.clone(), shadow.clone()],
+            WorkflowFeedbackLiftEvidenceOptions {
+                baseline_correct: Some(baseline.evidence.baseline_correct),
+                baseline_total: Some(baseline.evidence.baseline_total),
+                min_accuracy: 0.75,
+                min_lift: 0.10,
+            },
+        )
+        .expect("lift evidence");
+        let promotion_gate = build_promotion_gate_report(
+            vec![shadow.clone(), shadow],
+            WorkflowFeedbackPromotionGateOptions {
+                rollback_refs: baseline.evidence.rollback_refs.clone(),
+                behavior_lift_refs: vec![lift.metric_anchor_ref.clone()],
+                owner_approval_refs: if owner_approval {
+                    vec!["user:owner approved docs-memory-runbook promotion".to_string()]
+                } else {
+                    Vec::new()
+                },
+                min_shadow_reports: 2,
+                min_scenarios: 2,
+                min_strong_scenarios: 2,
+                min_top_shadow_score: 60,
+            },
+        )
+        .expect("promotion gate");
+
+        build_owner_review_packet_report(baseline, lift, promotion_gate).to_json_value()
+    }
+
+    #[test]
+    fn promotion_record_accepts_docs_memory_and_runbook_scopes() {
+        let record = build_promotion_record_report(
+            owner_review_packet_value_with_optional_approval(false),
+            Some("owner-review.json".to_string()),
+            WorkflowFeedbackPromotionRecordOptions {
+                owner_approval_refs: vec![
+                    "user:owner approved docs-memory-runbook promotion".to_string(),
+                ],
+                rollback_refs: vec!["rollback:remove docs and archive memory key".to_string()],
+                promotion_scopes: vec![
+                    "documentation".to_string(),
+                    "durable_memory".to_string(),
+                    "runbook".to_string(),
+                ],
+            },
+        )
+        .expect("promotion record");
+
+        assert_eq!(record.schema, WORKFLOW_FEEDBACK_PROMOTION_RECORD_SCHEMA);
+        assert!(record.read_only);
+        assert!(!record.boundary.writes_memory);
+        assert!(!record.boundary.mutates_runtime_policy);
+        assert!(!record.boundary.changes_retrieval_order);
+        assert!(!record.boundary.runtime_influence_allowed);
+        assert_eq!(
+            record.promotion_record_verdict,
+            "docs_memory_runbook_promotion_record_ready"
+        );
+        assert!(record.promotion_record_ready);
+        assert_eq!(record.accepted_scopes.len(), 3);
+        assert!(record.blocked_scopes.is_empty());
+        assert!(record.checks.iter().all(|check| check.passed));
+        assert_eq!(
+            record.source_owner_review_packet["schema"],
+            WORKFLOW_FEEDBACK_OWNER_REVIEW_PACKET_SCHEMA
+        );
+    }
+
+    #[test]
+    fn promotion_record_blocks_runtime_and_retrieval_scopes() {
+        let record = build_promotion_record_report(
+            owner_review_packet_value_with_optional_approval(true),
+            Some("owner-review.json".to_string()),
+            WorkflowFeedbackPromotionRecordOptions {
+                rollback_refs: vec!["rollback:disable runtime switch".to_string()],
+                promotion_scopes: vec![
+                    "documentation".to_string(),
+                    "retrieval".to_string(),
+                    "runtime_policy".to_string(),
+                ],
+                ..WorkflowFeedbackPromotionRecordOptions::default()
+            },
+        )
+        .expect("promotion record");
+
+        assert_eq!(
+            record.promotion_record_verdict,
+            "blocked_unsupported_promotion_scope"
+        );
+        assert!(!record.promotion_record_ready);
+        assert_eq!(record.accepted_scopes.len(), 1);
+        assert_eq!(record.blocked_scopes.len(), 2);
+        let scope_check = record
+            .checks
+            .iter()
+            .find(|check| check.id == "promotion_scopes_supported")
+            .expect("scope check");
+        assert!(!scope_check.passed);
     }
 
     #[test]

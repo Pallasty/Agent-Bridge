@@ -491,6 +491,28 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Read-only low-risk promotion record from an owner-review packet.
+    ///
+    /// Consumes an owner-review packet plus explicit approval/rollback refs and
+    /// records only documentation, durable-memory, or runbook promotion intent.
+    /// Higher-blast-radius scopes are blocked by the packet instead of applied.
+    WorkflowFeedbackPromotionRecord {
+        /// Owner-review packet JSON emitted by workflow-feedback-owner-review-packet.
+        #[arg(long = "owner-review-packet")]
+        owner_review_packet: PathBuf,
+        /// Low-risk promotion scope. Allowed here: documentation, durable_memory, runbook.
+        #[arg(long = "promotion-scope", required = true)]
+        promotion_scopes: Vec<String>,
+        /// Explicit owner approval reference for this separate promotion-record lane.
+        #[arg(long = "owner-approval-ref")]
+        owner_approval_refs: Vec<String>,
+        /// Rollback path, revert handle, or disable-switch reference.
+        #[arg(long = "rollback-ref")]
+        rollback_refs: Vec<String>,
+        /// Emit the machine-readable JSON snapshot instead of Markdown.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -7098,6 +7120,23 @@ async fn real_main() -> Result<()> {
         );
     }
 
+    if let Cmd::WorkflowFeedbackPromotionRecord {
+        owner_review_packet,
+        promotion_scopes,
+        owner_approval_refs,
+        rollback_refs,
+        json,
+    } = &cmd
+    {
+        return run_workflow_feedback_promotion_record(
+            owner_review_packet,
+            promotion_scopes,
+            owner_approval_refs,
+            rollback_refs,
+            *json,
+        );
+    }
+
     // Palace viewer: short-lived HTTP server, opens store directly (no Hub).
     if let Cmd::Palace { op } = &cmd {
         return match op {
@@ -7473,6 +7512,7 @@ async fn real_main() -> Result<()> {
         | Cmd::WorkflowFeedbackLiftEvidence { .. }
         | Cmd::WorkflowFeedbackBaselineEvidence { .. }
         | Cmd::WorkflowFeedbackOwnerReviewPacket { .. }
+        | Cmd::WorkflowFeedbackPromotionRecord { .. }
         | Cmd::Instinct { .. } => unreachable!(),
     }
 }
@@ -7665,6 +7705,30 @@ fn run_workflow_feedback_owner_review_packet(
         },
     )
     .context("building workflow feedback owner review packet")?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&report.to_json_value())?);
+    } else {
+        print!("{}", report.render_markdown());
+    }
+    Ok(())
+}
+
+fn run_workflow_feedback_promotion_record(
+    owner_review_packet: &PathBuf,
+    promotion_scopes: &[String],
+    owner_approval_refs: &[String],
+    rollback_refs: &[String],
+    as_json: bool,
+) -> Result<()> {
+    let report = ab_bridge::workflow_feedback::build_promotion_record_from_path(
+        owner_review_packet,
+        ab_bridge::workflow_feedback::WorkflowFeedbackPromotionRecordOptions {
+            owner_approval_refs: owner_approval_refs.to_vec(),
+            rollback_refs: rollback_refs.to_vec(),
+            promotion_scopes: promotion_scopes.to_vec(),
+        },
+    )
+    .context("building workflow feedback promotion record")?;
     if as_json {
         println!("{}", serde_json::to_string_pretty(&report.to_json_value())?);
     } else {

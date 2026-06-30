@@ -443,6 +443,40 @@ The owner-review packet checks:
 - promotion gate has shadow, behavior-lift, and rollback evidence
 - owner approval is explicit and never inferred
 
+### Slice 9 - Low-Risk Promotion Record
+
+Status: landed as read-only CLI promotion record.
+
+Command:
+
+```text
+agent-bridge workflow-feedback-promotion-record \
+  --owner-review-packet /tmp/workflow-feedback-owner-review-packet.json \
+  --promotion-scope documentation \
+  --promotion-scope durable_memory \
+  --promotion-scope runbook \
+  --owner-approval-ref "<explicit owner approval ref>" \
+  --rollback-ref "<rollback handle>" \
+  --json
+```
+
+Evidence fixture:
+
+- `docs/design/fixtures/workflow-feedback-promotion-record-2026-06-30.json`
+
+This record converts a ready owner-review packet plus explicit approval into a
+low-risk promotion record. It accepts only documentation, durable memory, and
+runbook scopes in this lane. Requests for skill, retrieval, tool-routing,
+runtime-policy, prompt, profile, or bootstrap influence are blocked by the
+packet instead of applied.
+
+The promotion record checks:
+
+- owner-review packet is ready and boundary-safe
+- approval and rollback refs are explicit
+- every requested scope is low risk for this lane
+- the command itself remains read-only and does not write memory
+
 ## Non-Goals
 
 - No automatic RL training path in the near term.
@@ -453,7 +487,7 @@ The owner-review packet checks:
 
 ## Immediate Next Step
 
-Send the owner-review packet for explicit owner approval. If approved, apply any
-memory/runbook/skill/retrieval promotion only through a separate authorized lane
-with the approval ref and rollback handle attached. Runtime, retrieval, and
-tool-routing influence remain blocked by default.
+Apply the approved low-risk record by updating documentation/runbook material
+and saving a durable memory with the approval ref and rollback handle attached.
+Skill, retrieval, tool-routing, runtime-policy, prompt, profile, and bootstrap
+influence remain blocked and require a stronger separate authorization lane.
