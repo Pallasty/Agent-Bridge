@@ -36,6 +36,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::process::Command;
 use tracing::{info, warn};
 
+use crate::pty_interactive::{self, InteractiveMap};
 use crate::{AgentCapabilities, AgentRuntime, AgentSession, SpawnConfig};
 
 #[derive(Clone)]
@@ -46,6 +47,12 @@ pub struct OpenCodeFamilyRuntime {
     auto_approve_flag: &'static str,
     store: Option<Arc<dyn StateStore>>,
     children: Arc<DashMap<String, u32>>,
+    /// Launch flags for the interactive PTY entry point (the bare TUI). Host-
+    /// supplied; default empty = bare `<binary>`, which starts the kilo/opencode
+    /// TUI. The one-shot `run` path is unaffected.
+    interactive_args: Vec<String>,
+    /// SessionId → live interactive PTY session (live `send_input`).
+    interactive: InteractiveMap,
 }
 
 impl OpenCodeFamilyRuntime {
@@ -60,6 +67,8 @@ impl OpenCodeFamilyRuntime {
             auto_approve_flag: "--dangerously-skip-permissions",
             store: None,
             children: Arc::new(DashMap::new()),
+            interactive_args: Vec::new(),
+            interactive: Arc::new(DashMap::new()),
         }
     }
 
@@ -84,6 +93,8 @@ impl OpenCodeFamilyRuntime {
             auto_approve_flag: "--auto",
             store: None,
             children: Arc::new(DashMap::new()),
+            interactive_args: Vec::new(),
+            interactive: Arc::new(DashMap::new()),
         }
     }
 
@@ -102,9 +113,54 @@ impl OpenCodeFamilyRuntime {
         self
     }
 
+    /// Launch flags for the interactive PTY entry point (the bare TUI). Host-
+    /// supplied; default empty = bare `<binary>`. The one-shot `run` path is
+    /// unaffected (it always appends `run <auto_flag> <prompt>`).
+    pub fn with_interactive_args(
+        mut self,
+        args: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.interactive_args = args.into_iter().map(Into::into).collect();
+        self
+    }
+
     /// Number of in-flight sessions (testing / observability).
     pub fn live_count(&self) -> usize {
         self.children.len()
+    }
+
+    /// Number of live interactive PTY sessions (testing / observability).
+    pub fn interactive_count(&self) -> usize {
+        self.interactive.len()
+    }
+
+    /// Snapshot the merged PTY output of a live interactive session, if one
+    /// exists for `session`. Returns `None` once the session has exited (and
+    /// been finalised to the [`StateStore`]).
+    pub fn read_interactive_output(&self, session: &SessionId) -> Option<String> {
+        pty_interactive::interactive_output(&self.interactive, session)
+    }
+
+    /// Launch the kilo/opencode TUI inside a PTY the daemon owns and keep it
+    /// alive for successive [`AgentRuntime::send_input`] turns. Mirrors the
+    /// one-shot path's StateStore bookkeeping (start row at spawn, finalise on
+    /// exit). The interactive entry point is the bare binary (no `run`); the host
+    /// may add launch flags via [`Self::with_interactive_args`].
+    ///
+    /// kilo/opencode submit on a bare CR (verified against the real kilo TUI:
+    /// no Kitty keyboard protocol, bracketed-paste only) — so this uses
+    /// [`pty_interactive::SubmitProfile::ENTER`], unlike codex's Kitty-Enter.
+    async fn spawn_interactive(&self, cfg: SpawnConfig) -> Result<AgentSession> {
+        pty_interactive::spawn_interactive(
+            self.id(),
+            &self.binary,
+            &self.interactive_args,
+            &self.store,
+            &self.interactive,
+            cfg,
+            pty_interactive::SubmitProfile::ENTER,
+        )
+        .await
     }
 }
 
@@ -330,7 +386,9 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
     }
 
     async fn spawn(&self, cfg: SpawnConfig) -> Result<AgentSession> {
-        cfg.reject_unsupported_interactive(self.runtime_id)?;
+        if cfg.interactive {
+            return self.spawn_interactive(cfg).await;
+        }
 
         let prompt = cfg.initial_prompt.clone().unwrap_or_default();
         if prompt.is_empty() {
@@ -594,15 +652,26 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
         })
     }
 
-    async fn send_input(&self, _session: &SessionId, _text: &str) -> Result<()> {
-        Err(Error::InvalidArgument(format!(
-            "{}: send_input requires interactive (PTY) mode, not yet supported. \
-             Use spawn() with initial_prompt for one-shot invocations.",
-            self.runtime_id
-        )))
+    async fn send_input(&self, session: &SessionId, text: &str) -> Result<()> {
+        pty_interactive::send_input(
+            self.id(),
+            &self.interactive,
+            session,
+            text,
+            pty_interactive::SubmitProfile::ENTER,
+        )
+        .await
     }
 
     async fn kill(&self, session: &SessionId) -> Result<()> {
+        // Interactive PTY session: signal the child via its kill handle. The
+        // background reader sees EOF, reaps, and finalises the session row.
+        if let Some(result) =
+            pty_interactive::kill_interactive(self.id(), &self.interactive, session)
+        {
+            return result;
+        }
+
         let pid = match self.children.get(session.as_str()) {
             Some(p) => *p,
             None => {
@@ -630,6 +699,9 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
     }
 
     fn pid_for(&self, session: &SessionId) -> Option<u32> {
+        if let Some(pid) = pty_interactive::interactive_pid(&self.interactive, session) {
+            return Some(pid);
+        }
         self.children.get(session.as_str()).map(|kv| *kv)
     }
 
@@ -837,23 +909,146 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    async fn wait_for<F: FnMut() -> bool>(total_ms: u64, step_ms: u64, mut predicate: F) -> bool {
+        let mut waited = 0u64;
+        while waited <= total_ms {
+            if predicate() {
+                return true;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(step_ms)).await;
+            waited += step_ms;
+        }
+        predicate()
+    }
+
     #[tokio::test]
-    async fn spawn_rejects_interactive_mode() {
-        let runtime = OpenCodeFamilyRuntime::kilo().with_binary("/no/such/kilo");
-        let err = runtime
+    async fn interactive_session_multi_turn_round_trips() {
+        // `/bin/cat` is a deterministic stand-in for the kilo/opencode TUI: it
+        // stays alive and echoes each submitted line back through the PTY. This
+        // proves the PTY plumbing; the real-binary submit key is covered by the
+        // ignored `kilo_real_interactive` integration test.
+        let rt = OpenCodeFamilyRuntime::kilo().with_binary("/bin/cat");
+        let sess = rt
             .spawn(SpawnConfig {
                 cwd: "/tmp".into(),
-                env: HashMap::new(),
-                initial_prompt: Some("hello".to_string()),
-                model: None,
-                node: None,
-                user: None,
                 interactive: true,
+                ..Default::default()
             })
             .await
-            .expect_err("unsupported interactive mode must fail before spawn");
+            .expect("spawn interactive");
+        assert_eq!(rt.interactive_count(), 1);
+        assert!(
+            rt.pid_for(&sess.id).is_some(),
+            "interactive session should expose a pid"
+        );
 
-        assert!(format!("{err}").contains("interactive sessions are not supported"));
+        rt.send_input(&sess.id, "alpha-one").await.expect("turn 1");
+        let ok1 = wait_for(2000, 25, || {
+            rt.read_interactive_output(&sess.id)
+                .map(|o| o.contains("alpha-one"))
+                .unwrap_or(false)
+        })
+        .await;
+        assert!(ok1, "turn 1 should echo through the PTY");
+
+        // A second turn proves the session stayed alive (not fire-and-forget).
+        rt.send_input(&sess.id, "beta-two").await.expect("turn 2");
+        let ok2 = wait_for(2000, 25, || {
+            rt.read_interactive_output(&sess.id)
+                .map(|o| o.contains("beta-two"))
+                .unwrap_or(false)
+        })
+        .await;
+        assert!(ok2, "turn 2 should echo — proves multi-turn interactive");
+
+        rt.kill(&sess.id).await.expect("kill");
+    }
+
+    #[tokio::test]
+    async fn interactive_initial_prompt_is_submitted_as_first_turn() {
+        let rt = OpenCodeFamilyRuntime::kilo().with_binary("/bin/cat");
+        let sess = rt
+            .spawn(SpawnConfig {
+                cwd: "/tmp".into(),
+                interactive: true,
+                initial_prompt: Some("seed-prompt".into()),
+                ..Default::default()
+            })
+            .await
+            .expect("spawn interactive");
+        let ok = wait_for(2000, 25, || {
+            rt.read_interactive_output(&sess.id)
+                .map(|o| o.contains("seed-prompt"))
+                .unwrap_or(false)
+        })
+        .await;
+        assert!(
+            ok,
+            "initial_prompt should be typed + submitted as the first turn"
+        );
+        rt.kill(&sess.id).await.expect("kill");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn interactive_args_are_passed_to_pty_child() {
+        let rt = OpenCodeFamilyRuntime::kilo()
+            .with_binary("/bin/sh")
+            .with_interactive_args(["-c", "printf 'ARGV:%s\\n' \"$1\"; cat", "sh", "flag-one"]);
+        let sess = rt
+            .spawn(SpawnConfig {
+                cwd: "/tmp".into(),
+                interactive: true,
+                ..Default::default()
+            })
+            .await
+            .expect("spawn interactive shell");
+
+        let saw_arg = wait_for(2000, 25, || {
+            rt.read_interactive_output(&sess.id)
+                .map(|o| o.contains("ARGV:flag-one"))
+                .unwrap_or(false)
+        })
+        .await;
+        assert!(saw_arg, "interactive args should reach the PTY child");
+
+        rt.send_input(&sess.id, "still-live")
+            .await
+            .expect("turn after argv print");
+        let still_live = wait_for(2000, 25, || {
+            rt.read_interactive_output(&sess.id)
+                .map(|o| o.contains("still-live"))
+                .unwrap_or(false)
+        })
+        .await;
+        assert!(
+            still_live,
+            "child should remain interactive after startup args"
+        );
+
+        rt.kill(&sess.id).await.expect("kill");
+    }
+
+    #[tokio::test]
+    async fn send_input_rejected_without_interactive_session() {
+        // One-shot sessions (and unknown ids) must reject input — only live
+        // PTY sessions accept it.
+        let rt = OpenCodeFamilyRuntime::kilo().with_binary("/bin/cat");
+        let err = rt
+            .send_input(&SessionId::new(), "nope")
+            .await
+            .expect_err("send_input must fail without a live interactive session");
+        assert!(matches!(err, Error::InvalidArgument(_)));
+    }
+
+    #[tokio::test]
+    async fn kill_unknown_session_errors() {
+        let rt = OpenCodeFamilyRuntime::kilo().with_binary("/bin/cat");
+        let err = rt
+            .kill(&SessionId::new())
+            .await
+            .expect_err("killing an unknown session must error");
+        assert!(matches!(err, Error::NotFound(_)));
     }
 
     fn unique_temp_dir(prefix: &str) -> std::path::PathBuf {
