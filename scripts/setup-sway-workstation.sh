@@ -578,9 +578,18 @@ read_battery() {
                 color="#94e2d5ff"
             fi
             ;;
-        *:[0-9]|*:1[0-5]) color="#f38ba8ff" ;;
-        *:1[6-9]|*:2[0-9]|*:3[0-5]) color="#f9e2afff" ;;
-        *) color="#a6e3a1ff" ;;
+        *:[0-9]|*:1[0-5])
+            label="${ic_bat}$(level_mark "$pct")"
+            color="#f38ba8ff"
+            ;;
+        *:1[6-9]|*:2[0-9]|*:3[0-5])
+            label="${ic_bat}$(level_mark "$pct")"
+            color="#f9e2afff"
+            ;;
+        *)
+            label="${ic_bat}$(level_mark "$pct")"
+            color="#a6e3a1ff"
+            ;;
     esac
     printf '%s|%s' "${label:-$ic_bat}" "$color"
 }

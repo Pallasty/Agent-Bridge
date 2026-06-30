@@ -14,18 +14,20 @@
 //! Snapshot SHA256 fingerprint serves as the cross-machine equivalence
 //! check per §3.4 + P5.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use arrow::array::{
-    Array, Float32Array, Int32Array, Int64Array, ListArray, ListBuilder,
-    Float32Builder, Int64Builder, StringArray, StringBuilder,
+    Array, Float32Array, Float32Builder, Int32Array, Int64Array, Int64Builder, ListArray,
+    ListBuilder, StringArray, StringBuilder,
 };
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::arrow::ArrowWriter;
 use parquet::file::properties::WriterProperties;
+use parquet::format::KeyValue;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -41,6 +43,22 @@ pub const SHORT_WINDOW: usize = 100;
 pub const LONG_WINDOW: usize = 1000;
 /// Rotation cap — keep at most this many rows in the file.
 pub const MAX_SNAPSHOTS: usize = 100;
+
+/// Schema-contract version (nexus-style; mirrors `ab-memory-columnar`'s
+/// `ab.memory_columnar.v1`). Embedded in BOTH the Arrow schema metadata and the
+/// Parquet footer KV so a reader can detect schema drift before decoding a
+/// single row group. Bump the **major** (`vN`) on any incompatible column-set
+/// or encoding change. `v1` is the first *explicit* contract: pre-contract
+/// substrate.parquet files carry no contract key and are accepted as legacy
+/// (their 10-field schema is structurally identical to v1).
+pub const SUBSTRATE_SNAPSHOT_SCHEMA_CONTRACT: &str = "ab.substrate_snapshot.v1";
+/// Metadata key under which [`SUBSTRATE_SNAPSHOT_SCHEMA_CONTRACT`] is written.
+pub const SCHEMA_CONTRACT_META_KEY: &str = "ab.schema_contract";
+/// Metadata key recording the snapshot provenance.
+pub const PROVENANCE_META_KEY: &str = "ab.provenance";
+/// Human-readable provenance written into the file metadata.
+pub const PROVENANCE: &str =
+    "agent-bridge seed substrate snapshot (Parquet, multi-cadence per memo §3.4)";
 
 /// Default substrate.parquet path: `$HOME/.local/share/agent-bridge/substrate.parquet`.
 /// Returns `None` if `$HOME` is unset.
@@ -103,37 +121,49 @@ pub struct SnapshotRow {
     pub connection_logits: Vec<f32>,
 }
 
-/// Arrow schema matching [`SnapshotRow`]. Stable across releases — schema
-/// changes will require a v23 file format bump.
+/// Arrow schema matching [`SnapshotRow`]. The schema metadata carries the
+/// contract version + provenance (mirrors `ab-memory-columnar`). **Stable
+/// across releases** — any column-set change here must bump
+/// [`SUBSTRATE_SNAPSHOT_SCHEMA_CONTRACT`]; the `arrow_schema_is_stable` test
+/// locks the column set.
 pub fn arrow_schema() -> Arc<Schema> {
-    Arc::new(Schema::new(vec![
-        Field::new("step", DataType::Int64, false),
-        Field::new("cycle_ts", DataType::Int64, false),
-        Field::new("tier", DataType::Utf8, false),
-        Field::new("n_alive", DataType::Int32, false),
-        Field::new(
-            "in_strengths",
-            DataType::List(Arc::new(Field::new("item", DataType::Float32, true))),
-            false,
-        ),
-        Field::new(
-            "last_perceived_key",
-            DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
-            false,
-        ),
-        Field::new(
-            "last_perceived_ts",
-            DataType::List(Arc::new(Field::new("item", DataType::Int64, true))),
-            false,
-        ),
-        Field::new("trailing_surprise_mean_short", DataType::Float32, false),
-        Field::new("trailing_surprise_mean_long", DataType::Float32, false),
-        Field::new(
-            "connection_logits",
-            DataType::List(Arc::new(Field::new("item", DataType::Float32, true))),
-            false,
-        ),
-    ]))
+    let mut meta = HashMap::new();
+    meta.insert(
+        SCHEMA_CONTRACT_META_KEY.to_string(),
+        SUBSTRATE_SNAPSHOT_SCHEMA_CONTRACT.to_string(),
+    );
+    meta.insert(PROVENANCE_META_KEY.to_string(), PROVENANCE.to_string());
+    Arc::new(Schema::new_with_metadata(
+        vec![
+            Field::new("step", DataType::Int64, false),
+            Field::new("cycle_ts", DataType::Int64, false),
+            Field::new("tier", DataType::Utf8, false),
+            Field::new("n_alive", DataType::Int32, false),
+            Field::new(
+                "in_strengths",
+                DataType::List(Arc::new(Field::new("item", DataType::Float32, true))),
+                false,
+            ),
+            Field::new(
+                "last_perceived_key",
+                DataType::List(Arc::new(Field::new("item", DataType::Utf8, true))),
+                false,
+            ),
+            Field::new(
+                "last_perceived_ts",
+                DataType::List(Arc::new(Field::new("item", DataType::Int64, true))),
+                false,
+            ),
+            Field::new("trailing_surprise_mean_short", DataType::Float32, false),
+            Field::new("trailing_surprise_mean_long", DataType::Float32, false),
+            Field::new(
+                "connection_logits",
+                DataType::List(Arc::new(Field::new("item", DataType::Float32, true))),
+                false,
+            ),
+        ],
+        meta,
+    ))
 }
 
 /// Build a [`RecordBatch`] from a slice of rows.
@@ -249,7 +279,9 @@ pub fn batch_to_rows(batch: &RecordBatch) -> Result<Vec<SnapshotRow>, arrow::err
         .column(7)
         .as_any()
         .downcast_ref::<Float32Array>()
-        .ok_or_else(|| arrow::error::ArrowError::CastError("trailing_surprise_mean_short".into()))?;
+        .ok_or_else(|| {
+            arrow::error::ArrowError::CastError("trailing_surprise_mean_short".into())
+        })?;
     let trailing_long = batch
         .column(8)
         .as_any()
@@ -316,6 +348,9 @@ pub fn read_all(path: &Path) -> Result<Vec<SnapshotRow>, SnapshotError> {
     }
     let file = std::fs::File::open(path)?;
     let builder = ParquetRecordBatchReaderBuilder::try_new(file)?;
+    // Detect schema drift before decoding (legacy files without a contract key
+    // are accepted as v1; only an explicit version mismatch is refused).
+    verify_contract(builder.metadata().file_metadata().key_value_metadata())?;
     let reader = builder.build()?;
     let mut rows = Vec::new();
     for batch in reader {
@@ -323,6 +358,46 @@ pub fn read_all(path: &Path) -> Result<Vec<SnapshotRow>, SnapshotError> {
         rows.extend(batch_to_rows(&batch)?);
     }
     Ok(rows)
+}
+
+/// Read the schema-contract version from a snapshot's Parquet footer without
+/// decoding any row groups. `None` for a legacy (pre-contract) file.
+pub fn read_contract(path: &Path) -> Result<Option<String>, SnapshotError> {
+    let file = std::fs::File::open(path)?;
+    let builder = ParquetRecordBatchReaderBuilder::try_new(file)?;
+    let found = builder
+        .metadata()
+        .file_metadata()
+        .key_value_metadata()
+        .and_then(|kvs| {
+            kvs.iter()
+                .find(|kv| kv.key == SCHEMA_CONTRACT_META_KEY)
+                .and_then(|kv| kv.value.clone())
+        });
+    Ok(found)
+}
+
+/// Verify the embedded schema contract before decoding row groups. Tolerant of
+/// LEGACY files: a substrate.parquet written before the contract existed has no
+/// contract key — its 10-field schema is structurally identical to v1, so it is
+/// accepted (the f32 source of truth is unchanged). Only an EXPLICIT, different
+/// `vN` is refused, so a v1 reader never silently mis-decodes a future v2 file.
+fn verify_contract(kvs: Option<&Vec<KeyValue>>) -> Result<(), SnapshotError> {
+    let found = kvs.and_then(|kvs| {
+        kvs.iter()
+            .find(|kv| kv.key == SCHEMA_CONTRACT_META_KEY)
+            .and_then(|kv| kv.value.clone())
+    });
+    match found {
+        Some(v) if v == SUBSTRATE_SNAPSHOT_SCHEMA_CONTRACT => Ok(()),
+        // Legacy pre-contract file: structurally v1, accept.
+        None => Ok(()),
+        // Explicit, different version: refuse rather than mis-decode.
+        Some(v) => Err(SnapshotError::Contract {
+            expected: SUBSTRATE_SNAPSHOT_SCHEMA_CONTRACT,
+            found: v,
+        }),
+    }
 }
 
 /// Write all rows to the file, overwriting any prior contents. Creates
@@ -335,7 +410,18 @@ pub fn write_all(path: &Path, rows: &[SnapshotRow]) -> Result<(), SnapshotError>
     let tmp = path.with_extension("parquet.tmp");
     {
         let file = std::fs::File::create(&tmp)?;
-        let props = WriterProperties::builder().build();
+        let props = WriterProperties::builder()
+            .set_key_value_metadata(Some(vec![
+                KeyValue {
+                    key: SCHEMA_CONTRACT_META_KEY.to_string(),
+                    value: Some(SUBSTRATE_SNAPSHOT_SCHEMA_CONTRACT.to_string()),
+                },
+                KeyValue {
+                    key: PROVENANCE_META_KEY.to_string(),
+                    value: Some(PROVENANCE.to_string()),
+                },
+            ]))
+            .build();
         let mut writer = ArrowWriter::try_new(file, arrow_schema(), Some(props))?;
         if !rows.is_empty() {
             let batch = rows_to_batch(rows)?;
@@ -418,6 +504,11 @@ pub enum SnapshotError {
     Arrow(#[from] arrow::error::ArrowError),
     #[error("snapshot parquet error: {0}")]
     Parquet(#[from] parquet::errors::ParquetError),
+    #[error("snapshot schema-contract mismatch: expected {expected}, found {found}")]
+    Contract {
+        expected: &'static str,
+        found: String,
+    },
 }
 
 // thiserror is a sibling-of-anyhow lightweight derive; we need it pulled
@@ -525,7 +616,10 @@ mod tests {
         assert_eq!(back.len(), MAX_SNAPSHOTS);
         // The oldest surviving row should have step == extra (front-dropped).
         assert_eq!(back[0].step, extra as i64);
-        assert_eq!(back[MAX_SNAPSHOTS - 1].step, (MAX_SNAPSHOTS + extra - 1) as i64);
+        assert_eq!(
+            back[MAX_SNAPSHOTS - 1].step,
+            (MAX_SNAPSHOTS + extra - 1) as i64
+        );
     }
 
     #[test]
@@ -553,8 +647,8 @@ mod tests {
 
     #[test]
     fn arrow_schema_is_stable() {
-        // Lock the schema: any unintended change breaks this test, forcing
-        // a v23 file format bump conversation.
+        // Lock the schema: any unintended change breaks this test, forcing a
+        // bump of SUBSTRATE_SNAPSHOT_SCHEMA_CONTRACT.
         let s = arrow_schema();
         assert_eq!(s.fields().len(), 10);
         assert_eq!(s.field(0).name(), "step");
@@ -567,6 +661,56 @@ mod tests {
         assert_eq!(s.field(7).name(), "trailing_surprise_mean_short");
         assert_eq!(s.field(8).name(), "trailing_surprise_mean_long");
         assert_eq!(s.field(9).name(), "connection_logits");
+        // The schema metadata carries the explicit contract version + provenance.
+        assert_eq!(
+            s.metadata()
+                .get(SCHEMA_CONTRACT_META_KEY)
+                .map(String::as_str),
+            Some(SUBSTRATE_SNAPSHOT_SCHEMA_CONTRACT)
+        );
+        assert!(s.metadata().contains_key(PROVENANCE_META_KEY));
+    }
+
+    #[test]
+    fn written_file_carries_schema_contract() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("substrate.parquet");
+        append_row(&path, sample_row(1, SnapshotTier::Hot, 3)).unwrap();
+        // Footer-readable contract without decoding rows.
+        assert_eq!(
+            read_contract(&path).unwrap().as_deref(),
+            Some(SUBSTRATE_SNAPSHOT_SCHEMA_CONTRACT)
+        );
+        // read_all (which calls verify_contract) still round-trips.
+        assert_eq!(read_all(&path).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn verify_contract_accepts_current_and_legacy_rejects_mismatch() {
+        // Current version → Ok.
+        let current = vec![parquet::format::KeyValue {
+            key: SCHEMA_CONTRACT_META_KEY.to_string(),
+            value: Some(SUBSTRATE_SNAPSHOT_SCHEMA_CONTRACT.to_string()),
+        }];
+        assert!(verify_contract(Some(&current)).is_ok());
+
+        // Legacy file: no KV at all, or contract key absent among others → Ok.
+        assert!(verify_contract(None).is_ok());
+        let other_only = vec![parquet::format::KeyValue {
+            key: PROVENANCE_META_KEY.to_string(),
+            value: Some("x".to_string()),
+        }];
+        assert!(verify_contract(Some(&other_only)).is_ok());
+
+        // Explicit different version → refused (no silent mis-decode).
+        let future = vec![parquet::format::KeyValue {
+            key: SCHEMA_CONTRACT_META_KEY.to_string(),
+            value: Some("ab.substrate_snapshot.v2".to_string()),
+        }];
+        assert!(matches!(
+            verify_contract(Some(&future)).unwrap_err(),
+            SnapshotError::Contract { .. }
+        ));
     }
 
     #[test]
