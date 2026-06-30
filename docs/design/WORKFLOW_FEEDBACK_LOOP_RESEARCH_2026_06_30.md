@@ -477,6 +477,26 @@ The promotion record checks:
 - every requested scope is low risk for this lane
 - the command itself remains read-only and does not write memory
 
+### Slice 10 - Low-Risk Promotion Applied
+
+Status: landed as documentation/runbook promotion.
+
+Runbook:
+
+- `docs/runbooks/WORKFLOW_FEEDBACK_LOW_RISK_PROMOTION_RUNBOOK_2026_06_30.md`
+
+Durable memory:
+
+- `workflow_feedback_low_risk_promotion_applied_20260630`
+
+This slice applies Slice 9 only inside the allowed low-risk scopes:
+documentation, durable memory, and runbook material. It records the reusable
+workflow-feedback evidence chain, reproduction commands, durable-memory save
+template, rollback path, and blocked scopes.
+
+No runtime, retrieval, tool-routing, prompt, profile, bootstrap, skill, or
+MCP-visible default influence changes are authorized by this slice.
+
 ## Non-Goals
 
 - No automatic RL training path in the near term.
@@ -487,7 +507,7 @@ The promotion record checks:
 
 ## Immediate Next Step
 
-Apply the approved low-risk record by updating documentation/runbook material
-and saving a durable memory with the approval ref and rollback handle attached.
-Skill, retrieval, tool-routing, runtime-policy, prompt, profile, and bootstrap
+Use the runbook for future workflow-feedback lessons and collect evidence on
+whether it reduces repeated planning loops or improves handoff quality. Skill,
+retrieval, tool-routing, runtime-policy, prompt, profile, and bootstrap
 influence remain blocked and require a stronger separate authorization lane.
