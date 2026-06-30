@@ -32,7 +32,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::process::Command;
 use tracing::{info, warn};
 
-use crate::pty_session::{PtyExit, PtySession};
+use crate::pty_interactive::{self, InteractiveMap};
 use crate::{AgentCapabilities, AgentRuntime, AgentSession, SpawnConfig};
 
 #[derive(Clone)]
@@ -43,7 +43,7 @@ pub struct ClaudeCodeRuntime {
     /// SessionId → PID of the live one-shot child process.
     children: Arc<DashMap<String, u32>>,
     /// SessionId → live interactive PTY session (live `send_input`).
-    interactive: Arc<DashMap<String, Arc<PtySession>>>,
+    interactive: InteractiveMap,
 }
 
 impl Default for ClaudeCodeRuntime {
@@ -98,103 +98,25 @@ impl ClaudeCodeRuntime {
     /// been finalised to the [`StateStore`]). Used for observability and tests
     /// — the trait has no streaming-read method yet.
     pub fn read_interactive_output(&self, session: &SessionId) -> Option<String> {
-        self.interactive
-            .get(session.as_str())
-            .map(|kv| kv.output_snapshot())
+        pty_interactive::interactive_output(&self.interactive, session)
     }
 
     /// Launch the agent CLI inside a PTY the daemon owns and keep it alive for
     /// successive [`Self::send_input`] turns. Mirrors the one-shot path's
     /// StateStore bookkeeping (start row at spawn, finalise on exit).
     async fn spawn_interactive(&self, cfg: SpawnConfig) -> Result<AgentSession> {
-        let session_id = SessionId::new();
-        let cwd = cfg.cwd.clone();
-
-        if let Some(store) = &self.store {
-            let initial = StoredSession {
-                id: session_id.clone(),
-                runtime_id: self.id().into(),
-                cwd: cwd.clone(),
-                started_at: now_secs(),
-                ended_at: None,
-                exit_code: None,
-                stdout: None,
-                stderr: None,
-                cloud_run_id: None,
-                cloud_run_state: None,
-                cloud_session_link: None,
-            };
-            if let Err(e) = store.save_session(&initial).await {
-                warn!(session = %session_id, error = %e, "store: save_session failed");
-            }
-        }
-
         // Interactive Claude Code is the TUI (no `-p`). The host can provide
         // launch flags such as `--no-chrome` to avoid first-run prompts; tests
         // keep the default empty so `/bin/cat` remains a clean PTY stand-in.
-        let args = self.interactive_args.clone();
-        let (session, exit_rx) = PtySession::spawn(&self.binary, &args, &cwd, &cfg.env)?;
-        let session = Arc::new(session);
-        let pid = session.pid();
-        self.interactive
-            .insert(session_id.as_str().to_string(), session.clone());
-        info!(session = %session_id, pid, cwd = %cwd, "claude-code interactive (PTY) session started");
-
-        // Optional first turn: type the initial prompt and submit it.
-        if let Some(p) = cfg.initial_prompt.as_deref() {
-            if !p.is_empty() {
-                if let Err(e) = session.write_input(&format!("{p}\r")) {
-                    warn!(session = %session_id, error = %e, "claude-code: initial prompt write failed");
-                }
-            }
-        }
-
-        // Finalise on child exit (EOF on the PTY master). Mirrors the one-shot
-        // wait task: stdout carries the merged PTY stream; stderr is None
-        // because a PTY merges the two.
-        let sid_bg = session_id.clone();
-        let store_bg = self.store.clone();
-        let interactive_bg = self.interactive.clone();
-        tokio::spawn(async move {
-            let exit = exit_rx.await;
-            interactive_bg.remove(sid_bg.as_str());
-            let ended_at = now_secs();
-            match exit {
-                Ok(PtyExit { exit_code, output }) => {
-                    info!(
-                        session = %sid_bg,
-                        exit = ?exit_code,
-                        output_preview = %truncate(&output, 200),
-                        "claude-code interactive session finished"
-                    );
-                    if let Some(store) = store_bg {
-                        let _ = store
-                            .finalise_session(&sid_bg, ended_at, exit_code, Some(output), None)
-                            .await;
-                    }
-                }
-                Err(_) => {
-                    warn!(session = %sid_bg, "claude-code: pty exit channel closed without a result");
-                    if let Some(store) = store_bg {
-                        let _ = store
-                            .finalise_session(
-                                &sid_bg,
-                                ended_at,
-                                None,
-                                None,
-                                Some("pty reader ended unexpectedly".into()),
-                            )
-                            .await;
-                    }
-                }
-            }
-        });
-
-        Ok(AgentSession {
-            id: session_id,
-            runtime_id: self.id().into(),
-            cwd,
-        })
+        pty_interactive::spawn_interactive(
+            self.id(),
+            &self.binary,
+            &self.interactive_args,
+            &self.store,
+            &self.interactive,
+            cfg,
+        )
+        .await
     }
 }
 
@@ -333,29 +255,16 @@ impl AgentRuntime for ClaudeCodeRuntime {
     }
 
     async fn send_input(&self, session: &SessionId, text: &str) -> Result<()> {
-        let Some(sess) = self.interactive.get(session.as_str()).map(|kv| kv.clone()) else {
-            return Err(Error::InvalidArgument(format!(
-                "claude-code: no live interactive session {session}. One-shot (`-p`) sessions \
-                 do not accept input — spawn with `interactive: true` to open a live PTY session."
-            )));
-        };
-        // Each call submits one turn: type the text, then a carriage return.
-        // The PTY line discipline maps CR→NL on input; this is the claude-code
-        // injection profile (type-then-Enter). Run the blocking write off the
-        // runtime so a full PTY input buffer can't stall it.
-        let payload = format!("{text}\r");
-        tokio::task::spawn_blocking(move || sess.write_input(&payload))
-            .await
-            .map_err(|e| Error::Backend(format!("send_input join: {e}")))?
+        pty_interactive::send_input(self.id(), &self.interactive, session, text).await
     }
 
     async fn kill(&self, session: &SessionId) -> Result<()> {
         // Interactive PTY session: signal the child via its kill handle. The
         // background reader sees EOF, reaps, and finalises the session row.
-        if let Some(sess) = self.interactive.get(session.as_str()).map(|kv| kv.clone()) {
-            sess.kill()?;
-            info!(session = %session, pid = sess.pid(), "interactive PTY session killed");
-            return Ok(());
+        if let Some(result) =
+            pty_interactive::kill_interactive(self.id(), &self.interactive, session)
+        {
+            return result;
         }
 
         let pid = match self.children.get(session.as_str()) {
@@ -383,11 +292,8 @@ impl AgentRuntime for ClaudeCodeRuntime {
     }
 
     fn pid_for(&self, session: &SessionId) -> Option<u32> {
-        if let Some(sess) = self.interactive.get(session.as_str()) {
-            let p = sess.pid();
-            if p != 0 {
-                return Some(p);
-            }
+        if let Some(pid) = pty_interactive::interactive_pid(&self.interactive, session) {
+            return Some(pid);
         }
         self.children.get(session.as_str()).map(|kv| *kv)
     }

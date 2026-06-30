@@ -23,6 +23,7 @@ pub mod codex;
 pub mod gemini;
 pub mod opencode_family;
 pub mod oz;
+pub mod pty_interactive;
 pub mod pty_session;
 pub mod worktree;
 
