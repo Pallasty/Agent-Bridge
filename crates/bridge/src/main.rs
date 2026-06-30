@@ -347,6 +347,23 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Read-only shadow scoring over Experience Object v0 fixtures.
+    ///
+    /// Ranks whether a fixture's lesson appears useful for a held-out scenario
+    /// without changing bootstrap, retrieval ranking, tool routing, memory, or
+    /// runtime policy.
+    WorkflowFeedbackShadowScore {
+        /// Experience Object v0 fixture JSON. Repeat for multiple candidates.
+        #[arg(long = "fixture", required = true)]
+        fixtures: Vec<PathBuf>,
+        /// Held-out workflow scenario to score against. Repeat for multiple
+        /// scenarios. When omitted, a generic workflow-policy scenario is used.
+        #[arg(long = "scenario")]
+        scenarios: Vec<String>,
+        /// Emit the machine-readable JSON snapshot instead of Markdown.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -6853,6 +6870,15 @@ async fn real_main() -> Result<()> {
         return run_workflow_feedback_report(*json, *window_secs, *top_tools).await;
     }
 
+    if let Cmd::WorkflowFeedbackShadowScore {
+        fixtures,
+        scenarios,
+        json,
+    } = &cmd
+    {
+        return run_workflow_feedback_shadow_score(fixtures, scenarios, *json);
+    }
+
     // Palace viewer: short-lived HTTP server, opens store directly (no Hub).
     if let Cmd::Palace { op } = &cmd {
         return match op {
@@ -7223,6 +7249,7 @@ async fn real_main() -> Result<()> {
         | Cmd::Walkthrough { .. }
         | Cmd::ContinuityReport { .. }
         | Cmd::WorkflowFeedbackReport { .. }
+        | Cmd::WorkflowFeedbackShadowScore { .. }
         | Cmd::Instinct { .. } => unreachable!(),
     }
 }
@@ -7274,6 +7301,24 @@ async fn run_workflow_feedback_report(
     )
     .await
     .context("building workflow feedback report")?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&report.to_json_value())?);
+    } else {
+        print!("{}", report.render_markdown());
+    }
+    Ok(())
+}
+
+fn run_workflow_feedback_shadow_score(
+    fixtures: &[PathBuf],
+    scenarios: &[String],
+    as_json: bool,
+) -> Result<()> {
+    let report = ab_bridge::workflow_feedback::build_shadow_score_report_from_paths(
+        fixtures,
+        scenarios.to_vec(),
+    )
+    .context("building workflow feedback shadow score")?;
     if as_json {
         println!("{}", serde_json::to_string_pretty(&report.to_json_value())?);
     } else {

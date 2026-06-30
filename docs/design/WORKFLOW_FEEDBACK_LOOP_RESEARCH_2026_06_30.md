@@ -294,6 +294,22 @@ examples should be from completed AB lanes, not synthetic tasks.
 
 ### Slice 4 - Shadow Scoring
 
+Status: landed as read-only CLI scorer.
+
+Command:
+
+```text
+agent-bridge workflow-feedback-shadow-score \
+  --fixture docs/design/fixtures/workflow-feedback-experience-agent-send-input-2026-06-30.json \
+  --fixture docs/design/fixtures/workflow-feedback-experience-report-cli-2026-06-30.json \
+  --scenario "<held-out workflow scenario>" \
+  --json
+```
+
+Scenario fixture:
+
+- `docs/design/fixtures/workflow-feedback-shadow-score-scenarios-2026-06-30.json`
+
 Score whether a proposed lesson would have helped a held-out session. Do not
 alter bootstrap, retrieval ranking, or tool routing. Produce only advisory
 rankings and evidence.
@@ -319,7 +335,7 @@ Runtime influence requires owner approval and rollback evidence.
 
 ## Immediate Next Step
 
-Use the manually reviewed Experience Object v0 fixtures as the first evidence
-source for read-only shadow scoring. The shadow scorer should rank whether a
-proposed lesson would have helped a held-out session without changing
-bootstrap, retrieval ranking, tool routing, or runtime policy.
+Use repeated shadow-scoring runs to decide whether a lesson is stable enough to
+enter the promotion gate. Promotion still requires owner approval, rollback
+evidence, and a measured behavior-lift anchor before any runtime, retrieval, or
+tool-routing influence.

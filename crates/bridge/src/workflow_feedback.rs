@@ -7,12 +7,16 @@
 //! influence.
 
 use ab_store::{McpToolCallStats, StateStore};
-use anyhow::Result;
+use anyhow::{Context, Result, bail};
 use serde::Serialize;
 use serde_json::{Value, json};
+use std::collections::BTreeSet;
+use std::path::PathBuf;
 
 pub const WORKFLOW_FEEDBACK_REPORT_SCHEMA: &str = "agent_bridge.workflow_feedback_report.v0";
 pub const EXPERIENCE_OBJECT_SCHEMA: &str = "agent_bridge.experience.v0";
+pub const WORKFLOW_FEEDBACK_SHADOW_SCORE_SCHEMA: &str =
+    "agent_bridge.workflow_feedback_shadow_score.v0";
 
 #[derive(Debug, Clone)]
 pub struct WorkflowFeedbackReportOptions {
@@ -112,6 +116,38 @@ pub struct ProposedImprovement {
     pub title: &'static str,
     pub rationale: String,
     pub next_action: &'static str,
+    pub runtime_influence_allowed: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkflowFeedbackShadowScoreReport {
+    pub schema: &'static str,
+    pub read_only: bool,
+    pub boundary: WorkflowFeedbackBoundary,
+    pub candidate_count: usize,
+    pub scenarios: Vec<String>,
+    pub rankings: Vec<ShadowScenarioRanking>,
+    pub non_goals: Vec<&'static str>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ShadowScenarioRanking {
+    pub scenario: String,
+    pub ranked_candidates: Vec<ShadowCandidateScore>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ShadowCandidateScore {
+    pub experience_id: String,
+    pub lane: Option<String>,
+    pub source_path: Option<String>,
+    pub shadow_score: u32,
+    pub readiness_score: u32,
+    pub relevance_score: u32,
+    pub verdict: &'static str,
+    pub matched_terms: Vec<String>,
+    pub lesson: Option<String>,
+    pub falsifier: Option<String>,
     pub runtime_influence_allowed: bool,
 }
 
@@ -289,6 +325,395 @@ impl WorkflowFeedbackReport {
         out.push_str("\n```\n");
         out
     }
+}
+
+impl WorkflowFeedbackShadowScoreReport {
+    pub fn to_json_value(&self) -> Value {
+        serde_json::to_value(self).unwrap_or_else(|_| {
+            json!({
+                "schema": WORKFLOW_FEEDBACK_SHADOW_SCORE_SCHEMA,
+                "read_only": true,
+                "serialization_error": true
+            })
+        })
+    }
+
+    pub fn render_markdown(&self) -> String {
+        let mut out = String::new();
+        out.push_str("# Workflow Feedback Shadow Score\n");
+        out.push_str(&format!("schema: {}\n", self.schema));
+        out.push_str("mode: read-only shadow scoring; no memory writes, no retrieval change, no tool-routing change, no runtime policy mutation\n\n");
+
+        for ranking in &self.rankings {
+            out.push_str("## Scenario\n");
+            out.push_str(&format!("{}\n\n", ranking.scenario));
+            out.push_str("| Rank | Experience | Shadow | Readiness | Relevance | Verdict | Matched terms |\n");
+            out.push_str("| ---: | --- | ---: | ---: | ---: | --- | --- |\n");
+            for (idx, candidate) in ranking.ranked_candidates.iter().enumerate() {
+                out.push_str(&format!(
+                    "| {} | {} | {} | {} | {} | {} | {} |\n",
+                    idx + 1,
+                    pipe_safe(&candidate.experience_id),
+                    candidate.shadow_score,
+                    candidate.readiness_score,
+                    candidate.relevance_score,
+                    candidate.verdict,
+                    pipe_safe(&candidate.matched_terms.join(", "))
+                ));
+            }
+            out.push('\n');
+        }
+
+        out.push_str("## Non-goals\n");
+        for non_goal in &self.non_goals {
+            out.push_str(&format!("- {non_goal}\n"));
+        }
+        out
+    }
+}
+
+pub fn build_shadow_score_report_from_paths(
+    fixture_paths: &[PathBuf],
+    scenarios: Vec<String>,
+) -> Result<WorkflowFeedbackShadowScoreReport> {
+    let mut experiences = Vec::new();
+    for path in fixture_paths {
+        let raw = std::fs::read_to_string(path)
+            .with_context(|| format!("reading experience fixture {}", path.display()))?;
+        let value: Value = serde_json::from_str(&raw)
+            .with_context(|| format!("parsing experience fixture {}", path.display()))?;
+        experiences.push(ExperienceCandidate::from_value(
+            value,
+            Some(path.display().to_string()),
+        )?);
+    }
+    build_shadow_score_report(experiences, scenarios)
+}
+
+fn build_shadow_score_report(
+    experiences: Vec<ExperienceCandidate>,
+    scenarios: Vec<String>,
+) -> Result<WorkflowFeedbackShadowScoreReport> {
+    if experiences.is_empty() {
+        bail!("at least one experience fixture is required");
+    }
+    let scenarios = if scenarios.is_empty() {
+        vec!["Future Agent-Bridge session needs a reusable workflow lesson before changing runtime, retrieval, or tool policy.".to_string()]
+    } else {
+        scenarios
+    };
+    let rankings = scenarios
+        .iter()
+        .map(|scenario| score_scenario(scenario, &experiences))
+        .collect::<Vec<_>>();
+    Ok(WorkflowFeedbackShadowScoreReport {
+        schema: WORKFLOW_FEEDBACK_SHADOW_SCORE_SCHEMA,
+        read_only: true,
+        boundary: WorkflowFeedbackBoundary {
+            writes_memory: false,
+            mutates_runtime_policy: false,
+            changes_retrieval_order: false,
+            runtime_influence_allowed: false,
+            owner_gated_runtime_influence: true,
+        },
+        candidate_count: experiences.len(),
+        scenarios,
+        rankings,
+        non_goals: vec![
+            "Does not call memory_search or alter bootstrap.",
+            "Does not change retrieval ranking, tool routing, or runtime policy.",
+            "Does not claim causal behavior lift; it only ranks fixture/lesson fit for later review.",
+            "Does not promote any lesson without owner-gated evidence and rollback path.",
+        ],
+    })
+}
+
+#[derive(Debug, Clone)]
+struct ExperienceCandidate {
+    source_path: Option<String>,
+    experience_id: String,
+    lane: Option<String>,
+    lesson: Option<String>,
+    falsifier: Option<String>,
+    runtime_influence_allowed: bool,
+    readiness_score: u32,
+    search_text: String,
+}
+
+impl ExperienceCandidate {
+    fn from_value(value: Value, source_path: Option<String>) -> Result<Self> {
+        let schema = value
+            .get("schema")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if schema != EXPERIENCE_OBJECT_SCHEMA {
+            bail!(
+                "fixture {} has schema {schema:?}, expected {EXPERIENCE_OBJECT_SCHEMA}",
+                source_path.as_deref().unwrap_or("<inline>")
+            );
+        }
+        let experience_id = value
+            .get("experience_id")
+            .and_then(Value::as_str)
+            .filter(|s| !s.trim().is_empty())
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "fixture {} missing non-empty experience_id",
+                    source_path.as_deref().unwrap_or("<inline>")
+                )
+            })?
+            .to_string();
+        let lane = value
+            .get("lane")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let lesson = value
+            .pointer("/reflection/lesson")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let falsifier = value
+            .pointer("/reflection/falsifier")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let runtime_influence_allowed = value
+            .pointer("/promotion/runtime_influence_allowed")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let readiness_score = readiness_score(&value);
+        let search_text = candidate_search_text(&value);
+        Ok(Self {
+            source_path,
+            experience_id,
+            lane,
+            lesson,
+            falsifier,
+            runtime_influence_allowed,
+            readiness_score,
+            search_text,
+        })
+    }
+}
+
+fn score_scenario(scenario: &str, experiences: &[ExperienceCandidate]) -> ShadowScenarioRanking {
+    let scenario_tokens = tokenize(scenario);
+    let mut ranked_candidates = experiences
+        .iter()
+        .map(|candidate| score_candidate(candidate, &scenario_tokens))
+        .collect::<Vec<_>>();
+    ranked_candidates.sort_by(|a, b| {
+        b.shadow_score
+            .cmp(&a.shadow_score)
+            .then_with(|| b.relevance_score.cmp(&a.relevance_score))
+            .then_with(|| b.readiness_score.cmp(&a.readiness_score))
+            .then_with(|| a.experience_id.cmp(&b.experience_id))
+    });
+    ShadowScenarioRanking {
+        scenario: scenario.to_string(),
+        ranked_candidates,
+    }
+}
+
+fn score_candidate(
+    candidate: &ExperienceCandidate,
+    scenario_tokens: &BTreeSet<String>,
+) -> ShadowCandidateScore {
+    let candidate_tokens = tokenize(&candidate.search_text);
+    let matched_terms = scenario_tokens
+        .intersection(&candidate_tokens)
+        .take(12)
+        .cloned()
+        .collect::<Vec<_>>();
+    let relevance_score = if scenario_tokens.is_empty() {
+        0
+    } else {
+        ((matched_terms.len() as f64 / scenario_tokens.len() as f64) * 100.0).round() as u32
+    };
+    let mut shadow_score = ((candidate.readiness_score as f64 * 0.35)
+        + (relevance_score as f64 * 0.65))
+        .round() as u32;
+    if candidate.runtime_influence_allowed {
+        shadow_score = shadow_score.saturating_sub(20);
+    }
+    let verdict = if candidate.runtime_influence_allowed {
+        "blocked_runtime_influence_not_shadow_only"
+    } else if candidate.readiness_score >= 75 && relevance_score >= 35 {
+        "likely_helpful_shadow_candidate"
+    } else if candidate.readiness_score >= 60 && relevance_score >= 15 {
+        "possible_shadow_candidate"
+    } else {
+        "weak_match_needs_review"
+    };
+    ShadowCandidateScore {
+        experience_id: candidate.experience_id.clone(),
+        lane: candidate.lane.clone(),
+        source_path: candidate.source_path.clone(),
+        shadow_score: shadow_score.min(100),
+        readiness_score: candidate.readiness_score,
+        relevance_score,
+        verdict,
+        matched_terms,
+        lesson: candidate.lesson.clone(),
+        falsifier: candidate.falsifier.clone(),
+        runtime_influence_allowed: candidate.runtime_influence_allowed,
+    }
+}
+
+fn readiness_score(value: &Value) -> u32 {
+    let mut score = 0_u32;
+    if non_empty_str(value, "experience_id") {
+        score += 8;
+    }
+    if non_empty_str(value, "goal") {
+        score += 8;
+    }
+    if array_len(value, "plan") >= 2 {
+        score += 8;
+    }
+    if array_len(
+        value
+            .pointer("/trajectory/tool_spans")
+            .unwrap_or(&Value::Null),
+        "",
+    ) >= 2
+    {
+        score += 14;
+    }
+    if array_len(
+        value
+            .pointer("/trajectory/decision_points")
+            .unwrap_or(&Value::Null),
+        "",
+    ) >= 1
+    {
+        score += 10;
+    }
+    if non_empty_str_at(value, "/reflection/lesson") {
+        score += 12;
+    }
+    if non_empty_str_at(value, "/reflection/falsifier") {
+        score += 8;
+    }
+    if array_len(
+        value.pointer("/outcome/evidence").unwrap_or(&Value::Null),
+        "",
+    ) >= 2
+    {
+        score += 12;
+    }
+    if value
+        .pointer("/promotion/runtime_influence_allowed")
+        .and_then(Value::as_bool)
+        == Some(false)
+    {
+        score += 10;
+    }
+    if safety_all_false(value) {
+        score += 10;
+    }
+    score.min(100)
+}
+
+fn candidate_search_text(value: &Value) -> String {
+    let mut parts = Vec::new();
+    for pointer in [
+        "/experience_id",
+        "/lane",
+        "/goal",
+        "/reflection/lesson",
+        "/reflection/falsifier",
+        "/promotion/suggested_trigger",
+    ] {
+        if let Some(s) = value.pointer(pointer).and_then(Value::as_str) {
+            parts.push(s.to_string());
+        }
+    }
+    collect_array_strings(value.get("plan"), &mut parts);
+    collect_array_strings(value.pointer("/reflection/reusable_workflow"), &mut parts);
+    collect_array_strings(value.pointer("/outcome/evidence"), &mut parts);
+    collect_nested_text(value.pointer("/trajectory/tool_spans"), &mut parts);
+    collect_nested_text(value.pointer("/trajectory/decision_points"), &mut parts);
+    parts.join(" ")
+}
+
+fn collect_array_strings(value: Option<&Value>, parts: &mut Vec<String>) {
+    if let Some(Value::Array(items)) = value {
+        for item in items {
+            if let Some(s) = item.as_str() {
+                parts.push(s.to_string());
+            }
+        }
+    }
+}
+
+fn collect_nested_text(value: Option<&Value>, parts: &mut Vec<String>) {
+    match value {
+        Some(Value::String(s)) => parts.push(s.to_string()),
+        Some(Value::Array(items)) => {
+            for item in items {
+                collect_nested_text(Some(item), parts);
+            }
+        }
+        Some(Value::Object(map)) => {
+            for (_key, item) in map {
+                collect_nested_text(Some(item), parts);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn non_empty_str(value: &Value, key: &str) -> bool {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false)
+}
+
+fn non_empty_str_at(value: &Value, pointer: &str) -> bool {
+    value
+        .pointer(pointer)
+        .and_then(Value::as_str)
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false)
+}
+
+fn array_len(value: &Value, key: &str) -> usize {
+    let target = if key.is_empty() {
+        value
+    } else {
+        value.get(key).unwrap_or(&Value::Null)
+    };
+    target.as_array().map(Vec::len).unwrap_or(0)
+}
+
+fn safety_all_false(value: &Value) -> bool {
+    [
+        "/safety/fixture_writes_memory",
+        "/safety/fixture_changes_runtime",
+        "/safety/fixture_changes_retrieval_order",
+        "/safety/fixture_authorizes_future_runtime_influence",
+    ]
+    .iter()
+    .all(|pointer| value.pointer(pointer).and_then(Value::as_bool) == Some(false))
+}
+
+fn tokenize(input: &str) -> BTreeSet<String> {
+    const STOP: &[&str] = &[
+        "a", "an", "and", "are", "as", "before", "by", "for", "from", "in", "into", "is", "it",
+        "no", "not", "of", "or", "the", "to", "with", "without",
+    ];
+    input
+        .split(|c: char| !c.is_alphanumeric() && c != '_')
+        .filter_map(|raw| {
+            let token = raw.trim().to_ascii_lowercase();
+            if token.len() < 3 || STOP.contains(&token.as_str()) {
+                None
+            } else {
+                Some(token)
+            }
+        })
+        .collect()
 }
 
 fn build_scorecard(evidence: &WorkflowFeedbackEvidence) -> Vec<ScorecardAxis> {
@@ -660,5 +1085,104 @@ mod tests {
             .find(|axis| axis.axis == "Feedback density")
             .expect("feedback axis");
         assert_eq!(feedback.status, "low");
+    }
+
+    fn fixture_value(id: &str, lane: &str, lesson: &str, trigger: &str) -> Value {
+        json!({
+            "schema": EXPERIENCE_OBJECT_SCHEMA,
+            "experience_id": id,
+            "scope": "project:/Data/CascadeProjects/agent-bridge",
+            "lane": lane,
+            "goal": lesson,
+            "plan": ["inspect", "verify", "record"],
+            "trajectory": {
+                "tool_spans": [
+                    {"tool": "cargo test", "purpose": "verify", "outcome": "success"},
+                    {"tool": "forum_post", "purpose": "record", "outcome": "success"}
+                ],
+                "decision_points": [
+                    {"question": "policy?", "decision": "stay read-only"}
+                ]
+            },
+            "outcome": {
+                "status": "success",
+                "evidence": ["commit landed", "tests passed"]
+            },
+            "reflection": {
+                "lesson": lesson,
+                "falsifier": "If the held-out scenario no longer matches, keep this as audit-only."
+            },
+            "promotion": {
+                "skill_candidate": false,
+                "runbook_candidate": true,
+                "runtime_influence_allowed": false,
+                "owner_gate_required": true,
+                "suggested_trigger": trigger
+            },
+            "source_anchors": {
+                "commits": ["0000000"]
+            },
+            "safety": {
+                "fixture_writes_memory": false,
+                "fixture_changes_runtime": false,
+                "fixture_changes_retrieval_order": false,
+                "fixture_authorizes_future_runtime_influence": false
+            }
+        })
+    }
+
+    #[test]
+    fn shadow_score_ranks_matching_fixture_above_nonmatching_fixture() {
+        let agent = ExperienceCandidate::from_value(
+            fixture_value(
+                "exp_agent_input",
+                "agent_send_input",
+                "Interactive agent runtime send_input fixes need post-reconnect binary verification and no chrome prompt.",
+                "interactive claude code send_input runtime prompt",
+            ),
+            Some("agent.json".to_string()),
+        )
+        .expect("agent fixture");
+        let report = ExperienceCandidate::from_value(
+            fixture_value(
+                "exp_workflow_report",
+                "workflow_feedback",
+                "Workflow feedback should mature from research to read-only report to fixture before default influence.",
+                "workflow feedback report shadow scoring",
+            ),
+            Some("report.json".to_string()),
+        )
+        .expect("report fixture");
+
+        let shadow = build_shadow_score_report(
+            vec![agent, report],
+            vec![
+                "interactive Claude Code send_input stalls on chrome prompt after reconnect"
+                    .to_string(),
+            ],
+        )
+        .expect("shadow report");
+
+        assert_eq!(shadow.schema, WORKFLOW_FEEDBACK_SHADOW_SCORE_SCHEMA);
+        assert!(shadow.read_only);
+        assert!(!shadow.boundary.writes_memory);
+        assert_eq!(shadow.rankings.len(), 1);
+        let ranked = &shadow.rankings[0].ranked_candidates;
+        assert_eq!(ranked[0].experience_id, "exp_agent_input");
+        assert!(ranked[0].shadow_score > ranked[1].shadow_score);
+        assert!(!ranked[0].runtime_influence_allowed);
+    }
+
+    #[test]
+    fn shadow_score_rejects_non_experience_schema() {
+        let err = ExperienceCandidate::from_value(
+            json!({"schema": "wrong.schema", "experience_id": "bad"}),
+            None,
+        )
+        .expect_err("wrong schema must fail");
+        assert!(
+            err.to_string()
+                .contains("expected agent_bridge.experience.v0")
+        );
     }
 }
