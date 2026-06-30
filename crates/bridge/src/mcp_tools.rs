@@ -16994,6 +16994,92 @@ impl McpTool for WorktreeRemoveTool {
 }
 
 // ===========================================================================
+//                 agent_send_input (interactive PTY follow-up turns)
+// ===========================================================================
+
+pub struct AgentSendInputTool {
+    hub: Hub,
+}
+impl AgentSendInputTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for AgentSendInputTool {
+    fn name(&self) -> &'static str {
+        "agent_send_input"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Send one follow-up turn to a live PTY-backed agent session opened \
+                 with agent_spawn(interactive=true). The session row's runtime_id selects \
+                 the runtime, so input is never sent to the daemon default by accident. \
+                 One-shot or finished sessions reject this call."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Session id returned by agent_spawn."
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "One turn of input. The runtime submits it once; pass an empty string only when you intentionally want to press Enter."
+                    }
+                },
+                "required": ["id", "text"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::AgentSpawn) {
+            return Ok(ToolResult::error(e));
+        }
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let id = match args.get("id").and_then(|v| v.as_str()) {
+            Some(s) => SessionId::from_raw(s.to_string()),
+            None => return Ok(ToolResult::error("missing 'id'")),
+        };
+        let text = match args.get("text").and_then(|v| v.as_str()) {
+            Some(s) => s.to_string(),
+            None => return Ok(ToolResult::error("missing 'text'")),
+        };
+        let session = match store.load_session(&id).await? {
+            Some(s) => s,
+            None => {
+                return Ok(ToolResult::error(format!(
+                    "unknown agent session {id}"
+                )));
+            }
+        };
+        if session.ended_at.is_some() {
+            return Ok(ToolResult::error(format!(
+                "agent session {id} already finished; spawn a new interactive session"
+            )));
+        }
+        let agent = match resolve_agent_for_session(&self.hub, &session) {
+            Ok(a) => a,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        match agent.send_input(&id, &text).await {
+            Ok(()) => Ok(ToolResult::json_text(&json!({
+                "status": "sent",
+                "id": id.as_str(),
+                "runtime_id": session.runtime_id,
+                "cwd": session.cwd,
+            }))),
+            Err(e) => Ok(ToolResult::error(format!("agent_send_input: {e}"))),
+        }
+    }
+}
+
+// ===========================================================================
 //                          agent_kill (v0.3)
 // ===========================================================================
 
@@ -17130,14 +17216,7 @@ impl McpTool for AgentSessionListTool {
                     "stderr_len":  s.stderr.as_ref().map(|x| x.len()).unwrap_or(0),
                 });
                 if running {
-                    let (pid, liveness) =
-                        match self.hub.agent.as_ref().and_then(|a| a.pid_for(&s.id)) {
-                            Some(pid) => {
-                                let alive = std::path::Path::new(&format!("/proc/{pid}")).exists();
-                                (Some(pid), if alive { "alive" } else { "dead" })
-                            }
-                            None => (None, "unknown"),
-                        };
+                    let (pid, liveness) = agent_session_liveness(&self.hub, &s);
                     if let Some(p) = pid {
                         row["pid"] = json!(p);
                     }
@@ -17338,6 +17417,32 @@ fn is_local_process_agent_runtime(runtime_id: &str) -> bool {
         runtime_id,
         "claude-code" | "codex" | "kilo" | "opencode" | "gemini" | "auggie"
     )
+}
+
+fn resolve_agent_for_session(
+    hub: &Hub,
+    session: &StoredSession,
+) -> std::result::Result<Arc<dyn ab_agent::AgentRuntime>, String> {
+    hub.agents
+        .get(&session.runtime_id)
+        .cloned()
+        .or_else(|| {
+            hub.agent
+                .as_ref()
+                .filter(|agent| agent.id() == session.runtime_id)
+                .cloned()
+        })
+        .ok_or_else(|| {
+            let mut available: Vec<&str> = hub.agents.keys().map(|s| s.as_str()).collect();
+            available.sort();
+            format!(
+                "agent session {} uses runtime '{}' but this MCP process is not tracking that \
+                 runtime; available: [{}]",
+                session.id,
+                session.runtime_id,
+                available.join(", ")
+            )
+        })
 }
 
 fn agent_session_liveness(hub: &Hub, session: &StoredSession) -> (Option<u32>, &'static str) {
@@ -55253,7 +55358,7 @@ impl McpTool for BraveWebSearchTool {
 pub enum Tier {
     /// Always registered. The smallest set that lets a typical interactive
     /// Claude session work end-to-end (memory navigation, terminal control,
-    /// agent_spawn, plan/worktree basics, shell_exec, session lifecycle
+    /// agent_spawn/send_input, plan/worktree basics, shell_exec, session lifecycle
     /// bootstrap/finalize).
     Essential,
     /// Default-on. Adds hook-friendly + multi-agent + maintenance ops:
@@ -55602,7 +55707,7 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // It is audited locally and never accepts arbitrary shell commands.
     "system_control",
     // Remote session steering: a Codex orchestrator (which already carries
-    // agent_spawn + agent_session_*) can launch/drive/observe long-lived agents
+    // agent_spawn/send_input/session_*) can launch/drive/observe long-lived agents
     // in named tmux sessions and roll up a worker blackboard.
     "agent_steer_launch",
     "agent_steer_drive",
@@ -55653,6 +55758,7 @@ fn codex_lean_tool(tool_name: &str) -> bool {
             | "skills_route"
             | "skills_feedback"
             | "agent_spawn"
+            | "agent_send_input"
             | "agent_session_get"
             | "agent_session_wait"
             | "agent_session_list"
@@ -58350,12 +58456,18 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Niche,
         Arc::new(TerminalResizeTool::new(hub.clone())),
     );
-    // Agent runtime: spawn + observe sessions.
+    // Agent runtime: spawn + drive + observe sessions.
     reg_if(
         &mut reg,
         policy,
         Tier::Essential,
         Arc::new(AgentSpawnTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
+        Arc::new(AgentSendInputTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
@@ -66643,6 +66755,35 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     }
 
     #[test]
+    fn registry_exposes_agent_send_input_with_agent_surface() {
+        let profiles = [
+            (
+                "profile-essential",
+                ToolPolicy::from_values(Some("profile"), None, None, Some("essential")),
+            ),
+            (
+                "codex-lean",
+                ToolPolicy::from_values(Some("codex-lean"), None, None, None),
+            ),
+        ];
+        for (label, policy) in profiles {
+            let names: Vec<String> = build_registry_with_policy(Hub::builder().build(), policy)
+                .list()
+                .into_iter()
+                .map(|s| s.name)
+                .collect();
+            assert!(
+                names.iter().any(|n| n == "agent_spawn"),
+                "agent_spawn missing from {label}"
+            );
+            assert!(
+                names.iter().any(|n| n == "agent_send_input"),
+                "agent_send_input missing from {label}"
+            );
+        }
+    }
+
+    #[test]
     fn registry_exposes_mcp_lifecycle_digest_tool() {
         for label in [
             "codex-essential",
@@ -70974,6 +71115,104 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
     }
 
     // ── agent_spawn policy → backend mapping ──────────────────────────────
+
+    async fn wait_for_claude_output(
+        rt: &ab_agent::ClaudeCodeRuntime,
+        session: &SessionId,
+        needle: &str,
+    ) -> bool {
+        for _ in 0..80 {
+            if rt
+                .read_interactive_output(session)
+                .map(|out| out.contains(needle))
+                .unwrap_or(false)
+            {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        false
+    }
+
+    #[test]
+    fn agent_send_input_schema_exposes_interactive_contract() {
+        let schema = AgentSendInputTool::new(crate::Hub::builder().build()).schema();
+        assert_eq!(schema.name, "agent_send_input");
+        assert!(schema.description.contains("interactive"));
+        assert!(schema.description.contains("runtime_id"));
+        assert_eq!(schema.input_schema["properties"]["id"]["type"], "string");
+        assert_eq!(schema.input_schema["properties"]["text"]["type"], "string");
+        assert_eq!(schema.input_schema["required"], json!(["id", "text"]));
+    }
+
+    #[tokio::test]
+    async fn agent_send_input_routes_to_live_session_runtime() {
+        use ab_agent::AgentRuntime;
+
+        let (base_hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = base_hub.store.as_ref().expect("store").clone();
+        let rt = Arc::new(
+            ab_agent::ClaudeCodeRuntime::with_binary("/bin/cat").with_store(store.clone()),
+        );
+        let hub = crate::Hub::builder()
+            .store(store)
+            .agent(rt.clone())
+            .build();
+
+        let session = rt
+            .spawn(SpawnConfig {
+                cwd: temp_dir.display().to_string(),
+                interactive: true,
+                ..Default::default()
+            })
+            .await
+            .expect("spawn interactive cat");
+
+        let out = AgentSendInputTool::new(hub.clone())
+            .execute(
+                json!({"id": session.id.as_str(), "text": "mcp-follow-up-turn"}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("send_input execute");
+        assert!(!out.is_error, "send_input should succeed: {out:?}");
+        let payload = result_text_as_json(&out);
+        assert_eq!(payload["status"], json!("sent"));
+        assert_eq!(payload["id"], json!(session.id.as_str()));
+        assert_eq!(payload["runtime_id"], json!("claude-code"));
+
+        assert!(
+            wait_for_claude_output(&rt, &session.id, "mcp-follow-up-turn").await,
+            "follow-up turn should be written into the live PTY session"
+        );
+
+        let listed = AgentSessionListTool::new(hub)
+            .execute(
+                json!({"state": "running", "limit": 10}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("list execute");
+        assert!(!listed.is_error, "session list should succeed: {listed:?}");
+        let rows = result_text_as_json(&listed);
+        let row = rows
+            .as_array()
+            .expect("session list array")
+            .iter()
+            .find(|row| row["id"] == json!(session.id.as_str()))
+            .expect("interactive session in running list");
+        assert_eq!(row["liveness"], json!("alive"));
+        assert!(row["pid"].as_u64().is_some(), "running row should carry pid");
+
+        rt.kill(&session.id).await.expect("kill interactive cat");
+        for _ in 0..40 {
+            if rt.interactive_count() == 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
 
     #[test]
     fn agent_spawn_schema_exposes_interactive_flag() {

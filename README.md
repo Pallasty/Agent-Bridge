@@ -667,7 +667,8 @@ Claude Code sees these tools when agent-bridge is registered as an MCP server:
 | | `browser_screenshot` | Capture full-page PNG (file or inline) |
 | | `browser_extract_text` | Visible page text (`innerText`), JSON `{ text, chars }` |
 | | `browser_fill_form` | Fill first matching input/textarea (`selector` + `value`) |
-| agent | `agent_spawn` | Launch a sibling Claude Code one-shot |
+| agent | `agent_spawn` | Launch a sibling agent one-shot, or a live `claude-code` PTY with `interactive=true` |
+| | `agent_send_input` | Send one follow-up turn to a live interactive agent session |
 | | `agent_kill` | SIGTERM a running sub-agent |
 | | `agent_session_list` | List recent agent sessions |
 | | `agent_session_get` | Fetch stdout/stderr of a session |
@@ -855,13 +856,17 @@ MCP tool (`limit` 1–500, default 20).
 
 | Runtime | id | Underlying CLI | Notes |
 |---------|----|----------------|-------|
-| `ClaudeCodeRuntime` (default) | `claude-code` | `claude -p <prompt>` | One-shot local invocation; SIGTERM-able. |
+| `ClaudeCodeRuntime` (default) | `claude-code` | `claude -p <prompt>` or bare `claude` in a PTY | One-shot local invocation by default; set `interactive=true` on `agent_spawn` for a live PTY session that accepts follow-up turns via `agent_send_input`. |
 | `OzAgentRuntime` | `warp-oz` | `oz agent run-cloud --prompt <prompt> [--environment <id>]` | Spawns a Warp Oz cloud agent. The local `oz` child exits quickly after POSTing to `https://app.warp.dev/api/v1/agent/run`; the run id is captured in the session's stdout. To cancel the cloud run itself, use `oz run cancel <run-id>` — `agent_kill` only signals the local CLI child. |
 
 Switch with `export AGENT_BRIDGE_AGENT_RUNTIME=warp-oz`. Pin a default
 cloud environment with `AGENT_BRIDGE_OZ_ENVIRONMENT_ID`, or override
 per-spawn by passing `env.OZ_ENVIRONMENT_ID` to the `agent_spawn` MCP
 tool.
+
+Interactive agent sessions are currently supported only by
+`backend=claude-code`. Other backends reject `interactive=true` before
+spawning; one-shot sessions and finished sessions reject `agent_send_input`.
 
 ### Cloud Agent Lifecycle (warp-oz)
 
