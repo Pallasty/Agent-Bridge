@@ -1992,6 +1992,21 @@ pub struct EmbeddingQuantRow {
     pub embedding_i8_scale: Option<f32>,
 }
 
+/// One active `present_outcome` row's already-normalized metadata facets,
+/// read-only for the `outcome_valence_shadow` valence-derivation diagnostic
+/// (arc5 stage V0). The valence rule reads only the `verify:`/`method:`/
+/// `decision:`/`embody:` tags that `build_outcome_memory` writes
+/// (`crates/bridge/src/present_ingest.rs`); NO free-text content is read.
+/// `tags_json` holds the raw JSON-array TEXT from the `tags` column; the caller
+/// decodes it with serde_json. See
+/// `docs/design/OUTCOMES_VALENCE_TRANSPORT_CONTRACT_DESIGN_2026_06_30.md`.
+#[derive(Debug, Clone)]
+pub struct OutcomeMetaRow {
+    pub key: String,
+    pub scope: Option<String>,
+    pub tags_json: String,
+}
+
 /// Memory kinds treated as bulk-imported reference catalog rather than
 /// working memory. Excluded from `S234Counts::memories_active` so
 /// routine catalog churn (decay-archive, restore, bulk-import) doesn't
@@ -2833,6 +2848,15 @@ pub trait StateStore: Send + Sync {
     /// project identity). NULL/empty scope is reported as the literal string
     /// `"global"`. Read-only; default impl returns empty vec.
     async fn memory_scope_counts(&self) -> Result<Vec<(String, u64)>> {
+        Ok(Vec::new())
+    }
+
+    /// Read-only snapshot of active `kind='present_outcome'` rows' metadata
+    /// (key, scope, tags) for the `outcome_valence_shadow` valence-derivation
+    /// diagnostic. Reads only the normalized tag facets — never the content
+    /// body. Mutates nothing, never touches the retrieval path. Default impl
+    /// returns empty so non-SQLite stores stay trait-compatible.
+    async fn active_outcome_meta_rows(&self) -> Result<Vec<OutcomeMetaRow>> {
         Ok(Vec::new())
     }
 
