@@ -54,6 +54,10 @@ for this queue directory so callers can see whether the JSONL bridge directory
 is the workspace default, an environment-derived directory, or an explicit
 override.
 
+The default queue-directory policy is advisory. Pass top-level
+`"command_dir_policy": "contained_or_existing"` to block auto-creating a queue
+directory unless the evidence proves its parent is inside the workspace.
+
 Supported commands:
 
 - `open_file`

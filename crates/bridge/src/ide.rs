@@ -59,6 +59,35 @@ pub struct IdeCommandOptions {
     pub wait_ms: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdeCommandDirPolicy {
+    Advisory,
+    ContainedOrExisting,
+}
+
+impl IdeCommandDirPolicy {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.trim() {
+            "" | "advisory" => Some(Self::Advisory),
+            "contained_or_existing" => Some(Self::ContainedOrExisting),
+            _ => None,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Advisory => "advisory",
+            Self::ContainedOrExisting => "contained_or_existing",
+        }
+    }
+}
+
+impl Default for IdeCommandDirPolicy {
+    fn default() -> Self {
+        Self::Advisory
+    }
+}
+
 #[derive(Debug, Clone)]
 struct ResolvedCommandDir {
     path: PathBuf,
@@ -96,6 +125,15 @@ pub fn read_ide_snapshot(
 /// Commands are append-only JSONL records. The VS Code/Cursor example watches
 /// `ide-commands.jsonl` and writes matching responses to `ide-responses.jsonl`.
 pub fn queue_ide_command(command: &str, args: Value, options: IdeCommandOptions) -> Result<Value> {
+    queue_ide_command_with_dir_policy(command, args, options, IdeCommandDirPolicy::default())
+}
+
+pub fn queue_ide_command_with_dir_policy(
+    command: &str,
+    args: Value,
+    options: IdeCommandOptions,
+    command_dir_policy: IdeCommandDirPolicy,
+) -> Result<Value> {
     let command = command.trim();
     if command.is_empty() {
         return Err(Error::InvalidArgument("command is required".into()));
@@ -142,6 +180,45 @@ pub fn queue_ide_command(command: &str, args: Value, options: IdeCommandOptions)
     let create_file_gate_blocks = create_file_gate_verdict == Some("blocked");
     let create_file_gate_allows = create_file_gate_verdict == Some("allowed");
     let workspace_boundary_contained = workspace_boundary_all_contained(&workspace_boundary);
+    if let Some(reason) = command_dir_policy_block_reason(command_dir_policy, &command_dir_boundary)
+    {
+        let mut payload = Map::new();
+        payload.insert("queued".to_string(), json!(false));
+        payload.insert("status".to_string(), json!("blocked"));
+        payload.insert("command".to_string(), json!(command));
+        payload.insert(
+            "command_dir_policy".to_string(),
+            json!(command_dir_policy.as_str()),
+        );
+        payload.insert("command_dir".to_string(), json!(dir.display().to_string()));
+        payload.insert("command_dir_boundary".to_string(), command_dir_boundary);
+        payload.insert(
+            "request_path".to_string(),
+            json!(request_path.display().to_string()),
+        );
+        payload.insert(
+            "response_path".to_string(),
+            json!(response_path.display().to_string()),
+        );
+        payload.insert("workspace_boundary".to_string(), workspace_boundary);
+        payload.insert(
+            "gate".to_string(),
+            json!({
+                "schema": "agent_bridge.ide_command.command_dir_gate.v0",
+                "policy": command_dir_policy.as_str(),
+                "reason": reason,
+                "queued": false,
+            }),
+        );
+        if let Some(gate) = create_file_gate {
+            payload.insert("create_file_gate".to_string(), gate);
+        }
+        payload.insert(
+            "hint".to_string(),
+            json!("command_dir_policy=contained_or_existing blocks auto-creating an IDE command directory unless its parent canonicalizes inside the workspace."),
+        );
+        return Ok(Value::Object(payload));
+    }
     if mutating_ide_command(command)
         && (create_file_gate_blocks || (!workspace_boundary_contained && !create_file_gate_allows))
     {
@@ -154,6 +231,10 @@ pub fn queue_ide_command(command: &str, args: Value, options: IdeCommandOptions)
         payload.insert("queued".to_string(), json!(false));
         payload.insert("status".to_string(), json!("blocked"));
         payload.insert("command".to_string(), json!(command));
+        payload.insert(
+            "command_dir_policy".to_string(),
+            json!(command_dir_policy.as_str()),
+        );
         payload.insert("command_dir".to_string(), json!(dir.display().to_string()));
         payload.insert("command_dir_boundary".to_string(), command_dir_boundary);
         payload.insert(
@@ -222,6 +303,10 @@ pub fn queue_ide_command(command: &str, args: Value, options: IdeCommandOptions)
     payload.insert("status".to_string(), json!(status));
     payload.insert("id".to_string(), json!(id));
     payload.insert("command".to_string(), json!(command));
+    payload.insert(
+        "command_dir_policy".to_string(),
+        json!(command_dir_policy.as_str()),
+    );
     payload.insert("command_dir".to_string(), json!(dir.display().to_string()));
     payload.insert("command_dir_boundary".to_string(), command_dir_boundary);
     payload.insert(
@@ -795,6 +880,30 @@ fn command_dir_boundary_evidence(
             "responses": command_dir.join(RESPONSES_FILE).display().to_string(),
         },
     })
+}
+
+fn command_dir_policy_block_reason(
+    policy: IdeCommandDirPolicy,
+    command_dir_boundary: &Value,
+) -> Option<&'static str> {
+    match policy {
+        IdeCommandDirPolicy::Advisory => None,
+        IdeCommandDirPolicy::ContainedOrExisting => {
+            let creates_dir = command_dir_boundary
+                .get("creates_dir_if_missing")
+                .and_then(Value::as_bool)
+                == Some(true);
+            let verdict = command_dir_boundary
+                .get("verdict")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown");
+            if creates_dir && verdict != "contained" {
+                Some("command_dir_auto_create_not_contained")
+            } else {
+                None
+            }
+        }
+    }
 }
 
 fn effective_command_dir_path(command_dir: &Path) -> PathBuf {
@@ -1828,6 +1937,70 @@ mod tests {
         assert_eq!(boundary["verdict"], "external");
         assert_eq!(boundary["creates_dir_if_missing"], true);
         assert_eq!(boundary["contained"], false);
+        assert!(outside.join(COMMANDS_FILE).exists());
+    }
+
+    #[test]
+    fn ide_command_command_dir_policy_blocks_external_auto_create_dir() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("project");
+        let outside = tmp.path().join("outside-commands");
+        std::fs::create_dir_all(&root).expect("mkdir root");
+
+        let v = queue_ide_command_with_dir_policy(
+            "write_snapshot",
+            json!({}),
+            IdeCommandOptions {
+                command_dir: Some(outside.clone()),
+                cwd: Some(root.clone()),
+                wait_ms: 0,
+            },
+            IdeCommandDirPolicy::ContainedOrExisting,
+        )
+        .expect("queue command");
+        let boundary = &v["command_dir_boundary"];
+
+        assert_eq!(v["queued"], false);
+        assert_eq!(v["status"], "blocked");
+        assert_eq!(v["command_dir_policy"], "contained_or_existing");
+        assert_eq!(boundary["relation"], "will_create_outside_workspace");
+        assert_eq!(boundary["verdict"], "external");
+        assert_eq!(
+            v["gate"]["schema"],
+            "agent_bridge.ide_command.command_dir_gate.v0"
+        );
+        assert_eq!(v["gate"]["reason"], "command_dir_auto_create_not_contained");
+        assert!(
+            !outside.exists(),
+            "strict command_dir policy must not auto-create an external queue dir"
+        );
+    }
+
+    #[test]
+    fn ide_command_command_dir_policy_allows_existing_external_dir() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("project");
+        let outside = tmp.path().join("outside-commands");
+        std::fs::create_dir_all(&root).expect("mkdir root");
+        std::fs::create_dir_all(&outside).expect("mkdir outside");
+
+        let v = queue_ide_command_with_dir_policy(
+            "write_snapshot",
+            json!({}),
+            IdeCommandOptions {
+                command_dir: Some(outside.clone()),
+                cwd: Some(root.clone()),
+                wait_ms: 0,
+            },
+            IdeCommandDirPolicy::ContainedOrExisting,
+        )
+        .expect("queue command");
+
+        assert_eq!(v["queued"], true);
+        assert_eq!(v["status"], "queued");
+        assert_eq!(v["command_dir_policy"], "contained_or_existing");
+        assert_eq!(v["command_dir_boundary"]["relation"], "outside_workspace");
+        assert_eq!(v["command_dir_boundary"]["creates_dir_if_missing"], false);
         assert!(outside.join(COMMANDS_FILE).exists());
     }
 

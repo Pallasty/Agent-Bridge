@@ -150,6 +150,13 @@ is separate from `workspace_boundary`: it describes where Agent-Bridge writes
 `ide-commands.jsonl`, not whether command target files are safe to open or
 mutate.
 
+By default this evidence is advisory. Callers that need a stricter posture can
+set top-level `command_dir_policy` to `contained_or_existing`. In that mode,
+Agent-Bridge blocks queueing before `create_dir_all` when the command directory
+does not exist and `command_dir_boundary` cannot prove it will be created under
+the workspace. Already-existing external command directories remain compatible
+and are still reported as external evidence.
+
 `open_file` and `reveal_range` remain advisory-only. Mutating commands
 (`apply_workspace_edit`, `save_file`, and `format_document`) return
 `queued=false,status=blocked` and do not write `ide-commands.jsonl` unless every
@@ -190,6 +197,9 @@ Phase 1, landed:
 - `ide_command` adds command-dir boundary evidence for the JSONL queue
   directory, including source, pre-queue existence, auto-create posture, and
   workspace containment relation.
+- `ide_command` supports opt-in `command_dir_policy=contained_or_existing`,
+  which blocks auto-creating external or unknown command directories while
+  preserving advisory default behavior.
 - `ide_command` blocks mutating edit/save/format requests before queueing when
   their path evidence is not fully contained.
 - `ide_command` allows explicit `apply_workspace_edit` create edits only through

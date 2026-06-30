@@ -3,7 +3,9 @@
 Status: AB-BORROW-2 planning artifact. The read-only `ide_snapshot` evidence
 slice, advisory `ide_command` evidence slice, mutating-command containment
 gate, guarded `apply_workspace_edit` create-file slice, and advisory
-`command_dir_boundary` queue-directory evidence are implemented.
+`command_dir_boundary` queue-directory evidence are implemented. A compatible
+opt-in `command_dir_policy=contained_or_existing` gate is also implemented for
+callers that want to block external or unknown command-directory auto-creation.
 
 This note closes the planning step for the borrowed workspace-boundary pattern
 from `docs/design/BORROWED_PATTERNS_BACKLOG_2026_06_09.md`. It turns the
@@ -31,15 +33,20 @@ borrow into an Agent-Bridge-native evidence contract for `ide_snapshot`,
   directory. This proves the command-dir source, pre-queue existence,
   auto-create posture, effective path, and relation to the inferred workspace
   root without changing queue compatibility.
+- `ide_command` can opt into `command_dir_policy=contained_or_existing`. This
+  blocks queueing before `create_dir_all` only when the command directory is
+  missing and the evidence cannot prove it will be created inside the
+  workspace. Existing external command directories remain compatible and
+  visible as external evidence.
 - `ide_command` blocks mutating `apply_workspace_edit`, `save_file`, and
   `format_document` requests before queueing unless all referenced paths exist
   and canonicalize inside the workspace.
 
 Remaining future hardening:
 
-- command-dir evidence is advisory; a future compatibility-breaking mode may
-  gate external auto-created command directories after extension/runtime
-  deployment data is available;
+- consider whether `contained_or_existing` should become the default after
+  extension/runtime deployment data confirms no legitimate external auto-create
+  flows rely on the advisory default;
 - exclude or `.gitignore` evidence is surfaced as advisory `not_evaluated`;
 - safe new-file creation is supported only by the explicit
   `apply_workspace_edit` per-edit `create: true` contract in

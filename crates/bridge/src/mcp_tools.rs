@@ -101,7 +101,10 @@ use crate::context_budget::{
     fatigue_tier, model_supports_1m_beta, resolve_context_window,
 };
 use crate::hub::Hub;
-use crate::ide::{queue_ide_command, read_ide_snapshot, IdeCommandOptions, IdeSnapshotOptions};
+use crate::ide::{
+    queue_ide_command_with_dir_policy, read_ide_snapshot, IdeCommandDirPolicy, IdeCommandOptions,
+    IdeSnapshotOptions,
+};
 use crate::project::{changes_digest, detect_project, git_topology_preflight, resolve_cwd};
 use crate::security::Cap;
 use crate::seed_substrate as ab_seed_bridge;
@@ -50473,7 +50476,9 @@ impl McpTool for IdeCommandTool {
                  remains final containment authority. Writes JSONL to \
                  <workspace>/.agent-bridge/ide-commands.jsonl (or command_dir / \
                  AGENT_BRIDGE_IDE_COMMAND_DIR) and optionally waits for a matching response \
-                 in ide-responses.jsonl."
+                 in ide-responses.jsonl. Optional command_dir_policy=contained_or_existing \
+                 blocks auto-creating an external or unknown command directory while keeping \
+                 existing directories compatible."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -50495,6 +50500,12 @@ impl McpTool for IdeCommandTool {
                     "command_dir": {
                         "type": "string",
                         "description": "Optional explicit directory containing ide-commands.jsonl and ide-responses.jsonl."
+                    },
+                    "command_dir_policy": {
+                        "type": "string",
+                        "enum": ["advisory", "contained_or_existing"],
+                        "default": "advisory",
+                        "description": "Queue-directory safety policy. advisory only reports command_dir_boundary evidence. contained_or_existing blocks auto-creating a command directory unless command_dir_boundary proves it will be inside the workspace; already-existing external directories remain compatible."
                     },
                     "wait_ms": {
                         "type": "integer",
@@ -50532,16 +50543,30 @@ impl McpTool for IdeCommandTool {
             .and_then(|v| v.as_u64())
             .unwrap_or(0)
             .min(30_000);
+        let command_dir_policy = match args
+            .get("command_dir_policy")
+            .and_then(|v| v.as_str())
+            .and_then(IdeCommandDirPolicy::from_str)
+        {
+            Some(policy) => policy,
+            None if args.get("command_dir_policy").is_some() => {
+                return Ok(ToolResult::error(
+                    "invalid command_dir_policy; expected advisory or contained_or_existing",
+                ))
+            }
+            None => IdeCommandDirPolicy::default(),
+        };
         let options = IdeCommandOptions {
             command_dir,
             cwd,
             wait_ms,
         };
 
-        let res =
-            tokio::task::spawn_blocking(move || queue_ide_command(&command, command_args, options))
-                .await
-                .map_err(|e| ab_core::Error::Backend(format!("ide_command task: {e}")))?;
+        let res = tokio::task::spawn_blocking(move || {
+            queue_ide_command_with_dir_policy(&command, command_args, options, command_dir_policy)
+        })
+        .await
+        .map_err(|e| ab_core::Error::Backend(format!("ide_command task: {e}")))?;
         match res {
             Ok(v) => Ok(ToolResult::json_text(&v)),
             Err(e) => Ok(ToolResult::error(e.to_string())),
