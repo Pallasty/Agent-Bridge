@@ -11972,6 +11972,18 @@ fn cli_env_truthy(key: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn cli_env_falsey(key: &str) -> bool {
+    std::env::var(key)
+        .ok()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "0" | "false" | "no" | "off"
+            )
+        })
+        .unwrap_or(false)
+}
+
 fn run_biocortex_retrieval_opt_in_runtime_transition_gate(
     runtime_readiness_packet_json: &std::path::Path,
     mut opts: BioCortexRetrievalOptInRuntimeTransitionGateOptions,
@@ -19520,8 +19532,18 @@ async fn build_hub() -> Result<Hub> {
         }
         _ => {
             let bin = std::env::var("AGENT_BRIDGE_CLAUDE_BIN").unwrap_or_else(|_| "claude".into());
+            let interactive_args =
+                if cli_env_falsey("AGENT_BRIDGE_CLAUDE_INTERACTIVE_NO_CHROME") {
+                    Vec::new()
+                } else {
+                    vec!["--no-chrome".to_string()]
+                };
             tracing::info!(runtime = "claude-code", binary = %bin, "agent runtime selected");
-            Arc::new(ClaudeCodeRuntime::with_binary(bin).with_store(store.clone()))
+            Arc::new(
+                ClaudeCodeRuntime::with_binary(bin)
+                    .with_interactive_args(interactive_args)
+                    .with_store(store.clone()),
+            )
         }
     };
 

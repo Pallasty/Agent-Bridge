@@ -38,6 +38,7 @@ use crate::{AgentCapabilities, AgentRuntime, AgentSession, SpawnConfig};
 #[derive(Clone)]
 pub struct ClaudeCodeRuntime {
     binary: String,
+    interactive_args: Vec<String>,
     store: Option<Arc<dyn StateStore>>,
     /// SessionId → PID of the live one-shot child process.
     children: Arc<DashMap<String, u32>>,
@@ -49,6 +50,7 @@ impl Default for ClaudeCodeRuntime {
     fn default() -> Self {
         Self {
             binary: "claude".into(),
+            interactive_args: Vec::new(),
             store: None,
             children: Arc::new(DashMap::new()),
             interactive: Arc::new(DashMap::new()),
@@ -63,10 +65,18 @@ impl ClaudeCodeRuntime {
     pub fn with_binary(binary: impl Into<String>) -> Self {
         Self {
             binary: binary.into(),
+            interactive_args: Vec::new(),
             store: None,
             children: Arc::new(DashMap::new()),
             interactive: Arc::new(DashMap::new()),
         }
+    }
+    pub fn with_interactive_args(
+        mut self,
+        args: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.interactive_args = args.into_iter().map(Into::into).collect();
+        self
     }
     pub fn with_store(mut self, store: Arc<dyn StateStore>) -> Self {
         self.store = Some(store);
@@ -119,10 +129,10 @@ impl ClaudeCodeRuntime {
             }
         }
 
-        // Interactive Claude Code is the bare CLI (no `-p`); flag tuning
-        // (model, etc.) for the TUI is follow-up — the one-shot `-p` path has
-        // no model flag either. The binary is overridable for tests.
-        let args: Vec<String> = Vec::new();
+        // Interactive Claude Code is the TUI (no `-p`). The host can provide
+        // launch flags such as `--no-chrome` to avoid first-run prompts; tests
+        // keep the default empty so `/bin/cat` remains a clean PTY stand-in.
+        let args = self.interactive_args.clone();
         let (session, exit_rx) = PtySession::spawn(&self.binary, &args, &cwd, &cfg.env)?;
         let session = Arc::new(session);
         let pid = session.pid();
@@ -491,6 +501,49 @@ mod tests {
             ok,
             "initial_prompt should be typed + submitted as the first turn"
         );
+        rt.kill(&sess.id).await.expect("kill");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn interactive_args_are_passed_to_pty_child() {
+        let rt = ClaudeCodeRuntime::with_binary("/bin/sh").with_interactive_args([
+            "-c",
+            "printf 'ARGV:%s\\n' \"$1\"; cat",
+            "sh",
+            "flag-one",
+        ]);
+        let sess = rt
+            .spawn(SpawnConfig {
+                cwd: "/tmp".into(),
+                interactive: true,
+                ..Default::default()
+            })
+            .await
+            .expect("spawn interactive shell");
+
+        let saw_arg = wait_for(2000, 25, || {
+            rt.read_interactive_output(&sess.id)
+                .map(|o| o.contains("ARGV:flag-one"))
+                .unwrap_or(false)
+        })
+        .await;
+        assert!(saw_arg, "interactive args should reach the PTY child");
+
+        rt.send_input(&sess.id, "still-live")
+            .await
+            .expect("turn after argv print");
+        let still_live = wait_for(2000, 25, || {
+            rt.read_interactive_output(&sess.id)
+                .map(|o| o.contains("still-live"))
+                .unwrap_or(false)
+        })
+        .await;
+        assert!(
+            still_live,
+            "child should remain interactive after startup args"
+        );
+
         rt.kill(&sess.id).await.expect("kill");
     }
 
