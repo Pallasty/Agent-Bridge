@@ -1,8 +1,8 @@
 # AB Workspace Boundary Evidence Plan - 2026-06-30
 
-Status: AB-BORROW-2 planning artifact. The first read-only `ide_snapshot`
-evidence slice and the advisory `ide_command` evidence slice are implemented;
-mutating-command enforcement remains pending.
+Status: AB-BORROW-2 planning artifact. The read-only `ide_snapshot` evidence
+slice, advisory `ide_command` evidence slice, and mutating-command containment
+gate are implemented.
 
 This note closes the planning step for the borrowed workspace-boundary pattern
 from `docs/design/BORROWED_PATTERNS_BACKLOG_2026_06_09.md`. It turns the
@@ -23,15 +23,20 @@ borrow into an Agent-Bridge-native evidence contract for `ide_snapshot`,
   for a matching response.
 - The command queue supports read/navigation commands and richer future commands
   such as `apply_workspace_edit`, `save_file`, and `format_document`.
-- `ide_command` returns advisory `workspace_boundary` evidence for
-  path-carrying commands while preserving the queued JSONL request unchanged.
+- `ide_command` returns `workspace_boundary` evidence for path-carrying
+  commands and preserves the queued JSONL request unchanged when queueing is
+  allowed.
+- `ide_command` blocks mutating `apply_workspace_edit`, `save_file`, and
+  `format_document` requests before queueing unless all referenced paths exist
+  and canonicalize inside the workspace.
 
-The remaining part is enforcement for mutating commands:
+Remaining future hardening:
 
 - command directory resolution does not prove that queued command paths are
   under the workspace;
 - exclude or `.gitignore` evidence is surfaced as advisory `not_evaluated`;
-- mutating IDE commands do not yet require contained paths before queueing.
+- safe new-file creation is not supported by this gate because missing paths
+  are still reported as `missing_path` rather than guessed contained.
 
 ## Evidence Contract
 
@@ -112,7 +117,7 @@ Implemented advisory behavior:
 - `apply_workspace_edit`, `save_file`, and `format_document`: include advisory
   boundary evidence in the response while preserving queue semantics.
 
-Pending enforcement behavior:
+Implemented enforcement behavior:
 
 - `apply_workspace_edit`, `save_file`, and `format_document`: require a
   contained workspace path before queueing, because those commands can mutate

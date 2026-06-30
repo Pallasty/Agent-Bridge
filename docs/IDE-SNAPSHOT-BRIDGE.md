@@ -138,7 +138,14 @@ Agent-Bridge responses also include advisory `workspace_boundary` evidence for
 commands that carry file paths. This evidence is derived before queueing from
 `args.workspace_root` / `workspaceRoot`, `cwd`, or a `<workspace>/.agent-bridge`
 command directory, plus command path fields such as `args.path` and
-`args.edits[*].path`. It does not block, rewrite, or remove queued requests.
+`args.edits[*].path`.
+
+`open_file` and `reveal_range` remain advisory-only. Mutating commands
+(`apply_workspace_edit`, `save_file`, and `format_document`) return
+`queued=false,status=blocked` and do not write `ide-commands.jsonl` unless every
+referenced path exists and canonicalizes inside the workspace. New-file edits
+therefore stay blocked until a later reviewed lane adds a safe create-file
+contract.
 
 Supported commands in the VS Code/Cursor example:
 
@@ -157,8 +164,10 @@ Phase 1, landed:
 
 - `ide_snapshot` MCP tool reads, normalizes, truncates, and marks stale snapshots.
 - `ide_snapshot` adds read-only workspace-boundary evidence for snapshot paths.
-- `ide_command` adds advisory workspace-boundary evidence for path-carrying
-  command requests without changing queue semantics.
+- `ide_command` adds workspace-boundary evidence for path-carrying command
+  requests.
+- `ide_command` blocks mutating edit/save/format requests before queueing when
+  their path evidence is not fully contained.
 - The tool is editor-agnostic and registered in the Essential profile.
 
 Phase 2, landed:

@@ -113,11 +113,36 @@ pub fn queue_ide_command(command: &str, args: Value, options: IdeCommandOptions)
     }
 
     let dir = resolve_command_dir(options.command_dir.as_deref(), options.cwd.as_deref())?;
-    std::fs::create_dir_all(&dir).map_err(Error::Io)?;
     let request_path = dir.join(COMMANDS_FILE);
     let response_path = dir.join(RESPONSES_FILE);
     let workspace_boundary =
         command_workspace_boundary_evidence(command, &args, options.cwd.as_deref(), &dir);
+    if mutating_ide_command(command) && !workspace_boundary_all_contained(&workspace_boundary) {
+        let actual_verdict = workspace_boundary
+            .get("verdict")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown")
+            .to_string();
+        return Ok(json!({
+            "queued": false,
+            "status": "blocked",
+            "command": command,
+            "command_dir": dir.display().to_string(),
+            "request_path": request_path.display().to_string(),
+            "response_path": response_path.display().to_string(),
+            "workspace_boundary": workspace_boundary,
+            "gate": {
+                "schema": "agent_bridge.ide_command.workspace_boundary_gate.v0",
+                "required_verdict": "contained",
+                "actual_verdict": actual_verdict,
+                "mutating_command": true,
+                "queued": false,
+            },
+            "hint": "mutating IDE commands require all referenced paths to exist and canonicalize inside the workspace before queueing.",
+        }));
+    }
+
+    std::fs::create_dir_all(&dir).map_err(Error::Io)?;
     let now_ms = system_time_to_unix_ms(SystemTime::now()).unwrap_or(0);
     let id = format!(
         "idecmd-{now_ms}-{}-{}",
@@ -647,6 +672,17 @@ fn command_path_candidates(command: &str, args: &Value) -> Vec<(String, PathInpu
         _ => {}
     }
     candidates
+}
+
+fn mutating_ide_command(command: &str) -> bool {
+    matches!(
+        command,
+        "apply_workspace_edit" | "save_file" | "format_document"
+    )
+}
+
+fn workspace_boundary_all_contained(workspace_boundary: &Value) -> bool {
+    workspace_boundary.get("verdict").and_then(Value::as_str) == Some("contained")
 }
 
 fn workspace_root_evidence(root: Option<&PathInput>) -> (Value, Option<PathBuf>) {
@@ -1292,6 +1328,81 @@ mod tests {
         assert_eq!(
             path_entry_by_role(boundary, "args.edits[0].path")["relation"],
             "inside_workspace"
+        );
+    }
+
+    #[test]
+    fn ide_command_mutating_gate_blocks_outside_save_file_before_queueing() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("project");
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&root).expect("mkdir root");
+        std::fs::create_dir_all(&outside).expect("mkdir outside");
+        let outside_file = outside.join("note.txt");
+        std::fs::write(&outside_file, "outside\n").expect("write outside");
+
+        let v = queue_ide_command(
+            "save_file",
+            json!({ "path": outside_file.display().to_string() }),
+            IdeCommandOptions {
+                command_dir: None,
+                cwd: Some(root.clone()),
+                wait_ms: 0,
+            },
+        )
+        .expect("queue command");
+        let command_file = root.join(".agent-bridge").join(COMMANDS_FILE);
+        let boundary = &v["workspace_boundary"];
+
+        assert_eq!(v["queued"], false);
+        assert_eq!(v["status"], "blocked");
+        assert_eq!(v["gate"]["actual_verdict"], "outside_workspace");
+        assert_eq!(boundary["verdict"], "outside_workspace");
+        assert_eq!(
+            path_entry_by_role(boundary, "args.path")["relation"],
+            "outside_workspace"
+        );
+        assert!(
+            !command_file.exists(),
+            "blocked mutating command must not be queued"
+        );
+    }
+
+    #[test]
+    fn ide_command_mutating_gate_blocks_missing_edit_path() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("project");
+        std::fs::create_dir_all(&root).expect("mkdir root");
+
+        let v = queue_ide_command(
+            "apply_workspace_edit",
+            json!({
+                "edits": [
+                    { "path": "src/new.rs", "text": "pub fn new_file() {}\n" }
+                ],
+                "save": false
+            }),
+            IdeCommandOptions {
+                command_dir: None,
+                cwd: Some(root.clone()),
+                wait_ms: 0,
+            },
+        )
+        .expect("queue command");
+        let command_file = root.join(".agent-bridge").join(COMMANDS_FILE);
+        let boundary = &v["workspace_boundary"];
+
+        assert_eq!(v["queued"], false);
+        assert_eq!(v["status"], "blocked");
+        assert_eq!(v["gate"]["actual_verdict"], "needs_review");
+        assert_eq!(boundary["verdict"], "needs_review");
+        assert_eq!(
+            path_entry_by_role(boundary, "args.edits[0].path")["relation"],
+            "missing_path"
+        );
+        assert!(
+            !command_file.exists(),
+            "blocked mutating command must not be queued"
         );
     }
 
