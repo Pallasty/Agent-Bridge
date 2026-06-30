@@ -548,13 +548,13 @@ CREATE INDEX IF NOT EXISTS idx_memory_coactivation_b       ON memory_coactivatio
 CREATE INDEX IF NOT EXISTS idx_memory_coactivation_count   ON memory_coactivation(count DESC);
 "#;
 
-// Outcome-collector prototype (flag-gated, default-OFF): lazily-created
-// telemetry table for the surfaced-key → memory_get "used" attribution. NOT a
-// versioned migration (the feature is prototype-grade + flag-gated; promote to a
-// real SCHEMA_V* migration only if the owner green-lights consumption). One row
-// per surfaced key per search; `used_at` is stamped when an explicit memory_get
-// of that key lands within the attribution window (NULL = "ignored" so far).
-const RETRIEVAL_SURFACING_DDL: &str = r#"
+// v39 — Outcome-collector prototype (flag-gated, default-OFF): telemetry table
+// for surfaced-key → memory_get "used" attribution. The table exists after
+// migration, but rows are written only when AGENT_BRIDGE_OUTCOME_COLLECTOR is
+// explicitly enabled. One row per surfaced key per search; `used_at` is stamped
+// when an explicit memory_get of that key lands within the attribution window
+// (NULL = "ignored" so far).
+const SCHEMA_V39_RETRIEVAL_SURFACING: &str = r#"
 CREATE TABLE IF NOT EXISTS retrieval_surfacing (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     memory_key  TEXT    NOT NULL,
@@ -1596,6 +1596,23 @@ impl SqliteStore {
                 // for every legacy row regardless. This is honesty, not correctness.
                 c.execute("UPDATE memory_coactivation SET last_cofire_at = first_at", [])?;
                 let _ = c.execute("UPDATE schema_meta SET value='38' WHERE key='version'", []);
+            }
+
+            // ── v39: retrieval_surfacing telemetry table (Outcome Collector).
+            // Default-OFF behavior still writes zero rows unless
+            // AGENT_BRIDGE_OUTCOME_COLLECTOR is enabled, but the schema itself is
+            // now formal and versioned so deployment/review can reason about it
+            // without runtime lazy DDL.
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "38".to_string());
+            if cur.as_str() == "38" {
+                c.execute_batch(SCHEMA_V39_RETRIEVAL_SURFACING)?;
+                let _ = c.execute("UPDATE schema_meta SET value='39' WHERE key='version'", []);
             }
             Ok(())
         })
@@ -6556,10 +6573,9 @@ impl StateStore for SqliteStore {
         }
     }
 
-    /// Outcome-collector prototype — see the trait doc. The `retrieval_surfacing`
-    /// table is created LAZILY here (no versioned migration: the whole feature is
-    /// flag-gated + prototype-grade; promote to a real migration only if the owner
-    /// green-lights consumption). Append-only; fail-soft like record_coactivation.
+    /// Outcome-collector prototype — see the trait doc. The v39
+    /// `retrieval_surfacing` table is versioned schema; writes remain flag-gated
+    /// by the MCP layer. Append-only; fail-soft like record_coactivation.
     async fn record_retrieval_surfacing(
         &self,
         surfaced: &[(String, i64)],
@@ -6576,7 +6592,6 @@ impl StateStore for SqliteStore {
         let res = self
             .conn
             .call(move |c| -> RusqliteResult<()> {
-                c.execute_batch(RETRIEVAL_SURFACING_DDL)?;
                 let tx = c.transaction()?;
                 {
                     let mut stmt = tx.prepare(
@@ -6610,7 +6625,6 @@ impl StateStore for SqliteStore {
         let res = self
             .conn
             .call(move |c| -> RusqliteResult<u64> {
-                c.execute_batch(RETRIEVAL_SURFACING_DDL)?;
                 let n = c.execute(
                     "UPDATE retrieval_surfacing
                         SET used_at = ?1
@@ -17086,7 +17100,7 @@ mod tests {
             .await
             .expect("inspect migrated rows");
 
-        assert_eq!(version, "38"); // v38 = bounded coactivation-latch (last_cofire_at warmth signal); latest after all migrations
+        assert_eq!(version, "39"); // v39 = retrieval_surfacing outcome telemetry table; latest after all migrations
         assert_eq!(bad_count, 0);
         assert_eq!(mem_created, 1_779_641_229_i64);
         assert_eq!(post_created, 1_779_641_229_i64);
@@ -18491,7 +18505,7 @@ mod tests {
             })
             .await
             .expect("probe schema");
-        assert_eq!(v, "38", "schema at v38");
+        assert_eq!(v, "39", "schema after v39");
         assert_eq!(n, 1, "last_cofire_at present exactly once");
 
         seed_pair_for_decay(&store, "a", "b", 3, 1_000).await; // insert without last_cofire_at
@@ -18541,8 +18555,50 @@ mod tests {
             })
             .await
             .expect("probe after upgrade");
-        assert_eq!(v, "38", "re-open ran the v38 rung");
+        assert_eq!(v, "39", "re-open ran through v39");
         assert_eq!(lcf, 5_000, "backfill seeded last_cofire_at from first_at");
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn v39_schema_adds_retrieval_surfacing_table() {
+        // Outcome Collector remains default-OFF at behavior level, but the storage
+        // substrate is a real migration: the table + indexes must exist after open.
+        let (dir, store) = fresh_store("v39-retrieval-surfacing").await;
+        let (v, table_n, key_idx_n, at_idx_n): (String, i64, i64, i64) = store
+            .conn
+            .call(|c| -> RusqliteResult<(String, i64, i64, i64)> {
+                let v: String = c.query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                let table_n: i64 = c.query_row(
+                    "SELECT COUNT(*) FROM sqlite_master \
+                     WHERE type='table' AND name='retrieval_surfacing'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                let key_idx_n: i64 = c.query_row(
+                    "SELECT COUNT(*) FROM sqlite_master \
+                     WHERE type='index' AND name='idx_retrieval_surfacing_key'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                let at_idx_n: i64 = c.query_row(
+                    "SELECT COUNT(*) FROM sqlite_master \
+                     WHERE type='index' AND name='idx_retrieval_surfacing_at'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                Ok((v, table_n, key_idx_n, at_idx_n))
+            })
+            .await
+            .expect("probe v39 schema");
+        assert_eq!(v, "39", "schema after v39");
+        assert_eq!(table_n, 1, "retrieval_surfacing table exists");
+        assert_eq!(key_idx_n, 1, "key/surfaced_at index exists");
+        assert_eq!(at_idx_n, 1, "surfaced_at index exists");
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
@@ -21756,7 +21812,7 @@ mod tests {
         let v = store.schema_meta_version().await.expect("query");
         assert_eq!(
             v.as_deref(),
-            Some("38"),
+            Some("39"),
             "if schema bumped, update both this assertion and S5 docs"
         );
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
@@ -22241,7 +22297,7 @@ mod tests {
             })
             .await
             .expect("probe schema");
-        assert_eq!(probe.0, "38", "schema must be at v38");
+        assert_eq!(probe.0, "39", "schema must be at v39");
         assert_eq!(
             (probe.1, probe.2, probe.3),
             (1, 1, 1),
@@ -22274,8 +22330,8 @@ mod tests {
             .expect("probe after reopen");
         assert_eq!(
             again,
-            ("38".to_string(), 2),
-            "re-open stays at v38 with both columns, no duplicate ALTER"
+            ("39".to_string(), 2),
+            "re-open stays at v39 with both columns, no duplicate ALTER"
         );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;

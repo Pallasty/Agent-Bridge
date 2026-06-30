@@ -19118,8 +19118,8 @@ fn recall_semantic_fallback_enabled() -> bool {
 
 /// Outcome-collector prototype gate. **Default-OFF** — only an explicit
 /// `AGENT_BRIDGE_OUTCOME_COLLECTOR=1`/`true` enables the surfaced-key logging
-/// (in `memory_search`) and the `memory_get` "used" attribution. Until then the
-/// `retrieval_surfacing` table is never created and behavior is byte-identical.
+/// (in `memory_search`) and the `memory_get` "used" attribution. The v39 table
+/// exists after store migration, but no rows are written while the flag is off.
 /// Pure (env split out) so the policy is unit-testable. See the Phase-0 study:
 /// the signal is real + de-contaminated but sparse, so this only SEEDS accrual.
 fn outcome_collector_enabled_from(env_val: Option<&str>) -> bool {
@@ -19154,7 +19154,7 @@ fn fallback_embedder_ready() -> bool {
 
 #[cfg(test)]
 mod recall_semantic_fallback_tests {
-    use super::recall_semantic_fallback_enabled_from;
+    use super::{outcome_collector_enabled_from, recall_semantic_fallback_enabled_from};
 
     #[test]
     fn semantic_fallback_default_off_unless_truthy() {
@@ -19167,6 +19167,19 @@ mod recall_semantic_fallback_tests {
         assert!(recall_semantic_fallback_enabled_from(Some("1")));
         assert!(recall_semantic_fallback_enabled_from(Some("true")));
         assert!(recall_semantic_fallback_enabled_from(Some("TRUE")));
+    }
+
+    #[test]
+    fn outcome_collector_default_off_unless_truthy() {
+        // Default-OFF: unset / "0" / arbitrary values write zero telemetry rows.
+        assert!(!outcome_collector_enabled_from(None));
+        assert!(!outcome_collector_enabled_from(Some("0")));
+        assert!(!outcome_collector_enabled_from(Some("")));
+        assert!(!outcome_collector_enabled_from(Some("yes")));
+        // Only an explicit truthy value opts in.
+        assert!(outcome_collector_enabled_from(Some("1")));
+        assert!(outcome_collector_enabled_from(Some("true")));
+        assert!(outcome_collector_enabled_from(Some("TRUE")));
     }
 }
 

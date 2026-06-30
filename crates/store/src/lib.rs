@@ -2931,12 +2931,12 @@ pub trait StateStore: Send + Sync {
     }
 
     /// **Outcome-collector prototype (flag-gated, default-OFF).** Append one row
-    /// per surfaced key to the lazily-created `retrieval_surfacing` telemetry
-    /// log, so a later EXPLICIT `memory_get` of the same key can be attributed as
-    /// a "used" retrieval outcome. This is the de-contaminated signal from the
-    /// Phase-0 study: search surfacings only, never the background re-access that
-    /// inflates `access_count`. `surfaced` is `(key, rank)` pairs (rank 0-based).
-    /// Default no-op so the feature is inert unless SqliteStore + the
+    /// per surfaced key to the v39 `retrieval_surfacing` telemetry log, so a
+    /// later EXPLICIT `memory_get` of the same key can be attributed as a "used"
+    /// retrieval outcome. This is the de-contaminated signal from the Phase-0
+    /// study: search surfacings only, never the background re-access that inflates
+    /// `access_count`. `surfaced` is `(key, rank)` pairs (rank 0-based). Default
+    /// no-op so the feature writes rows only when SqliteStore + the
     /// `AGENT_BRIDGE_OUTCOME_COLLECTOR` flag are both present.
     async fn record_retrieval_surfacing(
         &self,
