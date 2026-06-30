@@ -17,7 +17,7 @@ use ab_core::{Error, Result, SessionId};
 use ab_store::{StateStore, StoredSession};
 use dashmap::DashMap;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::{info, warn};
 
 use crate::pty_session::{PtyExit, PtySession};
@@ -26,6 +26,63 @@ use crate::{AgentSession, SpawnConfig};
 /// A runtime's live interactive sessions, keyed by `SessionId`. Cheap to share:
 /// the runtime keeps one clone in its struct and hands the helpers a borrow.
 pub type InteractiveMap = Arc<DashMap<String, Arc<PtySession>>>;
+
+/// How a runtime's interactive TUI accepts a submitted turn. Simple line REPLs
+/// (claude-code, `/bin/cat`) submit on a bare CR written together with the text;
+/// full-screen TUIs that enable the Kitty keyboard protocol (codex) only submit
+/// on a CSI-u Enter (`ESC [ 13 u`) and need the typed text rendered before the
+/// submit key lands — hence a settle delay and a separate write.
+#[derive(Clone, Copy)]
+pub struct SubmitProfile {
+    /// Byte sequence that submits the current input line.
+    pub key: &'static str,
+    /// Delay between writing the turn text and the submit key. Zero submits in a
+    /// single combined write (legacy line REPLs); non-zero splits the two writes
+    /// and waits in between so a TUI can render the input first.
+    pub settle: Duration,
+}
+
+impl SubmitProfile {
+    /// Legacy line REPL: CR submits immediately, written with the text in one go.
+    pub const ENTER: SubmitProfile = SubmitProfile {
+        key: "\r",
+        settle: Duration::ZERO,
+    };
+    /// Kitty-keyboard-protocol TUI (codex): submit on CSI-u Enter after a render
+    /// settle, written separately from the text.
+    pub const KITTY_ENTER: SubmitProfile = SubmitProfile {
+        key: "\x1b[13u",
+        settle: Duration::from_millis(500),
+    };
+}
+
+/// Write one turn — the text then the submit key — honouring a runtime's
+/// [`SubmitProfile`]. A zero settle writes both in one go (legacy CR REPLs); a
+/// non-zero settle types the text, waits for the TUI to render it, then sends the
+/// submit key as a separate write (Kitty-protocol TUIs like codex otherwise drop
+/// a submit that arrives glued to the text). Blocking PTY writes run off the
+/// runtime so a full input buffer can't stall it.
+async fn submit_turn(sess: &Arc<PtySession>, text: &str, submit: SubmitProfile) -> Result<()> {
+    if submit.settle.is_zero() {
+        let payload = format!("{text}{}", submit.key);
+        let s = sess.clone();
+        tokio::task::spawn_blocking(move || s.write_input(&payload))
+            .await
+            .map_err(|e| Error::Backend(format!("submit_turn join: {e}")))?
+    } else {
+        let s1 = sess.clone();
+        let t = text.to_string();
+        tokio::task::spawn_blocking(move || s1.write_input(&t))
+            .await
+            .map_err(|e| Error::Backend(format!("submit_turn join: {e}")))??;
+        tokio::time::sleep(submit.settle).await;
+        let s2 = sess.clone();
+        let key = submit.key;
+        tokio::task::spawn_blocking(move || s2.write_input(key))
+            .await
+            .map_err(|e| Error::Backend(format!("submit_turn join: {e}")))?
+    }
+}
 
 fn now_secs() -> i64 {
     SystemTime::now()
@@ -46,6 +103,7 @@ pub async fn spawn_interactive(
     store: &Option<Arc<dyn StateStore>>,
     interactive: &InteractiveMap,
     cfg: SpawnConfig,
+    submit: SubmitProfile,
 ) -> Result<AgentSession> {
     let session_id = SessionId::new();
     let cwd = cfg.cwd.clone();
@@ -78,7 +136,7 @@ pub async fn spawn_interactive(
     // Optional first turn: type the initial prompt and submit it.
     if let Some(p) = cfg.initial_prompt.as_deref() {
         if !p.is_empty() {
-            if let Err(e) = session.write_input(&format!("{p}\r")) {
+            if let Err(e) = submit_turn(&session, p, submit).await {
                 warn!(session = %session_id, runtime = %runtime_id, error = %e, "interactive: initial prompt write failed");
             }
         }
@@ -137,6 +195,7 @@ pub async fn send_input(
     interactive: &InteractiveMap,
     session: &SessionId,
     text: &str,
+    submit: SubmitProfile,
 ) -> Result<()> {
     let Some(sess) = interactive.get(session.as_str()).map(|kv| kv.clone()) else {
         return Err(Error::InvalidArgument(format!(
@@ -144,10 +203,7 @@ pub async fn send_input(
              accept input; spawn with `interactive: true` to open a live PTY session."
         )));
     };
-    let payload = format!("{text}\r");
-    tokio::task::spawn_blocking(move || sess.write_input(&payload))
-        .await
-        .map_err(|e| Error::Backend(format!("send_input join: {e}")))?
+    submit_turn(&sess, text, submit).await
 }
 
 /// Kill a live interactive session if one exists. Returns `Some(result)` when
