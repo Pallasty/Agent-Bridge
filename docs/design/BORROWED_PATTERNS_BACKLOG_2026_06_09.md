@@ -233,6 +233,12 @@ Acceptance:
 
 ### AB-BORROW-2: Workspace Boundary Evidence
 
+Status:
+
+- 2026-06-30 planning artifact landed:
+  `docs/design/AB_WORKSPACE_BOUNDARY_EVIDENCE_PLAN_2026_06_30.md`.
+- No runtime behavior changed in the planning slice.
+
 Outcome:
 
 - IDE and file-backed adapter reports include canonical root, containment status,
