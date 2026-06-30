@@ -163,6 +163,12 @@ Supported commands in the VS Code/Cursor example:
 commands remain visible on disk and the MCP call returns `status=queued` or
 `status=timeout` when `wait_ms` is set.
 
+The VS Code/Cursor example extension repeats the final authority checks before
+applying mutating commands. Existing-file edit/save/format requests must
+canonicalize inside the workspace, and create edits must prove parent-contained,
+target-missing, text-present, and no-range at execution time as well as at
+Agent-Bridge queue time.
+
 ## Implementation Path
 
 Phase 1, landed:
@@ -188,6 +194,8 @@ Phase 2, landed:
 - Include only diagnostics for the active workspace unless the user opts into a
   global runtime snapshot.
 - The same extension polls `ide-commands.jsonl` and writes command responses.
+- The extension performs final-authority checks before applying mutating
+  commands, including the safe create-file contract for `apply_workspace_edit`.
 
 Phase 3, richer IDE actions:
 

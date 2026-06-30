@@ -1,8 +1,8 @@
 # Agent-Bridge IDE Command Safe Create-File Contract - 2026-06-30
 
 Status: runtime slice implemented for Agent-Bridge pre-queue evidence and
-blocking. The IDE extension still remains final authority when it consumes the
-queued request.
+blocking. The VS Code/Cursor example extension also repeats the final authority
+checks when it consumes the queued request.
 
 This memo defines the runtime contract for allowing
 `apply_workspace_edit` to create new files without weakening the current
@@ -111,9 +111,10 @@ specific reasons such as:
 - `workspace_root_missing`
 - `mixed_batch_edit_failed`
 
-The IDE extension remains the final authority. It should repeat the same
-parent-containment and target-missing checks immediately before applying the
-edit, because the filesystem can change after Agent-Bridge queues the command.
+The IDE extension remains the final authority. It repeats the same
+parent-containment, target-missing, text-present, and range-absent checks
+immediately before applying the edit, because the filesystem can change after
+Agent-Bridge queues the command.
 
 ## Acceptance Tests
 
@@ -127,6 +128,8 @@ edit, because the filesystem can change after Agent-Bridge queues the command.
 - `create: true` with an outside or symlink-escaped parent blocks.
 - `create: true` with a non-null range blocks.
 - `create: true` without string `text` blocks.
+- The VS Code/Cursor example extension repeats those checks before executing
+  the queued edit.
 - A mixed batch blocks when any edit fails either the existing-file or
   create-file rule.
 - `save_file` and `format_document` missing paths still block.
@@ -144,6 +147,9 @@ The runtime slice is intentionally small and local to `crates/bridge/src/ide.rs`
 4. Return both `workspace_boundary` and `create_file_gate` evidence when create
    edits are present.
 5. Preserve the queued JSONL request unchanged when queueing is allowed.
+6. The VS Code/Cursor extension resolves relative edit paths against the
+   workspace root, canonicalizes existing-file targets, and canonicalizes create
+   parents before applying the edit.
 
 This is intentionally narrower than a general filesystem write API. The bridge
 keeps its queue-based IDE shape, and the IDE keeps its review/undo surface.

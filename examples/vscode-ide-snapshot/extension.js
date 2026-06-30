@@ -526,15 +526,96 @@ async function runTask(args) {
 
 // Guard: confine write/format commands to files inside the workspace root,
 // so the agent cannot edit arbitrary filesystem paths through the IDE bridge.
-function assertInsideWorkspace(filePath) {
+async function workspaceRootRealpath() {
   const root = workspaceRoot();
   if (!root) {
     throw new Error("no workspace root; refusing to edit");
   }
-  const resolved = path.resolve(filePath);
-  const rel = path.relative(root, resolved);
-  if (rel === "" || rel.startsWith("..") || path.isAbsolute(rel)) {
-    throw new Error(`path is outside the workspace root: ${filePath}`);
+  return fs.promises.realpath(root);
+}
+
+function pathInputToFsPath(value, name) {
+  const raw = requiredString(value, name);
+  if (raw.startsWith("file://")) {
+    const uri = vscode.Uri.parse(raw);
+    if (uri.scheme !== "file" || !uri.fsPath) {
+      throw new Error(`${name} must be a file URI`);
+    }
+    return uri.fsPath;
+  }
+  return raw;
+}
+
+function editPathInput(edit) {
+  for (const key of ["path", "file", "uri"]) {
+    if (edit && Object.prototype.hasOwnProperty.call(edit, key)) {
+      return pathInputToFsPath(edit[key], `edit.${key}`);
+    }
+  }
+  throw new Error("edit.path is required");
+}
+
+async function resolveWorkspacePath(rawPath, name) {
+  const root = workspaceRoot();
+  if (!root) {
+    throw new Error("no workspace root; refusing to edit");
+  }
+  const rootReal = await workspaceRootRealpath();
+  const resolved = path.isAbsolute(rawPath)
+    ? path.resolve(rawPath)
+    : path.resolve(root, rawPath);
+  return { rootReal, resolved, name };
+}
+
+function isInsideOrEqual(rootReal, candidate) {
+  const rel = path.relative(rootReal, candidate);
+  return rel === "" || (!!rel && !rel.startsWith("..") && !path.isAbsolute(rel));
+}
+
+async function assertExistingInsideWorkspace(rawPath, name) {
+  const { rootReal, resolved } = await resolveWorkspacePath(rawPath, name);
+  let real;
+  try {
+    real = await fs.promises.realpath(resolved);
+  } catch (err) {
+    throw new Error(`${name} does not exist: ${rawPath}`);
+  }
+  if (!isInsideOrEqual(rootReal, real)) {
+    throw new Error(`${name} is outside the workspace root: ${rawPath}`);
+  }
+  return resolved;
+}
+
+async function assertCreateTargetInsideWorkspace(rawPath, edit) {
+  const { rootReal, resolved } = await resolveWorkspacePath(rawPath, "edit.path");
+  if (edit.range !== undefined && edit.range !== null) {
+    throw new Error("create edit range must be absent or null");
+  }
+  if (typeof edit.text !== "string") {
+    throw new Error("create edit.text is required");
+  }
+  const parent = path.dirname(resolved);
+  let parentStat;
+  let parentReal;
+  try {
+    parentStat = await fs.promises.stat(parent);
+    parentReal = await fs.promises.realpath(parent);
+  } catch (err) {
+    throw new Error(`create edit parent does not exist: ${parent}`);
+  }
+  if (!parentStat.isDirectory()) {
+    throw new Error(`create edit parent is not a directory: ${parent}`);
+  }
+  if (!isInsideOrEqual(rootReal, parentReal)) {
+    throw new Error(`create edit parent is outside the workspace root: ${parent}`);
+  }
+  try {
+    await fs.promises.lstat(resolved);
+    throw new Error(`create edit target already exists: ${rawPath}`);
+  } catch (err) {
+    if (!err || err.code !== "ENOENT") {
+      throw err;
+    }
   }
   return resolved;
 }
@@ -547,10 +628,21 @@ async function applyWorkspaceEdit(args) {
   const workspaceEdit = new vscode.WorkspaceEdit();
   const touched = [];
   for (const edit of edits) {
-    const filePath = assertInsideWorkspace(requiredString(edit.path, "edit.path"));
+    const rawPath = editPathInput(edit);
     if (typeof edit.text !== "string") {
       throw new Error("edit.text is required");
     }
+    if (edit.create === true) {
+      const filePath = await assertCreateTargetInsideWorkspace(rawPath, edit);
+      const uri = vscode.Uri.file(filePath);
+      workspaceEdit.createFile(uri, { ignoreIfExists: false, overwrite: false });
+      workspaceEdit.insert(uri, new vscode.Position(0, 0), edit.text);
+      if (!touched.includes(filePath)) {
+        touched.push(filePath);
+      }
+      continue;
+    }
+    const filePath = await assertExistingInsideWorkspace(rawPath, "edit.path");
     const uri = vscode.Uri.file(filePath);
     const document = await vscode.workspace.openTextDocument(uri);
     const fullRange = new vscode.Range(
@@ -578,14 +670,20 @@ async function applyWorkspaceEdit(args) {
 }
 
 async function saveFile(args) {
-  const filePath = assertInsideWorkspace(requiredString(args.path, "path"));
+  const filePath = await assertExistingInsideWorkspace(
+    pathInputToFsPath(args.path, "path"),
+    "path"
+  );
   const document = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
   const saved = await document.save();
   return { saved, path: filePath };
 }
 
 async function formatDocument(args) {
-  const filePath = assertInsideWorkspace(requiredString(args.path, "path"));
+  const filePath = await assertExistingInsideWorkspace(
+    pathInputToFsPath(args.path, "path"),
+    "path"
+  );
   const uri = vscode.Uri.file(filePath);
   const document = await vscode.workspace.openTextDocument(uri);
   const formatEdits = await vscode.commands.executeCommand(

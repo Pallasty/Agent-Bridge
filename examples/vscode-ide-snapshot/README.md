@@ -55,6 +55,9 @@ Supported commands:
 - `reveal_range`
 - `run_task`
 - `write_snapshot`
+- `apply_workspace_edit`
+- `save_file`
+- `format_document`
 
 Example MCP call:
 
@@ -75,6 +78,34 @@ Example MCP call:
   }
 }
 ```
+
+`apply_workspace_edit` can update existing files or create a new leaf file when
+the backend queued an explicit create edit:
+
+```json
+{
+  "name": "ide_command",
+  "arguments": {
+    "cwd": "/abs/project",
+    "command": "apply_workspace_edit",
+    "args": {
+      "edits": [
+        {
+          "path": "src/new_file.rs",
+          "create": true,
+          "text": "pub fn new_file() {}\n"
+        }
+      ],
+      "save": true
+    }
+  }
+}
+```
+
+The extension repeats the final authority check before applying edits:
+new-file edits require `create: true`, string `text`, no `range`, an existing
+parent directory that canonicalizes inside the workspace, and a missing target.
+Existing-file edit/save/format commands must canonicalize inside the workspace.
 
 ## Notes
 
