@@ -3289,6 +3289,26 @@ impl StateStore for SqliteStore {
         // as the wire-level source of truth; the column is a derived index.
         let dedupe_key_storage: Option<String> = dedupe_tags.first().cloned();
 
+        // A1 (correction co-surface, write-path). When a `correction:<target>:*`
+        // feedback memory is persisted, auto-link the `corrects` edge to the
+        // memory it corrects, so the correction can co-surface with its target
+        // even when the record is saved OUTSIDE the `memory_correction` MCP tool
+        // (which links explicitly). The target is read from `related_keys[0]`:
+        // the canonical tool sets `related_keys = [target]`, while out-of-tool
+        // saves can carry extra related context after that first pointer.
+        // Computed here as an owned value so the `move` closure below
+        // can capture it — `mem` is a borrow and cannot cross into the closure.
+        let correction_target: Option<String> =
+            if kind == "feedback" && key.starts_with("correction:") {
+                mem.related_keys
+                    .first()
+                    .map(|target| target.trim())
+                    .filter(|target| !target.is_empty())
+                    .map(str::to_string)
+            } else {
+                None
+            };
+
         self.conn
             .call(move |c| -> RusqliteResult<()> {
                 // P9: embedding_backend column. COALESCE keeps prior tag
@@ -3345,6 +3365,32 @@ impl StateStore for SqliteStore {
                         embedding_i8_scale,
                     ],
                 )?;
+
+                // ── A1: correction auto-link ──────────────────────────────────
+                // Inside the SAME transaction as the memory INSERT above,
+                // idempotently create the `corrects` edge (correction → target)
+                // when the target row exists. ON CONFLICT keeps re-saves a no-op,
+                // and the explicit `memory_correction` path upserts the same edge
+                // harmlessly. Weight is the canonical EDGE_WEIGHT_CORRECTS (1.4),
+                // matching what `memory_link("corrects")` resolves to.
+                if let Some(target) = correction_target.as_ref() {
+                    let target_exists: bool = {
+                        let mut st =
+                            c.prepare("SELECT 1 FROM memories WHERE key = ?1 LIMIT 1")?;
+                        let mut rows = st.query(params![target.as_str()])?;
+                        rows.next()?.is_some()
+                    };
+                    if target_exists {
+                        c.execute(
+                            "INSERT INTO memory_edges
+                               (from_key, to_key, edge_type, weight, created_at)
+                             VALUES (?1, ?2, 'corrects', ?3, ?4)
+                             ON CONFLICT(from_key, to_key, edge_type)
+                             DO UPDATE SET weight = excluded.weight",
+                            params![key, target.as_str(), EDGE_WEIGHT_CORRECTS, now],
+                        )?;
+                    }
+                }
 
                 // ── dedupe-tag pass (Phase 2 #2 + Phase 2.x #7) ───────────────
                 // Caller-supplied `dedupe:<id>` tags explicitly group records
@@ -10294,6 +10340,196 @@ mod tests {
             })
             .await
             .expect("drop timestamp guards");
+    }
+
+    #[tokio::test]
+    async fn a1_memory_save_auto_links_corrects_edge_for_out_of_tool_correction() {
+        // A1: a `correction:<target>:*` feedback memory saved DIRECTLY via
+        // memory_save (bypassing the memory_correction MCP tool, which links
+        // explicitly) must still get a `corrects` edge auto-created to the
+        // target named in related_keys — closing the present_voice-style gap.
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-a1-autolink-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+
+        // Seed the target (the memory being corrected).
+        let mut target = mk_record(
+            "session_handoff_present_voice_tts_subsystem_20260601",
+            1_700_000_100,
+        );
+        target.kind = "observation".into();
+        store.memory_save(&target).await.expect("save target");
+
+        // Save the correction via the OUT-OF-TOOL path: feedback kind,
+        // correction:* key, related_keys=[target], and NO explicit memory_link.
+        let mut corr = mk_record(
+            "correction:session_handoff_present_voice_tts_subsystem_20260601:e8f0ab2032038682",
+            1_700_000_200,
+        );
+        corr.kind = "feedback".into();
+        corr.related_keys = vec![target.key.clone()];
+        store.memory_save(&corr).await.expect("save correction");
+
+        // A1 must have created the inbound corrects edge: correction -> target.
+        let edges = store
+            .memory_neighbors(&target.key)
+            .await
+            .expect("neighbors");
+        let corrects: Vec<_> = edges
+            .iter()
+            .filter(|e| {
+                e.edge_type == "corrects" && e.from_key == corr.key && e.to_key == target.key
+            })
+            .collect();
+        assert_eq!(
+            corrects.len(),
+            1,
+            "exactly one auto-linked corrects edge, got {edges:?}"
+        );
+        assert!(
+            (corrects[0].weight - EDGE_WEIGHT_CORRECTS).abs() < 1e-9,
+            "canonical EDGE_WEIGHT_CORRECTS (1.4) weight"
+        );
+
+        // Idempotent: a re-save must not duplicate the edge.
+        store.memory_save(&corr).await.expect("re-save correction");
+        let edges2 = store
+            .memory_neighbors(&target.key)
+            .await
+            .expect("neighbors2");
+        assert_eq!(
+            edges2.iter().filter(|e| e.edge_type == "corrects").count(),
+            1,
+            "re-save must not duplicate the corrects edge"
+        );
+
+        // Negative: a correction whose target does NOT exist gets no edge.
+        let mut orphan = mk_record(
+            "correction:does_not_exist_target_zzz:deadbeefdeadbeef",
+            1_700_000_300,
+        );
+        orphan.kind = "feedback".into();
+        orphan.related_keys = vec!["does_not_exist_target_zzz".into()];
+        store
+            .memory_save(&orphan)
+            .await
+            .expect("save orphan correction");
+        let oedges = store
+            .memory_neighbors(&orphan.key)
+            .await
+            .expect("orphan neighbors");
+        assert!(
+            oedges.iter().all(|e| e.edge_type != "corrects"),
+            "no corrects edge when target absent, got {oedges:?}"
+        );
+
+        // Negative: a feedback memory whose key is NOT a correction:* key gets
+        // no edge, even with a valid related_keys pointer.
+        let mut plain = mk_record("feedback_note_general_20260601", 1_700_000_400);
+        plain.kind = "feedback".into();
+        plain.related_keys = vec![target.key.clone()];
+        store
+            .memory_save(&plain)
+            .await
+            .expect("save plain feedback");
+        let pedges = store
+            .memory_neighbors(&plain.key)
+            .await
+            .expect("plain neighbors");
+        assert!(
+            pedges.iter().all(|e| e.edge_type != "corrects"),
+            "no corrects edge for a non-correction key, got {pedges:?}"
+        );
+
+        // Negative (review gap): a correction with ZERO related_keys is skipped.
+        let mut empty_rk = mk_record("correction:some_target_x:aaaabbbbccccdddd", 1_700_000_500);
+        empty_rk.kind = "feedback".into();
+        empty_rk.related_keys = vec![];
+        store
+            .memory_save(&empty_rk)
+            .await
+            .expect("save empty-rk correction");
+        let eedges = store
+            .memory_neighbors(&empty_rk.key)
+            .await
+            .expect("empty-rk neighbors");
+        assert!(
+            eedges.iter().all(|e| e.edge_type != "corrects"),
+            "no corrects edge when related_keys is empty, got {eedges:?}"
+        );
+
+        // Review fix: a correction with 2+ related_keys still auto-links to the
+        // first key. Extra keys are supporting context, not alternate targets.
+        let mut context = mk_record("another_key", 1_700_000_590);
+        context.kind = "context".into();
+        store.memory_save(&context).await.expect("save context");
+        let mut multi_rk = mk_record("correction:some_target_y:eeeeffff00001111", 1_700_000_600);
+        multi_rk.kind = "feedback".into();
+        multi_rk.related_keys = vec![target.key.clone(), context.key.clone()];
+        store
+            .memory_save(&multi_rk)
+            .await
+            .expect("save multi-rk correction");
+        let target_edges = store
+            .memory_neighbors(&target.key)
+            .await
+            .expect("target neighbors");
+        assert!(
+            target_edges.iter().any(|e| {
+                e.edge_type == "corrects" && e.from_key == multi_rk.key && e.to_key == target.key
+            }),
+            "multi-related correction must auto-link to related_keys[0], got {target_edges:?}"
+        );
+        let context_edges = store
+            .memory_neighbors(&context.key)
+            .await
+            .expect("context neighbors");
+        assert!(
+            context_edges
+                .iter()
+                .all(|e| !(e.edge_type == "corrects" && e.from_key == multi_rk.key)),
+            "multi-related correction must not auto-link to related_keys[1], got {context_edges:?}"
+        );
+
+        // Behavior lock (review gap): the existence check is status-agnostic — a
+        // correction to a SUPERSEDED target still links (the edge is additive and
+        // a superseded original can be revived). Documents the intentional design.
+        let mut stale_target = mk_record("stale_original_for_correction_20260601", 1_700_000_700);
+        stale_target.status = "superseded".into();
+        store
+            .memory_save(&stale_target)
+            .await
+            .expect("save stale target");
+        let mut corr_stale = mk_record(
+            "correction:stale_original_for_correction_20260601:1212343456567878",
+            1_700_000_800,
+        );
+        corr_stale.kind = "feedback".into();
+        corr_stale.related_keys = vec![stale_target.key.clone()];
+        store
+            .memory_save(&corr_stale)
+            .await
+            .expect("save correction to stale target");
+        let sedges = store
+            .memory_neighbors(&stale_target.key)
+            .await
+            .expect("stale neighbors");
+        assert!(
+            sedges
+                .iter()
+                .any(|e| e.edge_type == "corrects" && e.from_key == corr_stale.key),
+            "correction to a superseded target still auto-links (status-agnostic), got {sedges:?}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
     #[test]
