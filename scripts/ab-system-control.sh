@@ -1,10 +1,43 @@
 #!/usr/bin/env bash
 set -u
 
-default_audit_dir="$HOME/.local/share/agent-bridge/system-control"
-if [ -d /Data ] && [ -w /Data ]; then
-    default_audit_dir="/Data/agent-bridge/system-control"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+for helper in \
+    "$script_dir/lib/ab-platform.sh" \
+    "$script_dir/../scripts/lib/ab-platform.sh" \
+    "/Data/CascadeProjects/agent-bridge/scripts/lib/ab-platform.sh"
+do
+    if [ -f "$helper" ]; then
+        # shellcheck source=lib/ab-platform.sh
+        . "$helper"
+        break
+    fi
+done
+
+if ! command -v ab_platform_os >/dev/null 2>&1; then
+    ab_platform_os() { uname -s 2>/dev/null || printf 'unknown'; }
+    ab_is_macos() { [ "$(ab_platform_os)" = "Darwin" ]; }
+    ab_is_linux() { [ "$(ab_platform_os)" = "Linux" ]; }
+    ab_default_data_dir() {
+        if ab_is_macos; then
+            printf '%s/Library/Application Support/agent-bridge' "${HOME:-.}"
+        elif [ -n "${XDG_DATA_HOME:-}" ]; then
+            printf '%s/agent-bridge' "$XDG_DATA_HOME"
+        else
+            printf '%s/.local/share/agent-bridge' "${HOME:-.}"
+        fi
+    }
+    ab_default_system_control_audit_dir() {
+        if [ -d /Data ] && [ -w /Data ]; then
+            printf '/Data/agent-bridge/system-control'
+        else
+            printf '%s/system-control' "$(ab_default_data_dir)"
+        fi
+    }
 fi
+platform="$(ab_platform_os)"
+
+default_audit_dir="$(ab_default_system_control_audit_dir)"
 audit_dir="${AB_SYSTEM_CONTROL_AUDIT_DIR:-$default_audit_dir}"
 audit_log="$audit_dir/system-actions.jsonl"
 snapshot_log="$audit_dir/system-snapshots.jsonl"
@@ -25,7 +58,13 @@ ensure_snapshot_log() {
 }
 
 json_string() {
-    jq -Rn --arg s "$1" '$s'
+    if command -v jq >/dev/null 2>&1; then
+        jq -Rn --arg s "$1" '$s'
+    elif command -v python3 >/dev/null 2>&1; then
+        python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$1"
+    else
+        printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+    fi
 }
 
 json_or_null() {
@@ -54,7 +93,15 @@ audit() {
 }
 
 notify() {
-    notify-send -a sway "$1" "$2" >/dev/null 2>&1 || true
+    if command -v notify-send >/dev/null 2>&1; then
+        notify-send -a sway "$1" "$2" >/dev/null 2>&1 || true
+    elif ab_is_macos && command -v osascript >/dev/null 2>&1; then
+        osascript - "$1" "$2" >/dev/null 2>&1 <<'APPLESCRIPT' || true
+on run argv
+    display notification (item 2 of argv) with title (item 1 of argv)
+end run
+APPLESCRIPT
+    fi
 }
 
 run_audited() {
@@ -68,6 +115,14 @@ run_audited() {
     local rc=$?
     audit "$action" "$risk" "error" "rc=$rc $*"
     return "$rc"
+}
+
+unsupported_action() {
+    local action="$1"
+    local reason="${2:-unsupported on $platform}"
+    audit "$action" "low" "unsupported" "$reason"
+    echo "$action unsupported on $platform: $reason" >&2
+    return 4
 }
 
 event_action() {
@@ -171,14 +226,73 @@ require_confirm() {
 
 display_action() {
     case "${1:-}" in
-        off) run_audited "display.off" "low" swaymsg "output * power off" >/dev/null ;;
-        on) run_audited "display.on" "low" swaymsg "output * power on" >/dev/null ;;
+        off)
+            if ab_is_macos; then
+                command -v pmset >/dev/null 2>&1 || { unsupported_action "display.off" "pmset not found"; return; }
+                run_audited "display.off" "low" pmset displaysleepnow >/dev/null
+            else
+                run_audited "display.off" "low" swaymsg "output * power off" >/dev/null
+            fi
+            ;;
+        on)
+            if ab_is_macos; then
+                unsupported_action "display.on" "macOS display wake requires user input or a separate input-grant path"
+                return
+            fi
+            run_audited "display.on" "low" swaymsg "output * power on" >/dev/null
+            ;;
         toggle-off) display_action off ;;
         *) echo "usage: ab-system-control display off|on" >&2; return 2 ;;
     esac
 }
 
+macos_audio_action() {
+    command -v osascript >/dev/null 2>&1 || { unsupported_action "audio.${1:-}" "osascript not found"; return; }
+    local current next
+    case "${1:-}" in
+        up)
+            current="$(osascript -e 'output volume of (get volume settings)' 2>/dev/null || printf 0)"
+            case "$current" in ''|*[!0-9]*) current=0 ;; esac
+            next=$((current + 5))
+            [ "$next" -gt 100 ] && next=100
+            osascript -e "set volume output volume $next" -e 'set volume without output muted' >/dev/null
+            ;;
+        down)
+            current="$(osascript -e 'output volume of (get volume settings)' 2>/dev/null || printf 0)"
+            case "$current" in ''|*[!0-9]*) current=0 ;; esac
+            next=$((current - 5))
+            [ "$next" -lt 0 ] && next=0
+            osascript -e "set volume output volume $next" -e 'set volume without output muted' >/dev/null
+            ;;
+        mute)
+            current="$(osascript -e 'output muted of (get volume settings)' 2>/dev/null || printf false)"
+            if [ "$current" = "true" ]; then
+                osascript -e 'set volume without output muted' >/dev/null
+            else
+                osascript -e 'set volume with output muted' >/dev/null
+            fi
+            ;;
+        micmute)
+            unsupported_action "audio.micmute" "macOS microphone mute has no built-in shell equivalent"
+            return
+            ;;
+        *) echo "usage: ab-system-control audio up|down|mute|micmute" >&2; return 2 ;;
+    esac
+    local rc=$?
+    if [ "$rc" -eq 0 ]; then
+        audit "audio.${1:-}" "low" "ok"
+        notify "Audio" "$(osascript -e 'output volume of (get volume settings)' 2>/dev/null || true)%"
+    else
+        audit "audio.${1:-}" "low" "error" "rc=$rc"
+    fi
+    return "$rc"
+}
+
 audio_action() {
+    if ab_is_macos; then
+        macos_audio_action "$@"
+        return
+    fi
     case "${1:-}" in
         up)
             pactl set-sink-volume @DEFAULT_SINK@ +5% &&
@@ -207,6 +321,25 @@ audio_action() {
 }
 
 brightness_action() {
+    if ab_is_macos; then
+        if ! command -v brightness >/dev/null 2>&1; then
+            unsupported_action "brightness.${1:-}" "install the macOS brightness CLI or use system display settings"
+            return
+        fi
+        case "${1:-}" in
+            up) brightness +0.05 ;;
+            down) brightness -0.05 ;;
+            *) echo "usage: ab-system-control brightness up|down" >&2; return 2 ;;
+        esac
+        local rc=$?
+        if [ "$rc" -eq 0 ]; then
+            audit "brightness.${1:-}" "low" "ok"
+            notify "Brightness" "$(brightness -l 2>/dev/null | awk '/brightness/ {print $NF; exit}')"
+        else
+            audit "brightness.${1:-}" "low" "error" "rc=$rc"
+        fi
+        return "$rc"
+    fi
     case "${1:-}" in
         up) brightnessctl set +5% ;;
         down) brightnessctl set 5%- ;;
@@ -227,6 +360,23 @@ screenshot_action() {
     local dir="${XDG_PICTURES_DIR:-$HOME/Pictures}/Screenshots"
     mkdir -p "$dir"
     local file="$dir/screenshot-$(date +%Y%m%d-%H%M%S).png"
+    if ab_is_macos; then
+        command -v screencapture >/dev/null 2>&1 || { unsupported_action "screenshot.$mode" "screencapture not found"; return; }
+        case "$mode" in
+            full)
+                screencapture "$file" || { audit "screenshot.full" "low" "error"; return 1; }
+                ;;
+            region)
+                notify "Screenshot" "Select an area"
+                screencapture -i "$file" || { audit "screenshot.region" "low" "cancelled"; return 0; }
+                [ -s "$file" ] || { audit "screenshot.region" "low" "cancelled"; return 0; }
+                ;;
+            *) echo "usage: ab-system-control screenshot full|region" >&2; return 2 ;;
+        esac
+        audit "screenshot.$mode" "low" "ok" "$file"
+        notify "Screenshot" "Saved: $file"
+        return
+    fi
     case "$mode" in
         full)
             grim "$file" || { audit "screenshot.full" "low" "error"; return 1; }
@@ -247,7 +397,47 @@ screenshot_action() {
     notify "Screenshot" "Saved and copied: $file"
 }
 
+macos_wifi_device() {
+    command -v networksetup >/dev/null 2>&1 || return 1
+    networksetup -listallhardwareports 2>/dev/null |
+        awk '/Hardware Port: (Wi-Fi|AirPort)/ {getline; if ($1 == "Device:") {print $2; exit}}'
+}
+
+macos_wifi_action() {
+    local dev
+    dev="$(macos_wifi_device)"
+    [ -n "$dev" ] || { unsupported_action "wifi.${1:-}" "no macOS Wi-Fi device found"; return; }
+    case "${1:-}" in
+        networks)
+            networksetup -listpreferredwirelessnetworks "$dev"
+            audit "wifi.networks" "medium" "ok" "$dev"
+            ;;
+        reconnect)
+            run_audited "wifi.reconnect" "medium" networksetup -setairportpower "$dev" off &&
+                sleep 1 &&
+                run_audited "wifi.reconnect" "medium" networksetup -setairportpower "$dev" on
+            ;;
+        toggle)
+            local power
+            power="$(networksetup -getairportpower "$dev" 2>/dev/null | awk '{print $NF}')"
+            if [ "$power" = "On" ]; then
+                run_audited "wifi.toggle" "medium" networksetup -setairportpower "$dev" off
+            else
+                run_audited "wifi.toggle" "medium" networksetup -setairportpower "$dev" on
+            fi
+            ;;
+        actions|nmtui)
+            unsupported_action "wifi.${1:-}" "NetworkManager/nmtui menu is Linux-only"
+            ;;
+        *) echo "usage: ab-system-control wifi networks|actions|reconnect|toggle|nmtui" >&2; return 2 ;;
+    esac
+}
+
 wifi_action() {
+    if ab_is_macos; then
+        macos_wifi_action "$@"
+        return
+    fi
     case "${1:-}" in
         networks|actions|reconnect|toggle|nmtui)
             run_audited "wifi.${1:-}" "medium" "$HOME/.local/bin/sway-wifi-menu" "${1:-}"
@@ -257,6 +447,41 @@ wifi_action() {
 }
 
 desktop_action() {
+    if ab_is_macos; then
+        case "${1:-doctor}" in
+            doctor|check)
+                jq -n \
+                    --arg schema "agent_bridge.system_control.desktop_doctor.v0" \
+                    --arg platform "$platform" \
+                    --arg osascript "$(command -v osascript || true)" \
+                    --arg screencapture "$(command -v screencapture || true)" \
+                    --arg pmset "$(command -v pmset || true)" \
+                    --arg networksetup "$(command -v networksetup || true)" \
+                    '{
+                        schema: $schema,
+                        platform: $platform,
+                        status: "ok",
+                        summary: "macOS fallback path; Sway repair/watchdog actions are not applicable",
+                        checks: [
+                            {name:"osascript", status:(if $osascript == "" then "warn" else "ok" end), path:$osascript},
+                            {name:"screencapture", status:(if $screencapture == "" then "warn" else "ok" end), path:$screencapture},
+                            {name:"pmset", status:(if $pmset == "" then "warn" else "ok" end), path:$pmset},
+                            {name:"networksetup", status:(if $networksetup == "" then "warn" else "ok" end), path:$networksetup}
+                        ]
+                    }'
+                ;;
+            heal|watchdog|repair)
+                if ! require_confirm "${2:-}"; then
+                    audit "desktop.${1:-}" "medium" "blocked" "missing --confirm"
+                    echo "Refusing desktop ${1:-} without --confirm" >&2
+                    return 3
+                fi
+                unsupported_action "desktop.${1:-}" "Sway desktop repair/watchdog helpers are Linux-only"
+                ;;
+            *) echo "usage: ab-system-control desktop doctor|heal --confirm|watchdog --confirm|repair --confirm" >&2; return 2 ;;
+        esac
+        return
+    fi
     case "${1:-doctor}" in
         doctor|check)
             "$HOME/.local/bin/sway-desktop-doctor" doctor
@@ -296,13 +521,21 @@ status_action() {
             local status_json desktop_json events_json watchdog_diag power_diag wifi_diag screenshot_diag
             local timer_text agent_doctor_text
             status_json="$(status_action summary 2>/dev/null | json_or_null)"
-            desktop_json="$("$HOME/.local/bin/sway-desktop-doctor" doctor 2>/dev/null | json_or_null)"
+            if ab_is_macos; then
+                desktop_json="$(desktop_action doctor 2>/dev/null | json_or_null)"
+            else
+                desktop_json="$("$HOME/.local/bin/sway-desktop-doctor" doctor 2>/dev/null | json_or_null)"
+            fi
             events_json="$(events_action tail 40 2>/dev/null | json_or_null)"
             watchdog_diag="$(events_action diagnose watchdog 120 2>/dev/null | json_or_null)"
             power_diag="$(events_action diagnose power 120 2>/dev/null | json_or_null)"
             wifi_diag="$(events_action diagnose wifi 120 2>/dev/null | json_or_null)"
             screenshot_diag="$(events_action diagnose screenshot 120 2>/dev/null | json_or_null)"
-            timer_text="$(systemctl --user --no-pager list-timers sway-desktop-watchdog.timer 2>&1 || true)"
+            if ab_is_macos; then
+                timer_text="$(launchctl print "gui/$(id -u)/com.agentbridge.desktop-watchdog" 2>&1 || true)"
+            else
+                timer_text="$(systemctl --user --no-pager list-timers sway-desktop-watchdog.timer 2>&1 || true)"
+            fi
             if [ "${AB_SYSTEM_CONTROL_SNAPSHOT_SKIP_AGENT_DOCTOR:-0}" = "1" ]; then
                 agent_doctor_text="skipped by AB_SYSTEM_CONTROL_SNAPSHOT_SKIP_AGENT_DOCTOR=1"
             else
@@ -498,6 +731,83 @@ status_action() {
         *) echo "usage: ab-system-control status [summary|snapshot|record|history [n]|diagnose [n]|report [n]]" >&2; return 2 ;;
     esac
 
+    if ab_is_macos; then
+        local audio_volume="" audio_muted="" mic_muted=""
+        if command -v osascript >/dev/null 2>&1; then
+            audio_volume="$(osascript -e 'output volume of (get volume settings)' 2>/dev/null || true)"
+            [ -n "$audio_volume" ] && audio_volume="${audio_volume}%"
+            audio_muted="$(osascript -e 'output muted of (get volume settings)' 2>/dev/null || true)"
+            case "$audio_muted" in
+                true) audio_muted="yes" ;;
+                false) audio_muted="no" ;;
+            esac
+        fi
+
+        local brightness=""
+        if command -v brightness >/dev/null 2>&1; then
+            brightness="$(brightness -l 2>/dev/null | awk '/brightness/ {print $NF; exit}')"
+        fi
+
+        local wifi_radio="" wifi_connected="false" wifi_ssid="" wifi_signal=""
+        if command -v networksetup >/dev/null 2>&1; then
+            local wifi_dev="" power_line ssid_line
+            wifi_dev="$(macos_wifi_device)"
+            if [ -n "$wifi_dev" ]; then
+                power_line="$(networksetup -getairportpower "$wifi_dev" 2>/dev/null || true)"
+                case "$power_line" in
+                    *": On") wifi_radio="enabled" ;;
+                    *": Off") wifi_radio="disabled" ;;
+                    *) wifi_radio="" ;;
+                esac
+                ssid_line="$(networksetup -getairportnetwork "$wifi_dev" 2>/dev/null || true)"
+                case "$ssid_line" in
+                    "Current Wi-Fi Network:"*)
+                        wifi_connected="true"
+                        wifi_ssid="${ssid_line#Current Wi-Fi Network: }"
+                        ;;
+                esac
+            fi
+        fi
+
+        local outputs_total=1 outputs_active=1 outputs_powered=1 focused_output="main"
+        local battery_state="" battery_percent=""
+        if command -v pmset >/dev/null 2>&1; then
+            local batt=""
+            batt="$(pmset -g batt 2>/dev/null || true)"
+            battery_percent="$(printf '%s\n' "$batt" | grep -oE '[0-9]+%' | head -1 || true)"
+            battery_state="$(printf '%s\n' "$batt" | awk -F'; *' 'NR == 2 {print $2; exit}')"
+        fi
+
+        jq -n \
+            --arg schema "agent_bridge.system_control.status.v0" \
+            --arg platform "$platform" \
+            --arg audio_volume "$audio_volume" \
+            --arg audio_muted "$audio_muted" \
+            --arg mic_muted "$mic_muted" \
+            --arg brightness "$brightness" \
+            --arg wifi_radio "$wifi_radio" \
+            --arg wifi_ssid "$wifi_ssid" \
+            --arg wifi_signal "$wifi_signal" \
+            --arg focused_output "$focused_output" \
+            --arg battery_state "$battery_state" \
+            --arg battery_percent "$battery_percent" \
+            --argjson wifi_connected "$wifi_connected" \
+            --argjson outputs_total "$outputs_total" \
+            --argjson outputs_active "$outputs_active" \
+            --argjson outputs_powered "$outputs_powered" \
+            '{
+                schema: $schema,
+                platform: {os: $platform},
+                audio: {volume: $audio_volume, muted: $audio_muted, mic_muted: $mic_muted},
+                brightness: {percent: $brightness},
+                wifi: {radio: $wifi_radio, connected: $wifi_connected, ssid: $wifi_ssid, signal: $wifi_signal},
+                display: {outputs_total: $outputs_total, outputs_active: $outputs_active, outputs_powered: $outputs_powered, focused_output: $focused_output},
+                battery: {state: $battery_state, percentage: $battery_percent},
+                services: {swayidle: false, mako: false, networkmanager: false}
+            }'
+        return
+    fi
+
     local audio_volume="" audio_muted="" mic_muted=""
     if command -v pactl >/dev/null 2>&1; then
         audio_volume="$(pactl get-sink-volume @DEFAULT_SINK@ 2>/dev/null | awk -F/ 'NR == 1 {gsub(/ /, "", $2); print $2}')"
@@ -610,6 +920,21 @@ power_action() {
                 last="$(cat "$state_file" 2>/dev/null || true)"
             fi
             case "$last" in ''|*[!0-9]*) last="" ;; esac
+            if ab_is_macos; then
+                if [ -n "$last" ] && [ $((now - last)) -le "$window_seconds" ]; then
+                    rm -f "$state_file"
+                    audit "power.press.double" "high" "blocked" "macOS poweroff is not mapped"
+                    notify "Power button" "Poweroff is not mapped on macOS"
+                    unsupported_action "power.press.double" "use an explicit human-confirmed shutdown path on macOS"
+                    return
+                fi
+                printf '%s\n' "$now" >"$state_file"
+                audit "power.press.single" "medium" "ok" "macos_display_sleep; double_window=${window_seconds}s"
+                notify "Power button" "Screen off"
+                command -v pmset >/dev/null 2>&1 || { unsupported_action "display.off" "pmset not found"; return; }
+                pmset displaysleepnow
+                return
+            fi
             if [ -n "$last" ] && [ $((now - last)) -le "$window_seconds" ]; then
                 rm -f "$state_file"
                 audit "power.press.double" "high" "confirmed" "window=${window_seconds}s"
@@ -637,6 +962,10 @@ power_action() {
                 audit "power.off" "high" "blocked" "missing --confirm"
                 echo "Refusing poweroff without --confirm" >&2
                 return 3
+            fi
+            if ab_is_macos; then
+                unsupported_action "power.off" "macOS shutdown requires a separate human-confirmed adapter"
+                return
             fi
             audit "power.off" "high" "confirmed" "--confirm"
             exec systemctl poweroff

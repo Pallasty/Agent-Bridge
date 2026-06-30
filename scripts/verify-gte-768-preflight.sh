@@ -8,12 +8,14 @@ set -euo pipefail
 # whether the local node has the assets and runtime posture needed before a
 # scratch-copy rehearsal can start.
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
+. "$script_dir/lib/ab-platform.sh"
 cd "$repo_root"
 
 model_name="${AGENT_BRIDGE_GTE_MODEL_NAME:-gte-multilingual-base}"
 model_base="${AGENT_BRIDGE_ONNX_MODEL_DIR:-$HOME/.cache/agent-bridge/onnx-models}"
-db_path="${AB_STATE_DB:-$HOME/.local/share/agent-bridge/state.db}"
+db_path="${AB_STATE_DB:-$(ab_default_state_db)}"
 ab_bin="${AB_BIN:-$HOME/.local/bin/agent-bridge.real}"
 run_tests=false
 strict=false
@@ -24,7 +26,9 @@ usage() {
 usage: scripts/verify-gte-768-preflight.sh [flags]
 
 Flags:
-  --db PATH            State DB to inspect. Default: ~/.local/share/agent-bridge/state.db
+  --db PATH            State DB to inspect. Default: platform default
+                       (Linux: ~/.local/share/agent-bridge/state.db;
+                       macOS: ~/Library/Application Support/agent-bridge/state.db)
   --model-name NAME    Expected GTE backend label. Default: gte-multilingual-base
   --model-dir PATH     Base dir containing <model-name>/model.onnx. Default:
                        $AGENT_BRIDGE_ONNX_MODEL_DIR or ~/.cache/agent-bridge/onnx-models
@@ -48,6 +52,8 @@ Statuses:
   READY_FOR_SCRATCH_REHEARSAL  assets exist and no old-reader conflict was seen;
   NO_GO_MODEL_ASSET_MISSING    required local ONNX/tokenizer files are missing;
   NO_GO_LIVE_READER_MISMATCH   a live agent-bridge reader is not using GTE;
+  NO_GO_LIVE_READER_ENV_UNVERIFIED
+                               live reader env cannot be inspected for live cut-over;
   CHECK_WARNINGS_PRESENT       non-blocking warnings exist; review output.
 USAGE
 }
@@ -171,20 +177,23 @@ say
 
 say "## Live agent-bridge readers"
 reader_mismatch=0
+reader_env_unknown=0
 reader_count=0
 while IFS= read -r pid; do
     [ -n "$pid" ] || continue
-    [ -r "/proc/$pid/environ" ] || continue
     reader_count=$((reader_count + 1))
-    env_lines="$(tr '\0' '\n' < "/proc/$pid/environ" || true)"
-    model_env="$(printf '%s\n' "$env_lines" | awk -F= '$1 == "AGENT_BRIDGE_ONNX_MODEL" {print $2; found=1} END {if (!found) print "<unset>"}')"
-    model_dir_env="$(printf '%s\n' "$env_lines" | awk -F= '$1 == "AGENT_BRIDGE_ONNX_MODEL_DIR" {print $2; found=1} END {if (!found) print "<unset>"}')"
-    cmd="$(tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null || true)"
+    model_env="$(ab_reader_env_value "$pid" AGENT_BRIDGE_ONNX_MODEL || true)"
+    model_dir_env="$(ab_reader_env_value "$pid" AGENT_BRIDGE_ONNX_MODEL_DIR || true)"
+    cmd="$(ab_reader_cmdline "$pid")"
     say "pid=$pid model=$model_env model_dir=$model_dir_env cmd=$cmd"
+    if [ "$model_env" = "<unavailable>" ]; then
+        reader_env_unknown=$((reader_env_unknown + 1))
+        continue
+    fi
     if [ "$model_env" != "$model_name" ] && [ "$model_env" != "gte" ] && [ "$model_env" != "gte-ml" ]; then
         reader_mismatch=$((reader_mismatch + 1))
     fi
-done < <(pgrep -f 'agent-bridge.real (daemon|daemon-http|mcp)' || true)
+done < <(ab_list_agent_bridge_reader_pids)
 
 if [ "$reader_count" -eq 0 ]; then
     warn "no live agent-bridge daemon/mcp readers found"
@@ -193,6 +202,13 @@ elif [ "$reader_mismatch" -gt 0 ]; then
         block "NO_GO_LIVE_READER_MISMATCH" "$reader_mismatch live reader(s) are not using GTE"
     else
         say "INFO $reader_mismatch live reader(s) are not using GTE; OK for scratch rehearsal, not OK for live cut-over"
+    fi
+fi
+if [ "$reader_env_unknown" -gt 0 ]; then
+    if [ "$live_cutover" = true ]; then
+        block "NO_GO_LIVE_READER_ENV_UNVERIFIED" "$reader_env_unknown live reader env(s) could not be inspected on $(ab_platform_os)"
+    else
+        warn "$reader_env_unknown live reader env(s) could not be inspected on $(ab_platform_os); OK for scratch rehearsal, not OK for live cut-over"
     fi
 fi
 say

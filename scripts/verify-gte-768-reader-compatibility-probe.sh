@@ -10,7 +10,9 @@ set -euo pipefail
 
 target_backend="${AGENT_BRIDGE_GTE_MODEL_NAME:-gte-multilingual-base}"
 target_dim="${AGENT_BRIDGE_GTE_DIM:-768}"
-live_db="${AB_STATE_DB:-$HOME/.local/share/agent-bridge/state.db}"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "$script_dir/lib/ab-platform.sh"
+live_db="${AB_STATE_DB:-$(ab_default_state_db)}"
 pre_db="${AB_GTE_COMPAT_PRE_DB:-${AB_CANONICAL_BASELINE_DB:-${AB_BASELINE_DB:-}}}"
 post_db="${AB_GTE_COMPAT_POST_DB:-}"
 strict=false
@@ -26,7 +28,9 @@ Flags:
   --post-db PATH         Optional post-reindex copied/scratch DB to inspect.
                          Defaults to $AB_GTE_COMPAT_POST_DB.
   --live-db PATH         Live DB path that inputs must not equal. Default:
-                         ~/.local/share/agent-bridge/state.db
+                         platform default
+                         (Linux: ~/.local/share/agent-bridge/state.db;
+                         macOS: ~/Library/Application Support/agent-bridge/state.db)
   --target-backend NAME  Expected GTE backend label. Default:
                          gte-multilingual-base
   --target-dim N         Expected target vector dimension. Default: 768.
@@ -114,7 +118,7 @@ block() {
 
 same_file_as_live() {
     local path="$1"
-    [ -n "$path" ] && [ -f "$path" ] && [ -f "$live_db" ] && [ "$path" -ef "$live_db" ]
+    ab_same_file "$path" "$live_db"
 }
 
 check_db_arg() {

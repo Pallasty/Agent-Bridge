@@ -12,15 +12,17 @@ set -euo pipefail
 # reindexes that copy with AGENT_BRIDGE_ONNX_MODEL, and runs recall_eval against
 # the copy via AB_BASELINE_DB.
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
+. "$script_dir/lib/ab-platform.sh"
 cd "$repo_root"
 
 model_name="${AGENT_BRIDGE_GTE_MODEL_NAME:-gte-multilingual-base}"
 model_base="${AGENT_BRIDGE_ONNX_MODEL_DIR:-$HOME/.cache/agent-bridge/onnx-models}"
-live_db="${AB_STATE_DB:-$HOME/.local/share/agent-bridge/state.db}"
+live_db="${AB_STATE_DB:-$(ab_default_state_db)}"
 snapshot_path="${AB_CANONICAL_BASELINE_DB:-${AB_BASELINE_DB:-}}"
-scratch_base="${AB_GTE_REHEARSAL_DIR:-$HOME/.cache/agent-bridge/gte-rehearsal}"
-search_roots_raw="${AB_GTE_SNAPSHOT_SEARCH_ROOTS:-$HOME/.cache/agent-bridge:$HOME/.local/share/agent-bridge}"
+scratch_base="${AB_GTE_REHEARSAL_DIR:-$(ab_default_cache_dir)/gte-rehearsal}"
+search_roots_raw="${AB_GTE_SNAPSHOT_SEARCH_ROOTS:-$(ab_default_cache_dir):$(ab_default_data_dir)}"
 expect_active="${AB_GTE_EXPECT_ACTIVE:-}"
 expect_edges="${AB_GTE_EXPECT_EDGES:-}"
 expect_newest="${AB_GTE_EXPECT_NEWEST:-}"
@@ -36,9 +38,9 @@ Flags:
   --snapshot PATH      Explicit frozen/canonical source DB to check or rehearse.
                        Defaults to $AB_CANONICAL_BASELINE_DB, then $AB_BASELINE_DB.
   --scratch-dir DIR    Scratch base for rehearsal copies. Default:
-                       ~/.cache/agent-bridge/gte-rehearsal
+                       platform cache dir + /gte-rehearsal
   --search-roots LIST  Colon-separated roots to search for candidate DBs.
-                       Default: ~/.cache/agent-bridge:~/.local/share/agent-bridge
+                       Default: platform cache dir + platform data dir.
   --model-name NAME    Expected GTE backend label. Default: gte-multilingual-base
   --model-dir PATH     Base dir containing <model-name>/model.onnx.
   --expect-active N    Optional expected active-memory count for --snapshot.
@@ -147,19 +149,15 @@ block() {
 
 sha_or_unknown() {
     local path="$1"
-    if [ -f "$path" ]; then
-        sha256sum "$path" | awk '{print $1}'
-    else
-        printf '<missing>'
-    fi
+    ab_sha256 "$path" || true
 }
 
 file_bytes() {
-    stat -c '%s' "$1" 2>/dev/null || printf '?'
+    ab_file_bytes "$1"
 }
 
 file_mtime() {
-    stat -c '%y' "$1" 2>/dev/null || printf '?'
+    ab_file_mtime "$1"
 }
 
 snapshot_fingerprint() {
@@ -183,7 +181,7 @@ PY
 
 is_live_db() {
     local path="$1"
-    [ -f "$path" ] && [ -f "$live_db" ] && [ "$path" -ef "$live_db" ]
+    ab_same_file "$path" "$live_db"
 }
 
 classify_db_path() {
