@@ -16659,7 +16659,7 @@ impl McpTool for AgentSpawnTool {
                  backend=claude-code for a live PTY session). Pass prompt + cwd; runs to \
                  completion, returns session id. Pick a backend explicitly, or a policy \
                  ('cheap'=kilo, 'second_opinion'/'openai'=codex). backend takes precedence \
-                 over policy; both omitted = the configured primary→backup fallback chain \
+                 over policy; both omitted = the configured primary-to-backup fallback chain \
                  (AGENT_BRIDGE_AGENT_FALLBACK_CHAIN; just the daemon default when unset). Set `node` (+`user`) to dispatch \
                  a kilo/opencode run to a tailnet host via ssh — it stays free yet is recorded \
                  in agent_sessions; `cwd` is then a remote-absolute path."
@@ -16765,9 +16765,9 @@ impl McpTool for AgentSpawnTool {
             interactive,
         };
 
-        // Explicit `backend`/`policy` → honour exactly: a single attempt, no
+        // Explicit `backend`/`policy`: honor exactly with a single attempt, no
         // failover (the caller picked a runtime deliberately). With neither
-        // given, walk the configured primary→backup chain instead.
+        // given, walk the configured primary-to-backup chain instead.
         if let Some(b) = resolved_backend.as_deref() {
             let agent = match resolve_agent_backend(&self.hub, Some(b)) {
                 Ok(a) => a,
@@ -16851,8 +16851,8 @@ fn resolve_agent_backend(
     }
 }
 
-/// Parse the `AGENT_BRIDGE_AGENT_FALLBACK_CHAIN` spec — a comma-separated list
-/// of backend ids (e.g. `claude-code,kilo,codex`) — into an ordered, de-duped
+/// Parse the `AGENT_BRIDGE_AGENT_FALLBACK_CHAIN` spec, a comma-separated list
+/// of backend ids (e.g. `claude-code,kilo,codex`), into an ordered, de-duped
 /// list. Whitespace is trimmed and empty entries dropped.
 fn parse_fallback_chain(spec: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
@@ -16873,7 +16873,7 @@ fn parse_fallback_chain(spec: &str) -> Vec<String> {
 /// and resolves each id through the same registry as [`resolve_agent_backend`]
 /// (so the `oz`/`warp-oz` alias matches). Unknown ids are skipped with a warning
 /// rather than aborting the spawn. When the env is unset/empty or nothing
-/// resolves, falls back to the single default runtime (`hub.agent`) — i.e.
+/// resolves, falls back to the single default runtime (`hub.agent`), i.e.
 /// today's behaviour, no failover.
 fn resolve_spawn_chain(hub: &Hub) -> Vec<Arc<dyn ab_agent::AgentRuntime>> {
     let spec = std::env::var("AGENT_BRIDGE_AGENT_FALLBACK_CHAIN").unwrap_or_default();
@@ -72227,7 +72227,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             .contains("reject"));
     }
 
-    // ── agent_spawn primary→backup failover ────────────────────────────────
+    // agent_spawn primary-to-backup failover
     struct MockRuntime {
         id: String,
         fail: bool,
@@ -72265,6 +72265,30 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             id: id.to_string(),
             fail,
         })
+    }
+
+    static AGENT_SPAWN_FALLBACK_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct AgentSpawnFallbackEnvGuard {
+        key: &'static str,
+        old: Option<std::ffi::OsString>,
+    }
+
+    impl AgentSpawnFallbackEnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let old = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, old }
+        }
+    }
+
+    impl Drop for AgentSpawnFallbackEnvGuard {
+        fn drop(&mut self) {
+            match &self.old {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
     }
 
     #[test]
@@ -72312,9 +72336,39 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         let chain = vec![mock("claude-code", true), mock("kilo", true)];
         let err = spawn_with_failover(&chain, SpawnConfig::default())
             .await
-            .expect_err("all failing → Err");
+            .expect_err("all failing -> Err");
         assert!(err.contains("all 2 backend(s) failed"), "got: {err}");
         assert!(err.contains("kilo"), "should name the last failure: {err}");
+    }
+
+    #[tokio::test]
+    async fn agent_spawn_execute_uses_fallback_chain_when_backend_omitted() {
+        let _env_lock = AGENT_SPAWN_FALLBACK_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let _env =
+            AgentSpawnFallbackEnvGuard::set("AGENT_BRIDGE_AGENT_FALLBACK_CHAIN", "primary,backup");
+
+        let primary = mock("primary", true);
+        let backup = mock("backup", false);
+        let hub = crate::Hub::builder()
+            .agent(primary)
+            .register_agent(backup)
+            .build();
+        let out = AgentSpawnTool::new(hub)
+            .execute(
+                json!({"cwd": "/tmp", "prompt": "hello from fallback test"}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("agent_spawn execute");
+
+        assert!(!out.is_error, "fallback spawn should succeed: {out:?}");
+        let payload = result_text_as_json(&out);
+        assert_eq!(payload["runtime_id"], json!("backup"));
+        assert_eq!(payload["cwd"], json!("/tmp"));
+        assert_eq!(payload["failover"]["attempted"], json!(["primary"]));
+        assert_eq!(payload["failover"]["used"], json!("backup"));
     }
 
     #[test]
