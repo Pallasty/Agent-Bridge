@@ -399,6 +399,35 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Read-only lift-evidence proxy over held-out shadow-score scenarios.
+    ///
+    /// Compares shadow-score top candidates against expected top fixtures from
+    /// a scenario fixture. With baseline correct/total it can emit a measured
+    /// proxy lift anchor; without baseline it remains a falsifiable metric
+    /// anchor only. It does not change runtime, retrieval, memory, or routing.
+    WorkflowFeedbackLiftEvidence {
+        /// Scenario fixture containing expected top experience ids.
+        #[arg(long = "scenario-fixture")]
+        scenario_fixture: PathBuf,
+        /// Shadow-score JSON report. Repeat for independent shadow runs.
+        #[arg(long = "shadow-score", required = true)]
+        shadow_scores: Vec<PathBuf>,
+        /// Baseline correct count from an unguided or previous-policy run.
+        #[arg(long = "baseline-correct")]
+        baseline_correct: Option<u32>,
+        /// Baseline total count from an unguided or previous-policy run.
+        #[arg(long = "baseline-total")]
+        baseline_total: Option<u32>,
+        /// Minimum expected-top accuracy required for the proxy anchor.
+        #[arg(long, default_value_t = 0.75)]
+        min_accuracy: f64,
+        /// Minimum absolute lift over baseline required when baseline is supplied.
+        #[arg(long, default_value_t = 0.10)]
+        min_lift: f64,
+        /// Emit the machine-readable JSON snapshot instead of Markdown.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -4137,7 +4166,9 @@ fn main() -> Result<()> {
 async fn dim_guard_strict_preflight(store: &Arc<dyn StateStore>) {
     if let Some(warning) = ab_bridge::embedding_dim_guard::preflight_class1(store).await {
         if ab_bridge::embedding_dim_guard::strict_class1_enabled(
-            std::env::var("AGENT_BRIDGE_DIM_GUARD_STRICT").ok().as_deref(),
+            std::env::var("AGENT_BRIDGE_DIM_GUARD_STRICT")
+                .ok()
+                .as_deref(),
         ) {
             tracing::error!(target: "embedding_dim_guard", "STRICT ABORT: {warning}");
             eprintln!(
@@ -6939,6 +6970,27 @@ async fn real_main() -> Result<()> {
         );
     }
 
+    if let Cmd::WorkflowFeedbackLiftEvidence {
+        scenario_fixture,
+        shadow_scores,
+        baseline_correct,
+        baseline_total,
+        min_accuracy,
+        min_lift,
+        json,
+    } = &cmd
+    {
+        return run_workflow_feedback_lift_evidence(
+            scenario_fixture,
+            shadow_scores,
+            *baseline_correct,
+            *baseline_total,
+            *min_accuracy,
+            *min_lift,
+            *json,
+        );
+    }
+
     // Palace viewer: short-lived HTTP server, opens store directly (no Hub).
     if let Cmd::Palace { op } = &cmd {
         return match op {
@@ -7311,6 +7363,7 @@ async fn real_main() -> Result<()> {
         | Cmd::WorkflowFeedbackReport { .. }
         | Cmd::WorkflowFeedbackShadowScore { .. }
         | Cmd::WorkflowFeedbackPromotionGate { .. }
+        | Cmd::WorkflowFeedbackLiftEvidence { .. }
         | Cmd::Instinct { .. } => unreachable!(),
     }
 }
@@ -7421,6 +7474,35 @@ fn run_workflow_feedback_promotion_gate(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
+fn run_workflow_feedback_lift_evidence(
+    scenario_fixture: &PathBuf,
+    shadow_scores: &[PathBuf],
+    baseline_correct: Option<u32>,
+    baseline_total: Option<u32>,
+    min_accuracy: f64,
+    min_lift: f64,
+    as_json: bool,
+) -> Result<()> {
+    let report = ab_bridge::workflow_feedback::build_lift_evidence_report_from_paths(
+        scenario_fixture,
+        shadow_scores,
+        ab_bridge::workflow_feedback::WorkflowFeedbackLiftEvidenceOptions {
+            baseline_correct,
+            baseline_total,
+            min_accuracy,
+            min_lift,
+        },
+    )
+    .context("building workflow feedback lift evidence")?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&report.to_json_value())?);
+    } else {
+        print!("{}", report.render_markdown());
+    }
+    Ok(())
+}
+
 /// Daily-wire mechanism for the evidence-anchored session walkthrough: read a
 /// walkthrough `doc` JSON (file path, or `-` for stdin), render it through
 /// `present::write_walkthrough_artifact` into the present gallery, and read the
@@ -7459,8 +7541,8 @@ fn run_walkthrough(doc_arg: &str, title: Option<&str>, as_json: bool) -> Result<
         std::fs::read_to_string(doc_arg)
             .with_context(|| format!("read walkthrough doc {doc_arg}"))?
     };
-    let doc: Value =
-        serde_json::from_str(&raw).context("parse walkthrough doc JSON ({summary, steps:[...]})")?;
+    let doc: Value = serde_json::from_str(&raw)
+        .context("parse walkthrough doc JSON ({summary, steps:[...]})")?;
 
     let dir = presentations_dir();
     let (id, path) = write_walkthrough_artifact(&dir, &doc, title, None)
@@ -19733,12 +19815,11 @@ async fn build_hub() -> Result<Hub> {
         }
         _ => {
             let bin = std::env::var("AGENT_BRIDGE_CLAUDE_BIN").unwrap_or_else(|_| "claude".into());
-            let interactive_args =
-                if cli_env_falsey("AGENT_BRIDGE_CLAUDE_INTERACTIVE_NO_CHROME") {
-                    Vec::new()
-                } else {
-                    vec!["--no-chrome".to_string()]
-                };
+            let interactive_args = if cli_env_falsey("AGENT_BRIDGE_CLAUDE_INTERACTIVE_NO_CHROME") {
+                Vec::new()
+            } else {
+                vec!["--no-chrome".to_string()]
+            };
             tracing::info!(runtime = "claude-code", binary = %bin, "agent runtime selected");
             Arc::new(
                 ClaudeCodeRuntime::with_binary(bin)
@@ -19790,7 +19871,10 @@ mod tests {
         use ab_bridge::present::build_walkthrough_html;
         // An empty doc OR a doc of empty steps renders no content -> must FAIL the
         // self-check (we never silently write a blank "walkthrough").
-        for doc in [json!({"summary": "", "steps": []}), json!({"summary": "  ", "steps": [{}]})] {
+        for doc in [
+            json!({"summary": "", "steps": []}),
+            json!({"summary": "  ", "steps": [{}]}),
+        ] {
             let html = build_walkthrough_html(&doc, None, None);
             assert!(
                 !walkthrough_region_has_content(&html),

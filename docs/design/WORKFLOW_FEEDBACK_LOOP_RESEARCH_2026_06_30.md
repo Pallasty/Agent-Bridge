@@ -352,6 +352,32 @@ reports and checks:
 - behavior-lift and rollback refs are present
 - owner approval is explicit, never inferred from local evidence
 
+### Slice 6 - Lift Evidence Metric Anchor
+
+Status: landed as read-only CLI metric anchor.
+
+Command:
+
+```text
+agent-bridge workflow-feedback-lift-evidence \
+  --scenario-fixture docs/design/fixtures/workflow-feedback-shadow-score-scenarios-2026-06-30.json \
+  --shadow-score /tmp/workflow-feedback-shadow-score-run-1.json \
+  --shadow-score /tmp/workflow-feedback-shadow-score-run-2.json \
+  [--baseline-correct <count> --baseline-total <count>] \
+  --json
+```
+
+Evidence fixture:
+
+- `docs/design/fixtures/workflow-feedback-lift-evidence-anchor-2026-06-30.json`
+
+This packet turns held-out shadow-score observations into a behavior-lift ref
+candidate for Slice 5. It checks read-only shadow boundaries, scenario
+observation completeness, expected top-1 match accuracy, and optional measured
+lift over a baseline correct/total. Without baseline it emits only a falsifiable
+metric anchor (`metric_anchor_without_baseline`), not measured lift or owner
+approval.
+
 ## Non-Goals
 
 - No automatic RL training path in the near term.
@@ -362,8 +388,8 @@ reports and checks:
 
 ## Immediate Next Step
 
-Use the promotion-gate packet to collect real repeated shadow-score reports,
-behavior-lift anchors, rollback handles, and owner approval refs. The gate can
-mark a packet complete for review, but any actual memory/runbook/skill/retrieval
-promotion must happen in a separate authorized lane; runtime, retrieval, and
-tool-routing influence remain blocked by default.
+Use the lift-evidence packet to produce measured behavior-lift refs only after a
+baseline is supplied, then feed that ref into the promotion-gate packet together
+with rollback handles and owner approval refs. Any actual memory/runbook/skill/
+retrieval promotion must happen in a separate authorized lane; runtime,
+retrieval, and tool-routing influence remain blocked by default.

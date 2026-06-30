@@ -17,8 +17,12 @@ pub const WORKFLOW_FEEDBACK_REPORT_SCHEMA: &str = "agent_bridge.workflow_feedbac
 pub const EXPERIENCE_OBJECT_SCHEMA: &str = "agent_bridge.experience.v0";
 pub const WORKFLOW_FEEDBACK_SHADOW_SCORE_SCHEMA: &str =
     "agent_bridge.workflow_feedback_shadow_score.v0";
+pub const WORKFLOW_FEEDBACK_SHADOW_SCORE_SCENARIOS_SCHEMA: &str =
+    "agent_bridge.workflow_feedback_shadow_score_scenarios.v0";
 pub const WORKFLOW_FEEDBACK_PROMOTION_GATE_SCHEMA: &str =
     "agent_bridge.workflow_feedback_promotion_gate.v0";
+pub const WORKFLOW_FEEDBACK_LIFT_EVIDENCE_SCHEMA: &str =
+    "agent_bridge.workflow_feedback_lift_evidence.v0";
 
 #[derive(Debug, Clone)]
 pub struct WorkflowFeedbackReportOptions {
@@ -232,6 +236,80 @@ pub struct PromotionGateScenarioEvidence {
 pub struct PromotionGateExperienceCount {
     pub experience_id: String,
     pub top_rank_count: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct WorkflowFeedbackLiftEvidenceOptions {
+    pub baseline_correct: Option<u32>,
+    pub baseline_total: Option<u32>,
+    pub min_accuracy: f64,
+    pub min_lift: f64,
+}
+
+impl Default for WorkflowFeedbackLiftEvidenceOptions {
+    fn default() -> Self {
+        Self {
+            baseline_correct: None,
+            baseline_total: None,
+            min_accuracy: 0.75,
+            min_lift: 0.10,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkflowFeedbackLiftEvidenceReport {
+    pub schema: &'static str,
+    pub read_only: bool,
+    pub boundary: WorkflowFeedbackBoundary,
+    pub lift_verdict: &'static str,
+    pub metric_anchor_ref: String,
+    pub measured_against_baseline: bool,
+    pub evidence: LiftEvidenceSummary,
+    pub checks: Vec<LiftEvidenceCheck>,
+    pub scenario_observations: Vec<LiftScenarioObservation>,
+    pub recommended_next_actions: Vec<&'static str>,
+    pub non_goals: Vec<&'static str>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LiftEvidenceSummary {
+    pub scenario_fixture_path: Option<String>,
+    pub shadow_report_count: usize,
+    pub scenario_case_count: usize,
+    pub observation_count: usize,
+    pub expected_top_match_count: usize,
+    pub missing_observation_count: usize,
+    pub unsafe_shadow_report_count: usize,
+    pub top1_accuracy: f64,
+    pub baseline_correct: Option<u32>,
+    pub baseline_total: Option<u32>,
+    pub baseline_accuracy: Option<f64>,
+    pub absolute_lift: Option<f64>,
+    pub min_required_accuracy: f64,
+    pub min_required_lift: f64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LiftEvidenceCheck {
+    pub id: &'static str,
+    pub passed: bool,
+    pub evidence: String,
+    pub required: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct LiftScenarioObservation {
+    pub source_path: Option<String>,
+    pub scenario_id: String,
+    pub scenario: String,
+    pub expected_top_experience_id: String,
+    pub observed_top_experience_id: Option<String>,
+    pub shadow_score: Option<u32>,
+    pub verdict: Option<String>,
+    pub matched_expected_top: bool,
+    pub boundary_safe: bool,
+    pub runtime_influence_allowed: bool,
 }
 
 pub async fn build_report(
@@ -549,6 +627,110 @@ impl WorkflowFeedbackPromotionGateReport {
     }
 }
 
+impl WorkflowFeedbackLiftEvidenceReport {
+    pub fn to_json_value(&self) -> Value {
+        serde_json::to_value(self).unwrap_or_else(|_| {
+            json!({
+                "schema": WORKFLOW_FEEDBACK_LIFT_EVIDENCE_SCHEMA,
+                "read_only": true,
+                "serialization_error": true
+            })
+        })
+    }
+
+    pub fn render_markdown(&self) -> String {
+        let mut out = String::new();
+        out.push_str("# Workflow Feedback Lift Evidence\n");
+        out.push_str(&format!("schema: {}\n", self.schema));
+        out.push_str(&format!("verdict: {}\n", self.lift_verdict));
+        out.push_str(&format!("metric_anchor_ref: {}\n", self.metric_anchor_ref));
+        out.push_str("mode: read-only metric anchor; no memory writes, no retrieval change, no tool-routing change, no runtime policy mutation\n\n");
+
+        out.push_str("## Evidence\n");
+        out.push_str(&format!(
+            "- shadow reports: {}\n",
+            self.evidence.shadow_report_count
+        ));
+        out.push_str(&format!(
+            "- scenario cases: {}\n",
+            self.evidence.scenario_case_count
+        ));
+        out.push_str(&format!(
+            "- observations: {} missing={}\n",
+            self.evidence.observation_count, self.evidence.missing_observation_count
+        ));
+        out.push_str(&format!(
+            "- expected top matches: {} ({:.1}%)\n",
+            self.evidence.expected_top_match_count,
+            self.evidence.top1_accuracy * 100.0
+        ));
+        if let Some(baseline_accuracy) = self.evidence.baseline_accuracy {
+            out.push_str(&format!(
+                "- baseline: {}/{} ({:.1}%)\n",
+                self.evidence.baseline_correct.unwrap_or(0),
+                self.evidence.baseline_total.unwrap_or(0),
+                baseline_accuracy * 100.0
+            ));
+        } else {
+            out.push_str("- baseline: not supplied\n");
+        }
+        if let Some(lift) = self.evidence.absolute_lift {
+            out.push_str(&format!("- absolute lift: {:.1}%\n", lift * 100.0));
+        }
+        out.push('\n');
+
+        out.push_str("## Checks\n");
+        out.push_str("| Check | Status | Evidence | Required |\n");
+        out.push_str("| --- | --- | --- | --- |\n");
+        for check in &self.checks {
+            out.push_str(&format!(
+                "| {} | {} | {} | {} |\n",
+                check.id,
+                if check.passed { "pass" } else { "blocked" },
+                pipe_safe(&check.evidence),
+                pipe_safe(&check.required)
+            ));
+        }
+        out.push('\n');
+
+        out.push_str("## Scenario Observations\n");
+        out.push_str("| Scenario | Expected | Observed | Score | Match | Safe |\n");
+        out.push_str("| --- | --- | --- | ---: | --- | --- |\n");
+        for observation in &self.scenario_observations {
+            out.push_str(&format!(
+                "| {} | {} | {} | {} | {} | {} |\n",
+                pipe_safe(&observation.scenario_id),
+                pipe_safe(&observation.expected_top_experience_id),
+                pipe_safe(
+                    observation
+                        .observed_top_experience_id
+                        .as_deref()
+                        .unwrap_or("<missing>")
+                ),
+                observation
+                    .shadow_score
+                    .map(|score| score.to_string())
+                    .unwrap_or_else(|| "-".to_string()),
+                observation.matched_expected_top,
+                observation.boundary_safe
+            ));
+        }
+        out.push('\n');
+
+        out.push_str("## Recommended Next Actions\n");
+        for action in &self.recommended_next_actions {
+            out.push_str(&format!("- {action}\n"));
+        }
+        out.push('\n');
+
+        out.push_str("## Non-goals\n");
+        for non_goal in &self.non_goals {
+            out.push_str(&format!("- {non_goal}\n"));
+        }
+        out
+    }
+}
+
 pub fn build_shadow_score_report_from_paths(
     fixture_paths: &[PathBuf],
     scenarios: Vec<String>,
@@ -588,6 +770,46 @@ pub fn build_promotion_gate_report_from_paths(
     build_promotion_gate_report(shadow_reports, options)
 }
 
+pub fn build_lift_evidence_report_from_paths(
+    scenario_fixture_path: &PathBuf,
+    shadow_score_paths: &[PathBuf],
+    options: WorkflowFeedbackLiftEvidenceOptions,
+) -> Result<WorkflowFeedbackLiftEvidenceReport> {
+    if shadow_score_paths.is_empty() {
+        bail!("at least one shadow score report is required");
+    }
+    let raw = std::fs::read_to_string(scenario_fixture_path).with_context(|| {
+        format!(
+            "reading scenario fixture {}",
+            scenario_fixture_path.display()
+        )
+    })?;
+    let scenario_value: Value = serde_json::from_str(&raw).with_context(|| {
+        format!(
+            "parsing scenario fixture {}",
+            scenario_fixture_path.display()
+        )
+    })?;
+    let scenario_fixture = ShadowScoreScenarioFixture::from_value(
+        scenario_value,
+        Some(scenario_fixture_path.display().to_string()),
+    )?;
+
+    let mut shadow_reports = Vec::new();
+    for path in shadow_score_paths {
+        let raw = std::fs::read_to_string(path)
+            .with_context(|| format!("reading shadow score report {}", path.display()))?;
+        let value: Value = serde_json::from_str(&raw)
+            .with_context(|| format!("parsing shadow score report {}", path.display()))?;
+        shadow_reports.push(ShadowScoreReportEvidence::from_value(
+            value,
+            Some(path.display().to_string()),
+        )?);
+    }
+
+    build_lift_evidence_report(scenario_fixture, shadow_reports, options)
+}
+
 fn build_shadow_score_report(
     experiences: Vec<ExperienceCandidate>,
     scenarios: Vec<String>,
@@ -622,6 +844,199 @@ fn build_shadow_score_report(
             "Does not change retrieval ranking, tool routing, or runtime policy.",
             "Does not claim causal behavior lift; it only ranks fixture/lesson fit for later review.",
             "Does not promote any lesson without owner-gated evidence and rollback path.",
+        ],
+    })
+}
+
+fn build_lift_evidence_report(
+    scenario_fixture: ShadowScoreScenarioFixture,
+    shadow_reports: Vec<ShadowScoreReportEvidence>,
+    options: WorkflowFeedbackLiftEvidenceOptions,
+) -> Result<WorkflowFeedbackLiftEvidenceReport> {
+    if scenario_fixture.cases.is_empty() {
+        bail!("at least one scenario case is required");
+    }
+    if shadow_reports.is_empty() {
+        bail!("at least one shadow score report is required");
+    }
+
+    let min_accuracy = options.min_accuracy.clamp(0.0, 1.0);
+    let min_lift = options.min_lift.clamp(0.0, 1.0);
+    let baseline_total = options.baseline_total.filter(|total| *total > 0);
+    let baseline_correct =
+        baseline_total.map(|total| options.baseline_correct.unwrap_or(0).min(total));
+    let baseline_accuracy = match (baseline_correct, baseline_total) {
+        (Some(correct), Some(total)) if total > 0 => Some(correct as f64 / total as f64),
+        _ => None,
+    };
+
+    let mut observations = Vec::new();
+    let mut unsafe_shadow_report_count = 0_usize;
+    for report in &shadow_reports {
+        if !report.boundary_safe {
+            unsafe_shadow_report_count += 1;
+        }
+        for case in &scenario_fixture.cases {
+            let top = report
+                .top_candidates
+                .iter()
+                .find(|candidate| candidate.scenario == case.scenario);
+            let matched_expected_top = top
+                .map(|candidate| candidate.experience_id == case.expected_top_experience_id)
+                .unwrap_or(false);
+            observations.push(LiftScenarioObservation {
+                source_path: report.source_path.clone(),
+                scenario_id: case.scenario_id.clone(),
+                scenario: case.scenario.clone(),
+                expected_top_experience_id: case.expected_top_experience_id.clone(),
+                observed_top_experience_id: top.map(|candidate| candidate.experience_id.clone()),
+                shadow_score: top.map(|candidate| candidate.shadow_score),
+                verdict: top.map(|candidate| candidate.verdict.clone()),
+                matched_expected_top,
+                boundary_safe: report.boundary_safe,
+                runtime_influence_allowed: top
+                    .map(|candidate| candidate.runtime_influence_allowed)
+                    .unwrap_or(false),
+            });
+        }
+    }
+
+    let observation_count = observations
+        .iter()
+        .filter(|observation| observation.observed_top_experience_id.is_some())
+        .count();
+    let missing_observation_count = observations.len().saturating_sub(observation_count);
+    let expected_top_match_count = observations
+        .iter()
+        .filter(|observation| observation.matched_expected_top)
+        .count();
+    let top1_accuracy = if observation_count == 0 {
+        0.0
+    } else {
+        expected_top_match_count as f64 / observation_count as f64
+    };
+    let absolute_lift = baseline_accuracy.map(|baseline| top1_accuracy - baseline);
+    let safe_boundaries = unsafe_shadow_report_count == 0
+        && observations
+            .iter()
+            .all(|observation| !observation.runtime_influence_allowed);
+    let observations_complete = missing_observation_count == 0
+        && observation_count == scenario_fixture.cases.len() * shadow_reports.len();
+    let accuracy_passed = top1_accuracy >= min_accuracy;
+    let baseline_supplied = baseline_accuracy.is_some();
+    let lift_passed = absolute_lift.map(|lift| lift >= min_lift).unwrap_or(false);
+
+    let lift_verdict = if !safe_boundaries {
+        "blocked_shadow_boundary_violation"
+    } else if !observations_complete {
+        "blocked_incomplete_observations"
+    } else if !accuracy_passed {
+        "blocked_expected_top_accuracy"
+    } else if !baseline_supplied {
+        "metric_anchor_without_baseline"
+    } else if !lift_passed {
+        "blocked_no_positive_lift"
+    } else {
+        "measured_lift_anchor"
+    };
+
+    let checks = vec![
+        LiftEvidenceCheck {
+            id: "shadow_boundaries_safe",
+            passed: safe_boundaries,
+            evidence: format!(
+                "{unsafe_shadow_report_count} unsafe report(s); {} top candidate(s) allow runtime influence",
+                observations
+                    .iter()
+                    .filter(|observation| observation.runtime_influence_allowed)
+                    .count()
+            ),
+            required:
+                "all shadow reports read_only=true and all observed top candidates keep runtime influence disabled"
+                    .to_string(),
+        },
+        LiftEvidenceCheck {
+            id: "scenario_observations_complete",
+            passed: observations_complete,
+            evidence: format!(
+                "{observation_count} observed top candidate(s), {missing_observation_count} missing"
+            ),
+            required: format!(
+                "{} scenario case(s) across {} shadow report(s)",
+                scenario_fixture.cases.len(),
+                shadow_reports.len()
+            ),
+        },
+        LiftEvidenceCheck {
+            id: "expected_top_accuracy",
+            passed: accuracy_passed,
+            evidence: format!(
+                "{} / {} observed top candidate(s) matched expected top ({:.1}%)",
+                expected_top_match_count,
+                observation_count,
+                top1_accuracy * 100.0
+            ),
+            required: format!("top-1 expected match accuracy >= {:.1}%", min_accuracy * 100.0),
+        },
+        LiftEvidenceCheck {
+            id: "baseline_supplied",
+            passed: baseline_supplied,
+            evidence: match (baseline_correct, baseline_total) {
+                (Some(correct), Some(total)) => format!("{correct} / {total} baseline correct"),
+                _ => "no baseline correct/total supplied".to_string(),
+            },
+            required: "baseline-correct and baseline-total for measured lift".to_string(),
+        },
+        LiftEvidenceCheck {
+            id: "positive_lift",
+            passed: lift_passed,
+            evidence: absolute_lift
+                .map(|lift| format!("{:.1}% absolute lift over baseline", lift * 100.0))
+                .unwrap_or_else(|| "no baseline supplied; lift not measured".to_string()),
+            required: format!("absolute lift >= {:.1}%", min_lift * 100.0),
+        },
+    ];
+
+    let evidence = LiftEvidenceSummary {
+        scenario_fixture_path: scenario_fixture.source_path.clone(),
+        shadow_report_count: shadow_reports.len(),
+        scenario_case_count: scenario_fixture.cases.len(),
+        observation_count,
+        expected_top_match_count,
+        missing_observation_count,
+        unsafe_shadow_report_count,
+        top1_accuracy,
+        baseline_correct,
+        baseline_total,
+        baseline_accuracy,
+        absolute_lift,
+        min_required_accuracy: min_accuracy,
+        min_required_lift: min_lift,
+    };
+    let metric_anchor_ref = lift_metric_anchor_ref(lift_verdict, &evidence);
+
+    Ok(WorkflowFeedbackLiftEvidenceReport {
+        schema: WORKFLOW_FEEDBACK_LIFT_EVIDENCE_SCHEMA,
+        read_only: true,
+        boundary: WorkflowFeedbackBoundary {
+            writes_memory: false,
+            mutates_runtime_policy: false,
+            changes_retrieval_order: false,
+            runtime_influence_allowed: false,
+            owner_gated_runtime_influence: true,
+        },
+        lift_verdict,
+        metric_anchor_ref,
+        measured_against_baseline: baseline_supplied,
+        evidence,
+        checks,
+        scenario_observations: observations,
+        recommended_next_actions: lift_recommended_next_actions(lift_verdict),
+        non_goals: vec![
+            "Does not promote memories, runbooks, skills, retrieval rules, or tool routing.",
+            "Does not mutate runtime policy, prompts, profiles, bootstrap, or memory.",
+            "Does not infer owner approval or rollback evidence.",
+            "Does not claim real runtime behavior lift unless a baseline correct/total is supplied.",
         ],
     })
 }
@@ -829,6 +1244,63 @@ struct TopShadowCandidate {
     runtime_influence_allowed: bool,
 }
 
+#[derive(Debug, Clone)]
+struct ShadowScoreScenarioFixture {
+    source_path: Option<String>,
+    cases: Vec<ShadowScoreScenarioCase>,
+}
+
+#[derive(Debug, Clone)]
+struct ShadowScoreScenarioCase {
+    scenario_id: String,
+    scenario: String,
+    expected_top_experience_id: String,
+}
+
+impl ShadowScoreScenarioFixture {
+    fn from_value(value: Value, source_path: Option<String>) -> Result<Self> {
+        let schema = value
+            .get("schema")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if schema != WORKFLOW_FEEDBACK_SHADOW_SCORE_SCENARIOS_SCHEMA {
+            bail!(
+                "scenario fixture {} has schema {schema:?}, expected {WORKFLOW_FEEDBACK_SHADOW_SCORE_SCENARIOS_SCHEMA}",
+                source_path.as_deref().unwrap_or("<inline>")
+            );
+        }
+        if value.get("read_only").and_then(Value::as_bool) != Some(true) {
+            bail!(
+                "scenario fixture {} must set read_only=true",
+                source_path.as_deref().unwrap_or("<inline>")
+            );
+        }
+        let cases = value
+            .get("scenario_cases")
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "scenario fixture {} missing scenario_cases array",
+                    source_path.as_deref().unwrap_or("<inline>")
+                )
+            })?
+            .iter()
+            .map(|case| {
+                let scenario_id = required_str(case, "scenario_id", "scenario case")?;
+                let scenario = required_str(case, "scenario", "scenario case")?;
+                let expected_top_experience_id =
+                    required_str(case, "expected_top_experience_id", "scenario case")?;
+                Ok(ShadowScoreScenarioCase {
+                    scenario_id,
+                    scenario,
+                    expected_top_experience_id,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(Self { source_path, cases })
+    }
+}
+
 impl ShadowScoreReportEvidence {
     fn from_value(value: Value, source_path: Option<String>) -> Result<Self> {
         let schema = value
@@ -923,6 +1395,16 @@ impl ShadowScoreReportEvidence {
     }
 }
 
+fn required_str(value: &Value, key: &str, label: &str) -> Result<String> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .ok_or_else(|| anyhow::anyhow!("{label} missing non-empty {key}"))
+}
+
 fn clean_refs(refs: Vec<String>) -> Vec<String> {
     refs.into_iter()
         .map(|s| s.trim().to_string())
@@ -946,6 +1428,51 @@ fn top_experience_counts(counts: BTreeMap<String, usize>) -> Vec<PromotionGateEx
             .then_with(|| a.experience_id.cmp(&b.experience_id))
     });
     rows
+}
+
+fn lift_metric_anchor_ref(verdict: &str, evidence: &LiftEvidenceSummary) -> String {
+    let baseline = evidence
+        .baseline_accuracy
+        .map(|value| format!("{value:.3}"))
+        .unwrap_or_else(|| "none".to_string());
+    let lift = evidence
+        .absolute_lift
+        .map(|value| format!("{value:.3}"))
+        .unwrap_or_else(|| "none".to_string());
+    format!(
+        "workflow-feedback-lift-evidence:v0;verdict={verdict};observations={};top1_accuracy={:.3};baseline_accuracy={baseline};absolute_lift={lift}",
+        evidence.observation_count, evidence.top1_accuracy
+    )
+}
+
+fn lift_recommended_next_actions(lift_verdict: &str) -> Vec<&'static str> {
+    match lift_verdict {
+        "blocked_shadow_boundary_violation" => vec![
+            "Reject the lift anchor until all shadow reports are read-only and runtime influence remains false.",
+            "Regenerate shadow-score reports from safe fixtures before comparing against baseline.",
+        ],
+        "blocked_incomplete_observations" => vec![
+            "Re-run shadow scoring with every held-out scenario from the scenario fixture.",
+            "Do not use a partial observation set as a behavior-lift anchor.",
+        ],
+        "blocked_expected_top_accuracy" => vec![
+            "Improve fixture quality or scenario coverage before using this as a promotion input.",
+            "Keep the lesson in audit-only mode until expected-top accuracy clears the threshold.",
+        ],
+        "metric_anchor_without_baseline" => vec![
+            "Attach this packet as a falsifiable metric anchor only, not as measured lift.",
+            "Collect a baseline correct/total from an unguided or previous-policy run before owner review.",
+        ],
+        "blocked_no_positive_lift" => vec![
+            "Do not advance to owner review; the measured proxy does not beat baseline enough.",
+            "Inspect mismatched scenarios and update the lesson or fixture before another run.",
+        ],
+        "measured_lift_anchor" => vec![
+            "Use the metric_anchor_ref as the behavior-lift ref in the promotion gate packet.",
+            "Still require rollback evidence and explicit owner approval before any separate promotion lane.",
+        ],
+        _ => vec!["Review the lift evidence packet manually before using it as a gate input."],
+    }
 }
 
 fn recommended_next_actions(gate_verdict: &str) -> Vec<&'static str> {
@@ -1886,6 +2413,114 @@ mod tests {
         .to_json_value()
     }
 
+    fn two_scenario_fixture_value() -> Value {
+        json!({
+            "schema": WORKFLOW_FEEDBACK_SHADOW_SCORE_SCENARIOS_SCHEMA,
+            "read_only": true,
+            "scenario_cases": [
+                {
+                    "scenario_id": "interactive_agent_send_input_stall",
+                    "scenario": "interactive Claude Code send_input stalls on chrome prompt after reconnect",
+                    "expected_top_experience_id": "exp_agent_input"
+                },
+                {
+                    "scenario_id": "workflow_feedback_policy_pressure",
+                    "scenario": "workflow feedback lessons should stay report first with shadow scoring and owner gate",
+                    "expected_top_experience_id": "exp_workflow_report"
+                }
+            ]
+        })
+    }
+
+    #[test]
+    fn lift_evidence_reports_metric_anchor_without_baseline() {
+        let scenarios = ShadowScoreScenarioFixture::from_value(
+            two_scenario_fixture_value(),
+            Some("scenarios.json".to_string()),
+        )
+        .expect("scenario fixture");
+        let shadow = ShadowScoreReportEvidence::from_value(
+            two_scenario_shadow_score_value(),
+            Some("shadow.json".to_string()),
+        )
+        .expect("shadow evidence");
+        let lift = build_lift_evidence_report(
+            scenarios,
+            vec![shadow],
+            WorkflowFeedbackLiftEvidenceOptions {
+                min_accuracy: 0.75,
+                min_lift: 0.10,
+                ..Default::default()
+            },
+        )
+        .expect("lift evidence");
+
+        assert_eq!(lift.schema, WORKFLOW_FEEDBACK_LIFT_EVIDENCE_SCHEMA);
+        assert!(lift.read_only);
+        assert!(!lift.boundary.writes_memory);
+        assert!(!lift.boundary.mutates_runtime_policy);
+        assert!(!lift.boundary.changes_retrieval_order);
+        assert!(!lift.boundary.runtime_influence_allowed);
+        assert_eq!(lift.lift_verdict, "metric_anchor_without_baseline");
+        assert!(!lift.measured_against_baseline);
+        assert_eq!(lift.evidence.observation_count, 2);
+        assert_eq!(lift.evidence.expected_top_match_count, 2);
+        assert!((lift.evidence.top1_accuracy - 1.0).abs() < f64::EPSILON);
+        assert!(lift.metric_anchor_ref.contains("baseline_accuracy=none"));
+    }
+
+    #[test]
+    fn lift_evidence_measures_positive_lift_against_baseline() {
+        let scenarios = ShadowScoreScenarioFixture::from_value(
+            two_scenario_fixture_value(),
+            Some("scenarios.json".to_string()),
+        )
+        .expect("scenario fixture");
+        let shadow_one = ShadowScoreReportEvidence::from_value(
+            two_scenario_shadow_score_value(),
+            Some("shadow-one.json".to_string()),
+        )
+        .expect("shadow one");
+        let shadow_two = ShadowScoreReportEvidence::from_value(
+            two_scenario_shadow_score_value(),
+            Some("shadow-two.json".to_string()),
+        )
+        .expect("shadow two");
+        let lift = build_lift_evidence_report(
+            scenarios,
+            vec![shadow_one, shadow_two],
+            WorkflowFeedbackLiftEvidenceOptions {
+                baseline_correct: Some(0),
+                baseline_total: Some(4),
+                min_accuracy: 0.75,
+                min_lift: 0.50,
+            },
+        )
+        .expect("lift evidence");
+
+        assert_eq!(lift.lift_verdict, "measured_lift_anchor");
+        assert!(lift.measured_against_baseline);
+        assert_eq!(lift.evidence.observation_count, 4);
+        assert_eq!(lift.evidence.expected_top_match_count, 4);
+        assert_eq!(lift.evidence.baseline_accuracy, Some(0.0));
+        assert_eq!(lift.evidence.absolute_lift, Some(1.0));
+        assert!(lift.checks.iter().all(|check| check.passed));
+        assert!(lift.metric_anchor_ref.contains("absolute_lift=1.000"));
+    }
+
+    #[test]
+    fn lift_evidence_rejects_non_scenario_fixture_schema() {
+        let err = ShadowScoreScenarioFixture::from_value(
+            json!({"schema": "wrong.schema", "read_only": true, "scenario_cases": []}),
+            None,
+        )
+        .expect_err("wrong schema must fail");
+        assert!(
+            err.to_string()
+                .contains("expected agent_bridge.workflow_feedback_shadow_score_scenarios.v0")
+        );
+    }
+
     #[test]
     fn promotion_gate_blocks_without_lift_rollback_and_owner_refs() {
         let shadow = ShadowScoreReportEvidence::from_value(
@@ -1963,6 +2598,146 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("expected agent_bridge.workflow_feedback_shadow_score.v0")
+        );
+    }
+
+    fn two_case_scenario_fixture() -> ShadowScoreScenarioFixture {
+        ShadowScoreScenarioFixture::from_value(
+            json!({
+                "schema": WORKFLOW_FEEDBACK_SHADOW_SCORE_SCENARIOS_SCHEMA,
+                "read_only": true,
+                "scenario_cases": [
+                    {
+                        "scenario_id": "interactive_agent_send_input_stall",
+                        "scenario": "interactive Claude Code send_input stalls on chrome prompt after reconnect",
+                        "expected_top_experience_id": "exp_agent_input"
+                    },
+                    {
+                        "scenario_id": "workflow_feedback_policy_pressure",
+                        "scenario": "workflow feedback lessons should stay report first with shadow scoring and owner gate",
+                        "expected_top_experience_id": "exp_workflow_report"
+                    }
+                ]
+            }),
+            Some("scenarios.json".to_string()),
+        )
+        .expect("scenario fixture")
+    }
+
+    #[test]
+    fn lift_evidence_reports_measured_anchor_when_shadow_beats_baseline() {
+        let shadow = ShadowScoreReportEvidence::from_value(
+            two_scenario_shadow_score_value(),
+            Some("shadow.json".to_string()),
+        )
+        .expect("shadow evidence");
+
+        let report = build_lift_evidence_report(
+            two_case_scenario_fixture(),
+            vec![shadow],
+            WorkflowFeedbackLiftEvidenceOptions {
+                baseline_correct: Some(1),
+                baseline_total: Some(2),
+                min_accuracy: 0.75,
+                min_lift: 0.25,
+            },
+        )
+        .expect("lift evidence");
+
+        assert_eq!(report.schema, WORKFLOW_FEEDBACK_LIFT_EVIDENCE_SCHEMA);
+        assert!(report.read_only);
+        assert!(!report.boundary.writes_memory);
+        assert!(!report.boundary.mutates_runtime_policy);
+        assert!(!report.boundary.changes_retrieval_order);
+        assert!(!report.boundary.runtime_influence_allowed);
+        assert_eq!(report.lift_verdict, "measured_lift_anchor");
+        assert!(report.measured_against_baseline);
+        assert_eq!(report.evidence.observation_count, 2);
+        assert_eq!(report.evidence.expected_top_match_count, 2);
+        assert_eq!(report.evidence.missing_observation_count, 0);
+        assert_eq!(report.evidence.baseline_correct, Some(1));
+        assert_eq!(report.evidence.baseline_total, Some(2));
+        assert_eq!(report.evidence.top1_accuracy, 1.0);
+        assert_eq!(report.evidence.absolute_lift, Some(0.5));
+        assert!(report.metric_anchor_ref.contains("measured_lift_anchor"));
+        assert!(report.checks.iter().all(|check| check.passed));
+    }
+
+    #[test]
+    fn lift_evidence_without_baseline_is_metric_anchor_only() {
+        let shadow = ShadowScoreReportEvidence::from_value(
+            two_scenario_shadow_score_value(),
+            Some("shadow.json".to_string()),
+        )
+        .expect("shadow evidence");
+
+        let report = build_lift_evidence_report(
+            two_case_scenario_fixture(),
+            vec![shadow],
+            WorkflowFeedbackLiftEvidenceOptions {
+                min_accuracy: 0.75,
+                ..WorkflowFeedbackLiftEvidenceOptions::default()
+            },
+        )
+        .expect("lift evidence");
+
+        assert_eq!(report.lift_verdict, "metric_anchor_without_baseline");
+        assert!(!report.measured_against_baseline);
+        assert_eq!(report.evidence.absolute_lift, None);
+        let baseline_check = report
+            .checks
+            .iter()
+            .find(|check| check.id == "baseline_supplied")
+            .expect("baseline check");
+        assert!(!baseline_check.passed);
+        assert!(!report.checks.iter().all(|check| check.passed));
+    }
+
+    #[test]
+    fn lift_evidence_blocks_incomplete_shadow_observations() {
+        let shadow = ShadowScoreReportEvidence::from_value(
+            two_scenario_shadow_score_value(),
+            Some("shadow.json".to_string()),
+        )
+        .expect("shadow evidence");
+        let incomplete_fixture = ShadowScoreScenarioFixture::from_value(
+            json!({
+                "schema": WORKFLOW_FEEDBACK_SHADOW_SCORE_SCENARIOS_SCHEMA,
+                "read_only": true,
+                "scenario_cases": [
+                    {
+                        "scenario_id": "not_scored",
+                        "scenario": "a held-out scenario not present in the shadow report",
+                        "expected_top_experience_id": "exp_agent_input"
+                    }
+                ]
+            }),
+            Some("missing.json".to_string()),
+        )
+        .expect("scenario fixture");
+
+        let report = build_lift_evidence_report(
+            incomplete_fixture,
+            vec![shadow],
+            WorkflowFeedbackLiftEvidenceOptions {
+                baseline_correct: Some(0),
+                baseline_total: Some(1),
+                min_accuracy: 0.75,
+                min_lift: 0.10,
+            },
+        )
+        .expect("lift evidence");
+
+        assert_eq!(report.lift_verdict, "blocked_incomplete_observations");
+        assert_eq!(report.evidence.observation_count, 0);
+        assert_eq!(report.evidence.missing_observation_count, 1);
+        assert!(
+            !report
+                .checks
+                .iter()
+                .find(|check| check.id == "scenario_observations_complete")
+                .expect("observation check")
+                .passed
         );
     }
 }
