@@ -1974,6 +1974,24 @@ pub struct MemoryStats {
     pub db_size_bytes: Option<u64>,
 }
 
+/// One active memory row's embedding columns, for the read-only INT8
+/// quantization shadow diagnostic (`embedding_quant_shadow` MCP tool).
+///
+/// Pure data accessor: the f32 `embedding` BLOB (the source of truth) plus the
+/// optional v37 INT8 shadow pair. `embedding_i8`/`embedding_i8_scale` are
+/// `None` for rows whose shadow has not been populated (pre-v37 rows, or rows
+/// whose f32 embedding was reused rather than recomputed). No decode or
+/// quantize happens here — the caller (the bridge diagnostic) owns the math.
+#[derive(Debug, Clone)]
+pub struct EmbeddingQuantRow {
+    /// Raw little-endian f32 bytes (decode via [`decode_embedding`]).
+    pub embedding: Vec<u8>,
+    /// Per-row INT8 codes BLOB (1 byte/code, no framing), or `None` if unshadowed.
+    pub embedding_i8: Option<Vec<u8>>,
+    /// Per-row absmax dequant scale, or `None` if unshadowed.
+    pub embedding_i8_scale: Option<f32>,
+}
+
 /// Memory kinds treated as bulk-imported reference catalog rather than
 /// working memory. Excluded from `S234Counts::memories_active` so
 /// routine catalog churn (decay-archive, restore, bulk-import) doesn't
@@ -2780,6 +2798,16 @@ pub trait StateStore: Send + Sync {
     /// Return aggregate statistics about the memory store.
     /// Intended for `memory_stats` MCP tool and session-curate diagnostics.
     async fn memory_stats(&self) -> Result<MemoryStats>;
+
+    /// Read-only snapshot of every active row's embedding columns for the INT8
+    /// quantization shadow diagnostic (`embedding_quant_shadow`): the f32
+    /// `embedding` (source of truth) plus the optional v37 INT8 shadow pair.
+    /// Reads only `status='active' AND embedding IS NOT NULL`; mutates nothing,
+    /// never touches the retrieval path, never drops f32. Default impl returns
+    /// empty so non-SQLite stores stay trait-compatible.
+    async fn active_embedding_quant_rows(&self) -> Result<Vec<EmbeddingQuantRow>> {
+        Ok(Vec::new())
+    }
 
     /// P12: counts of active memories grouped by `embedding_backend`
     /// (added v26). NULL is reported as the literal string `"unknown"`

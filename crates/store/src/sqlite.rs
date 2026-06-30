@@ -5967,6 +5967,33 @@ impl StateStore for SqliteStore {
         Ok(rows)
     }
 
+    async fn active_embedding_quant_rows(&self) -> Result<Vec<crate::EmbeddingQuantRow>> {
+        let rows = self
+            .conn
+            .call(move |c| -> RusqliteResult<Vec<crate::EmbeddingQuantRow>> {
+                let mut stmt = c.prepare(
+                    "SELECT embedding, embedding_i8, embedding_i8_scale \
+                     FROM memories \
+                     WHERE status = 'active' AND embedding IS NOT NULL",
+                )?;
+                let rows = stmt
+                    .query_map([], |row| {
+                        Ok(crate::EmbeddingQuantRow {
+                            embedding: row.get::<_, Vec<u8>>(0)?,
+                            embedding_i8: row.get::<_, Option<Vec<u8>>>(1)?,
+                            // Column is REAL (8-byte double); read as f64 and
+                            // narrow back to the f32 the codec stored (exact).
+                            embedding_i8_scale: row.get::<_, Option<f64>>(2)?.map(|s| s as f32),
+                        })
+                    })?
+                    .collect::<RusqliteResult<Vec<_>>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("active_embedding_quant_rows: {e}")))?;
+        Ok(rows)
+    }
+
     async fn memory_stats(&self) -> Result<MemoryStats> {
         let stats = self
             .conn

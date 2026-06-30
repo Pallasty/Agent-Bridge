@@ -28302,6 +28302,221 @@ impl McpTool for MemoryStatsTool {
 }
 
 // ===========================================================================
+
+/// §5 gate floors from `docs/design/INT8_EMBEDDING_COLUMN_SHADOW_PROPOSAL_2026_06_28.md`.
+/// G3: footprint reduction floor (≈3.98x available; gate at 3.5x for headroom).
+const QUANT_GATE_FOOTPRINT_FLOOR: f64 = 3.5;
+/// G4: mean round-trip cosine fidelity floor (and 0 rows allowed below it).
+const QUANT_GATE_COSINE_FLOOR: f64 = 0.999;
+
+/// Read-only INT8-embedding quantization **shadow** diagnostic. Re-quantizes the
+/// live active f32 corpus in memory and reports the §5 gate (G1 recall, G2
+/// zero-regression, G3 footprint, G4 cosine) plus the persisted v37 shadow's
+/// coverage + fidelity. Warn-only: writes nothing, never touches retrieval, and
+/// never drops the f32 source of truth (Phase C cutover is owner-gated). This is
+/// the one-call dry-run evidence surface for the lswr admission ladder.
+pub struct EmbeddingQuantShadowTool {
+    hub: Hub,
+}
+impl EmbeddingQuantShadowTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for EmbeddingQuantShadowTool {
+    fn name(&self) -> &'static str {
+        "embedding_quant_shadow"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only INT8-embedding quantization shadow diagnostic. \
+                 Re-quantizes the live active f32 corpus IN MEMORY (the f32 `embedding` \
+                 BLOB stays the untouched source of truth) and reports: per-row cosine \
+                 drift + projected ~3.98x byte savings (`measure_drift`), a recall@k \
+                 regression gate (`recall_regression_gate`, asymmetric f32-query vs \
+                 dequantized-INT8 corpus), and the persisted v37 `embedding_i8` shadow's \
+                 coverage + stored-vs-f32 fidelity. Emits the §5 gate verdicts (G1 recall, \
+                 G2 zero-regression, G3 footprint >= 3.5x, G4 mean cosine >= 0.999). \
+                 WARN-ONLY: never writes, never changes retrieval order, never drops f32. \
+                 Phase C cutover (serve INT8 / drop f32) is owner-gated via the lswr ladder \
+                 and is NOT performed here — this tool only measures."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "k": {
+                        "type": "integer", "minimum": 1, "maximum": 100, "default": 10,
+                        "description": "recall@k neighbor depth (G1). Default 10."
+                    },
+                    "max_queries": {
+                        "type": "integer", "minimum": 1, "maximum": 5000, "default": 200,
+                        "description": "Deterministic stride query-sample size. Default 200."
+                    },
+                    "threshold": {
+                        "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.98,
+                        "description": "recall@k pass floor (G1). Default 0.98."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no memory store configured")),
+        };
+        let k = args.get("k").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
+        let max_queries = args
+            .get("max_queries")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(200) as usize;
+        let threshold = args.get("threshold").and_then(|v| v.as_f64()).unwrap_or(0.98);
+
+        let rows = store
+            .active_embedding_quant_rows()
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("active_embedding_quant_rows: {e}")))?;
+
+        // Decode the f32 corpus; track the dim spread (honesty note: the recall
+        // gate keeps only the first-non-empty-row dim, so mixed-dim stores must
+        // be visible rather than silently collapsed).
+        let mut f32_vecs: Vec<Vec<f32>> = Vec::with_capacity(rows.len());
+        let mut dim_counts: std::collections::BTreeMap<usize, u64> =
+            std::collections::BTreeMap::new();
+        // Persisted-shadow coverage + stored-vs-f32 fidelity accumulators.
+        let mut shadowed: u64 = 0;
+        let mut shadow_len_mismatch: u64 = 0;
+        let mut shadow_compared: u64 = 0;
+        let mut shadow_cos_sum: f64 = 0.0;
+        let mut shadow_cos_min: f64 = 1.0;
+        for r in &rows {
+            let f = ab_store::decode_embedding(&r.embedding);
+            if !f.is_empty() {
+                *dim_counts.entry(f.len()).or_insert(0) += 1;
+            }
+            if let (Some(blob), Some(scale)) = (&r.embedding_i8, r.embedding_i8_scale) {
+                shadowed += 1;
+                if !f.is_empty() && blob.len() == f.len() {
+                    let q = ab_store::quant::QuantizedRow::from_blob(blob, scale);
+                    let deq = ab_store::quant::dequantize_row_i8(&q);
+                    let c = cosine_similarity(&f, &deq) as f64;
+                    shadow_cos_sum += c;
+                    shadow_cos_min = shadow_cos_min.min(c);
+                    shadow_compared += 1;
+                } else {
+                    shadow_len_mismatch += 1;
+                }
+            }
+            f32_vecs.push(f);
+        }
+        let unshadowed = (rows.len() as u64).saturating_sub(shadowed);
+
+        // Projected drift + recall over the live f32 corpus, re-quantized in memory.
+        let drift = ab_store::quant::measure_drift(f32_vecs.iter().map(|v| v.as_slice()));
+        let slices: Vec<&[f32]> = f32_vecs.iter().map(|v| v.as_slice()).collect();
+        let recall = ab_store::quant::recall_regression_gate(&slices, k, max_queries, threshold);
+
+        // §5 gates.
+        let g1 = recall.passed;
+        let g2 = recall.queries_below_threshold == 0;
+        let ratio = drift.compression_ratio();
+        let g3 = ratio >= QUANT_GATE_FOOTPRINT_FLOOR;
+        let g4 = drift.mean_cosine >= QUANT_GATE_COSINE_FLOOR && drift.rows_below_0_999 == 0;
+        let gates_pass = g1 && g2 && g3 && g4;
+
+        let round6 = |x: f64| (x * 1_000_000.0).round() / 1_000_000.0;
+        let dim_spread: Vec<Value> = dim_counts
+            .iter()
+            .map(|(d, n)| json!({ "dim": d, "rows": n }))
+            .collect();
+        let shadow_mean_cos = if shadow_compared > 0 {
+            shadow_cos_sum / shadow_compared as f64
+        } else {
+            1.0
+        };
+        let coverage = if rows.is_empty() {
+            0.0
+        } else {
+            shadowed as f64 / rows.len() as f64
+        };
+        // Vacuous "pass" on an empty/degenerate corpus is reported honestly.
+        let verdict = if drift.rows == 0 {
+            "no_corpus"
+        } else if gates_pass {
+            "shadow_pass"
+        } else {
+            "attention"
+        };
+
+        Ok(ToolResult::json_text(&json!({
+            "schema": "agent_bridge.embedding_quant_shadow.v0",
+            "read_only": true,
+            "boundary": {
+                "mode": "shadow_only",
+                "mutates_ab_memory": false,
+                "writes_embeddings": false,
+                "changes_retrieval_vector": false,
+                "changes_memory_search_order": false,
+                "drops_f32_source_of_truth": false,
+                "runs_phase_c_cutover": false
+            },
+            "corpus": {
+                "active_with_f32": rows.len(),
+                "dim_spread": dim_spread
+            },
+            "drift": {
+                "schema": "agent_bridge.embedding_quant_drift_eval.v0",
+                "rows": drift.rows,
+                "f32_bytes": drift.f32_bytes,
+                "int8_bytes": drift.int8_bytes,
+                "compression_ratio": round6(ratio),
+                "min_cosine": round6(drift.min_cosine as f64),
+                "mean_cosine": round6(drift.mean_cosine),
+                "rows_below_0_999": drift.rows_below_0_999,
+                "zero_rows": drift.zero_rows
+            },
+            "recall_gate": {
+                "schema": "agent_bridge.embedding_quant_recall_gate.v0",
+                "corpus": recall.corpus,
+                "queries": recall.queries,
+                "k": recall.k,
+                "mean_recall_at_k": round6(recall.mean_recall_at_k),
+                "min_recall_at_k": round6(recall.min_recall_at_k),
+                "queries_below_threshold": recall.queries_below_threshold,
+                "threshold": recall.threshold,
+                "passed": recall.passed
+            },
+            "stored_shadow": {
+                "shadowed_rows": shadowed,
+                "unshadowed_rows": unshadowed,
+                "coverage": round6(coverage),
+                "consistency_compared": shadow_compared,
+                "length_mismatch_rows": shadow_len_mismatch,
+                "stored_vs_f32_mean_cosine": round6(shadow_mean_cos),
+                "stored_vs_f32_min_cosine": round6(if shadow_compared > 0 { shadow_cos_min } else { 1.0 })
+            },
+            "gates": {
+                "G1_recall": { "pass": g1, "mean_recall_at_k": round6(recall.mean_recall_at_k), "threshold": recall.threshold },
+                "G2_zero_regressions": { "pass": g2, "queries_below_threshold": recall.queries_below_threshold },
+                "G3_footprint": { "pass": g3, "compression_ratio": round6(ratio), "floor": QUANT_GATE_FOOTPRINT_FLOOR },
+                "G4_cosine": { "pass": g4, "mean_cosine": round6(drift.mean_cosine), "rows_below_0_999": drift.rows_below_0_999, "floor": QUANT_GATE_COSINE_FLOOR },
+                "G5_query_f32_invariant": { "pass": true, "note": "asymmetric retrieval: fresh f32 query vs dequantized-INT8 corpus; query is never quantized" },
+                "G6_human_review": { "pass": false, "note": "owner sign-off is required even if G1-G5 pass; not satisfiable by this read-only tool" }
+            },
+            "verdict": verdict,
+            "promotion": {
+                "phase_a_landed": true,
+                "phase_c_gated": true,
+                "note": "Phase C (serve INT8 / drop f32) requires the lswr outcome-admission ladder + explicit owner sign-off (design §8). This tool only measures; it authorizes nothing."
+            }
+        })))
+    }
+}
+
+// ===========================================================================
 //                  memory_query_stats — Phase 0 telemetry readout
 // ===========================================================================
 
@@ -59037,6 +59252,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         &mut reg,
         policy,
         Tier::Standard,
+        Arc::new(EmbeddingQuantShadowTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
         Arc::new(MemoryQueryStatsTool::new(hub.clone())),
     );
     reg_if(
@@ -71298,6 +71519,130 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             .expect("open store");
         let hub = crate::Hub::builder().store(Arc::new(store)).build();
         (hub, temp_dir)
+    }
+
+    #[tokio::test]
+    async fn embedding_quant_shadow_reports_gates_and_shadow_coverage() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        for i in 0..6u32 {
+            let rec = MemoryRecord {
+                key: format!("quant-shadow-{i}"),
+                kind: "fact".into(),
+                content: format!(
+                    "quant shadow corpus row number {i} with distinct words alpha beta gamma"
+                ),
+                tags: vec![],
+                related_keys: vec![],
+                scope: None,
+                created_at: now,
+                updated_at: now,
+                last_accessed_at: 0,
+                access_count: 0,
+                importance: 0.5,
+                status: "active".into(),
+                trigger_pattern: None,
+                superseded_by: None,
+            };
+            store.memory_save(&rec).await.expect("save");
+        }
+
+        let tool = EmbeddingQuantShadowTool::new(hub);
+        let res = tool
+            .execute(json!({}), &ToolContext::default())
+            .await
+            .expect("execute ok");
+        assert!(!res.is_error, "diagnostic must succeed");
+        let v = result_json(&res);
+
+        // Structure + boundary discipline (hold for any corpus state).
+        assert_eq!(v["schema"], "agent_bridge.embedding_quant_shadow.v0");
+        assert_eq!(v["read_only"], true);
+        assert_eq!(v["boundary"]["drops_f32_source_of_truth"], false);
+        assert_eq!(v["boundary"]["runs_phase_c_cutover"], false);
+        assert_eq!(v["boundary"]["mutates_ab_memory"], false);
+        assert_eq!(v["promotion"]["phase_c_gated"], true);
+        // All six §5 gates are present.
+        for g in [
+            "G1_recall",
+            "G2_zero_regressions",
+            "G3_footprint",
+            "G4_cosine",
+            "G5_query_f32_invariant",
+            "G6_human_review",
+        ] {
+            assert!(v["gates"][g].is_object(), "missing gate {g}");
+        }
+        assert!(v["verdict"].is_string());
+
+        // How many of the saved rows acquire an f32 embedding depends on the
+        // async ONNX cold-start, so assert RELATIONAL invariants that hold for
+        // any corpus state rather than exact counts (the drift/recall codec math
+        // is covered by `ab_store::quant` unit tests). The contract we own here:
+        // the diagnostic never over-reports shadows or comparisons.
+        let active = v["corpus"]["active_with_f32"].as_u64().expect("active");
+        let drift_rows = v["drift"]["rows"].as_u64().expect("drift rows");
+        let shadowed = v["stored_shadow"]["shadowed_rows"]
+            .as_u64()
+            .expect("shadowed");
+        let compared = v["stored_shadow"]["consistency_compared"]
+            .as_u64()
+            .expect("compared");
+        assert!(drift_rows <= active, "drift rows cannot exceed active rows");
+        assert!(shadowed <= active, "shadowed rows cannot exceed active rows");
+        assert!(
+            compared <= shadowed,
+            "compared rows cannot exceed shadowed rows"
+        );
+        // Any persisted shadow MUST honor the §3.1 length contract.
+        assert_eq!(v["stored_shadow"]["length_mismatch_rows"], 0);
+        // When a persisted INT8 shadow exists, it must round-trip the f32
+        // faithfully and the projected footprint win must clear the G3 floor.
+        if compared >= 1 {
+            assert!(
+                v["stored_shadow"]["stored_vs_f32_min_cosine"]
+                    .as_f64()
+                    .expect("min cosine")
+                    >= 0.9,
+                "stored INT8 shadow should round-trip to a high cosine"
+            );
+            assert!(
+                v["drift"]["compression_ratio"].as_f64().expect("ratio") >= 3.5,
+                "INT8 footprint reduction should clear the G3 floor"
+            );
+        }
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn embedding_quant_shadow_empty_store_is_no_corpus() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let tool = EmbeddingQuantShadowTool::new(hub);
+        let res = tool
+            .execute(json!({}), &ToolContext::default())
+            .await
+            .expect("execute ok");
+        let v = result_json(&res);
+        assert_eq!(v["corpus"]["active_with_f32"], 0);
+        assert_eq!(v["verdict"], "no_corpus");
+        assert_eq!(v["read_only"], true);
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[test]
+    fn embedding_quant_shadow_schema_exposes_params() {
+        let tool = EmbeddingQuantShadowTool::new(crate::Hub::builder().build());
+        let schema = tool.schema();
+        assert_eq!(schema.name, "embedding_quant_shadow");
+        let props = &schema.input_schema["properties"];
+        assert!(props["k"].is_object());
+        assert!(props["max_queries"].is_object());
+        assert!(props["threshold"].is_object());
     }
 
     fn announce_args<'a>(
