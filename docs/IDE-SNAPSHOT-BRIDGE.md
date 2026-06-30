@@ -140,6 +140,16 @@ commands that carry file paths. This evidence is derived before queueing from
 command directory, plus command path fields such as `args.path` and
 `args.edits[*].path`.
 
+Every `ide_command` response also includes `command_dir_boundary` evidence for
+the JSONL queue directory. It records how the directory was chosen
+(`cwd_default`, `process_cwd_default`, `env_command_dir`,
+`env_snapshot_parent`, or `argument`), whether the directory already exists or
+will be created by Agent-Bridge, and whether the effective directory or its
+creation parent canonicalizes under the inferred workspace root. This evidence
+is separate from `workspace_boundary`: it describes where Agent-Bridge writes
+`ide-commands.jsonl`, not whether command target files are safe to open or
+mutate.
+
 `open_file` and `reveal_range` remain advisory-only. Mutating commands
 (`apply_workspace_edit`, `save_file`, and `format_document`) return
 `queued=false,status=blocked` and do not write `ide-commands.jsonl` unless every
@@ -177,6 +187,9 @@ Phase 1, landed:
 - `ide_snapshot` adds read-only workspace-boundary evidence for snapshot paths.
 - `ide_command` adds workspace-boundary evidence for path-carrying command
   requests.
+- `ide_command` adds command-dir boundary evidence for the JSONL queue
+  directory, including source, pre-queue existence, auto-create posture, and
+  workspace containment relation.
 - `ide_command` blocks mutating edit/save/format requests before queueing when
   their path evidence is not fully contained.
 - `ide_command` allows explicit `apply_workspace_edit` create edits only through

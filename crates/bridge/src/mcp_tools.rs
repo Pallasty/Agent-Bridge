@@ -50465,8 +50465,8 @@ impl McpTool for IdeCommandTool {
             description: "Queue a lightweight command for an IDE extension to execute via the \
                  file bridge. Supported commands: open_file, reveal_range, run_task, \
                  write_snapshot, apply_workspace_edit, save_file, format_document. The \
-                 response includes advisory workspace-boundary evidence for path-carrying \
-                 commands; mutating edit/save/format commands are blocked before queueing unless \
+                 response includes advisory command-dir and workspace-boundary evidence for \
+                 path-carrying commands; mutating edit/save/format commands are blocked before queueing unless \
                  their paths canonicalize inside the workspace, except explicit \
                  apply_workspace_edit create edits may queue through create_file_gate evidence \
                  when the parent is contained and the target is missing. The IDE extension still \

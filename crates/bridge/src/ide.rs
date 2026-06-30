@@ -23,6 +23,7 @@ const COMMANDS_FILE: &str = "ide-commands.jsonl";
 const RESPONSES_FILE: &str = "ide-responses.jsonl";
 const WORKSPACE_BOUNDARY_SCHEMA: &str = "agent_bridge.workspace_boundary_evidence.v0";
 const CREATE_FILE_GATE_SCHEMA: &str = "agent_bridge.ide_command.create_file_gate.v0";
+const COMMAND_DIR_BOUNDARY_SCHEMA: &str = "agent_bridge.ide_command.command_dir_boundary.v0";
 
 static COMMAND_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -56,6 +57,12 @@ pub struct IdeCommandOptions {
     pub command_dir: Option<PathBuf>,
     pub cwd: Option<PathBuf>,
     pub wait_ms: u64,
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedCommandDir {
+    path: PathBuf,
+    source: &'static str,
 }
 
 /// Read the current IDE snapshot from an explicit path, environment variable,
@@ -113,9 +120,12 @@ pub fn queue_ide_command(command: &str, args: Value, options: IdeCommandOptions)
         ));
     }
 
-    let dir = resolve_command_dir(options.command_dir.as_deref(), options.cwd.as_deref())?;
+    let resolved_dir = resolve_command_dir(options.command_dir.as_deref(), options.cwd.as_deref())?;
+    let dir = resolved_dir.path;
     let request_path = dir.join(COMMANDS_FILE);
     let response_path = dir.join(RESPONSES_FILE);
+    let command_dir_boundary =
+        command_dir_boundary_evidence(&dir, resolved_dir.source, &args, options.cwd.as_deref());
     let workspace_boundary =
         command_workspace_boundary_evidence(command, &args, options.cwd.as_deref(), &dir);
     let create_file_gate = command_create_file_gate_evidence(
@@ -145,6 +155,7 @@ pub fn queue_ide_command(command: &str, args: Value, options: IdeCommandOptions)
         payload.insert("status".to_string(), json!("blocked"));
         payload.insert("command".to_string(), json!(command));
         payload.insert("command_dir".to_string(), json!(dir.display().to_string()));
+        payload.insert("command_dir_boundary".to_string(), command_dir_boundary);
         payload.insert(
             "request_path".to_string(),
             json!(request_path.display().to_string()),
@@ -212,6 +223,7 @@ pub fn queue_ide_command(command: &str, args: Value, options: IdeCommandOptions)
     payload.insert("id".to_string(), json!(id));
     payload.insert("command".to_string(), json!(command));
     payload.insert("command_dir".to_string(), json!(dir.display().to_string()));
+    payload.insert("command_dir_boundary".to_string(), command_dir_boundary);
     payload.insert(
         "request_path".to_string(),
         json!(request_path.display().to_string()),
@@ -301,25 +313,42 @@ fn snapshot_candidates(explicit_path: Option<&str>, cwd: Option<&Path>) -> Vec<S
     out
 }
 
-fn resolve_command_dir(explicit_dir: Option<&Path>, cwd: Option<&Path>) -> Result<PathBuf> {
+fn resolve_command_dir(
+    explicit_dir: Option<&Path>,
+    cwd: Option<&Path>,
+) -> Result<ResolvedCommandDir> {
     if let Some(dir) = explicit_dir {
-        return Ok(dir.to_path_buf());
+        return Ok(ResolvedCommandDir {
+            path: dir.to_path_buf(),
+            source: "argument",
+        });
     }
     if let Ok(dir) = std::env::var("AGENT_BRIDGE_IDE_COMMAND_DIR") {
         let dir = dir.trim();
         if !dir.is_empty() {
-            return Ok(PathBuf::from(dir));
+            return Ok(ResolvedCommandDir {
+                path: PathBuf::from(dir),
+                source: "env_command_dir",
+            });
         }
     }
     if let Ok(snapshot) = std::env::var("AGENT_BRIDGE_IDE_SNAPSHOT") {
         let snapshot = snapshot.trim();
         if !snapshot.is_empty() {
             if let Some(parent) = Path::new(snapshot).parent() {
-                return Ok(parent.to_path_buf());
+                return Ok(ResolvedCommandDir {
+                    path: parent.to_path_buf(),
+                    source: "env_snapshot_parent",
+                });
             }
         }
     }
 
+    let source = if cwd.is_some() {
+        "cwd_default"
+    } else {
+        "process_cwd_default"
+    };
     let base = cwd
         .map(Path::to_path_buf)
         .or_else(|| std::env::current_dir().ok())
@@ -331,7 +360,10 @@ fn resolve_command_dir(explicit_dir: Option<&Path>, cwd: Option<&Path>) -> Resul
             base.display()
         )));
     }
-    Ok(base.join(".agent-bridge"))
+    Ok(ResolvedCommandDir {
+        path: base.join(".agent-bridge"),
+        source,
+    })
 }
 
 fn append_jsonl(path: &Path, value: &Value) -> Result<()> {
@@ -670,6 +702,109 @@ fn workspace_boundary_evidence_from_parts(
         },
         "verdict": verdict,
     })
+}
+
+fn command_dir_boundary_evidence(
+    command_dir: &Path,
+    source: &str,
+    args: &Value,
+    cwd: Option<&Path>,
+) -> Value {
+    let effective_dir = effective_command_dir_path(command_dir);
+    let root_input = command_workspace_root_input(args, cwd, command_dir);
+    let (_root_evidence, root_canonical) = workspace_root_evidence(root_input.as_ref());
+
+    let metadata = std::fs::metadata(&effective_dir).ok();
+    let exists = metadata.is_some();
+    let is_dir = metadata.as_ref().is_some_and(|m| m.is_dir());
+    let canonical = if exists {
+        std::fs::canonicalize(&effective_dir).ok()
+    } else {
+        None
+    };
+
+    let parent = effective_dir.parent().map(Path::to_path_buf);
+    let parent_metadata = parent.as_ref().and_then(|p| std::fs::metadata(p).ok());
+    let parent_exists = parent_metadata.is_some();
+    let parent_is_dir = parent_metadata.as_ref().is_some_and(|m| m.is_dir());
+    let parent_canonical = if parent_exists && parent_is_dir {
+        parent.as_ref().and_then(|p| std::fs::canonicalize(p).ok())
+    } else {
+        None
+    };
+
+    let root = root_canonical.as_ref();
+    let contained_existing = root
+        .zip(canonical.as_ref())
+        .is_some_and(|(root, dir)| dir == root || dir.starts_with(root));
+    let contained_parent = root
+        .zip(parent_canonical.as_ref())
+        .is_some_and(|(root, parent)| parent == root || parent.starts_with(root));
+    let relation = if root.is_none() {
+        "no_workspace_root"
+    } else if exists && !is_dir {
+        "not_directory"
+    } else if exists && canonical.is_none() {
+        "canonicalize_failed"
+    } else if exists && contained_existing {
+        "inside_workspace"
+    } else if exists {
+        "outside_workspace"
+    } else if parent_exists && !parent_is_dir {
+        "parent_not_directory"
+    } else if parent_exists && contained_parent {
+        "will_create_inside_workspace"
+    } else if parent_exists {
+        "will_create_outside_workspace"
+    } else {
+        "parent_missing"
+    };
+    let contained = matches!(
+        relation,
+        "inside_workspace" | "will_create_inside_workspace"
+    );
+    let verdict = match relation {
+        "inside_workspace" | "will_create_inside_workspace" => "contained",
+        "outside_workspace" | "will_create_outside_workspace" => "external",
+        "no_workspace_root" => "no_workspace_root",
+        _ => "needs_review",
+    };
+
+    json!({
+        "schema": COMMAND_DIR_BOUNDARY_SCHEMA,
+        "mode": "pre_queue_evidence",
+        "source": source,
+        "path": command_dir.display().to_string(),
+        "effective_path": effective_dir.display().to_string(),
+        "relative_resolution": if command_dir.is_absolute() { "absolute" } else { "process_cwd" },
+        "canonical": canonical.as_ref().map(|p| p.display().to_string()),
+        "exists": exists,
+        "is_dir": is_dir,
+        "creates_dir_if_missing": !exists,
+        "contained": contained,
+        "relation": relation,
+        "verdict": verdict,
+        "workspace_root": root.map(|p| p.display().to_string()),
+        "parent": parent.as_ref().map(|p| p.display().to_string()),
+        "parent_canonical": parent_canonical.as_ref().map(|p| p.display().to_string()),
+        "parent_exists": parent_exists,
+        "parent_is_dir": parent_is_dir,
+        "parent_contained": contained_parent,
+        "queue_files": {
+            "commands": command_dir.join(COMMANDS_FILE).display().to_string(),
+            "responses": command_dir.join(RESPONSES_FILE).display().to_string(),
+        },
+    })
+}
+
+fn effective_command_dir_path(command_dir: &Path) -> PathBuf {
+    if command_dir.is_absolute() {
+        command_dir.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(command_dir))
+            .unwrap_or_else(|_| command_dir.to_path_buf())
+    }
 }
 
 fn command_workspace_root_input(
@@ -1600,6 +1735,100 @@ mod tests {
             path_entry_by_role(boundary, "args.path")["relation"],
             "inside_workspace"
         );
+    }
+
+    #[test]
+    fn ide_command_command_dir_boundary_reports_default_workspace_queue_dir() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("project");
+        std::fs::create_dir_all(&root).expect("mkdir root");
+
+        let v = queue_ide_command(
+            "write_snapshot",
+            json!({}),
+            IdeCommandOptions {
+                command_dir: None,
+                cwd: Some(root.clone()),
+                wait_ms: 0,
+            },
+        )
+        .expect("queue command");
+        let boundary = &v["command_dir_boundary"];
+
+        assert_eq!(v["status"], "queued");
+        assert_eq!(boundary["schema"], COMMAND_DIR_BOUNDARY_SCHEMA);
+        assert_eq!(boundary["source"], "cwd_default");
+        assert_eq!(boundary["relation"], "will_create_inside_workspace");
+        assert_eq!(boundary["verdict"], "contained");
+        assert_eq!(boundary["creates_dir_if_missing"], true);
+        assert_eq!(boundary["contained"], true);
+        assert_eq!(
+            boundary["queue_files"]["commands"],
+            root.join(".agent-bridge")
+                .join(COMMANDS_FILE)
+                .display()
+                .to_string()
+        );
+    }
+
+    #[test]
+    fn ide_command_command_dir_boundary_reports_existing_external_dir() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("project");
+        let src = root.join("src");
+        let outside = tmp.path().join("outside-commands");
+        std::fs::create_dir_all(&src).expect("mkdir src");
+        std::fs::create_dir_all(&outside).expect("mkdir outside");
+        std::fs::write(src.join("lib.rs"), "pub fn lib() {}\n").expect("write lib");
+
+        let v = queue_ide_command(
+            "open_file",
+            json!({ "path": "src/lib.rs" }),
+            IdeCommandOptions {
+                command_dir: Some(outside.clone()),
+                cwd: Some(root.clone()),
+                wait_ms: 0,
+            },
+        )
+        .expect("queue command");
+        let boundary = &v["command_dir_boundary"];
+
+        assert_eq!(v["status"], "queued");
+        assert_eq!(boundary["source"], "argument");
+        assert_eq!(boundary["relation"], "outside_workspace");
+        assert_eq!(boundary["verdict"], "external");
+        assert_eq!(boundary["creates_dir_if_missing"], false);
+        assert_eq!(boundary["contained"], false);
+        assert_eq!(v["workspace_boundary"]["verdict"], "contained");
+        assert!(outside.join(COMMANDS_FILE).exists());
+    }
+
+    #[test]
+    fn ide_command_command_dir_boundary_reports_external_auto_create_dir() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("project");
+        let outside = tmp.path().join("outside-commands");
+        std::fs::create_dir_all(&root).expect("mkdir root");
+
+        let v = queue_ide_command(
+            "write_snapshot",
+            json!({}),
+            IdeCommandOptions {
+                command_dir: Some(outside.clone()),
+                cwd: Some(root.clone()),
+                wait_ms: 0,
+            },
+        )
+        .expect("queue command");
+        let boundary = &v["command_dir_boundary"];
+
+        assert_eq!(v["status"], "queued");
+        assert_eq!(boundary["source"], "argument");
+        assert_eq!(boundary["relation"], "will_create_outside_workspace");
+        assert_eq!(boundary["verdict"], "external");
+        assert_eq!(boundary["creates_dir_if_missing"], true);
+        assert_eq!(boundary["contained"], false);
+        assert!(outside.join(COMMANDS_FILE).exists());
     }
 
     #[test]

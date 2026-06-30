@@ -2,7 +2,8 @@
 
 Status: AB-BORROW-2 planning artifact. The read-only `ide_snapshot` evidence
 slice, advisory `ide_command` evidence slice, mutating-command containment
-gate, and guarded `apply_workspace_edit` create-file slice are implemented.
+gate, guarded `apply_workspace_edit` create-file slice, and advisory
+`command_dir_boundary` queue-directory evidence are implemented.
 
 This note closes the planning step for the borrowed workspace-boundary pattern
 from `docs/design/BORROWED_PATTERNS_BACKLOG_2026_06_09.md`. It turns the
@@ -26,14 +27,19 @@ borrow into an Agent-Bridge-native evidence contract for `ide_snapshot`,
 - `ide_command` returns `workspace_boundary` evidence for path-carrying
   commands and preserves the queued JSONL request unchanged when queueing is
   allowed.
+- `ide_command` returns `command_dir_boundary` evidence for the JSONL queue
+  directory. This proves the command-dir source, pre-queue existence,
+  auto-create posture, effective path, and relation to the inferred workspace
+  root without changing queue compatibility.
 - `ide_command` blocks mutating `apply_workspace_edit`, `save_file`, and
   `format_document` requests before queueing unless all referenced paths exist
   and canonicalize inside the workspace.
 
 Remaining future hardening:
 
-- command directory resolution does not prove that queued command paths are
-  under the workspace;
+- command-dir evidence is advisory; a future compatibility-breaking mode may
+  gate external auto-created command directories after extension/runtime
+  deployment data is available;
 - exclude or `.gitignore` evidence is surfaced as advisory `not_evaluated`;
 - safe new-file creation is supported only by the explicit
   `apply_workspace_edit` per-edit `create: true` contract in

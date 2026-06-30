@@ -49,6 +49,11 @@ and appends results to:
 <workspace>/.agent-bridge/ide-responses.jsonl
 ```
 
+Agent-Bridge `ide_command` responses include `command_dir_boundary` evidence
+for this queue directory so callers can see whether the JSONL bridge directory
+is the workspace default, an environment-derived directory, or an explicit
+override.
+
 Supported commands:
 
 - `open_file`
