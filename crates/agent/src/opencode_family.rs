@@ -53,6 +53,11 @@ pub struct OpenCodeFamilyRuntime {
     interactive_args: Vec<String>,
     /// SessionId → live interactive PTY session (live `send_input`).
     interactive: InteractiveMap,
+    /// How this runtime's TUI accepts a submitted turn. Per-runtime, NOT shared:
+    /// the family's two binaries are not guaranteed to agree. kilo's key was
+    /// real-binary verified (bare CR); opencode's is only inferred (see the
+    /// constructors). Codex proved two "same-shape" TUIs can need opposite keys.
+    submit: pty_interactive::SubmitProfile,
 }
 
 impl OpenCodeFamilyRuntime {
@@ -69,6 +74,13 @@ impl OpenCodeFamilyRuntime {
             children: Arc::new(DashMap::new()),
             interactive_args: Vec::new(),
             interactive: Arc::new(DashMap::new()),
+            // INFERRED from kilo (opencode's downstream fork) — NOT binary-verified:
+            // opencode is not installed here, so its real TUI submit key was never
+            // probed. If upstream opencode enables the Kitty keyboard protocol (as
+            // codex does), this must become KITTY_ENTER or interactive turns will be
+            // typed but never submitted (silent hang). Verify against the real
+            // `opencode` binary before relying on interactive mode.
+            submit: pty_interactive::SubmitProfile::ENTER,
         }
     }
 
@@ -95,6 +107,10 @@ impl OpenCodeFamilyRuntime {
             children: Arc::new(DashMap::new()),
             interactive_args: Vec::new(),
             interactive: Arc::new(DashMap::new()),
+            // VERIFIED against the real kilo TUI (tests/kilo_real_interactive.rs):
+            // it emits no Kitty keyboard protocol and uses bracketed paste, so a
+            // bare CR submits — proven by a multi-turn 42/99 round-trip.
+            submit: pty_interactive::SubmitProfile::ENTER,
         }
     }
 
@@ -147,9 +163,8 @@ impl OpenCodeFamilyRuntime {
     /// exit). The interactive entry point is the bare binary (no `run`); the host
     /// may add launch flags via [`Self::with_interactive_args`].
     ///
-    /// kilo/opencode submit on a bare CR (verified against the real kilo TUI:
-    /// no Kitty keyboard protocol, bracketed-paste only) — so this uses
-    /// [`pty_interactive::SubmitProfile::ENTER`], unlike codex's Kitty-Enter.
+    /// Uses this runtime's [`submit`](Self::submit) profile — verified bare CR
+    /// for kilo, inferred (unverified) bare CR for opencode; see the constructors.
     async fn spawn_interactive(&self, cfg: SpawnConfig) -> Result<AgentSession> {
         pty_interactive::spawn_interactive(
             self.id(),
@@ -158,7 +173,7 @@ impl OpenCodeFamilyRuntime {
             &self.store,
             &self.interactive,
             cfg,
-            pty_interactive::SubmitProfile::ENTER,
+            self.submit,
         )
         .await
     }
@@ -653,14 +668,7 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
     }
 
     async fn send_input(&self, session: &SessionId, text: &str) -> Result<()> {
-        pty_interactive::send_input(
-            self.id(),
-            &self.interactive,
-            session,
-            text,
-            pty_interactive::SubmitProfile::ENTER,
-        )
-        .await
+        pty_interactive::send_input(self.id(), &self.interactive, session, text, self.submit).await
     }
 
     async fn kill(&self, session: &SessionId) -> Result<()> {
@@ -1049,6 +1057,118 @@ mod tests {
             .await
             .expect_err("killing an unknown session must error");
         assert!(matches!(err, Error::NotFound(_)));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn enter_profile_submits_a_real_line_not_just_terminal_echo() {
+        // GUARD for the submit-key choice (SubmitProfile::ENTER). A plain
+        // `/bin/cat` stand-in cannot tell ENTER from KITTY_ENTER: the PTY echoes
+        // typed text either way, so `output.contains(text)` passes even when the
+        // turn never submits. Here `stty -echo` turns terminal echo OFF, so the
+        // marker can only reach the output if the submit key actually completed a
+        // line that `cat` read back. A bare CR (ENTER) is mapped to NL by the tty
+        // (ICRNL) and submits; a Kitty CSI-u Enter (\x1b[13u) carries no newline,
+        // so the line never completes and the marker never appears. This test
+        // therefore FAILS if the family is ever mis-wired to KITTY_ENTER — the one
+        // guard the echoing /bin/cat tests cannot provide.
+        let rt = OpenCodeFamilyRuntime::kilo()
+            .with_binary("/bin/sh")
+            .with_interactive_args(["-c", "stty -echo; printf 'READY\\n'; exec cat", "sh"]);
+        let sess = rt
+            .spawn(SpawnConfig {
+                cwd: "/tmp".into(),
+                interactive: true,
+                ..Default::default()
+            })
+            .await
+            .expect("spawn no-echo stand-in");
+        // READY proves `stty -echo` has been applied before we submit.
+        let ready = wait_for(3000, 25, || {
+            rt.read_interactive_output(&sess.id)
+                .map(|o| o.contains("READY"))
+                .unwrap_or(false)
+        })
+        .await;
+        assert!(
+            ready,
+            "stand-in should signal READY (echo disabled, cat live)"
+        );
+
+        rt.send_input(&sess.id, "submit-marker-xyz")
+            .await
+            .expect("turn");
+        let submitted = wait_for(3000, 25, || {
+            rt.read_interactive_output(&sess.id)
+                .map(|o| o.contains("submit-marker-xyz"))
+                .unwrap_or(false)
+        })
+        .await;
+        assert!(
+            submitted,
+            "ENTER must submit a full line the no-echo cat reads back; a wrong \
+             profile (e.g. KITTY_ENTER) would never complete the line"
+        );
+        rt.kill(&sess.id).await.expect("kill");
+    }
+
+    #[tokio::test]
+    async fn interactive_session_persists_and_finalises_in_store() {
+        use ab_store::{SessionFilter, SqliteStore, StateStore as _};
+
+        let root = unique_temp_dir("ab-kilo-interactive-store");
+        fs::create_dir_all(&root).expect("mkdir root");
+        let store = Arc::new(
+            SqliteStore::open(&root.join("state.db"))
+                .await
+                .expect("open store"),
+        );
+        let filter = || SessionFilter {
+            runtime_id: Some("kilo".to_string()),
+            cwd_prefix: Some(root.display().to_string()),
+            ..SessionFilter::default()
+        };
+        let rt = OpenCodeFamilyRuntime::kilo()
+            .with_binary("/bin/cat")
+            .with_store(store.clone());
+        let sess = rt
+            .spawn(SpawnConfig {
+                cwd: root.display().to_string(),
+                interactive: true,
+                ..Default::default()
+            })
+            .await
+            .expect("spawn interactive");
+
+        // save_session(initial) ran at spawn: exactly one row, not yet ended.
+        let running = store.list_sessions(&filter(), 10).await.expect("list");
+        assert_eq!(
+            running.len(),
+            1,
+            "interactive spawn must persist a session row"
+        );
+        assert!(
+            running[0].ended_at.is_none(),
+            "live interactive session must not be pre-finalised"
+        );
+
+        // kill → PTY EOF → finalise_session on exit (asserts the close-the-loop
+        // bookkeeping the echo-only tests never touch).
+        rt.kill(&sess.id).await.expect("kill");
+        let mut finalised = false;
+        for _ in 0..80 {
+            let rows = store.list_sessions(&filter(), 10).await.expect("list");
+            if rows.len() == 1 && rows[0].ended_at.is_some() {
+                finalised = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(
+            finalised,
+            "interactive session must be finalised (ended_at set) on PTY exit"
+        );
+        let _ = fs::remove_dir_all(root);
     }
 
     fn unique_temp_dir(prefix: &str) -> std::path::PathBuf {
