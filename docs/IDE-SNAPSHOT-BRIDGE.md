@@ -134,6 +134,12 @@ Response shape:
 }
 ```
 
+Agent-Bridge responses also include advisory `workspace_boundary` evidence for
+commands that carry file paths. This evidence is derived before queueing from
+`args.workspace_root` / `workspaceRoot`, `cwd`, or a `<workspace>/.agent-bridge`
+command directory, plus command path fields such as `args.path` and
+`args.edits[*].path`. It does not block, rewrite, or remove queued requests.
+
 Supported commands in the VS Code/Cursor example:
 
 - `open_file`: `{ "path": "/abs/file", "range": optional, "preview": false }`
@@ -151,6 +157,8 @@ Phase 1, landed:
 
 - `ide_snapshot` MCP tool reads, normalizes, truncates, and marks stale snapshots.
 - `ide_snapshot` adds read-only workspace-boundary evidence for snapshot paths.
+- `ide_command` adds advisory workspace-boundary evidence for path-carrying
+  command requests without changing queue semantics.
 - The tool is editor-agnostic and registered in the Essential profile.
 
 Phase 2, landed:

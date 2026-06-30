@@ -1,7 +1,8 @@
 # AB Workspace Boundary Evidence Plan - 2026-06-30
 
 Status: AB-BORROW-2 planning artifact. The first read-only `ide_snapshot`
-evidence slice is implemented; `ide_command` follow-up remains pending.
+evidence slice and the advisory `ide_command` evidence slice are implemented;
+mutating-command enforcement remains pending.
 
 This note closes the planning step for the borrowed workspace-boundary pattern
 from `docs/design/BORROWED_PATTERNS_BACKLOG_2026_06_09.md`. It turns the
@@ -22,8 +23,10 @@ borrow into an Agent-Bridge-native evidence contract for `ide_snapshot`,
   for a matching response.
 - The command queue supports read/navigation commands and richer future commands
   such as `apply_workspace_edit`, `save_file`, and `format_document`.
+- `ide_command` returns advisory `workspace_boundary` evidence for
+  path-carrying commands while preserving the queued JSONL request unchanged.
 
-The remaining part is command-side use of explicit workspace-boundary evidence:
+The remaining part is enforcement for mutating commands:
 
 - command directory resolution does not prove that queued command paths are
   under the workspace;
@@ -102,10 +105,15 @@ Acceptance tests for the first slice:
 After read-only snapshot evidence lands, `ide_command` can consume the same
 helper before queueing commands that carry paths.
 
-Recommended behavior:
+Implemented advisory behavior:
 
 - `open_file` and `reveal_range`: include boundary evidence in the response; do
-  not block in the first command slice unless the path is obviously invalid.
+  not block in the first command slice.
+- `apply_workspace_edit`, `save_file`, and `format_document`: include advisory
+  boundary evidence in the response while preserving queue semantics.
+
+Pending enforcement behavior:
+
 - `apply_workspace_edit`, `save_file`, and `format_document`: require a
   contained workspace path before queueing, because those commands can mutate
   user files when the IDE extension executes them.

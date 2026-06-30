@@ -116,6 +116,8 @@ pub fn queue_ide_command(command: &str, args: Value, options: IdeCommandOptions)
     std::fs::create_dir_all(&dir).map_err(Error::Io)?;
     let request_path = dir.join(COMMANDS_FILE);
     let response_path = dir.join(RESPONSES_FILE);
+    let workspace_boundary =
+        command_workspace_boundary_evidence(command, &args, options.cwd.as_deref(), &dir);
     let now_ms = system_time_to_unix_ms(SystemTime::now()).unwrap_or(0);
     let id = format!(
         "idecmd-{now_ms}-{}-{}",
@@ -152,6 +154,7 @@ pub fn queue_ide_command(command: &str, args: Value, options: IdeCommandOptions)
         "command_dir": dir.display().to_string(),
         "request_path": request_path.display().to_string(),
         "response_path": response_path.display().to_string(),
+        "workspace_boundary": workspace_boundary,
         "response": response,
         "hint": if status == "timeout" {
             "command was queued but no IDE response arrived before wait_ms elapsed; make sure the IDE extension is running."
@@ -545,11 +548,43 @@ fn workspace_boundary_evidence(
         &["file", "path", "uri"],
     );
 
+    workspace_boundary_evidence_from_parts(
+        root_input.as_ref(),
+        root_evidence,
+        root_canonical,
+        &candidates,
+    )
+}
+
+fn command_workspace_boundary_evidence(
+    command: &str,
+    args: &Value,
+    cwd: Option<&Path>,
+    command_dir: &Path,
+) -> Value {
+    let root_input = command_workspace_root_input(args, cwd, command_dir);
+    let (root_evidence, root_canonical) = workspace_root_evidence(root_input.as_ref());
+    let candidates = command_path_candidates(command, args);
+
+    workspace_boundary_evidence_from_parts(
+        root_input.as_ref(),
+        root_evidence,
+        root_canonical,
+        &candidates,
+    )
+}
+
+fn workspace_boundary_evidence_from_parts(
+    root_input: Option<&PathInput>,
+    root_evidence: Value,
+    root_canonical: Option<PathBuf>,
+    candidates: &[(String, PathInput)],
+) -> Value {
     let paths: Vec<Value> = candidates
         .iter()
         .map(|(role, input)| path_boundary_evidence(role, input, root_canonical.as_deref()))
         .collect();
-    let verdict = workspace_boundary_verdict(root_input.as_ref(), root_canonical.as_ref(), &paths);
+    let verdict = workspace_boundary_verdict(root_input, root_canonical.as_ref(), &paths);
 
     json!({
         "schema": WORKSPACE_BOUNDARY_SCHEMA,
@@ -562,6 +597,56 @@ fn workspace_boundary_evidence(
         },
         "verdict": verdict,
     })
+}
+
+fn command_workspace_root_input(
+    args: &Value,
+    cwd: Option<&Path>,
+    command_dir: &Path,
+) -> Option<PathInput> {
+    if let Some(root) =
+        get_first(args, &["workspace_root", "workspaceRoot"]).and_then(path_input_from_value)
+    {
+        return Some(root);
+    }
+    if let Some(cwd) = cwd {
+        return Some(path_input_from_path(cwd));
+    }
+    if command_dir.file_name().and_then(|s| s.to_str()) == Some(".agent-bridge") {
+        if let Some(parent) = command_dir.parent() {
+            return Some(path_input_from_path(parent));
+        }
+    }
+    None
+}
+
+fn command_path_candidates(command: &str, args: &Value) -> Vec<(String, PathInput)> {
+    let mut candidates = Vec::new();
+    match command {
+        "open_file" | "reveal_range" | "save_file" | "format_document" => {
+            push_object_path_candidates(&mut candidates, "args", args, &["path", "file", "uri"]);
+        }
+        "apply_workspace_edit" => {
+            push_object_path_candidates(&mut candidates, "args", args, &["path", "file", "uri"]);
+            if let Some(edits) = args.get("edits").and_then(Value::as_array) {
+                for (idx, edit) in edits.iter().enumerate() {
+                    if let Some(map) = edit.as_object() {
+                        for key in ["path", "file", "uri"] {
+                            if let Some(value) = map.get(key) {
+                                push_path_candidate(
+                                    &mut candidates,
+                                    &format!("args.edits[{idx}].{key}"),
+                                    value,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    candidates
 }
 
 fn workspace_root_evidence(root: Option<&PathInput>) -> (Value, Option<PathBuf>) {
@@ -759,6 +844,13 @@ fn path_input_from_value(value: &Value) -> Option<PathInput> {
         input: raw.to_string(),
         path: PathBuf::from(path_text),
     })
+}
+
+fn path_input_from_path(path: &Path) -> PathInput {
+    PathInput {
+        input: path.display().to_string(),
+        path: path.to_path_buf(),
+    }
 }
 
 fn file_uri_to_path(s: &str) -> Option<&str> {
@@ -1096,6 +1188,111 @@ mod tests {
         assert_eq!(v["status"], "queued");
         assert_eq!(request["command"], "open_file");
         assert_eq!(request["args"]["path"], "/tmp/project/src/lib.rs");
+        assert_eq!(v["workspace_boundary"]["verdict"], "no_workspace_root");
+    }
+
+    #[test]
+    fn ide_command_boundary_uses_cwd_for_relative_open_file() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("project");
+        let src = root.join("src");
+        std::fs::create_dir_all(&src).expect("mkdir src");
+        std::fs::write(src.join("lib.rs"), "pub fn lib() {}\n").expect("write lib");
+
+        let v = queue_ide_command(
+            "open_file",
+            json!({ "path": "src/lib.rs" }),
+            IdeCommandOptions {
+                command_dir: None,
+                cwd: Some(root.clone()),
+                wait_ms: 0,
+            },
+        )
+        .expect("queue command");
+        let raw = std::fs::read_to_string(root.join(".agent-bridge").join(COMMANDS_FILE))
+            .expect("commands file");
+        let request: Value = serde_json::from_str(raw.lines().next().unwrap()).unwrap();
+        let boundary = &v["workspace_boundary"];
+
+        assert_eq!(v["status"], "queued");
+        assert_eq!(request["args"]["path"], "src/lib.rs");
+        assert_eq!(boundary["verdict"], "contained");
+        assert_eq!(
+            path_entry_by_role(boundary, "args.path")["relation"],
+            "inside_workspace"
+        );
+    }
+
+    #[test]
+    fn ide_command_boundary_reports_outside_file_uri_without_blocking() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("project");
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&root).expect("mkdir root");
+        std::fs::create_dir_all(&outside).expect("mkdir outside");
+        let outside_file = outside.join("note.txt");
+        std::fs::write(&outside_file, "outside\n").expect("write outside");
+        let outside_uri = format!("file://{}", outside_file.display());
+
+        let v = queue_ide_command(
+            "reveal_range",
+            json!({ "path": outside_uri }),
+            IdeCommandOptions {
+                command_dir: None,
+                cwd: Some(root.clone()),
+                wait_ms: 0,
+            },
+        )
+        .expect("queue command");
+        let raw = std::fs::read_to_string(root.join(".agent-bridge").join(COMMANDS_FILE))
+            .expect("commands file");
+        let request: Value = serde_json::from_str(raw.lines().next().unwrap()).unwrap();
+        let boundary = &v["workspace_boundary"];
+
+        assert_eq!(v["queued"], true);
+        assert_eq!(request["command"], "reveal_range");
+        assert_eq!(boundary["verdict"], "outside_workspace");
+        assert_eq!(
+            path_entry_by_role(boundary, "args.path")["relation"],
+            "outside_workspace"
+        );
+    }
+
+    #[test]
+    fn ide_command_boundary_reports_apply_workspace_edit_paths_advisory_only() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("project");
+        let src = root.join("src");
+        std::fs::create_dir_all(&src).expect("mkdir src");
+        std::fs::write(src.join("lib.rs"), "pub fn lib() {}\n").expect("write lib");
+
+        let v = queue_ide_command(
+            "apply_workspace_edit",
+            json!({
+                "edits": [
+                    { "path": "src/lib.rs", "text": "pub fn changed() {}\n" }
+                ],
+                "save": false
+            }),
+            IdeCommandOptions {
+                command_dir: None,
+                cwd: Some(root.clone()),
+                wait_ms: 0,
+            },
+        )
+        .expect("queue command");
+        let raw = std::fs::read_to_string(root.join(".agent-bridge").join(COMMANDS_FILE))
+            .expect("commands file");
+        let request: Value = serde_json::from_str(raw.lines().next().unwrap()).unwrap();
+        let boundary = &v["workspace_boundary"];
+
+        assert_eq!(request["command"], "apply_workspace_edit");
+        assert_eq!(request["args"]["edits"][0]["path"], "src/lib.rs");
+        assert_eq!(boundary["verdict"], "contained");
+        assert_eq!(
+            path_entry_by_role(boundary, "args.edits[0].path")["relation"],
+            "inside_workspace"
+        );
     }
 
     #[test]
