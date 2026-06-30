@@ -313,6 +313,7 @@ mod tests {
                 model: None,
                 node: None,
                 user: None,
+                interactive: false,
             })
             .await
             .expect_err("empty prompt must fail");

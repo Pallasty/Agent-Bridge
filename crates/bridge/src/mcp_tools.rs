@@ -16652,7 +16652,8 @@ impl McpTool for AgentSpawnTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Spawn a sibling AI agent (one-shot). Pass prompt + cwd; runs to \
+            description: "Spawn a sibling AI agent (one-shot by default; set `interactive` for a \
+                 live claude-code PTY session). Pass prompt + cwd; runs to \
                  completion, returns session id. Pick a backend explicitly, or a policy \
                  ('cheap'=kilo, 'second_opinion'/'openai'=codex). backend takes precedence \
                  over policy; both omitted = daemon default. Set `node` (+`user`) to dispatch \
@@ -16686,6 +16687,10 @@ impl McpTool for AgentSpawnTool {
                     "user": {
                         "type": "string",
                         "description": "ssh user for remote dispatch (paired with 'node')."
+                    },
+                    "interactive": {
+                        "type": "boolean",
+                        "description": "Open a live PTY-backed session (claude-code) instead of a one-shot run; the child stays alive so follow-up turns can be sent with send_input. `prompt` is submitted as the first turn. Other backends ignore this and run one-shot."
                     }
                 },
                 "required": ["cwd", "prompt"]
@@ -16746,6 +16751,10 @@ impl McpTool for AgentSpawnTool {
             .and_then(|v| v.as_str())
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
+        let interactive = args
+            .get("interactive")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let cfg = SpawnConfig {
             cwd,
             env,
@@ -16753,6 +16762,7 @@ impl McpTool for AgentSpawnTool {
             model,
             node,
             user,
+            interactive,
         };
         match agent.spawn(cfg).await {
             Ok(s) => Ok(ToolResult::json_text(
@@ -70964,6 +70974,19 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
     }
 
     // ── agent_spawn policy → backend mapping ──────────────────────────────
+
+    #[test]
+    fn agent_spawn_schema_exposes_interactive_flag() {
+        let schema = AgentSpawnTool::new(crate::Hub::builder().build()).schema();
+        let interactive = &schema.input_schema["properties"]["interactive"];
+
+        assert!(schema.description.contains("interactive"));
+        assert_eq!(interactive["type"], "boolean");
+        assert!(interactive["description"]
+            .as_str()
+            .expect("interactive description")
+            .contains("send_input"));
+    }
 
     #[test]
     fn policy_routes_to_expected_backends() {

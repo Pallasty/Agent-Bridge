@@ -1,8 +1,10 @@
 //! AI coding agent runtime abstraction + git worktree manager.
 //!
 //! - [`AgentRuntime`]: trait wrapping a CLI agent (`claude`, `codex`, `aider`...).
-//! - [`ClaudeCodeRuntime`]: spawns Claude Code in a working directory; one-shot
-//!   `-p` mode for now (PTY/interactive mode is P2).
+//! - [`ClaudeCodeRuntime`]: spawns Claude Code in a working directory. One-shot
+//!   `-p` mode by default; set [`SpawnConfig::interactive`] for a live
+//!   PTY-backed session that accepts successive turns via
+//!   [`AgentRuntime::send_input`] (see [`pty_session`]).
 //! - [`OzAgentRuntime`]: spawns Warp Oz cloud agents via the `oz` CLI;
 //!   the local subprocess is short-lived (it just POSTs to the Warp
 //!   API and exits), but the cloud run continues asynchronously.
@@ -21,6 +23,7 @@ pub mod codex;
 pub mod gemini;
 pub mod opencode_family;
 pub mod oz;
+pub mod pty_session;
 pub mod worktree;
 
 pub use auggie::AuggieRuntime;
@@ -31,7 +34,7 @@ pub use opencode_family::OpenCodeFamilyRuntime;
 pub use oz::OzAgentRuntime;
 pub use worktree::{GitWorktreeManager, Worktree};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SpawnConfig {
     pub cwd: String,
     #[serde(default)]
@@ -55,6 +58,14 @@ pub struct SpawnConfig {
     /// is unset/local.
     #[serde(default)]
     pub user: Option<String>,
+    /// Open a live, PTY-backed interactive session instead of a one-shot run.
+    /// When `true`, [`ClaudeCodeRuntime`] launches the agent CLI inside a
+    /// pseudo-terminal it owns and keeps it alive so callers can drive
+    /// successive turns via [`AgentRuntime::send_input`]; `initial_prompt`, if
+    /// present, is typed and submitted as the first turn. Runtimes that have
+    /// not implemented interactive mode ignore this flag and run one-shot.
+    #[serde(default)]
+    pub interactive: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -77,6 +88,12 @@ pub trait AgentRuntime: Send + Sync {
 
     async fn spawn(&self, cfg: SpawnConfig) -> Result<AgentSession>;
 
+    /// Type one turn of input into a live session and submit it.
+    ///
+    /// Only meaningful for sessions opened with [`SpawnConfig::interactive`].
+    /// One-shot (`-p`) sessions cannot accept input, so runtimes reject the
+    /// call with `InvalidArgument`; runtimes without interactive support reject
+    /// it unconditionally.
     async fn send_input(&self, session: &SessionId, text: &str) -> Result<()>;
 
     /// Send SIGTERM to the underlying process. Idempotent — calling on an

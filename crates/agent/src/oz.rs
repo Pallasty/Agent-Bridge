@@ -644,6 +644,7 @@ mod tests {
             model: None,
             node: None,
             user: None,
+            interactive: false,
         };
         let err = runtime
             .spawn(cfg)

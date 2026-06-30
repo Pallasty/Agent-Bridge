@@ -13,3 +13,7 @@ serde_json.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 dashmap.workspace = true
+
+# Interactive PTY-backed agent sessions (live `send_input`). Same version as
+# the in-daemon PtyBackend in `ab-terminal` so they share one build of the dep.
+portable-pty = "0.9"
