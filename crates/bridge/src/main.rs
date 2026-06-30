@@ -428,6 +428,26 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Read-only baseline/rollback evidence packet for workflow feedback lift.
+    ///
+    /// Consumes baseline observation fixtures for the held-out scenario set and
+    /// emits baseline correct/total plus rollback refs for later lift evidence
+    /// and promotion-gate review. It does not run an agent or change runtime,
+    /// retrieval, memory, or routing.
+    WorkflowFeedbackBaselineEvidence {
+        /// Scenario fixture containing expected top experience ids.
+        #[arg(long = "scenario-fixture")]
+        scenario_fixture: PathBuf,
+        /// Baseline observation fixture. Repeat for independent baselines.
+        #[arg(long = "baseline-observation", required = true)]
+        baseline_observations: Vec<PathBuf>,
+        /// Rollback path, revert handle, or disable-switch reference.
+        #[arg(long = "rollback-ref")]
+        rollback_refs: Vec<String>,
+        /// Emit the machine-readable JSON snapshot instead of Markdown.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -6989,6 +7009,21 @@ async fn real_main() -> Result<()> {
         );
     }
 
+    if let Cmd::WorkflowFeedbackBaselineEvidence {
+        scenario_fixture,
+        baseline_observations,
+        rollback_refs,
+        json,
+    } = &cmd
+    {
+        return run_workflow_feedback_baseline_evidence(
+            scenario_fixture,
+            baseline_observations,
+            rollback_refs,
+            *json,
+        );
+    }
+
     // Palace viewer: short-lived HTTP server, opens store directly (no Hub).
     if let Cmd::Palace { op } = &cmd {
         return match op {
@@ -7362,6 +7397,7 @@ async fn real_main() -> Result<()> {
         | Cmd::WorkflowFeedbackShadowScore { .. }
         | Cmd::WorkflowFeedbackPromotionGate { .. }
         | Cmd::WorkflowFeedbackLiftEvidence { .. }
+        | Cmd::WorkflowFeedbackBaselineEvidence { .. }
         | Cmd::Instinct { .. } => unreachable!(),
     }
 }
@@ -7493,6 +7529,28 @@ fn run_workflow_feedback_lift_evidence(
         },
     )
     .context("building workflow feedback lift evidence")?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&report.to_json_value())?);
+    } else {
+        print!("{}", report.render_markdown());
+    }
+    Ok(())
+}
+
+fn run_workflow_feedback_baseline_evidence(
+    scenario_fixture: &PathBuf,
+    baseline_observations: &[PathBuf],
+    rollback_refs: &[String],
+    as_json: bool,
+) -> Result<()> {
+    let report = ab_bridge::workflow_feedback::build_baseline_evidence_report_from_paths(
+        scenario_fixture,
+        baseline_observations,
+        ab_bridge::workflow_feedback::WorkflowFeedbackBaselineEvidenceOptions {
+            rollback_refs: rollback_refs.to_vec(),
+        },
+    )
+    .context("building workflow feedback baseline evidence")?;
     if as_json {
         println!("{}", serde_json::to_string_pretty(&report.to_json_value())?);
     } else {

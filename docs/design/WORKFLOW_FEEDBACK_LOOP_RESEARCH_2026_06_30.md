@@ -378,6 +378,37 @@ lift over a baseline correct/total. Without baseline it emits only a falsifiable
 metric anchor (`metric_anchor_without_baseline`), not measured lift or owner
 approval.
 
+### Slice 7 - Baseline And Rollback Evidence
+
+Status: landed as read-only CLI evidence packet.
+
+Command:
+
+```text
+agent-bridge workflow-feedback-baseline-evidence \
+  --scenario-fixture docs/design/fixtures/workflow-feedback-shadow-score-scenarios-2026-06-30.json \
+  --baseline-observation docs/design/fixtures/workflow-feedback-baseline-observations-2026-06-30.json \
+  --rollback-ref "<rollback handle>" \
+  --json
+```
+
+Evidence fixture:
+
+- `docs/design/fixtures/workflow-feedback-baseline-observations-2026-06-30.json`
+
+This packet converts explicit baseline observations into `baseline_correct`,
+`baseline_total`, `baseline_accuracy`, and a `baseline_ref` that can be fed into
+Slice 6. It separately carries rollback refs for Slice 5. The example fixture is
+a previous-policy proxy for exercising the evidence flow; it is not owner
+approval, production runtime evidence, or a promotion decision.
+
+The baseline evidence packet checks:
+
+- baseline observation fixtures are read-only and boundary-safe
+- every held-out scenario has exactly one known observation per fixture
+- duplicate, unknown, or missing observations block the packet
+- rollback refs are present before promotion-gate readiness
+
 ## Non-Goals
 
 - No automatic RL training path in the near term.
@@ -388,8 +419,9 @@ approval.
 
 ## Immediate Next Step
 
-Use the lift-evidence packet to produce measured behavior-lift refs only after a
-baseline is supplied, then feed that ref into the promotion-gate packet together
-with rollback handles and owner approval refs. Any actual memory/runbook/skill/
-retrieval promotion must happen in a separate authorized lane; runtime,
-retrieval, and tool-routing influence remain blocked by default.
+Use the baseline-evidence output to pass `baseline_correct` and `baseline_total`
+into `workflow-feedback-lift-evidence`, then feed the resulting
+`metric_anchor_ref` plus rollback refs into the promotion-gate packet for owner
+review. Any actual memory/runbook/skill/retrieval promotion must happen in a
+separate authorized lane; runtime, retrieval, and tool-routing influence remain
+blocked by default.

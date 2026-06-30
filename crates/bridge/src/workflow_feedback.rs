@@ -23,6 +23,10 @@ pub const WORKFLOW_FEEDBACK_PROMOTION_GATE_SCHEMA: &str =
     "agent_bridge.workflow_feedback_promotion_gate.v0";
 pub const WORKFLOW_FEEDBACK_LIFT_EVIDENCE_SCHEMA: &str =
     "agent_bridge.workflow_feedback_lift_evidence.v0";
+pub const WORKFLOW_FEEDBACK_BASELINE_EVIDENCE_SCHEMA: &str =
+    "agent_bridge.workflow_feedback_baseline_evidence.v0";
+pub const WORKFLOW_FEEDBACK_BASELINE_OBSERVATIONS_SCHEMA: &str =
+    "agent_bridge.workflow_feedback_baseline_observations.v0";
 
 #[derive(Debug, Clone)]
 pub struct WorkflowFeedbackReportOptions {
@@ -255,6 +259,63 @@ impl Default for WorkflowFeedbackLiftEvidenceOptions {
             min_lift: 0.10,
         }
     }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct WorkflowFeedbackBaselineEvidenceOptions {
+    pub rollback_refs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WorkflowFeedbackBaselineEvidenceReport {
+    pub schema: &'static str,
+    pub read_only: bool,
+    pub boundary: WorkflowFeedbackBoundary,
+    pub baseline_verdict: &'static str,
+    pub baseline_ref: String,
+    pub evidence: BaselineEvidenceSummary,
+    pub checks: Vec<BaselineEvidenceCheck>,
+    pub scenario_observations: Vec<BaselineScenarioObservation>,
+    pub recommended_next_actions: Vec<&'static str>,
+    pub non_goals: Vec<&'static str>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BaselineEvidenceSummary {
+    pub scenario_fixture_path: Option<String>,
+    pub baseline_observation_fixture_count: usize,
+    pub scenario_case_count: usize,
+    pub expected_observation_count: usize,
+    pub observation_count: usize,
+    pub baseline_correct: u32,
+    pub baseline_total: u32,
+    pub baseline_accuracy: f64,
+    pub missing_observation_count: usize,
+    pub duplicate_observation_count: usize,
+    pub unknown_observation_count: usize,
+    pub unsafe_fixture_count: usize,
+    pub rollback_refs: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BaselineEvidenceCheck {
+    pub id: &'static str,
+    pub passed: bool,
+    pub evidence: String,
+    pub required: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct BaselineScenarioObservation {
+    pub source_path: Option<String>,
+    pub observation_source: Option<String>,
+    pub scenario_id: String,
+    pub scenario: String,
+    pub expected_top_experience_id: String,
+    pub observed_top_experience_id: Option<String>,
+    pub evidence_ref: Option<String>,
+    pub matched_expected_top: bool,
+    pub fixture_safe: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -731,6 +792,106 @@ impl WorkflowFeedbackLiftEvidenceReport {
     }
 }
 
+impl WorkflowFeedbackBaselineEvidenceReport {
+    pub fn to_json_value(&self) -> Value {
+        serde_json::to_value(self).unwrap_or_else(|_| {
+            json!({
+                "schema": WORKFLOW_FEEDBACK_BASELINE_EVIDENCE_SCHEMA,
+                "read_only": true,
+                "serialization_error": true
+            })
+        })
+    }
+
+    pub fn render_markdown(&self) -> String {
+        let mut out = String::new();
+        out.push_str("# Workflow Feedback Baseline Evidence\n");
+        out.push_str(&format!("schema: {}\n", self.schema));
+        out.push_str(&format!("verdict: {}\n", self.baseline_verdict));
+        out.push_str(&format!("baseline_ref: {}\n", self.baseline_ref));
+        out.push_str("mode: read-only baseline evidence packet; no memory writes, no retrieval change, no tool-routing change, no runtime policy mutation\n\n");
+
+        out.push_str("## Evidence\n");
+        out.push_str(&format!(
+            "- baseline fixtures: {}\n",
+            self.evidence.baseline_observation_fixture_count
+        ));
+        out.push_str(&format!(
+            "- scenario cases: {}\n",
+            self.evidence.scenario_case_count
+        ));
+        out.push_str(&format!(
+            "- observations: {} expected={} missing={} duplicate={} unknown={}\n",
+            self.evidence.observation_count,
+            self.evidence.expected_observation_count,
+            self.evidence.missing_observation_count,
+            self.evidence.duplicate_observation_count,
+            self.evidence.unknown_observation_count
+        ));
+        out.push_str(&format!(
+            "- baseline: {}/{} ({:.1}%)\n",
+            self.evidence.baseline_correct,
+            self.evidence.baseline_total,
+            self.evidence.baseline_accuracy * 100.0
+        ));
+        out.push_str(&format!(
+            "- unsafe baseline fixtures: {}\n",
+            self.evidence.unsafe_fixture_count
+        ));
+        out.push_str(&format!(
+            "- rollback refs: {}\n\n",
+            self.evidence.rollback_refs.len()
+        ));
+
+        out.push_str("## Checks\n");
+        out.push_str("| Check | Status | Evidence | Required |\n");
+        out.push_str("| --- | --- | --- | --- |\n");
+        for check in &self.checks {
+            out.push_str(&format!(
+                "| {} | {} | {} | {} |\n",
+                check.id,
+                if check.passed { "pass" } else { "blocked" },
+                pipe_safe(&check.evidence),
+                pipe_safe(&check.required)
+            ));
+        }
+        out.push('\n');
+
+        out.push_str("## Scenario Observations\n");
+        out.push_str("| Scenario | Expected | Observed | Match | Safe | Evidence ref |\n");
+        out.push_str("| --- | --- | --- | --- | --- | --- |\n");
+        for observation in &self.scenario_observations {
+            out.push_str(&format!(
+                "| {} | {} | {} | {} | {} | {} |\n",
+                pipe_safe(&observation.scenario_id),
+                pipe_safe(&observation.expected_top_experience_id),
+                pipe_safe(
+                    observation
+                        .observed_top_experience_id
+                        .as_deref()
+                        .unwrap_or("<missing>")
+                ),
+                observation.matched_expected_top,
+                observation.fixture_safe,
+                pipe_safe(observation.evidence_ref.as_deref().unwrap_or("-"))
+            ));
+        }
+        out.push('\n');
+
+        out.push_str("## Recommended Next Actions\n");
+        for action in &self.recommended_next_actions {
+            out.push_str(&format!("- {action}\n"));
+        }
+        out.push('\n');
+
+        out.push_str("## Non-goals\n");
+        for non_goal in &self.non_goals {
+            out.push_str(&format!("- {non_goal}\n"));
+        }
+        out
+    }
+}
+
 pub fn build_shadow_score_report_from_paths(
     fixture_paths: &[PathBuf],
     scenarios: Vec<String>,
@@ -810,6 +971,46 @@ pub fn build_lift_evidence_report_from_paths(
     build_lift_evidence_report(scenario_fixture, shadow_reports, options)
 }
 
+pub fn build_baseline_evidence_report_from_paths(
+    scenario_fixture_path: &PathBuf,
+    baseline_observation_paths: &[PathBuf],
+    options: WorkflowFeedbackBaselineEvidenceOptions,
+) -> Result<WorkflowFeedbackBaselineEvidenceReport> {
+    if baseline_observation_paths.is_empty() {
+        bail!("at least one baseline observation fixture is required");
+    }
+    let raw = std::fs::read_to_string(scenario_fixture_path).with_context(|| {
+        format!(
+            "reading scenario fixture {}",
+            scenario_fixture_path.display()
+        )
+    })?;
+    let scenario_value: Value = serde_json::from_str(&raw).with_context(|| {
+        format!(
+            "parsing scenario fixture {}",
+            scenario_fixture_path.display()
+        )
+    })?;
+    let scenario_fixture = ShadowScoreScenarioFixture::from_value(
+        scenario_value,
+        Some(scenario_fixture_path.display().to_string()),
+    )?;
+
+    let mut baseline_fixtures = Vec::new();
+    for path in baseline_observation_paths {
+        let raw = std::fs::read_to_string(path)
+            .with_context(|| format!("reading baseline observation {}", path.display()))?;
+        let value: Value = serde_json::from_str(&raw)
+            .with_context(|| format!("parsing baseline observation {}", path.display()))?;
+        baseline_fixtures.push(BaselineObservationFixture::from_value(
+            value,
+            Some(path.display().to_string()),
+        )?);
+    }
+
+    build_baseline_evidence_report(scenario_fixture, baseline_fixtures, options)
+}
+
 fn build_shadow_score_report(
     experiences: Vec<ExperienceCandidate>,
     scenarios: Vec<String>,
@@ -844,6 +1045,190 @@ fn build_shadow_score_report(
             "Does not change retrieval ranking, tool routing, or runtime policy.",
             "Does not claim causal behavior lift; it only ranks fixture/lesson fit for later review.",
             "Does not promote any lesson without owner-gated evidence and rollback path.",
+        ],
+    })
+}
+
+fn build_baseline_evidence_report(
+    scenario_fixture: ShadowScoreScenarioFixture,
+    baseline_fixtures: Vec<BaselineObservationFixture>,
+    options: WorkflowFeedbackBaselineEvidenceOptions,
+) -> Result<WorkflowFeedbackBaselineEvidenceReport> {
+    if scenario_fixture.cases.is_empty() {
+        bail!("at least one scenario case is required");
+    }
+    if baseline_fixtures.is_empty() {
+        bail!("at least one baseline observation fixture is required");
+    }
+
+    let scenario_ids = scenario_fixture
+        .cases
+        .iter()
+        .map(|case| case.scenario_id.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut observations = Vec::new();
+    let mut missing_observation_count = 0_usize;
+    let mut duplicate_observation_count = 0_usize;
+    let mut unknown_observation_count = 0_usize;
+    let mut unsafe_fixture_count = 0_usize;
+
+    for fixture in &baseline_fixtures {
+        if !fixture.safe {
+            unsafe_fixture_count += 1;
+        }
+        unknown_observation_count += fixture
+            .observations
+            .iter()
+            .filter(|observation| !scenario_ids.contains(observation.scenario_id.as_str()))
+            .count();
+
+        for case in &scenario_fixture.cases {
+            let matching = fixture
+                .observations
+                .iter()
+                .filter(|observation| observation.scenario_id == case.scenario_id)
+                .collect::<Vec<_>>();
+            if matching.is_empty() {
+                missing_observation_count += 1;
+                observations.push(BaselineScenarioObservation {
+                    source_path: fixture.source_path.clone(),
+                    observation_source: fixture.observation_source.clone(),
+                    scenario_id: case.scenario_id.clone(),
+                    scenario: case.scenario.clone(),
+                    expected_top_experience_id: case.expected_top_experience_id.clone(),
+                    observed_top_experience_id: None,
+                    evidence_ref: None,
+                    matched_expected_top: false,
+                    fixture_safe: fixture.safe,
+                });
+                continue;
+            }
+
+            duplicate_observation_count += matching.len().saturating_sub(1);
+            let observation = matching[0];
+            let matched_expected_top =
+                observation.observed_top_experience_id == case.expected_top_experience_id;
+            observations.push(BaselineScenarioObservation {
+                source_path: fixture.source_path.clone(),
+                observation_source: fixture.observation_source.clone(),
+                scenario_id: case.scenario_id.clone(),
+                scenario: case.scenario.clone(),
+                expected_top_experience_id: case.expected_top_experience_id.clone(),
+                observed_top_experience_id: Some(observation.observed_top_experience_id.clone()),
+                evidence_ref: observation.evidence_ref.clone(),
+                matched_expected_top,
+                fixture_safe: fixture.safe,
+            });
+        }
+    }
+
+    let observation_count = observations
+        .iter()
+        .filter(|observation| observation.observed_top_experience_id.is_some())
+        .count();
+    let baseline_correct = observations
+        .iter()
+        .filter(|observation| {
+            observation.observed_top_experience_id.is_some() && observation.matched_expected_top
+        })
+        .count() as u32;
+    let baseline_total = observation_count as u32;
+    let baseline_accuracy = fraction(baseline_correct as u64, baseline_total as u64);
+    let expected_observation_count = scenario_fixture.cases.len() * baseline_fixtures.len();
+    let rollback_refs = clean_refs(options.rollback_refs);
+    let safe_fixtures = unsafe_fixture_count == 0;
+    let observations_complete =
+        missing_observation_count == 0 && observation_count == expected_observation_count;
+    let observations_unambiguous =
+        duplicate_observation_count == 0 && unknown_observation_count == 0;
+    let rollback_evidence = !rollback_refs.is_empty();
+
+    let baseline_verdict = if !safe_fixtures {
+        "blocked_unsafe_baseline_fixture"
+    } else if !observations_unambiguous {
+        "blocked_ambiguous_baseline_observations"
+    } else if !observations_complete {
+        "blocked_incomplete_baseline_observations"
+    } else if !rollback_evidence {
+        "baseline_without_rollback"
+    } else {
+        "baseline_evidence_ready"
+    };
+
+    let checks = vec![
+        BaselineEvidenceCheck {
+            id: "baseline_fixtures_safe",
+            passed: safe_fixtures,
+            evidence: format!("{unsafe_fixture_count} unsafe fixture(s)"),
+            required: "all baseline fixtures read_only=true and all baseline safety flags false"
+                .to_string(),
+        },
+        BaselineEvidenceCheck {
+            id: "baseline_observations_complete",
+            passed: observations_complete,
+            evidence: format!(
+                "{observation_count} observed baseline result(s), {missing_observation_count} missing"
+            ),
+            required: format!(
+                "{expected_observation_count} observation(s) across {} scenario case(s) and {} fixture(s)",
+                scenario_fixture.cases.len(),
+                baseline_fixtures.len()
+            ),
+        },
+        BaselineEvidenceCheck {
+            id: "baseline_observations_unambiguous",
+            passed: observations_unambiguous,
+            evidence: format!(
+                "{duplicate_observation_count} duplicate observation(s), {unknown_observation_count} unknown scenario observation(s)"
+            ),
+            required: "exactly one baseline observation per known scenario per fixture".to_string(),
+        },
+        BaselineEvidenceCheck {
+            id: "rollback_refs_present",
+            passed: rollback_evidence,
+            evidence: format!("{} rollback ref(s)", rollback_refs.len()),
+            required: "explicit rollback path or revert handle for any later promotion".to_string(),
+        },
+    ];
+
+    let evidence = BaselineEvidenceSummary {
+        scenario_fixture_path: scenario_fixture.source_path.clone(),
+        baseline_observation_fixture_count: baseline_fixtures.len(),
+        scenario_case_count: scenario_fixture.cases.len(),
+        expected_observation_count,
+        observation_count,
+        baseline_correct,
+        baseline_total,
+        baseline_accuracy,
+        missing_observation_count,
+        duplicate_observation_count,
+        unknown_observation_count,
+        unsafe_fixture_count,
+        rollback_refs,
+    };
+    let baseline_ref = baseline_evidence_ref(baseline_verdict, &evidence);
+
+    Ok(WorkflowFeedbackBaselineEvidenceReport {
+        schema: WORKFLOW_FEEDBACK_BASELINE_EVIDENCE_SCHEMA,
+        read_only: true,
+        boundary: WorkflowFeedbackBoundary {
+            writes_memory: false,
+            mutates_runtime_policy: false,
+            changes_retrieval_order: false,
+            runtime_influence_allowed: false,
+            owner_gated_runtime_influence: true,
+        },
+        baseline_verdict,
+        baseline_ref,
+        evidence,
+        checks,
+        scenario_observations: observations,
+        recommended_next_actions: baseline_recommended_next_actions(baseline_verdict),
+        non_goals: vec![
+            "Does not run an agent, model, replay harness, memory search, or retrieval experiment.",
+            "Does not write memory, mutate runtime policy, alter retrieval order, or change tool routing.",
+            "Does not infer owner approval or promote a lesson.",
+            "Does not claim behavior lift; it only packages baseline counts and rollback handles for later gates.",
         ],
     })
 }
@@ -1257,6 +1642,21 @@ struct ShadowScoreScenarioCase {
     expected_top_experience_id: String,
 }
 
+#[derive(Debug, Clone)]
+struct BaselineObservationFixture {
+    source_path: Option<String>,
+    observation_source: Option<String>,
+    safe: bool,
+    observations: Vec<BaselineObservation>,
+}
+
+#[derive(Debug, Clone)]
+struct BaselineObservation {
+    scenario_id: String,
+    observed_top_experience_id: String,
+    evidence_ref: Option<String>,
+}
+
 impl ShadowScoreScenarioFixture {
     fn from_value(value: Value, source_path: Option<String>) -> Result<Self> {
         let schema = value
@@ -1298,6 +1698,76 @@ impl ShadowScoreScenarioFixture {
             })
             .collect::<Result<Vec<_>>>()?;
         Ok(Self { source_path, cases })
+    }
+}
+
+impl BaselineObservationFixture {
+    fn from_value(value: Value, source_path: Option<String>) -> Result<Self> {
+        let schema = value
+            .get("schema")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if schema != WORKFLOW_FEEDBACK_BASELINE_OBSERVATIONS_SCHEMA {
+            bail!(
+                "baseline observation fixture {} has schema {schema:?}, expected {WORKFLOW_FEEDBACK_BASELINE_OBSERVATIONS_SCHEMA}",
+                source_path.as_deref().unwrap_or("<inline>")
+            );
+        }
+
+        let read_only = value
+            .get("read_only")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let observation_source = value
+            .get("observation_source")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let safe = read_only
+            && [
+                "/safety/baseline_writes_memory",
+                "/safety/baseline_changes_runtime",
+                "/safety/baseline_changes_retrieval_order",
+                "/safety/baseline_changes_tool_routing",
+            ]
+            .iter()
+            .all(|pointer| value.pointer(pointer).and_then(Value::as_bool) == Some(false));
+        let observations = value
+            .get("observations")
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "baseline observation fixture {} missing observations array",
+                    source_path.as_deref().unwrap_or("<inline>")
+                )
+            })?
+            .iter()
+            .map(|observation| {
+                let scenario_id = required_str(observation, "scenario_id", "baseline observation")?;
+                let observed_top_experience_id = required_str(
+                    observation,
+                    "observed_top_experience_id",
+                    "baseline observation",
+                )?;
+                let evidence_ref = observation
+                    .get("evidence_ref")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string);
+                Ok(BaselineObservation {
+                    scenario_id,
+                    observed_top_experience_id,
+                    evidence_ref,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(Self {
+            source_path,
+            observation_source,
+            safe,
+            observations,
+        })
     }
 }
 
@@ -1443,6 +1913,42 @@ fn lift_metric_anchor_ref(verdict: &str, evidence: &LiftEvidenceSummary) -> Stri
         "workflow-feedback-lift-evidence:v0;verdict={verdict};observations={};top1_accuracy={:.3};baseline_accuracy={baseline};absolute_lift={lift}",
         evidence.observation_count, evidence.top1_accuracy
     )
+}
+
+fn baseline_evidence_ref(verdict: &str, evidence: &BaselineEvidenceSummary) -> String {
+    format!(
+        "workflow-feedback-baseline-evidence:v0;verdict={verdict};correct={};total={};accuracy={:.3};rollback_refs={}",
+        evidence.baseline_correct,
+        evidence.baseline_total,
+        evidence.baseline_accuracy,
+        evidence.rollback_refs.len()
+    )
+}
+
+fn baseline_recommended_next_actions(baseline_verdict: &str) -> Vec<&'static str> {
+    match baseline_verdict {
+        "blocked_unsafe_baseline_fixture" => vec![
+            "Reject the baseline packet until every fixture is read-only and all baseline safety flags are false.",
+            "Regenerate the baseline observation fixture from evidence without mutating memory, retrieval, runtime, or routing.",
+        ],
+        "blocked_ambiguous_baseline_observations" => vec![
+            "Repair duplicate or unknown scenario observations before using the counts.",
+            "Keep exactly one baseline observation per known held-out scenario per fixture.",
+        ],
+        "blocked_incomplete_baseline_observations" => vec![
+            "Collect baseline observations for every held-out scenario before measuring lift.",
+            "Do not pass partial baseline counts to lift evidence.",
+        ],
+        "baseline_without_rollback" => vec![
+            "Use baseline_correct and baseline_total only as metric inputs, not as promotion readiness.",
+            "Attach an explicit rollback path before feeding this packet into promotion gate review.",
+        ],
+        "baseline_evidence_ready" => vec![
+            "Pass baseline_correct and baseline_total into workflow-feedback-lift-evidence.",
+            "Use baseline_ref or rollback refs as evidence inputs for promotion-gate review.",
+        ],
+        _ => vec!["Review the baseline evidence packet manually before using it as a gate input."],
+    }
 }
 
 fn lift_recommended_next_actions(lift_verdict: &str) -> Vec<&'static str> {
@@ -2430,6 +2936,175 @@ mod tests {
                 }
             ]
         })
+    }
+
+    fn baseline_observation_fixture_value(agent_observed: &str, workflow_observed: &str) -> Value {
+        json!({
+            "schema": WORKFLOW_FEEDBACK_BASELINE_OBSERVATIONS_SCHEMA,
+            "read_only": true,
+            "purpose": "test previous-policy baseline observations",
+            "observation_source": "unit_test_previous_policy_proxy",
+            "observations": [
+                {
+                    "scenario_id": "interactive_agent_send_input_stall",
+                    "observed_top_experience_id": agent_observed,
+                    "evidence_ref": "test:agent-baseline"
+                },
+                {
+                    "scenario_id": "workflow_feedback_policy_pressure",
+                    "observed_top_experience_id": workflow_observed,
+                    "evidence_ref": "test:workflow-baseline"
+                }
+            ],
+            "safety": {
+                "baseline_writes_memory": false,
+                "baseline_changes_runtime": false,
+                "baseline_changes_retrieval_order": false,
+                "baseline_changes_tool_routing": false
+            }
+        })
+    }
+
+    #[test]
+    fn baseline_evidence_counts_correct_total_and_rollback_refs() {
+        let scenarios = ShadowScoreScenarioFixture::from_value(
+            two_scenario_fixture_value(),
+            Some("scenarios.json".to_string()),
+        )
+        .expect("scenario fixture");
+        let baseline = BaselineObservationFixture::from_value(
+            baseline_observation_fixture_value(
+                "baseline_no_experience_selected",
+                "baseline_no_experience_selected",
+            ),
+            Some("baseline.json".to_string()),
+        )
+        .expect("baseline fixture");
+
+        let report = build_baseline_evidence_report(
+            scenarios,
+            vec![baseline],
+            WorkflowFeedbackBaselineEvidenceOptions {
+                rollback_refs: vec![
+                    "rollback:disable promoted workflow feedback artifact".to_string(),
+                ],
+            },
+        )
+        .expect("baseline evidence");
+
+        assert_eq!(report.schema, WORKFLOW_FEEDBACK_BASELINE_EVIDENCE_SCHEMA);
+        assert!(report.read_only);
+        assert!(!report.boundary.writes_memory);
+        assert!(!report.boundary.mutates_runtime_policy);
+        assert!(!report.boundary.changes_retrieval_order);
+        assert!(!report.boundary.runtime_influence_allowed);
+        assert_eq!(report.baseline_verdict, "baseline_evidence_ready");
+        assert_eq!(report.evidence.baseline_correct, 0);
+        assert_eq!(report.evidence.baseline_total, 2);
+        assert_eq!(report.evidence.baseline_accuracy, 0.0);
+        assert_eq!(report.evidence.rollback_refs.len(), 1);
+        assert_eq!(report.scenario_observations.len(), 2);
+        assert!(report.checks.iter().all(|check| check.passed));
+        assert!(report.baseline_ref.contains("correct=0;total=2"));
+    }
+
+    #[test]
+    fn baseline_evidence_without_rollback_is_not_promotion_ready() {
+        let scenarios = ShadowScoreScenarioFixture::from_value(
+            two_scenario_fixture_value(),
+            Some("scenarios.json".to_string()),
+        )
+        .expect("scenario fixture");
+        let baseline = BaselineObservationFixture::from_value(
+            baseline_observation_fixture_value("exp_agent_input", "exp_workflow_report"),
+            Some("baseline.json".to_string()),
+        )
+        .expect("baseline fixture");
+
+        let report = build_baseline_evidence_report(
+            scenarios,
+            vec![baseline],
+            WorkflowFeedbackBaselineEvidenceOptions::default(),
+        )
+        .expect("baseline evidence");
+
+        assert_eq!(report.baseline_verdict, "baseline_without_rollback");
+        assert_eq!(report.evidence.baseline_correct, 2);
+        assert_eq!(report.evidence.baseline_total, 2);
+        assert_eq!(report.evidence.baseline_accuracy, 1.0);
+        let rollback_check = report
+            .checks
+            .iter()
+            .find(|check| check.id == "rollback_refs_present")
+            .expect("rollback check");
+        assert!(!rollback_check.passed);
+    }
+
+    #[test]
+    fn baseline_evidence_blocks_incomplete_observations() {
+        let scenarios = ShadowScoreScenarioFixture::from_value(
+            two_scenario_fixture_value(),
+            Some("scenarios.json".to_string()),
+        )
+        .expect("scenario fixture");
+        let baseline = BaselineObservationFixture::from_value(
+            json!({
+                "schema": WORKFLOW_FEEDBACK_BASELINE_OBSERVATIONS_SCHEMA,
+                "read_only": true,
+                "observation_source": "unit_test_previous_policy_proxy",
+                "observations": [
+                    {
+                        "scenario_id": "interactive_agent_send_input_stall",
+                        "observed_top_experience_id": "exp_agent_input"
+                    }
+                ],
+                "safety": {
+                    "baseline_writes_memory": false,
+                    "baseline_changes_runtime": false,
+                    "baseline_changes_retrieval_order": false,
+                    "baseline_changes_tool_routing": false
+                }
+            }),
+            Some("baseline.json".to_string()),
+        )
+        .expect("baseline fixture");
+
+        let report = build_baseline_evidence_report(
+            scenarios,
+            vec![baseline],
+            WorkflowFeedbackBaselineEvidenceOptions {
+                rollback_refs: vec![
+                    "rollback:disable promoted workflow feedback artifact".to_string(),
+                ],
+            },
+        )
+        .expect("baseline evidence");
+
+        assert_eq!(
+            report.baseline_verdict,
+            "blocked_incomplete_baseline_observations"
+        );
+        assert_eq!(report.evidence.observation_count, 1);
+        assert_eq!(report.evidence.missing_observation_count, 1);
+        let complete_check = report
+            .checks
+            .iter()
+            .find(|check| check.id == "baseline_observations_complete")
+            .expect("complete check");
+        assert!(!complete_check.passed);
+    }
+
+    #[test]
+    fn baseline_evidence_rejects_non_baseline_schema() {
+        let err = BaselineObservationFixture::from_value(
+            json!({"schema": "wrong.schema", "read_only": true, "observations": []}),
+            None,
+        )
+        .expect_err("wrong schema must fail");
+        assert!(
+            err.to_string()
+                .contains("expected agent_bridge.workflow_feedback_baseline_observations.v0")
+        );
     }
 
     #[test]

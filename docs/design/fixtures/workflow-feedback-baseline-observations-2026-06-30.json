@@ -1,0 +1,24 @@
+{
+  "schema": "agent_bridge.workflow_feedback_baseline_observations.v0",
+  "read_only": true,
+  "purpose": "Sample previous-policy baseline observations for workflow-feedback lift evidence. This fixture is a proxy packet for reproducing the evidence flow; it is not owner approval, runtime promotion, or a claim of real production behavior lift.",
+  "observation_source": "fixture_previous_policy_proxy",
+  "observations": [
+    {
+      "scenario_id": "interactive_agent_send_input_stall",
+      "observed_top_experience_id": "baseline_no_experience_selected",
+      "evidence_ref": "fixture:previous_policy_did_not_surface_agent_send_input_lesson"
+    },
+    {
+      "scenario_id": "workflow_feedback_policy_pressure",
+      "observed_top_experience_id": "baseline_no_experience_selected",
+      "evidence_ref": "fixture:previous_policy_did_not_surface_workflow_feedback_lesson"
+    }
+  ],
+  "safety": {
+    "baseline_writes_memory": false,
+    "baseline_changes_runtime": false,
+    "baseline_changes_retrieval_order": false,
+    "baseline_changes_tool_routing": false
+  }
+}
