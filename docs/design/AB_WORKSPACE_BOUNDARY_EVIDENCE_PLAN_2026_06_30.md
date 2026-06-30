@@ -1,8 +1,8 @@
 # AB Workspace Boundary Evidence Plan - 2026-06-30
 
 Status: AB-BORROW-2 planning artifact. The read-only `ide_snapshot` evidence
-slice, advisory `ide_command` evidence slice, and mutating-command containment
-gate are implemented.
+slice, advisory `ide_command` evidence slice, mutating-command containment
+gate, and guarded `apply_workspace_edit` create-file slice are implemented.
 
 This note closes the planning step for the borrowed workspace-boundary pattern
 from `docs/design/BORROWED_PATTERNS_BACKLOG_2026_06_09.md`. It turns the
@@ -35,10 +35,11 @@ Remaining future hardening:
 - command directory resolution does not prove that queued command paths are
   under the workspace;
 - exclude or `.gitignore` evidence is surfaced as advisory `not_evaluated`;
-- safe new-file creation is not supported by this gate because missing paths
-  are still reported as `missing_path` rather than guessed contained. The
-  reviewed follow-up contract is tracked in
+- safe new-file creation is supported only by the explicit
+  `apply_workspace_edit` per-edit `create: true` contract in
   `docs/design/AB_IDE_COMMAND_SAFE_CREATE_FILE_CONTRACT_2026_06_30.md`.
+  Missing paths still report `missing_path` in `workspace_boundary`; the
+  separate `create_file_gate` decides whether that missing leaf may queue.
 
 ## Evidence Contract
 
@@ -126,10 +127,10 @@ Implemented enforcement behavior:
   user files when the IDE extension executes them.
 - Keep the IDE extension responsible for its own final authority check. Agent-
   Bridge evidence is a safety preflight, not a sandbox.
-- New-file creation remains out of scope for this gate unless a later
-  `apply_workspace_edit` implementation follows the explicit per-edit
-  create-file contract in
-  `docs/design/AB_IDE_COMMAND_SAFE_CREATE_FILE_CONTRACT_2026_06_30.md`.
+- `apply_workspace_edit` may queue explicit per-edit `create: true` edits
+  through `create_file_gate.v0` when the parent is contained, the target is
+  missing, `text` is present as full file contents, and `range` is absent/null.
+  `save_file` and `format_document` remain existing-file-only commands.
 
 ## Non-Goals
 
@@ -148,11 +149,11 @@ git diff --check
 rg -n "workspace_boundary|AB-BORROW-2|ide_snapshot|ide_command" docs/design docs/IDE-SNAPSHOT-BRIDGE.md
 ```
 
-For the later code slice:
+For the guarded create-file code slice:
 
 ```bash
 cargo test -p ab-bridge --lib ide::tests -- --nocapture
 ```
 
-If the later implementation touches MCP schema text, also run the focused MCP
+If the implementation touches MCP schema text, also run the focused MCP
 registry tests for `ide_snapshot` and `ide_command`.

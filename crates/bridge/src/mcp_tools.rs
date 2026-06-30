@@ -50352,8 +50352,10 @@ impl McpTool for IdeCommandTool {
                  write_snapshot, apply_workspace_edit, save_file, format_document. The \
                  response includes advisory workspace-boundary evidence for path-carrying \
                  commands; mutating edit/save/format commands are blocked before queueing unless \
-                 their paths canonicalize inside the workspace. The IDE extension still remains \
-                 final containment authority. Writes JSONL to \
+                 their paths canonicalize inside the workspace, except explicit \
+                 apply_workspace_edit create edits may queue through create_file_gate evidence \
+                 when the parent is contained and the target is missing. The IDE extension still \
+                 remains final containment authority. Writes JSONL to \
                  <workspace>/.agent-bridge/ide-commands.jsonl (or command_dir / \
                  AGENT_BRIDGE_IDE_COMMAND_DIR) and optionally waits for a matching response \
                  in ide-responses.jsonl."
@@ -50369,7 +50371,7 @@ impl McpTool for IdeCommandTool {
                     "args": {
                         "type": "object",
                         "default": {},
-                        "description": "Command-specific JSON args. open_file/reveal_range use {path, range?, preview?, preserve_focus?}; run_task uses {name}; write_snapshot uses {}; apply_workspace_edit uses {edits:[{path, range?, text}], save?} (omit range to replace the whole file); save_file uses {path}; format_document uses {path, save?}. Optional workspace_root/workspaceRoot can anchor workspace_boundary evidence; otherwise cwd or <workspace>/.agent-bridge is used when available. Mutating paths must exist and canonicalize inside the workspace before queueing."
+                        "description": "Command-specific JSON args. open_file/reveal_range use {path, range?, preview?, preserve_focus?}; run_task uses {name}; write_snapshot uses {}; apply_workspace_edit uses {edits:[{path, range?, text, create?}], save?} (omit range to replace the whole file); save_file uses {path}; format_document uses {path, save?}. Optional workspace_root/workspaceRoot can anchor workspace_boundary evidence; otherwise cwd or <workspace>/.agent-bridge is used when available. Mutating paths must exist and canonicalize inside the workspace before queueing, except apply_workspace_edit edits with create:true may create a missing leaf file when the parent exists and canonicalizes inside the workspace, text is present as full file contents, and range is absent/null."
                     },
                     "cwd": {
                         "type": "string",

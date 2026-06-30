@@ -143,9 +143,13 @@ command directory, plus command path fields such as `args.path` and
 `open_file` and `reveal_range` remain advisory-only. Mutating commands
 (`apply_workspace_edit`, `save_file`, and `format_document`) return
 `queued=false,status=blocked` and do not write `ide-commands.jsonl` unless every
-referenced path exists and canonicalizes inside the workspace. New-file edits
-therefore stay blocked until a later reviewed lane adds a safe create-file
-contract. The proposed contract is documented in
+referenced path exists and canonicalizes inside the workspace. `apply_workspace_edit`
+also supports a narrow new-file path: each created file must be declared with
+per-edit `create: true`, the parent directory must already exist and
+canonicalize inside the workspace, the target must be missing, and `range` must
+be absent or null. The create edit must also provide `text` as the full file
+contents. These responses include `create_file_gate` evidence alongside
+`workspace_boundary`. The contract is documented in
 `docs/design/AB_IDE_COMMAND_SAFE_CREATE_FILE_CONTRACT_2026_06_30.md`.
 
 Supported commands in the VS Code/Cursor example:
@@ -169,6 +173,9 @@ Phase 1, landed:
   requests.
 - `ide_command` blocks mutating edit/save/format requests before queueing when
   their path evidence is not fully contained.
+- `ide_command` allows explicit `apply_workspace_edit` create edits only through
+  `create_file_gate.v0` when the parent is contained, the target is missing,
+  full file text is present, and no edit range is present.
 - The tool is editor-agnostic and registered in the Essential profile.
 
 Phase 2, landed:

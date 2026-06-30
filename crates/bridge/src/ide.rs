@@ -6,9 +6,9 @@
 
 use ab_core::{Error, Result};
 use serde_json::{json, Map, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::OpenOptions;
-use std::io::Write;
+use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -22,6 +22,7 @@ const DEFAULT_MAX_MESSAGE_CHARS: usize = 1_000;
 const COMMANDS_FILE: &str = "ide-commands.jsonl";
 const RESPONSES_FILE: &str = "ide-responses.jsonl";
 const WORKSPACE_BOUNDARY_SCHEMA: &str = "agent_bridge.workspace_boundary_evidence.v0";
+const CREATE_FILE_GATE_SCHEMA: &str = "agent_bridge.ide_command.create_file_gate.v0";
 
 static COMMAND_COUNTER: AtomicU64 = AtomicU64::new(1);
 
@@ -117,29 +118,63 @@ pub fn queue_ide_command(command: &str, args: Value, options: IdeCommandOptions)
     let response_path = dir.join(RESPONSES_FILE);
     let workspace_boundary =
         command_workspace_boundary_evidence(command, &args, options.cwd.as_deref(), &dir);
-    if mutating_ide_command(command) && !workspace_boundary_all_contained(&workspace_boundary) {
+    let create_file_gate = command_create_file_gate_evidence(
+        command,
+        &args,
+        options.cwd.as_deref(),
+        &dir,
+        &workspace_boundary,
+    );
+    let create_file_gate_verdict = create_file_gate
+        .as_ref()
+        .and_then(|gate| gate.get("verdict"))
+        .and_then(Value::as_str);
+    let create_file_gate_blocks = create_file_gate_verdict == Some("blocked");
+    let create_file_gate_allows = create_file_gate_verdict == Some("allowed");
+    let workspace_boundary_contained = workspace_boundary_all_contained(&workspace_boundary);
+    if mutating_ide_command(command)
+        && (create_file_gate_blocks || (!workspace_boundary_contained && !create_file_gate_allows))
+    {
         let actual_verdict = workspace_boundary
             .get("verdict")
             .and_then(Value::as_str)
             .unwrap_or("unknown")
             .to_string();
-        return Ok(json!({
-            "queued": false,
-            "status": "blocked",
-            "command": command,
-            "command_dir": dir.display().to_string(),
-            "request_path": request_path.display().to_string(),
-            "response_path": response_path.display().to_string(),
-            "workspace_boundary": workspace_boundary,
-            "gate": {
+        let mut payload = Map::new();
+        payload.insert("queued".to_string(), json!(false));
+        payload.insert("status".to_string(), json!("blocked"));
+        payload.insert("command".to_string(), json!(command));
+        payload.insert("command_dir".to_string(), json!(dir.display().to_string()));
+        payload.insert(
+            "request_path".to_string(),
+            json!(request_path.display().to_string()),
+        );
+        payload.insert(
+            "response_path".to_string(),
+            json!(response_path.display().to_string()),
+        );
+        payload.insert("workspace_boundary".to_string(), workspace_boundary);
+        payload.insert(
+            "gate".to_string(),
+            json!({
                 "schema": "agent_bridge.ide_command.workspace_boundary_gate.v0",
                 "required_verdict": "contained",
                 "actual_verdict": actual_verdict,
+                "create_file_gate_verdict": create_file_gate_verdict,
                 "mutating_command": true,
                 "queued": false,
-            },
-            "hint": "mutating IDE commands require all referenced paths to exist and canonicalize inside the workspace before queueing.",
-        }));
+            }),
+        );
+        if let Some(gate) = create_file_gate {
+            payload.insert("create_file_gate".to_string(), gate);
+        }
+        let hint = if create_file_gate_blocks {
+            "mutating IDE command was blocked by create-file preflight; create edits require an existing contained parent, missing target, and no range."
+        } else {
+            "mutating IDE commands require all referenced paths to exist and canonicalize inside the workspace before queueing."
+        };
+        payload.insert("hint".to_string(), json!(hint));
+        return Ok(Value::Object(payload));
     }
 
     std::fs::create_dir_all(&dir).map_err(Error::Io)?;
@@ -171,22 +206,35 @@ pub fn queue_ide_command(command: &str, args: Value, options: IdeCommandOptions)
         "queued"
     };
 
-    Ok(json!({
-        "queued": true,
-        "status": status,
-        "id": id,
-        "command": command,
-        "command_dir": dir.display().to_string(),
-        "request_path": request_path.display().to_string(),
-        "response_path": response_path.display().to_string(),
-        "workspace_boundary": workspace_boundary,
-        "response": response,
-        "hint": if status == "timeout" {
+    let mut payload = Map::new();
+    payload.insert("queued".to_string(), json!(true));
+    payload.insert("status".to_string(), json!(status));
+    payload.insert("id".to_string(), json!(id));
+    payload.insert("command".to_string(), json!(command));
+    payload.insert("command_dir".to_string(), json!(dir.display().to_string()));
+    payload.insert(
+        "request_path".to_string(),
+        json!(request_path.display().to_string()),
+    );
+    payload.insert(
+        "response_path".to_string(),
+        json!(response_path.display().to_string()),
+    );
+    payload.insert("workspace_boundary".to_string(), workspace_boundary);
+    if let Some(gate) = create_file_gate {
+        payload.insert("create_file_gate".to_string(), gate);
+    }
+    payload.insert("response".to_string(), response.unwrap_or(Value::Null));
+    payload.insert(
+        "hint".to_string(),
+        json!(if status == "timeout" {
             "command was queued but no IDE response arrived before wait_ms elapsed; make sure the IDE extension is running."
         } else {
             "IDE extension should consume ide-commands.jsonl and append to ide-responses.jsonl."
-        },
-    }))
+        }),
+    );
+
+    Ok(Value::Object(payload))
 }
 
 fn snapshot_candidates(explicit_path: Option<&str>, cwd: Option<&Path>) -> Vec<SnapshotSource> {
@@ -683,6 +731,301 @@ fn mutating_ide_command(command: &str) -> bool {
 
 fn workspace_boundary_all_contained(workspace_boundary: &Value) -> bool {
     workspace_boundary.get("verdict").and_then(Value::as_str) == Some("contained")
+}
+
+fn command_create_file_gate_evidence(
+    command: &str,
+    args: &Value,
+    cwd: Option<&Path>,
+    command_dir: &Path,
+    workspace_boundary: &Value,
+) -> Option<Value> {
+    if command != "apply_workspace_edit" {
+        return None;
+    }
+
+    let edits = args.get("edits").and_then(Value::as_array);
+    let has_create_intent = edits
+        .into_iter()
+        .flatten()
+        .any(|edit| edit.get("create").and_then(Value::as_bool) == Some(true));
+    let has_missing_paths = workspace_boundary_paths(workspace_boundary)
+        .iter()
+        .any(|(_, relation)| relation == "missing_path");
+    if !has_create_intent && !has_missing_paths {
+        return None;
+    }
+
+    let root_input = command_workspace_root_input(args, cwd, command_dir);
+    let (_root_evidence, root_canonical) = workspace_root_evidence(root_input.as_ref());
+    let mut reasons = BTreeSet::new();
+    let mut checks = Vec::new();
+    let mut applies_to = Vec::new();
+    let mut allowed_create_roles = BTreeSet::new();
+
+    if has_create_intent && root_canonical.is_none() {
+        reasons.insert("workspace_root_missing".to_string());
+    }
+
+    if let Some(edits) = edits {
+        for (idx, edit) in edits.iter().enumerate() {
+            let Some(edit_obj) = edit.as_object() else {
+                continue;
+            };
+            if edit_obj.get("create").and_then(Value::as_bool) != Some(true) {
+                continue;
+            }
+            applies_to.push(format!("args.edits[{idx}]"));
+            let (check, check_allowed_roles, check_reasons) =
+                create_file_edit_gate_check(idx, edit_obj, root_canonical.as_deref());
+            for role in check_allowed_roles {
+                allowed_create_roles.insert(role);
+            }
+            for reason in check_reasons {
+                reasons.insert(reason);
+            }
+            checks.push(check);
+        }
+    }
+
+    let mut uncovered_missing_path = false;
+    for (role, relation) in workspace_boundary_paths(workspace_boundary) {
+        match relation.as_str() {
+            "inside_workspace" => {}
+            "missing_path" if allowed_create_roles.contains(&role) => {}
+            "missing_path" => {
+                uncovered_missing_path = true;
+                reasons.insert("create_flag_missing".to_string());
+            }
+            "no_workspace_root" => {
+                reasons.insert("workspace_root_missing".to_string());
+            }
+            "outside_workspace" | "canonicalize_failed" => {
+                reasons.insert("mixed_batch_edit_failed".to_string());
+            }
+            _ => {}
+        }
+    }
+    if uncovered_missing_path && applies_to.is_empty() {
+        checks.push(json!({
+            "explicit_create": false,
+            "allowed": false,
+            "reasons": ["create_flag_missing"],
+        }));
+    }
+
+    let reason_values: Vec<String> = reasons.into_iter().collect();
+    let verdict = if reason_values.is_empty() {
+        "allowed"
+    } else {
+        "blocked"
+    };
+
+    Some(json!({
+        "schema": CREATE_FILE_GATE_SCHEMA,
+        "mode": "pre_queue_evidence",
+        "verdict": verdict,
+        "applies_to": applies_to,
+        "reasons": reason_values,
+        "checks": checks,
+    }))
+}
+
+fn create_file_edit_gate_check(
+    idx: usize,
+    edit: &Map<String, Value>,
+    workspace_root: Option<&Path>,
+) -> (Value, Vec<String>, BTreeSet<String>) {
+    let path_inputs = edit_path_inputs(edit, idx);
+    let range_absent = match edit.get("range") {
+        Some(range) => range.is_null(),
+        None => true,
+    };
+    let text_present = edit.get("text").is_some_and(Value::is_string);
+    let mut reasons = BTreeSet::new();
+    let mut allowed_roles = Vec::new();
+    let mut path_checks = Vec::new();
+
+    if !range_absent {
+        reasons.insert("create_range_present".to_string());
+    }
+    if !text_present {
+        reasons.insert("create_text_missing".to_string());
+    }
+    if path_inputs.is_empty() {
+        reasons.insert("create_path_missing".to_string());
+    }
+
+    for (role, input) in path_inputs {
+        let (path_check, path_allowed, path_reasons) =
+            create_file_path_gate_check(&role, &input, workspace_root);
+        if path_allowed && range_absent {
+            allowed_roles.push(role);
+        }
+        for reason in path_reasons {
+            reasons.insert(reason);
+        }
+        path_checks.push(path_check);
+    }
+
+    let parent_exists = !path_checks.is_empty()
+        && path_checks
+            .iter()
+            .all(|check| check.get("parent_exists").and_then(Value::as_bool) == Some(true));
+    let parent_contained = !path_checks.is_empty()
+        && path_checks
+            .iter()
+            .all(|check| check.get("parent_contained").and_then(Value::as_bool) == Some(true));
+    let target_missing = !path_checks.is_empty()
+        && path_checks
+            .iter()
+            .all(|check| check.get("target_missing").and_then(Value::as_bool) == Some(true));
+    let reason_values: Vec<String> = reasons.iter().cloned().collect();
+    let allowed = reason_values.is_empty();
+
+    (
+        json!({
+            "edit": idx,
+            "role": format!("args.edits[{idx}]"),
+            "explicit_create": true,
+            "parent_exists": parent_exists,
+            "parent_contained": parent_contained,
+            "target_missing": target_missing,
+            "range_absent": range_absent,
+            "text_present": text_present,
+            "auto_mkdir": false,
+            "extension_final_authority": true,
+            "allowed": allowed,
+            "reasons": reason_values,
+            "paths": path_checks,
+        }),
+        allowed_roles,
+        reasons,
+    )
+}
+
+fn create_file_path_gate_check(
+    role: &str,
+    input: &PathInput,
+    workspace_root: Option<&Path>,
+) -> (Value, bool, BTreeSet<String>) {
+    let mut reasons = BTreeSet::new();
+    let Some(root) = workspace_root else {
+        reasons.insert("workspace_root_missing".to_string());
+        return (
+            json!({
+                "role": role,
+                "input": input.input.as_str(),
+                "parent": Value::Null,
+                "parent_canonical": Value::Null,
+                "parent_exists": false,
+                "parent_is_dir": false,
+                "parent_contained": false,
+                "target": Value::Null,
+                "target_missing": false,
+                "allowed": false,
+                "reasons": ["workspace_root_missing"],
+            }),
+            false,
+            reasons,
+        );
+    };
+
+    let target = if input.path.is_absolute() {
+        input.path.clone()
+    } else {
+        root.join(&input.path)
+    };
+    let parent = target.parent().map(Path::to_path_buf);
+    let mut parent_exists = false;
+    let mut parent_is_dir = false;
+    let mut parent_canonical = None;
+    let mut parent_contained = false;
+
+    if let Some(parent) = parent.as_ref() {
+        if let Ok(metadata) = std::fs::metadata(parent) {
+            parent_exists = true;
+            parent_is_dir = metadata.is_dir();
+            if parent_is_dir {
+                parent_canonical = std::fs::canonicalize(parent).ok();
+                if let Some(canonical) = parent_canonical.as_ref() {
+                    parent_contained = canonical == root || canonical.starts_with(root);
+                }
+            }
+        }
+    }
+
+    let target_status = match std::fs::symlink_metadata(&target) {
+        Ok(_) => "exists",
+        Err(err) if err.kind() == ErrorKind::NotFound => "missing",
+        Err(_) => "unknown",
+    };
+    let target_missing = target_status == "missing";
+    if !parent_exists {
+        reasons.insert("create_parent_missing".to_string());
+    } else if !parent_is_dir {
+        reasons.insert("create_parent_not_dir".to_string());
+    }
+    if parent_exists && parent_is_dir && !parent_contained {
+        reasons.insert("create_parent_outside_workspace".to_string());
+    }
+    match target_status {
+        "exists" => {
+            reasons.insert("create_target_exists".to_string());
+        }
+        "unknown" => {
+            reasons.insert("create_target_status_unknown".to_string());
+        }
+        _ => {}
+    }
+
+    let reason_values: Vec<String> = reasons.iter().cloned().collect();
+    let allowed = reason_values.is_empty();
+    (
+        json!({
+            "role": role,
+            "input": input.input.as_str(),
+            "parent": parent.as_ref().map(|p| p.display().to_string()),
+            "parent_canonical": parent_canonical.as_ref().map(|p| p.display().to_string()),
+            "parent_exists": parent_exists,
+            "parent_is_dir": parent_is_dir,
+            "parent_contained": parent_contained,
+            "target": target.display().to_string(),
+            "target_status": target_status,
+            "target_missing": target_missing,
+            "allowed": allowed,
+            "reasons": reason_values,
+        }),
+        allowed,
+        reasons,
+    )
+}
+
+fn edit_path_inputs(edit: &Map<String, Value>, idx: usize) -> Vec<(String, PathInput)> {
+    let mut inputs = Vec::new();
+    for key in ["path", "file", "uri"] {
+        if let Some(path_input) = edit.get(key).and_then(path_input_from_value) {
+            inputs.push((format!("args.edits[{idx}].{key}"), path_input));
+        }
+    }
+    inputs
+}
+
+fn workspace_boundary_paths(workspace_boundary: &Value) -> Vec<(String, String)> {
+    workspace_boundary
+        .get("paths")
+        .and_then(Value::as_array)
+        .map(|paths| {
+            paths
+                .iter()
+                .filter_map(|path| {
+                    let role = path.get("role").and_then(Value::as_str)?;
+                    let relation = path.get("relation").and_then(Value::as_str)?;
+                    Some((role.to_string(), relation.to_string()))
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn workspace_root_evidence(root: Option<&PathInput>) -> (Value, Option<PathBuf>) {
@@ -1395,6 +1738,11 @@ mod tests {
         assert_eq!(v["queued"], false);
         assert_eq!(v["status"], "blocked");
         assert_eq!(v["gate"]["actual_verdict"], "needs_review");
+        assert_eq!(v["create_file_gate"]["verdict"], "blocked");
+        assert!(v["create_file_gate"]["reasons"]
+            .as_array()
+            .expect("reasons")
+            .contains(&json!("create_flag_missing")));
         assert_eq!(boundary["verdict"], "needs_review");
         assert_eq!(
             path_entry_by_role(boundary, "args.edits[0].path")["relation"],
@@ -1404,6 +1752,354 @@ mod tests {
             !command_file.exists(),
             "blocked mutating command must not be queued"
         );
+    }
+
+    #[test]
+    fn ide_command_create_file_gate_allows_missing_create_edit_parent_contained() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("project");
+        let src = root.join("src");
+        std::fs::create_dir_all(&src).expect("mkdir src");
+
+        let v = queue_ide_command(
+            "apply_workspace_edit",
+            json!({
+                "edits": [
+                    { "path": "src/new.rs", "create": true, "text": "pub fn new_file() {}\n" }
+                ],
+                "save": false
+            }),
+            IdeCommandOptions {
+                command_dir: None,
+                cwd: Some(root.clone()),
+                wait_ms: 0,
+            },
+        )
+        .expect("queue command");
+        let raw = std::fs::read_to_string(root.join(".agent-bridge").join(COMMANDS_FILE))
+            .expect("commands file");
+        let request: Value = serde_json::from_str(raw.lines().next().unwrap()).unwrap();
+        let boundary = &v["workspace_boundary"];
+        let create_gate = &v["create_file_gate"];
+
+        assert_eq!(v["queued"], true);
+        assert_eq!(request["command"], "apply_workspace_edit");
+        assert_eq!(request["args"]["edits"][0]["create"], true);
+        assert_eq!(boundary["verdict"], "needs_review");
+        assert_eq!(
+            path_entry_by_role(boundary, "args.edits[0].path")["relation"],
+            "missing_path"
+        );
+        assert_eq!(create_gate["schema"], CREATE_FILE_GATE_SCHEMA);
+        assert_eq!(create_gate["verdict"], "allowed");
+        assert_eq!(create_gate["checks"][0]["allowed"], true);
+        assert_eq!(create_gate["checks"][0]["parent_contained"], true);
+        assert_eq!(create_gate["checks"][0]["target_missing"], true);
+        assert_eq!(create_gate["checks"][0]["text_present"], true);
+    }
+
+    #[test]
+    fn ide_command_create_file_gate_blocks_existing_create_target() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("project");
+        let src = root.join("src");
+        std::fs::create_dir_all(&src).expect("mkdir src");
+        std::fs::write(src.join("new.rs"), "pub fn existing() {}\n").expect("write existing");
+
+        let v = queue_ide_command(
+            "apply_workspace_edit",
+            json!({
+                "edits": [
+                    { "path": "src/new.rs", "create": true, "text": "pub fn new_file() {}\n" }
+                ],
+                "save": false
+            }),
+            IdeCommandOptions {
+                command_dir: None,
+                cwd: Some(root.clone()),
+                wait_ms: 0,
+            },
+        )
+        .expect("queue command");
+        let command_file = root.join(".agent-bridge").join(COMMANDS_FILE);
+
+        assert_eq!(v["queued"], false);
+        assert_eq!(v["status"], "blocked");
+        assert_eq!(v["workspace_boundary"]["verdict"], "contained");
+        assert_eq!(v["create_file_gate"]["verdict"], "blocked");
+        assert!(v["create_file_gate"]["reasons"]
+            .as_array()
+            .expect("reasons")
+            .contains(&json!("create_target_exists")));
+        assert!(
+            !command_file.exists(),
+            "blocked create command must not be queued"
+        );
+    }
+
+    #[test]
+    fn ide_command_create_file_gate_blocks_missing_parent() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("project");
+        std::fs::create_dir_all(&root).expect("mkdir root");
+
+        let v = queue_ide_command(
+            "apply_workspace_edit",
+            json!({
+                "edits": [
+                    { "path": "src/new.rs", "create": true, "text": "pub fn new_file() {}\n" }
+                ],
+                "save": false
+            }),
+            IdeCommandOptions {
+                command_dir: None,
+                cwd: Some(root.clone()),
+                wait_ms: 0,
+            },
+        )
+        .expect("queue command");
+        let command_file = root.join(".agent-bridge").join(COMMANDS_FILE);
+
+        assert_eq!(v["queued"], false);
+        assert_eq!(v["status"], "blocked");
+        assert_eq!(v["create_file_gate"]["verdict"], "blocked");
+        assert!(v["create_file_gate"]["reasons"]
+            .as_array()
+            .expect("reasons")
+            .contains(&json!("create_parent_missing")));
+        assert!(
+            !command_file.exists(),
+            "blocked create command must not be queued"
+        );
+    }
+
+    #[test]
+    fn ide_command_create_file_gate_blocks_missing_text() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("project");
+        let src = root.join("src");
+        std::fs::create_dir_all(&src).expect("mkdir src");
+
+        let v = queue_ide_command(
+            "apply_workspace_edit",
+            json!({
+                "edits": [
+                    { "path": "src/new.rs", "create": true }
+                ],
+                "save": false
+            }),
+            IdeCommandOptions {
+                command_dir: None,
+                cwd: Some(root.clone()),
+                wait_ms: 0,
+            },
+        )
+        .expect("queue command");
+        let command_file = root.join(".agent-bridge").join(COMMANDS_FILE);
+
+        assert_eq!(v["queued"], false);
+        assert_eq!(v["status"], "blocked");
+        assert_eq!(v["create_file_gate"]["verdict"], "blocked");
+        assert!(v["create_file_gate"]["reasons"]
+            .as_array()
+            .expect("reasons")
+            .contains(&json!("create_text_missing")));
+        assert!(
+            !command_file.exists(),
+            "blocked create command must not be queued"
+        );
+    }
+
+    #[test]
+    fn ide_command_create_file_gate_blocks_create_range() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("project");
+        let src = root.join("src");
+        std::fs::create_dir_all(&src).expect("mkdir src");
+
+        let v = queue_ide_command(
+            "apply_workspace_edit",
+            json!({
+                "edits": [
+                    {
+                        "path": "src/new.rs",
+                        "create": true,
+                        "range": { "start": { "line": 0, "character": 0 }, "end": { "line": 0, "character": 0 } },
+                        "text": "pub fn new_file() {}\n"
+                    }
+                ],
+                "save": false
+            }),
+            IdeCommandOptions {
+                command_dir: None,
+                cwd: Some(root.clone()),
+                wait_ms: 0,
+            },
+        )
+        .expect("queue command");
+        let command_file = root.join(".agent-bridge").join(COMMANDS_FILE);
+
+        assert_eq!(v["queued"], false);
+        assert_eq!(v["status"], "blocked");
+        assert_eq!(v["create_file_gate"]["verdict"], "blocked");
+        assert!(v["create_file_gate"]["reasons"]
+            .as_array()
+            .expect("reasons")
+            .contains(&json!("create_range_present")));
+        assert!(
+            !command_file.exists(),
+            "blocked create command must not be queued"
+        );
+    }
+
+    #[test]
+    fn ide_command_create_file_gate_blocks_outside_parent() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("project");
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&root).expect("mkdir root");
+        std::fs::create_dir_all(&outside).expect("mkdir outside");
+        let outside_target = outside.join("new.rs");
+
+        let v = queue_ide_command(
+            "apply_workspace_edit",
+            json!({
+                "edits": [
+                    {
+                        "path": outside_target.display().to_string(),
+                        "create": true,
+                        "text": "pub fn outside() {}\n"
+                    }
+                ],
+                "save": false
+            }),
+            IdeCommandOptions {
+                command_dir: None,
+                cwd: Some(root.clone()),
+                wait_ms: 0,
+            },
+        )
+        .expect("queue command");
+        let command_file = root.join(".agent-bridge").join(COMMANDS_FILE);
+
+        assert_eq!(v["queued"], false);
+        assert_eq!(v["status"], "blocked");
+        assert_eq!(v["workspace_boundary"]["verdict"], "needs_review");
+        assert_eq!(v["create_file_gate"]["verdict"], "blocked");
+        assert!(v["create_file_gate"]["reasons"]
+            .as_array()
+            .expect("reasons")
+            .contains(&json!("create_parent_outside_workspace")));
+        assert!(
+            !command_file.exists(),
+            "blocked create command must not be queued"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ide_command_create_file_gate_blocks_symlink_escaped_parent() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("project");
+        let outside = tmp.path().join("outside");
+        std::fs::create_dir_all(&root).expect("mkdir root");
+        std::fs::create_dir_all(&outside).expect("mkdir outside");
+        std::os::unix::fs::symlink(&outside, root.join("linked-outside")).expect("symlink");
+
+        let v = queue_ide_command(
+            "apply_workspace_edit",
+            json!({
+                "edits": [
+                    { "path": "linked-outside/new.rs", "create": true, "text": "pub fn outside() {}\n" }
+                ],
+                "save": false
+            }),
+            IdeCommandOptions {
+                command_dir: None,
+                cwd: Some(root.clone()),
+                wait_ms: 0,
+            },
+        )
+        .expect("queue command");
+        let command_file = root.join(".agent-bridge").join(COMMANDS_FILE);
+
+        assert_eq!(v["queued"], false);
+        assert_eq!(v["status"], "blocked");
+        assert_eq!(v["create_file_gate"]["verdict"], "blocked");
+        assert!(v["create_file_gate"]["reasons"]
+            .as_array()
+            .expect("reasons")
+            .contains(&json!("create_parent_outside_workspace")));
+        assert!(
+            !command_file.exists(),
+            "blocked create command must not be queued"
+        );
+    }
+
+    #[test]
+    fn ide_command_create_file_gate_blocks_mixed_batch_failure() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("project");
+        let src = root.join("src");
+        std::fs::create_dir_all(&src).expect("mkdir src");
+        std::fs::write(src.join("lib.rs"), "pub fn lib() {}\n").expect("write lib");
+
+        let v = queue_ide_command(
+            "apply_workspace_edit",
+            json!({
+                "edits": [
+                    { "path": "src/lib.rs", "text": "pub fn changed() {}\n" },
+                    { "path": "src/new.rs", "create": true, "text": "pub fn new_file() {}\n" },
+                    { "path": "missing/other.rs", "text": "pub fn missing() {}\n" }
+                ],
+                "save": false
+            }),
+            IdeCommandOptions {
+                command_dir: None,
+                cwd: Some(root.clone()),
+                wait_ms: 0,
+            },
+        )
+        .expect("queue command");
+        let command_file = root.join(".agent-bridge").join(COMMANDS_FILE);
+
+        assert_eq!(v["queued"], false);
+        assert_eq!(v["status"], "blocked");
+        assert_eq!(v["create_file_gate"]["verdict"], "blocked");
+        assert!(v["create_file_gate"]["reasons"]
+            .as_array()
+            .expect("reasons")
+            .contains(&json!("create_flag_missing")));
+        assert!(
+            !command_file.exists(),
+            "mixed batch failure must not be queued"
+        );
+    }
+
+    #[test]
+    fn ide_command_save_and_format_missing_paths_do_not_use_create_file_gate() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("project");
+        std::fs::create_dir_all(&root).expect("mkdir root");
+
+        for command in ["save_file", "format_document"] {
+            let v = queue_ide_command(
+                command,
+                json!({ "path": "src/new.rs", "create": true }),
+                IdeCommandOptions {
+                    command_dir: None,
+                    cwd: Some(root.clone()),
+                    wait_ms: 0,
+                },
+            )
+            .expect("queue command");
+
+            assert_eq!(v["queued"], false, "{command} must stay blocked");
+            assert!(
+                v.get("create_file_gate").is_none(),
+                "{command} must not use apply_workspace_edit create gate"
+            );
+        }
     }
 
     #[test]

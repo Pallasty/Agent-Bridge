@@ -1,9 +1,10 @@
 # Agent-Bridge IDE Command Safe Create-File Contract - 2026-06-30
 
-Status: design memo only. No runtime behavior changes are introduced by this
-document.
+Status: runtime slice implemented for Agent-Bridge pre-queue evidence and
+blocking. The IDE extension still remains final authority when it consumes the
+queued request.
 
-This memo defines a reviewable follow-up contract for allowing
+This memo defines the runtime contract for allowing
 `apply_workspace_edit` to create new files without weakening the current
 workspace-boundary gate.
 
@@ -20,8 +21,8 @@ Keep the current mutating-command gate unchanged by default:
   after preflight evidence says the request is safe enough for the IDE to
   review and execute.
 
-New-file creation may be added later only for `apply_workspace_edit`, and only
-when each created file is declared per edit with `create: true`.
+New-file creation is supported only for `apply_workspace_edit`, and only when
+each created file is declared per edit with `create: true`.
 
 ## Proposed Request Shape
 
@@ -45,7 +46,8 @@ Contract rules:
 
 - `create` defaults to `false`.
 - `create: true` is evaluated per edit, not as a broad top-level flag.
-- `create: true` requires a path, file, or file URI and full file contents.
+- `create: true` requires a path, file, or file URI and `text` as the full file
+  contents. An empty string is valid for an empty file.
 - `range` must be omitted or null for a create edit.
 - Relative targets resolve against the workspace root. Absolute paths and file
   URIs must still prove the same parent containment.
@@ -69,8 +71,9 @@ Do not silently reinterpret the existing `workspace_boundary` object so that a
 missing file becomes `contained`. Missing targets should remain visible as
 missing-path evidence.
 
-Add a create-file-specific preflight block when the command includes create
-edits:
+Agent-Bridge adds a create-file-specific preflight block when the command
+includes create edits or when a missing edit path could be explained by this
+contract:
 
 ```json
 {
@@ -100,9 +103,11 @@ specific reasons such as:
 - `create_flag_missing`
 - `create_path_missing`
 - `create_range_present`
+- `create_text_missing`
 - `create_parent_missing`
 - `create_parent_outside_workspace`
 - `create_target_exists`
+- `create_target_status_unknown`
 - `workspace_root_missing`
 - `mixed_batch_edit_failed`
 
@@ -110,7 +115,7 @@ The IDE extension remains the final authority. It should repeat the same
 parent-containment and target-missing checks immediately before applying the
 edit, because the filesystem can change after Agent-Bridge queues the command.
 
-## Acceptance Tests For A Later Code Slice
+## Acceptance Tests
 
 - Existing contained `apply_workspace_edit` still queues without
   `create_file_gate`.
@@ -121,6 +126,7 @@ edit, because the filesystem can change after Agent-Bridge queues the command.
 - `create: true` with a missing parent blocks.
 - `create: true` with an outside or symlink-escaped parent blocks.
 - `create: true` with a non-null range blocks.
+- `create: true` without string `text` blocks.
 - A mixed batch blocks when any edit fails either the existing-file or
   create-file rule.
 - `save_file` and `format_document` missing paths still block.
@@ -129,7 +135,7 @@ edit, because the filesystem can change after Agent-Bridge queues the command.
 
 ## Implementation Notes
 
-The later runtime slice should be small and local to `crates/bridge/src/ide.rs`:
+The runtime slice is intentionally small and local to `crates/bridge/src/ide.rs`:
 
 1. Parse create edit intent from `args.edits[*].create`.
 2. For non-create edits, keep using existing path-candidate containment.
