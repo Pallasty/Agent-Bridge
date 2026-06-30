@@ -130,6 +130,7 @@ impl CodexRuntime {
             &self.store,
             &self.interactive,
             cfg,
+            pty_interactive::SubmitProfile::KITTY_ENTER,
         )
         .await
     }
@@ -285,7 +286,14 @@ impl AgentRuntime for CodexRuntime {
     }
 
     async fn send_input(&self, session: &SessionId, text: &str) -> Result<()> {
-        pty_interactive::send_input(self.id(), &self.interactive, session, text).await
+        pty_interactive::send_input(
+            self.id(),
+            &self.interactive,
+            session,
+            text,
+            pty_interactive::SubmitProfile::KITTY_ENTER,
+        )
+        .await
     }
 
     async fn kill(&self, session: &SessionId) -> Result<()> {
