@@ -16659,7 +16659,8 @@ impl McpTool for AgentSpawnTool {
                  backend=claude-code for a live PTY session). Pass prompt + cwd; runs to \
                  completion, returns session id. Pick a backend explicitly, or a policy \
                  ('cheap'=kilo, 'second_opinion'/'openai'=codex). backend takes precedence \
-                 over policy; both omitted = daemon default. Set `node` (+`user`) to dispatch \
+                 over policy; both omitted = the configured primary→backup fallback chain \
+                 (AGENT_BRIDGE_AGENT_FALLBACK_CHAIN; just the daemon default when unset). Set `node` (+`user`) to dispatch \
                  a kilo/opencode run to a tailnet host via ssh — it stays free yet is recorded \
                  in agent_sessions; `cwd` is then a remote-absolute path."
                 .into(),
@@ -16693,7 +16694,7 @@ impl McpTool for AgentSpawnTool {
                     },
                     "interactive": {
                         "type": "boolean",
-                        "description": "Open a live PTY-backed session instead of a one-shot run. Currently supported only by backend=claude-code; unsupported backends reject this flag before spawning. The child stays alive so follow-up turns can be sent with send_input, and `prompt` is submitted as the first turn."
+                        "description": "Open a live PTY-backed session instead of a one-shot run. Supported by backend=claude-code and codex (live PTY); other backends reject this flag before spawning. The child stays alive so follow-up turns can be sent with send_input, and `prompt` is submitted as the first turn."
                     }
                 },
                 "required": ["cwd", "prompt"]
@@ -16718,10 +16719,6 @@ impl McpTool for AgentSpawnTool {
                 .and_then(policy_to_backend)
                 .map(String::from)
         });
-        let agent = match resolve_agent_backend(&self.hub, resolved_backend.as_deref()) {
-            Ok(a) => a,
-            Err(e) => return Ok(ToolResult::error(e)),
-        };
         let cwd = match args.get("cwd").and_then(|v| v.as_str()) {
             Some(s) => s.to_string(),
             None => return Ok(ToolResult::error("missing 'cwd'")),
@@ -16767,10 +16764,42 @@ impl McpTool for AgentSpawnTool {
             user,
             interactive,
         };
-        match agent.spawn(cfg).await {
-            Ok(s) => Ok(ToolResult::json_text(
-                &serde_json::to_value(s).unwrap_or(Value::Null),
-            )),
+
+        // Explicit `backend`/`policy` → honour exactly: a single attempt, no
+        // failover (the caller picked a runtime deliberately). With neither
+        // given, walk the configured primary→backup chain instead.
+        if let Some(b) = resolved_backend.as_deref() {
+            let agent = match resolve_agent_backend(&self.hub, Some(b)) {
+                Ok(a) => a,
+                Err(e) => return Ok(ToolResult::error(e)),
+            };
+            return match agent.spawn(cfg).await {
+                Ok(s) => Ok(ToolResult::json_text(
+                    &serde_json::to_value(s).unwrap_or(Value::Null),
+                )),
+                Err(e) => Ok(ToolResult::error(format!("agent: {e}"))),
+            };
+        }
+
+        let chain = resolve_spawn_chain(&self.hub);
+        if chain.is_empty() {
+            return Ok(ToolResult::error("no default agent runtime configured"));
+        }
+        match spawn_with_failover(&chain, cfg).await {
+            Ok((s, idx, failed)) => {
+                let mut v = serde_json::to_value(&s).unwrap_or(Value::Null);
+                // Surface that a backup was used so the caller isn't silently
+                // handed a different runtime than the primary.
+                if idx > 0 {
+                    if let Some(obj) = v.as_object_mut() {
+                        obj.insert(
+                            "failover".to_string(),
+                            json!({ "attempted": failed, "used": s.runtime_id }),
+                        );
+                    }
+                }
+                Ok(ToolResult::json_text(&v))
+            }
             Err(e) => Ok(ToolResult::error(format!("agent: {e}"))),
         }
     }
@@ -16820,6 +16849,88 @@ fn resolve_agent_backend(
             .clone()
             .ok_or_else(|| "no default agent runtime configured".to_string()),
     }
+}
+
+/// Parse the `AGENT_BRIDGE_AGENT_FALLBACK_CHAIN` spec — a comma-separated list
+/// of backend ids (e.g. `claude-code,kilo,codex`) — into an ordered, de-duped
+/// list. Whitespace is trimmed and empty entries dropped.
+fn parse_fallback_chain(spec: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for raw in spec.split(',') {
+        let id = raw.trim();
+        if id.is_empty() {
+            continue;
+        }
+        if !out.iter().any(|e| e == id) {
+            out.push(id.to_string());
+        }
+    }
+    out
+}
+
+/// Resolve the ordered runtime chain for an *unspecified-backend* `agent_spawn`
+/// (no explicit `backend`/`policy`). Reads `AGENT_BRIDGE_AGENT_FALLBACK_CHAIN`
+/// and resolves each id through the same registry as [`resolve_agent_backend`]
+/// (so the `oz`/`warp-oz` alias matches). Unknown ids are skipped with a warning
+/// rather than aborting the spawn. When the env is unset/empty or nothing
+/// resolves, falls back to the single default runtime (`hub.agent`) — i.e.
+/// today's behaviour, no failover.
+fn resolve_spawn_chain(hub: &Hub) -> Vec<Arc<dyn ab_agent::AgentRuntime>> {
+    let spec = std::env::var("AGENT_BRIDGE_AGENT_FALLBACK_CHAIN").unwrap_or_default();
+    let mut chain: Vec<Arc<dyn ab_agent::AgentRuntime>> = Vec::new();
+    for id in parse_fallback_chain(&spec) {
+        match resolve_agent_backend(hub, Some(&id)) {
+            Ok(rt) => {
+                if !chain.iter().any(|c| c.id() == rt.id()) {
+                    chain.push(rt);
+                }
+            }
+            Err(e) => {
+                tracing::warn!(backend = %id, error = %e, "agent_spawn fallback chain: skipping unknown backend");
+            }
+        }
+    }
+    if chain.is_empty() {
+        if let Some(def) = hub.agent.clone() {
+            chain.push(def);
+        }
+    }
+    chain
+}
+
+/// Try to spawn `cfg` against each runtime in `chain` in order, returning the
+/// first success with its index and the ids that failed before it. Errors only
+/// when every backend fails (aggregated reason). `chain` is expected non-empty.
+async fn spawn_with_failover(
+    chain: &[Arc<dyn ab_agent::AgentRuntime>],
+    cfg: SpawnConfig,
+) -> std::result::Result<(ab_agent::AgentSession, usize, Vec<String>), String> {
+    let mut failed: Vec<String> = Vec::new();
+    let mut last_err = String::from("no agent backend available");
+    for (idx, rt) in chain.iter().enumerate() {
+        match rt.spawn(cfg.clone()).await {
+            Ok(session) => {
+                if idx > 0 {
+                    tracing::warn!(
+                        backend = %rt.id(),
+                        attempt = idx,
+                        failed = ?failed,
+                        "agent_spawn: primary backend(s) failed; using fallback"
+                    );
+                }
+                return Ok((session, idx, failed));
+            }
+            Err(e) => {
+                tracing::warn!(backend = %rt.id(), error = %e, "agent_spawn: backend spawn failed; trying next");
+                last_err = format!("{}: {e}", rt.id());
+                failed.push(rt.id().to_string());
+            }
+        }
+    }
+    Err(format!(
+        "all {} backend(s) failed; last: {last_err}",
+        chain.len()
+    ))
 }
 
 /// Resolve which `GitWorktreeManager` a tool call should use. If the caller
@@ -72114,6 +72225,96 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             .as_str()
             .expect("interactive description")
             .contains("reject"));
+    }
+
+    // ── agent_spawn primary→backup failover ────────────────────────────────
+    struct MockRuntime {
+        id: String,
+        fail: bool,
+    }
+
+    #[async_trait]
+    impl ab_agent::AgentRuntime for MockRuntime {
+        fn id(&self) -> &str {
+            &self.id
+        }
+        async fn spawn(&self, cfg: SpawnConfig) -> ab_core::Result<ab_agent::AgentSession> {
+            if self.fail {
+                Err(ab_core::Error::Backend(format!(
+                    "{}: mock spawn fail",
+                    self.id
+                )))
+            } else {
+                Ok(ab_agent::AgentSession {
+                    id: ab_core::SessionId::new(),
+                    runtime_id: self.id.clone(),
+                    cwd: cfg.cwd,
+                })
+            }
+        }
+        async fn send_input(&self, _s: &ab_core::SessionId, _t: &str) -> ab_core::Result<()> {
+            Ok(())
+        }
+        async fn capabilities(&self) -> ab_agent::AgentCapabilities {
+            ab_agent::AgentCapabilities::default()
+        }
+    }
+
+    fn mock(id: &str, fail: bool) -> Arc<dyn ab_agent::AgentRuntime> {
+        Arc::new(MockRuntime {
+            id: id.to_string(),
+            fail,
+        })
+    }
+
+    #[test]
+    fn parse_fallback_chain_trims_drops_empty_and_dedups() {
+        assert_eq!(
+            parse_fallback_chain(" claude-code , kilo ,, codex , kilo "),
+            vec![
+                "claude-code".to_string(),
+                "kilo".to_string(),
+                "codex".to_string()
+            ]
+        );
+        assert!(parse_fallback_chain("   ").is_empty());
+        assert!(parse_fallback_chain("").is_empty());
+    }
+
+    #[tokio::test]
+    async fn failover_uses_first_when_primary_succeeds() {
+        let chain = vec![mock("claude-code", false), mock("kilo", false)];
+        let (s, idx, failed) = spawn_with_failover(&chain, SpawnConfig::default())
+            .await
+            .expect("primary should succeed");
+        assert_eq!(idx, 0);
+        assert!(failed.is_empty());
+        assert_eq!(s.runtime_id, "claude-code");
+    }
+
+    #[tokio::test]
+    async fn failover_falls_through_to_first_healthy_backup() {
+        let chain = vec![
+            mock("claude-code", true),
+            mock("kilo", true),
+            mock("codex", false),
+        ];
+        let (s, idx, failed) = spawn_with_failover(&chain, SpawnConfig::default())
+            .await
+            .expect("a healthy backup exists");
+        assert_eq!(idx, 2);
+        assert_eq!(failed, vec!["claude-code".to_string(), "kilo".to_string()]);
+        assert_eq!(s.runtime_id, "codex");
+    }
+
+    #[tokio::test]
+    async fn failover_errors_when_all_backends_fail() {
+        let chain = vec![mock("claude-code", true), mock("kilo", true)];
+        let err = spawn_with_failover(&chain, SpawnConfig::default())
+            .await
+            .expect_err("all failing → Err");
+        assert!(err.contains("all 2 backend(s) failed"), "got: {err}");
+        assert!(err.contains("kilo"), "should name the last failure: {err}");
     }
 
     #[test]
