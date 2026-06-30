@@ -36,7 +36,9 @@ Remaining future hardening:
   under the workspace;
 - exclude or `.gitignore` evidence is surfaced as advisory `not_evaluated`;
 - safe new-file creation is not supported by this gate because missing paths
-  are still reported as `missing_path` rather than guessed contained.
+  are still reported as `missing_path` rather than guessed contained. The
+  reviewed follow-up contract is tracked in
+  `docs/design/AB_IDE_COMMAND_SAFE_CREATE_FILE_CONTRACT_2026_06_30.md`.
 
 ## Evidence Contract
 
@@ -124,6 +126,10 @@ Implemented enforcement behavior:
   user files when the IDE extension executes them.
 - Keep the IDE extension responsible for its own final authority check. Agent-
   Bridge evidence is a safety preflight, not a sandbox.
+- New-file creation remains out of scope for this gate unless a later
+  `apply_workspace_edit` implementation follows the explicit per-edit
+  create-file contract in
+  `docs/design/AB_IDE_COMMAND_SAFE_CREATE_FILE_CONTRACT_2026_06_30.md`.
 
 ## Non-Goals
 

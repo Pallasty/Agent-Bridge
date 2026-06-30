@@ -145,7 +145,8 @@ command directory, plus command path fields such as `args.path` and
 `queued=false,status=blocked` and do not write `ide-commands.jsonl` unless every
 referenced path exists and canonicalizes inside the workspace. New-file edits
 therefore stay blocked until a later reviewed lane adds a safe create-file
-contract.
+contract. The proposed contract is documented in
+`docs/design/AB_IDE_COMMAND_SAFE_CREATE_FILE_CONTRACT_2026_06_30.md`.
 
 Supported commands in the VS Code/Cursor example:
 
