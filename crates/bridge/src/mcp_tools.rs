@@ -28415,6 +28415,335 @@ impl McpTool for MemoryScopeSurveyTool {
 }
 
 // ===========================================================================
+//                        outcome_valence_shadow
+// ===========================================================================
+
+/// Plain sha256-hex of a raw string, for redacting memory keys / scopes in the
+/// `outcome_valence_shadow` envelope (no raw key/scope ever leaves the process).
+fn outcome_valence_sha256(s: &str) -> String {
+    let mut hasher = Sha256::new();
+    ShaDigest::update(&mut hasher, s.as_bytes());
+    format!("{:x}", ShaDigest::finalize(hasher))
+}
+
+/// Read-only **valence-derivation dry-run** diagnostic (arc5 stage V0). Reads the
+/// normalized `verify:`/`method:`/`decision:`/`embody:` tag facets of active
+/// `present_outcome` rows and PROJECTS a candidate valence scalar per record via a
+/// transparent deterministic rule (verify_status × decision → base, scaled by a
+/// method-confidence factor; range [-1,1]). It does NOT write, NEVER recomputes the
+/// stored importance=0.5 (present_ingest.rs), NEVER supplies anything to biocortex
+/// (no live plasticity axis consumes it), NEVER changes retrieval order. Valence is
+/// *derived in shadow*, never *produced* into durable state. The output is the
+/// evidence surface for the outcomes→valence transport contract; it authorizes
+/// nothing (owner/board-gated). See
+/// `docs/design/OUTCOMES_VALENCE_TRANSPORT_CONTRACT_DESIGN_2026_06_30.md`.
+pub struct OutcomeValenceShadowTool {
+    hub: Hub,
+}
+impl OutcomeValenceShadowTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for OutcomeValenceShadowTool {
+    fn name(&self) -> &'static str {
+        "outcome_valence_shadow"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only valence-derivation dry-run over active present_outcome \
+                 rows. Projects a CANDIDATE valence scalar per record from the normalized \
+                 verify:/decision:/method: tag facets via a transparent deterministic rule \
+                 (verify_status × decision → base in [-1,1], scaled by a method-confidence \
+                 factor). Reports coverage (derivable vs non-derivable rows), valence \
+                 distribution, per-facet breakdowns, and per-row hashed-key projections with \
+                 an audit rule_path. WARN-ONLY: writes nothing, never recomputes the stored \
+                 importance, never supplies valence to biocortex (no live consumer exists), \
+                 never changes retrieval order, authorizes nothing. Valence is derived in \
+                 shadow, never produced into durable state."
+                .into(),
+            input_schema: json!({ "type": "object", "properties": {} }),
+        }
+    }
+    async fn execute(&self, _args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no memory store configured")),
+        };
+        let meta_rows = store
+            .active_outcome_meta_rows()
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("active_outcome_meta_rows: {e}")))?;
+
+        // Per-row listing is capped to keep the envelope bounded; the aggregates
+        // below are computed over the FULL set (no silent aggregate truncation).
+        const ROWS_CAP: usize = 256;
+
+        let total_rows = meta_rows.len() as u64;
+        let mut derivable: u64 = 0;
+        let mut sum_v: f64 = 0.0;
+        let mut min_v: f64 = f64::INFINITY;
+        let mut max_v: f64 = f64::NEG_INFINITY;
+        let mut positive: u64 = 0;
+        let mut neutral: u64 = 0;
+        let mut negative: u64 = 0;
+        let mut dist = [0u64; 4];
+        let mut by_verify: std::collections::BTreeMap<String, u64> =
+            std::collections::BTreeMap::new();
+        let mut by_decision: std::collections::BTreeMap<Option<String>, u64> =
+            std::collections::BTreeMap::new();
+        let mut by_method: std::collections::BTreeMap<String, u64> =
+            std::collections::BTreeMap::new();
+        let mut rows_json: Vec<Value> = Vec::new();
+
+        for row in &meta_rows {
+            let tags: Vec<String> = serde_json::from_str(&row.tags_json).unwrap_or_default();
+            let mut verify_status = String::new();
+            let mut method = String::new();
+            let mut decision: Option<String> = None;
+            let mut embody: Option<String> = None;
+            for t in &tags {
+                if let Some(v) = t.strip_prefix("verify:") {
+                    verify_status = v.to_string();
+                } else if let Some(m) = t.strip_prefix("method:") {
+                    method = m.to_string();
+                } else if let Some(d) = t.strip_prefix("decision:") {
+                    decision = Some(d.to_string());
+                } else if let Some(e) = t.strip_prefix("embody:") {
+                    embody = Some(e.to_string());
+                }
+            }
+            let method_label: String = if method.is_empty() {
+                "unknown".to_string()
+            } else {
+                method.clone()
+            };
+            let dec_class = match decision.as_deref() {
+                Some("approved") => "approved",
+                Some("rejected") => "rejected",
+                _ => "none",
+            };
+            let vs_class = match verify_status.as_str() {
+                "rendered_ok" => "ok",
+                "failed" | "error" => "failed",
+                "" => "empty",
+                _ => "other",
+            };
+            // Deterministic (verify_status × decision) → base valence. See §2.4 of
+            // the design doc. `_` arms collapse unrecognized decisions into "none".
+            let base: Option<f64> = match (vs_class, dec_class) {
+                ("ok", "approved") => Some(1.0),
+                ("ok", "rejected") => Some(-0.4),
+                ("ok", _) => Some(0.6),
+                ("failed", "approved") => Some(-0.2),
+                ("failed", "rejected") => Some(-1.0),
+                ("failed", _) => Some(-0.7),
+                ("empty", "approved") => Some(0.3),
+                ("empty", "rejected") => Some(-0.6),
+                ("empty", _) => None,
+                ("other", "approved") => Some(0.3),
+                ("other", "rejected") => Some(-0.5),
+                _ => None,
+            };
+            let conf = match method_label.as_str() {
+                "browser_eval" | "macos_ax_verify" => 1.0,
+                "desktop_verify" => 0.9,
+                "lite_probe" => 0.7,
+                "self_report" => 0.5,
+                _ => 0.6,
+            };
+
+            // facet tallies over the FULL set
+            *by_verify.entry(verify_status.clone()).or_default() += 1;
+            *by_decision.entry(decision.clone()).or_default() += 1;
+            *by_method.entry(method_label.clone()).or_default() += 1;
+
+            let vs_disp = if verify_status.is_empty() {
+                "<empty>"
+            } else {
+                verify_status.as_str()
+            };
+            let (is_derivable, valence_opt, valence_class, rule_path) = match base {
+                Some(b) => {
+                    let v = (b * conf).clamp(-1.0, 1.0);
+                    let v = (v * 1_000_000.0).round() / 1_000_000.0;
+                    derivable += 1;
+                    sum_v += v;
+                    if v < min_v {
+                        min_v = v;
+                    }
+                    if v > max_v {
+                        max_v = v;
+                    }
+                    let class = if v > 0.05 {
+                        positive += 1;
+                        "positive"
+                    } else if v < -0.05 {
+                        negative += 1;
+                        "negative"
+                    } else {
+                        neutral += 1;
+                        "neutral"
+                    };
+                    let idx: usize = if v < -0.5 {
+                        0
+                    } else if v < 0.0 {
+                        1
+                    } else if v < 0.5 {
+                        2
+                    } else {
+                        3
+                    };
+                    dist[idx] += 1;
+                    (
+                        true,
+                        Some(v),
+                        class,
+                        format!(
+                            "verify={vs_disp}+decision={dec_class} -> base={b:+.1} * conf({method_label}={conf:.1}) = {v:+.3}"
+                        ),
+                    )
+                }
+                None => (
+                    false,
+                    None,
+                    "non_derivable",
+                    format!(
+                        "verify={vs_disp}+decision={dec_class} -> insufficient signal (not derivable)"
+                    ),
+                ),
+            };
+
+            if rows_json.len() < ROWS_CAP {
+                rows_json.push(json!({
+                    "key_sha256": outcome_valence_sha256(&row.key),
+                    "scope_sha256": outcome_valence_sha256(row.scope.as_deref().unwrap_or("")),
+                    "verify_status": verify_status,
+                    "decision": match &decision { Some(d) => json!(d), None => Value::Null },
+                    "method": method_label,
+                    "embody": match &embody { Some(e) => json!(e), None => Value::Null },
+                    "derivable": is_derivable,
+                    "valence": match valence_opt { Some(v) => json!(v), None => Value::Null },
+                    "valence_class": valence_class,
+                    "rule_path": rule_path,
+                }));
+            }
+        }
+
+        let non_derivable = total_rows - derivable;
+        let coverage = if total_rows > 0 {
+            (derivable as f64 / total_rows as f64 * 1_000_000.0).round() / 1_000_000.0
+        } else {
+            0.0
+        };
+        let mean_v = if derivable > 0 {
+            (sum_v / derivable as f64 * 1_000_000.0).round() / 1_000_000.0
+        } else {
+            0.0
+        };
+        let min_out = if derivable > 0 { min_v } else { 0.0 };
+        let max_out = if derivable > 0 { max_v } else { 0.0 };
+        let rows_truncated = total_rows.saturating_sub(rows_json.len() as u64);
+
+        let by_verify_json: Vec<Value> = by_verify
+            .iter()
+            .map(|(k, n)| json!({ "verify_status": k, "rows": n }))
+            .collect();
+        let by_decision_json: Vec<Value> = by_decision
+            .iter()
+            .map(|(k, n)| {
+                json!({
+                    "decision": match k { Some(s) => json!(s), None => Value::Null },
+                    "rows": n
+                })
+            })
+            .collect();
+        let by_method_json: Vec<Value> = by_method
+            .iter()
+            .map(|(k, n)| json!({ "method": k, "rows": n }))
+            .collect();
+
+        Ok(ToolResult::json_text(&json!({
+            "schema": "agent_bridge.outcome_valence_shadow.v0",
+            "read_only": true,
+            "boundary": {
+                "mode": "valence_derivation_dry_run",
+                "read_only": true,
+                "mutates_ab_memory": false,
+                "recomputes_stored_importance": false,
+                "writes_valence": false,
+                "changes_memory_search_order": false,
+                "runs_biocortex": false,
+                "supplies_to_biocortex": false,
+                "runtime_adapter_approved": false,
+                "executor_enabled": false,
+                "runtime_authority_granted": false
+            },
+            "rule": {
+                "schema": "agent_bridge.outcome_valence_rule.v0",
+                "note": "Transparent deterministic map (verify_status, decision) -> base valence, scaled by a method-confidence factor. No model, no learning, no randomness.",
+                "valence_range": [-1.0, 1.0],
+                "method_confidence_factors": {
+                    "browser_eval": 1.0, "macos_ax_verify": 1.0, "desktop_verify": 0.9,
+                    "lite_probe": 0.7, "self_report": 0.5, "unknown": 0.6
+                }
+            },
+            "summary": {
+                "present_outcome_rows": total_rows,
+                "derivable_rows": derivable,
+                "non_derivable_rows": non_derivable,
+                "coverage": coverage,
+                "mean_valence": mean_v,
+                "min_valence": min_out,
+                "max_valence": max_out,
+                "positive_rows": positive,
+                "neutral_rows": neutral,
+                "negative_rows": negative
+            },
+            "distribution": [
+                { "bucket": "[-1.0,-0.5)", "rows": dist[0] },
+                { "bucket": "[-0.5, 0.0)", "rows": dist[1] },
+                { "bucket": "[ 0.0, 0.5)", "rows": dist[2] },
+                { "bucket": "[ 0.5, 1.0]", "rows": dist[3] }
+            ],
+            "facet_breakdown": {
+                "by_verify_status": by_verify_json,
+                "by_decision": by_decision_json,
+                "by_method": by_method_json
+            },
+            "rows": rows_json,
+            "rows_truncated": rows_truncated,
+            "non_goals": [
+                "Does NOT write or recompute the stored importance=0.5 (present_ingest.rs).",
+                "Does NOT persist valence to any column or sidecar.",
+                "Does NOT supply valence to biocortex (no live plasticity axis consumes it).",
+                "Does NOT change retrieval order or call memory_search.",
+                "Not a learned reward model — a transparent deterministic rule only.",
+                "Not a credit-assignment engine — per-record terminal valence with an attribution facet, not multi-step transport."
+            ],
+            "owner_decision_packet": {
+                "approval_packet": true,
+                "read_only": true,
+                "authorized": false,
+                "decision": "valence_derivation_enablement",
+                "writes_authorized": false,
+                "gate_note": "Deriving a PERSISTED valence signal (let alone supplying it to biocortex or letting it influence importance/retrieval) is owner/board-gated. This tool only PROJECTS a candidate valence; it authorizes nothing. A flip requires (1) a reviewed derivation rule, (2) explicit owner approval, (3) a downstream consumer (new biocortex plasticity axis) that does not yet exist.",
+                "evidence": {
+                    "present_outcome_rows": total_rows,
+                    "derivable_rows": derivable,
+                    "coverage": coverage,
+                    "mean_valence": mean_v
+                },
+                "rollback": "No state changes to roll back — read-only projection."
+            }
+        })))
+    }
+}
+
+// ===========================================================================
 //                             memory_stats
 // ===========================================================================
 
@@ -59470,6 +59799,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         &mut reg,
         policy,
         Tier::Standard,
+        Arc::new(OutcomeValenceShadowTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
         Arc::new(MemoryQueryStatsTool::new(hub.clone())),
     );
     reg_if(
@@ -71824,6 +72159,205 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         let tool = MemoryScopeSurveyTool::new(crate::Hub::builder().build());
         let schema = tool.schema();
         assert_eq!(schema.name, "memory_scope_survey");
+        assert_eq!(schema.input_schema["type"], "object");
+    }
+
+    #[tokio::test]
+    async fn outcome_valence_shadow_derives_from_facets() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        // Distinct scope per row (mirror present_ingest::outcome_scope) so the
+        // same-kind+same-scope contradiction detector cannot supersede the cohort.
+        let seeds: [(&str, &str, Vec<&str>); 3] = [
+            (
+                "outcome_va",
+                "outcome:va",
+                vec!["verify:rendered_ok", "decision:approved", "method:browser_eval"],
+            ),
+            (
+                "outcome_vb",
+                "outcome:vb",
+                vec!["verify:failed", "decision:rejected", "method:browser_eval"],
+            ),
+            ("outcome_vc", "outcome:vc", vec![]),
+        ];
+        for (key, scope, tags) in seeds {
+            let rec = MemoryRecord {
+                key: key.into(),
+                kind: "present_outcome".into(),
+                content: format!("outcome row {key} distinct alpha beta gamma"),
+                tags: tags.into_iter().map(|s| s.to_string()).collect(),
+                related_keys: vec![],
+                scope: Some(scope.into()),
+                created_at: now,
+                updated_at: now,
+                last_accessed_at: 0,
+                access_count: 0,
+                importance: 0.5,
+                status: "active".into(),
+                trigger_pattern: None,
+                superseded_by: None,
+            };
+            store.memory_save(&rec).await.expect("save");
+        }
+
+        let tool = OutcomeValenceShadowTool::new(hub);
+        let res = tool
+            .execute(json!({}), &ToolContext::default())
+            .await
+            .expect("execute ok");
+        assert!(!res.is_error, "diagnostic must succeed");
+        let v = result_json(&res);
+
+        assert_eq!(v["schema"], "agent_bridge.outcome_valence_shadow.v0");
+        assert_eq!(v["read_only"], true);
+        assert_eq!(v["summary"]["present_outcome_rows"], 3);
+        assert_eq!(v["summary"]["derivable_rows"], 2);
+        assert_eq!(v["summary"]["non_derivable_rows"], 1);
+        assert_eq!(v["summary"]["positive_rows"], 1);
+        assert_eq!(v["summary"]["negative_rows"], 1);
+        assert_eq!(v["summary"]["mean_valence"].as_f64().expect("mean"), 0.0);
+        assert_eq!(v["summary"]["min_valence"].as_f64().expect("min"), -1.0);
+        assert_eq!(v["summary"]["max_valence"].as_f64().expect("max"), 1.0);
+
+        // distribution buckets sum to derivable_rows
+        let dist_sum: u64 = v["distribution"]
+            .as_array()
+            .expect("dist")
+            .iter()
+            .map(|b| b["rows"].as_u64().unwrap_or(0))
+            .sum();
+        assert_eq!(dist_sum, 2);
+
+        // per-row projection checks (rows are hashed; key by verify_status facet)
+        let rows = v["rows"].as_array().expect("rows");
+        assert_eq!(rows.len(), 3);
+        let ok_row = rows
+            .iter()
+            .find(|r| r["verify_status"] == "rendered_ok")
+            .expect("ok row");
+        assert_eq!(ok_row["valence"].as_f64().expect("v"), 1.0);
+        assert_eq!(ok_row["valence_class"], "positive");
+        assert_eq!(ok_row["derivable"], true);
+        let fail_row = rows
+            .iter()
+            .find(|r| r["verify_status"] == "failed")
+            .expect("fail row");
+        assert_eq!(fail_row["valence"].as_f64().expect("v"), -1.0);
+        assert_eq!(fail_row["valence_class"], "negative");
+        let bare_row = rows
+            .iter()
+            .find(|r| r["derivable"] == false)
+            .expect("bare row");
+        assert!(bare_row["valence"].is_null());
+        assert_eq!(bare_row["valence_class"], "non_derivable");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn outcome_valence_shadow_boundary_all_false() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let tool = OutcomeValenceShadowTool::new(hub);
+        let res = tool
+            .execute(json!({}), &ToolContext::default())
+            .await
+            .expect("execute ok");
+        let v = result_json(&res);
+        let b = &v["boundary"];
+        assert_eq!(b["read_only"], true);
+        for flag in [
+            "mutates_ab_memory",
+            "recomputes_stored_importance",
+            "writes_valence",
+            "changes_memory_search_order",
+            "runs_biocortex",
+            "supplies_to_biocortex",
+            "runtime_adapter_approved",
+            "executor_enabled",
+            "runtime_authority_granted",
+        ] {
+            assert_eq!(b[flag], false, "boundary.{flag} must be false");
+        }
+        assert_eq!(v["owner_decision_packet"]["authorized"], false);
+        assert_eq!(v["owner_decision_packet"]["writes_authorized"], false);
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn outcome_valence_shadow_redacts_keys_and_scopes() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        let rec = MemoryRecord {
+            key: "outcome_SECRETARTIFACT123".into(),
+            kind: "present_outcome".into(),
+            content: "redaction probe alpha beta".into(),
+            tags: vec![
+                "verify:rendered_ok".into(),
+                "decision:approved".into(),
+                "method:browser_eval".into(),
+            ],
+            related_keys: vec![],
+            scope: Some("outcome:SECRETSCOPE456".into()),
+            created_at: now,
+            updated_at: now,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".into(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store.memory_save(&rec).await.expect("save");
+
+        let tool = OutcomeValenceShadowTool::new(hub);
+        let res = tool
+            .execute(json!({}), &ToolContext::default())
+            .await
+            .expect("execute ok");
+        let v = result_json(&res);
+        let serialized = serde_json::to_string(&v).expect("serialize");
+        assert!(
+            !serialized.contains("SECRETARTIFACT123"),
+            "raw key leaked into envelope"
+        );
+        assert!(
+            !serialized.contains("SECRETSCOPE456"),
+            "raw scope leaked into envelope"
+        );
+        assert_eq!(v["summary"]["present_outcome_rows"], 1);
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn outcome_valence_shadow_empty_store_is_vacuous() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let tool = OutcomeValenceShadowTool::new(hub);
+        let res = tool
+            .execute(json!({}), &ToolContext::default())
+            .await
+            .expect("execute ok");
+        let v = result_json(&res);
+        assert_eq!(v["summary"]["present_outcome_rows"], 0);
+        assert_eq!(v["summary"]["coverage"].as_f64().expect("cov"), 0.0);
+        assert_eq!(v["rows"].as_array().expect("rows").len(), 0);
+        assert_eq!(v["read_only"], true);
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[test]
+    fn outcome_valence_shadow_schema_exposes_no_params() {
+        let tool = OutcomeValenceShadowTool::new(crate::Hub::builder().build());
+        let schema = tool.schema();
+        assert_eq!(schema.name, "outcome_valence_shadow");
         assert_eq!(schema.input_schema["type"], "object");
     }
 

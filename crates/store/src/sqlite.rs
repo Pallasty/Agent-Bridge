@@ -6021,6 +6021,35 @@ impl StateStore for SqliteStore {
         Ok(rows)
     }
 
+    async fn active_outcome_meta_rows(&self) -> Result<Vec<crate::OutcomeMetaRow>> {
+        // NOTE: the tag-array column on `memories` is named `tags` (base DDL),
+        // not `tags_json` (which exists only on the forum/summary tables).
+        let rows = self
+            .conn
+            .call(move |c| -> RusqliteResult<Vec<crate::OutcomeMetaRow>> {
+                let mut stmt = c.prepare(
+                    "SELECT key, scope, tags \
+                     FROM memories \
+                     WHERE status = 'active' AND kind = 'present_outcome'",
+                )?;
+                let rows = stmt
+                    .query_map([], |row| {
+                        Ok(crate::OutcomeMetaRow {
+                            key: row.get::<_, String>(0)?,
+                            scope: row.get::<_, Option<String>>(1)?,
+                            tags_json: row
+                                .get::<_, Option<String>>(2)?
+                                .unwrap_or_else(|| "[]".to_string()),
+                        })
+                    })?
+                    .collect::<RusqliteResult<Vec<_>>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("active_outcome_meta_rows: {e}")))?;
+        Ok(rows)
+    }
+
     async fn memory_stats(&self) -> Result<MemoryStats> {
         let stats = self
             .conn
