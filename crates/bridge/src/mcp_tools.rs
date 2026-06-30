@@ -37146,8 +37146,13 @@ fn outcome_gated_consolidation_status_eval(
         "next_stage": {
             "stage": 2,
             "control_surface": "outcome_gated_consolidation_transition_gate",
-            "available": false,
-            "note": "Stage 2 transition gate is not implemented yet; Stage 1 status is the current read-only boundary."
+            "implemented": true,
+            "available": may_apply,
+            "note": if may_apply {
+                "Stage 2 transition gate is implemented and may be called next; it remains read-only and must re-assert the runtime/operator/per-call gate."
+            } else {
+                "Stage 2 transition gate is implemented but not available until Stage 1 blockers are cleared."
+            }
         }
     })
 }
@@ -77629,7 +77634,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert_eq!(status["data_access"]["reads_memory_rows"], json!(true));
         assert_eq!(status["data_access"]["mutates_state"], json!(false));
         assert_eq!(status["read_only"], json!(true));
-        assert_eq!(status["next_stage"]["available"], json!(false));
+        assert_eq!(status["next_stage"]["implemented"], json!(true));
         assert_eq!(
             status["schema"],
             json!("agent_bridge.outcome_gated_consolidation.status.v1")
@@ -77680,6 +77685,8 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert_eq!(status["boundary_check"]["may_apply"], json!(true));
         assert!(ogc_blocker_list(&status).is_empty());
         assert_eq!(status["status"], json!("ready_for_transition_gate"));
+        assert_eq!(status["next_stage"]["implemented"], json!(true));
+        assert_eq!(status["next_stage"]["available"], json!(true));
         assert_eq!(status["candidates"]["total"], json!(3));
         assert_eq!(status["candidates"]["shadow_eligible"], json!(2));
         assert_eq!(status["candidates"]["blocked"], json!(1));
