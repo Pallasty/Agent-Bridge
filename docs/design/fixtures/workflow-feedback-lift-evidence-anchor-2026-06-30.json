@@ -1,0 +1,37 @@
+{
+  "schema": "agent_bridge.workflow_feedback_lift_evidence_anchor.v0",
+  "read_only": true,
+  "purpose": "Review fixture for the read-only workflow-feedback lift-evidence metric anchor. It describes how held-out shadow-score observations become a behavior-lift ref candidate without granting runtime, retrieval, memory, skill, or tool-routing influence.",
+  "scenario_fixture_schema": "agent_bridge.workflow_feedback_shadow_score_scenarios.v0",
+  "source_shadow_score_schema": "agent_bridge.workflow_feedback_shadow_score.v0",
+  "lift_evidence_schema": "agent_bridge.workflow_feedback_lift_evidence.v0",
+  "recommended_shadow_score_command": "agent-bridge workflow-feedback-shadow-score --fixture docs/design/fixtures/workflow-feedback-experience-agent-send-input-2026-06-30.json --fixture docs/design/fixtures/workflow-feedback-experience-report-cli-2026-06-30.json --scenario '<scenario_cases[0].scenario>' --scenario '<scenario_cases[1].scenario>' --json > /tmp/workflow-feedback-shadow-score-run-1.json",
+  "recommended_lift_evidence_command": "agent-bridge workflow-feedback-lift-evidence --scenario-fixture docs/design/fixtures/workflow-feedback-shadow-score-scenarios-2026-06-30.json --shadow-score /tmp/workflow-feedback-shadow-score-run-1.json --shadow-score /tmp/workflow-feedback-shadow-score-run-2.json --baseline-correct '<count>' --baseline-total '<count>' --json",
+  "default_thresholds": {
+    "min_accuracy": 0.75,
+    "min_lift": 0.1
+  },
+  "expected_verdicts": {
+    "without_baseline": "metric_anchor_without_baseline",
+    "with_incomplete_observations": "blocked_incomplete_observations",
+    "with_safe_matching_observations_and_sufficient_lift": "measured_lift_anchor"
+  },
+  "expected_summary_contract": {
+    "schema": "agent_bridge.workflow_feedback_lift_evidence.v0",
+    "read_only": true,
+    "boundary.writes_memory": false,
+    "boundary.mutates_runtime_policy": false,
+    "boundary.changes_retrieval_order": false,
+    "boundary.runtime_influence_allowed": false,
+    "advisory_only": true
+  },
+  "safety": {
+    "lift_evidence_writes_memory": false,
+    "lift_evidence_promotes_runbook": false,
+    "lift_evidence_promotes_skill": false,
+    "lift_evidence_changes_runtime": false,
+    "lift_evidence_changes_retrieval_order": false,
+    "lift_evidence_changes_tool_routing": false,
+    "lift_evidence_authorizes_future_runtime_influence": false
+  }
+}

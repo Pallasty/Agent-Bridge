@@ -294,11 +294,45 @@ examples should be from completed AB lanes, not synthetic tasks.
 
 ### Slice 4 - Shadow Scoring
 
+Status: landed as read-only CLI scorer.
+
+Command:
+
+```text
+agent-bridge workflow-feedback-shadow-score \
+  --fixture docs/design/fixtures/workflow-feedback-experience-agent-send-input-2026-06-30.json \
+  --fixture docs/design/fixtures/workflow-feedback-experience-report-cli-2026-06-30.json \
+  --scenario "<held-out workflow scenario>" \
+  --json
+```
+
+Scenario fixture:
+
+- `docs/design/fixtures/workflow-feedback-shadow-score-scenarios-2026-06-30.json`
+
 Score whether a proposed lesson would have helped a held-out session. Do not
 alter bootstrap, retrieval ranking, or tool routing. Produce only advisory
 rankings and evidence.
 
 ### Slice 5 - Promotion Gate
+
+Status: landed as read-only CLI gate packet.
+
+Command:
+
+```text
+agent-bridge workflow-feedback-promotion-gate \
+  --shadow-score /tmp/workflow-feedback-shadow-score-run-1.json \
+  --shadow-score /tmp/workflow-feedback-shadow-score-run-2.json \
+  --behavior-lift-ref "<metric or falsifiable behavior-lift anchor>" \
+  --rollback-ref "<rollback path or revert handle>" \
+  [--owner-approval-ref "<explicit owner approval ref>"] \
+  --json
+```
+
+Evidence fixture:
+
+- `docs/design/fixtures/workflow-feedback-promotion-gate-evidence-2026-06-30.json`
 
 Only repeated, measured wins should promote an experience into:
 
@@ -308,6 +342,160 @@ Only repeated, measured wins should promote an experience into:
 - a bounded retrieval influence rule
 
 Runtime influence requires owner approval and rollback evidence.
+
+The gate consumes previously emitted `workflow-feedback-shadow-score --json`
+reports and checks:
+
+- all shadow reports are read-only and boundary-safe
+- repeated independent shadow-score reports exist
+- held-out scenarios have strong top-ranked matches
+- behavior-lift and rollback refs are present
+- owner approval is explicit, never inferred from local evidence
+
+### Slice 6 - Lift Evidence Metric Anchor
+
+Status: landed as read-only CLI metric anchor.
+
+Command:
+
+```text
+agent-bridge workflow-feedback-lift-evidence \
+  --scenario-fixture docs/design/fixtures/workflow-feedback-shadow-score-scenarios-2026-06-30.json \
+  --shadow-score /tmp/workflow-feedback-shadow-score-run-1.json \
+  --shadow-score /tmp/workflow-feedback-shadow-score-run-2.json \
+  [--baseline-correct <count> --baseline-total <count>] \
+  --json
+```
+
+Evidence fixture:
+
+- `docs/design/fixtures/workflow-feedback-lift-evidence-anchor-2026-06-30.json`
+
+This packet turns held-out shadow-score observations into a behavior-lift ref
+candidate for Slice 5. It checks read-only shadow boundaries, scenario
+observation completeness, expected top-1 match accuracy, and optional measured
+lift over a baseline correct/total. Without baseline it emits only a falsifiable
+metric anchor (`metric_anchor_without_baseline`), not measured lift or owner
+approval.
+
+### Slice 7 - Baseline And Rollback Evidence
+
+Status: landed as read-only CLI evidence packet.
+
+Command:
+
+```text
+agent-bridge workflow-feedback-baseline-evidence \
+  --scenario-fixture docs/design/fixtures/workflow-feedback-shadow-score-scenarios-2026-06-30.json \
+  --baseline-observation docs/design/fixtures/workflow-feedback-baseline-observations-2026-06-30.json \
+  --rollback-ref "<rollback handle>" \
+  --json
+```
+
+Evidence fixture:
+
+- `docs/design/fixtures/workflow-feedback-baseline-observations-2026-06-30.json`
+
+This packet converts explicit baseline observations into `baseline_correct`,
+`baseline_total`, `baseline_accuracy`, and a `baseline_ref` that can be fed into
+Slice 6. It separately carries rollback refs for Slice 5. The example fixture is
+a previous-policy proxy for exercising the evidence flow; it is not owner
+approval, production runtime evidence, or a promotion decision.
+
+The baseline evidence packet checks:
+
+- baseline observation fixtures are read-only and boundary-safe
+- every held-out scenario has exactly one known observation per fixture
+- duplicate, unknown, or missing observations block the packet
+- rollback refs are present before promotion-gate readiness
+
+### Slice 8 - Owner Review Packet Assembly
+
+Status: landed as read-only CLI review packet.
+
+Command:
+
+```text
+agent-bridge workflow-feedback-owner-review-packet \
+  --scenario-fixture docs/design/fixtures/workflow-feedback-shadow-score-scenarios-2026-06-30.json \
+  --baseline-observation docs/design/fixtures/workflow-feedback-baseline-observations-2026-06-30.json \
+  --shadow-score /tmp/workflow-feedback-shadow-score-run-1.json \
+  --shadow-score /tmp/workflow-feedback-shadow-score-run-2.json \
+  --rollback-ref "<rollback handle>" \
+  [--owner-approval-ref "<owner approval ref>"] \
+  --json
+```
+
+Evidence fixture:
+
+- `docs/design/fixtures/workflow-feedback-owner-review-packet-2026-06-30.json`
+
+This packet composes Slice 7 baseline evidence, Slice 6 measured lift evidence,
+and Slice 5 promotion-gate checks into one owner-review artifact. It embeds the
+nested packets and surfaces the final review posture. Without an owner approval
+ref it can reach `ready_for_owner_review`, but it must not claim
+`owner_review_packet_complete` or authorize promotion.
+
+The owner-review packet checks:
+
+- baseline evidence is complete, safe, unambiguous, and carries rollback refs
+- lift evidence emits `measured_lift_anchor` against that baseline
+- promotion gate has shadow, behavior-lift, and rollback evidence
+- owner approval is explicit and never inferred
+
+### Slice 9 - Low-Risk Promotion Record
+
+Status: landed as read-only CLI promotion record.
+
+Command:
+
+```text
+agent-bridge workflow-feedback-promotion-record \
+  --owner-review-packet /tmp/workflow-feedback-owner-review-packet.json \
+  --promotion-scope documentation \
+  --promotion-scope durable_memory \
+  --promotion-scope runbook \
+  --owner-approval-ref "<explicit owner approval ref>" \
+  --rollback-ref "<rollback handle>" \
+  --json
+```
+
+Evidence fixture:
+
+- `docs/design/fixtures/workflow-feedback-promotion-record-2026-06-30.json`
+
+This record converts a ready owner-review packet plus explicit approval into a
+low-risk promotion record. It accepts only documentation, durable memory, and
+runbook scopes in this lane. Requests for skill, retrieval, tool-routing,
+runtime-policy, prompt, profile, or bootstrap influence are blocked by the
+packet instead of applied.
+
+The promotion record checks:
+
+- owner-review packet is ready and boundary-safe
+- approval and rollback refs are explicit
+- every requested scope is low risk for this lane
+- the command itself remains read-only and does not write memory
+
+### Slice 10 - Low-Risk Promotion Applied
+
+Status: landed as documentation/runbook promotion.
+
+Runbook:
+
+- `docs/runbooks/WORKFLOW_FEEDBACK_LOW_RISK_PROMOTION_RUNBOOK_2026_06_30.md`
+
+Durable memory:
+
+- `workflow_feedback_low_risk_promotion_applied_20260630`
+
+This slice applies Slice 9 only inside the allowed low-risk scopes:
+documentation, durable memory, and runbook material. It records the reusable
+workflow-feedback evidence chain, reproduction commands, durable-memory save
+template, rollback path, and blocked scopes.
+
+No runtime, retrieval, tool-routing, prompt, profile, bootstrap, skill, or
+MCP-visible default influence changes are authorized by this slice.
 
 ## Non-Goals
 
@@ -319,7 +507,7 @@ Runtime influence requires owner approval and rollback evidence.
 
 ## Immediate Next Step
 
-Use the manually reviewed Experience Object v0 fixtures as the first evidence
-source for read-only shadow scoring. The shadow scorer should rank whether a
-proposed lesson would have helped a held-out session without changing
-bootstrap, retrieval ranking, tool routing, or runtime policy.
+Use the runbook for future workflow-feedback lessons and collect evidence on
+whether it reduces repeated planning loops or improves handoff quality. Skill,
+retrieval, tool-routing, runtime-policy, prompt, profile, and bootstrap
+influence remain blocked and require a stronger separate authorization lane.
