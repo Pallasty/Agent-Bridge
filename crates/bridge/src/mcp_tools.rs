@@ -28209,6 +28209,212 @@ fn detect_frontend() -> &'static str {
 }
 
 // ===========================================================================
+//                          memory_scope_survey
+// ===========================================================================
+
+/// Read-only bulk scope-survey diagnostic. Enumerates active memories grouped
+/// by `scope`, canonicalizes each project scope (same logic the read-time
+/// matcher + `memory_save` `scope_identity_trace` use), groups by canonical
+/// identity to surface project-scope FRAGMENTATION (several legacy scope
+/// strings → one project), and assembles an owner decision packet for the
+/// write-time canonicalization flip. Warn-only: writes nothing, never changes a
+/// stored scope or retrieval, never authorizes the flip (owner/board-gated).
+pub struct MemoryScopeSurveyTool {
+    hub: Hub,
+}
+impl MemoryScopeSurveyTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for MemoryScopeSurveyTool {
+    fn name(&self) -> &'static str {
+        "memory_scope_survey"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only bulk scope-survey diagnostic over the live memory store. \
+                 Enumerates active memories grouped by scope, canonicalizes each project scope \
+                 via project_identity (honoring AGENT_BRIDGE_PROJECT_SCOPE_ALIASES + \
+                 AGENT_BRIDGE_PROJECT_ID — the same inputs the read-time scope matcher uses), \
+                 and groups by canonical identity to surface FRAGMENTATION: several legacy scope \
+                 strings (e.g. case / .git / worktree-suffix / cross-machine path variants) that \
+                 map to one logical project. Reports fragmentation groups (rescue candidates), \
+                 unregistered legacy project scopes (owner-registration candidates), per-scope \
+                 write-shadow actions, and an owner decision packet for the write-time \
+                 canonicalization flip. WARN-ONLY: never writes, never changes a stored scope or \
+                 retrieval order, never authorizes the flip (owner/board-gated, forum #120)."
+                .into(),
+            input_schema: json!({ "type": "object", "properties": {} }),
+        }
+    }
+    async fn execute(&self, _args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no memory store configured")),
+        };
+        let scope_counts = store
+            .memory_scope_counts()
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("memory_scope_counts: {e}")))?;
+
+        // Same policy inputs the read-time matcher + memory_save trace consult.
+        let aliases = std::env::var("AGENT_BRIDGE_PROJECT_SCOPE_ALIASES")
+            .ok()
+            .filter(|s| !s.trim().is_empty());
+        let configured_project_id = std::env::var("AGENT_BRIDGE_PROJECT_ID")
+            .ok()
+            .filter(|s| !s.trim().is_empty());
+        use crate::project_identity::{
+            approved_scope_alias_canonical, evaluate_scope_write_shadow,
+            LEGACY_PROJECT_SCOPE_PREFIX, PROJECT_ID_SCOPE_PREFIX,
+        };
+
+        let mut total_active: u64 = 0;
+        let mut project_scope_count: usize = 0;
+        // canonical identity -> [(scope, count)]
+        let mut by_canonical: std::collections::BTreeMap<String, Vec<(String, u64)>> =
+            std::collections::BTreeMap::new();
+        let mut scopes_json: Vec<Value> = Vec::new();
+        let mut unregistered_legacy: Vec<Value> = Vec::new();
+
+        for (scope, count) in &scope_counts {
+            total_active += *count;
+            let is_project_id = scope.starts_with(PROJECT_ID_SCOPE_PREFIX);
+            let is_legacy = scope.starts_with(LEGACY_PROJECT_SCOPE_PREFIX);
+            let class = if is_project_id {
+                "project_id"
+            } else if is_legacy {
+                "legacy_project"
+            } else {
+                "non_project"
+            };
+            let (canonical, shadow) = if is_project_id || is_legacy {
+                project_scope_count += 1;
+                (
+                    approved_scope_alias_canonical(scope, aliases.as_deref().unwrap_or("")),
+                    Some(evaluate_scope_write_shadow(
+                        scope,
+                        configured_project_id.as_deref(),
+                        aliases.as_deref(),
+                    )),
+                )
+            } else {
+                (None, None)
+            };
+
+            if let Some(c) = &canonical {
+                by_canonical
+                    .entry(c.clone())
+                    .or_default()
+                    .push((scope.clone(), *count));
+            } else if is_legacy {
+                // Legacy project path with no canonical/registry mapping: a
+                // candidate the owner may want to register as an alias.
+                unregistered_legacy.push(json!({ "scope": scope, "count": count }));
+            }
+
+            scopes_json.push(json!({
+                "scope": scope,
+                "count": count,
+                "class": class,
+                "canonical": canonical,
+                "shadow_action": shadow.as_ref().map(|s| s.action.label()),
+                "shadow_reason": shadow.as_ref().map(|s| s.reason),
+                "would_store_if_enabled": shadow.as_ref().map(|s| s.would_store_scope_if_enabled.clone()),
+                "shadow_write_eligible": shadow.as_ref().map(|s| s.shadow_write_eligible),
+            }));
+        }
+
+        // Fragmentation groups: one canonical identity covered by >=2 distinct
+        // legacy scope strings — the rescue candidates a flip would consolidate
+        // (already unified at recall time by the read-time canonical matcher).
+        let mut fragmentation_groups: Vec<Value> = Vec::new();
+        let mut rescue_candidate_rows: u64 = 0;
+        let mut fragmented_groups_count: usize = 0;
+        for (canonical, members) in &by_canonical {
+            if members.len() < 2 {
+                continue;
+            }
+            fragmented_groups_count += 1;
+            let group_rows: u64 = members.iter().map(|(_, n)| *n).sum();
+            // Rows that would change scope under a flip = all but the largest member.
+            let max_member = members.iter().map(|(_, n)| *n).max().unwrap_or(0);
+            rescue_candidate_rows += group_rows.saturating_sub(max_member);
+            let members_json: Vec<Value> = members
+                .iter()
+                .map(|(s, n)| json!({ "scope": s, "count": n }))
+                .collect();
+            fragmentation_groups.push(json!({
+                "canonical": canonical,
+                "distinct_scopes": members.len(),
+                "total_rows": group_rows,
+                "members": members_json,
+            }));
+        }
+        fragmentation_groups.sort_by(|a, b| {
+            b["total_rows"]
+                .as_u64()
+                .unwrap_or(0)
+                .cmp(&a["total_rows"].as_u64().unwrap_or(0))
+        });
+        unregistered_legacy.sort_by(|a, b| {
+            b["count"]
+                .as_u64()
+                .unwrap_or(0)
+                .cmp(&a["count"].as_u64().unwrap_or(0))
+        });
+        let policy_configured = aliases.is_some() || configured_project_id.is_some();
+
+        Ok(ToolResult::json_text(&json!({
+            "schema": "agent_bridge.memory_scope_survey.v0",
+            "read_only": true,
+            "boundary": {
+                "mode": "scope_survey_dry_run",
+                "mutates_memory": false,
+                "changes_stored_scope": false,
+                "changes_retrieval": false,
+                "authorizes_write_flip": false
+            },
+            "policy": {
+                "alias_registry_configured": aliases.is_some(),
+                "configured_project_id": configured_project_id,
+                "note": "Canonicalization honors AGENT_BRIDGE_PROJECT_SCOPE_ALIASES + AGENT_BRIDGE_PROJECT_ID — the same inputs as the read-time matcher and the memory_save scope_identity_trace."
+            },
+            "summary": {
+                "distinct_scopes": scope_counts.len(),
+                "project_scopes": project_scope_count,
+                "total_active_rows": total_active,
+                "fragmented_canonical_groups": fragmented_groups_count,
+                "rescue_candidate_rows": rescue_candidate_rows,
+                "unregistered_legacy_project_scopes": unregistered_legacy.len()
+            },
+            "scopes": scopes_json,
+            "fragmentation_groups": fragmentation_groups,
+            "unregistered_legacy_project_scopes": unregistered_legacy,
+            "owner_decision_packet": {
+                "approval_packet": true,
+                "read_only": true,
+                "decision": "scope_write_canonicalization_flip",
+                "production_project_id_writes_authorized": false,
+                "write_flip_owner_gated": true,
+                "gate_note": "Write-time scope canonicalization (the flip) is owner/board-gated (forum #120). This tool only measures; it authorizes nothing. A flip requires (1) a reviewed alias registry covering the legacy scopes, (2) explicit owner approval, (3) legacy scope preserved on rewrite.",
+                "evidence": {
+                    "fragmented_canonical_groups": fragmented_groups_count,
+                    "rescue_candidate_rows": rescue_candidate_rows,
+                    "unregistered_legacy_project_scopes": unregistered_legacy.len(),
+                    "policy_configured": policy_configured
+                },
+                "rollback": "No state changes to roll back — read-only survey."
+            }
+        })))
+    }
+}
+
+// ===========================================================================
 //                             memory_stats
 // ===========================================================================
 
@@ -59252,6 +59458,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         &mut reg,
         policy,
         Tier::Standard,
+        Arc::new(MemoryScopeSurveyTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
         Arc::new(EmbeddingQuantShadowTool::new(hub.clone())),
     );
     reg_if(
@@ -71519,6 +71731,100 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             .expect("open store");
         let hub = crate::Hub::builder().store(Arc::new(store)).build();
         (hub, temp_dir)
+    }
+
+    #[tokio::test]
+    async fn memory_scope_survey_detects_canonical_fragmentation() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+
+        // Two project-id scope strings that canonicalize to the SAME identity
+        // (case + .git variance), plus a non-project scope and a global row.
+        let frag_a = "project-id:git:github.com/Pallasting/Agent-Bridge.git";
+        let frag_b = "project-id:git:github.com/pallasting/agent-bridge";
+        let mut idx = 0u32;
+        for (scope, n) in [(frag_a, 2u32), (frag_b, 3), ("domain:rust", 1)] {
+            for _ in 0..n {
+                let rec = MemoryRecord {
+                    key: format!("scope-survey-{idx}"),
+                    kind: "fact".into(),
+                    content: format!("scope survey row {idx}"),
+                    tags: vec![],
+                    related_keys: vec![],
+                    scope: Some(scope.to_string()),
+                    created_at: now,
+                    updated_at: now,
+                    last_accessed_at: 0,
+                    access_count: 0,
+                    importance: 0.5,
+                    status: "active".into(),
+                    trigger_pattern: None,
+                    superseded_by: None,
+                };
+                store.memory_save(&rec).await.expect("save");
+                idx += 1;
+            }
+        }
+        let global = MemoryRecord {
+            key: "scope-survey-global".into(),
+            kind: "fact".into(),
+            content: "global row".into(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: now,
+            updated_at: now,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".into(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store.memory_save(&global).await.expect("save global");
+
+        let tool = MemoryScopeSurveyTool::new(hub);
+        let res = tool
+            .execute(json!({}), &ToolContext::default())
+            .await
+            .expect("execute ok");
+        assert!(!res.is_error, "diagnostic must succeed");
+        let v = result_json(&res);
+
+        assert_eq!(v["schema"], "agent_bridge.memory_scope_survey.v0");
+        assert_eq!(v["read_only"], true);
+        assert_eq!(v["boundary"]["authorizes_write_flip"], false);
+        assert_eq!(
+            v["owner_decision_packet"]["production_project_id_writes_authorized"],
+            false
+        );
+        assert_eq!(v["summary"]["total_active_rows"], 7);
+        // frag_a + frag_b canonicalize together → one fragmentation group.
+        assert_eq!(v["summary"]["fragmented_canonical_groups"], 1);
+        let groups = v["fragmentation_groups"].as_array().expect("groups");
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0]["distinct_scopes"], 2);
+        assert_eq!(groups[0]["total_rows"], 5);
+        assert_eq!(
+            groups[0]["canonical"],
+            "project-id:git:github.com/pallasting/agent-bridge"
+        );
+        // rescue candidates = total(5) − largest member(3) = 2.
+        assert_eq!(v["summary"]["rescue_candidate_rows"], 2);
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[test]
+    fn memory_scope_survey_schema_exposes_no_params() {
+        let tool = MemoryScopeSurveyTool::new(crate::Hub::builder().build());
+        let schema = tool.schema();
+        assert_eq!(schema.name, "memory_scope_survey");
+        assert_eq!(schema.input_schema["type"], "object");
     }
 
     #[tokio::test]

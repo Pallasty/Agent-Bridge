@@ -2827,6 +2827,15 @@ pub trait StateStore: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// Counts of active memories grouped by `scope`. Backs the read-only
+    /// `memory_scope_survey` diagnostic, which detects project-scope
+    /// fragmentation (several legacy scope strings that canonicalize to one
+    /// project identity). NULL/empty scope is reported as the literal string
+    /// `"global"`. Read-only; default impl returns empty vec.
+    async fn memory_scope_counts(&self) -> Result<Vec<(String, u64)>> {
+        Ok(Vec::new())
+    }
+
     /// Semantic search: embed `query` via feature hashing, load all stored
     /// embeddings, return memories ranked by cosine similarity ≥ `threshold`.
     /// Falls back gracefully when no embeddings are stored yet.
