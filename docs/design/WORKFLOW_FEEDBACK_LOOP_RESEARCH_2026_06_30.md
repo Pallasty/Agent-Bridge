@@ -282,6 +282,13 @@ Output a report with:
 
 ### Slice 3 - Experience Object Fixture
 
+Status: landed as two manually reviewed v0 fixtures.
+
+Fixtures:
+
+- `docs/design/fixtures/workflow-feedback-experience-agent-send-input-2026-06-30.json`
+- `docs/design/fixtures/workflow-feedback-experience-report-cli-2026-06-30.json`
+
 Create a fixture schema and one or two manually assembled examples. The first
 examples should be from completed AB lanes, not synthetic tasks.
 
@@ -312,6 +319,7 @@ Runtime influence requires owner approval and rollback evidence.
 
 ## Immediate Next Step
 
-Use the read-only workflow feedback report to create 1-2 manually reviewed
-Experience Object v0 fixtures from completed AB lanes. Those fixtures become
-the evidence source for later shadow scoring.
+Use the manually reviewed Experience Object v0 fixtures as the first evidence
+source for read-only shadow scoring. The shadow scorer should rank whether a
+proposed lesson would have helped a held-out session without changing
+bootstrap, retrieval ranking, tool routing, or runtime policy.

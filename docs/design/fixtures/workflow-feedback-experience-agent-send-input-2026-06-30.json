@@ -1,0 +1,154 @@
+{
+  "schema": "agent_bridge.experience.v0",
+  "experience_id": "exp_20260630_agent_send_input_no_chrome",
+  "created_at": "2026-06-30T15:00:00Z",
+  "scope": "project:/Data/CascadeProjects/agent-bridge",
+  "lane": "agent_send_input_interactive_claude_recovery",
+  "goal": "Make Agent-Bridge's interactive Claude Code sessions accept follow-up input through agent_send_input without stalling on the first-run Chrome prompt.",
+  "plan": [
+    "verify the MCP tool surface exposes agent_send_input after reconnect",
+    "dogfood an interactive Claude Code session and identify the stall condition",
+    "make interactive runtime arguments explicit and testable",
+    "inject --no-chrome for production Claude Code interactive sessions by default",
+    "run focused tests, cargo check, release build, install, and direct MCP smoke",
+    "record memory and forum anchors for future session recovery"
+  ],
+  "trajectory": {
+    "source_commits": [
+      {
+        "commit": "ee23f99",
+        "role": "initial agent_send_input implementation",
+        "evidence_state": "landed_before_follow_up"
+      },
+      {
+        "commit": "b6a46e0",
+        "subject": "fix(agent): disable chrome prompt for interactive claude",
+        "role": "follow-up interactive runtime fix"
+      }
+    ],
+    "tool_spans": [
+      {
+        "tool": "agent_session_list",
+        "purpose": "confirm no running Claude Code sessions before post-reconnect smoke",
+        "outcome": "success",
+        "observation": "no running runtime_id=claude-code sessions remained after reconnect"
+      },
+      {
+        "tool": "agent_send_input",
+        "purpose": "dogfood follow-up input into a live interactive session",
+        "outcome": "initial_failure_then_fixed",
+        "observation": "live Claude Code sessions could stall on the browser/Chrome prompt before --no-chrome was injected"
+      },
+      {
+        "tool": "cargo test",
+        "purpose": "verify PTY interactive argument handling in ab-agent",
+        "outcome": "success",
+        "command": "cargo test -p ab-agent interactive_ -- --nocapture"
+      },
+      {
+        "tool": "cargo check",
+        "purpose": "verify ab-bridge after production runtime default changed",
+        "outcome": "success",
+        "command": "cargo check -p ab-bridge --all-targets"
+      },
+      {
+        "tool": "cargo build",
+        "purpose": "produce isolated release binary for installation",
+        "outcome": "success",
+        "command": "CARGO_TARGET_DIR=/tmp/ab-target-b6a46e0 CARGO_BUILD_JOBS=2 cargo build -p ab-bridge --release --bin agent-bridge"
+      },
+      {
+        "tool": "direct MCP smoke",
+        "purpose": "prove send_input can deliver multiple follow-up lines through the installed binary",
+        "outcome": "success",
+        "evidence": [
+          "AGENT_BRIDGE_CLAUDE_BIN=/bin/cat",
+          "AGENT_BRIDGE_CLAUDE_INTERACTIVE_NO_CHROME=0",
+          "stdout contained AB_B6A_DIRECT_FIRST_20260630 and AB_B6A_DIRECT_SECOND_20260630"
+        ]
+      }
+    ],
+    "decision_points": [
+      {
+        "question": "Should --no-chrome be hard-coded into every test/runtime path?",
+        "decision": "Keep tests neutral by adding ClaudeCodeRuntime::with_interactive_args, and inject --no-chrome only in the production bridge runtime unless AGENT_BRIDGE_CLAUDE_INTERACTIVE_NO_CHROME is falsey.",
+        "reason": "This preserves testability with /bin/cat and keeps the behavior operator-overridable."
+      },
+      {
+        "question": "Should the result be trusted before MCP reconnect?",
+        "decision": "No. Treat the install as stale until reconnect verifies the live MCP servers execute the new agent-bridge.real.",
+        "reason": "The MCP process can keep an older binary alive after installation."
+      }
+    ],
+    "artifacts": {
+      "files_changed": [
+        "crates/agent/src/claude_code.rs",
+        "crates/bridge/src/main.rs"
+      ],
+      "installed_binary_sha256": "c76995d37842f114d497e9b1ff1f82e40ec396414fe311f207371f21556da3f6",
+      "installed_binary_build_id": "e32ab72d092372e57583fbf84201b6a1d668a6f9"
+    }
+  },
+  "outcome": {
+    "status": "success",
+    "behavior_change": "Production Claude Code interactive sessions receive --no-chrome by default, avoiding the first-run browser prompt that blocked send_input dogfooding.",
+    "evidence": [
+      "commit b6a46e0 pushed to origin/master",
+      "focused ab-agent interactive tests passed 9/9",
+      "ab-bridge all-target check passed",
+      "isolated release build succeeded",
+      "installed agent-bridge.real verified by hash and BuildID",
+      "direct MCP smoke with /bin/cat delivered two follow-up inputs",
+      "post-reconnect doctor reported ok=true, fails=0, warns=0"
+    ],
+    "known_limits": [
+      "The direct smoke used /bin/cat for deterministic input echo rather than a full live Claude Code conversation.",
+      "Operator can disable the production --no-chrome default with AGENT_BRIDGE_CLAUDE_INTERACTIVE_NO_CHROME=0|false|no|off."
+    ]
+  },
+  "reflection": {
+    "lesson": "Interactive-agent fixes need both runtime dogfood and post-reconnect binary verification; otherwise a correct patch can appear broken because the live MCP process still runs an older binary or the child process is blocked on a first-run prompt.",
+    "reusable_workflow": [
+      "confirm current tool surface",
+      "dogfood with a minimal deterministic child when possible",
+      "make runtime defaults explicit and operator-overridable",
+      "run focused tests plus all-target check",
+      "install and verify binary identity",
+      "reconnect MCP and re-check doctor/lifecycle"
+    ],
+    "falsifier": "If future live Claude Code sessions still stall before accepting input with default settings, this experience should be marked incomplete and a new fixture should capture the actual prompt/output blocker."
+  },
+  "promotion": {
+    "skill_candidate": false,
+    "runbook_candidate": true,
+    "memory_lesson_candidate": true,
+    "runtime_influence_allowed": false,
+    "owner_gate_required": true,
+    "suggested_trigger": "When changing interactive agent runtimes, send_input semantics, or MCP-installed binaries."
+  },
+  "source_anchors": {
+    "memory_keys": [
+      "agent_interactive_no_chrome_b6a46e0_20260630"
+    ],
+    "forum": [
+      {
+        "thread": 90,
+        "posts": [
+          2644,
+          2645,
+          2648
+        ]
+      }
+    ],
+    "commits": [
+      "ee23f99",
+      "b6a46e0"
+    ]
+  },
+  "safety": {
+    "fixture_writes_memory": false,
+    "fixture_changes_runtime": false,
+    "fixture_changes_retrieval_order": false,
+    "fixture_authorizes_future_runtime_influence": false
+  }
+}
