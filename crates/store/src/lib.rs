@@ -2930,6 +2930,31 @@ pub trait StateStore: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// **Outcome-collector prototype (flag-gated, default-OFF).** Append one row
+    /// per surfaced key to the lazily-created `retrieval_surfacing` telemetry
+    /// log, so a later EXPLICIT `memory_get` of the same key can be attributed as
+    /// a "used" retrieval outcome. This is the de-contaminated signal from the
+    /// Phase-0 study: search surfacings only, never the background re-access that
+    /// inflates `access_count`. `surfaced` is `(key, rank)` pairs (rank 0-based).
+    /// Default no-op so the feature is inert unless SqliteStore + the
+    /// `AGENT_BRIDGE_OUTCOME_COLLECTOR` flag are both present.
+    async fn record_retrieval_surfacing(
+        &self,
+        _surfaced: &[(String, i64)],
+        _query: &str,
+        _mode: &str,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    /// **Outcome-collector prototype (flag-gated, default-OFF).** Mark recent
+    /// un-attributed surfacings of `key` (surfaced within `window_secs`) as
+    /// "used" by stamping `used_at`, and return how many rows were newly
+    /// attributed. Default no-op returning 0.
+    async fn attribute_retrieval_get(&self, _key: &str, _window_secs: i64) -> Result<u64> {
+        Ok(0)
+    }
+
     /// **Phase 0 telemetry** — append one row to `memory_query_log`. Called
     /// by the MCP layer immediately after `memory_search` / `memory_get` so
     /// hit-rate / latency / top-hit-age can be aggregated. Default impl is

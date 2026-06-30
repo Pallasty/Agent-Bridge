@@ -548,6 +548,26 @@ CREATE INDEX IF NOT EXISTS idx_memory_coactivation_b       ON memory_coactivatio
 CREATE INDEX IF NOT EXISTS idx_memory_coactivation_count   ON memory_coactivation(count DESC);
 "#;
 
+// Outcome-collector prototype (flag-gated, default-OFF): lazily-created
+// telemetry table for the surfaced-key → memory_get "used" attribution. NOT a
+// versioned migration (the feature is prototype-grade + flag-gated; promote to a
+// real SCHEMA_V* migration only if the owner green-lights consumption). One row
+// per surfaced key per search; `used_at` is stamped when an explicit memory_get
+// of that key lands within the attribution window (NULL = "ignored" so far).
+const RETRIEVAL_SURFACING_DDL: &str = r#"
+CREATE TABLE IF NOT EXISTS retrieval_surfacing (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    memory_key  TEXT    NOT NULL,
+    query       TEXT    NOT NULL DEFAULT '',
+    mode        TEXT    NOT NULL DEFAULT '',
+    rank        INTEGER NOT NULL,
+    surfaced_at INTEGER NOT NULL,
+    used_at     INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_retrieval_surfacing_key ON retrieval_surfacing(memory_key, surfaced_at DESC);
+CREATE INDEX IF NOT EXISTS idx_retrieval_surfacing_at  ON retrieval_surfacing(surfaced_at DESC);
+"#;
+
 // v32 — timestamp integrity guard for sync/export tables.
 //
 // SQLite's dynamic typing allows TEXT to land in INTEGER columns. A handful of
@@ -6532,6 +6552,81 @@ impl StateStore for SqliteStore {
                 // Fail-soft: trace must never break search.
                 tracing::warn!(error = %e, "record_coactivation failed (non-fatal)");
                 Ok(())
+            }
+        }
+    }
+
+    /// Outcome-collector prototype — see the trait doc. The `retrieval_surfacing`
+    /// table is created LAZILY here (no versioned migration: the whole feature is
+    /// flag-gated + prototype-grade; promote to a real migration only if the owner
+    /// green-lights consumption). Append-only; fail-soft like record_coactivation.
+    async fn record_retrieval_surfacing(
+        &self,
+        surfaced: &[(String, i64)],
+        query: &str,
+        mode: &str,
+    ) -> Result<()> {
+        if surfaced.is_empty() {
+            return Ok(());
+        }
+        let now = now_secs();
+        let rows: Vec<(String, i64)> = surfaced.to_vec();
+        let query = query.to_string();
+        let mode = mode.to_string();
+        let res = self
+            .conn
+            .call(move |c| -> RusqliteResult<()> {
+                c.execute_batch(RETRIEVAL_SURFACING_DDL)?;
+                let tx = c.transaction()?;
+                {
+                    let mut stmt = tx.prepare(
+                        "INSERT INTO retrieval_surfacing
+                            (memory_key, query, mode, rank, surfaced_at, used_at)
+                         VALUES (?1, ?2, ?3, ?4, ?5, NULL)",
+                    )?;
+                    for (key, rank) in &rows {
+                        stmt.execute(rusqlite::params![key, query, mode, rank, now])?;
+                    }
+                }
+                tx.commit()?;
+                Ok(())
+            })
+            .await;
+        match res {
+            Ok(()) => Ok(()),
+            Err(e) => {
+                tracing::warn!(error = %e, "record_retrieval_surfacing failed (non-fatal)");
+                Ok(())
+            }
+        }
+    }
+
+    /// Outcome-collector prototype — attribute an explicit get to recent
+    /// surfacings of `key` (used_at stamp). Returns rows newly marked used.
+    async fn attribute_retrieval_get(&self, key: &str, window_secs: i64) -> Result<u64> {
+        let key = key.to_string();
+        let now = now_secs();
+        let cutoff = now - window_secs.max(0);
+        let res = self
+            .conn
+            .call(move |c| -> RusqliteResult<u64> {
+                c.execute_batch(RETRIEVAL_SURFACING_DDL)?;
+                let n = c.execute(
+                    "UPDATE retrieval_surfacing
+                        SET used_at = ?1
+                      WHERE memory_key = ?2
+                        AND used_at IS NULL
+                        AND surfaced_at >= ?3",
+                    rusqlite::params![now, key, cutoff],
+                )?;
+                Ok(n as u64)
+            })
+            .await;
+        match res {
+            Ok(n) => Ok(n),
+            Err(e) => {
+                tracing::warn!(error = %e, "attribute_retrieval_get failed (non-fatal)");
+                Ok(0)
             }
         }
     }
@@ -17030,6 +17125,44 @@ mod tests {
             trigger_pattern: None,
             superseded_by: None,
         }
+    }
+
+    #[tokio::test]
+    async fn retrieval_surfacing_records_and_attributes_used_once() {
+        // Outcome-collector prototype: a search surfaces 3 keys; an explicit
+        // memory_get of one of them within the window attributes exactly one
+        // "used", is idempotent on re-get, and never attributes an unsurfaced key.
+        let (_dir, store) = fresh_store("retrieval-surfacing").await;
+        store
+            .record_retrieval_surfacing(
+                &[
+                    ("alpha".to_string(), 0),
+                    ("bravo".to_string(), 1),
+                    ("charlie".to_string(), 2),
+                ],
+                "some query",
+                "fts",
+            )
+            .await
+            .expect("record surfacing");
+
+        let used = store
+            .attribute_retrieval_get("bravo", 1800)
+            .await
+            .expect("attribute");
+        assert_eq!(used, 1, "exactly one surfacing of bravo marked used");
+
+        let again = store
+            .attribute_retrieval_get("bravo", 1800)
+            .await
+            .expect("attribute again");
+        assert_eq!(again, 0, "no double-attribution on a second get");
+
+        let none = store
+            .attribute_retrieval_get("delta", 1800)
+            .await
+            .expect("attribute delta");
+        assert_eq!(none, 0, "an unsurfaced key has no used attribution");
     }
 
     #[tokio::test]

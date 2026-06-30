@@ -19067,6 +19067,18 @@ impl McpTool for MemoryGetTool {
             "mcp:memory_get",
         );
 
+        // Outcome-collector prototype (flag-gated, default-OFF): attribute this
+        // explicit get to any recent search surfacing of the same key (= "used").
+        // memory_get is an explicit fetch, NOT background re-access, so this is the
+        // de-contaminated positive signal. Fire-and-forget; 1800s window.
+        if outcome_collector_enabled() && row.is_some() {
+            let store_clone = store.clone();
+            let k = key.clone();
+            tokio::spawn(async move {
+                let _ = store_clone.attribute_retrieval_get(&k, 1800).await;
+            });
+        }
+
         match row {
             None => Ok(ToolResult::json_text(&Value::Null)),
             Some(rec) => {
@@ -19099,6 +19111,24 @@ fn recall_semantic_fallback_enabled_from(env_val: Option<&str>) -> bool {
 fn recall_semantic_fallback_enabled() -> bool {
     recall_semantic_fallback_enabled_from(
         std::env::var("AGENT_BRIDGE_RECALL_SEMANTIC_FALLBACK")
+            .ok()
+            .as_deref(),
+    )
+}
+
+/// Outcome-collector prototype gate. **Default-OFF** — only an explicit
+/// `AGENT_BRIDGE_OUTCOME_COLLECTOR=1`/`true` enables the surfaced-key logging
+/// (in `memory_search`) and the `memory_get` "used" attribution. Until then the
+/// `retrieval_surfacing` table is never created and behavior is byte-identical.
+/// Pure (env split out) so the policy is unit-testable. See the Phase-0 study:
+/// the signal is real + de-contaminated but sparse, so this only SEEDS accrual.
+fn outcome_collector_enabled_from(env_val: Option<&str>) -> bool {
+    matches!(env_val, Some(v) if v == "1" || v.eq_ignore_ascii_case("true"))
+}
+
+fn outcome_collector_enabled() -> bool {
+    outcome_collector_enabled_from(
+        std::env::var("AGENT_BRIDGE_OUTCOME_COLLECTOR")
             .ok()
             .as_deref(),
     )
@@ -19447,6 +19477,26 @@ impl McpTool for MemorySearchTool {
             .take(10)
             .map(|h| h.record.key.clone())
             .collect();
+        // Outcome-collector prototype (flag-gated, default-OFF): log the surfaced
+        // keys so a later EXPLICIT memory_get of one of them attributes a "used"
+        // retrieval outcome. Reuses coact_keys (top-10 non-skill, scope-allowed)
+        // as the surfaced set; clones it so the coactivation write below still
+        // owns its copy. Fire-and-forget like coactivation — never blocks search.
+        if outcome_collector_enabled() && !coact_keys.is_empty() {
+            let store_clone = store.clone();
+            let surfaced: Vec<(String, i64)> = coact_keys
+                .iter()
+                .enumerate()
+                .map(|(i, k)| (k.clone(), i as i64))
+                .collect();
+            let q_owned = q.to_string();
+            let mode_owned = mode.to_string();
+            tokio::spawn(async move {
+                let _ = store_clone
+                    .record_retrieval_surfacing(&surfaced, &q_owned, &mode_owned)
+                    .await;
+            });
+        }
         if coact_keys.len() >= 2 {
             let store_clone = store.clone();
             tokio::spawn(async move {
