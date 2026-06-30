@@ -250,6 +250,19 @@ Outputs:
 
 ### Slice 2 - Read-Only Workflow Feedback Report
 
+Status: landed as v0 CLI report.
+
+Command:
+
+```text
+agent-bridge workflow-feedback-report [--json] [--window-secs 86400] [--top-tools 10]
+```
+
+Implementation:
+
+- `crates/bridge/src/workflow_feedback.rs`
+- `crates/bridge/src/main.rs`
+
 Compose existing data without writing policy:
 
 - recent goals and work memory
@@ -299,6 +312,6 @@ Runtime influence requires owner approval and rollback evidence.
 
 ## Immediate Next Step
 
-Build a read-only workflow feedback report that consumes existing AB state and
-emits the maturity scorecard plus 3-5 proposed improvements. That report can
-become the evidence source for Experience Object v0 and later shadow scoring.
+Use the read-only workflow feedback report to create 1-2 manually reviewed
+Experience Object v0 fixtures from completed AB lanes. Those fixtures become
+the evidence source for later shadow scoring.

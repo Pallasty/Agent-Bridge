@@ -332,6 +332,21 @@ enum Cmd {
         #[arg(long)]
         json: bool,
     },
+    /// Read-only workflow feedback report: compose existing memory statistics
+    /// and MCP tool-call telemetry into a maturity scorecard plus an
+    /// Experience Object v0 fixture. Report-first only: no memory writes, no
+    /// retrieval changes, and no runtime policy mutation.
+    WorkflowFeedbackReport {
+        /// Seconds of MCP tool-call telemetry to inspect.
+        #[arg(long, default_value_t = 86_400)]
+        window_secs: i64,
+        /// Number of hot tools to include in the report.
+        #[arg(long, default_value_t = 10)]
+        top_tools: u32,
+        /// Emit the machine-readable JSON snapshot instead of Markdown.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Copy, Clone, Debug, ValueEnum)]
@@ -6828,6 +6843,16 @@ async fn real_main() -> Result<()> {
         return run_continuity_report(*json).await;
     }
 
+    // Workflow feedback report: opens the store read-only, no Hub/daemon.
+    if let Cmd::WorkflowFeedbackReport {
+        window_secs,
+        top_tools,
+        json,
+    } = &cmd
+    {
+        return run_workflow_feedback_report(*json, *window_secs, *top_tools).await;
+    }
+
     // Palace viewer: short-lived HTTP server, opens store directly (no Hub).
     if let Cmd::Palace { op } = &cmd {
         return match op {
@@ -7197,6 +7222,7 @@ async fn real_main() -> Result<()> {
         | Cmd::Doctor { .. }
         | Cmd::Walkthrough { .. }
         | Cmd::ContinuityReport { .. }
+        | Cmd::WorkflowFeedbackReport { .. }
         | Cmd::Instinct { .. } => unreachable!(),
     }
 }
@@ -7214,6 +7240,42 @@ async fn run_continuity_report(as_json: bool) -> Result<()> {
         .context("building continuity report")?;
     if as_json {
         println!("{}", report.to_json());
+    } else {
+        print!("{}", report.render_markdown());
+    }
+    Ok(())
+}
+
+/// Read-only workflow feedback report: compose existing store statistics and
+/// MCP tool-call telemetry into a maturity scorecard. No Hub/daemon and no
+/// writes.
+async fn run_workflow_feedback_report(
+    as_json: bool,
+    window_secs: i64,
+    top_tools: u32,
+) -> Result<()> {
+    let db_path = std::env::var("AB_BASELINE_DB")
+        .ok()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(ab_store::default_db_path);
+    let store = SqliteStore::open(&db_path)
+        .await
+        .context("opening store for workflow feedback report")?;
+    let scope = std::env::current_dir()
+        .ok()
+        .map(|p| format!("project:{}", p.display()));
+    let report = ab_bridge::workflow_feedback::build_report(
+        &store,
+        ab_bridge::workflow_feedback::WorkflowFeedbackReportOptions {
+            window_secs,
+            top_tools,
+            scope,
+        },
+    )
+    .await
+    .context("building workflow feedback report")?;
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&report.to_json_value())?);
     } else {
         print!("{}", report.render_markdown());
     }
