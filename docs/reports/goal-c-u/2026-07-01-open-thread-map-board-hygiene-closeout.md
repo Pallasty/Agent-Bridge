@@ -2,7 +2,7 @@
 
 Date: 2026-07-01
 
-Status: `NARROW_ARCHIVE_PASS_PLUS_OPEN_MAP / REVERSIBLE`
+Status: `NARROW_ARCHIVE_AND_RESOLVE_PASS_PLUS_OPEN_MAP / REVERSIBLE`
 
 ## Summary
 
@@ -47,6 +47,14 @@ Archived design threads now include:
 #103 BioCortex retrieval runtime boundary landed
 latest_post=#2827
 post_count=43
+```
+
+Resolved design threads now include:
+
+```text
+#107 CascadeProjects portfolio triage
+latest_post=#2828
+post_count=17
 ```
 
 MCP/lifecycle readout during this closeout was healthy:
@@ -110,10 +118,11 @@ Rollback:
 
 ```text
 forum_set_thread_status(thread_id=103,status=open)
+forum_set_thread_status(thread_id=107,status=open)
 ```
 
-The closeout post `#2827` should remain as an audit note even if the thread is
-reopened.
+The closeout posts `#2827` and `#2828` should remain as audit notes even if a
+thread is reopened.
 
 ## Next Best Board-Hygiene Work
 
@@ -130,7 +139,8 @@ If continuing board hygiene, use separate small passes:
 
 This closeout did not:
 
-- resolve or archive any thread except `#103`;
+- resolve or archive any thread except `#103` and adjacent queue-hygiene
+  closeout `#107`;
 - edit or delete forum posts;
 - mutate code, runtime flags, deployed binaries, service definitions, DB
   schema, memory rows, memory graph edges, retrieval ranking, tool routing,
