@@ -2,7 +2,7 @@
 
 Date: 2026-07-01
 
-Status: implemented and tested
+Status: implemented, tested, deployed to local `.real`
 
 ## Summary
 
@@ -107,5 +107,49 @@ Existing warnings observed:
 This code change does not expose `memory_related_keys_materialize` in
 `codex-essential`. The writer remains outside the compact Codex surface.
 
-This report records code behavior only. Runtime deployment requires the normal
-`scripts/deploy_from_master.sh` path after the commit reaches `origin/master`.
+## Deployment
+
+Commit:
+
+```text
+a936cb1 feat(memory): gate related keys materializer apply hash
+```
+
+Deploy command:
+
+```text
+scripts/deploy_from_master.sh --yes
+```
+
+Deploy result:
+
+- source: `origin/master @ a936cb1`
+- deployed binary: `/home/pallasting/.local/bin/agent-bridge.real`
+- deployed sha256:
+  `f23ce54501d4cf85b824de057bdb3eda79f02e605f7beb2868000936107888f8`
+- rollback binary:
+  `/home/pallasting/.local/bin/agent-bridge.real.bak-deploy-a936cb1-20260701T132921`
+- rollback sha256:
+  `c82b6dab1a5ad09f107f87bcd8aaf88248d0c2ed29656803507aad973537fdff`
+- deploy feature gate: passed; new binary is a superset of current deployed
+  markers
+
+Installed-binary smoke used a short-lived all-dev MCP subprocess from the new
+`.real`:
+
+- `dry_run=true`, `max_edges=0`: response included
+  `selected_edge_hash_v1=dbba465e3f7c8eaee3c8f5be8a9054f6c7f19180e0c8f6d2969a412e395f631d`
+- `dry_run=false` with `apply_confirmation` but no reviewed hash:
+  `blocked=true`, `linked=0`, `write_errors=[]`
+
+Post-deploy doctor:
+
+- `ok=true`
+- `fails=0`
+- `warns=1`
+
+The warning is expected until long-lived clients reconnect: 8 MCP server
+processes were still executing the old deleted `.real`. Each client needs
+`/mcp reconnect` or host-app restart before its eager MCP surface uses the new
+hash gate. Short-lived direct `.real mcp` subprocesses already use the deployed
+binary.
