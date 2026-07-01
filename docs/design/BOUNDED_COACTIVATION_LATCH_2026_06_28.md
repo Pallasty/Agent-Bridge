@@ -1,10 +1,10 @@
-> `docs/design/BOUNDED_COACTIVATION_LATCH_2026_06_28.md` — **PROPOSE-ONLY — not implemented; owner sign-off required before any decay-behavior change to the shared store.**
+> `docs/design/BOUNDED_COACTIVATION_LATCH_2026_06_28.md` — **IMPLEMENTED as v38 and currently verified; see `docs/reports/goal-c-u/2026-07-01-bounded-coactivation-latch-current-state.md`.**
 
 ## 0. Status
 
-> **PROPOSE-ONLY — NOT IMPLEMENTED — OWNER-GATED.**
+> **SUPERSEDED STATUS NOTE (2026-07-01): IMPLEMENTED AND VERIFIED.**
 >
-> This document specifies a *bounded* coactivation-consolidation latch that fixes the two MAJOR defects an adversarial review found in the first (reverted) latch wiring. It changes the live decay behavior of the **shared, multi-node memory store**, so it requires owner sign-off and the same disciplined gate (isolated worktree → exhaustive validation → multi-lens adversarial verify → owner approval → commit) before any code lands.
+> This design has landed in the store as the v38 bounded coactivation latch. The live schema is now v39, which includes v38's additive `last_cofire_at` rung and the v38 behavior wiring in `record_coactivation`, `decay_coactivation_once`, and `memory_prune_coactivation_noise`. The original proposal text below is retained as design rationale; do not treat the historical "owner-gated" wording as an active blocker.
 
 - **Author:** `claude-opus-4.8` (Data session, `borrowed-patterns` campaign).
 - **Date:** 2026-06-28.
