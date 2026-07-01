@@ -19,7 +19,7 @@ Current repo state during this audit:
 
 ```text
 ## master...origin/master
-HEAD 1fd7158 docs(memory): record ghp1d post-reconnect orphan readout
+HEAD 1fa25de docs(memory): review ghp1d residual orphans
 ```
 
 An unrelated GHP-1d report exists in the repository:
@@ -28,9 +28,11 @@ An unrelated GHP-1d report exists in the repository:
 docs/reports/goal-c-u/2026-07-01-ghp1d-residual-orphan-manual-review-packet.md
 ```
 
-This audit did not read, modify, stage, or commit that file.
+That packet is already committed at `1fa25de`; this audit does not modify it.
 
 Thread #90 readout:
+
+Forum metadata: board `general`, status `open`.
 
 | Post | Current meaning |
 |---|---|
