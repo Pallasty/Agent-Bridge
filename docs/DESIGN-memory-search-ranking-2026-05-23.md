@@ -2,9 +2,11 @@
 
 Date: 2026-05-23
 
-Status: implemented as an observability MVP. Do not wire PageRank-style
-centrality into `memory_search` ranking until the diagnostic surface has been
-dogfooded.
+Status: implemented as an observability MVP. The bounded PageRank-style
+centrality-prior experiment has now been completed offline and is `NO-GO`.
+Do not wire centrality into `memory_search` ranking unless a later repaired,
+store-resident corpus passes the reopen gates in
+`docs/reports/goal-c-u/2026-07-01-centrality-prior-offline-no-go.md`.
 
 ## Question
 
@@ -48,15 +50,14 @@ Current retrieval is already multi-signal:
 
 ## Decision
 
-Do not add PageRank directly into `memory_search` yet.
+Do not add PageRank directly into `memory_search`.
 
-PageRank-like centrality is useful as a possible bounded prior, but it is risky
-as a first move because global centrality can promote old hubs over fresh task
-state. The first topology run also shows a high orphan fraction, so a global
-rank prior would systematically ignore too much fresh or unlinked memory. The
-current graph contains mixed edge semantics (`evolved`, `relates`, `supersedes`,
-`summarizes`, `cofires`, and others), so centrality must be measured, cleaned,
-and capped before it can become a ranking signal.
+PageRank-like centrality was useful enough to test as a possible bounded prior,
+but the completed offline evaluation rejected it for the current store and
+evidence base. Global centrality promoted hubs over peripheral targets, failed
+the pre-registered lift gates, regressed leaf targets, and flipped sign across
+edge direction. The current graph can still be observed and repaired, but
+centrality is not approved as a ranking signal.
 
 ## MVP implemented
 
@@ -117,8 +118,10 @@ dry-run review, but still not approval to run a write pass automatically.
 
 ## Future path
 
-If `memory_graph_topology` remains healthy over real use, the next experiment
-should be a bounded centrality prior:
+The former bounded-centrality experiment is closed as `NO-GO`; see
+`docs/reports/goal-c-u/2026-07-01-centrality-prior-offline-no-go.md`. The
+following shape remains only as reopen criteria for a later owner-approved,
+store-resident corpus with enough centrality-connected golds:
 
 1. Compute centrality offline or in a short-lived cache, not synchronously
    inside every `memory_search`.
@@ -130,6 +133,8 @@ should be a bounded centrality prior:
 5. Keep exact-key and fresh work-memory recall above graph centrality.
 
 The first ranking changes should still be query-local repairs, such as better
-token normalization and key/tag fallback for tool-like terms. Global centrality
-comes after the graph diagnostic proves it is helping rather than amplifying
-hubs.
+token normalization and key/tag fallback for tool-like terms. The separate
+semantic-ranking finding also points toward owner-reviewed weighting validation,
+because additive bonuses can swamp cosine relevance in the opt-in semantic path.
+Global centrality remains diagnostic only until a new evaluation proves it is
+helping rather than amplifying hubs.
