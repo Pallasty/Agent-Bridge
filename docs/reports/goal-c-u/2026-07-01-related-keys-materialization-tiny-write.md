@@ -11,6 +11,15 @@ Status: completed, small reversible write
 Executed a guarded 5-edge `related_keys` materialization batch through the
 existing `memory_related_keys_materialize` MCP tool.
 
+This was a third small GHP-1c materialization slice observed after two parallel
+records had already landed:
+
+- `8e7824d docs(memory): record ghp1c related-keys materialization`
+- `fff3b7e docs(memory): record ghp1c supplemental materialization`
+
+Those earlier records applied 15 exact-scope `relates` edges in total. This
+packet records the next 5-edge micro-batch at `created_at=1782936253`.
+
 The tool is intentionally not exposed in the current `codex-essential` surface.
 It is implemented and tested in the repo, and is reachable from a temporary
 `AGENT_BRIDGE_TOOLSET=all-dev` MCP subprocess. No direct SQLite mutation was
@@ -77,6 +86,10 @@ Result:
 
 Read: exact-scope materialization still has explicit-link backlog, but the next
 exact-scope tiny batch is graph-density work, not orphan-reduction work.
+
+This dry-run happened after the two parallel GHP-1c packets above. Its low
+orphan-reduction value should be read as post-first-wave saturation, not as a
+contradiction of the earlier reports.
 
 ## Live Write
 
@@ -199,9 +212,9 @@ Use narrow rollback only with a fresh backup and quick_check.
 ## Follow-Up
 
 Do not continue broad exact-scope materialization just to increase edge count.
-The next higher-value graph hygiene step is either:
+After the first 10-edge packet, the supplemental 5-edge packet, and this third
+5-edge packet, the next higher-value graph hygiene step is either:
 
 1. investigate the remaining exact-scope 3-orphan surface, or
 2. design a stricter live materializer apply contract with `plan_hash` or an
    explicit reviewed-edge allowlist so `dry_run` and `apply` cannot drift.
-
