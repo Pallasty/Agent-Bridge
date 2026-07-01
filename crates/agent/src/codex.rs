@@ -455,6 +455,47 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
+    async fn interactive_initial_prompt_waits_for_tui_boot_settle() {
+        let rt = CodexRuntime::new()
+            .with_binary("/bin/bash")
+            .with_interactive_args([
+                "-lc",
+                "while IFS= read -r -t 0.2 _line; do :; done; printf 'READY\\n'; exec cat",
+            ]);
+        let sess = rt
+            .spawn(SpawnConfig {
+                cwd: "/tmp".into(),
+                interactive: true,
+                initial_prompt: Some("boot-settle-marker".into()),
+                ..Default::default()
+            })
+            .await
+            .expect("spawn delayed-ready stand-in");
+
+        let ready = wait_for(3000, 25, || {
+            rt.read_interactive_output(&sess.id)
+                .map(|o| o.contains("READY"))
+                .unwrap_or(false)
+        })
+        .await;
+        assert!(ready, "stand-in should reach its post-drain READY state");
+
+        let submitted_after_ready = wait_for(5000, 25, || {
+            rt.read_interactive_output(&sess.id)
+                .map(|o| o.contains("boot-settle-marker"))
+                .unwrap_or(false)
+        })
+        .await;
+        assert!(
+            submitted_after_ready,
+            "initial_prompt should be submitted after the TUI boot settle; \
+             an immediate write would be drained before READY and never echoed"
+        );
+        rt.kill(&sess.id).await.expect("kill");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
     async fn interactive_args_are_passed_to_pty_child() {
         let rt = CodexRuntime::new()
             .with_binary("/bin/sh")
