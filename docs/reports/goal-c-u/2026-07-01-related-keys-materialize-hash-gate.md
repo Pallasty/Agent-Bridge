@@ -74,6 +74,26 @@ Results:
 - `memory_related_keys_materialize_write_requires_matching_selected_edge_hash`: passed
 - `memory_related_keys_materialize_dry_run_exact_scope_excludes_parent_scope_candidates`: passed
 
+Supplemental verification in a later session:
+
+```text
+cargo test -p ab-bridge memory_related_keys_materialize --no-default-features
+```
+
+Result:
+
+- 5 related tests passed
+- 0 failed
+
+The broader target filter covered the materialization plan max-edge cap,
+inbound cap, exact-scope dry-run filtering, exact-scope scope requirement, and
+the matching-hash live-write gate.
+
+`git diff --check` passed. `cargo fmt --check` was also attempted, but the
+repo-wide rustfmt diff path emitted large unrelated formatting diffs in
+pre-existing files and then failed with an allocation error. It did not modify
+files.
+
 Existing warnings observed:
 
 - `ab-store` mixed-script confusable warning for `coactivation_stats_β_trigger_threshold`
@@ -87,4 +107,3 @@ This code change does not expose `memory_related_keys_materialize` in
 
 This report records code behavior only. Runtime deployment requires the normal
 `scripts/deploy_from_master.sh` path after the commit reaches `origin/master`.
-
