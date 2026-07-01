@@ -259,11 +259,70 @@ impl SemanticGate {
 /// appeared at position `r` (1-based) in the top-k result. Accept-set entries
 /// beyond the primary designated key are added only after content-reading
 /// (memory_get) confirms they are also-correct — never to inflate R@k.
+#[derive(Debug)]
 struct Case {
     query: &'static str,
     expect: &'static [&'static str],
     tier: Tier,
     scope: CaseScope,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct EvalCase {
+    idx1: usize,
+    case: &'static Case,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CorpusExpectedKeyStatus {
+    key: String,
+    kind: Option<String>,
+    scope: Option<String>,
+    status: Option<String>,
+}
+
+impl CorpusExpectedKeyStatus {
+    fn absent(key: &str) -> Self {
+        Self {
+            key: key.to_string(),
+            kind: None,
+            scope: None,
+            status: None,
+        }
+    }
+
+    fn is_present(&self) -> bool {
+        self.status.is_some()
+    }
+
+    fn is_active(&self) -> bool {
+        self.status.as_deref() == Some("active")
+    }
+
+    fn status_label(&self) -> &str {
+        self.status.as_deref().unwrap_or("absent")
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CorpusCaseHealth {
+    idx1: usize,
+    tier: Tier,
+    scope: CaseScope,
+    query: &'static str,
+    expected: Vec<CorpusExpectedKeyStatus>,
+}
+
+impl CorpusCaseHealth {
+    fn has_present_expected_key(&self) -> bool {
+        self.expected
+            .iter()
+            .any(CorpusExpectedKeyStatus::is_present)
+    }
+
+    fn has_active_expected_key(&self) -> bool {
+        self.expected.iter().any(CorpusExpectedKeyStatus::is_active)
+    }
 }
 
 /// v2 corpus — keys verified present in the live store on 2026-06-19 (queried
@@ -821,6 +880,163 @@ fn baseline_db_fingerprint(db_path: &Path) -> SqlResult<BaselineDbFingerprint> {
     })
 }
 
+fn corpus_expected_key_status(
+    conn: &RusqliteConnection,
+    key: &str,
+) -> SqlResult<CorpusExpectedKeyStatus> {
+    let mut stmt = conn.prepare(
+        "SELECT kind, scope, status
+           FROM memories
+          WHERE key = ?1
+          LIMIT 1",
+    )?;
+    let mut rows = stmt.query(params![key])?;
+    if let Some(row) = rows.next()? {
+        Ok(CorpusExpectedKeyStatus {
+            key: key.to_string(),
+            kind: row.get(0)?,
+            scope: row.get(1)?,
+            status: row.get(2)?,
+        })
+    } else {
+        Ok(CorpusExpectedKeyStatus::absent(key))
+    }
+}
+
+fn corpus_health_rows(db_path: &Path) -> SqlResult<Vec<CorpusCaseHealth>> {
+    let conn = RusqliteConnection::open_with_flags(db_path, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    let mut rows = Vec::with_capacity(CORPUS.len());
+    for (i, case) in CORPUS.iter().enumerate() {
+        let mut expected = Vec::with_capacity(case.expect.len());
+        for key in case.expect {
+            expected.push(corpus_expected_key_status(&conn, key)?);
+        }
+        rows.push(CorpusCaseHealth {
+            idx1: i + 1,
+            tier: case.tier,
+            scope: case.scope,
+            query: case.query,
+            expected,
+        });
+    }
+    Ok(rows)
+}
+
+fn active_eval_cases(db_path: &Path) -> SqlResult<(Vec<EvalCase>, Vec<CorpusCaseHealth>)> {
+    let health = corpus_health_rows(db_path)?;
+    let mut active = Vec::new();
+    let mut skipped = Vec::new();
+
+    for row in health {
+        if row.has_active_expected_key() {
+            active.push(EvalCase {
+                idx1: row.idx1,
+                case: &CORPUS[row.idx1 - 1],
+            });
+        } else {
+            skipped.push(row);
+        }
+    }
+
+    Ok((active, skipped))
+}
+
+#[cfg(test)]
+fn all_defined_eval_cases() -> Vec<EvalCase> {
+    CORPUS
+        .iter()
+        .enumerate()
+        .map(|(i, case)| EvalCase { idx1: i + 1, case })
+        .collect()
+}
+
+fn eval_case_idx1(eval_cases: &[EvalCase], eval_idx0: usize) -> usize {
+    eval_cases
+        .get(eval_idx0)
+        .map(|case| case.idx1)
+        .unwrap_or(eval_idx0 + 1)
+}
+
+fn print_corpus_health(db_path: &Path) -> SqlResult<()> {
+    let rows = corpus_health_rows(db_path)?;
+    let total_cases = rows.len();
+    let present_cases = rows
+        .iter()
+        .filter(|row| row.has_present_expected_key())
+        .count();
+    let active_cases = rows
+        .iter()
+        .filter(|row| row.has_active_expected_key())
+        .count();
+    let total_expected_keys = rows.iter().map(|row| row.expected.len()).sum::<usize>();
+    let present_expected_keys = rows
+        .iter()
+        .flat_map(|row| &row.expected)
+        .filter(|key| key.is_present())
+        .count();
+    let active_expected_keys = rows
+        .iter()
+        .flat_map(|row| &row.expected)
+        .filter(|key| key.is_active())
+        .count();
+
+    println!("## Corpus expected-key health");
+    println!("  cases_total:           {total_cases}");
+    println!("  cases_with_present:    {present_cases}");
+    println!("  cases_with_active:     {active_cases}");
+    println!("  expected_keys_total:   {total_expected_keys}");
+    println!("  expected_keys_present: {present_expected_keys}");
+    println!("  expected_keys_active:  {active_expected_keys}");
+    println!();
+    println!(
+        "  {:<4} {:<9} {:<10} {:<8} {:<8} {:<34} {}",
+        "#", "tier", "scope", "present", "active", "query", "expected keys"
+    );
+    for row in &rows {
+        let present = if row.has_present_expected_key() {
+            "yes"
+        } else {
+            "no"
+        };
+        let active = if row.has_active_expected_key() {
+            "yes"
+        } else {
+            "no"
+        };
+        let query: String = row.query.chars().take(34).collect();
+        let key_status = row
+            .expected
+            .iter()
+            .map(|expected| {
+                let kind = expected.kind.as_deref().unwrap_or("-");
+                let scope = expected.scope.as_deref().unwrap_or("-");
+                format!(
+                    "{}:{}:{}:{}",
+                    expected.key,
+                    expected.status_label(),
+                    kind,
+                    scope
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!(
+            "  {:<4} {:<9} {:<10} {:<8} {:<8} {:<34} {}",
+            row.idx1,
+            row.tier.label(),
+            row.scope.label(),
+            present,
+            active,
+            query,
+            key_status
+        );
+    }
+    println!();
+    println!("  note: present/active are checked by key with read-only SQL.");
+    println!("  note: cases without an active expected key should not count in live-store R@k.");
+    Ok(())
+}
+
 fn embedding_dim_from_byte_len(byte_len: i64) -> Option<usize> {
     if byte_len <= 0 || byte_len % 4 != 0 {
         return None;
@@ -998,6 +1214,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (db_path, db_source) = resolve_baseline_db_path();
     print_baseline_db_context(&db_path, db_source)?;
 
+    if matches!(
+        std::env::args().nth(1).as_deref(),
+        Some("--check-corpus" | "--corpus-health")
+    ) {
+        print_corpus_health(&db_path)?;
+        return Ok(());
+    }
+
     // Action A (#3746 / Goal C U-surface): select the embed model the store was
     // actually indexed with, so semantic is MEASURED against the right vector
     // space instead of being silently SKIPPED on a host/model mismatch — a
@@ -1014,7 +1238,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let store = open_baseline_store(&db_path, db_source).await?;
-    let n = CORPUS.len();
+    let (eval_cases, skipped_cases) = active_eval_cases(&db_path)?;
+    let n_defined = CORPUS.len();
+    let n = eval_cases.len();
+    if n == 0 {
+        return Err("recall_eval corpus has no cases with active expected keys in this DB".into());
+    }
 
     // ── Embedding backend gate (semantic only) ──────────────────────────────
     // Query embeddings MUST match the model the store was indexed with (auto-
@@ -1037,7 +1266,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("# T0 recall eval — drift-free, fixed held-out corpus");
     println!("db:              {}", db_path.display());
-    println!("corpus:          {n} cases (v2, tiered: easy/moderate/hard)");
+    println!(
+        "corpus:          {n} active cases ({n_defined} defined; stale skipped: {})",
+        skipped_cases.len()
+    );
+    if !skipped_cases.is_empty() {
+        let skipped_idx = skipped_cases.iter().map(|row| row.idx1).collect::<Vec<_>>();
+        println!(
+            "# skipped stale corpus cases without active expected keys: {}",
+            fmt_idx(&skipped_idx)
+        );
+    }
     println!("top_k:           {TOP_K}");
     println!("embed backend:   {backend_name}");
     println!("semantic:        {}", semantic_gate.enabled_label());
@@ -1052,7 +1291,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut semantic_scope_soft = SemanticScopeAgg::default();
     let mut semantic_scope_hard = SemanticScopeAgg::default();
     let mut fts_graph = CandidateExpansionAgg::default();
-    let mut fts_candidate_counts = Vec::with_capacity(CORPUS.len());
+    let mut fts_candidate_counts = Vec::with_capacity(eval_cases.len());
     let scratch_cjk = ScratchCjkFts::build(&db_path)?;
     let scratch_tool_surface = ScratchToolSurfaceProjectionFts::build(&db_path)?;
     let scratch_remote_session = ScratchRemoteSessionProjectionFts::build(&db_path)?;
@@ -1065,7 +1304,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // actually delivers (NOT full semantic mode on every case).
     let mut fts_empty_semantic = ModeAgg::default();
 
-    for case in CORPUS {
+    for eval_case in &eval_cases {
+        let case = eval_case.case;
         let fts_keys = keys_of(store.memory_search(case.query, &[], TOP_K as u32).await?);
         let fts_rank = first_hit_rank(&fts_keys, case.expect);
         fts_candidate_counts.push(fts_keys.len());
@@ -1166,17 +1406,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             &semantic_scope_raw,
             &semantic_scope_soft,
             &semantic_scope_hard,
+            &eval_cases,
             n,
         );
         print_semantic_scope_case_matrix(
             &semantic_scope_raw,
             &semantic_scope_soft,
             &semantic_scope_hard,
+            &eval_cases,
         );
     }
 
     println!("## Offline candidate expansion (FTS + direct graph neighbors)");
-    print_candidate_expansion_summary(&fts_graph, n);
+    print_candidate_expansion_summary(&fts_graph, &eval_cases, n);
     println!(
         "  mode contract: baseline candidates keep their FTS order; up to \
          {GRAPH_NEIGHBOR_LIMIT} direct graph-neighbor rows per baseline candidate \
@@ -1208,13 +1450,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .iter()
             .enumerate()
             .filter(|(_, c)| **c == 0)
-            .map(|(i, _)| i)
+            .map(|(i, _)| eval_case_idx1(&eval_cases, i))
             .collect();
         let by_tier = |t: Tier| -> usize {
-            CORPUS
+            eval_cases
                 .iter()
                 .enumerate()
-                .filter(|(i, c)| c.tier == t && fts_candidate_counts[*i] == 0)
+                .filter(|(i, c)| c.case.tier == t && fts_candidate_counts[*i] == 0)
                 .count()
         };
         println!(
@@ -1241,7 +1483,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     print_case2_tool_surface_projection_probe(&scratch_tool_surface)?;
     print_case8_remote_session_projection_probe(&scratch_remote_session)?;
-    print_role_aware_hard_family_aggregate(&scratch_tool_surface, &scratch_remote_session)?;
+    print_role_aware_hard_family_aggregate(
+        &scratch_tool_surface,
+        &scratch_remote_session,
+        &eval_cases,
+    )?;
 
     // ── Per-tier breakdown (worst-case paraphrase vs lexically-anchored) ─────
     // The single aggregate above blends pure-paraphrase (hard) and
@@ -1254,10 +1500,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "mode/tier", "n", "R@1", "R@5", "R@10", "MRR"
     );
     for tier in [Tier::Easy, Tier::Moderate, Tier::Hard] {
-        let idxs: Vec<usize> = CORPUS
+        let idxs: Vec<usize> = eval_cases
             .iter()
             .enumerate()
-            .filter(|(_, c)| c.tier == tier)
+            .filter(|(_, c)| c.case.tier == tier)
             .map(|(i, _)| i)
             .collect();
         if idxs.is_empty() {
@@ -1269,7 +1515,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         print_tier_row("fts+cjk_acc", &fts_cjk_acc, &idxs, tier.label());
         print_tier_row("fts_empty+cjk", &fts_empty_cjk_acc, &idxs, tier.label());
         if semantic_ready {
-            print_tier_row("fts_empty+semantic", &fts_empty_semantic, &idxs, tier.label());
+            print_tier_row(
+                "fts_empty+semantic",
+                &fts_empty_semantic,
+                &idxs,
+                tier.label(),
+            );
         }
         print_tier_row("hybrid", &hybrid, &idxs, tier.label());
         if semantic_ready {
@@ -1295,11 +1546,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "semantic",
         "query"
     );
-    for (i, case) in CORPUS.iter().enumerate() {
+    for (i, eval_case) in eval_cases.iter().enumerate() {
+        let case = eval_case.case;
         let q: String = case.query.chars().take(34).collect();
         println!(
             "  {:<4} {:<9} {:>5} {:>9} {:>7} {:>7} {:>9} {:>7} {:>9}  {}",
-            i + 1,
+            eval_case.idx1,
             case.tier.label(),
             rank_cell(fts.ranks[i]),
             rank_cell(fts_graph.ranks[i]),
@@ -1318,8 +1570,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     // ── Honest read ─────────────────────────────────────────────────────────
-    let fts_miss: Vec<usize> = miss_indices(&fts);
-    let hyb_miss: Vec<usize> = miss_indices(&hybrid);
+    let fts_miss: Vec<usize> = miss_indices(&fts, &eval_cases);
+    let hyb_miss: Vec<usize> = miss_indices(&hybrid, &eval_cases);
     println!("## Honest read");
     println!(
         "  fts misses (not in top {TOP_K}): {} case(s){}",
@@ -1331,14 +1583,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         hyb_miss.len(),
         fmt_idx(&hyb_miss)
     );
-    let fts_graph_added = candidate_expansion_added_indices(&fts_graph);
+    let fts_graph_added = candidate_expansion_added_indices(&fts_graph, &eval_cases);
     println!(
         "  offline fts+graph added hits over fts misses: {} case(s){}",
         fts_graph_added.len(),
         fmt_idx(&fts_graph_added)
     );
-    let fts_cjk_added = added_hit_indices(&fts, &fts_cjk);
-    let fts_cjk_acc_added = added_hit_indices(&fts, &fts_cjk_acc);
+    let fts_cjk_added = added_hit_indices(&fts, &fts_cjk, &eval_cases);
+    let fts_cjk_acc_added = added_hit_indices(&fts, &fts_cjk_acc, &eval_cases);
     println!(
         "  scratch fts+cjk added hits over fts misses: {} case(s){}",
         fts_cjk_added.len(),
@@ -1349,14 +1601,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         fts_cjk_acc_added.len(),
         fmt_idx(&fts_cjk_acc_added)
     );
-    let fts_empty_cjk_acc_added = added_hit_indices(&fts, &fts_empty_cjk_acc);
+    let fts_empty_cjk_acc_added = added_hit_indices(&fts, &fts_empty_cjk_acc, &eval_cases);
     println!(
         "  deployable-shape fts_empty+cjk added hits over fts misses: {} case(s){}",
         fts_empty_cjk_acc_added.len(),
         fmt_idx(&fts_empty_cjk_acc_added)
     );
     if semantic_ready {
-        let fts_empty_semantic_added = added_hit_indices(&fts, &fts_empty_semantic);
+        let fts_empty_semantic_added = added_hit_indices(&fts, &fts_empty_semantic, &eval_cases);
         println!(
             "  Item B fts_empty+semantic added hits over fts misses: {} case(s){} \
              — the shipped fallback's REAL recovery set (FTS-empty tail only, not full semantic)",
@@ -1365,7 +1617,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     if semantic_ready {
-        let sem_miss = miss_indices(&semantic);
+        let sem_miss = miss_indices(&semantic, &eval_cases);
         println!(
             "  semantic misses (not in top {TOP_K}): {} case(s){}",
             sem_miss.len(),
@@ -1373,15 +1625,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     println!(
-        "  miss audit (2026-06-19, content-read on this store): the v1 \"a miss \
-         might be a near-dup also-correct outranking the designated key\" caveat \
-         was discharged by reading each fts miss. Result: of the 6 v1 fts misses, \
-         only #4 was a genuine also-correct outrank (now folded into its \
-         accept-set, so it scores as a hit); the rest are VERIFIED TRUE misses — \
-         #1/#2 returned 0 fts rows (no token overlap at all), #5/#9 surfaced \
-         same-domain answer-wrong memories, and #8's designated key has \
-         importance=0.122 and is buried by the importance/recency blend (LEVER-3). \
-         So the headroom is real, not a scoring artifact."
+        "  historical miss audit (2026-06-19, full defined corpus): the v1 \
+         \"a miss might be a near-dup also-correct outranking the designated \
+         key\" caveat was discharged by reading each fts miss. Result: of the \
+         6 v1 fts misses, only #4 was a genuine also-correct outrank (folded \
+         into its accept-set); the rest were VERIFIED TRUE misses. Current live \
+         runs still score only cases whose expected keys are active in this DB."
     );
     print_runtime_gate_anchor(
         &fts,
@@ -1390,6 +1639,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         &semantic,
         semantic_ready,
         &fts_candidate_counts,
+        &eval_cases,
     );
     println!(
         "  caveat: hand-curated corpus, N={n}. The hard tier is the worst case \
@@ -2846,8 +3096,23 @@ struct RoleAwareHardFamilyRank {
 fn print_role_aware_hard_family_aggregate(
     scratch_tool_surface: &ScratchToolSurfaceProjectionFts,
     scratch_remote_session: &ScratchRemoteSessionProjectionFts,
+    eval_cases: &[EvalCase],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let rows = role_aware_hard_family_ranks(scratch_tool_surface, scratch_remote_session)?;
+    let all_rows = role_aware_hard_family_ranks(scratch_tool_surface, scratch_remote_session)?;
+    let active_idx1 = eval_cases
+        .iter()
+        .map(|case| case.idx1)
+        .collect::<BTreeSet<_>>();
+    let rows = all_rows
+        .iter()
+        .filter(|row| active_idx1.contains(&row.idx1))
+        .cloned()
+        .collect::<Vec<_>>();
+    let skipped = all_rows
+        .iter()
+        .filter(|row| !active_idx1.contains(&row.idx1))
+        .map(|row| row.idx1)
+        .collect::<Vec<_>>();
     let strict_agg = mode_agg_from_ranks(rows.iter().map(|row| row.strict_rank));
     let role_aware_agg = mode_agg_from_ranks(rows.iter().map(|row| row.role_aware_rank));
     let n = rows.len();
@@ -2857,21 +3122,38 @@ fn print_role_aware_hard_family_aggregate(
         "  {:<30} {:>4} {:>7} {:>7} {:>7} {:>7}",
         "mode", "n", "R@1", "R@5", "R@10", "MRR"
     );
-    print_eval_mode_row("strict_projected_families", &strict_agg, n);
-    print_eval_mode_row("role_aware_hard_families", &role_aware_agg, n);
+    if n > 0 {
+        print_eval_mode_row("strict_projected_families", &strict_agg, n);
+        print_eval_mode_row("role_aware_hard_families", &role_aware_agg, n);
+    } else {
+        println!("  no active implemented role-aware hard-family rows in this DB");
+    }
     println!(
         "  gate: aggregate denominator is only implemented eval-only role-aware \
-         hard families (#2 tool-surface, #8 remote-session). This row is a \
-         measurement contract, not a default retrieval mode."
+         hard families with active expected keys (#2 tool-surface, #8 remote-session \
+         are the implemented probes). This row is a measurement contract, not a \
+         default retrieval mode."
     );
+    if !skipped.is_empty() {
+        println!(
+            "  skipped implemented family rows without active expected keys: {}",
+            fmt_idx(&skipped)
+        );
+    }
     println!("  family ranks:");
-    for row in &rows {
+    for row in &all_rows {
         let case = &CORPUS[row.idx1 - 1];
         let q: String = case.query.chars().take(34).collect();
+        let status = if active_idx1.contains(&row.idx1) {
+            "active"
+        } else {
+            "skipped=no-active-expected-key"
+        };
         println!(
-            "    #{:<2} {:<18} strict={} role_aware={} strict_candidates={} role_candidates={} {}",
+            "    #{:<2} {:<18} {:<30} strict={} role_aware={} strict_candidates={} role_candidates={} {}",
             row.idx1,
             row.family,
+            status,
             rank_cell(row.strict_rank),
             rank_cell(row.role_aware_rank),
             row.strict_candidates,
@@ -3033,9 +3315,10 @@ fn print_semantic_scope_eval_summary(
     raw: &SemanticScopeAgg,
     soft: &SemanticScopeAgg,
     hard: &SemanticScopeAgg,
+    eval_cases: &[EvalCase],
     n: usize,
 ) {
-    let hard_idxs = tier_indices(Tier::Hard);
+    let hard_idxs = tier_indices(Tier::Hard, eval_cases);
     println!("## Eval-only semantic scope A/B/C (candidate pool cap {SEMANTIC_SCOPE_CANDIDATE_K})");
     println!(
         "  {:<18} {:>4} {:>7} {:>7} {:>7} {:>7} {:>9} {:>8} {:>7}",
@@ -3045,8 +3328,8 @@ fn print_semantic_scope_eval_summary(
     print_semantic_scope_row("A soft-scope", soft, n, &hard_idxs);
     print_semantic_scope_row("B hard-prefilter", hard, n, &hard_idxs);
 
-    let cross_gold = cross_gold_case_indices();
-    let hard_losses = cross_gold_loss_indices(raw, hard);
+    let cross_gold = cross_gold_case_indices(eval_cases);
+    let hard_losses = cross_gold_loss_indices(raw, hard, eval_cases);
     println!(
         "  scope contract: purity = (local+global)/top{TOP_K} rows. B is \
          local+global hard prefilter only; cross-domain gold cases are tracked \
@@ -3082,17 +3365,19 @@ fn print_semantic_scope_case_matrix(
     raw: &SemanticScopeAgg,
     soft: &SemanticScopeAgg,
     hard: &SemanticScopeAgg,
+    eval_cases: &[EvalCase],
 ) {
     println!("## Semantic scope per-case (eval-only)");
     println!(
         "  {:<4} {:<9} {:<11} {:>5} {:>6} {:>6} {:>8} {:>7}  {}",
         "#", "tier", "scope", "C", "A", "B", "Bpurity", "Bcross", "query"
     );
-    for (i, case) in CORPUS.iter().enumerate() {
+    for (i, eval_case) in eval_cases.iter().enumerate() {
+        let case = eval_case.case;
         let q: String = case.query.chars().take(32).collect();
         println!(
             "  {:<4} {:<9} {:<11} {:>5} {:>6} {:>6} {:>8} {:>7}  {}",
-            i + 1,
+            eval_case.idx1,
             case.tier.label(),
             case.scope.label(),
             rank_cell(raw.mode.ranks[i]),
@@ -3123,14 +3408,18 @@ fn print_eval_mode_row(label: &str, agg: &ModeAgg, n: usize) {
     );
 }
 
-fn print_candidate_expansion_summary(agg: &CandidateExpansionAgg, n: usize) {
+fn print_candidate_expansion_summary(
+    agg: &CandidateExpansionAgg,
+    eval_cases: &[EvalCase],
+    n: usize,
+) {
     let baseline_miss_count = agg
         .baseline_ranks
         .iter()
         .filter(|rank| rank.is_none())
         .count();
     let expanded_hit_count = agg.ranks.iter().filter(|rank| rank.is_some()).count();
-    let added_hit_count = candidate_expansion_added_indices(agg).len();
+    let added_hit_count = candidate_expansion_added_indices(agg, eval_cases).len();
     let rr_sum = agg
         .ranks
         .iter()
@@ -3237,22 +3526,31 @@ fn rank_cell(rank: Option<usize>) -> String {
     }
 }
 
-fn miss_indices(agg: &ModeAgg) -> Vec<usize> {
+fn miss_indices(agg: &ModeAgg, eval_cases: &[EvalCase]) -> Vec<usize> {
     agg.ranks
         .iter()
         .enumerate()
-        .filter_map(|(i, r)| if r.is_none() { Some(i + 1) } else { None })
+        .filter_map(|(i, r)| {
+            if r.is_none() {
+                Some(eval_case_idx1(eval_cases, i))
+            } else {
+                None
+            }
+        })
         .collect()
 }
 
-fn candidate_expansion_added_indices(agg: &CandidateExpansionAgg) -> Vec<usize> {
+fn candidate_expansion_added_indices(
+    agg: &CandidateExpansionAgg,
+    eval_cases: &[EvalCase],
+) -> Vec<usize> {
     agg.baseline_ranks
         .iter()
         .zip(&agg.ranks)
         .enumerate()
         .filter_map(|(i, (baseline, expanded))| {
             if baseline.is_none() && expanded.is_some() {
-                Some(i + 1)
+                Some(eval_case_idx1(eval_cases, i))
             } else {
                 None
             }
@@ -3260,21 +3558,13 @@ fn candidate_expansion_added_indices(agg: &CandidateExpansionAgg) -> Vec<usize> 
         .collect()
 }
 
-fn tier_indices(tier: Tier) -> Vec<usize> {
-    CORPUS
-        .iter()
-        .enumerate()
-        .filter_map(|(i, case)| if case.tier == tier { Some(i) } else { None })
-        .collect()
-}
-
-fn cross_gold_case_indices() -> Vec<usize> {
-    CORPUS
+fn tier_indices(tier: Tier, eval_cases: &[EvalCase]) -> Vec<usize> {
+    eval_cases
         .iter()
         .enumerate()
         .filter_map(|(i, case)| {
-            if case.scope.is_cross_domain_gold() {
-                Some(i + 1)
+            if case.case.tier == tier {
+                Some(i)
             } else {
                 None
             }
@@ -3282,12 +3572,29 @@ fn cross_gold_case_indices() -> Vec<usize> {
         .collect()
 }
 
-fn cross_gold_loss_indices(raw: &SemanticScopeAgg, filtered: &SemanticScopeAgg) -> Vec<usize> {
-    CORPUS
+fn cross_gold_case_indices(eval_cases: &[EvalCase]) -> Vec<usize> {
+    eval_cases
+        .iter()
+        .filter_map(|case| {
+            if case.case.scope.is_cross_domain_gold() {
+                Some(case.idx1)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn cross_gold_loss_indices(
+    raw: &SemanticScopeAgg,
+    filtered: &SemanticScopeAgg,
+    eval_cases: &[EvalCase],
+) -> Vec<usize> {
+    eval_cases
         .iter()
         .enumerate()
         .filter_map(|(i, case)| {
-            if case.scope.is_cross_domain_gold()
+            if case.case.scope.is_cross_domain_gold()
                 && raw.mode.ranks.get(i).is_some_and(|rank| rank.is_some())
                 && filtered
                     .mode
@@ -3295,7 +3602,7 @@ fn cross_gold_loss_indices(raw: &SemanticScopeAgg, filtered: &SemanticScopeAgg) 
                     .get(i)
                     .is_some_and(|rank| rank.is_none())
             {
-                Some(i + 1)
+                Some(case.idx1)
             } else {
                 None
             }
@@ -3314,11 +3621,15 @@ fn recall_at_10_for_indices(ranks: &[Option<usize>], idxs: &[usize]) -> f64 {
     hits as f64 / idxs.len() as f64
 }
 
-fn miss_indices_for(ranks: &[Option<usize>], idxs: &[usize]) -> Vec<usize> {
+fn miss_indices_for(
+    ranks: &[Option<usize>],
+    idxs: &[usize],
+    eval_cases: &[EvalCase],
+) -> Vec<usize> {
     idxs.iter()
         .filter_map(|&i| {
             if ranks.get(i).is_some_and(|rank| rank.is_none()) {
-                Some(i + 1)
+                Some(eval_case_idx1(eval_cases, i))
             } else {
                 None
             }
@@ -3326,7 +3637,7 @@ fn miss_indices_for(ranks: &[Option<usize>], idxs: &[usize]) -> Vec<usize> {
         .collect()
 }
 
-fn added_hit_indices(before: &ModeAgg, after: &ModeAgg) -> Vec<usize> {
+fn added_hit_indices(before: &ModeAgg, after: &ModeAgg, eval_cases: &[EvalCase]) -> Vec<usize> {
     before
         .ranks
         .iter()
@@ -3334,7 +3645,7 @@ fn added_hit_indices(before: &ModeAgg, after: &ModeAgg) -> Vec<usize> {
         .enumerate()
         .filter_map(|(i, (before, after))| {
             if before.is_none() && after.is_some() {
-                Some(i + 1)
+                Some(eval_case_idx1(eval_cases, i))
             } else {
                 None
             }
@@ -3342,14 +3653,18 @@ fn added_hit_indices(before: &ModeAgg, after: &ModeAgg) -> Vec<usize> {
         .collect()
 }
 
-fn hard_zero_fts_miss_indices(fts: &ModeAgg, fts_candidate_counts: &[usize]) -> Vec<usize> {
-    tier_indices(Tier::Hard)
+fn hard_zero_fts_miss_indices(
+    fts: &ModeAgg,
+    fts_candidate_counts: &[usize],
+    eval_cases: &[EvalCase],
+) -> Vec<usize> {
+    tier_indices(Tier::Hard, eval_cases)
         .into_iter()
         .filter_map(|i| {
             if fts.ranks.get(i).is_some_and(|rank| rank.is_none())
                 && fts_candidate_counts.get(i) == Some(&0)
             {
-                Some(i + 1)
+                Some(eval_case_idx1(eval_cases, i))
             } else {
                 None
             }
@@ -3364,14 +3679,20 @@ fn print_runtime_gate_anchor(
     semantic: &ModeAgg,
     semantic_ready: bool,
     fts_candidate_counts: &[usize],
+    eval_cases: &[EvalCase],
 ) {
-    let hard_idxs = tier_indices(Tier::Hard);
-    let hard_fts_misses = miss_indices_for(&fts.ranks, &hard_idxs);
-    let hard_graph_added = miss_indices_for(&fts.ranks, &hard_idxs)
-        .into_iter()
-        .filter(|idx1| fts_graph.ranks[*idx1 - 1].is_some())
+    let hard_idxs = tier_indices(Tier::Hard, eval_cases);
+    let hard_fts_misses = miss_indices_for(&fts.ranks, &hard_idxs, eval_cases);
+    let hard_graph_added = hard_idxs
+        .iter()
+        .copied()
+        .filter(|&i| {
+            fts.ranks.get(i).is_some_and(|rank| rank.is_none())
+                && fts_graph.ranks.get(i).is_some_and(|rank| rank.is_some())
+        })
+        .map(|i| eval_case_idx1(eval_cases, i))
         .collect::<Vec<_>>();
-    let hard_zero_rows = hard_zero_fts_miss_indices(fts, fts_candidate_counts);
+    let hard_zero_rows = hard_zero_fts_miss_indices(fts, fts_candidate_counts, eval_cases);
 
     println!();
     println!("## Runtime gate anchor (main recall_eval hard tier)");
@@ -3411,22 +3732,29 @@ fn print_runtime_gate_anchor(
     );
     println!("  review gate targets (#3897):");
     for &idx1 in REVIEW_GATE_TARGET_CASES {
-        let i = idx1 - 1;
-        let q: String = CORPUS[i].query.chars().take(30).collect();
-        println!(
-            "    #{:<2} fts={:<3} rows={:<2} fts+graph={:<3} hybrid={:<3} semantic={:<3} {}",
-            idx1,
-            rank_cell(fts.ranks[i]),
-            fts_candidate_counts.get(i).copied().unwrap_or_default(),
-            rank_cell(fts_graph.ranks[i]),
-            rank_cell(hybrid.ranks[i]),
-            if semantic_ready {
-                rank_cell(semantic.ranks[i])
-            } else {
-                "n/a".to_string()
-            },
-            q,
-        );
+        let corpus_idx = idx1 - 1;
+        let q: String = CORPUS[corpus_idx].query.chars().take(30).collect();
+        if let Some(eval_idx) = eval_cases.iter().position(|case| case.idx1 == idx1) {
+            println!(
+                "    #{:<2} fts={:<3} rows={:<2} fts+graph={:<3} hybrid={:<3} semantic={:<3} {}",
+                idx1,
+                rank_cell(fts.ranks[eval_idx]),
+                fts_candidate_counts
+                    .get(eval_idx)
+                    .copied()
+                    .unwrap_or_default(),
+                rank_cell(fts_graph.ranks[eval_idx]),
+                rank_cell(hybrid.ranks[eval_idx]),
+                if semantic_ready {
+                    rank_cell(semantic.ranks[eval_idx])
+                } else {
+                    "n/a".to_string()
+                },
+                q,
+            );
+        } else {
+            println!("    #{:<2} skipped=no-active-expected-key {}", idx1, q);
+        }
     }
 }
 
@@ -4007,6 +4335,69 @@ mod tests {
     }
 
     #[test]
+    fn corpus_expected_key_status_distinguishes_absent_present_and_active() {
+        let absent = CorpusExpectedKeyStatus::absent("missing");
+        assert!(!absent.is_present());
+        assert!(!absent.is_active());
+        assert_eq!(absent.status_label(), "absent");
+
+        let archived = CorpusExpectedKeyStatus {
+            key: "old".to_string(),
+            kind: Some("decision".to_string()),
+            scope: None,
+            status: Some("archived".to_string()),
+        };
+        assert!(archived.is_present());
+        assert!(!archived.is_active());
+        assert_eq!(archived.status_label(), "archived");
+
+        let active = CorpusExpectedKeyStatus {
+            key: "live".to_string(),
+            kind: Some("decision".to_string()),
+            scope: None,
+            status: Some("active".to_string()),
+        };
+        assert!(active.is_present());
+        assert!(active.is_active());
+        assert_eq!(active.status_label(), "active");
+    }
+
+    #[test]
+    fn corpus_case_health_counts_active_accept_set_members() {
+        let row = CorpusCaseHealth {
+            idx1: 1,
+            tier: Tier::Hard,
+            scope: CaseScope::AgentBridgeLocal,
+            query: "q",
+            expected: vec![
+                CorpusExpectedKeyStatus::absent("missing"),
+                CorpusExpectedKeyStatus {
+                    key: "old".to_string(),
+                    kind: Some("decision".to_string()),
+                    scope: None,
+                    status: Some("archived".to_string()),
+                },
+                CorpusExpectedKeyStatus {
+                    key: "live".to_string(),
+                    kind: Some("decision".to_string()),
+                    scope: None,
+                    status: Some("active".to_string()),
+                },
+            ],
+        };
+
+        assert!(row.has_present_expected_key());
+        assert!(row.has_active_expected_key());
+
+        let absent_only = CorpusCaseHealth {
+            expected: vec![CorpusExpectedKeyStatus::absent("missing")],
+            ..row
+        };
+        assert!(!absent_only.has_present_expected_key());
+        assert!(!absent_only.has_active_expected_key());
+    }
+
+    #[test]
     fn memory_scope_relation_classifies_global_local_and_cross_project() {
         assert_eq!(
             memory_scope_relation(None, AGENT_BRIDGE_PROJECT_SCOPE),
@@ -4077,6 +4468,7 @@ mod tests {
 
     #[test]
     fn cross_gold_loss_indices_reports_hard_prefilter_falsifier_cases() {
+        let eval_cases = all_defined_eval_cases();
         let mut raw = SemanticScopeAgg {
             mode: ModeAgg {
                 ranks: vec![None; CORPUS.len()],
@@ -4093,7 +4485,7 @@ mod tests {
         };
         raw.mode.ranks[9] = Some(1); // case #10 is a cross-domain gold case
 
-        assert_eq!(cross_gold_loss_indices(&raw, &hard), vec![10]);
+        assert_eq!(cross_gold_loss_indices(&raw, &hard, &eval_cases), vec![10]);
     }
 
     #[test]
@@ -4148,6 +4540,7 @@ mod tests {
 
     #[test]
     fn hard_zero_fts_miss_indices_reports_only_hard_zero_row_misses() {
+        let eval_cases = all_defined_eval_cases();
         let mut fts = ModeAgg {
             ranks: vec![Some(1); CORPUS.len()],
             ..ModeAgg::default()
@@ -4161,7 +4554,10 @@ mod tests {
         fts.ranks[2] = None; // moderate, zero rows
         counts[2] = 0;
 
-        assert_eq!(hard_zero_fts_miss_indices(&fts, &counts), vec![1]);
+        assert_eq!(
+            hard_zero_fts_miss_indices(&fts, &counts, &eval_cases),
+            vec![1]
+        );
     }
 
     #[test]
