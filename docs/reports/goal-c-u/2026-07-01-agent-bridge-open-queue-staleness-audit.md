@@ -18,7 +18,8 @@ Current repo state during this audit:
 
 - queue evidence includes `403db05` (`docs(memory): revalidate correction
   backfill preflight`) on top of the earlier `a03cc4d` preflight
-- this report is the additional docs-only queue-interpretation commit `b81b3fd`
+- initial queue-audit commit was `b81b3fd`; later local follow-ups refreshed the
+  baseline and incorporated the post-backfill verification state
 - single worktree: `/Data/CascadeProjects/agent-bridge`
 - working tree clean before this report
 - MCP lifecycle: `ready`, readiness warnings `0`, failing tools `0`
@@ -40,6 +41,7 @@ These should not be treated as active blockers anymore.
 | Workflow-feedback stack as unfinished core plumbing | Closed through the low-risk promotion lane. Slices 1-10 are merged; remaining work is to use the runbook and gather lift/handoff evidence. | forum #108 posts #2690/#2693/#2696, `WORKFLOW_FEEDBACK_LOW_RISK_PROMOTION_RUNBOOK_2026_06_30.md` |
 | Local GTE 768 runtime switch | Closed as no-op for this node. The live store is already schema v38 with active 768d `gte-multilingual-base` embeddings. | `2026-06-30-gte-768-local-runtime-switch-plan-closure.md` |
 | BioCortex T6 side-signal head sample as runtime-influence evidence | Closed negative evidence. The redacted head sample showed `no_lift`; order movement alone is not relevance lift. | `52ee090`, forum #102 post #2751, `2026-07-01-biocortex-t6-relevance-lift-head-sample.md` |
+| Correction co-surface single-edge backfill | Closed after the queue audit began. The live store now has 5 `corrects` edges and the single candidate edge exists with weight `1.4`. | `2026-07-01-correction-cosurface-single-edge-backfill.md`, read-only SQLite verification |
 
 One older line inside `2026-07-01-correction-cosurface-link-review.md` still
 says semantic rebalance should remain owner-reviewed before merge/deploy. That
@@ -53,8 +55,7 @@ These are real follow-ups, but not automatic next writes.
 
 | Item | Gate | Safe next shape |
 |---|---|---|
-| Correction co-surface live backfill | Owner approval for one-row maintenance write. | If approved, add the single missing `corrects` edge and then record read-only post-backfill verification. Do not combine with env enablement. |
-| `AGENT_BRIDGE_CORRECTION_COSURFACE` enablement | Separate owner decision after backfill. | Short A/B or shadow window, top-k diff inspection, then decide whether to keep the env flag enabled. |
+| `AGENT_BRIDGE_CORRECTION_COSURFACE` enablement | Separate owner decision after backfill. | Short A/B or shadow window, top-k diff inspection, then decide whether to keep the env flag enabled. Do not infer this from the completed edge backfill. |
 | Bounded coactivation latch | Owner review before shared-store decay behavior changes. | Isolated worktree, v38 wiring, cap/recency tests, full adversarial re-verify, then owner approval before commit. |
 | SQLite `VACUUM` | Maintenance window. | Stop or freeze writers, back up `state.db` plus WAL/SHM if present, run integrity/quick checks, run VACUUM, verify size and `quick_check`. |
 | Trigger recall production/default behavior | Production NO-GO without explicit owner packet. | Continue docs/read-only evidence, or use the dedicated candidate branch only under its Stage-2 constraints. |
@@ -70,14 +71,25 @@ correction:session_handoff_present_voice_tts_subsystem_20260601:e8f0ab2032038682
 session_handoff_present_voice_tts_subsystem_20260601
 ```
 
-It is small and concrete, but still a live DB write and therefore remains
-owner-gated.
+That maintenance write has now been executed by a parallel active session and
+verified read-only from the live store:
+
+```text
+active_memories=667
+active_feedback_corrections=5
+corrects_edges=5
+candidate_edge=(from, to, corrects, 1.4, 1782931382)
+```
+
+Do not repeat the backfill. The remaining correction co-surface decision is
+runtime read-path enablement, which is a separate gate.
 
 ## Local Branch And Worktree Read
 
 Current local branches:
 
-- `master` at `b81b3fd`, aligned with `origin/master`
+- `master` carries the queue-audit commits on top of the correction preflight
+  and post-backfill documentation line
 - archive refs:
   - `archive/obsolete-daemon-embed-delegation-20260630`
   - `archive/obsolete-opencode-family-interactive-20260701`
@@ -93,8 +105,9 @@ audits before any action.
 ## Board Read
 
 Thread #102 still shows a correction LINK open question, but the implementation
-branch has merged and the current live question is narrower: whether to approve
-one-row backfill and, later, a separate co-surface A/B enablement.
+branch has merged and the one-row backfill has since been completed. The
+current live question is narrower: whether to approve a separate co-surface A/B
+or shadow enablement window.
 
 Thread #105 still carries older GTE open-question text in the digest. For the
 local node, the runtime switch is closed as a no-op and the recall-eval corpus
@@ -112,8 +125,9 @@ run a separate status audit before implementing anything from that RFC.
 ## Recommended Next Order
 
 1. Publish this queue audit to repo, durable memory, work memory, and forum.
-2. If the owner explicitly approves the correction co-surface backfill, perform
-   only the one-row idempotent maintenance write and verify read-only afterward.
+2. Do not repeat the correction backfill. If the owner explicitly opens the
+   next correction gate, run only a bounded co-surface A/B or shadow enablement
+   review.
 3. If no owner gate opens, prefer non-conflicting read-only work:
    workflow-feedback usage evidence, report-quality improvement, queue audits,
    or stale-board cleanup proposals.
@@ -134,11 +148,14 @@ run a separate status audit before implementing anything from that RFC.
 - `work_memory(op=list, cwd=/Data/CascadeProjects/agent-bridge)`
 - `agent_presence_list(project=agent-bridge, max_idle_secs=900)`
 - `mcp_lifecycle_digest(repo_root=/Data/CascadeProjects/agent-bridge)`
+- read-only SQLite verification of the post-backfill `corrects` edge
+- `/proc` environment scan showing visible `agent-bridge.real` processes do not
+  have `AGENT_BRIDGE_CORRECTION_COSURFACE` set
 - targeted reads of current reports and runbooks cited above
 
 ## Boundary
 
 This report is deliberately conservative. It updates queue interpretation only.
-It does not authorize any live backfill, env flag, schema migration, ranking
-change, production recall behavior, daemon restart, deploy, branch merge, or
-archival branch deletion.
+It does not authorize any additional live backfill, env flag, schema migration,
+ranking change, production recall behavior, daemon restart, deploy, branch
+merge, or archival branch deletion.

@@ -145,6 +145,37 @@ The following were verified after the write:
 This backfill does not enable correction co-surface read behavior. It only makes
 the existing live graph consistent with the already-landed A1 write-path rule.
 
+## Publish-Time Sanity Check
+
+Before publishing this report, the backfill was rechecked from a fresh
+read-only connection. Later report/memory activity had increased active
+memories from 666 to 667, but the correction-edge state stayed complete:
+
+```json
+{
+  "active_memories": 667,
+  "active_feedback_corrections": 5,
+  "corrects_edges": 5,
+  "missing_valid_correction_edges": [],
+  "candidate_edge": {
+    "from_key": "correction:session_handoff_present_voice_tts_subsystem_20260601:e8f0ab2032038682",
+    "to_key": "session_handoff_present_voice_tts_subsystem_20260601",
+    "edge_type": "corrects",
+    "weight": 1.4,
+    "created_at": 1782931382
+  }
+}
+```
+
+The backup file was still present with the recorded SHA-256:
+
+```text
+9da1a973af97d89d86d90ffa8e8bbb115fa9d6c5bbdb14303b73604892789174
+```
+
+A visible process environment scan found no
+`AGENT_BRIDGE_CORRECTION_COSURFACE` setting in `agent-bridge.real` processes.
+
 ## Remaining Gate
 
 `AGENT_BRIDGE_CORRECTION_COSURFACE=1` remains a separate owner decision.
