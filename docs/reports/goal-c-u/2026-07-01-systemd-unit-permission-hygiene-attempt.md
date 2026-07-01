@@ -2,7 +2,10 @@
 
 Date: 2026-07-01
 
-Status: attempted / blocked by host filesystem permissions semantics / no service restart
+Status: superseded by symlink migration / no service restart
+
+Superseded by:
+`docs/reports/goal-c-u/2026-07-01-agent-bridge-systemd-permission-hygiene.md`
 
 ## Summary
 
@@ -49,11 +52,11 @@ sudo: interactive authentication is required
 sudo_status=1
 ```
 
-Interpretation: the straightforward chmod remediation is not currently
-actionable from this agent session. A durable fix likely requires an operator
-or host-level change, such as moving user systemd config to a Linux-native
-filesystem with normal mode persistence, changing the mount permissions
-semantics, or applying root-assisted ownership/mode repair.
+Interpretation at the time of this attempt: the straightforward chmod
+remediation was not actionable from this agent session. A later bounded fix
+avoided changing `/home` mount semantics by keeping the real unit files on the
+Linux-native `/Data` filesystem and replacing the `/home` unit files with
+symlinks.
 
 ## Service Safety Check
 

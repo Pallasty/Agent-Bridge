@@ -2,6 +2,9 @@
 
 Date: 2026-07-01
 
+Follow-up to:
+`docs/reports/goal-c-u/2026-07-01-systemd-unit-permission-hygiene-attempt.md`
+
 ## Summary
 
 The Agent-Bridge user systemd permission warnings were cleaned up without
@@ -81,4 +84,3 @@ To roll back, replace the Agent-Bridge symlinks under
 ```bash
 systemctl --user daemon-reload
 ```
-
