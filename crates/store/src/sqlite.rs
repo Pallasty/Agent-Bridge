@@ -5407,14 +5407,29 @@ impl StateStore for SqliteStore {
                     params![min_access_i, cutoff],
                     |r| r.get::<_, i64>(0),
                 )?;
-                // Bump only rows still below the ceiling. CASE is used
-                // over MIN(a,b) for portability (matches decay's symmetry).
+                // Bump only rows still below the ceiling, using a
+                // MULTIPLICATIVE-toward-target step: importance moves a
+                // `step` FRACTION of its remaining headroom to the ceiling
+                // (importance += step·(ceiling − importance)), not a flat
+                // additive `+step`. Rationale (2026-06-30 saturation finding):
+                // the old additive `min(importance+step, ceiling)` is a one-way
+                // ratchet — every row reinforced ≥⌈(ceiling−start)/step⌉ times
+                // pins to EXACTLY the ceiling, and with no opposing decay on
+                // warm rows this collapsed 37% of the live store onto a single
+                // importance value (top tier: 2 distinct values), destroying the
+                // ordering signal the search-rank `+w·importance` bonus depends
+                // on. The multiplicative form asymptotes toward the ceiling but
+                // keeps rows SEPARATED by reinforcement frequency, so importance
+                // retains intra-tier ordering. Bounded by construction: with
+                // 0 ≤ step ≤ 1 and importance < ceiling, the new value stays in
+                // (importance, ceiling) — it never reaches or exceeds the
+                // ceiling, so no CASE/clamp is needed. Rows already AT the
+                // ceiling (importance == ceiling, e.g. the legacy additive pile)
+                // are excluded by `importance < ?3` and left untouched.
+                let step = step.min(1.0);
                 let reinforced = tx.execute(
                     "UPDATE memories
-                        SET importance = CASE
-                              WHEN importance + ?2 > ?3 THEN ?3
-                              ELSE importance + ?2
-                            END
+                        SET importance = importance + ?2 * (?3 - importance)
                       WHERE status = 'active'
                         AND access_count >= ?1
                         AND last_accessed_at > 0
@@ -20886,7 +20901,8 @@ mod tests {
             .expect("open store");
         let now = now_secs();
         let day = 86_400_i64;
-        // Accessed 1 day ago, 10 hits, importance 0.2 → should jump to 0.25.
+        // Accessed 1 day ago, 10 hits, importance 0.2. Multiplicative-toward-
+        // target: 0.2 + 0.05·(0.95 − 0.2) = 0.2 + 0.0375 = 0.2375.
         import_reinforce_fixture(
             &store,
             &temp_dir,
@@ -20903,8 +20919,8 @@ mod tests {
         assert_eq!(stats.skipped_at_ceiling, 0);
         let imp = read_importance(&store, "hot_x").await;
         assert!(
-            (imp - 0.25).abs() < 1e-9,
-            "imp={imp} (expected 0.20 + 0.05)"
+            (imp - 0.2375).abs() < 1e-9,
+            "imp={imp} (expected 0.20 + 0.05·(0.95−0.20) = 0.2375)"
         );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
@@ -20990,7 +21006,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn reinforce_active_clamps_to_ceiling() {
+    async fn reinforce_active_approaches_but_never_exceeds_ceiling() {
         let temp_dir = reinforce_temp_dir("ceiling");
         tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
         let store = SqliteStore::open(&temp_dir.join("state.db"))
@@ -20998,7 +21014,9 @@ mod tests {
             .expect("open store");
         let now = now_secs();
         let day = 86_400_i64;
-        // 0.92 + 0.05 = 0.97 > ceiling 0.95 → CASE clamps to 0.95.
+        // Multiplicative: 0.92 + 0.05·(0.95 − 0.92) = 0.92 + 0.0015 = 0.9215.
+        // Unlike the old additive rule (0.92 + 0.05 = 0.97 clamped to 0.95),
+        // the new value stays strictly BELOW the ceiling — no pile-up at 0.95.
         import_reinforce_fixture(
             &store,
             &temp_dir,
@@ -21014,8 +21032,55 @@ mod tests {
         assert_eq!(stats.reinforced, 1);
         let imp = read_importance(&store, "near_top_d").await;
         assert!(
-            (imp - 0.95).abs() < 1e-9,
-            "imp={imp} (expected clamp to ceiling)"
+            (imp - 0.9215).abs() < 1e-9,
+            "imp={imp} (expected 0.92 + 0.05·(0.95−0.92) = 0.9215)"
+        );
+        assert!(imp < 0.95, "imp={imp} must stay strictly below the ceiling");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn reinforce_active_multiplicative_preserves_ordering_no_saturation() {
+        // Anti-saturation guard (2026-06-30 finding): two rows that the OLD
+        // additive rule would BOTH clamp onto exactly 0.95 (destroying their
+        // relative order) must instead stay DISTINCT and below the ceiling
+        // under the multiplicative-toward-target rule, and the row with less
+        // headroom must receive the smaller absolute bump.
+        let temp_dir = reinforce_temp_dir("no_sat");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+        let now = now_secs();
+        let day = 86_400_i64;
+        // Both would additively clamp to 0.95 (0.92+0.05, 0.94+0.05).
+        import_reinforce_fixture(
+            &store,
+            &temp_dir,
+            &[
+                ("lower_g", now - 1 * day, 20, 0.92, "active"),
+                ("upper_h", now - 1 * day, 20, 0.94, "active"),
+            ],
+        )
+        .await;
+
+        let stats = store
+            .memory_reinforce_active(7 * day, 5, 0.05, 0.95)
+            .await
+            .expect("reinforce");
+        assert_eq!(stats.candidates, 2);
+        assert_eq!(stats.reinforced, 2);
+        let lo = read_importance(&store, "lower_g").await; // 0.92 + 0.05·0.03 = 0.9215
+        let hi = read_importance(&store, "upper_h").await; // 0.94 + 0.05·0.01 = 0.9405
+        assert!((lo - 0.9215).abs() < 1e-9, "lo={lo}");
+        assert!((hi - 0.9405).abs() < 1e-9, "hi={hi}");
+        assert!(lo < 0.95 && hi < 0.95, "both stay below ceiling");
+        assert!(hi > lo, "ordering preserved (not collapsed to a single value)");
+        // less headroom (upper_h) => smaller absolute bump than lower_g
+        assert!(
+            (hi - 0.94) < (lo - 0.92),
+            "increment shrinks near the ceiling"
         );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;

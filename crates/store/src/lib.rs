@@ -2521,9 +2521,14 @@ pub trait StateStore: Send + Sync {
     ) -> Result<DecayUnusedStats>;
 
     /// Positive-reinforcement mirror of [`Self::memory_decay_unused_importance`].
-    /// Bumps `importance` by `step` (capped at `ceiling`) for every active
+    /// Moves `importance` a `step` FRACTION of its remaining headroom toward
+    /// `ceiling` (`importance += step·(ceiling − importance)`) for every active
     /// row that has `access_count >= min_access` AND was read within the
-    /// window (`last_accessed_at > now - window_secs`).
+    /// window (`last_accessed_at > now - window_secs`). This multiplicative
+    /// (not flat-additive) step asymptotes toward the ceiling without ever
+    /// reaching it, so repeatedly-reinforced rows stay ordered by reinforcement
+    /// frequency instead of collapsing onto a single ceiling value — see the
+    /// 2026-06-30 saturation finding. Rows already `== ceiling` are left as-is.
     ///
     /// Designed to compose with the daily hygiene service alongside
     /// `decay-unused` and `prune-coactivation-noise`: those two only

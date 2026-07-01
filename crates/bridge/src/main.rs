@@ -16010,9 +16010,12 @@ async fn run_dream_decay_unused(
 }
 
 /// Hebbian wire-strengthen — positive-reinforcement mirror of
-/// `run_dream_decay_unused`. Bumps `importance` by `step` (capped at
-/// `ceiling`) for every active row with `access_count >= min_access`
-/// and `last_accessed_at` within `window_days`.
+/// `run_dream_decay_unused`. Moves `importance` a `step` fraction of its
+/// remaining headroom toward `ceiling` (`importance += step·(ceiling −
+/// importance)`) for every active row with `access_count >= min_access`
+/// and `last_accessed_at` within `window_days`. Multiplicative (not flat
+/// additive) so repeat reinforcement asymptotes toward — never pins at —
+/// the ceiling, preserving intra-tier ordering (2026-06-30 saturation fix).
 ///
 /// Composes with the daily cron service as a 3rd ExecStart=- alongside
 /// `decay-unused` and `prune-coactivation-noise`. Without this op the
