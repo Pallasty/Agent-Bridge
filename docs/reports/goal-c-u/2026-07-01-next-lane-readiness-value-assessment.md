@@ -82,10 +82,10 @@ hub_nodes=25
 ```
 
 Later read-only `semantic_bus_runtime_health` spot-checks still reported
-`status=ready`, but graph counters moved as the live memory region changed
-(`edges=1920`, `orphan_nodes=57`, `stale_nodes=85` in the later sample). Treat
-these counts as point-in-time signals for future audit scoping, not acceptance
-gates.
+`status=ready`, but graph counters moved as the live memory region changed:
+`stale_nodes=83` at `1782935040`, then `edges=1921`,
+`orphan_nodes=57`, `stale_nodes=86` at `1782935109`. Treat these counts as
+point-in-time signals for future audit scoping, not acceptance gates.
 
 Agent presence:
 
