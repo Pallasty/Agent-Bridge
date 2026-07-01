@@ -42,6 +42,7 @@ These should not be treated as active blockers anymore.
 | Local GTE 768 runtime switch | Closed as no-op for this node. The live store is already schema v38 with active 768d `gte-multilingual-base` embeddings. | `2026-06-30-gte-768-local-runtime-switch-plan-closure.md` |
 | BioCortex T6 side-signal head sample as runtime-influence evidence | Closed negative evidence. The redacted head sample showed `no_lift`; order movement alone is not relevance lift. | `52ee090`, forum #102 post #2751, `2026-07-01-biocortex-t6-relevance-lift-head-sample.md` |
 | Correction co-surface single-edge backfill | Closed after the queue audit began. The live store now has 5 `corrects` edges and the single candidate edge exists with weight `1.4`. | `2026-07-01-correction-cosurface-single-edge-backfill.md`, read-only SQLite verification |
+| Bounded coactivation latch | Stale as an active implementation gate. Current tree has the v38 bounded latch implemented and verified; live schema_meta is v39 and includes v38. | `2026-07-01-bounded-coactivation-latch-current-state.md`, `cargo test -p ab-store v38_` |
 
 One older line inside `2026-07-01-correction-cosurface-link-review.md` still
 says semantic rebalance should remain owner-reviewed before merge/deploy. That
@@ -56,7 +57,6 @@ These are real follow-ups, but not automatic next writes.
 | Item | Gate | Safe next shape |
 |---|---|---|
 | `AGENT_BRIDGE_CORRECTION_COSURFACE` enablement | Separate owner decision after backfill. | Short A/B or shadow window, top-k diff inspection, then decide whether to keep the env flag enabled. Do not infer this from the completed edge backfill. |
-| Bounded coactivation latch | Owner review before shared-store decay behavior changes. | Isolated worktree, v38 wiring, cap/recency tests, full adversarial re-verify, then owner approval before commit. |
 | SQLite `VACUUM` | Maintenance window. | Stop or freeze writers, back up `state.db` plus WAL/SHM if present, run integrity/quick checks, run VACUUM, verify size and `quick_check`. |
 | Trigger recall production/default behavior | Production NO-GO without explicit owner packet. | Continue docs/read-only evidence, or use the dedicated candidate branch only under its Stage-2 constraints. |
 | BioCortex / T6 / runtime influence | Owner-gated; current latest sampled evidence is `no_lift`. | Require explicit downstream labeled cases, nonzero lift, zero-regression packet, and rollback evidence. |
@@ -132,8 +132,8 @@ run a separate status audit before implementing anything from that RFC.
    workflow-feedback usage evidence, report-quality improvement, queue audits,
    or stale-board cleanup proposals.
 4. For implementation lanes, require an isolated worktree and fresh gate:
-   bounded coactivation latch, trigger recall production candidate, LSWR runtime
-   evidence duplicate, and any retrieval/runtime policy change.
+   trigger recall production candidate, LSWR runtime evidence duplicate, and
+   any retrieval/runtime policy change.
 
 ## Evidence Checked
 

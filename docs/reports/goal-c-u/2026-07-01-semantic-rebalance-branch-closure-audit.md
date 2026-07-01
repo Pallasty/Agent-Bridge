@@ -100,8 +100,8 @@ active follow-up queue.
 
 Remaining meaningful items are still gated or operational-window constrained:
 
-- correction co-surface enablement / live backfill: owner-gated;
-- bounded coactivation latch: owner-gated implementation work;
+- correction co-surface enablement: controlled shadow/A/B gate; live backfill is already completed;
+- bounded coactivation latch: closed as implemented/verified; see `2026-07-01-bounded-coactivation-latch-current-state.md`;
 - SQLite `VACUUM`: maintenance-window work;
 - any production retrieval-order or ranking-policy change beyond the already
   landed semantic rebalance: owner-gated.

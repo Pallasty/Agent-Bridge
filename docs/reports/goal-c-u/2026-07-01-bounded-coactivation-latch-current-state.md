@@ -54,7 +54,8 @@ Result: 0 tests matched the filter. The noise-prune behavior is covered by the v
 Live DB read-only probe (`/home/pallasting/.local/share/agent-bridge/state.db`):
 
 ```text
-schema_version 39
+schema_meta.version 39
+pragma_user_version 0
 last_cofire_at_columns 1
 edges 1618
 consolidated 40
@@ -65,4 +66,7 @@ over_cap False
 
 ## Remaining Action
 
-No implementation change is needed for the bounded latch itself. The active next step is to remove stale queue/status references that still describe bounded coactivation latch as owner-gated or not implemented, and then continue with the next reversible retrieval-quality lane.
+No implementation change is needed for the bounded latch itself. This slice
+updates the current queue/replan reports so they no longer describe bounded
+coactivation latch as owner-gated or not implemented. Continue with the next
+reversible retrieval-quality lane.

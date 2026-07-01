@@ -67,6 +67,7 @@ Already closed or completed:
 | Single correction-edge backfill | Completed, backed up, read-only verified; do not repeat. |
 | Correction co-surface shadow diff | Completed at `94ea29d`; positive targeted default-FTS evidence. |
 | Workflow-feedback runbook usage replay | Completed at `d1f0820`; report, shadow-score, owner-review packet, and promotion-record commands replayed read-only. |
+| Bounded coactivation latch | Implemented as v38 and verified in the current tree; old propose-only wording is stale. |
 | Centrality/PageRank prior | Closed as NO-GO for ranking. |
 | Kilo/opencode first-prompt readiness | Closed with deterministic coverage. |
 
@@ -75,7 +76,6 @@ Still gated:
 | Lane | Gate |
 |---|---|
 | `AGENT_BRIDGE_CORRECTION_COSURFACE=1` live enablement | Runtime read-path behavior; use a separate controlled A/B or shadow window gate. |
-| Bounded coactivation latch | Shared-store decay behavior; owner-reviewed implementation lane. |
 | SQLite `VACUUM` | Maintenance window with writer freeze and backup. |
 | Trigger recall production/default behavior | Explicit production packet only. |
 | BioCortex/T6 runtime influence | Runtime-influence gate. |
