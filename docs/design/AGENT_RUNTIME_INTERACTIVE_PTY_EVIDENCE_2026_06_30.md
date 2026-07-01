@@ -14,8 +14,10 @@ backends.
 - `claude-code`: shared PTY helper, `SubmitProfile::ENTER`.
 - `codex`: shared PTY helper, `SubmitProfile::KITTY_ENTER`; real Codex TUI verified.
 - `kilo`: shared PTY helper, `SubmitProfile::ENTER`; real kilo TUI verified.
-- `opencode`: shared PTY helper, `SubmitProfile::ENTER`; inferred from kilo and
-  explicitly unverified until a real `opencode` binary is available.
+- `opencode`: shared PTY helper, `SubmitProfile::KITTY_ENTER`; real opencode TUI
+  verified (opencode-ai v1.17.12). Unlike its fork kilo, opencode ENABLES the
+  Kitty keyboard protocol, so the previously-inferred `ENTER` was wrong (a
+  combined `text\r` write never submits); KITTY_ENTER round-trips.
 - `gemini`: shared PTY helper, `SubmitProfile::ENTER_SETTLED`; real gemini TUI
   verified. gemini enables the Kitty keyboard protocol (like codex) yet submits
   on a bare CR — but its Ink input drops a zero-settle combined `text\r` write,
@@ -38,16 +40,18 @@ for bin in opencode kilo gemini auggie oz warp; do command -v "$bin"; done
 Result on this host:
 
 - `kilo`: present at `/home/pallasting/.kilo/bin/kilo`, version `7.3.41`.
-- `opencode`: not installed.
+- `opencode`: installed (`opencode-ai` v1.17.12, linked into `~/.local/bin`;
+  OpenCode Zen auth + a free default model configured).
 - `gemini`: installed (`@google/gemini-cli` v0.49.0, linked into `~/.local/bin`).
 - `auggie`: not installed.
 - `oz` / `warp`: not installed.
 
 ## Runtime Decisions
 
-`opencode`: keep interactive support but label submit-key evidence as inferred.
-The implementation must switch to `SubmitProfile::KITTY_ENTER` if a real opencode
-TUI probe shows Kitty keyboard protocol behavior.
+`opencode`: submit-key evidence RESOLVED (2026-06-30). The real opencode TUI probe
+showed Kitty keyboard protocol behavior, so the implementation switched from the
+inferred `ENTER` to `SubmitProfile::KITTY_ENTER` (verified: a combined-CR write
+fails to submit, KITTY_ENTER round-trips). See `tests/opencode_real_interactive.rs`.
 
 `gemini`: MIGRATED (2026-06-30). The Gemini CLI's Ink/React TUI was probed with a
 real binary: it submits on a bare CR (NOT Kitty Enter, despite enabling the Kitty

@@ -54,9 +54,10 @@ pub struct OpenCodeFamilyRuntime {
     /// SessionId → live interactive PTY session (live `send_input`).
     interactive: InteractiveMap,
     /// How this runtime's TUI accepts a submitted turn. Per-runtime, NOT shared:
-    /// the family's two binaries are not guaranteed to agree. kilo's key was
-    /// real-binary verified (bare CR); opencode's is only inferred (see the
-    /// constructors). Codex proved two "same-shape" TUIs can need opposite keys.
+    /// the family's two binaries do NOT agree. Both real-binary verified —
+    /// kilo submits on a bare CR (no Kitty protocol); opencode enables the Kitty
+    /// keyboard protocol and submits on KITTY_ENTER (a combined `text\r` write is
+    /// dropped). A fork and its upstream needed opposite keys — always probe.
     submit: pty_interactive::SubmitProfile,
 }
 
@@ -74,13 +75,15 @@ impl OpenCodeFamilyRuntime {
             children: Arc::new(DashMap::new()),
             interactive_args: Vec::new(),
             interactive: Arc::new(DashMap::new()),
-            // INFERRED from kilo (opencode's downstream fork) — NOT binary-verified:
-            // opencode is not installed here, so its real TUI submit key was never
-            // probed. If upstream opencode enables the Kitty keyboard protocol (as
-            // codex does), this must become KITTY_ENTER or interactive turns will be
-            // typed but never submitted (silent hang). Verify against the real
-            // `opencode` binary before relying on interactive mode.
-            submit: pty_interactive::SubmitProfile::ENTER,
+            // VERIFIED against the real opencode TUI (2026-06-30, opencode-ai
+            // v1.17.12): opencode ENABLES the Kitty keyboard protocol — unlike
+            // its own downstream fork kilo, which does not — so the earlier
+            // INFERRED `ENTER` was WRONG: a zero-settle combined `text\r` write is
+            // typed but never submits (the exact silent hang the old note warned
+            // about). Empirically combined-CR fails; both KITTY_ENTER and a
+            // CR-after-settle round-trip. Use KITTY_ENTER, matching codex and the
+            // TUI's own Kitty-native contract.
+            submit: pty_interactive::SubmitProfile::KITTY_ENTER,
         }
     }
 
@@ -163,8 +166,9 @@ impl OpenCodeFamilyRuntime {
     /// exit). The interactive entry point is the bare binary (no `run`); the host
     /// may add launch flags via [`Self::with_interactive_args`].
     ///
-    /// Uses this runtime's [`submit`](Self::submit) profile — verified bare CR
-    /// for kilo, inferred (unverified) bare CR for opencode; see the constructors.
+    /// Uses this runtime's [`submit`](Self::submit) profile — both real-binary
+    /// verified: bare CR for kilo, KITTY_ENTER for opencode (Kitty-native); see
+    /// the constructors.
     async fn spawn_interactive(&self, cfg: SpawnConfig) -> Result<AgentSession> {
         pty_interactive::spawn_interactive(
             self.id(),
