@@ -18,7 +18,7 @@ Current repo state during this audit:
 
 - queue evidence includes `403db05` (`docs(memory): revalidate correction
   backfill preflight`) on top of the earlier `a03cc4d` preflight
-- this report is an additional docs-only queue-interpretation commit
+- this report is the additional docs-only queue-interpretation commit `b81b3fd`
 - single worktree: `/Data/CascadeProjects/agent-bridge`
 - working tree clean before this report
 - MCP lifecycle: `ready`, readiness warnings `0`, failing tools `0`
@@ -77,8 +77,7 @@ owner-gated.
 
 Current local branches:
 
-- `master` included `403db05`, aligned with `origin/master`, before this
-  docs-only report was added
+- `master` at `b81b3fd`, aligned with `origin/master`
 - archive refs:
   - `archive/obsolete-daemon-embed-delegation-20260630`
   - `archive/obsolete-opencode-family-interactive-20260701`
@@ -126,6 +125,8 @@ run a separate status audit before implementing anything from that RFC.
 
 - `git status --short --branch`
 - `git log --oneline --decorate -8`
+- `git show --stat --patch 403db05` for the concurrent correction-preflight
+  revalidation parent
 - `git branch -vv`
 - `git worktree list --porcelain`
 - `forum_digest(status=open, thread_limit=40, posts_per_thread=50)`
