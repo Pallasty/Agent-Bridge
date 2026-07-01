@@ -48,6 +48,7 @@ Related evidence:
 - `2026-07-01-correction-cosurface-single-edge-backfill.md`
 - `2026-07-01-correction-cosurface-shadow-diff.md`
 - `2026-07-01-correction-cosurface-mcp-ab-smoke.md`
+- `2026-07-01-correction-cosurface-s1-closeout.md`
 - `2026-07-01-agent-bridge-open-queue-staleness-audit.md`
 - `2026-07-01-reversible-autonomy-task-replan.md`
 
@@ -86,14 +87,13 @@ Execution should be scoped to one of these levels:
 |---|---|---|---|
 | S0 | Offline or frozen-copy shadow expansion | No live runtime behavior change | Autonomous |
 | S0.5 | Copied-DB MCP A/B smoke | Real MCP tool path, still no live-store write | Done at `ec80b97` |
-| S1 | Short-lived installed-binary MCP subprocess with env enabled | Live read-path experiment in an isolated child process | Authorized under standing reversible rule |
+| S1 | Short-lived installed-binary MCP subprocess with env enabled | Live read-path experiment in an isolated child process | Authorized, but not currently needed; see S1 closeout |
 | S2 | Time-bounded daemon or active MCP client window | Shared local runtime behavior change | Only after S1 passes and rollback is recorded |
 
-S1 remains the recommended next gate if more evidence is needed. S0.5 already
-validated the real MCP stdio tool path against copied stores; S1 is narrower
-than S2 because it still keeps the current Codex MCP process and the long-lived
-daemons on default behavior while exercising a live-store read path in a
-short-lived child process.
+S0.5 already validated the real MCP stdio tool path against copied stores. The
+S1 closeout records why a live-store child-process trial is not worth running
+now: it would add normal `memory_search` telemetry/coactivation side effects
+without adding material B1 correctness signal. S2 is not warranted.
 
 ## Non-Goals
 
