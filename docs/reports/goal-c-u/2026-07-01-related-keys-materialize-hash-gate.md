@@ -134,6 +134,27 @@ Deploy result:
 - deploy feature gate: passed; new binary is a superset of current deployed
   markers
 
+Follow-up deploy after the focused verification record:
+
+- command: `scripts/deploy_from_master.sh --yes`
+- source at fetch/build time: `origin/master @ c75bc2a`
+- deployed binary: `/home/pallasting/.local/bin/agent-bridge.real`
+- deployed sha256:
+  `66389e60e2cc648f152aa8fd9d0bc566ea34b2df5ddb6982d42061e472cbb91c`
+- previous deployed binary backup:
+  `/home/pallasting/.local/bin/agent-bridge.real.bak-deploy-c75bc2a-20260701T133441`
+- previous deployed sha256:
+  `f23ce54501d4cf85b824de057bdb3eda79f02e605f7beb2868000936107888f8`
+- deploy feature gate: passed; new binary is a superset of current deployed
+  markers
+- installed-binary string smoke found `reviewed_selected_edge_hash_v1`,
+  `selected_edge_hash_v1`, and
+  `agent_bridge.memory_related_keys.selected_edges.v1`
+
+As of `5b86955`, all commits after `a936cb1` are documentation/report updates:
+there is no `crates/`, `Cargo.toml`, or `Cargo.lock` diff from `a936cb1` to
+`HEAD`.
+
 Installed-binary smoke used a short-lived all-dev MCP subprocess from the new
 `.real`:
 
