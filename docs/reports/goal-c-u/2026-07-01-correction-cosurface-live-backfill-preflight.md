@@ -172,6 +172,54 @@ This preflight does not authorize:
 - graph hygiene beyond the single named correction edge;
 - broad correction-edge inference from key parsing alone.
 
+## Read-Only Revalidation
+
+Revalidated on current `origin/master`:
+
+```text
+a03cc4d docs(memory): preflight correction cosurface backfill
+```
+
+Effective tests still pass:
+
+```text
+CARGO_BUILD_JOBS=1 cargo test -p ab-store \
+  a1_memory_save_auto_links_corrects_edge_for_out_of_tool_correction \
+  -- --nocapture
+```
+
+Result: passed, 1/1.
+
+```text
+CARGO_BUILD_JOBS=1 cargo test -p ab-bridge --no-default-features \
+  b1_cosurface_inserts_corrector_after_corrected_original \
+  -- --nocapture
+```
+
+Result: passed, 1/1.
+
+The live-store read-only candidate count is unchanged. Active memory count
+increased from 664 to 666 due later memory/report activity, but correction edge
+state did not change:
+
+| Metric | Count |
+|---|---:|
+| active memories | 666 |
+| active feedback corrections | 5 |
+| existing `corrects` edges | 4 |
+| missing valid correction edges | 1 |
+
+The single missing valid candidate remains:
+
+```text
+correction:session_handoff_present_voice_tts_subsystem_20260601:e8f0ab2032038682
+  --corrects-->
+session_handoff_present_voice_tts_subsystem_20260601
+```
+
+This revalidation remains read-only and does not authorize the backfill or
+`AGENT_BRIDGE_CORRECTION_COSURFACE` enablement.
+
 ## Recommended Next Step
 
 Post this preflight to the board as the owner review packet. If approved, run a
