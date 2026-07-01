@@ -2,7 +2,7 @@
 //!
 //! Ignored by default: this can launch real agent CLIs and make live model/API
 //! calls. Use it when installing a new runtime or deciding whether a TUI submits
-//! on bare Enter or Kitty CSI-u Enter.
+//! on bare Enter, settled bare Enter, or Kitty CSI-u Enter.
 //!
 //! Minimal examples:
 //!
@@ -12,7 +12,7 @@
 //! cargo test -p ab-agent --test runtime_interactive_submit_probe -- --ignored --nocapture
 //!
 //! AB_REAL_PTY_PROBE_RUNTIME=gemini \
-//! AB_REAL_PTY_PROBE_PROFILE=kitty_enter \
+//! AB_REAL_PTY_PROBE_PROFILE=enter_settled \
 //! cargo test -p ab-agent --test runtime_interactive_submit_probe -- --ignored --nocapture
 //! ```
 //!
@@ -96,7 +96,7 @@ async fn configured_runtime_interactive_submit_profile_probe() {
     }
     assert!(
         matched,
-        "expected marker {:?} was not observed; if the TUI accepted the prompt but did not submit, rerun with the other AB_REAL_PTY_PROBE_PROFILE (enter vs kitty_enter)",
+        "expected marker {:?} was not observed; if the TUI accepted the prompt but did not submit, rerun with the other AB_REAL_PTY_PROBE_PROFILE (enter vs enter_settled vs kitty_enter)",
         cfg.expect
     );
 }
@@ -163,6 +163,7 @@ fn default_binary(runtime: &str) -> Option<String> {
 fn default_profile_name(runtime: &str) -> &'static str {
     match runtime {
         "codex" => "kitty_enter",
+        "gemini" => "enter_settled",
         _ => "enter",
     }
 }
@@ -170,11 +171,13 @@ fn default_profile_name(runtime: &str) -> &'static str {
 fn parse_profile(raw: &str) -> std::result::Result<SubmitProfile, String> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "enter" | "cr" => Ok(SubmitProfile::ENTER),
+        "enter_settled" | "enter-settled" | "settled_enter" | "settled-enter"
+        | "cr_settled" | "cr-settled" => Ok(SubmitProfile::ENTER_SETTLED),
         "kitty" | "kitty_enter" | "kitty-enter" | "csi_u_enter" | "csi-u-enter" => {
             Ok(SubmitProfile::KITTY_ENTER)
         }
         other => Err(format!(
-            "unknown AB_REAL_PTY_PROBE_PROFILE '{other}' (expected enter or kitty_enter)"
+            "unknown AB_REAL_PTY_PROBE_PROFILE '{other}' (expected enter, enter_settled, or kitty_enter)"
         )),
     }
 }
@@ -285,5 +288,10 @@ fn parse_profile_accepts_known_submit_profiles() {
     let kitty = parse_profile("kitty_enter").unwrap();
     assert_eq!(kitty.key, "\x1b[13u");
     assert!(!kitty.settle.is_zero());
+
+    let settled = parse_profile("enter_settled").unwrap();
+    assert_eq!(settled.key, "\r");
+    assert!(!settled.settle.is_zero());
+
     assert!(parse_profile("spacebar").is_err());
 }

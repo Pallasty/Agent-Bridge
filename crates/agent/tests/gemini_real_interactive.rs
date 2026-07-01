@@ -2,14 +2,14 @@
 //!
 //! Ignored by default: needs the real `gemini` CLI installed and a working
 //! `GEMINI_API_KEY` in the environment (it makes live Google AI Studio calls).
-//! This is the gold-standard check behind gemini's `SubmitProfile::ENTER`:
+//! This is the gold-standard check behind gemini's `SubmitProfile::ENTER_SETTLED`:
 //! `/bin/cat` unit tests prove the PTY plumbing but cannot prove that a turn
 //! actually *submits* in gemini's full-screen Ink/React TUI.
 //!
 //! The important, non-obvious result this locked in: gemini **enables the Kitty
 //! keyboard protocol** (just like codex) yet still submits on a **bare CR**, not
-//! CSI-u Enter. Kitty-enable does NOT imply Kitty-Enter — the submit key had to
-//! be probed empirically, and it is `ENTER`.
+//! CSI-u Enter. Kitty-enable does NOT imply Kitty-Enter — the submit key and
+//! settle shape had to be probed empirically, and it is `ENTER_SETTLED`.
 //!
 //! To skip gemini's first-run auth dialog headlessly, the test points `HOME` at
 //! a throwaway dir seeded with a `.gemini/settings.json` that pre-selects the

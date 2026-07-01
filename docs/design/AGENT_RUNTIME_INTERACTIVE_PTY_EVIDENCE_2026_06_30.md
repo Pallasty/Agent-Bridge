@@ -102,7 +102,7 @@ AB_REAL_PTY_PROBE_PROFILE=enter \
 cargo test -p ab-agent --test runtime_interactive_submit_probe -- --ignored --nocapture
 
 AB_REAL_PTY_PROBE_RUNTIME=gemini \
-AB_REAL_PTY_PROBE_PROFILE=kitty_enter \
+AB_REAL_PTY_PROBE_PROFILE=enter_settled \
 cargo test -p ab-agent --test runtime_interactive_submit_probe -- --ignored --nocapture
 ```
 
@@ -117,5 +117,6 @@ Useful overrides:
 - `AB_REAL_PTY_PROBE_EXPECT=AB42-PROBE-OK`
 
 Operational rule: first run the probe with the suspected profile. If the TUI
-accepts text but no marker returns, rerun with the other profile (`enter` vs
-`kitty_enter`) before changing production `SubmitProfile` wiring.
+accepts text but no marker returns, rerun the relevant alternatives (`enter`,
+`enter_settled`, `kitty_enter`) before changing production `SubmitProfile`
+wiring.
