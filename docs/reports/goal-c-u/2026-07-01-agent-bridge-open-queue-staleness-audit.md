@@ -16,7 +16,9 @@ gated, or belongs in a dedicated conflict-resolution lane.
 
 Current repo state during this audit:
 
-- `master == origin/master == a03cc4d`
+- queue evidence includes `403db05` (`docs(memory): revalidate correction
+  backfill preflight`) on top of the earlier `a03cc4d` preflight
+- this report is an additional docs-only queue-interpretation commit
 - single worktree: `/Data/CascadeProjects/agent-bridge`
 - working tree clean before this report
 - MCP lifecycle: `ready`, readiness warnings `0`, failing tools `0`
@@ -75,7 +77,8 @@ owner-gated.
 
 Current local branches:
 
-- `master` at `a03cc4d`, aligned with `origin/master`
+- `master` included `403db05`, aligned with `origin/master`, before this
+  docs-only report was added
 - archive refs:
   - `archive/obsolete-daemon-embed-delegation-20260630`
   - `archive/obsolete-opencode-family-interactive-20260701`
