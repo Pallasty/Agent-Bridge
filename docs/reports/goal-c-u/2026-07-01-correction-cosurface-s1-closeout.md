@@ -65,7 +65,7 @@ Independent post-check during closeout:
 ```text
 backup_sha256=984516adeb577ea6e10c667281e1790287cf093b3d3f736a7318d7f223a3a817
 visible_agent_bridge_processes_checked=14
-flagged_processes_retaining_AGENТ_BRIDGE_CORRECTION_COSURFACE=0
+flagged_processes_retaining_AGENT_BRIDGE_CORRECTION_COSURFACE=0
 mcp_lifecycle_state=ready
 readiness_warnings=0
 failing_tool_count=0
