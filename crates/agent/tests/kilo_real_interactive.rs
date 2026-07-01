@@ -93,3 +93,46 @@ async fn kilo_real_multi_turn_round_trip() {
         "turn 2 should submit + round-trip 99 (multi-turn liveness)"
     );
 }
+
+#[tokio::test]
+#[ignore]
+async fn kilo_real_initial_prompt_round_trip() {
+    let rt = OpenCodeFamilyRuntime::kilo();
+    let sess = match rt
+        .spawn(SpawnConfig {
+            cwd: "/Data/CascadeProjects/agent-bridge".into(),
+            interactive: true,
+            initial_prompt: Some(
+                "Reply with exactly: AB_KILO_INITIAL_PROMPT_OK. No extra words.".into(),
+            ),
+            ..Default::default()
+        })
+        .await
+    {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("SKIP: kilo not spawnable ({e})");
+            return;
+        }
+    };
+
+    let mut ok = false;
+    for _ in 0..240 {
+        if rt
+            .read_interactive_output(&sess.id)
+            .map(|o| o.contains("AB_KILO_INITIAL_PROMPT_OK"))
+            .unwrap_or(false)
+        {
+            ok = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+
+    let _ = rt.kill(&sess.id).await;
+
+    assert!(
+        ok,
+        "initial prompt should submit after the real kilo boot settle"
+    );
+}

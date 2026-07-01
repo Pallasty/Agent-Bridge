@@ -17360,9 +17360,9 @@ impl McpTool for AgentSessionReconcileTool {
         ToolSchema {
             name: self.name().into(),
             description: "Find stale running local agent sessions whose owning MCP process has \
-                 likely disappeared, and optionally finalise them. Defaults to dry-run. Use \
-                 this after MCP/IDE restarts when agent_session_list shows old running rows \
-                 with no live child PID."
+                 likely disappeared, and optionally finalise proven-dead rows. Defaults to \
+                 dry-run. Rows with liveness=untracked are reported but not finalised by \
+                 default because another live MCP process may own their in-memory PTY session."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -17375,6 +17375,15 @@ impl McpTool for AgentSessionReconcileTool {
                     "apply_confirmation": {
                         "type": "string",
                         "description": "Required exact value 'finalise_stale_sessions' when dry_run=false, after reviewing dry-run candidates."
+                    },
+                    "finalise_untracked": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Also finalise liveness=untracked rows. Dangerous while multiple MCP processes may be active; requires apply_untracked_confirmation when dry_run=false."
+                    },
+                    "apply_untracked_confirmation": {
+                        "type": "string",
+                        "description": "Required exact value 'finalise_untracked_sessions' when dry_run=false and finalise_untracked=true."
                     },
                     "stale_after_secs": {
                         "type": "integer",
@@ -17420,6 +17429,22 @@ impl McpTool for AgentSessionReconcileTool {
                  after reviewing dry-run candidates",
             ));
         }
+        let finalise_untracked = args
+            .get("finalise_untracked")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if !dry_run
+            && finalise_untracked
+            && args
+                .get("apply_untracked_confirmation")
+                .and_then(|v| v.as_str())
+                != Some("finalise_untracked_sessions")
+        {
+            return Ok(ToolResult::error(
+                "dry_run=false with finalise_untracked=true requires \
+                 apply_untracked_confirmation=\"finalise_untracked_sessions\"",
+            ));
+        }
         let stale_after_secs = args
             .get("stale_after_secs")
             .and_then(|v| v.as_i64())
@@ -17445,10 +17470,12 @@ impl McpTool for AgentSessionReconcileTool {
         let rows = store.list_sessions(&filter, limit).await?;
         let now = dispatch_now_secs();
         let mut candidates = Vec::new();
+        let mut deferred_untracked = Vec::new();
         let mut finalised_count = 0usize;
         let mut skipped_recent = 0usize;
         let mut skipped_unsupported_runtime = 0usize;
         let mut skipped_alive = 0usize;
+        let mut skipped_untracked = 0usize;
         let mut errors = Vec::new();
 
         for session in rows {
@@ -17466,11 +17493,7 @@ impl McpTool for AgentSessionReconcileTool {
                 skipped_alive += 1;
                 continue;
             }
-            let reason = format!(
-                "agent_session_reconcile: finalised stale running session after {age_secs}s; \
-                 liveness={liveness}"
-            );
-            candidates.push(json!({
+            let candidate = json!({
                 "id": session.id.as_str(),
                 "runtime_id": session.runtime_id.as_str(),
                 "cwd": session.cwd.as_str(),
@@ -17479,7 +17502,21 @@ impl McpTool for AgentSessionReconcileTool {
                 "pid": pid,
                 "liveness": liveness,
                 "exit_code_if_applied": -15,
-            }));
+            });
+            if liveness == "untracked" && !finalise_untracked {
+                skipped_untracked += 1;
+                let mut deferred = candidate;
+                deferred["deferred_reason"] = json!(
+                    "untracked_liveness_requires_finalise_untracked_confirmation"
+                );
+                deferred_untracked.push(deferred);
+                continue;
+            }
+            let reason = format!(
+                "agent_session_reconcile: finalised stale running session after {age_secs}s; \
+                 liveness={liveness}"
+            );
+            candidates.push(candidate);
             if !dry_run {
                 let stderr = append_reconcile_reason(session.stderr.as_deref(), &reason);
                 match store
@@ -17507,14 +17544,18 @@ impl McpTool for AgentSessionReconcileTool {
             "scanned_count": skipped_recent
                 + skipped_unsupported_runtime
                 + skipped_alive
+                + skipped_untracked
                 + candidates.len(),
             "candidate_count": candidates.len(),
+            "deferred_untracked_count": deferred_untracked.len(),
             "finalised_count": finalised_count,
             "skipped_recent": skipped_recent,
             "skipped_unsupported_runtime": skipped_unsupported_runtime,
             "skipped_alive": skipped_alive,
+            "skipped_untracked": skipped_untracked,
             "errors": errors,
             "candidates": candidates,
+            "deferred_untracked": deferred_untracked,
         })))
     }
 }
@@ -73990,7 +74031,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
     }
 
     #[tokio::test]
-    async fn agent_session_reconcile_finalises_stale_running_local_sessions() {
+    async fn agent_session_reconcile_defers_untracked_sessions_by_default() {
         use ab_core::SessionId;
         use ab_store::StoredSession;
 
@@ -74024,7 +74065,9 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             .expect("dry-run execute");
         let dry_payload = result_text_as_json(&dry_run);
         assert_eq!(dry_payload["dry_run"], true);
-        assert_eq!(dry_payload["candidate_count"], 1);
+        assert_eq!(dry_payload["candidate_count"], 0);
+        assert_eq!(dry_payload["deferred_untracked_count"], 1);
+        assert_eq!(dry_payload["skipped_untracked"], 1);
         assert_eq!(dry_payload["finalised_count"], 0);
 
         let applied = tool
@@ -74057,8 +74100,51 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             .expect("confirmed execute");
         let payload = result_text_as_json(&applied);
         assert_eq!(payload["dry_run"], false);
-        assert_eq!(payload["candidate_count"], 1);
-        assert_eq!(payload["finalised_count"], 1);
+        assert_eq!(payload["candidate_count"], 0);
+        assert_eq!(payload["deferred_untracked_count"], 1);
+        assert_eq!(payload["finalised_count"], 0);
+
+        let row = store
+            .load_session(&session_id)
+            .await
+            .expect("load")
+            .expect("session");
+        assert!(row.ended_at.is_none());
+        assert_eq!(row.exit_code, None);
+
+        let untracked_without_extra_confirmation = tool
+            .execute(
+                json!({
+                    "stale_after_secs": 300,
+                    "dry_run": false,
+                    "apply_confirmation": "finalise_stale_sessions",
+                    "finalise_untracked": true,
+                    "limit": 10
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("untracked confirmation gate execute");
+        assert!(untracked_without_extra_confirmation.is_error);
+
+        let forced = tool
+            .execute(
+                json!({
+                    "stale_after_secs": 300,
+                    "dry_run": false,
+                    "apply_confirmation": "finalise_stale_sessions",
+                    "finalise_untracked": true,
+                    "apply_untracked_confirmation": "finalise_untracked_sessions",
+                    "limit": 10
+                }),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("confirmed untracked execute");
+        let forced_payload = result_text_as_json(&forced);
+        assert_eq!(forced_payload["candidate_count"], 1);
+        assert_eq!(forced_payload["deferred_untracked_count"], 0);
+        assert_eq!(forced_payload["finalised_count"], 1);
 
         let row = store
             .load_session(&session_id)

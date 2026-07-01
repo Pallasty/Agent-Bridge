@@ -17,7 +17,7 @@ use ab_core::{Error, Result, SessionId};
 use ab_store::{StateStore, StoredSession};
 use dashmap::DashMap;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tracing::{info, warn};
 
 use crate::pty_session::{PtyExit, PtySession};
@@ -44,6 +44,13 @@ pub struct SubmitProfile {
     /// Full-screen TUIs often ignore input sent during alternate-screen startup;
     /// line-REPL stand-ins keep this at zero.
     pub initial_prompt_delay: Duration,
+    /// Optional output markers that indicate the initial composer is ready to
+    /// accept a first turn. When set, the helper waits for any marker before
+    /// typing `initial_prompt`; this avoids fixed sleeps racing slow TUI boot.
+    pub initial_prompt_ready_markers: &'static [&'static str],
+    /// Maximum time to wait for [`Self::initial_prompt_ready_markers`] before
+    /// falling back to the delay-only behavior.
+    pub initial_prompt_ready_timeout: Duration,
 }
 
 impl SubmitProfile {
@@ -52,6 +59,8 @@ impl SubmitProfile {
         key: "\r",
         settle: Duration::ZERO,
         initial_prompt_delay: Duration::ZERO,
+        initial_prompt_ready_markers: &[],
+        initial_prompt_ready_timeout: Duration::ZERO,
     };
     /// Kitty-keyboard-protocol TUI (codex): submit on CSI-u Enter after a render
     /// settle, written separately from the text.
@@ -59,6 +68,8 @@ impl SubmitProfile {
         key: "\x1b[13u",
         settle: Duration::from_millis(500),
         initial_prompt_delay: Duration::ZERO,
+        initial_prompt_ready_markers: &[],
+        initial_prompt_ready_timeout: Duration::ZERO,
     };
     /// Ink/React TUI (gemini): submits on a **bare CR** like a line REPL, but the
     /// CR must be written *separately* from the text after a render settle — Ink
@@ -70,10 +81,22 @@ impl SubmitProfile {
         key: "\r",
         settle: Duration::from_millis(600),
         initial_prompt_delay: Duration::ZERO,
+        initial_prompt_ready_markers: &[],
+        initial_prompt_ready_timeout: Duration::ZERO,
     };
 
     pub fn with_initial_prompt_delay(mut self, delay: Duration) -> Self {
         self.initial_prompt_delay = delay;
+        self
+    }
+
+    pub fn with_initial_prompt_ready_markers(
+        mut self,
+        markers: &'static [&'static str],
+        timeout: Duration,
+    ) -> Self {
+        self.initial_prompt_ready_markers = markers;
+        self.initial_prompt_ready_timeout = timeout;
         self
     }
 }
@@ -103,6 +126,39 @@ async fn submit_turn(sess: &Arc<PtySession>, text: &str, submit: SubmitProfile) 
         tokio::task::spawn_blocking(move || s2.write_input(key))
             .await
             .map_err(|e| Error::Backend(format!("submit_turn join: {e}")))?
+    }
+}
+
+async fn wait_for_initial_prompt_ready(
+    sess: &Arc<PtySession>,
+    session: &SessionId,
+    runtime_id: &str,
+    submit: SubmitProfile,
+) {
+    if submit.initial_prompt_ready_markers.is_empty()
+        || submit.initial_prompt_ready_timeout.is_zero()
+    {
+        return;
+    }
+    let deadline = Instant::now() + submit.initial_prompt_ready_timeout;
+    loop {
+        let output = sess.output_snapshot();
+        if submit
+            .initial_prompt_ready_markers
+            .iter()
+            .any(|marker| output.contains(marker))
+        {
+            return;
+        }
+        if Instant::now() >= deadline {
+            warn!(
+                session = %session,
+                runtime = %runtime_id,
+                "interactive: initial prompt readiness marker timed out; falling back to delayed submit"
+            );
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 }
 
@@ -161,6 +217,7 @@ pub async fn spawn_interactive(
             if !submit.initial_prompt_delay.is_zero() {
                 tokio::time::sleep(submit.initial_prompt_delay).await;
             }
+            wait_for_initial_prompt_ready(&session, &session_id, runtime_id, submit).await;
             if let Err(e) = submit_turn(&session, p, submit).await {
                 warn!(session = %session_id, runtime = %runtime_id, error = %e, "interactive: initial prompt write failed");
             }
@@ -264,4 +321,67 @@ pub fn interactive_output(interactive: &InteractiveMap, session: &SessionId) -> 
     interactive
         .get(session.as_str())
         .map(|kv| kv.output_snapshot())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn wait_for<F: FnMut() -> bool>(total_ms: u64, step_ms: u64, mut predicate: F) -> bool {
+        let mut waited = 0u64;
+        while waited <= total_ms {
+            if predicate() {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(step_ms)).await;
+            waited += step_ms;
+        }
+        predicate()
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn initial_prompt_waits_for_ready_marker_before_submit() {
+        let interactive: InteractiveMap = Arc::new(DashMap::new());
+        let store: Option<Arc<dyn StateStore>> = None;
+        let args = vec![
+            "-lc".to_string(),
+            "while IFS= read -r -t 0.2 _line; do :; done; \
+             printf 'READY-FOR-FIRST-TURN\\n'; exec cat"
+                .to_string(),
+        ];
+        let submit = SubmitProfile::ENTER
+            .with_initial_prompt_ready_markers(&["READY-FOR-FIRST-TURN"], Duration::from_secs(3));
+        let sess = spawn_interactive(
+            "test-runtime",
+            "/bin/bash",
+            &args,
+            &store,
+            &interactive,
+            SpawnConfig {
+                cwd: "/tmp".into(),
+                initial_prompt: Some("first-turn-after-ready".into()),
+                interactive: true,
+                ..Default::default()
+            },
+            submit,
+        )
+        .await
+        .expect("spawn delayed-ready stand-in");
+
+        let submitted = wait_for(5000, 25, || {
+            interactive_output(&interactive, &sess.id)
+                .map(|o| o.contains("first-turn-after-ready"))
+                .unwrap_or(false)
+        })
+        .await;
+        assert!(
+            submitted,
+            "initial prompt should be held until the readiness marker appears"
+        );
+
+        kill_interactive("test-runtime", &interactive, &sess.id)
+            .expect("interactive session should be live")
+            .expect("kill delayed-ready stand-in");
+    }
 }

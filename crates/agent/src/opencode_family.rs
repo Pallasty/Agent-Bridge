@@ -39,6 +39,8 @@ use tracing::{info, warn};
 use crate::pty_interactive::{self, InteractiveMap};
 use crate::{AgentCapabilities, AgentRuntime, AgentSession, SpawnConfig};
 
+const KILO_INTERACTIVE_READY_MARKERS: &[&str] = &["Ask anything"];
+
 #[derive(Clone)]
 pub struct OpenCodeFamilyRuntime {
     binary: String,
@@ -114,8 +116,15 @@ impl OpenCodeFamilyRuntime {
             // VERIFIED against the real kilo TUI (tests/kilo_real_interactive.rs):
             // it emits no Kitty keyboard protocol and uses bracketed paste, so a
             // bare CR submits — proven by a multi-turn 42/99 round-trip.
-            submit: pty_interactive::SubmitProfile::ENTER
-                .with_initial_prompt_delay(Duration::from_secs(3)),
+            // Kilo 7.3.x can spend several seconds painting its alternate-screen
+            // boot UI before the composer is ready. Input sent during that
+            // window is silently dropped, while later send_input turns work.
+            // Wait for the visible composer marker instead of racing it with a
+            // fixed sleep.
+            submit: pty_interactive::SubmitProfile::ENTER.with_initial_prompt_ready_markers(
+                KILO_INTERACTIVE_READY_MARKERS,
+                Duration::from_secs(30),
+            ),
         }
     }
 
