@@ -1,0 +1,24 @@
+{
+  "schema": "agent_bridge.workflow_feedback_baseline_observations.v0",
+  "read_only": true,
+  "purpose": "Previous-policy baseline observations for the 2026-07-01 correction co-surface and bounded-latch workflow-feedback fixtures. This is a proxy packet for reproducing the evidence flow; it is not owner approval, runtime promotion, or a claim of real production behavior lift.",
+  "observation_source": "fixture_previous_policy_proxy_20260701_cosurface_latch",
+  "observations": [
+    {
+      "scenario_id": "correction_cosurface_s1_or_s2_decision",
+      "observed_top_experience_id": "baseline_no_experience_selected",
+      "evidence_ref": "fixture:previous_policy_did_not_surface_correction_cosurface_s1_keep_disabled_lesson"
+    },
+    {
+      "scenario_id": "bounded_latch_stale_owner_gate_text",
+      "observed_top_experience_id": "baseline_no_experience_selected",
+      "evidence_ref": "fixture:previous_policy_did_not_surface_bounded_latch_stale_gate_cleanup_lesson"
+    }
+  ],
+  "safety": {
+    "baseline_writes_memory": false,
+    "baseline_changes_runtime": false,
+    "baseline_changes_retrieval_order": false,
+    "baseline_changes_tool_routing": false
+  }
+}

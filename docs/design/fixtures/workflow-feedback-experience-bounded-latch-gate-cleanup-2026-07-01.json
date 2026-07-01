@@ -1,0 +1,137 @@
+{
+  "schema": "agent_bridge.experience.v0",
+  "experience_id": "exp_20260701_bounded_latch_stale_gate_cleanup",
+  "created_at": "2026-07-01T19:35:00Z",
+  "scope": "project:/Data/CascadeProjects/agent-bridge",
+  "lane": "bounded_coactivation_latch_stale_gate_cleanup",
+  "goal": "Resolve stale owner-gated documentation and queue state after discovering the bounded coactivation latch was already implemented and verified as v38.",
+  "plan": [
+    "audit the bounded coactivation latch design doc and source code",
+    "verify v38 schema, last_cofire_at, recency-conditioned immunity, and max_latched_edges cap wiring",
+    "run focused coactivation and v38 tests",
+    "probe the live store read-only for schema version and latched-set bounds",
+    "mark the design doc status as superseded and add a current-state report",
+    "clear stale queue references so future agents do not treat the lane as owner-gated implementation work"
+  ],
+  "trajectory": {
+    "source_commits": [
+      {
+        "commit": "6ba64be",
+        "subject": "docs(memory): mark bounded latch implemented",
+        "role": "design status and current-state report"
+      },
+      {
+        "commit": "d63affd",
+        "subject": "docs(memory): clear bounded latch stale gates",
+        "role": "queue and replan cleanup"
+      }
+    ],
+    "tool_spans": [
+      {
+        "tool": "rg/sed source audit",
+        "purpose": "confirm whether bounded latch was implemented or only proposed",
+        "outcome": "success",
+        "observation": "source had v38 migration, record_coactivation warmth stamping, unified prune predicates, and cap eviction"
+      },
+      {
+        "tool": "cargo test",
+        "purpose": "verify pure latch kernel and v38 store behavior",
+        "outcome": "success",
+        "evidence": [
+          "cargo test -p ab-store coactivation_latch -> 7 passed",
+          "cargo test -p ab-store v38_ -> 9 passed",
+          "cargo test -p ab-store decay_coactivation -> 6 passed"
+        ]
+      },
+      {
+        "tool": "read-only SQLite probe",
+        "purpose": "verify live schema and cap state without mutating the store",
+        "outcome": "success",
+        "observation": "schema_meta.version 39, last_cofire_at column present, consolidated 40, warm_latched_4d 40, over_cap false"
+      },
+      {
+        "tool": "docs/report patch",
+        "purpose": "replace stale propose-only owner-gated status with implemented/verified status",
+        "outcome": "success",
+        "evidence": [
+          "docs/design/BOUNDED_COACTIVATION_LATCH_2026_06_28.md",
+          "docs/reports/goal-c-u/2026-07-01-bounded-coactivation-latch-current-state.md"
+        ]
+      }
+    ],
+    "decision_points": [
+      {
+        "question": "Should stale owner-gated wording block current work?",
+        "decision": "No. Source and tests showed the v38 bounded latch already landed and passed targeted gates.",
+        "reason": "Treating stale docs as active gates would send future agents into duplicate implementation work."
+      },
+      {
+        "question": "Should this trigger a code change?",
+        "decision": "No implementation change was needed. The safe action was documentation and queue-state correction.",
+        "reason": "The behavior was already present and verified; changing code would add risk without value."
+      }
+    ],
+    "artifacts": {
+      "files_changed": [
+        "docs/design/BOUNDED_COACTIVATION_LATCH_2026_06_28.md",
+        "docs/reports/goal-c-u/2026-07-01-bounded-coactivation-latch-current-state.md",
+        "docs/reports/goal-c-u/2026-07-01-agent-bridge-open-queue-staleness-audit.md",
+        "docs/reports/goal-c-u/2026-07-01-reversible-autonomy-task-replan.md"
+      ]
+    }
+  },
+  "outcome": {
+    "status": "success",
+    "behavior_change": "No runtime behavior changed. Stale docs and queue entries were corrected so bounded coactivation latch is treated as implemented/verified, not as active owner-gated implementation work.",
+    "evidence": [
+      "current-state report added for bounded coactivation latch",
+      "design doc header marks historical propose-only status as superseded",
+      "queue/replan reports moved bounded latch from gated work to closed/verified work",
+      "durable memory key bounded_coactivation_latch_v38_implemented_verified_20260701 saved"
+    ],
+    "known_limits": [
+      "This does not retune stale_window_secs or max_latched_edges.",
+      "This does not change coactivation runtime behavior.",
+      "Future tuning still needs separate measurement if live immune-set pressure changes."
+    ]
+  },
+  "reflection": {
+    "lesson": "When a board or design doc says owner-gated/not implemented, verify against source, tests, live schema, and durable memory before planning implementation. Stale gate text should be corrected as queue hygiene, not obeyed as a current blocker.",
+    "reusable_workflow": [
+      "read the design doc status and the corresponding source sections",
+      "run targeted implementation tests",
+      "probe live state read-only when safe",
+      "write a current-state report before changing queue status",
+      "update stale docs narrowly and avoid unrelated refactors",
+      "save durable memory so future sessions do not repeat the audit"
+    ],
+    "falsifier": "If a future source audit finds the latch wiring removed or tests failing, reopen the implementation lane and mark this fixture stale."
+  },
+  "promotion": {
+    "skill_candidate": false,
+    "runbook_candidate": true,
+    "memory_lesson_candidate": true,
+    "runtime_influence_allowed": false,
+    "owner_gate_required": false,
+    "suggested_trigger": "When a stale board, work_memory row, or design document describes an already-landed feature as owner-gated, not implemented, or pending."
+  },
+  "source_anchors": {
+    "memory_keys": [
+      "bounded_coactivation_latch_v38_implemented_verified_20260701"
+    ],
+    "commits": [
+      "6ba64be",
+      "d63affd"
+    ],
+    "files": [
+      "docs/reports/goal-c-u/2026-07-01-bounded-coactivation-latch-current-state.md",
+      "docs/design/BOUNDED_COACTIVATION_LATCH_2026_06_28.md"
+    ]
+  },
+  "safety": {
+    "fixture_writes_memory": false,
+    "fixture_changes_runtime": false,
+    "fixture_changes_retrieval_order": false,
+    "fixture_authorizes_future_runtime_influence": false
+  }
+}
