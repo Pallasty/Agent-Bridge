@@ -2,7 +2,7 @@
 
 Date: 2026-07-01
 
-Status: `STANDING_AUTH_PACKET / DOCS_ONLY / NO_RUNTIME_CHANGE`
+Status: `STANDING_AUTH_PACKET / S1_PASSED / LONG_LIVED_COSURFACE_DISABLED`
 
 ## Decision
 
@@ -58,6 +58,11 @@ subprocesses over copied databases, with the flag off and on. It did not write
 to the live memory store and did not enable the flag in live Codex/Cursor MCP
 sessions or daemons.
 
+`2026-07-01-correction-cosurface-s1-closeout.md` is the S1 closeout: it
+exercised short-lived installed-binary MCP subprocesses against the live store,
+after a SQLite backup, and verified that no long-lived process kept the env flag
+afterward.
+
 Live store read-only probe:
 
 ```text
@@ -87,13 +92,15 @@ Execution should be scoped to one of these levels:
 |---|---|---|---|
 | S0 | Offline or frozen-copy shadow expansion | No live runtime behavior change | Autonomous |
 | S0.5 | Copied-DB MCP A/B smoke | Real MCP tool path, still no live-store write | Done at `ec80b97` |
-| S1 | Short-lived installed-binary MCP subprocess with env enabled | Live read-path experiment in an isolated child process | Authorized, but not currently needed; see S1 closeout |
+| S1 | Short-lived installed-binary MCP subprocess with env enabled | Live read-path experiment in an isolated child process | Done; passed in `2026-07-01-correction-cosurface-s1-closeout.md` |
 | S2 | Time-bounded daemon or active MCP client window | Shared local runtime behavior change | Only after S1 passes and rollback is recorded |
 
-S0.5 already validated the real MCP stdio tool path against copied stores. The
-S1 closeout records why a live-store child-process trial is not worth running
-now: it would add normal `memory_search` telemetry/coactivation side effects
-without adding material B1 correctness signal. S2 is not warranted.
+S1 has now passed. The next escalation, if more evidence is needed, is S2: a
+time-bounded daemon or active-client window. S2 is meaningfully broader than S1
+because it affects long-lived active clients or daemons, so it needs a separate
+closeout with start/stop times, affected process ids, rollback, and keep-disable
+or keep-enable recommendation. S2 is not warranted by the current targeted
+evidence.
 
 ## Non-Goals
 
@@ -279,14 +286,15 @@ Post this packet to thread #102 as a status/update, not as a per-step approval
 request:
 
 ```text
-Standing-auth update: S1 correction co-surface controlled A/B can proceed as a
+Standing-auth update: S1 correction co-surface controlled A/B passed as a
 reversible local child-process trial.
 Scope: local short-lived installed-binary MCP subprocess only.
 Flag: AGENT_BRIDGE_CORRECTION_COSURFACE=1.
 No daemon restart, deploy, schema change, memory content write, or edge backfill.
-Output: top-k diff closeout and keep-disabled/keep-enabled recommendation.
+Output: keep disabled unless S2 is separately recorded.
 ```
 
 ## Boundary
 
-This report is the gate packet. It does not execute the gate.
+This report is the gate packet. The S1 closeout is recorded separately; this
+packet does not authorize S2 or broad default enablement.
