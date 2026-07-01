@@ -77,11 +77,13 @@ Results:
 Supplemental verification in a later session:
 
 ```text
+cargo test -p ab-bridge --lib memory_related_keys -- --nocapture
 cargo test -p ab-bridge memory_related_keys_materialize --no-default-features
 ```
 
 Result:
 
+- focused `--lib memory_related_keys`: 11 passed, 0 failed
 - 5 related tests passed
 - 0 failed
 
