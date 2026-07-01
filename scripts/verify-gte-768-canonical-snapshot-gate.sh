@@ -26,8 +26,12 @@ search_roots_raw="${AB_GTE_SNAPSHOT_SEARCH_ROOTS:-$(ab_default_cache_dir):$(ab_d
 expect_active="${AB_GTE_EXPECT_ACTIVE:-}"
 expect_edges="${AB_GTE_EXPECT_EDGES:-}"
 expect_newest="${AB_GTE_EXPECT_NEWEST:-}"
+expect_corpus_total="${AB_GTE_EXPECT_CORPUS_TOTAL:-}"
+expect_corpus_present="${AB_GTE_EXPECT_CORPUS_PRESENT:-}"
+expect_corpus_active="${AB_GTE_EXPECT_CORPUS_ACTIVE:-}"
 run_rehearsal=false
 run_preflight=true
+check_corpus=false
 strict=false
 
 usage() {
@@ -46,6 +50,14 @@ Flags:
   --expect-active N    Optional expected active-memory count for --snapshot.
   --expect-edges N     Optional expected memory-edge count for --snapshot.
   --expect-newest N    Optional expected newest created_at for --snapshot.
+  --check-corpus       Run recall_eval --check-corpus against --snapshot.
+                       Rehearsal mode always records corpus health for the copy.
+  --expect-corpus-total N
+                       Optional expected defined corpus case count.
+  --expect-corpus-present N
+                       Optional expected corpus cases with present expected keys.
+  --expect-corpus-active N
+                       Optional expected corpus cases with active expected keys.
   --skip-preflight     Do not call verify-gte-768-preflight.sh first.
   --run-rehearsal      Copy --snapshot into scratch, reindex that copy, and run
                        recall_eval against the copy. Requires --snapshot.
@@ -65,6 +77,8 @@ Statuses:
   NO_GO_SNAPSHOT_HAS_WAL            --snapshot has a non-empty WAL sidecar;
   NO_GO_SNAPSHOT_FINGERPRINT_MISMATCH explicit snapshot does not match an
                                       expected logical fingerprint;
+  NO_GO_CORPUS_HEALTH_FAILED        recall_eval --check-corpus could not run;
+  NO_GO_CORPUS_HEALTH_MISMATCH      corpus health did not match expectations;
   READY_FOR_CANONICAL_REHEARSAL     explicit snapshot is safe to rehearse;
   REHEARSAL_COMPLETED_REVIEW_METRICS scratch reindex + recall_eval completed.
 USAGE
@@ -104,6 +118,22 @@ while [ "$#" -gt 0 ]; do
             expect_newest="${2:-}"
             shift 2
             ;;
+        --check-corpus)
+            check_corpus=true
+            shift
+            ;;
+        --expect-corpus-total)
+            expect_corpus_total="${2:-}"
+            shift 2
+            ;;
+        --expect-corpus-present)
+            expect_corpus_present="${2:-}"
+            shift 2
+            ;;
+        --expect-corpus-active)
+            expect_corpus_active="${2:-}"
+            shift 2
+            ;;
         --skip-preflight)
             run_preflight=false
             shift
@@ -127,6 +157,10 @@ while [ "$#" -gt 0 ]; do
             ;;
     esac
 done
+
+if [ -n "$expect_corpus_total" ] || [ -n "$expect_corpus_present" ] || [ -n "$expect_corpus_active" ]; then
+    check_corpus=true
+fi
 
 say() { printf '%s\n' "$*"; }
 
@@ -179,6 +213,61 @@ print(f"{active} {edges} {newest}")
 PY
 }
 
+extract_health_value() {
+    local output_path="$1"
+    local key="$2"
+    awk -v key="$key" '$1 == key {print $2; exit}' "$output_path"
+}
+
+assert_expected_health_value() {
+    local label="$1"
+    local actual="$2"
+    local expected="$3"
+    if [ -n "$expected" ] && [ "$actual" != "$expected" ]; then
+        block "NO_GO_CORPUS_HEALTH_MISMATCH" "$label mismatch: expected $expected got ${actual:-<missing>}"
+    fi
+}
+
+check_recall_corpus_health() {
+    local db_path="$1"
+    local log_path="${2:-}"
+    local tmp
+    tmp="$(mktemp)"
+
+    if [ -n "$log_path" ]; then
+        if ! AB_BASELINE_DB="$db_path" \
+            AGENT_BRIDGE_ONNX_MODEL="$model_name" \
+            cargo run -p ab-bridge --example recall_eval -- --check-corpus \
+            2>&1 | tee "$log_path" | tee "$tmp"; then
+            block "NO_GO_CORPUS_HEALTH_FAILED" "recall_eval --check-corpus failed for $db_path"
+            rm -f "$tmp"
+            return
+        fi
+    else
+        if ! AB_BASELINE_DB="$db_path" \
+            AGENT_BRIDGE_ONNX_MODEL="$model_name" \
+            cargo run -p ab-bridge --example recall_eval -- --check-corpus \
+            2>&1 | tee "$tmp"; then
+            block "NO_GO_CORPUS_HEALTH_FAILED" "recall_eval --check-corpus failed for $db_path"
+            rm -f "$tmp"
+            return
+        fi
+    fi
+
+    local cases_total
+    local cases_present
+    local cases_active
+    cases_total="$(extract_health_value "$tmp" "cases_total:")"
+    cases_present="$(extract_health_value "$tmp" "cases_with_present:")"
+    cases_active="$(extract_health_value "$tmp" "cases_with_active:")"
+
+    say "corpus_health_summary=cases_total=${cases_total:-unknown} cases_with_present=${cases_present:-unknown} cases_with_active=${cases_active:-unknown}"
+    assert_expected_health_value "corpus cases_total" "$cases_total" "$expect_corpus_total"
+    assert_expected_health_value "corpus cases_with_present" "$cases_present" "$expect_corpus_present"
+    assert_expected_health_value "corpus cases_with_active" "$cases_active" "$expect_corpus_active"
+    rm -f "$tmp"
+}
+
 is_live_db() {
     local path="$1"
     ab_same_file "$path" "$live_db"
@@ -197,7 +286,7 @@ classify_db_path() {
         *"/recovery/"*)
             printf 'local_recovery_snapshot_not_canonical_by_itself'
             ;;
-        *4016*|*frozen*|*Frozen*|*canonical*|*Canonical*|*mac*|*Mac*|*baseline*|*Baseline*)
+        *4016*|*frozen*|*Frozen*|*canonical*|*Canonical*|*mac*|*Mac*|*baseline*|*Baseline*|*snapshot*|*Snapshot*|*checkpointed*|*Checkpointed*)
             printf 'name_suggests_canonical_candidate'
             ;;
         *)
@@ -214,11 +303,13 @@ say "model:       $model_name"
 say "model_dir:   $model_base/$model_name"
 say "scratch:     $scratch_base"
 say "expect:      active=${expect_active:-<unset>} edges=${expect_edges:-<unset>} newest=${expect_newest:-<unset>}"
+say "corpus:      check=$check_corpus total=${expect_corpus_total:-<unset>} present=${expect_corpus_present:-<unset>} active=${expect_corpus_active:-<unset>}"
 say
 
 say "## Reference contract"
 say "source: forum #105/#2550 and docs/reports/goal-c-u/2026-06-25-gte-768-local-rehearsal.md"
 say "boundary: no live cut-over until recall benefit is reproduced on the canonical frozen snapshot"
+say "corpus boundary: canonical recall metrics must also record recall_eval expected-key health"
 say
 
 if [ "$run_preflight" = true ]; then
@@ -308,6 +399,12 @@ else
     fi
 fi
 
+if [ "$check_corpus" = true ] && [ -n "$snapshot_path" ] && [[ "$status" != NO_GO_* ]]; then
+    say
+    say "## Source snapshot recall_eval corpus health"
+    check_recall_corpus_health "$snapshot_path"
+fi
+
 if [ "$run_rehearsal" = true ]; then
     say
     say "## Scratch rehearsal"
@@ -323,18 +420,24 @@ if [ "$run_rehearsal" = true ]; then
         say "copied_sha256=$(sha_or_unknown "$out_dir/state.db")"
         say
 
-        say "### Reindex copy"
-        AGENT_BRIDGE_ONNX_MODEL="$model_name" \
-            cargo run -p ab-store --example reindex_to_active_model -- "$out_dir/state.db" \
-            2>&1 | tee "$out_dir/reindex.log"
+        say "### recall_eval corpus health on copied snapshot"
+        check_recall_corpus_health "$out_dir/state.db" "$out_dir/recall_eval.check_corpus.log"
         say
 
-        say "### recall_eval on reindexed copy"
-        AB_BASELINE_DB="$out_dir/state.db" \
+        if [[ "$status" != NO_GO_* ]]; then
+            say "### Reindex copy"
             AGENT_BRIDGE_ONNX_MODEL="$model_name" \
-            cargo run -p ab-bridge --example recall_eval \
-            2>&1 | tee "$out_dir/recall_eval.log"
-        status="REHEARSAL_COMPLETED_REVIEW_METRICS"
+                cargo run -p ab-store --example reindex_to_active_model -- "$out_dir/state.db" \
+                2>&1 | tee "$out_dir/reindex.log"
+            say
+
+            say "### recall_eval on reindexed copy"
+            AB_BASELINE_DB="$out_dir/state.db" \
+                AGENT_BRIDGE_ONNX_MODEL="$model_name" \
+                cargo run -p ab-bridge --example recall_eval \
+                2>&1 | tee "$out_dir/recall_eval.log"
+            status="REHEARSAL_COMPLETED_REVIEW_METRICS"
+        fi
     fi
 fi
 
