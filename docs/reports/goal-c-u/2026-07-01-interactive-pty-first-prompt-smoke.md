@@ -8,11 +8,11 @@ Scope: post-boot-settle evidence for `agent_spawn(interactive=true)` runtimes
 ## Why
 
 Commit `2d1c873` added a boot-settle delay before the initial prompt is written
-to real interactive TUIs. The unit tests cover the shared initial-prompt path,
-but the live evidence ledger still needed a small follow-up smoke after the
-current MCP relink and the recall-eval cleanup.
+to real interactive TUIs. This report records the post-relink smoke and the
+follow-up deterministic unit coverage that made the boot-settle contract visible
+across every supported local interactive runtime.
 
-This report records the local evidence gathered before moving to the next lane.
+The local evidence below was gathered before moving to the next lane.
 
 ## Environment
 
@@ -48,13 +48,41 @@ cargo test -p ab-agent interactive_initial_prompt -- --nocapture
 Result:
 
 ```text
-running 5 tests
-test opencode_family::tests::interactive_initial_prompt_waits_for_tui_boot_settle ... ok
-test opencode_family::tests::interactive_initial_prompt_is_submitted_as_first_turn ... ok
+running 8 tests
 test claude_code::tests::interactive_initial_prompt_is_submitted_as_first_turn ... ok
+test claude_code::tests::interactive_initial_prompt_waits_for_tui_boot_settle ... ok
 test codex::tests::interactive_initial_prompt_is_submitted_as_first_turn ... ok
+test codex::tests::interactive_initial_prompt_waits_for_tui_boot_settle ... ok
 test gemini::tests::interactive_initial_prompt_is_submitted_as_first_turn ... ok
-test result: ok. 5 passed; 0 failed
+test gemini::tests::interactive_initial_prompt_waits_for_tui_boot_settle ... ok
+test opencode_family::tests::interactive_initial_prompt_is_submitted_as_first_turn ... ok
+test opencode_family::tests::interactive_initial_prompt_waits_for_tui_boot_settle ... ok
+test result: ok. 8 passed; 0 failed
+```
+
+Follow-up commit:
+
+```text
+be3357a test(agent): cover initial prompt boot settle across runtimes
+```
+
+That commit adds deterministic delayed-ready stand-in tests for `claude-code`,
+`codex`, and `gemini`, matching the already-existing `opencode_family` boot
+settle test. The stand-in drains early stdin before printing `READY` and then
+execs `cat`; the initial prompt must therefore be submitted after startup
+settles, or it will be lost.
+
+Full `ab-agent` validation after the follow-up:
+
+```sh
+cargo test -p ab-agent -- --nocapture
+```
+
+Result:
+
+```text
+running 74 tests
+test result: ok. 74 passed; 0 failed
 ```
 
 Claude Code PTY plumbing regression:
