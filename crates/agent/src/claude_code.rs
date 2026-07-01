@@ -28,7 +28,7 @@ use dashmap::DashMap;
 use std::collections::HashMap;
 use std::process::Stdio;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::process::Command;
 use tracing::{info, warn};
 
@@ -115,7 +115,7 @@ impl ClaudeCodeRuntime {
             &self.store,
             &self.interactive,
             cfg,
-            pty_interactive::SubmitProfile::ENTER,
+            pty_interactive::SubmitProfile::ENTER.with_initial_prompt_delay(Duration::from_secs(3)),
         )
         .await
     }

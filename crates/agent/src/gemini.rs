@@ -92,7 +92,8 @@ impl GeminiRuntime {
             // gemini: bare CR submit, but split off after a render settle — the
             // Ink TUI drops a combined text+CR write (real-binary verified
             // 2026-06-30: combined never submits, split @600ms round-trips).
-            submit: pty_interactive::SubmitProfile::ENTER_SETTLED,
+            submit: pty_interactive::SubmitProfile::ENTER_SETTLED
+                .with_initial_prompt_delay(Duration::from_secs(3)),
         }
     }
 

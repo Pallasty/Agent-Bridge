@@ -32,7 +32,7 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::process::Command;
 use tracing::{info, warn};
 
@@ -83,7 +83,8 @@ impl OpenCodeFamilyRuntime {
             // about). Empirically combined-CR fails; both KITTY_ENTER and a
             // CR-after-settle round-trip. Use KITTY_ENTER, matching codex and the
             // TUI's own Kitty-native contract.
-            submit: pty_interactive::SubmitProfile::KITTY_ENTER,
+            submit: pty_interactive::SubmitProfile::KITTY_ENTER
+                .with_initial_prompt_delay(Duration::from_secs(3)),
         }
     }
 
@@ -113,7 +114,8 @@ impl OpenCodeFamilyRuntime {
             // VERIFIED against the real kilo TUI (tests/kilo_real_interactive.rs):
             // it emits no Kitty keyboard protocol and uses bracketed paste, so a
             // bare CR submits — proven by a multi-turn 42/99 round-trip.
-            submit: pty_interactive::SubmitProfile::ENTER,
+            submit: pty_interactive::SubmitProfile::ENTER
+                .with_initial_prompt_delay(Duration::from_secs(3)),
         }
     }
 
@@ -1044,6 +1046,47 @@ mod tests {
         assert!(
             ok,
             "initial_prompt should be typed + submitted as the first turn"
+        );
+        rt.kill(&sess.id).await.expect("kill");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn interactive_initial_prompt_waits_for_tui_boot_settle() {
+        let rt = OpenCodeFamilyRuntime::kilo()
+            .with_binary("/bin/bash")
+            .with_interactive_args([
+                "-lc",
+                "while IFS= read -r -t 0.2 _line; do :; done; printf 'READY\\n'; exec cat",
+            ]);
+        let sess = rt
+            .spawn(SpawnConfig {
+                cwd: "/tmp".into(),
+                interactive: true,
+                initial_prompt: Some("boot-settle-marker".into()),
+                ..Default::default()
+            })
+            .await
+            .expect("spawn delayed-ready stand-in");
+
+        let ready = wait_for(3000, 25, || {
+            rt.read_interactive_output(&sess.id)
+                .map(|o| o.contains("READY"))
+                .unwrap_or(false)
+        })
+        .await;
+        assert!(ready, "stand-in should reach its post-drain READY state");
+
+        let submitted_after_ready = wait_for(5000, 25, || {
+            rt.read_interactive_output(&sess.id)
+                .map(|o| o.contains("boot-settle-marker"))
+                .unwrap_or(false)
+        })
+        .await;
+        assert!(
+            submitted_after_ready,
+            "initial_prompt should be submitted after the TUI boot settle; \
+             an immediate write would be drained before READY and never echoed"
         );
         rt.kill(&sess.id).await.expect("kill");
     }

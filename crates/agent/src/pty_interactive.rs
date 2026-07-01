@@ -40,6 +40,10 @@ pub struct SubmitProfile {
     /// single combined write (legacy line REPLs); non-zero splits the two writes
     /// and waits in between so a TUI can render the input first.
     pub settle: Duration,
+    /// Delay after spawning a live TUI before sending the optional first prompt.
+    /// Full-screen TUIs often ignore input sent during alternate-screen startup;
+    /// line-REPL stand-ins keep this at zero.
+    pub initial_prompt_delay: Duration,
 }
 
 impl SubmitProfile {
@@ -47,12 +51,14 @@ impl SubmitProfile {
     pub const ENTER: SubmitProfile = SubmitProfile {
         key: "\r",
         settle: Duration::ZERO,
+        initial_prompt_delay: Duration::ZERO,
     };
     /// Kitty-keyboard-protocol TUI (codex): submit on CSI-u Enter after a render
     /// settle, written separately from the text.
     pub const KITTY_ENTER: SubmitProfile = SubmitProfile {
         key: "\x1b[13u",
         settle: Duration::from_millis(500),
+        initial_prompt_delay: Duration::ZERO,
     };
     /// Ink/React TUI (gemini): submits on a **bare CR** like a line REPL, but the
     /// CR must be written *separately* from the text after a render settle — Ink
@@ -63,7 +69,13 @@ impl SubmitProfile {
     pub const ENTER_SETTLED: SubmitProfile = SubmitProfile {
         key: "\r",
         settle: Duration::from_millis(600),
+        initial_prompt_delay: Duration::ZERO,
     };
+
+    pub fn with_initial_prompt_delay(mut self, delay: Duration) -> Self {
+        self.initial_prompt_delay = delay;
+        self
+    }
 }
 
 /// Write one turn — the text then the submit key — honouring a runtime's
@@ -146,6 +158,9 @@ pub async fn spawn_interactive(
     // Optional first turn: type the initial prompt and submit it.
     if let Some(p) = cfg.initial_prompt.as_deref() {
         if !p.is_empty() {
+            if !submit.initial_prompt_delay.is_zero() {
+                tokio::time::sleep(submit.initial_prompt_delay).await;
+            }
             if let Err(e) = submit_turn(&session, p, submit).await {
                 warn!(session = %session_id, runtime = %runtime_id, error = %e, "interactive: initial prompt write failed");
             }
