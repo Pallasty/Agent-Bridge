@@ -1,0 +1,33 @@
+{
+  "schema": "agent_bridge.workflow_feedback_shadow_score_scenarios.v0",
+  "read_only": true,
+  "purpose": "Held-out workflow scenario for the correction co-surface S1 closeout Experience Object. This tests whether a future gated retrieval experiment retrieves the process-scoped env trial lesson before any long-lived/default enablement.",
+  "scenario_cases": [
+    {
+      "scenario_id": "correction_cosurface_s1_env_gate_parallel_closeout",
+      "scenario": "A future Agent-Bridge session is evaluating correction co-surface behavior and must use a subprocess env trial with backup, exclude_kinds checks, limit checks, rollback env scan, long lived flag disabled, and no S2 daemon window.",
+      "expected_top_experience_id": "exp_20260701_correction_cosurface_s1_pass",
+      "review_intent": "The scorer should rank the correction co-surface S1 pass experience above generic workflow-feedback process lessons and unrelated interactive-agent runtime repairs."
+    }
+  ],
+  "recommended_call": {
+    "tool": "agent-bridge CLI",
+    "command": "agent-bridge workflow-feedback-shadow-score --fixture docs/design/fixtures/workflow-feedback-experience-agent-send-input-2026-06-30.json --fixture docs/design/fixtures/workflow-feedback-experience-report-cli-2026-06-30.json --fixture docs/design/fixtures/workflow-feedback-experience-correction-cosurface-s1-2026-07-01.json --scenario '<scenario_cases[0].scenario>' --json"
+  },
+  "expected_summary_contract": {
+    "schema": "agent_bridge.workflow_feedback_shadow_score.v0",
+    "read_only": true,
+    "candidate_count": 3,
+    "boundary.writes_memory": false,
+    "boundary.mutates_runtime_policy": false,
+    "boundary.changes_retrieval_order": false,
+    "boundary.runtime_influence_allowed": false,
+    "rankings[0].ranked_candidates[0].experience_id": "exp_20260701_correction_cosurface_s1_pass"
+  },
+  "safety": {
+    "fixture_writes_memory": false,
+    "fixture_changes_runtime": false,
+    "fixture_changes_retrieval_order": false,
+    "fixture_authorizes_future_runtime_influence": false
+  }
+}

@@ -1,0 +1,168 @@
+{
+  "schema": "agent_bridge.experience.v0",
+  "experience_id": "exp_20260701_correction_cosurface_s1_keep_disabled",
+  "created_at": "2026-07-01T19:30:00Z",
+  "scope": "project:/Data/CascadeProjects/agent-bridge",
+  "lane": "correction_cosurface_standing_auth_s1_keep_disabled",
+  "goal": "Validate the default-off correction co-surface read path under standing reversible authorization, close S1 with evidence, and keep long-lived AGENT_BRIDGE_CORRECTION_COSURFACE disabled.",
+  "plan": [
+    "confirm the corrects edge backfill and shadow diff evidence are complete",
+    "run copied-DB MCP A/B smoke with AGENT_BRIDGE_CORRECTION_COSURFACE off and on",
+    "add a pure env-gate parser test plus direct B1 co-surface behavior coverage",
+    "align the enablement packet with standing reversible authorization",
+    "run a short-lived live-store MCP child-process S1 trial after a SQLite backup",
+    "verify no long-lived process retains AGENT_BRIDGE_CORRECTION_COSURFACE and keep S2 disabled"
+  ],
+  "trajectory": {
+    "source_commits": [
+      {
+        "commit": "ec80b97",
+        "subject": "docs(memory): record correction cosurface mcp smoke",
+        "role": "copied-DB real MCP A/B smoke"
+      },
+      {
+        "commit": "d9189cb",
+        "subject": "test(memory): cover correction cosurface gate",
+        "role": "default-off/truthy env gate and B1 behavior coverage"
+      },
+      {
+        "commit": "0603206",
+        "subject": "docs(memory): record correction cosurface s1 pass",
+        "role": "live-store S1 child-process pass evidence"
+      },
+      {
+        "commit": "dd88a74",
+        "subject": "docs(memory): correct cosurface s1 postcheck",
+        "role": "postcheck honesty correction"
+      }
+    ],
+    "tool_spans": [
+      {
+        "tool": "agent-bridge.real mcp",
+        "purpose": "run copied-DB off/on A/B smoke through the real MCP stdio memory_search path",
+        "outcome": "success",
+        "observation": "enabled subprocess inserted the active correction immediately after the visible corrected original while feedback exclusion and limit bounds held"
+      },
+      {
+        "tool": "cargo test",
+        "purpose": "pin the default-off AGENT_BRIDGE_CORRECTION_COSURFACE truthy parser",
+        "outcome": "success",
+        "command": "CARGO_BUILD_JOBS=1 cargo test -p ab-bridge correction_cosurface_default_off_unless_truthy -- --nocapture"
+      },
+      {
+        "tool": "cargo test",
+        "purpose": "pin direct B1 co-surface insertion, no duplicate, inactive skip, and exclude_kinds behavior",
+        "outcome": "success",
+        "command": "CARGO_BUILD_JOBS=1 cargo test -p ab-bridge b1_cosurface_inserts_corrector_after_corrected_original -- --nocapture"
+      },
+      {
+        "tool": "sqlite3 backup API",
+        "purpose": "create rollback anchor before live-store S1 child-process trial",
+        "outcome": "success",
+        "evidence": [
+          "backup=/home/pallasting/.local/share/agent-bridge/backups/state.before-correction-cosurface-s1-live-subprocess.20260701T191536Z.db",
+          "sha256=984516adeb577ea6e10c667281e1790287cf093b3d3f736a7318d7f223a3a817"
+        ]
+      },
+      {
+        "tool": "process env scan",
+        "purpose": "verify rollback after the S1 child-process trial",
+        "outcome": "success",
+        "observation": "0 visible long-lived processes retained AGENT_BRIDGE_CORRECTION_COSURFACE"
+      }
+    ],
+    "decision_points": [
+      {
+        "question": "Should copied-DB MCP smoke be treated as enough to enable long-lived runtime behavior?",
+        "decision": "No. It validates the real tool path without live-store writes, but long-lived runtime enablement still needs a separate S2 packet.",
+        "reason": "Default-off behavior should remain unless there is a clear organic live-user impact need."
+      },
+      {
+        "question": "Should S1 be blocked on a fresh owner prompt after standing reversible authorization?",
+        "decision": "No. A short-lived local child process with backup, evidence, and termination rollback fits the standing reversible-operation rule.",
+        "reason": "The operation is local, bounded, reversible, and recorded."
+      },
+      {
+        "question": "Should S2 run after S1 passed?",
+        "decision": "No. S1 is positive targeted evidence, but it does not measure broad organic live-user impact.",
+        "reason": "S2 would affect long-lived active clients or daemons and needs a separate start/stop and rollback packet."
+      }
+    ],
+    "artifacts": {
+      "files_changed": [
+        "crates/bridge/src/mcp_tools.rs",
+        "docs/reports/goal-c-u/2026-07-01-correction-cosurface-mcp-ab-smoke.md",
+        "docs/reports/goal-c-u/2026-07-01-correction-cosurface-ab-enablement-packet.md",
+        "docs/reports/goal-c-u/2026-07-01-correction-cosurface-s1-closeout.md"
+      ],
+      "forum_posts": [
+        2766,
+        2771
+      ]
+    }
+  },
+  "outcome": {
+    "status": "success",
+    "behavior_change": "No long-lived runtime behavior changed. The gated correction co-surface path is verified for copied-DB and live-store child-process trials while remaining default-off for active MCP/daemon processes.",
+    "evidence": [
+      "copied-DB MCP A/B smoke passed through real stdio memory_search path",
+      "S1 live-store child-process trial passed after SQLite backup",
+      "targeted query suite inserted the correction after the original, preserved feedback exclusion, avoided duplicates, and kept pages within limit",
+      "14 visible agent-bridge related processes were checked and 0 retained AGENT_BRIDGE_CORRECTION_COSURFACE",
+      "MCP tool telemetry reported failing_tool_count=0 after the trial"
+    ],
+    "known_limits": [
+      "The evidence is targeted to the known correction-edge case, not broad organic live-user impact.",
+      "S1 uses normal memory_search and may write ordinary telemetry/access/coactivation rows.",
+      "S2 long-lived daemon or active-client enablement remains unwarranted."
+    ]
+  },
+  "reflection": {
+    "lesson": "For gated retrieval read-path changes, separate copied-DB tool-path proof, short-lived live child-process proof, and long-lived runtime windows. Standing reversible authorization can cover S1 when rollback is process termination plus env verification, but it should not collapse into S2.",
+    "reusable_workflow": [
+      "backfill or verify graph edges first",
+      "run static or copied-DB shadow diff before live trials",
+      "pin the env gate with a pure parser test",
+      "use an installed-binary child process for scoped live-store S1",
+      "create a DB backup before normal memory_search side effects",
+      "terminate the child process and scan long-lived process env",
+      "keep long-lived flags disabled unless a separate S2 packet is justified"
+    ],
+    "falsifier": "If future correction cases show broad negative movement, feedback leakage despite exclude_kinds, duplicate corrections, or page growth beyond limit, reopen B1 and keep the env flag disabled."
+  },
+  "promotion": {
+    "skill_candidate": false,
+    "runbook_candidate": true,
+    "memory_lesson_candidate": true,
+    "runtime_influence_allowed": false,
+    "owner_gate_required": false,
+    "suggested_trigger": "When validating default-off retrieval read-path flags, correction co-surface behavior, S1 child-process trials, or deciding whether S2 daemon enablement is warranted."
+  },
+  "source_anchors": {
+    "memory_keys": [
+      "correction_cosurface_s1_closed_keep_disabled_20260701",
+      "correction_cosurface_s1_standing_auth_boundary_20260701"
+    ],
+    "forum": [
+      {
+        "thread": 102,
+        "posts": [
+          2766,
+          2771
+        ]
+      }
+    ],
+    "commits": [
+      "ec80b97",
+      "d9189cb",
+      "0603206",
+      "dd88a74"
+    ]
+  },
+  "safety": {
+    "fixture_writes_memory": false,
+    "fixture_changes_runtime": false,
+    "fixture_changes_retrieval_order": false,
+    "fixture_authorizes_future_runtime_influence": false
+  }
+}
