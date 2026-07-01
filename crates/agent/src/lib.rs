@@ -128,5 +128,16 @@ pub trait AgentRuntime: Send + Sync {
         None
     }
 
+    /// Snapshot the merged live PTY output of an interactive `session`, if this
+    /// runtime is tracking one. Returns `None` for non-interactive runtimes,
+    /// unknown sessions, or sessions that have already exited and been finalised
+    /// to the [`StateStore`] (read the persisted `stdout` for those). Surfaced
+    /// via `agent_session_output` so programmatic multi-turn callers can read a
+    /// reply before the next [`AgentRuntime::send_input`]. Default impl returns
+    /// `None` so runtimes without interactive support stay trait-compatible.
+    fn read_interactive_output(&self, _session: &SessionId) -> Option<String> {
+        None
+    }
+
     async fn capabilities(&self) -> AgentCapabilities;
 }

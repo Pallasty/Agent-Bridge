@@ -333,6 +333,13 @@ impl AgentRuntime for CodexRuntime {
         self.children.get(session.as_str()).map(|kv| *kv)
     }
 
+    /// Trait-level exposure of the live interactive PTY buffer (Kitty-Enter
+    /// TUI) so `agent_session_output` can read a reply through `dyn
+    /// AgentRuntime`; mirrors inherent [`CodexRuntime::read_interactive_output`].
+    fn read_interactive_output(&self, session: &SessionId) -> Option<String> {
+        pty_interactive::interactive_output(&self.interactive, session)
+    }
+
     async fn capabilities(&self) -> AgentCapabilities {
         AgentCapabilities {
             supports_mcp: true,

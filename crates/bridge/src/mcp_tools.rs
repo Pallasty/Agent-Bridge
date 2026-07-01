@@ -17632,6 +17632,103 @@ impl McpTool for AgentSessionGetTool {
     }
 }
 
+// ===========================================================================
+//                       agent_session_output (v0.9)
+// ===========================================================================
+
+/// Read the live PTY transcript of an interactive session. `agent_send_input`
+/// only confirms `status:"sent"` and `agent_session_get` shows `stdout:null`
+/// until a session finalises — so without this tool a programmatic multi-turn
+/// caller can drive an interactive agent but never read its replies. Closes the
+/// read side of the interactive contract (spawn + send + read + kill).
+pub struct AgentSessionOutputTool {
+    hub: Hub,
+}
+impl AgentSessionOutputTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for AgentSessionOutputTool {
+    fn name(&self) -> &'static str {
+        "agent_session_output"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read the merged PTY transcript of an agent session opened with \
+                 agent_spawn(interactive=true). For a still-running session it returns the \
+                 current in-memory buffer (source=\"live\") so a caller can read a reply \
+                 before the next agent_send_input turn; agent_send_input itself only \
+                 confirms delivery and does not echo output. For a finished session it \
+                 returns the stdout finalised to the store (source=\"finalized\"). A \
+                 one-shot session, or one whose runtime has no interactive buffer, returns \
+                 source=\"none\"."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": { "id": { "type": "string", "description": "Session id returned by agent_spawn." } },
+                "required": ["id"]
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        if let Err(e) = self.hub.security.check(Cap::AgentSpawn) {
+            return Ok(ToolResult::error(e));
+        }
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let id = match args.get("id").and_then(|v| v.as_str()) {
+            Some(s) => SessionId::from_raw(s.to_string()),
+            None => return Ok(ToolResult::error("missing 'id'")),
+        };
+        let session = match store.load_session(&id).await? {
+            Some(s) => s,
+            None => return Ok(ToolResult::error(format!("unknown agent session {id}"))),
+        };
+        // Finished sessions carry their full transcript in the persisted stdout;
+        // the live in-memory buffer is gone once the PTY finalises.
+        if session.ended_at.is_some() {
+            return Ok(ToolResult::json_text(&json!({
+                "id": id.as_str(),
+                "runtime_id": session.runtime_id,
+                "cwd": session.cwd,
+                "source": "finalized",
+                "ended": true,
+                "exit_code": session.exit_code,
+                "output": session.stdout.unwrap_or_default(),
+            })));
+        }
+        // Running session: pull the live buffer straight from the runtime.
+        let agent = match resolve_agent_for_session(&self.hub, &session) {
+            Ok(a) => a,
+            Err(e) => return Ok(ToolResult::error(e)),
+        };
+        match agent.read_interactive_output(&id) {
+            Some(output) => Ok(ToolResult::json_text(&json!({
+                "id": id.as_str(),
+                "runtime_id": session.runtime_id,
+                "cwd": session.cwd,
+                "source": "live",
+                "ended": false,
+                "output": output,
+            }))),
+            None => Ok(ToolResult::json_text(&json!({
+                "id": id.as_str(),
+                "runtime_id": session.runtime_id,
+                "cwd": session.cwd,
+                "source": "none",
+                "ended": false,
+                "output": Value::Null,
+                "note": "no live interactive buffer; this is a one-shot session or a runtime without interactive support",
+            }))),
+        }
+    }
+}
+
 pub struct AgentSessionWaitTool {
     hub: Hub,
 }
@@ -59520,6 +59617,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         &mut reg,
         policy,
         Tier::Essential,
+        Arc::new(AgentSessionOutputTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Essential,
         Arc::new(AgentSessionWaitTool::new(hub.clone())),
     );
     reg_if(
@@ -72270,6 +72373,88 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             }
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[test]
+    fn agent_session_output_schema_exposes_read_contract() {
+        let schema = AgentSessionOutputTool::new(crate::Hub::builder().build()).schema();
+        assert_eq!(schema.name, "agent_session_output");
+        assert!(schema.description.contains("interactive"));
+        assert!(schema.description.contains("agent_send_input"));
+        assert_eq!(schema.input_schema["properties"]["id"]["type"], "string");
+        assert_eq!(schema.input_schema["required"], json!(["id"]));
+    }
+
+    #[tokio::test]
+    async fn agent_session_output_reads_live_then_finalized_transcript() {
+        use ab_agent::AgentRuntime;
+
+        let (base_hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = base_hub.store.as_ref().expect("store").clone();
+        let rt = Arc::new(
+            ab_agent::ClaudeCodeRuntime::with_binary("/bin/cat").with_store(store.clone()),
+        );
+        let hub = crate::Hub::builder().store(store).agent(rt.clone()).build();
+
+        let session = rt
+            .spawn(SpawnConfig {
+                cwd: temp_dir.display().to_string(),
+                interactive: true,
+                ..Default::default()
+            })
+            .await
+            .expect("spawn interactive cat");
+
+        rt.send_input(&session.id, "read-side-marker")
+            .await
+            .expect("send turn");
+        assert!(
+            wait_for_claude_output(&rt, &session.id, "read-side-marker").await,
+            "cat should echo the marker into the live buffer"
+        );
+
+        // Running session -> live source, marker visible before finalise.
+        let live = AgentSessionOutputTool::new(hub.clone())
+            .execute(json!({"id": session.id.as_str()}), &ToolContext::default())
+            .await
+            .expect("session_output execute (live)");
+        assert!(
+            !live.is_error,
+            "session_output should succeed live: {live:?}"
+        );
+        let lp = result_text_as_json(&live);
+        assert_eq!(lp["source"], json!("live"));
+        assert_eq!(lp["ended"], json!(false));
+        assert_eq!(lp["runtime_id"], json!("claude-code"));
+        assert!(
+            lp["output"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("read-side-marker"),
+            "live output should contain the echoed marker: {lp:?}"
+        );
+
+        // After exit, the same tool serves the finalised transcript from the store.
+        rt.kill(&session.id).await.expect("kill");
+        let mut fp = Value::Null;
+        for _ in 0..80 {
+            let fin = AgentSessionOutputTool::new(hub.clone())
+                .execute(json!({"id": session.id.as_str()}), &ToolContext::default())
+                .await
+                .expect("session_output execute (finalized)");
+            fp = result_text_as_json(&fin);
+            if fp["source"] == json!("finalized") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert_eq!(
+            fp["source"],
+            json!("finalized"),
+            "should serve finalised transcript after exit: {fp:?}"
+        );
+        assert_eq!(fp["ended"], json!(true));
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 

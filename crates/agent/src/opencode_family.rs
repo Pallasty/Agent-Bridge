@@ -713,6 +713,13 @@ impl AgentRuntime for OpenCodeFamilyRuntime {
         self.children.get(session.as_str()).map(|kv| *kv)
     }
 
+    /// Trait-level exposure of the live interactive PTY buffer (bare-CR TUI)
+    /// so `agent_session_output` can read a reply through `dyn AgentRuntime`;
+    /// mirrors inherent [`OpenCodeFamilyRuntime::read_interactive_output`].
+    fn read_interactive_output(&self, session: &SessionId) -> Option<String> {
+        pty_interactive::interactive_output(&self.interactive, session)
+    }
+
     async fn capabilities(&self) -> AgentCapabilities {
         AgentCapabilities {
             supports_mcp: true,
@@ -970,6 +977,46 @@ mod tests {
         assert!(ok2, "turn 2 should echo — proves multi-turn interactive");
 
         rt.kill(&sess.id).await.expect("kill");
+    }
+
+    #[tokio::test]
+    async fn trait_read_interactive_output_surfaces_live_buffer() {
+        // The MCP `agent_session_output` tool reads through `dyn AgentRuntime`,
+        // so the trait method (not just the inherent one) must surface the live
+        // PTY buffer. Guards the read side of the interactive contract.
+        let rt = OpenCodeFamilyRuntime::kilo().with_binary("/bin/cat");
+        let dynrt: &dyn AgentRuntime = &rt;
+        let sess = dynrt
+            .spawn(SpawnConfig {
+                cwd: "/tmp".into(),
+                interactive: true,
+                ..Default::default()
+            })
+            .await
+            .expect("spawn interactive");
+        dynrt
+            .send_input(&sess.id, "gamma-three")
+            .await
+            .expect("turn");
+        let ok = wait_for(2000, 25, || {
+            dynrt
+                .read_interactive_output(&sess.id)
+                .map(|o| o.contains("gamma-three"))
+                .unwrap_or(false)
+        })
+        .await;
+        assert!(
+            ok,
+            "trait-dispatched read_interactive_output should surface the live PTY buffer"
+        );
+        // An unknown session id reads as None through the trait, never panics.
+        assert!(
+            dynrt
+                .read_interactive_output(&SessionId::from_raw("ses-does-not-exist"))
+                .is_none(),
+            "unknown session should read as None"
+        );
+        dynrt.kill(&sess.id).await.expect("kill");
     }
 
     #[tokio::test]
