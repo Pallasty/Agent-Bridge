@@ -32,7 +32,7 @@ already merged and default-off.
 Repository baseline during this packet:
 
 ```text
-master == origin/master == d63affd docs(memory): clear bounded latch stale gates
+master == origin/master == ec80b97 docs(memory): record correction cosurface mcp smoke
 ```
 
 Related evidence:
@@ -41,8 +41,15 @@ Related evidence:
 - `2026-07-01-correction-cosurface-live-backfill-preflight.md`
 - `2026-07-01-correction-cosurface-single-edge-backfill.md`
 - `2026-07-01-correction-cosurface-shadow-diff.md`
+- `2026-07-01-correction-cosurface-mcp-ab-smoke.md`
 - `2026-07-01-agent-bridge-open-queue-staleness-audit.md`
 - `2026-07-01-reversible-autonomy-task-replan.md`
+
+`2026-07-01-correction-cosurface-mcp-ab-smoke.md` is an important lowering-risk
+artifact: it exercised the real MCP stdio `memory_search` path in two short-lived
+subprocesses over copied databases, with the flag off and on. It did not write
+to the live memory store and did not enable the flag in live Codex/Cursor MCP
+sessions or daemons.
 
 Live store read-only probe:
 
@@ -72,12 +79,15 @@ Approval should be scoped to one of these levels:
 | Level | Scope | Risk | Default recommendation |
 |---|---|---|---|
 | S0 | Offline or frozen-copy shadow expansion | No live runtime behavior change | Autonomous |
+| S0.5 | Copied-DB MCP A/B smoke | Real MCP tool path, still no live-store write | Done at `ec80b97` |
 | S1 | Short-lived installed-binary MCP subprocess with env enabled | Live read-path experiment in an isolated child process | Preferred owner-gated trial |
 | S2 | Time-bounded daemon or active MCP client window | Shared local runtime behavior change | Only after S1 passes |
 
-S1 is the recommended next gate. It keeps the current Codex MCP process and the
-long-lived daemons on default behavior while exercising the real MCP
-`memory_search` implementation in a short-lived child process.
+S1 remains the recommended next gate if more evidence is needed. S0.5 already
+validated the real MCP stdio tool path against copied stores; S1 is narrower
+than S2 because it still keeps the current Codex MCP process and the long-lived
+daemons on default behavior while exercising a live-store read path in a
+short-lived child process.
 
 ## Non-Goals
 

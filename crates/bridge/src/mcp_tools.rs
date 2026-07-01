@@ -19292,7 +19292,10 @@ fn fallback_embedder_ready() -> bool {
 
 #[cfg(test)]
 mod recall_semantic_fallback_tests {
-    use super::{outcome_collector_enabled_from, recall_semantic_fallback_enabled_from};
+    use super::{
+        correction_cosurface_enabled_from, outcome_collector_enabled_from,
+        recall_semantic_fallback_enabled_from,
+    };
 
     #[test]
     fn semantic_fallback_default_off_unless_truthy() {
@@ -19318,6 +19321,21 @@ mod recall_semantic_fallback_tests {
         assert!(outcome_collector_enabled_from(Some("1")));
         assert!(outcome_collector_enabled_from(Some("true")));
         assert!(outcome_collector_enabled_from(Some("TRUE")));
+    }
+
+    #[test]
+    fn correction_cosurface_default_off_unless_truthy() {
+        // Default-OFF: unset / "0" / arbitrary values keep the fts page
+        // byte-identical to pure ranking.
+        assert!(!correction_cosurface_enabled_from(None));
+        assert!(!correction_cosurface_enabled_from(Some("0")));
+        assert!(!correction_cosurface_enabled_from(Some("")));
+        assert!(!correction_cosurface_enabled_from(Some("yes")));
+        assert!(!correction_cosurface_enabled_from(Some("false")));
+        // Only an explicit truthy value opts in to B1 co-surfacing.
+        assert!(correction_cosurface_enabled_from(Some("1")));
+        assert!(correction_cosurface_enabled_from(Some("true")));
+        assert!(correction_cosurface_enabled_from(Some("TRUE")));
     }
 }
 
@@ -19729,10 +19747,16 @@ impl McpTool for MemorySearchTool {
 /// True when the B1 correction co-surface read-path is enabled. Default-OFF:
 /// when unset / `0` / `false` the search path is byte-identical to pure ranking.
 /// Mirrors the existing `AGENT_BRIDGE_*` boolean-switch idiom (e.g. main.rs).
+fn correction_cosurface_enabled_from(env_val: Option<&str>) -> bool {
+    matches!(env_val, Some(v) if v == "1" || v.eq_ignore_ascii_case("true"))
+}
+
 fn correction_cosurface_enabled() -> bool {
-    std::env::var("AGENT_BRIDGE_CORRECTION_COSURFACE")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
+    correction_cosurface_enabled_from(
+        std::env::var("AGENT_BRIDGE_CORRECTION_COSURFACE")
+            .ok()
+            .as_deref(),
+    )
 }
 
 /// B1 — co-surface corrections next to the originals they correct.
