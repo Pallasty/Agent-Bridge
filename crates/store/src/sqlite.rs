@@ -2123,13 +2123,16 @@ fn compute_signal_fidelity_from_rows(
 
     // Saturation metrics (2026-06-30). n_ceiling mirrors n_floor: rows pinned
     // at/above the reinforce ceiling. top_distinct counts distinct importance
-    // values among the top-`top_n` by importance — 1-2 means the top tier has
+    // values among a fixed top-50 by importance — 1-2 means the top tier has
     // collapsed onto a single value (importance stops ordering search results).
     const SATURATION_CEILING: f64 = 0.95;
     // Fixed top-tier window, independent of the misrank `top_n` (some callers
     // pass 0 to suppress misrank rows but still want the scalar saturation stat).
     const TOP_TIER_N: usize = 50;
-    let n_ceiling_importance = importances.iter().filter(|i| **i >= SATURATION_CEILING).count() as u64;
+    let n_ceiling_importance = importances
+        .iter()
+        .filter(|i| **i >= SATURATION_CEILING)
+        .count() as u64;
     let mut sorted_desc = importances.clone();
     sorted_desc.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
     let top_distinct_importance = sorted_desc
@@ -21098,7 +21101,10 @@ mod tests {
         assert!((lo - 0.9215).abs() < 1e-9, "lo={lo}");
         assert!((hi - 0.9405).abs() < 1e-9, "hi={hi}");
         assert!(lo < 0.95 && hi < 0.95, "both stay below ceiling");
-        assert!(hi > lo, "ordering preserved (not collapsed to a single value)");
+        assert!(
+            hi > lo,
+            "ordering preserved (not collapsed to a single value)"
+        );
         // less headroom (upper_h) => smaller absolute bump than lower_g
         assert!(
             (hi - 0.94) < (lo - 0.92),
@@ -21348,7 +21354,10 @@ mod tests {
 
         let stats = store.signal_fidelity_stats(5).await.expect("fidelity");
         assert_eq!(stats.total_active, 5);
-        assert_eq!(stats.n_ceiling_importance, 4, "four rows at the 0.95 ceiling");
+        assert_eq!(
+            stats.n_ceiling_importance, 4,
+            "four rows at the 0.95 ceiling"
+        );
         assert_eq!(
             stats.top_distinct_importance, 2,
             "only two distinct importance values among the top tier (0.95, 0.50)"

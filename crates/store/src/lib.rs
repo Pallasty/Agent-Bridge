@@ -1727,11 +1727,11 @@ pub struct SignalFidelityStats {
     /// "reinforce ratchet pinned everyone to the top" tell. Watch this fall
     /// after the multiplicative-reinforce fix (2026-06-30) lands.
     pub n_ceiling_importance: u64,
-    /// Distinct `importance` values among the top-`top_n` rows by importance.
+    /// Distinct `importance` values among the top-50 rows by importance.
     /// The top-tier discrimination metric: `1`–`2` means importance has
     /// collapsed onto a single ceiling value and contributes no ordering to
     /// the search-rank `+w·importance` bonus where it matters most; a healthy
-    /// value approaches `top_n`.
+    /// value approaches the observed top-tier row count, capped at 50.
     pub top_distinct_importance: u64,
     /// Mean importance across all active rows.
     pub mean_importance: f64,
