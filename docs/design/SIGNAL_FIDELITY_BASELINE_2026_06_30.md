@@ -59,3 +59,48 @@ For the next observations, the expected healthy direction is:
 
 The useful next check is after one or more scheduled reinforce/decay cycles, not
 immediately after this baseline.
+
+## Follow-up Observation - 2026-07-01
+
+Command:
+
+```bash
+/home/pallasting/.local/bin/agent-bridge.real dream signal-fidelity --top-n 0 --json
+/home/pallasting/.local/bin/agent-bridge.real dream signal-fidelity --top-n 5 --json
+```
+
+Observed values:
+
+```text
+total_active              650
+n_touched                 524
+n_zero_access             126
+n_floor_importance        79
+n_ceiling_importance      238
+top_distinct_importance   2
+mean_importance           0.6885928020578819
+mean_access               24.903076923076924
+spearman_r                +0.5587050746347924
+spearman_r_touched        +0.4869418077542258
+```
+
+Delta from the 2026-06-30 baseline:
+
+```text
+total_active              +7
+n_touched                 +12
+n_zero_access             -5
+n_floor_importance        +9
+n_ceiling_importance      0
+top_distinct_importance   0
+spearman_r                +0.012286764564214977
+spearman_r_touched        +0.01550743164413614
+```
+
+Interpretation:
+
+Access/importance correlation improved slightly, which keeps the ranking signal
+useful. The exact-ceiling pile has not improved yet: `n_ceiling_importance`
+remains `238`, and the top-50 window still has only `2` distinct importance
+values. Continue observing after scheduled reinforce/decay cycles; do not
+backfill or bulk-rewrite the old saturated rows from this single follow-up.
