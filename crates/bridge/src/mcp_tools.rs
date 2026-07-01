@@ -36195,6 +36195,27 @@ impl MemoryRelatedKeyEdgePlan {
     }
 }
 
+fn memory_related_keys_selected_edge_hash_v1(edges: &[MemoryRelatedKeyEdgePlan]) -> String {
+    let canonical_edges: Vec<Value> = edges
+        .iter()
+        .map(|edge| {
+            json!({
+                "from_key": edge.from_key,
+                "to_key": edge.to_key,
+                "edge_type": "relates",
+            })
+        })
+        .collect();
+    let canonical = json!({
+        "schema": "agent_bridge.memory_related_keys.selected_edges.v1",
+        "edges": canonical_edges,
+    });
+    let encoded = serde_json::to_vec(&canonical).unwrap_or_default();
+    let mut hasher = Sha256::new();
+    ShaDigest::update(&mut hasher, encoded);
+    format!("{:x}", ShaDigest::finalize(hasher))
+}
+
 #[derive(Debug, Default)]
 struct MemoryRelatedKeysMaterializePlan {
     visible_total: usize,
@@ -36252,12 +36273,15 @@ impl MemoryRelatedKeysMaterializePlan {
         max_inbound_per_target: u32,
     ) -> Value {
         let projected_orphans = self.projected_orphans_after_selected();
+        let selected_edge_hash_v1 =
+            memory_related_keys_selected_edge_hash_v1(&self.selected_edges);
         json!({
             "visible_total": self.visible_total,
             "current_edge_pairs": self.current_edge_pairs,
             "current_orphans": self.current_orphans,
             "safe_candidate_pairs_before_caps": self.safe_candidate_pairs_before_caps,
             "selected_edges_count": self.selected_edges.len(),
+            "selected_edge_hash_v1": selected_edge_hash_v1,
             "max_edges": max_edges,
             "max_outbound_per_source": max_outbound_per_source,
             "max_inbound_per_target": max_inbound_per_target,
@@ -37101,6 +37125,11 @@ impl McpTool for MemoryRelatedKeysMaterializeTool {
                         "type": "string",
                         "description": "Required exact value 'materialize_related_keys' when dry_run=false."
                     },
+                    "reviewed_selected_edge_hash_v1": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$",
+                        "description": "Required when dry_run=false: exact selected_edge_hash_v1 from the reviewed dry-run response. Prevents dry_run/apply selected-edge drift."
+                    },
                     "edge_type": {
                         "type": "string",
                         "enum": ["relates"],
@@ -37212,6 +37241,12 @@ impl McpTool for MemoryRelatedKeysMaterializeTool {
             .and_then(|v| v.as_str())
             .map(str::trim)
             .unwrap_or("");
+        let reviewed_selected_edge_hash_v1 = args
+            .get("reviewed_selected_edge_hash_v1")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
         let edge_type = args
             .get("edge_type")
             .and_then(|v| v.as_str())
@@ -37376,6 +37411,32 @@ impl McpTool for MemoryRelatedKeysMaterializeTool {
                     "error".into(),
                     json!("dry_run=false requires apply_confirmation='materialize_related_keys'"),
                 );
+            }
+            return Ok(ToolResult::json_text(&result));
+        }
+        let selected_edge_hash_v1 = result
+            .get("selected_edge_hash_v1")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if !dry_run
+            && reviewed_selected_edge_hash_v1.as_deref() != Some(selected_edge_hash_v1.as_str())
+        {
+            if let Some(obj) = result.as_object_mut() {
+                obj.insert("blocked".into(), json!(true));
+                obj.insert(
+                    "error".into(),
+                    json!("dry_run=false requires reviewed_selected_edge_hash_v1 to match the current selected_edge_hash_v1"),
+                );
+                obj.insert(
+                    "reviewed_selected_edge_hash_v1".into(),
+                    reviewed_selected_edge_hash_v1
+                        .as_deref()
+                        .map(Value::from)
+                        .unwrap_or(Value::Null),
+                );
+                obj.insert("linked".into(), json!(0));
+                obj.insert("write_errors".into(), json!([]));
             }
             return Ok(ToolResult::json_text(&result));
         }
@@ -64682,6 +64743,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             schema.input_schema["properties"]["scope_filter"]["enum"],
             json!(["compatible", "exact"])
         );
+        assert!(schema.input_schema["properties"]
+            .get("reviewed_selected_edge_hash_v1")
+            .is_some());
         let out = tool
             .execute(
                 json!({
@@ -64701,12 +64765,144 @@ com.example.multiline, , \"Line one\nLine two\"\n";
 
         assert_eq!(payload["filters"]["scope_filter"], json!("exact"));
         assert_eq!(payload["selected_edges_count"], json!(1));
+        let selected_hash = payload["selected_edge_hash_v1"]
+            .as_str()
+            .expect("selected_edge_hash_v1");
+        assert_eq!(selected_hash.len(), 64);
+        assert!(selected_hash
+            .chars()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
         assert_eq!(payload["selected_edges"][0]["from_key"], json!("exact_source"));
         assert_eq!(payload["selected_edges"][0]["to_key"], json!("exact_target"));
 
         let serialized = serde_json::to_string(&payload).expect("serialize payload");
         assert!(!serialized.contains("parent_source"));
         assert!(!serialized.contains("parent_target"));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_related_keys_materialize_write_requires_matching_selected_edge_hash() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.as_ref().expect("store").clone();
+
+        let mut source = mk_mem_scoped(
+            "hash_source",
+            "decision",
+            "hash source content with durable detail",
+            &[],
+            Some("project:/repo/app"),
+        );
+        source.related_keys = vec!["hash_target".into()];
+        let target = mk_mem_scoped(
+            "hash_target",
+            "lesson",
+            "hash target content with durable detail",
+            &[],
+            Some("project:/repo/app"),
+        );
+        for rec in [source, target] {
+            store.memory_save(&rec).await.expect("seed memory");
+        }
+
+        let tool = MemoryRelatedKeysMaterializeTool::new(hub);
+        let args = json!({
+            "scope": "project:/repo/app",
+            "scope_mode": "local_only",
+            "scope_filter": "exact",
+            "max_records": 100,
+            "max_edges": 1,
+            "preview_chars": 80
+        });
+        let dry_run = result_text_as_json(
+            &tool
+                .execute(args.clone(), &ToolContext::default())
+                .await
+                .expect("dry-run"),
+        );
+        let selected_hash = dry_run["selected_edge_hash_v1"]
+            .as_str()
+            .expect("selected_edge_hash_v1")
+            .to_string();
+
+        let missing_hash = result_text_as_json(
+            &tool
+                .execute(
+                    json!({
+                        "dry_run": false,
+                        "apply_confirmation": "materialize_related_keys",
+                        "scope": "project:/repo/app",
+                        "scope_mode": "local_only",
+                        "scope_filter": "exact",
+                        "max_records": 100,
+                        "max_edges": 1,
+                        "preview_chars": 80
+                    }),
+                    &ToolContext::default(),
+                )
+                .await
+                .expect("missing hash write attempt"),
+        );
+        assert_eq!(missing_hash["blocked"], serde_json::Value::Bool(true));
+        assert_eq!(missing_hash["linked"], json!(0));
+
+        let wrong_hash = result_text_as_json(
+            &tool
+                .execute(
+                    json!({
+                        "dry_run": false,
+                        "apply_confirmation": "materialize_related_keys",
+                        "reviewed_selected_edge_hash_v1": "0000000000000000000000000000000000000000000000000000000000000000",
+                        "scope": "project:/repo/app",
+                        "scope_mode": "local_only",
+                        "scope_filter": "exact",
+                        "max_records": 100,
+                        "max_edges": 1,
+                        "preview_chars": 80
+                    }),
+                    &ToolContext::default(),
+                )
+                .await
+                .expect("wrong hash write attempt"),
+        );
+        assert_eq!(wrong_hash["blocked"], serde_json::Value::Bool(true));
+        assert_eq!(wrong_hash["linked"], json!(0));
+        assert!(store
+            .memory_neighbors("hash_source")
+            .await
+            .expect("neighbors before write")
+            .is_empty());
+
+        let wrote = result_text_as_json(
+            &tool
+                .execute(
+                    json!({
+                        "dry_run": false,
+                        "apply_confirmation": "materialize_related_keys",
+                        "reviewed_selected_edge_hash_v1": selected_hash,
+                        "scope": "project:/repo/app",
+                        "scope_mode": "local_only",
+                        "scope_filter": "exact",
+                        "max_records": 100,
+                        "max_edges": 1,
+                        "preview_chars": 80
+                    }),
+                    &ToolContext::default(),
+                )
+                .await
+                .expect("hash-matched write"),
+        );
+        assert_eq!(wrote["blocked"], serde_json::Value::Bool(false));
+        assert_eq!(wrote["linked"], json!(1));
+        let edges = store
+            .memory_neighbors("hash_source")
+            .await
+            .expect("neighbors after write");
+        assert_eq!(edges.len(), 1);
+        assert_eq!(edges[0].from_key, "hash_source");
+        assert_eq!(edges[0].to_key, "hash_target");
+        assert_eq!(edges[0].edge_type, "relates");
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
