@@ -585,6 +585,36 @@ fn mcp_detail_for_kind(
     }
 }
 
+fn mcp_refresh_parent_summary(rows: &[McpProcessObservation]) -> Option<String> {
+    let mut groups: std::collections::BTreeMap<(Option<i64>, String), usize> =
+        std::collections::BTreeMap::new();
+    for row in rows
+        .iter()
+        .filter(|row| row.kind != McpProcessKind::CurrentReal)
+    {
+        let parent = row
+            .parent_command
+            .as_deref()
+            .map(one_line)
+            .unwrap_or_else(|| "unknown".to_string());
+        *groups.entry((row.ppid, parent)).or_insert(0) += 1;
+    }
+    if groups.is_empty() {
+        return None;
+    }
+
+    let parts = groups
+        .into_iter()
+        .map(|((ppid, parent), count)| {
+            let ppid = ppid
+                .map(|p| p.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            format!("ppid={ppid} count={count} parent={parent}")
+        })
+        .collect::<Vec<_>>();
+    Some(format!("refresh parent(s): {}", parts.join("; ")))
+}
+
 fn format_mcp_process_summary(rows: &[McpProcessObservation]) -> String {
     let current_real = mcp_pids_by_kind(rows, McpProcessKind::CurrentReal);
     let stale_real = mcp_pids_by_kind(rows, McpProcessKind::StaleReal);
@@ -613,6 +643,7 @@ fn format_mcp_process_summary(rows: &[McpProcessObservation]) -> String {
         );
     }
     let detail_blocks = [
+        mcp_refresh_parent_summary(rows),
         mcp_detail_for_kind(rows, McpProcessKind::StaleReal, "stale"),
         mcp_detail_for_kind(rows, McpProcessKind::DirectBinary, "direct"),
         mcp_detail_for_kind(rows, McpProcessKind::Unknown, "unknown"),
@@ -630,10 +661,13 @@ fn format_mcp_process_summary(rows: &[McpProcessObservation]) -> String {
 fn mcp_process_reconnect_hint(rows: &[McpProcessObservation]) -> &'static str {
     if mcp_pids_by_kind(rows, McpProcessKind::CurrentReal).is_empty() {
         "restart the MCP client(s) so they respawn from the current wrapper \
-         and re-read tools/list; this refreshes newly added tool manifests"
+         and re-read tools/list; this refreshes newly added tool manifests. \
+         If a soft MCP reconnect leaves stale children under the same Codex/Cursor/Claude \
+         parent process, reload or restart that host app/server so it respawns stdio MCP"
     } else {
         "current .real MCP server(s) are already active; restart only stale/direct/unknown \
-         MCP client(s) that still need refreshed tool manifests"
+         MCP client(s) that still need refreshed tool manifests. If those rows stay under \
+         the same host parent after a soft reconnect, reload or restart that host app/server"
     }
 }
 
@@ -1412,6 +1446,7 @@ agent_bridge.system_control.audit.v0
         let detail = format_mcp_process_summary(&rows);
 
         assert!(detail.contains("2 MCP server(s): 1 current .real, 1 stale .real"));
+        assert!(detail.contains("refresh parent(s): ppid=77 count=1 parent=claude --continue"));
         assert!(detail.contains("stale detail"));
         assert!(detail.contains("pid=202"));
         assert!(detail.contains("ppid=77"));
@@ -1454,8 +1489,10 @@ agent_bridge.system_control.audit.v0
 
         assert!(detail.contains("at least one current .real MCP server is active"));
         assert!(detail.contains("stale/direct/unknown rows are other clients or old sessions"));
+        assert!(detail.contains("refresh parent(s): ppid=77 count=1 parent=warp"));
         assert!(hint.contains("current .real MCP server(s) are already active"));
         assert!(hint.contains("restart only stale/direct/unknown"));
+        assert!(hint.contains("reload or restart that host app/server"));
     }
 
     #[test]
@@ -1478,7 +1515,9 @@ agent_bridge.system_control.audit.v0
 
         assert!(detail.contains("no current .real MCP server detected"));
         assert!(detail.contains("active client may still be stale"));
+        assert!(detail.contains("refresh parent(s): ppid=77 count=1 parent=claude --continue"));
         assert!(hint.contains("restart the MCP client(s) so they respawn"));
+        assert!(hint.contains("soft MCP reconnect leaves stale children"));
     }
 
     #[test]
