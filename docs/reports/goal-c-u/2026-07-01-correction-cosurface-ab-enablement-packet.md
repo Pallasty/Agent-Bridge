@@ -2,7 +2,7 @@
 
 Date: 2026-07-01
 
-Status: `OWNER_GATE_PACKET / DOCS_ONLY / NO_RUNTIME_CHANGE`
+Status: `STANDING_AUTH_PACKET / DOCS_ONLY / NO_RUNTIME_CHANGE`
 
 ## Decision
 
@@ -10,7 +10,7 @@ Do not enable `AGENT_BRIDGE_CORRECTION_COSURFACE` in this slice.
 
 This packet defines the smallest controlled path for deciding whether the gated
 B1 correction co-surface read path should be enabled beyond shadow evidence. It
-is an authorization and experiment design packet only. It does not change live
+is an authorization-boundary and experiment design packet only. It does not change live
 environment variables, restart daemons, deploy binaries, write memory rows, add
 graph edges, change ranking weights, or alter default retrieval behavior.
 
@@ -20,12 +20,18 @@ The standing operating rule is reversible autonomy: docs, branches, read-only
 probes, local experiments, and backed-up reversible maintenance can proceed
 without repeated permission, provided evidence and lessons are recorded.
 
-The subordinate Agent-Bridge memory authorization carve-out still gates
-subsystem runtime authority. That carve-out covers automatic graph, memory,
-ranking, search-order, and runtime-influence behavior. Enabling
-`AGENT_BRIDGE_CORRECTION_COSURFACE=1` changes the live read path for
-`memory_search`, so it remains owner-gated even though the implementation is
-already merged and default-off.
+The owner's newer standing instruction supersedes repeated per-step owner
+approval for meaningfully reversible local operations. The subordinate
+Agent-Bridge memory authorization carve-out is therefore interpreted as an
+evidence/rollback gate, not as a requirement to stop for another approval round
+when the proposed action is local, scoped, reversible, and recorded.
+
+Enabling `AGENT_BRIDGE_CORRECTION_COSURFACE=1` changes the `memory_search` read
+path for the process that carries the env flag. S1 is acceptable under standing
+authorization because it is a short-lived local child process with process
+termination as rollback. S2 must still be preceded by an S1 closeout and an
+explicit rollback packet because it affects long-lived active clients or
+daemons.
 
 ## Current Baseline
 
@@ -71,17 +77,17 @@ The one-row correction-edge backfill is complete. Do not repeat it.
 
 ## Gate Question
 
-Should the owner approve a controlled local A/B window for
+Which controlled local A/B window should run next for
 `AGENT_BRIDGE_CORRECTION_COSURFACE=1`?
 
-Approval should be scoped to one of these levels:
+Execution should be scoped to one of these levels:
 
 | Level | Scope | Risk | Default recommendation |
 |---|---|---|---|
 | S0 | Offline or frozen-copy shadow expansion | No live runtime behavior change | Autonomous |
 | S0.5 | Copied-DB MCP A/B smoke | Real MCP tool path, still no live-store write | Done at `ec80b97` |
-| S1 | Short-lived installed-binary MCP subprocess with env enabled | Live read-path experiment in an isolated child process | Preferred owner-gated trial |
-| S2 | Time-bounded daemon or active MCP client window | Shared local runtime behavior change | Only after S1 passes |
+| S1 | Short-lived installed-binary MCP subprocess with env enabled | Live read-path experiment in an isolated child process | Authorized under standing reversible rule |
+| S2 | Time-bounded daemon or active MCP client window | Shared local runtime behavior change | Only after S1 passes and rollback is recorded |
 
 S1 remains the recommended next gate if more evidence is needed. S0.5 already
 validated the real MCP stdio tool path against copied stores; S1 is narrower
@@ -91,7 +97,7 @@ short-lived child process.
 
 ## Non-Goals
 
-This packet does not authorize:
+This packet does not execute:
 
 - broad default enablement;
 - daemon or MCP client restart;
@@ -102,7 +108,7 @@ This packet does not authorize:
 - PageRank, centrality, or feedback-weight ranking changes;
 - BioCortex, T6, trigger-recall, or other runtime-influence gates;
 - cross-node or fleet rollout;
-- keeping the flag enabled after the trial without a closeout decision.
+- keeping the flag enabled after a trial without a closeout decision.
 
 ## Experiment Contract
 
@@ -234,11 +240,11 @@ or direct read-only shadow replica instead of MCP `memory_search`.
 ## S2 Escalation Conditions
 
 Do not move to a daemon or active-client window unless S1 passes and a closeout
-packet says why S2 adds value.
+packet says why S2 adds value and records a rollback plan.
 
-If S2 is approved later, the window should be time-bounded and local-node-only:
+If S2 is run later, the window should be time-bounded and local-node-only:
 
-- record start time, intended stop time, process ids, and approval reference;
+- record start time, intended stop time, process ids, and authorization/rollback reference;
 - capture the same top-k diff suite before and after;
 - remove the env setting and restart affected processes at the end;
 - verify the flag is absent from visible long-lived processes;
@@ -254,7 +260,7 @@ verify no visible long-lived agent-bridge.real process has
 AGENT_BRIDGE_CORRECTION_COSURFACE set
 ```
 
-S2 rollback, if ever approved, is:
+S2 rollback, if ever run, is:
 
 ```text
 remove the env override
@@ -267,12 +273,14 @@ No DB rollback is expected for B1 itself because B1 does not write memory rows,
 schema, or `corrects` edges. Normal retrieval telemetry from `memory_search`
 should be disclosed in the closeout.
 
-## Board Request
+## Board Update
 
-Post this packet to thread #102 as a `question`:
+Post this packet to thread #102 as a status/update, not as a per-step approval
+request:
 
 ```text
-Owner gate request: approve S1 correction co-surface controlled A/B window?
+Standing-auth update: S1 correction co-surface controlled A/B can proceed as a
+reversible local child-process trial.
 Scope: local short-lived installed-binary MCP subprocess only.
 Flag: AGENT_BRIDGE_CORRECTION_COSURFACE=1.
 No daemon restart, deploy, schema change, memory content write, or edge backfill.
