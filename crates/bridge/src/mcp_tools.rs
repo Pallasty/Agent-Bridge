@@ -56898,6 +56898,7 @@ fn codex_lean_tool(tool_name: &str) -> bool {
             | "agent_spawn"
             | "agent_send_input"
             | "agent_session_get"
+            | "agent_session_output"
             | "agent_session_wait"
             | "agent_session_list"
             | "agent_session_reconcile"
@@ -67917,7 +67918,7 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     }
 
     #[test]
-    fn registry_exposes_agent_send_input_with_agent_surface() {
+    fn registry_exposes_agent_interactive_session_surface() {
         let profiles = [
             (
                 "profile-essential",
@@ -67934,14 +67935,20 @@ com.example.multiline, , \"Line one\nLine two\"\n";
                 .into_iter()
                 .map(|s| s.name)
                 .collect();
-            assert!(
-                names.iter().any(|n| n == "agent_spawn"),
-                "agent_spawn missing from {label}"
-            );
-            assert!(
-                names.iter().any(|n| n == "agent_send_input"),
-                "agent_send_input missing from {label}"
-            );
+            for tool in [
+                "agent_spawn",
+                "agent_send_input",
+                "agent_session_get",
+                "agent_session_output",
+                "agent_session_wait",
+                "agent_session_list",
+                "agent_session_reconcile",
+            ] {
+                assert!(
+                    names.iter().any(|n| n == tool),
+                    "{tool} missing from {label}"
+                );
+            }
         }
     }
 
