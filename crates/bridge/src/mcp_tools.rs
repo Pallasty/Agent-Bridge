@@ -72277,17 +72277,77 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
     fn agent_spawn_schema_exposes_interactive_flag() {
         let schema = AgentSpawnTool::new(crate::Hub::builder().build()).schema();
         let interactive = &schema.input_schema["properties"]["interactive"];
+        let desc = interactive["description"]
+            .as_str()
+            .expect("interactive description");
 
         assert!(schema.description.contains("interactive"));
         assert_eq!(interactive["type"], "boolean");
-        assert!(interactive["description"]
-            .as_str()
-            .expect("interactive description")
-            .contains("send_input"));
-        assert!(interactive["description"]
-            .as_str()
-            .expect("interactive description")
-            .contains("reject"));
+        assert!(desc.contains("send_input"));
+        assert!(desc.contains("reject"));
+        for backend in ["claude-code", "codex", "kilo", "opencode"] {
+            assert!(
+                desc.contains(backend),
+                "interactive schema should name supported backend {backend}: {desc}"
+            );
+        }
+        for backend in ["gemini", "auggie", "warp-oz", "oz"] {
+            assert!(
+                !desc.contains(backend),
+                "interactive schema must not imply unsupported backend {backend}: {desc}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn agent_spawn_interactive_rejects_non_pty_backends_before_spawn() {
+        let hub = crate::Hub::builder()
+            .register_agent(Arc::new(
+                ab_agent::GeminiRuntime::new().with_binary("/definitely/not/gemini"),
+            ))
+            .register_agent(Arc::new(ab_agent::AuggieRuntime::with_binary(
+                "/definitely/not/auggie",
+            )))
+            .register_agent(Arc::new(ab_agent::OzAgentRuntime::with_binary(
+                "/definitely/not/oz",
+            )))
+            .build();
+        let tool = AgentSpawnTool::new(hub);
+
+        for (backend, runtime_id) in [
+            ("gemini", "gemini"),
+            ("auggie", "auggie"),
+            ("warp-oz", "warp-oz"),
+            ("oz", "warp-oz"),
+        ] {
+            let out = tool
+                .execute(
+                    json!({
+                        "cwd": "/tmp",
+                        "prompt": "must fail before process spawn",
+                        "backend": backend,
+                        "interactive": true
+                    }),
+                    &ToolContext::default(),
+                )
+                .await
+                .expect("agent_spawn execute");
+            assert!(
+                out.is_error,
+                "{backend} interactive spawn should fail closed"
+            );
+            let msg = result_text(&out);
+            assert!(
+                msg.contains(&format!(
+                    "{runtime_id}: interactive sessions are not supported"
+                )),
+                "{backend} should reject via runtime interactive gate, got: {msg}"
+            );
+            assert!(
+                !msg.contains("No such file") && !msg.contains("spawn "),
+                "{backend} should reject before attempting the missing binary, got: {msg}"
+            );
+        }
     }
 
     // agent_spawn primary-to-backup failover
