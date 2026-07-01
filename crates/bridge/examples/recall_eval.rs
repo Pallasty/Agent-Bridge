@@ -1239,6 +1239,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let store = open_baseline_store(&db_path, db_source).await?;
     let (eval_cases, skipped_cases) = active_eval_cases(&db_path)?;
+    let active_case_idx1 = eval_cases
+        .iter()
+        .map(|case| case.idx1)
+        .collect::<BTreeSet<_>>();
     let n_defined = CORPUS.len();
     let n = eval_cases.len();
     if n == 0 {
@@ -1481,8 +1485,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!();
     }
 
-    print_case2_tool_surface_projection_probe(&scratch_tool_surface)?;
-    print_case8_remote_session_projection_probe(&scratch_remote_session)?;
+    print_case2_tool_surface_projection_probe(
+        &scratch_tool_surface,
+        active_case_idx1.contains(&CASE2_TOOL_SURFACE_IDX1),
+    )?;
+    print_case8_remote_session_projection_probe(
+        &scratch_remote_session,
+        active_case_idx1.contains(&CASE8_REMOTE_SESSION_IDX1),
+    )?;
     print_role_aware_hard_family_aggregate(
         &scratch_tool_surface,
         &scratch_remote_session,
@@ -2474,6 +2484,7 @@ fn query_mentions_remote_session_diagnostic_or_meta(query: &str) -> bool {
 
 fn print_case2_tool_surface_projection_probe(
     scratch: &ScratchToolSurfaceProjectionFts,
+    target_active: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let case = &CORPUS[CASE2_TOOL_SURFACE_IDX1 - 1];
     let query_terms = tool_surface_projection_terms("", case.query);
@@ -2499,6 +2510,12 @@ fn print_case2_tool_surface_projection_probe(
         .collect::<Vec<_>>();
 
     println!("## Case #2 tool-surface projection probe");
+    if !target_active {
+        println!(
+            "  status: skipped=no-active-expected-key; target-key hit counts below \
+             are diagnostic for this live DB, not current acceptance evidence."
+        );
+    }
     println!(
         "  query terms: {}",
         if query_terms.is_empty() {
@@ -2594,7 +2611,7 @@ fn print_case2_tool_surface_projection_probe(
     println!();
 
     print_case2_tool_surface_negative_controls(scratch, case.expect)?;
-    print_case2_tool_surface_positive_controls(scratch, case.expect)?;
+    print_case2_tool_surface_positive_controls(scratch, case.expect, target_active)?;
     Ok(())
 }
 
@@ -2663,14 +2680,23 @@ fn print_case2_tool_surface_negative_controls(
 fn print_case2_tool_surface_positive_controls(
     scratch: &ScratchToolSurfaceProjectionFts,
     target_keys: &[&str],
+    target_active: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("## Case #2 tool-surface positive controls");
-    println!(
-        "  gate: positive controls should recover the expected policy memory in \
-         durable and strict-durable accepted candidates. Strict mode requires \
-         {STRICT_TOOL_SURFACE_REQUIRED_TERM} plus at least three additional \
-         policy terms."
-    );
+    if target_active {
+        println!(
+            "  gate: positive controls should recover the expected policy memory in \
+             durable and strict-durable accepted candidates. Strict mode requires \
+             {STRICT_TOOL_SURFACE_REQUIRED_TERM} plus at least three additional \
+             policy terms."
+        );
+    } else {
+        println!(
+            "  gate: target policy memory is not active in this DB, so positive \
+             controls report candidate behavior only. Expected-key hit totals \
+             should not be read as current acceptance evidence."
+        );
+    }
 
     let mut durable_hits = 0;
     let mut strict_hits = 0;
@@ -2776,6 +2802,7 @@ fn print_case2_tool_surface_positive_controls(
 
 fn print_case8_remote_session_projection_probe(
     scratch: &ScratchRemoteSessionProjectionFts,
+    target_active: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let case = &CORPUS[CASE8_REMOTE_SESSION_IDX1 - 1];
     let query_terms = remote_session_projection_terms("", case.query);
@@ -2806,6 +2833,12 @@ fn print_case8_remote_session_projection_probe(
         .collect::<Vec<_>>();
 
     println!("## Case #8 remote-session projection probe");
+    if !target_active {
+        println!(
+            "  status: skipped=no-active-expected-key; target-key hit counts below \
+             are diagnostic for this live DB, not current acceptance evidence."
+        );
+    }
     println!(
         "  query terms: {}",
         if query_terms.is_empty() {
@@ -2903,7 +2936,7 @@ fn print_case8_remote_session_projection_probe(
     println!();
 
     print_case8_remote_session_negative_controls(scratch, case.expect)?;
-    print_case8_remote_session_positive_controls(scratch, case.expect)?;
+    print_case8_remote_session_positive_controls(scratch, case.expect, target_active)?;
     Ok(())
 }
 
@@ -2972,14 +3005,23 @@ fn print_case8_remote_session_negative_controls(
 fn print_case8_remote_session_positive_controls(
     scratch: &ScratchRemoteSessionProjectionFts,
     target_keys: &[&str],
+    target_active: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     println!("## Case #8 remote-session positive controls");
-    println!(
-        "  gate: positive controls should recover the expected remote-session \
-         memory or its steering-chain family in durable and strict-durable \
-         accepted candidates. Strict mode requires {STRICT_REMOTE_SESSION_REQUIRED_TERM} \
-         plus steering/session anchors."
-    );
+    if target_active {
+        println!(
+            "  gate: positive controls should recover the expected remote-session \
+             memory or its steering-chain family in durable and strict-durable \
+             accepted candidates. Strict mode requires {STRICT_REMOTE_SESSION_REQUIRED_TERM} \
+             plus steering/session anchors."
+        );
+    } else {
+        println!(
+            "  gate: target remote-session memory is not active in this DB, so \
+             positive controls report candidate behavior only. Expected-key hit \
+             totals should not be read as current acceptance evidence."
+        );
+    }
 
     let mut durable_hits = 0;
     let mut strict_hits = 0;
