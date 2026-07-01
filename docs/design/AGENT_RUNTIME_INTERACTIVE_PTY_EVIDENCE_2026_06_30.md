@@ -74,3 +74,39 @@ The runtime-specific tests still own real submit-key evidence:
 
 - `tests/codex_real_interactive.rs` for Codex Kitty Enter.
 - `tests/kilo_real_interactive.rs` for kilo bare Enter.
+
+## Real-Binary Probe Harness
+
+`crates/agent/tests/runtime_interactive_submit_probe.rs` provides a configurable
+ignored probe for runtimes that are not yet installed or not yet migrated. It
+uses the storage-free `PtySession` core directly, so it can test a CLI's raw TUI
+submit behavior before that runtime is wired into `agent_spawn(interactive=true)`.
+
+The probe is explicit opt-in: even with `--ignored`, it skips unless
+`AB_REAL_PTY_PROBE_RUNTIME` or `AB_REAL_PTY_PROBE_BIN` is set.
+
+Examples:
+
+```sh
+AB_REAL_PTY_PROBE_RUNTIME=opencode \
+AB_REAL_PTY_PROBE_PROFILE=enter \
+cargo test -p ab-agent --test runtime_interactive_submit_probe -- --ignored --nocapture
+
+AB_REAL_PTY_PROBE_RUNTIME=gemini \
+AB_REAL_PTY_PROBE_PROFILE=kitty_enter \
+cargo test -p ab-agent --test runtime_interactive_submit_probe -- --ignored --nocapture
+```
+
+Useful overrides:
+
+- `AB_REAL_PTY_PROBE_BIN=/absolute/path/to/cli`
+- `AB_REAL_PTY_PROBE_ARGS_JSON='["--flag","value"]'`
+- `AB_REAL_PTY_PROBE_CWD=/path/to/workspace`
+- `AB_REAL_PTY_PROBE_BOOT_SECS=20`
+- `AB_REAL_PTY_PROBE_RESPONSE_SECS=120`
+- `AB_REAL_PTY_PROBE_PROMPT='Reply with exactly: AB42-PROBE-OK'`
+- `AB_REAL_PTY_PROBE_EXPECT=AB42-PROBE-OK`
+
+Operational rule: first run the probe with the suspected profile. If the TUI
+accepts text but no marker returns, rerun with the other profile (`enter` vs
+`kitty_enter`) before changing production `SubmitProfile` wiring.
