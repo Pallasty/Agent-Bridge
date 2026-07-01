@@ -16656,7 +16656,7 @@ impl McpTool for AgentSpawnTool {
         ToolSchema {
             name: self.name().into(),
             description: "Spawn a sibling AI agent (one-shot by default; set `interactive` with \
-                 backend=claude-code/codex/kilo/opencode for a live PTY session). Pass prompt + cwd; runs to \
+                 backend=claude-code/codex/kilo/opencode/gemini for a live PTY session). Pass prompt + cwd; runs to \
                  completion, returns session id. Pick a backend explicitly, or a policy \
                  ('cheap'=kilo, 'second_opinion'/'openai'=codex). backend takes precedence \
                  over policy; both omitted = the configured primary-to-backup fallback chain \
@@ -16694,7 +16694,7 @@ impl McpTool for AgentSpawnTool {
                     },
                     "interactive": {
                         "type": "boolean",
-                        "description": "Open a live PTY-backed session instead of a one-shot run. Supported by backend=claude-code, codex, kilo, opencode (live PTY); other backends reject this flag before spawning. The child stays alive so follow-up turns can be sent with send_input, and `prompt` is submitted as the first turn."
+                        "description": "Open a live PTY-backed session instead of a one-shot run. Supported by backend=claude-code, codex, kilo, opencode, gemini (live PTY); other backends reject this flag before spawning. The child stays alive so follow-up turns can be sent with send_input, and `prompt` is submitted as the first turn."
                     }
                 },
                 "required": ["cwd", "prompt"]
@@ -72477,13 +72477,13 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert_eq!(interactive["type"], "boolean");
         assert!(desc.contains("send_input"));
         assert!(desc.contains("reject"));
-        for backend in ["claude-code", "codex", "kilo", "opencode"] {
+        for backend in ["claude-code", "codex", "kilo", "opencode", "gemini"] {
             assert!(
                 desc.contains(backend),
                 "interactive schema should name supported backend {backend}: {desc}"
             );
         }
-        for backend in ["gemini", "auggie", "warp-oz", "oz"] {
+        for backend in ["auggie", "warp-oz", "oz"] {
             assert!(
                 !desc.contains(backend),
                 "interactive schema must not imply unsupported backend {backend}: {desc}"
@@ -72494,9 +72494,6 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
     #[tokio::test]
     async fn agent_spawn_interactive_rejects_non_pty_backends_before_spawn() {
         let hub = crate::Hub::builder()
-            .register_agent(Arc::new(
-                ab_agent::GeminiRuntime::new().with_binary("/definitely/not/gemini"),
-            ))
             .register_agent(Arc::new(ab_agent::AuggieRuntime::with_binary(
                 "/definitely/not/auggie",
             )))
@@ -72507,7 +72504,6 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         let tool = AgentSpawnTool::new(hub);
 
         for (backend, runtime_id) in [
-            ("gemini", "gemini"),
             ("auggie", "auggie"),
             ("warp-oz", "warp-oz"),
             ("oz", "warp-oz"),

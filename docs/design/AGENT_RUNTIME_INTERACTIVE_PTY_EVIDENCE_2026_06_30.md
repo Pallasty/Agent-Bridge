@@ -16,10 +16,14 @@ backends.
 - `kilo`: shared PTY helper, `SubmitProfile::ENTER`; real kilo TUI verified.
 - `opencode`: shared PTY helper, `SubmitProfile::ENTER`; inferred from kilo and
   explicitly unverified until a real `opencode` binary is available.
+- `gemini`: shared PTY helper, `SubmitProfile::ENTER_SETTLED`; real gemini TUI
+  verified. gemini enables the Kitty keyboard protocol (like codex) yet submits
+  on a bare CR — but its Ink input drops a zero-settle combined `text\r` write,
+  so the CR is split off after a ~600ms render settle (a third submit shape,
+  distinct from both `ENTER` and `KITTY_ENTER`).
 
 Unsupported runtimes must reject `interactive=true` before spawning a process:
 
-- `gemini`
 - `auggie`
 - `warp-oz` / `oz`
 
@@ -35,7 +39,7 @@ Result on this host:
 
 - `kilo`: present at `/home/pallasting/.kilo/bin/kilo`, version `7.3.41`.
 - `opencode`: not installed.
-- `gemini`: not installed.
+- `gemini`: installed (`@google/gemini-cli` v0.49.0, linked into `~/.local/bin`).
 - `auggie`: not installed.
 - `oz` / `warp`: not installed.
 
@@ -45,9 +49,13 @@ Result on this host:
 The implementation must switch to `SubmitProfile::KITTY_ENTER` if a real opencode
 TUI probe shows Kitty keyboard protocol behavior.
 
-`gemini`: migrate only when installed and real-binary tested. Gemini CLI has a
-local interactive mode, but its submit key and trust/auth behavior need direct
-PTY evidence before enabling AB live sessions.
+`gemini`: MIGRATED (2026-06-30). The Gemini CLI's Ink/React TUI was probed with a
+real binary: it submits on a bare CR (NOT Kitty Enter, despite enabling the Kitty
+keyboard protocol) but only when the CR is written separately from the text after
+a render settle — hence `SubmitProfile::ENTER_SETTLED`. Auth uses a `GEMINI_API_KEY`
+(the OAuth / Code Assist free tier was quota-exhausted); the operator's `~/.gemini`
+needs `selectedType: "gemini-api-key"` to skip the first-run auth dialog headlessly.
+Verified end-to-end by `tests/gemini_real_interactive.rs` (multi-turn 42/99).
 
 `auggie`: migrate only when installed and real-binary tested. The current AB
 runtime is the one-shot `auggie --print --quiet` wrapper; interactive mode must
@@ -63,17 +71,18 @@ interaction belongs to Warp UI / `oz run` surfaces, not AB-owned PTY sessions.
 Regression coverage added with this ledger:
 
 - `agent_spawn_schema_exposes_interactive_flag` now asserts that the schema names
-  only `claude-code`, `codex`, `kilo`, and `opencode` as supported interactive
-  backends.
+  `claude-code`, `codex`, `kilo`, `opencode`, and `gemini` as supported interactive
+  backends (and does not name `auggie` / `warp-oz` / `oz`).
 - `agent_spawn_interactive_rejects_non_pty_backends_before_spawn` registers
-  missing-binary `gemini`, `auggie`, and `oz` runtimes, then verifies
-  `interactive=true` fails through the unsupported-interactive gate rather than
-  reaching process spawn.
+  missing-binary `auggie` and `oz` runtimes, then verifies `interactive=true`
+  fails through the unsupported-interactive gate rather than reaching process spawn.
 
 The runtime-specific tests still own real submit-key evidence:
 
 - `tests/codex_real_interactive.rs` for Codex Kitty Enter.
 - `tests/kilo_real_interactive.rs` for kilo bare Enter.
+- `tests/gemini_real_interactive.rs` for gemini bare CR + render settle
+  (`ENTER_SETTLED`); needs `GEMINI_API_KEY` and skips otherwise.
 
 ## Real-Binary Probe Harness
 

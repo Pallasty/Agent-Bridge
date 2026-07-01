@@ -54,6 +54,16 @@ impl SubmitProfile {
         key: "\x1b[13u",
         settle: Duration::from_millis(500),
     };
+    /// Ink/React TUI (gemini): submits on a **bare CR** like a line REPL, but the
+    /// CR must be written *separately* from the text after a render settle — Ink
+    /// re-renders on each input and a zero-settle combined `text\r` write drops
+    /// the CR (empirically: combined never submits; split @600ms round-trips).
+    /// gemini also enables the Kitty keyboard protocol yet still submits on CR,
+    /// so Kitty-enable does NOT imply `KITTY_ENTER` — the key was probed.
+    pub const ENTER_SETTLED: SubmitProfile = SubmitProfile {
+        key: "\r",
+        settle: Duration::from_millis(600),
+    };
 }
 
 /// Write one turn — the text then the submit key — honouring a runtime's

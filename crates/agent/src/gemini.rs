@@ -1,8 +1,11 @@
 //! Google Gemini CLI agent runtime.
 //!
-//! One-shot wrapper around `gemini -p "<prompt>"`. The Gemini CLI defaults to
-//! interactive mode; `-p / --prompt` switches to headless single-shot which
-//! prints the model response to stdout and exits.
+//! Wraps the Google Gemini CLI in two modes:
+//!
+//! - **One-shot**: `gemini -p "<prompt>"` — headless single-shot that prints the
+//!   model response to stdout and exits.
+//! - **Interactive**: a daemon-owned PTY running the bare `gemini` TUI, kept
+//!   alive across `send_input` turns (shared [`crate::pty_interactive`] helper).
 //!
 //! Two flags get forced for a stable headless experience:
 //!
@@ -29,6 +32,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::process::Command;
 use tracing::{info, warn};
 
+use crate::pty_interactive::{self, InteractiveMap};
 use crate::{AgentCapabilities, AgentRuntime, AgentSession, SpawnConfig};
 
 /// Default watchdog timeout for one-shot Gemini spawns. A successful
@@ -47,6 +51,19 @@ pub struct GeminiRuntime {
     timeout_secs: Option<u64>,
     store: Option<Arc<dyn StateStore>>,
     children: Arc<DashMap<String, u32>>,
+    /// Launch flags for the interactive PTY entry point (the bare `gemini` TUI).
+    /// Host-supplied; default empty = bare `gemini`, which starts the interactive
+    /// TUI (the one-shot path adds `-p`, so it never launches the TUI).
+    interactive_args: Vec<String>,
+    /// SessionId → live interactive PTY session (live `send_input`).
+    interactive: InteractiveMap,
+    /// How the gemini TUI accepts a submitted turn. Real-binary verified: gemini
+    /// enables the Kitty keyboard protocol (like codex) yet still submits on a
+    /// **bare CR** — so the key is CR, NOT CSI-u Enter. But its Ink/React input
+    /// re-renders on each keystroke and drops a zero-settle combined `text\r`
+    /// write, so the CR must be split off after a render settle. Hence
+    /// `SubmitProfile::ENTER_SETTLED`, not `ENTER` (combined) or `KITTY_ENTER`.
+    submit: pty_interactive::SubmitProfile,
 }
 
 impl Default for GeminiRuntime {
@@ -70,6 +87,12 @@ impl GeminiRuntime {
             timeout_secs,
             store: None,
             children: Arc::new(DashMap::new()),
+            interactive_args: Vec::new(),
+            interactive: Arc::new(DashMap::new()),
+            // gemini: bare CR submit, but split off after a render settle — the
+            // Ink TUI drops a combined text+CR write (real-binary verified
+            // 2026-06-30: combined never submits, split @600ms round-trips).
+            submit: pty_interactive::SubmitProfile::ENTER_SETTLED,
         }
     }
 
@@ -96,6 +119,47 @@ impl GeminiRuntime {
     pub fn live_count(&self) -> usize {
         self.children.len()
     }
+
+    /// Launch flags for the interactive `gemini` TUI (default empty = bare
+    /// binary). The one-shot `run` path is unaffected — it builds its own argv.
+    pub fn with_interactive_args(
+        mut self,
+        args: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        self.interactive_args = args.into_iter().map(Into::into).collect();
+        self
+    }
+
+    /// Number of live interactive PTY sessions (testing / observability).
+    pub fn interactive_count(&self) -> usize {
+        self.interactive.len()
+    }
+
+    /// Snapshot the merged PTY output of a live interactive session, if one
+    /// exists for `session`. Returns `None` once the session has exited (and
+    /// been finalised to the [`StateStore`]).
+    pub fn read_interactive_output(&self, session: &SessionId) -> Option<String> {
+        pty_interactive::interactive_output(&self.interactive, session)
+    }
+
+    /// Launch the bare `gemini` TUI inside a daemon-owned PTY and keep it alive
+    /// for successive [`AgentRuntime::send_input`] turns. Mirrors the one-shot
+    /// path's StateStore bookkeeping (start row at spawn, finalise on exit).
+    /// Auth/trust for the TUI come from the spawn env (`GEMINI_API_KEY`,
+    /// `GEMINI_CLI_TRUST_WORKSPACE=true`) plus the operator's `~/.gemini`
+    /// (`selectedType: "gemini-api-key"` to skip the first-run auth dialog).
+    async fn spawn_interactive(&self, cfg: SpawnConfig) -> Result<AgentSession> {
+        pty_interactive::spawn_interactive(
+            self.id(),
+            &self.binary,
+            &self.interactive_args,
+            &self.store,
+            &self.interactive,
+            cfg,
+            self.submit,
+        )
+        .await
+    }
 }
 
 fn env_nonempty(key: &str) -> Option<String> {
@@ -119,7 +183,9 @@ impl AgentRuntime for GeminiRuntime {
     }
 
     async fn spawn(&self, cfg: SpawnConfig) -> Result<AgentSession> {
-        cfg.reject_unsupported_interactive(self.id())?;
+        if cfg.interactive {
+            return self.spawn_interactive(cfg).await;
+        }
 
         let prompt = cfg.initial_prompt.clone().unwrap_or_default();
         if prompt.is_empty() {
@@ -286,15 +352,19 @@ impl AgentRuntime for GeminiRuntime {
         })
     }
 
-    async fn send_input(&self, _session: &SessionId, _text: &str) -> Result<()> {
-        Err(Error::InvalidArgument(
-            "gemini: send_input requires interactive mode (not yet supported); \
-             use spawn() with initial_prompt for one-shot."
-                .into(),
-        ))
+    async fn send_input(&self, session: &SessionId, text: &str) -> Result<()> {
+        pty_interactive::send_input(self.id(), &self.interactive, session, text, self.submit).await
     }
 
     async fn kill(&self, session: &SessionId) -> Result<()> {
+        // Interactive PTY session: signal via its kill handle; the background
+        // reader sees EOF, reaps, and finalises the session row.
+        if let Some(result) =
+            pty_interactive::kill_interactive(self.id(), &self.interactive, session)
+        {
+            return result;
+        }
+
         let pid = match self.children.get(session.as_str()) {
             Some(p) => *p,
             None => {
@@ -317,7 +387,17 @@ impl AgentRuntime for GeminiRuntime {
     }
 
     fn pid_for(&self, session: &SessionId) -> Option<u32> {
+        if let Some(pid) = pty_interactive::interactive_pid(&self.interactive, session) {
+            return Some(pid);
+        }
         self.children.get(session.as_str()).map(|kv| *kv)
+    }
+
+    /// Trait-level exposure of the live interactive PTY buffer so
+    /// `agent_session_output` can read a reply through `dyn AgentRuntime`;
+    /// mirrors inherent [`GeminiRuntime::read_interactive_output`].
+    fn read_interactive_output(&self, session: &SessionId) -> Option<String> {
+        pty_interactive::interactive_output(&self.interactive, session)
     }
 
     async fn capabilities(&self) -> AgentCapabilities {
@@ -353,22 +433,158 @@ fn truncate(s: &str, max: usize) -> String {
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn spawn_rejects_interactive_mode() {
-        let rt = GeminiRuntime::new().with_binary("/no/such/gemini");
-        let err = rt
-            .spawn(SpawnConfig {
-                cwd: "/tmp".into(),
-                env: HashMap::new(),
-                initial_prompt: Some("hello".into()),
-                model: None,
-                node: None,
-                user: None,
-                interactive: true,
-            })
-            .await
-            .expect_err("unsupported interactive mode must fail before spawn");
+    async fn wait_for<F: FnMut() -> bool>(total_ms: u64, step_ms: u64, mut predicate: F) -> bool {
+        let mut waited = 0u64;
+        while waited <= total_ms {
+            if predicate() {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(step_ms)).await;
+            waited += step_ms;
+        }
+        predicate()
+    }
 
-        assert!(format!("{err}").contains("interactive sessions are not supported"));
+    fn interactive_cfg(cwd: &str) -> SpawnConfig {
+        SpawnConfig {
+            cwd: cwd.into(),
+            env: HashMap::new(),
+            initial_prompt: None,
+            model: None,
+            node: None,
+            user: None,
+            interactive: true,
+        }
+    }
+
+    #[tokio::test]
+    async fn interactive_session_multi_turn_round_trips() {
+        // `/bin/cat` is a deterministic stand-in for the gemini TUI: it stays
+        // alive and echoes each submitted line back through the PTY. This proves
+        // the PTY plumbing; the real submit key (bare CR, despite gemini enabling
+        // the Kitty keyboard protocol) is covered by the ignored
+        // `gemini_real_interactive` integration test.
+        let rt = GeminiRuntime::new().with_binary("/bin/cat");
+        let sess = rt
+            .spawn(interactive_cfg("/tmp"))
+            .await
+            .expect("spawn interactive");
+        assert_eq!(rt.interactive_count(), 1);
+        assert!(
+            rt.pid_for(&sess.id).is_some(),
+            "interactive session should expose a pid"
+        );
+
+        rt.send_input(&sess.id, "alpha-one").await.expect("turn 1");
+        let ok1 = wait_for(2000, 25, || {
+            rt.read_interactive_output(&sess.id)
+                .map(|o| o.contains("alpha-one"))
+                .unwrap_or(false)
+        })
+        .await;
+        assert!(ok1, "turn 1 should echo through the PTY");
+
+        rt.send_input(&sess.id, "beta-two").await.expect("turn 2");
+        let ok2 = wait_for(2000, 25, || {
+            rt.read_interactive_output(&sess.id)
+                .map(|o| o.contains("beta-two"))
+                .unwrap_or(false)
+        })
+        .await;
+        assert!(ok2, "turn 2 should echo — proves multi-turn interactive");
+
+        rt.kill(&sess.id).await.expect("kill");
+    }
+
+    #[tokio::test]
+    async fn interactive_initial_prompt_is_submitted_as_first_turn() {
+        let rt = GeminiRuntime::new().with_binary("/bin/cat");
+        let mut cfg = interactive_cfg("/tmp");
+        cfg.initial_prompt = Some("first-turn-marker".into());
+        let sess = rt.spawn(cfg).await.expect("spawn interactive");
+        let ok = wait_for(2000, 25, || {
+            rt.read_interactive_output(&sess.id)
+                .map(|o| o.contains("first-turn-marker"))
+                .unwrap_or(false)
+        })
+        .await;
+        assert!(
+            ok,
+            "the initial prompt should be submitted as the first turn"
+        );
+        rt.kill(&sess.id).await.expect("kill");
+    }
+
+    #[tokio::test]
+    async fn interactive_args_are_passed_to_pty_child() {
+        let rt = GeminiRuntime::new()
+            .with_binary("/bin/sh")
+            .with_interactive_args(["-c", "printf 'ARGV:%s\\n' \"$1\"; cat", "sh", "flag-one"]);
+        let sess = rt
+            .spawn(interactive_cfg("/tmp"))
+            .await
+            .expect("spawn interactive");
+        let ok = wait_for(2000, 25, || {
+            rt.read_interactive_output(&sess.id)
+                .map(|o| o.contains("ARGV:flag-one"))
+                .unwrap_or(false)
+        })
+        .await;
+        assert!(ok, "interactive_args should reach the PTY child");
+        rt.kill(&sess.id).await.expect("kill");
+    }
+
+    #[tokio::test]
+    async fn trait_read_interactive_output_surfaces_live_buffer() {
+        // agent_session_output reads through `dyn AgentRuntime`, so the trait
+        // method (not just the inherent one) must surface the live PTY buffer.
+        let rt = GeminiRuntime::new().with_binary("/bin/cat");
+        let dynrt: &dyn AgentRuntime = &rt;
+        let sess = dynrt
+            .spawn(interactive_cfg("/tmp"))
+            .await
+            .expect("spawn interactive");
+        dynrt
+            .send_input(&sess.id, "gamma-three")
+            .await
+            .expect("turn");
+        let ok = wait_for(2000, 25, || {
+            dynrt
+                .read_interactive_output(&sess.id)
+                .map(|o| o.contains("gamma-three"))
+                .unwrap_or(false)
+        })
+        .await;
+        assert!(
+            ok,
+            "trait-dispatched read_interactive_output should surface the live PTY buffer"
+        );
+        assert!(
+            dynrt.read_interactive_output(&SessionId::new()).is_none(),
+            "unknown session should read as None"
+        );
+        dynrt.kill(&sess.id).await.expect("kill");
+    }
+
+    #[tokio::test]
+    async fn send_input_rejected_without_interactive_session() {
+        // One-shot sessions (and unknown ids) must reject input — only live PTY
+        // sessions accept it.
+        let rt = GeminiRuntime::new().with_binary("/bin/cat");
+        let err = rt
+            .send_input(&SessionId::new(), "nope")
+            .await
+            .expect_err("send_input must fail without a live interactive session");
+        assert!(matches!(err, Error::InvalidArgument(_)));
+    }
+
+    #[tokio::test]
+    async fn kill_unknown_session_errors() {
+        let rt = GeminiRuntime::new().with_binary("/bin/cat");
+        let err = rt
+            .kill(&SessionId::new())
+            .await
+            .expect_err("kill of an unknown session must error");
+        assert!(matches!(err, Error::NotFound(_)));
     }
 }
