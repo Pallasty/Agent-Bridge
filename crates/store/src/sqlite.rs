@@ -2121,6 +2121,26 @@ fn compute_signal_fidelity_from_rows(
         .cloned()
         .collect();
 
+    // Saturation metrics (2026-06-30). n_ceiling mirrors n_floor: rows pinned
+    // at/above the reinforce ceiling. top_distinct counts distinct importance
+    // values among the top-`top_n` by importance — 1-2 means the top tier has
+    // collapsed onto a single value (importance stops ordering search results).
+    const SATURATION_CEILING: f64 = 0.95;
+    // Fixed top-tier window, independent of the misrank `top_n` (some callers
+    // pass 0 to suppress misrank rows but still want the scalar saturation stat).
+    const TOP_TIER_N: usize = 50;
+    let n_ceiling_importance = importances.iter().filter(|i| **i >= SATURATION_CEILING).count() as u64;
+    let mut sorted_desc = importances.clone();
+    sorted_desc.sort_by(|a, b| b.partial_cmp(a).unwrap_or(std::cmp::Ordering::Equal));
+    let top_distinct_importance = sorted_desc
+        .iter()
+        .take(TOP_TIER_N)
+        // quantise to 1e-6 so float noise doesn't inflate the distinct count;
+        // genuine ties (e.g. the 0.95 pile) collapse to one bucket.
+        .map(|v| (v * 1_000_000.0).round() as i64)
+        .collect::<std::collections::HashSet<_>>()
+        .len() as u64;
+
     SignalFidelityStats {
         total_active,
         spearman_r,
@@ -2128,6 +2148,8 @@ fn compute_signal_fidelity_from_rows(
         n_touched,
         n_zero_access,
         n_floor_importance,
+        n_ceiling_importance,
+        top_distinct_importance,
         mean_importance,
         mean_access,
         under_reinforced,
@@ -21297,6 +21319,40 @@ mod tests {
         assert_eq!(stats.under_reinforced[0].key, "hot_unloved");
         // cold_loved is the over-promoted extreme.
         assert_eq!(stats.over_promoted[0].key, "cold_loved");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn signal_fidelity_surfaces_ceiling_saturation() {
+        // Four rows pinned at exactly the 0.95 ceiling + one below: n_ceiling
+        // counts the pile, and top_distinct collapses to 2 (0.95 and 0.5) —
+        // the saturation tell that the multiplicative-reinforce fix targets.
+        let temp_dir = fidelity_temp_dir("ceiling_sat");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+        import_fidelity_fixture(
+            &store,
+            &temp_dir,
+            &[
+                ("pin_a", 0.95, 20),
+                ("pin_b", 0.95, 30),
+                ("pin_c", 0.95, 40),
+                ("pin_d", 0.95, 50),
+                ("low_e", 0.50, 5),
+            ],
+        )
+        .await;
+
+        let stats = store.signal_fidelity_stats(5).await.expect("fidelity");
+        assert_eq!(stats.total_active, 5);
+        assert_eq!(stats.n_ceiling_importance, 4, "four rows at the 0.95 ceiling");
+        assert_eq!(
+            stats.top_distinct_importance, 2,
+            "only two distinct importance values among the top tier (0.95, 0.50)"
+        );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

@@ -16125,6 +16125,24 @@ async fn run_dream_signal_fidelity(top_n: u32, as_json: bool) -> Result<()> {
             0.0
         }
     );
+    println!(
+        "  at importance ceiling: {}    ({:.0}% — reinforce-saturated)",
+        stats.n_ceiling_importance,
+        if stats.total_active > 0 {
+            100.0 * stats.n_ceiling_importance as f64 / stats.total_active as f64
+        } else {
+            0.0
+        }
+    );
+    println!(
+        "  top-50 distinct imp  : {}    ({} — 1-2 = ceiling collapse, top-tier has no ordering)",
+        stats.top_distinct_importance,
+        if stats.top_distinct_importance <= 2 {
+            "COLLAPSED"
+        } else {
+            "ok"
+        }
+    );
     println!();
     println!(
         "mean importance        : {:.3}    mean access : {:.2}",
