@@ -1899,7 +1899,7 @@ fn has_valid_fts_column_prefix_before_colon(before_colon: &str) -> bool {
     col == "content"
 }
 
-fn now_secs() -> i64 {
+pub fn now_secs() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
@@ -2241,7 +2241,7 @@ fn feedback_kind_boost_fts(kind: &str) -> f64 {
 ///   `AGENT_BRIDGE_SEMANTIC_RANK_LEGACY=1` → restore legacy `(1, 0.2, 0.1, 0.2)`
 ///   `AGENT_BRIDGE_SEMANTIC_W_{COS,IMP,MEM,FB}=<f64>` → override one weight
 /// Negative / non-finite overrides are ignored (fall back to the default).
-fn semantic_rank_weights() -> (f64, f64, f64, f64) {
+pub fn semantic_rank_weights() -> (f64, f64, f64, f64) {
     let legacy = std::env::var("AGENT_BRIDGE_SEMANTIC_RANK_LEGACY")
         .map(|v| {
             let v = v.trim();
@@ -2279,6 +2279,32 @@ fn resolve_semantic_weights(legacy: bool, overrides: [Option<f64>; 4]) -> (f64, 
         overrides[2].unwrap_or(CONSERVATIVE.2),
         overrides[3].unwrap_or(CONSERVATIVE.3),
     )
+}
+
+/// Composite semantic-retrieval score: `w_cos·cosine + w_imp·importance +
+/// w_mem·memory_score + w_fb·feedback_kind`. The SINGLE source of truth for
+/// `mode=semantic` ranking, shared by the SQL path
+/// ([`SqliteStore::memory_search_semantic`]) and the warm embed-cache path in
+/// the bridge, so both honor the same owner-approved [`semantic_rank_weights`].
+///
+/// `weights` is resolved once per query by the caller (env reads are not free);
+/// pass the tuple from [`semantic_rank_weights`]. `now` is unix seconds (see
+/// [`now_secs`]) — resolve it once per query for consistent recency across rows.
+pub fn semantic_blend_score(
+    weights: (f64, f64, f64, f64),
+    cosine: f32,
+    importance: f64,
+    last_accessed_at: i64,
+    access_count: u64,
+    kind: &str,
+    now: i64,
+) -> f64 {
+    let (w_cos, w_imp, w_mem, w_fb) = weights;
+    let fb_kind = if kind == "feedback" { 1.0 } else { 0.0 };
+    w_cos * cosine as f64
+        + w_imp * importance
+        + w_mem * memory_score(last_accessed_at, access_count, now, kind)
+        + w_fb * fb_kind
 }
 
 /// Tokenise content for contradiction-overlap detection.
@@ -6520,11 +6546,16 @@ impl StateStore for SqliteStore {
                 // Blend cosine relevance with small importance / recency /
                 // feedback tie-breakers. Cosine leads; the bonuses only break
                 // near-ties (owner-signed-off rebalance, see semantic_rank_weights).
-                let fb_kind = if rec.kind == "feedback" { 1.0 } else { 0.0 };
-                let score = w_cos * cosine as f64
-                    + w_imp * rec.importance
-                    + w_mem * memory_score(rec.last_accessed_at, rec.access_count, now, &rec.kind)
-                    + w_fb * fb_kind;
+                // Shared with the bridge warm-cache path via semantic_blend_score.
+                let score = semantic_blend_score(
+                    (w_cos, w_imp, w_mem, w_fb),
+                    cosine,
+                    rec.importance,
+                    rec.last_accessed_at,
+                    rec.access_count,
+                    &rec.kind,
+                    now,
+                );
                 Some(MemorySearchHit {
                     record: rec,
                     score,
@@ -22280,6 +22311,30 @@ mod tests {
         assert_eq!(
             resolve_semantic_weights(false, [Some(2.0), Some(0.1), None, Some(0.0)]),
             (2.0, 0.1, 0.02, 0.0)
+        );
+    }
+
+    #[test]
+    fn semantic_blend_score_matches_documented_formula() {
+        // Age 0 (now == last_accessed_at) + access_count 0 ⇒ memory_score = 1.0
+        // (recency exp(0)=1 + 0.3·ln(1)=0), isolating the weight arithmetic.
+        let w = (1.0, 0.05, 0.02, 0.03); // conservative point
+        let s = semantic_blend_score(w, 0.5, 0.8, 1000, 0, "decision", 1000);
+        // 1.0·0.5 + 0.05·0.8 + 0.02·1.0 + 0.03·0
+        assert!((s - (0.5 + 0.04 + 0.02)).abs() < 1e-9, "got {s}");
+        // Feedback kind adds exactly w_fb on top of the same base.
+        let s_fb = semantic_blend_score(w, 0.5, 0.8, 1000, 0, "feedback", 1000);
+        assert!(
+            (s_fb - (s + 0.03)).abs() < 1e-9,
+            "feedback adds w_fb; got {s_fb}"
+        );
+        // The rebalance rationale: a clear cosine gap is NOT overridden by
+        // importance under the conservative point.
+        let hi_cos_lo_imp = semantic_blend_score(w, 0.80, 0.10, 1000, 0, "decision", 1000);
+        let lo_cos_hi_imp = semantic_blend_score(w, 0.55, 0.95, 1000, 0, "decision", 1000);
+        assert!(
+            hi_cos_lo_imp > lo_cos_hi_imp,
+            "cosine gap 0.25 must beat importance gap 0.85 under conservative weights"
         );
     }
 

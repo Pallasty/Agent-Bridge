@@ -14,7 +14,10 @@ pub mod embedding;
 pub mod lineage_audit;
 pub mod quant;
 pub mod sqlite;
-pub use sqlite::{default_db_path, temporal_bonus, weight_for_edge_type, SqliteStore};
+pub use sqlite::{
+    default_db_path, now_secs, semantic_blend_score, semantic_rank_weights, temporal_bonus,
+    weight_for_edge_type, SqliteStore,
+};
 pub mod vector;
 pub use embedding::{
     default_backend, set_default_backend, EmbeddingBackend, HashBackend, OnnxBackend,

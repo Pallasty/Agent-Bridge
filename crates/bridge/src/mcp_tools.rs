@@ -29,7 +29,10 @@ use ab_mcp::{ContentBlock, McpTool, ToolContext, ToolRegistry, ToolResult, ToolS
 use ab_store::{
     cosine_similarity,
     embed_text,
+    now_secs,
     prioritize_session_handoff,
+    semantic_blend_score,
+    semantic_rank_weights,
     // MemoryStats is used indirectly via store.memory_stats() — no direct struct access needed.
     AgentPresenceRecord,
     CompactPolicy,
@@ -19551,6 +19554,15 @@ impl McpTool for MemorySearchTool {
             let cache_guard = self.hub.memory_embed_cache.lock().await;
             if let Some(cached) = cache_guard.as_ref() {
                 let query_vec = embed_text(&q);
+                // Score via the SAME owner-approved weights + formula as the SQL
+                // path (memory_search_semantic), through the shared
+                // semantic_blend_score. Resolve weights + clock once per query.
+                // Before this fix the warm cache hardcoded `cosine + 0.2·importance`,
+                // silently ignoring the conservative rebalance and every
+                // AGENT_BRIDGE_SEMANTIC_* env knob whenever the embed cache was
+                // warm — so mode=semantic ranking diverged by cache state.
+                let weights = semantic_rank_weights();
+                let now = now_secs();
                 let mut hits: Vec<MemorySearchHit> = cached
                     .iter()
                     // Tombstone/supersede tolerance: cache cleanup is racy
@@ -19563,7 +19575,15 @@ impl McpTool for MemorySearchTool {
                             return None;
                         }
                         Some(MemorySearchHit {
-                            score: cosine as f64 + 0.2 * rec.importance,
+                            score: semantic_blend_score(
+                                weights,
+                                cosine,
+                                rec.importance,
+                                rec.last_accessed_at,
+                                rec.access_count,
+                                &rec.kind,
+                                now,
+                            ),
                             record: rec.clone(),
                             cosine: Some(cosine),
                         })
@@ -90535,6 +90555,117 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
                 cos
             );
         }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn memory_search_semantic_warm_cache_matches_sql_blend() {
+        // Regression: mode=semantic had TWO scorers. The SQL path
+        // (memory_search_semantic) used the owner-approved semantic_rank_weights
+        // blend; the warm embed-cache path hardcoded `cosine + 0.2·importance`,
+        // bypassing the weights + every AGENT_BRIDGE_SEMANTIC_* env knob — so
+        // ranking silently diverged by cache state. Both now route through the
+        // shared semantic_blend_score; assert the warm-cache tool path reproduces
+        // the SQL path's scores. The varied importance/kind corpus below makes the
+        // OLD 0.2·importance formula disagree, so this fails on the pre-fix code.
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+
+        let now = ab_store::now_secs();
+        let mk = |key: &str, kind: &str, suffix: &str, importance: f64, age_days: i64, access: u64| {
+            ab_store::MemoryRecord {
+                key: key.into(),
+                kind: kind.into(),
+                content: format!("shared semantic anchor tokens alpha bravo charlie {suffix}"),
+                tags: vec![],
+                related_keys: vec![],
+                scope: None,
+                created_at: now - age_days * 86_400,
+                updated_at: now - age_days * 86_400,
+                last_accessed_at: now - age_days * 86_400,
+                access_count: access,
+                importance,
+                status: "active".into(),
+                trigger_pattern: None,
+                superseded_by: None,
+            }
+        };
+        // Shared anchor tokens (real cosine to the query) + unique suffix per row
+        // (escape memory_save's overlap-supersede). Distinct importance/kind/
+        // recency so the conservative blend and the old 0.2·importance formula
+        // rank differently.
+        let corpus = [
+            mk("warm_fresh_decision", "decision", "delta", 0.30, 0, 0),
+            mk("warm_stale_feedback", "feedback", "echo", 0.90, 45, 12),
+            mk("warm_mid_lesson", "lesson", "foxtrot", 0.60, 10, 3),
+        ];
+        for rec in &corpus {
+            store.memory_save(rec).await.expect("save");
+        }
+
+        let query = "shared semantic anchor tokens alpha bravo charlie";
+
+        // SQL (cold) path — raw blend scores, no cache involved.
+        let sql_hits = store
+            .memory_search_semantic(query, 10, 0.0)
+            .await
+            .expect("sql semantic");
+        assert!(
+            sql_hits.len() >= 3,
+            "expected all 3 rows from sql path, got {}",
+            sql_hits.len()
+        );
+        let sql_scores: std::collections::HashMap<String, f64> = sql_hits
+            .iter()
+            .map(|h| (h.record.key.clone(), h.score))
+            .collect();
+
+        // Populate the warm embed cache from the SAME store snapshot (identical
+        // embeddings ⇒ identical cosine ⇒ any score delta is formula-only).
+        let rows = store
+            .memory_load_embeddings()
+            .await
+            .expect("load embeddings");
+        *hub.memory_embed_cache.lock().await = Some(rows);
+
+        // Warm path through the tool (hits the embed-cache branch).
+        let tool = MemorySearchTool::new(hub.clone());
+        let res = tool
+            .execute(
+                json!({"query": query, "mode": "semantic", "limit": 10, "threshold": 0.0}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("warm semantic");
+        let warm = result_text_as_json(&res);
+        let warm_arr = warm.as_array().expect("array result");
+        assert_eq!(
+            warm_arr.len(),
+            sql_hits.len(),
+            "warm and sql must surface the same rows"
+        );
+
+        let mut warm_order: Vec<String> = Vec::new();
+        for hit in warm_arr {
+            let key = hit["record"]["key"]
+                .as_str()
+                .expect("record.key")
+                .to_string();
+            let warm_score = hit["score"].as_f64().expect("score");
+            let sql_score = *sql_scores
+                .get(&key)
+                .unwrap_or_else(|| panic!("key {key} missing from sql path"));
+            assert!(
+                (warm_score - sql_score).abs() < 1e-4,
+                "warm score {warm_score} must equal sql blend {sql_score} for {key}"
+            );
+            warm_order.push(key);
+        }
+
+        // Identical scores ⇒ identical sorted order.
+        let sql_order: Vec<String> = sql_hits.iter().map(|h| h.record.key.clone()).collect();
+        assert_eq!(warm_order, sql_order, "warm-cache order must equal SQL order");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
     // ── B1 project-state digest — formatter (audit-gap B1 v0) ────────────────
