@@ -17228,13 +17228,28 @@ impl McpTool for AgentKillTool {
         }
     }
     async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
-        let agent = match &self.hub.agent {
-            Some(a) => a.clone(),
-            None => return Ok(ToolResult::error("no agent runtime configured")),
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
         };
         let id = match args.get("id").and_then(|v| v.as_str()) {
             Some(s) => SessionId::from_raw(s.to_string()),
             None => return Ok(ToolResult::error("missing 'id'")),
+        };
+        // Route to the runtime that OWNS this session (by its recorded
+        // `runtime_id`), NOT the configured primary. The primary is frequently a
+        // different runtime (e.g. claude-code) than the session's (e.g. gemini),
+        // and each runtime tracks its own live interactive PTY sessions in a
+        // process-local map — killing via the primary misses the handle, returns
+        // a spurious "no live child", and leaks the child process tree. Mirrors
+        // the resolution agent_send_input / agent_session_output already use.
+        let session = match store.load_session(&id).await? {
+            Some(s) => s,
+            None => return Ok(ToolResult::error(format!("unknown agent session {id}"))),
+        };
+        let agent = match resolve_agent_for_session(&self.hub, &session) {
+            Ok(a) => a,
+            Err(e) => return Ok(ToolResult::error(e)),
         };
         match agent.kill(&id).await {
             Ok(()) => Ok(ToolResult::text(format!("SIGTERM sent to session {id}"))),
@@ -72641,6 +72656,71 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             }
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    /// Regression: `agent_kill` must route to the runtime that OWNS the session
+    /// (by its stored `runtime_id`), not the configured primary. Before the fix
+    /// the handler always killed via `hub.agent`; a session owned by a
+    /// non-primary runtime (e.g. gemini while the primary is claude-code) was
+    /// never found in the primary's process-local interactive map, so kill
+    /// returned a spurious "no live child" and leaked the live child tree. Here
+    /// the primary is a mock and the session is owned by a real (cat-backed)
+    /// runtime registered separately: only owner-routed kill tears the PTY down.
+    #[tokio::test]
+    async fn agent_kill_routes_to_session_owning_runtime_not_primary() {
+        use ab_agent::AgentRuntime;
+
+        let (base_hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = base_hub.store.as_ref().expect("store").clone();
+        // The session OWNER: a real interactive runtime (id "claude-code").
+        let owner = Arc::new(
+            ab_agent::ClaudeCodeRuntime::with_binary("/bin/cat").with_store(store.clone()),
+        );
+        // The configured PRIMARY is a DIFFERENT runtime — pre-fix, kill went here.
+        let hub = crate::Hub::builder()
+            .store(store)
+            .agent(mock("mock-primary", false))
+            .register_agent(owner.clone())
+            .build();
+
+        let session = owner
+            .spawn(SpawnConfig {
+                cwd: temp_dir.display().to_string(),
+                interactive: true,
+                ..Default::default()
+            })
+            .await
+            .expect("spawn interactive cat");
+        assert_eq!(
+            owner.interactive_count(),
+            1,
+            "session should be live before kill"
+        );
+
+        let out = AgentKillTool::new(hub)
+            .execute(json!({"id": session.id.as_str()}), &ToolContext::default())
+            .await
+            .expect("kill execute");
+        assert!(
+            !out.is_error,
+            "kill should succeed by routing to the owner: {out:?}"
+        );
+
+        // The OWNER's live PTY must actually be torn down, proving the kill
+        // reached the owner and not the mock primary.
+        let mut killed = false;
+        for _ in 0..80 {
+            if owner.interactive_count() == 0 {
+                killed = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert!(
+            killed,
+            "owner's interactive session must be killed — kill routed to the session's runtime"
+        );
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
