@@ -142,6 +142,69 @@ pub fn importance_from_valence(valence: f64, floor: f64, ceiling: f64) -> f64 {
 /// tool is gated per-call (`confirm_apply`) instead.
 pub const OUTCOME_VALENCE_IMPORTANCE_ENV: &str = "AB_OUTCOME_VALENCE_IMPORTANCE";
 
+/// Canonical fixed-precision rendering of a valence scalar for tag values —
+/// the SAME string everywhere (`+0.600`), so label and stamp comparisons are
+/// exact string equality, never float comparison.
+pub fn format_valence(valence: f64) -> String {
+    format!("{valence:+.3}")
+}
+
+/// Tag prefix carrying the derived valence scalar as a DURABLE LABEL,
+/// independent of the importance lifecycle. `importance` doubles as retrieval
+/// rank and is owned by decay/reinforce/archival — a floor-negative row gets
+/// archived ~3x sooner than baseline, silently skewing the valence corpus
+/// positive (survivorship bias). The label tag survives archival, so the
+/// corpus stays honest even for rows the lifecycle retires.
+pub const VALENCE_TAG_PREFIX: &str = "valence:";
+/// Tag prefix for the coarse class (`positive`/`neutral`/`negative`), the
+/// cheap scan key for consumers that don't need the scalar.
+pub const VALENCE_CLASS_TAG_PREFIX: &str = "valence_class:";
+/// Tag prefix recording that importance WAS applied for a given derived
+/// valence (`valence_applied:+0.600`). The stamp makes the retro apply pass
+/// one-shot per row: a stamped row whose facets still derive the same valence
+/// is skipped, so decay/reinforce own the trajectory after the initial
+/// valence stamp (no undamped restoring force, no reinforcement claw-back).
+/// A facet change (e.g. a decision landing later) derives a DIFFERENT
+/// valence, the stamp no longer matches, and the row re-qualifies on its own.
+pub const VALENCE_APPLIED_TAG_PREFIX: &str = "valence_applied:";
+
+/// Coarse class label for a valence scalar — same thresholds as the shadow
+/// tool's `valence_class` field.
+pub fn valence_class(valence: f64) -> &'static str {
+    if valence > 0.05 {
+        "positive"
+    } else if valence < -0.05 {
+        "negative"
+    } else {
+        "neutral"
+    }
+}
+
+/// The durable label tags for a derived valence: scalar + class.
+pub fn valence_label_tags(valence: f64) -> Vec<String> {
+    vec![
+        format!("{VALENCE_TAG_PREFIX}{}", format_valence(valence)),
+        format!("{VALENCE_CLASS_TAG_PREFIX}{}", valence_class(valence)),
+    ]
+}
+
+/// The applied-stamp tag for a derived valence.
+pub fn valence_applied_tag(valence: f64) -> String {
+    format!("{VALENCE_APPLIED_TAG_PREFIX}{}", format_valence(valence))
+}
+
+/// Extract the applied-stamp value (the `+0.600` string) from a tag list, if
+/// present. Later duplicates win, mirroring `facets_from_tags`.
+pub fn applied_stamp(tags: &[String]) -> Option<String> {
+    let mut out = None;
+    for t in tags {
+        if let Some(v) = t.strip_prefix(VALENCE_APPLIED_TAG_PREFIX) {
+            out = Some(v.to_string());
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -191,6 +254,30 @@ mod tests {
         assert_eq!(f.method, "browser_eval");
         assert_eq!(f.decision.as_deref(), Some("approved"));
         assert_eq!(f.embody.as_deref(), Some("embodied"));
+    }
+
+    #[test]
+    fn label_and_stamp_tags_render_canonically() {
+        assert_eq!(format_valence(0.6), "+0.600");
+        assert_eq!(format_valence(-1.0), "-1.000");
+        assert_eq!(
+            valence_label_tags(0.6),
+            vec![
+                "valence:+0.600".to_string(),
+                "valence_class:positive".to_string()
+            ]
+        );
+        assert_eq!(valence_class(-0.4), "negative");
+        assert_eq!(valence_class(0.0), "neutral");
+        assert_eq!(valence_applied_tag(-1.0), "valence_applied:-1.000");
+
+        let tags = vec![
+            "verify:rendered_ok".to_string(),
+            "valence_applied:+0.300".to_string(),
+            "valence_applied:+0.600".to_string(),
+        ];
+        assert_eq!(applied_stamp(&tags).as_deref(), Some("+0.600"));
+        assert_eq!(applied_stamp(&[]), None);
     }
 
     #[test]

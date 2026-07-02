@@ -253,25 +253,37 @@ pub fn build_outcome_memory_gated(
         tags.push(format!("embody:{e}"));
     }
 
-    // Gated valence→importance: derive from the SAME facets the tags carry via
-    // the shared v0 rule. Non-derivable (or gate off) keeps the historical 0.5.
-    let importance = if derive_importance {
-        let facets = crate::outcome_valence::OutcomeFacets {
-            verify_status: verify_status.to_string(),
-            method: verify_method.to_string(),
-            decision: decision.map(str::to_string),
-            embody: embody_status.map(str::to_string),
-        };
-        match crate::outcome_valence::derive_valence(&facets).valence {
-            Some(v) => crate::outcome_valence::importance_from_valence(
+    // Derive valence ONCE from the same facets the tags carry (shared v0 rule).
+    let facets = crate::outcome_valence::OutcomeFacets {
+        verify_status: verify_status.to_string(),
+        method: verify_method.to_string(),
+        decision: decision.map(str::to_string),
+        embody: embody_status.map(str::to_string),
+    };
+    let derived_valence = crate::outcome_valence::derive_valence(&facets).valence;
+
+    // DURABLE LABEL CHANNEL — always written when derivable, independent of the
+    // importance gate: importance doubles as retrieval rank and is owned by
+    // decay/reinforce/archival (a floor-negative row archives ~3x sooner than
+    // baseline), so the label must not live in importance or the surviving
+    // valence corpus skews positive. Tags survive archival.
+    if let Some(v) = derived_valence {
+        tags.extend(crate::outcome_valence::valence_label_tags(v));
+    }
+
+    // Gated valence→importance. Non-derivable (or gate off) keeps the
+    // historical 0.5. When importance IS derived at birth, the row also gets
+    // the applied-stamp so the retro apply pass treats it as already handled.
+    let importance = match (derive_importance, derived_valence) {
+        (true, Some(v)) => {
+            tags.push(crate::outcome_valence::valence_applied_tag(v));
+            crate::outcome_valence::importance_from_valence(
                 v,
                 crate::outcome_valence::IMPORTANCE_FLOOR_DEFAULT,
                 crate::outcome_valence::IMPORTANCE_CEILING_DEFAULT,
-            ),
-            None => 0.5,
+            )
         }
-    } else {
-        0.5
+        _ => 0.5,
     };
 
     Some(MemoryRecord {
@@ -313,6 +325,23 @@ mod tests {
     fn valence_importance_gate_off_keeps_hardcoded_half() {
         let m = build_outcome_memory_gated(&rec("abc123def456"), 42, false).expect("builds");
         assert_eq!(m.importance, 0.5);
+        // The durable LABEL channel is independent of the importance gate…
+        assert!(m.tags.contains(&"valence:+0.600".to_string()));
+        assert!(m.tags.contains(&"valence_class:positive".to_string()));
+        // …but the applied-stamp is only minted when importance was derived.
+        assert!(!m.tags.iter().any(|t| t.starts_with("valence_applied:")));
+    }
+
+    #[test]
+    fn non_derivable_row_gets_no_valence_tags() {
+        let mut bare = rec("bare12345678");
+        bare["verify_status"] = json!("");
+        bare.as_object_mut().unwrap().remove("verify_method");
+        let m = build_outcome_memory_gated(&bare, 42, true).expect("builds");
+        assert_eq!(m.importance, 0.5);
+        assert!(!m.tags.iter().any(|t| t.starts_with("valence:")
+            || t.starts_with("valence_class:")
+            || t.starts_with("valence_applied:")));
     }
 
     #[test]
@@ -320,6 +349,9 @@ mod tests {
         // rendered_ok + no decision + browser_eval → valence +0.6 → importance 0.8.
         let m = build_outcome_memory_gated(&rec("abc123def456"), 42, true).expect("builds");
         assert!((m.importance - 0.8).abs() < 1e-9, "got {}", m.importance);
+        // Gate ON ⇒ label AND applied-stamp minted at birth.
+        assert!(m.tags.contains(&"valence:+0.600".to_string()));
+        assert!(m.tags.contains(&"valence_applied:+0.600".to_string()));
 
         // failed + rejected → valence -1.0 → clamped to the 0.1 floor.
         let mut failed = rec("feedbeef1234");

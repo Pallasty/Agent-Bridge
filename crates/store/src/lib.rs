@@ -2890,6 +2890,17 @@ pub trait StateStore: Send + Sync {
         Ok(false)
     }
 
+    /// Merge `tags` into one active memory's tag list (append-unique; existing
+    /// tags and their order preserved; no supersede, no timestamp churn — the
+    /// tags-column mirror of [`Self::memory_set_importance`]). Returns `true`
+    /// iff the row exists and is active (even when every tag was already
+    /// present). Used by `outcome_valence_importance_apply` to stamp applied
+    /// rows. Default impl is a no-op `false` so non-SQLite stores stay
+    /// trait-compatible.
+    async fn memory_add_tags(&self, _key: &str, _tags: &[String]) -> Result<bool> {
+        Ok(false)
+    }
+
     /// Semantic search: embed `query` via feature hashing, load all stored
     /// embeddings, return memories ranked by cosine similarity ≥ `threshold`.
     /// Falls back gracefully when no embeddings are stored yet.

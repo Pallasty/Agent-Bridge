@@ -12067,18 +12067,41 @@ impl McpTool for OutcomesMemoryDriftTool {
 /// surface is the read-only drift projection; this tool closes the loop only on
 /// explicit operator action with dry_run:false. Additive: no schema/column/table
 /// change, no event_spine write.
-/// Refresh-preserving importance for `present_outcomes_ingest`: when an ACTIVE
-/// row already exists for the deterministic outcome key, its stored importance
-/// carries lifecycle state owned by other writers (decay passes, reinforce,
-/// `outcome_valence_importance_apply`) — a content refresh must carry it
-/// forward. A brand-new row keeps the builder's initial importance (0.5, or
-/// the gated valence derivation).
-fn carry_forward_ingest_importance(
+/// Refresh-preserving lifecycle state for `present_outcomes_ingest`: when an
+/// ACTIVE row already exists for the deterministic outcome key, a content
+/// refresh must carry forward the state owned by OTHER writers, because the
+/// upsert replaces both `importance` and `tags` wholesale:
+///
+/// - **importance** is owned by decay passes, reinforce, and
+///   `outcome_valence_importance_apply` — the builder's initial value must
+///   not stomp it.
+/// - **the `valence_applied:` stamp** is APPLY HISTORY, only truthfully
+///   minted by the code that actually wrote the derived importance. On a
+///   refresh the builder's importance is discarded (above), so any stamp the
+///   builder minted for this rebuild would attest an application that never
+///   happened — drop it, and preserve the EXISTING row's stamp verbatim
+///   instead. A facet change then leaves the old stamp mismatching the newly
+///   derived valence, which is exactly what re-qualifies the row in the
+///   audited apply pass.
+///
+/// A brand-new row keeps the builder's output unchanged (initial importance —
+/// 0.5 or the gated derivation — plus, gate-ON, a truthful birth stamp).
+fn carry_forward_ingest_lifecycle(
     mut mem: MemoryRecord,
-    existing_importance: Option<f64>,
+    existing: Option<&MemoryRecord>,
 ) -> MemoryRecord {
-    if let Some(imp) = existing_importance {
-        mem.importance = imp;
+    if let Some(ex) = existing {
+        mem.importance = ex.importance;
+        mem.tags.retain(|t| {
+            !t.starts_with(crate::outcome_valence::VALENCE_APPLIED_TAG_PREFIX)
+        });
+        if let Some(stamp) = ex
+            .tags
+            .iter()
+            .find(|t| t.starts_with(crate::outcome_valence::VALENCE_APPLIED_TAG_PREFIX))
+        {
+            mem.tags.push(stamp.clone());
+        }
     }
     mem
 }
@@ -12210,20 +12233,20 @@ impl McpTool for PresentOutcomesIngestTool {
             // superseded/tombstoned row (no non-mutating status-aware keyed read
             // exists in the store trait). Named `active_row_exists` accordingly;
             // it is not a resurrection oracle.
-            let existing_importance = store
+            let existing_record = store
                 .memory_search(&mem.key, &[], 5)
                 .await
                 .unwrap_or_default()
                 .iter()
                 .find(|h| h.record.key == mem.key)
-                .map(|h| h.record.importance);
-            let active_row_exists = existing_importance.is_some();
-            // Refresh must not reset lifecycle state: the existing row's
-            // importance is owned by other writers (decay, reinforce,
-            // outcome_valence_importance_apply) and the upsert would otherwise
-            // stomp it back to the builder's initial value with no audit
-            // (adversarial review finding, 2026-07-02).
-            let mem = carry_forward_ingest_importance(mem, existing_importance);
+                .map(|h| h.record.clone());
+            let active_row_exists = existing_record.is_some();
+            // Refresh must not reset lifecycle state (importance NOR the
+            // valence_applied stamp): both are owned by other writers and the
+            // upsert replaces the columns wholesale (adversarial review
+            // findings, 2026-07-02 — gate-OFF refresh wiped the stamp; gate-ON
+            // refresh minted a false one).
+            let mem = carry_forward_ingest_lifecycle(mem, existing_record.as_ref());
 
             let mut row = json!({
                 "key": mem.key,
@@ -29181,10 +29204,13 @@ impl McpTool for OutcomeValenceImportanceApplyTool {
                 Default confirm_apply=false ⇒ dry-run preview, no writes. With \
                 confirm_apply=true a full rollback map (old→new per key) is persisted as \
                 an audit memory record BEFORE any importance moves, so the pass is \
-                reversible. Re-runs against an unchanged store are no-ops \
-                (min_delta), but decay/reinforce passes move importance between \
-                runs, so a repeated confirm pass acts as a RESTORING FORCE toward \
-                the static valence target — schedule with care. Affects only AB's \
+                reversible. ONE-SHOT per row: an applied row is stamped \
+                (valence_applied:<v> tag) and skipped on later passes while its \
+                facets still derive the same valence — decay/reinforce own the \
+                trajectory after the initial stamp. A facet change (e.g. a \
+                decision landing later) re-qualifies the row automatically; \
+                restamp=true forces re-assertion. Rows already at target get a \
+                stamp-only update (tags, no importance write). Affects only AB's \
                 own retrieval ranking; never touches biocortex. Ingest-side derivation for FUTURE rows is gated separately by \
                 the AB_OUTCOME_VALENCE_IMPORTANCE env (default OFF)."
                 .into(),
@@ -29195,7 +29221,8 @@ impl McpTool for OutcomeValenceImportanceApplyTool {
                     "floor": { "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.1, "description": "Importance never set below this (matches the memory_decay_unused floor)." },
                     "ceiling": { "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.9, "description": "Importance never set above this (hand-pinned 1.0 records always outrank derived scores)." },
                     "min_delta": { "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.01, "description": "Skip rows whose |new - old| is below this (makes re-runs idempotent)." },
-                    "max_apply_per_pass": { "type": "integer", "minimum": 1, "maximum": 500, "default": 50, "description": "Cap on importance updates applied this call." }
+                    "max_apply_per_pass": { "type": "integer", "minimum": 1, "maximum": 500, "default": 50, "description": "Cap on importance updates applied this call." },
+                    "restamp": { "type": "boolean", "default": false, "description": "Re-assert importance even for rows whose valence_applied stamp already matches the derived valence (overrides the one-shot skip)." }
                 }
             }),
         }
@@ -29234,6 +29261,7 @@ impl McpTool for OutcomeValenceImportanceApplyTool {
             .and_then(Value::as_u64)
             .unwrap_or(50)
             .clamp(1, 500) as usize;
+        let restamp = args.get("restamp").and_then(Value::as_bool).unwrap_or(false);
 
         let meta_rows = store
             .active_outcome_meta_rows()
@@ -29246,10 +29274,14 @@ impl McpTool for OutcomeValenceImportanceApplyTool {
             new: f64,
             valence: f64,
             rule_path: String,
+            /// Importance already at target — only the label/stamp tags are
+            /// missing or stale (retro-stamps rows applied before stamping
+            /// existed, or rows that converged on their own).
+            stamp_only: bool,
         }
         let total_rows = meta_rows.len() as u64;
         let mut derivable: u64 = 0;
-        let mut skipped_below_min_delta: u64 = 0;
+        let mut skipped_already_stamped: u64 = 0;
         let mut candidates: Vec<Candidate> = Vec::new();
         for row in &meta_rows {
             let tags: Vec<String> = serde_json::from_str(&row.tags_json).unwrap_or_default();
@@ -29257,17 +29289,25 @@ impl McpTool for OutcomeValenceImportanceApplyTool {
             let derived = crate::outcome_valence::derive_valence(&facets);
             let Some(v) = derived.valence else { continue };
             derivable += 1;
-            let target = crate::outcome_valence::importance_from_valence(v, floor, ceiling);
-            if (target - row.importance).abs() < min_delta {
-                skipped_below_min_delta += 1;
+            // ONE-SHOT stamp: a row whose stamp matches the CURRENT derived
+            // valence was already applied for these facets — decay/reinforce
+            // own its importance now. A facet change derives a different
+            // valence and the stamp stops matching, re-qualifying the row.
+            let stamped_current = crate::outcome_valence::applied_stamp(&tags).as_deref()
+                == Some(crate::outcome_valence::format_valence(v).as_str());
+            if stamped_current && !restamp {
+                skipped_already_stamped += 1;
                 continue;
             }
+            let target = crate::outcome_valence::importance_from_valence(v, floor, ceiling);
+            let stamp_only = (target - row.importance).abs() < min_delta;
             candidates.push(Candidate {
                 key: row.key.clone(),
                 old: row.importance,
                 new: target,
                 valence: v,
                 rule_path: derived.rule_path,
+                stamp_only,
             });
         }
         // Deterministic order so preview and apply agree run-to-run.
@@ -29277,6 +29317,8 @@ impl McpTool for OutcomeValenceImportanceApplyTool {
 
         let mut applied: u64 = 0;
         let mut failed: u64 = 0;
+        let mut stamped: u64 = 0;
+        let mut stamp_failed: u64 = 0;
         let mut audit_memory_key: Option<String> = None;
         if confirm_apply && !to_apply.is_empty() {
             // Rollback map FIRST: if the apply loop dies mid-pass, the audit
@@ -29294,6 +29336,7 @@ impl McpTool for OutcomeValenceImportanceApplyTool {
             let audit_key = format!("outcome_valence_importance_apply_{now}_{audit_nonce:09}");
             let audit_rows: Vec<Value> = to_apply
                 .iter()
+                .filter(|c| !c.stamp_only)
                 .map(|c| {
                     json!({
                         "key": c.key,
@@ -29304,6 +29347,11 @@ impl McpTool for OutcomeValenceImportanceApplyTool {
                     })
                 })
                 .collect();
+            let stamp_only_keys: Vec<&str> = to_apply
+                .iter()
+                .filter(|c| c.stamp_only)
+                .map(|c| c.key.as_str())
+                .collect();
             let audit_body = json!({
                 "schema": "agent_bridge.outcome_valence_importance_audit.v0",
                 "applied_at": now,
@@ -29312,6 +29360,7 @@ impl McpTool for OutcomeValenceImportanceApplyTool {
                 "min_delta": min_delta,
                 "rollback": "for each row: memory_set_importance(key, old_importance)",
                 "rows": audit_rows,
+                "stamp_only_keys": stamp_only_keys,
             });
             let audit_rec = MemoryRecord {
                 key: audit_key.clone(),
@@ -29352,10 +29401,26 @@ impl McpTool for OutcomeValenceImportanceApplyTool {
             }
             audit_memory_key = Some(audit_key);
             for c in to_apply {
-                match store.memory_set_importance(&c.key, c.new).await {
-                    Ok(true) => applied += 1,
-                    Ok(false) => failed += 1, // row vanished between read and write
-                    Err(_) => failed += 1,
+                if !c.stamp_only {
+                    match store.memory_set_importance(&c.key, c.new).await {
+                        Ok(true) => applied += 1,
+                        Ok(false) => {
+                            failed += 1; // row vanished between read and write
+                            continue;
+                        }
+                        Err(_) => {
+                            failed += 1;
+                            continue;
+                        }
+                    }
+                }
+                // Durable label + one-shot stamp (additive tags; reversible by
+                // tag removal, no pre-image needed in the audit map).
+                let mut stamp_tags = crate::outcome_valence::valence_label_tags(c.valence);
+                stamp_tags.push(crate::outcome_valence::valence_applied_tag(c.valence));
+                match store.memory_add_tags(&c.key, &stamp_tags).await {
+                    Ok(true) => stamped += 1,
+                    Ok(false) | Err(_) => stamp_failed += 1,
                 }
             }
         }
@@ -29369,20 +29434,28 @@ impl McpTool for OutcomeValenceImportanceApplyTool {
                     "new_importance": c.new,
                     "valence": c.valence,
                     "rule_path": c.rule_path,
+                    "action": if c.stamp_only { "stamp_only" } else { "importance+stamp" },
                     "applied": confirm_apply,
                 })
             })
             .collect();
 
+        // Honest mutation accounting: stamp-only passes write TAGS and persist
+        // an audit record even when no importance moved (adversarial review
+        // finding, 2026-07-02 — flags keyed on applied>0 misreported those
+        // passes as non-mutating).
+        let mutated = applied > 0 || stamped > 0 || audit_memory_key.is_some();
         Ok(ToolResult::json_text(&json!({
             "schema": "agent_bridge.outcome_valence_importance_apply.v0",
-            "read_only": !confirm_apply,
+            "read_only": !mutated,
             "boundary": {
                 "mode": if confirm_apply { "valence_importance_apply" } else { "valence_importance_dry_run" },
-                "read_only": !confirm_apply,
-                "mutates_ab_memory": applied > 0,
+                "read_only": !mutated,
+                "mutates_ab_memory": mutated,
                 "recomputes_stored_importance": applied > 0,
-                "changes_memory_search_order": applied > 0,
+                // importance moves reorder ranking; label/stamp tags change
+                // tag-FILTERED search membership.
+                "changes_memory_search_order": applied > 0 || stamped > 0,
                 "writes_valence": false,
                 "runs_biocortex": false,
                 "supplies_to_biocortex": false
@@ -29397,21 +29470,28 @@ impl McpTool for OutcomeValenceImportanceApplyTool {
                 "floor": floor,
                 "ceiling": ceiling,
                 "min_delta": min_delta,
-                "max_apply_per_pass": max_apply
+                "max_apply_per_pass": max_apply,
+                "restamp": restamp
             },
             "summary": {
                 "present_outcome_rows": total_rows,
                 "derivable_rows": derivable,
                 "candidates": candidates.len() as u64,
+                "importance_candidates": candidates.iter().filter(|c| !c.stamp_only).count() as u64,
+                "stamp_only_candidates": candidates.iter().filter(|c| c.stamp_only).count() as u64,
                 "applied": applied,
+                "stamped": stamped,
                 "failed": failed,
-                "skipped_below_min_delta": skipped_below_min_delta,
+                "stamp_failed": stamp_failed,
+                "skipped_already_stamped": skipped_already_stamped,
                 "capped_out": capped_out
             },
             "rows": rows_json,
             "audit_memory_key": match &audit_memory_key { Some(k) => json!(k), None => Value::Null },
             "rollback": if applied > 0 {
-                json!("restore old values from the audit record (audit_memory_key): memory_set_importance(key, old_importance) per row")
+                json!("importance: restore old values from the audit record (audit_memory_key) via memory_set_importance(key, old_importance); labels/stamps are additive tags, reversible by tag removal")
+            } else if mutated {
+                json!("tag-only writes (labels + stamps, keys in the audit record); reversible by tag removal")
             } else {
                 json!("no writes this call")
             }
@@ -73726,13 +73806,25 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(audit.content.contains("\"old_importance\": 0.5"));
         assert!(audit.tags.iter().any(|t| t == "rollback_map"));
 
-        // Second confirm pass is a no-op: targets already reached (Δ < min_delta).
+        // Applied rows carry the durable label + the one-shot stamp.
+        let ia = store
+            .memory_get("outcome_ia")
+            .await
+            .expect("get ia")
+            .expect("ia exists");
+        assert!(ia.tags.contains(&"valence:+1.000".to_string()));
+        assert!(ia.tags.contains(&"valence_class:positive".to_string()));
+        assert!(ia.tags.contains(&"valence_applied:+1.000".to_string()));
+
+        // Second confirm pass is a no-op: the stamp matches the derived
+        // valence, so both rows are skipped one-shot (not merely min_delta).
         let res2 = tool
             .execute(json!({"confirm_apply": true}), &ToolContext::default())
             .await
             .expect("execute ok");
         let v2 = result_json(&res2);
         assert_eq!(v2["summary"]["candidates"], 0);
+        assert_eq!(v2["summary"]["skipped_already_stamped"], 2);
         assert_eq!(v2["summary"]["applied"], 0);
         assert!(v2["audit_memory_key"].is_null());
 
@@ -73755,11 +73847,12 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         let audit1 = v1["audit_memory_key"].as_str().expect("audit 1").to_string();
 
         // Immediate param-change rerun (same unix second is the hazard case):
-        // ceiling 0.7 re-qualifies the 0.9 row.
+        // ceiling 0.7 re-targets the 0.9 row; restamp overrides the one-shot
+        // stamp pass 1 just minted.
         let v2 = result_json(
             &tool
                 .execute(
-                    json!({"confirm_apply": true, "ceiling": 0.7}),
+                    json!({"confirm_apply": true, "ceiling": 0.7, "restamp": true}),
                     &ToolContext::default(),
                 )
                 .await
@@ -73785,30 +73878,173 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
+    #[tokio::test]
+    async fn outcome_valence_importance_apply_stamp_only_retro_stamps_converged_rows() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        // A row whose importance already sits at the derived target (0.9 for
+        // rendered_ok+approved) but which predates stamping — e.g. applied by
+        // an older binary, or converged via reinforce.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        let rec = MemoryRecord {
+            key: "outcome_conv".into(),
+            kind: "present_outcome".into(),
+            content: "converged outcome row alpha beta gamma".into(),
+            tags: vec![
+                "verify:rendered_ok".into(),
+                "decision:approved".into(),
+                "method:browser_eval".into(),
+            ],
+            related_keys: vec![],
+            scope: Some("outcome:conv".into()),
+            created_at: now,
+            updated_at: now,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.9,
+            status: "active".into(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store.memory_save(&rec).await.expect("save");
+
+        let tool = OutcomeValenceImportanceApplyTool::new(hub);
+        let v = result_json(
+            &tool
+                .execute(json!({"confirm_apply": true}), &ToolContext::default())
+                .await
+                .expect("execute ok"),
+        );
+        assert_eq!(v["summary"]["stamp_only_candidates"], 1);
+        assert_eq!(v["summary"]["applied"], 0, "no importance write needed");
+        assert_eq!(v["summary"]["stamped"], 1);
+
+        let row = store
+            .memory_get("outcome_conv")
+            .await
+            .expect("get")
+            .expect("exists");
+        assert!((row.importance - 0.9).abs() < 1e-9, "importance untouched");
+        assert!(row.tags.contains(&"valence_applied:+1.000".to_string()));
+        assert!(row.tags.contains(&"valence:+1.000".to_string()));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn outcome_valence_importance_apply_facet_change_requalifies_stamped_row() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        // Stamped for +0.600 (rendered_ok, no decision), but a decision has
+        // since landed: facets now derive +1.000 → the stale stamp must NOT
+        // block re-application.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        let rec = MemoryRecord {
+            key: "outcome_upd".into(),
+            kind: "present_outcome".into(),
+            content: "updated outcome row alpha beta gamma".into(),
+            tags: vec![
+                "verify:rendered_ok".into(),
+                "decision:approved".into(),
+                "method:browser_eval".into(),
+                "valence_applied:+0.600".into(),
+            ],
+            related_keys: vec![],
+            scope: Some("outcome:upd".into()),
+            created_at: now,
+            updated_at: now,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.8,
+            status: "active".into(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store.memory_save(&rec).await.expect("save");
+
+        let tool = OutcomeValenceImportanceApplyTool::new(hub);
+        let v = result_json(
+            &tool
+                .execute(json!({"confirm_apply": true}), &ToolContext::default())
+                .await
+                .expect("execute ok"),
+        );
+        assert_eq!(v["summary"]["skipped_already_stamped"], 0);
+        assert_eq!(v["summary"]["applied"], 1, "stale stamp must re-qualify");
+
+        let row = store
+            .memory_get("outcome_upd")
+            .await
+            .expect("get")
+            .expect("exists");
+        assert!(
+            (row.importance - 0.9).abs() < 1e-9,
+            "re-derived to +1.0 target"
+        );
+        // Later stamp wins on read (applied_stamp takes the last duplicate).
+        assert!(row.tags.contains(&"valence_applied:+1.000".to_string()));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
     #[test]
-    fn carry_forward_ingest_importance_preserves_existing() {
-        let mem = MemoryRecord {
+    fn carry_forward_ingest_lifecycle_preserves_importance_and_stamp_history() {
+        let base = |tags: Vec<&str>, importance: f64| MemoryRecord {
             key: "outcome_x".into(),
             kind: "present_outcome".into(),
             content: "row".into(),
-            tags: vec![],
+            tags: tags.into_iter().map(|s| s.to_string()).collect(),
             related_keys: vec![],
             scope: Some("outcome:x".into()),
             created_at: 1,
             updated_at: 1,
             last_accessed_at: 1,
             access_count: 0,
-            importance: 0.5,
+            importance,
             status: "active".into(),
             trigger_pattern: None,
             superseded_by: None,
         };
-        // Existing active row (e.g. valence-applied 0.9) → refresh carries it.
-        let kept = carry_forward_ingest_importance(mem.clone(), Some(0.9));
-        assert_eq!(kept.importance, 0.9);
-        // Brand-new row → builder's initial value stands.
-        let fresh = carry_forward_ingest_importance(mem, None);
-        assert_eq!(fresh.importance, 0.5);
+
+        // Brand-new row → builder output untouched (incl. a gate-ON birth stamp).
+        let built = base(vec!["valence:+0.600", "valence_applied:+0.600"], 0.8);
+        let fresh = carry_forward_ingest_lifecycle(built.clone(), None);
+        assert_eq!(fresh.importance, 0.8);
+        assert!(fresh.tags.contains(&"valence_applied:+0.600".to_string()));
+
+        // Refresh, gate-ON, facets changed (decision landed): the builder's
+        // fresh stamp is FALSE (its derived importance was just discarded) —
+        // drop it, keep the existing row's stamp so the mismatch re-qualifies
+        // the row in the audited apply pass.
+        let rebuilt = base(
+            vec!["decision:approved", "valence:+1.000", "valence_applied:+1.000"],
+            0.9,
+        );
+        let existing = base(vec!["valence:+0.600", "valence_applied:+0.600"], 0.8);
+        let kept = carry_forward_ingest_lifecycle(rebuilt, Some(&existing));
+        assert_eq!(kept.importance, 0.8, "existing importance carried");
+        assert!(
+            kept.tags.contains(&"valence_applied:+0.600".to_string()),
+            "existing stamp preserved verbatim"
+        );
+        assert!(
+            !kept.tags.contains(&"valence_applied:+1.000".to_string()),
+            "builder's unearned fresh stamp dropped"
+        );
+
+        // Refresh, gate-OFF (builder mints no stamp): the existing stamp must
+        // survive the tag rebuild — losing it re-armed the restoring force.
+        let rebuilt_off = base(vec!["valence:+0.600"], 0.5);
+        let existing_off = base(vec!["valence:+0.600", "valence_applied:+0.600"], 0.62);
+        let kept_off = carry_forward_ingest_lifecycle(rebuilt_off, Some(&existing_off));
+        assert_eq!(kept_off.importance, 0.62);
+        assert!(kept_off.tags.contains(&"valence_applied:+0.600".to_string()));
     }
 
     #[test]
