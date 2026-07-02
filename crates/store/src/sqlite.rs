@@ -69,6 +69,7 @@ use crate::{
     MemoryQueryRecord, MemoryQueryStats, MemoryRecord, MemorySearchHit, MemoryStats, MisrankRow,
     ModeStats,
     NotificationRecord, OverlapPair, PlanRecord, PlanStep, ReinforceActiveStats, ReplayAuditRow,
+    RetrievalOutcomeMemory, RetrievalOutcomeSummary,
     ReplayAuditStats, S234Counts, SessionFilter, SignalFidelityStats, StateStore, StoredSession,
     WaypointRow, WaypointStats, MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP,
     MEMORY_QUERY_LOG_RING_CAP, STDIO_CAP,
@@ -7040,6 +7041,153 @@ impl StateStore for SqliteStore {
     /// **Phase 0 telemetry** — aggregate `memory_query_log` over the last
     /// `window_secs` seconds. Returns hit-rate, p50/p95 latency, avg top-hit
     /// age, per-kind counts, and top miss queries.
+    async fn retrieval_outcome_summary(
+        &self,
+        window_secs: i64,
+        top_n: usize,
+    ) -> Result<RetrievalOutcomeSummary> {
+        let now = now_secs();
+        let window_start = now - window_secs.max(0);
+        let top_n = top_n.max(1) as i64;
+
+        self.conn
+            .call(move |c| -> RusqliteResult<RetrievalOutcomeSummary> {
+                // Scalar aggregate over the window. COUNT(DISTINCT CASE …) over
+                // all-NULL = 0; AVG over an empty (no-used) set = NULL → COALESCE.
+                let (total, used, distinct_mem, distinct_used, avg_rank, avg_rank_used): (
+                    i64,
+                    i64,
+                    i64,
+                    i64,
+                    f64,
+                    f64,
+                ) = c.query_row(
+                    "SELECT
+                        COUNT(*),
+                        COALESCE(SUM(CASE WHEN used_at IS NOT NULL THEN 1 ELSE 0 END), 0),
+                        COUNT(DISTINCT memory_key),
+                        COUNT(DISTINCT CASE WHEN used_at IS NOT NULL THEN memory_key END),
+                        COALESCE(AVG(rank), 0.0),
+                        COALESCE(AVG(CASE WHEN used_at IS NOT NULL THEN rank END), 0.0)
+                       FROM retrieval_surfacing
+                      WHERE surfaced_at >= ?1",
+                    rusqlite::params![window_start],
+                    |r| {
+                        Ok((
+                            r.get(0)?,
+                            r.get(1)?,
+                            r.get(2)?,
+                            r.get(3)?,
+                            r.get(4)?,
+                            r.get(5)?,
+                        ))
+                    },
+                )?;
+
+                if total == 0 {
+                    return Ok(RetrievalOutcomeSummary {
+                        window_start,
+                        window_end: now,
+                        ..Default::default()
+                    });
+                }
+
+                // Per-mode surfacing counts, most-first.
+                let mut mode_stmt = c.prepare(
+                    "SELECT mode, COUNT(*) FROM retrieval_surfacing
+                      WHERE surfaced_at >= ?1
+                   GROUP BY mode ORDER BY COUNT(*) DESC, mode ASC",
+                )?;
+                let by_mode: Vec<(String, u64)> = mode_stmt
+                    .query_map(rusqlite::params![window_start], |r| {
+                        Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64))
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+
+                // Per-memory aggregates via a CTE so the derived columns are real
+                // columns (referenceable inside ORDER BY expressions — a bare
+                // alias inside a compound ORDER BY expr would resolve to a table
+                // column and error). Reinforce candidates = used > 0.
+                let mut used_stmt = c.prepare(
+                    "WITH agg AS (
+                        SELECT memory_key,
+                               COUNT(*) AS surfaced,
+                               SUM(CASE WHEN used_at IS NOT NULL THEN 1 ELSE 0 END) AS used,
+                               AVG(rank) AS avg_rank,
+                               MAX(surfaced_at) AS last_surf
+                          FROM retrieval_surfacing
+                         WHERE surfaced_at >= ?1
+                      GROUP BY memory_key
+                     )
+                     SELECT memory_key, surfaced, used, avg_rank, last_surf
+                       FROM agg
+                      WHERE used > 0
+                   ORDER BY used DESC, (CAST(used AS REAL) / surfaced) DESC,
+                            surfaced DESC, memory_key ASC
+                      LIMIT ?2",
+                )?;
+                let top_used: Vec<RetrievalOutcomeMemory> = used_stmt
+                    .query_map(rusqlite::params![window_start, top_n], |r| {
+                        Ok(RetrievalOutcomeMemory {
+                            key: r.get(0)?,
+                            surfaced_count: r.get::<_, i64>(1)? as u64,
+                            used_count: r.get::<_, i64>(2)? as u64,
+                            avg_rank: r.get(3)?,
+                            last_surfaced_at: r.get(4)?,
+                        })
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+
+                // Decay candidates = surfaced ≥ 2 with ZERO used (surfaced-but-
+                // never-used = noise in results). The ≥2 floor drops one-off
+                // surfacings that simply had no chance to be used yet.
+                let mut never_stmt = c.prepare(
+                    "WITH agg AS (
+                        SELECT memory_key,
+                               COUNT(*) AS surfaced,
+                               SUM(CASE WHEN used_at IS NOT NULL THEN 1 ELSE 0 END) AS used,
+                               AVG(rank) AS avg_rank,
+                               MAX(surfaced_at) AS last_surf
+                          FROM retrieval_surfacing
+                         WHERE surfaced_at >= ?1
+                      GROUP BY memory_key
+                     )
+                     SELECT memory_key, surfaced, avg_rank, last_surf
+                       FROM agg
+                      WHERE used = 0 AND surfaced >= 2
+                   ORDER BY surfaced DESC, last_surf DESC, memory_key ASC
+                      LIMIT ?2",
+                )?;
+                let top_never_used: Vec<RetrievalOutcomeMemory> = never_stmt
+                    .query_map(rusqlite::params![window_start, top_n], |r| {
+                        Ok(RetrievalOutcomeMemory {
+                            key: r.get(0)?,
+                            surfaced_count: r.get::<_, i64>(1)? as u64,
+                            used_count: 0,
+                            avg_rank: r.get(2)?,
+                            last_surfaced_at: r.get(3)?,
+                        })
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+
+                Ok(RetrievalOutcomeSummary {
+                    window_start,
+                    window_end: now,
+                    total_surfacings: total as u64,
+                    used_surfacings: used as u64,
+                    distinct_memories: distinct_mem as u64,
+                    distinct_used_memories: distinct_used as u64,
+                    avg_rank_overall: avg_rank,
+                    avg_rank_when_used: avg_rank_used,
+                    by_mode,
+                    top_used,
+                    top_never_used,
+                })
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("retrieval_outcome_summary: {e}")))
+    }
+
     async fn memory_query_stats(&self, window_secs: i64) -> Result<MemoryQueryStats> {
         let now = now_secs();
         let window_start = now - window_secs.max(0);
@@ -17408,6 +17556,169 @@ mod tests {
             .await
             .expect("attribute delta");
         assert_eq!(none, 0, "an unsurfaced key has no used attribution");
+    }
+
+    #[tokio::test]
+    async fn retrieval_outcome_summary_empty_is_zero() {
+        // A store with no surfacings returns an all-zero summary (the honest
+        // "no data yet" — the collector gate is default-OFF).
+        let (_dir, store) = fresh_store("outcome-summary-empty").await;
+        let s = store
+            .retrieval_outcome_summary(3600, 10)
+            .await
+            .expect("summary");
+        assert_eq!(s.total_surfacings, 0);
+        assert_eq!(s.used_surfacings, 0);
+        assert!(s.top_used.is_empty());
+        assert!(s.top_never_used.is_empty());
+        assert!(s.by_mode.is_empty());
+    }
+
+    #[tokio::test]
+    async fn retrieval_outcome_summary_aggregates_used_and_never_used() {
+        // Three "searches" surface 4 memories at various ranks/modes; two of them
+        // (alpha, delta) get an explicit get → all their in-window surfacings turn
+        // "used" (attribute_retrieval_get stamps every null-used row for the key).
+        //   alpha:   3 surfacings (ranks 0,0,2), all used  → reinforce, top
+        //   delta:   2 surfacings (ranks 3,1),   all used  → reinforce, 2nd
+        //   bravo:   2 surfacings (ranks 1,1),   0 used    → decay candidate
+        //   charlie: 1 surfacing  (rank 2),      0 used    → below the ≥2 floor
+        let (_dir, store) = fresh_store("outcome-summary-agg").await;
+        for (rows, q, mode) in [
+            (
+                vec![
+                    ("alpha".to_string(), 0i64),
+                    ("bravo".to_string(), 1),
+                    ("charlie".to_string(), 2),
+                ],
+                "q1",
+                "fts",
+            ),
+            (
+                vec![
+                    ("alpha".to_string(), 0),
+                    ("bravo".to_string(), 1),
+                    ("delta".to_string(), 3),
+                ],
+                "q2",
+                "semantic",
+            ),
+            (
+                vec![("alpha".to_string(), 2), ("delta".to_string(), 1)],
+                "q3",
+                "fts",
+            ),
+        ] {
+            store
+                .record_retrieval_surfacing(&rows, q, mode)
+                .await
+                .expect("record");
+        }
+        assert_eq!(
+            store.attribute_retrieval_get("alpha", 1800).await.unwrap(),
+            3
+        );
+        assert_eq!(
+            store.attribute_retrieval_get("delta", 1800).await.unwrap(),
+            2
+        );
+
+        let s = store
+            .retrieval_outcome_summary(3600, 10)
+            .await
+            .expect("summary");
+        assert_eq!(s.total_surfacings, 8, "3+2+1+2 surfacings");
+        assert_eq!(s.used_surfacings, 5, "alpha 3 + delta 2");
+        assert_eq!(s.distinct_memories, 4);
+        assert_eq!(s.distinct_used_memories, 2);
+        assert!(
+            (s.avg_rank_overall - 1.25).abs() < 1e-6,
+            "avg_rank_overall=10/8, got {}",
+            s.avg_rank_overall
+        );
+        assert!(
+            (s.avg_rank_when_used - 1.2).abs() < 1e-6,
+            "avg_rank_when_used=6/5, got {}",
+            s.avg_rank_when_used
+        );
+        assert_eq!(s.by_mode, vec![("fts".to_string(), 5), ("semantic".to_string(), 3)]);
+
+        // Reinforce candidates ordered by used_count DESC: alpha (3) then delta (2).
+        let used_keys: Vec<&str> = s.top_used.iter().map(|m| m.key.as_str()).collect();
+        assert_eq!(used_keys, vec!["alpha", "delta"]);
+        assert_eq!(s.top_used[0].surfaced_count, 3);
+        assert_eq!(s.top_used[0].used_count, 3);
+
+        // Decay candidates: bravo only (surfaced 2, 0 used); charlie is below ≥2.
+        let never_keys: Vec<&str> = s.top_never_used.iter().map(|m| m.key.as_str()).collect();
+        assert_eq!(never_keys, vec!["bravo"]);
+        assert_eq!(s.top_never_used[0].used_count, 0);
+        // Column mapping on the decay path: avg_rank = AVG(1,1) = 1.0, and
+        // last_surfaced_at is a real epoch (not the avg_rank value swapped in).
+        assert!(
+            (s.top_never_used[0].avg_rank - 1.0).abs() < 1e-6,
+            "bravo avg_rank=1.0, got {}",
+            s.top_never_used[0].avg_rank
+        );
+        assert!(s.top_never_used[0].last_surfaced_at > 1_000_000_000);
+
+        // top_n cap: request 1 reinforce candidate → only the top (alpha).
+        let s1 = store
+            .retrieval_outcome_summary(3600, 1)
+            .await
+            .expect("summary top_n=1");
+        assert_eq!(s1.top_used.len(), 1);
+        assert_eq!(s1.top_used[0].key, "alpha");
+    }
+
+    #[tokio::test]
+    async fn retrieval_outcome_summary_distinguishes_surfaced_from_used() {
+        // A memory surfaced 3× but used only 2× (attribute marks the 2 rows that
+        // existed at get-time; a later 3rd surfacing stays unused). Guards against
+        // a surfaced_count↔used_count swap and an avg_rank↔last_surfaced_at swap
+        // that equal-valued fixtures would hide.
+        let (_dir, store) = fresh_store("outcome-surfaced-ne-used").await;
+        store
+            .record_retrieval_surfacing(&[("echo".to_string(), 0)], "qa", "fts")
+            .await
+            .unwrap();
+        store
+            .record_retrieval_surfacing(&[("echo".to_string(), 2)], "qb", "fts")
+            .await
+            .unwrap();
+        assert_eq!(
+            store.attribute_retrieval_get("echo", 1800).await.unwrap(),
+            2,
+            "the 2 surfacings that exist at get-time turn used"
+        );
+        // A later surfacing is NOT retroactively used.
+        store
+            .record_retrieval_surfacing(&[("echo".to_string(), 4)], "qc", "semantic")
+            .await
+            .unwrap();
+
+        let s = store
+            .retrieval_outcome_summary(3600, 10)
+            .await
+            .expect("summary");
+        assert_eq!(s.total_surfacings, 3);
+        assert_eq!(s.used_surfacings, 2);
+        assert_eq!(s.top_used.len(), 1);
+        let echo = &s.top_used[0];
+        assert_eq!(echo.key, "echo");
+        assert_eq!(echo.surfaced_count, 3, "surfaced ≠ used: 3 surfacings");
+        assert_eq!(echo.used_count, 2, "surfaced ≠ used: 2 used");
+        // avg_rank = AVG(0,2,4) = 2.0 (proves the avg_rank column, not a swap with
+        // last_surfaced_at which would be a large epoch, not 2.0).
+        assert!(
+            (echo.avg_rank - 2.0).abs() < 1e-6,
+            "avg_rank=2.0, got {}",
+            echo.avg_rank
+        );
+        assert!(
+            echo.last_surfaced_at > 1_000_000_000,
+            "last_surfaced_at is a real epoch, not the avg_rank value"
+        );
     }
 
     #[tokio::test]

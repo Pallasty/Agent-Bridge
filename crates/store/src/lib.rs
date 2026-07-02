@@ -1003,6 +1003,61 @@ pub struct ModeStats {
     pub avg_top_hit_age_secs: f64,
 }
 
+/// One memory's retrieval-outcome tally within a window, aggregated from the
+/// `retrieval_surfacing` telemetry table (rows written only when the outcome
+/// collector gate `AGENT_BRIDGE_OUTCOME_COLLECTOR` is enabled). Read-only
+/// diagnostic — carries no authority over ranking; it makes the surfaced→used
+/// signal visible so a later, calibrated reinforce/decay rule can be designed
+/// against the real distribution instead of guessed against zero data.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct RetrievalOutcomeMemory {
+    pub key: String,
+    /// Times this memory was surfaced (logged as a top-10 search hit) in-window.
+    pub surfaced_count: u64,
+    /// Of those surfacings, how many were attributed a `used_at` (an explicit
+    /// `memory_get` within the attribution window) — the de-contaminated "used".
+    pub used_count: u64,
+    /// Mean surfaced rank (0 = top of results). A memory used from a deeper
+    /// rank is a stronger relevance signal than one used from rank 0.
+    pub avg_rank: f64,
+    /// Most recent `surfaced_at` (unix secs) for this memory in-window.
+    pub last_surfaced_at: i64,
+}
+
+/// Aggregate readout over `retrieval_surfacing` — the retrieval-feedback half of
+/// the learning loop (surfaced→used). Read-only baseline telemetry; empty when
+/// the collector has logged nothing in the window (default-OFF gate ⇒ an honest
+/// "no data yet"). Reinforce/decay candidates are surfaced for a downstream,
+/// separately-gated calibrated rule — this readout itself mutates nothing.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct RetrievalOutcomeSummary {
+    /// Earliest `surfaced_at` counted (unix secs) = now − window_secs.
+    pub window_start: i64,
+    /// Window end (unix secs).
+    pub window_end: i64,
+    /// Total surfacing rows in-window.
+    pub total_surfacings: u64,
+    /// Surfacings with a non-NULL `used_at`.
+    pub used_surfacings: u64,
+    /// Distinct memories surfaced in-window.
+    pub distinct_memories: u64,
+    /// Distinct memories with at least one used surfacing in-window.
+    pub distinct_used_memories: u64,
+    /// Mean rank across all surfacings (0 = top).
+    pub avg_rank_overall: f64,
+    /// Mean rank across USED surfacings only (0.0 if none used).
+    pub avg_rank_when_used: f64,
+    /// Per-mode surfacing counts, most-first.
+    pub by_mode: Vec<(String, u64)>,
+    /// Reinforce candidates: memories with ≥1 used surfacing, ranked by
+    /// `used_count` DESC then used/surfaced ratio DESC. Capped to `top_n`.
+    pub top_used: Vec<RetrievalOutcomeMemory>,
+    /// Decay candidates: memories surfaced ≥2× with ZERO used, ranked by
+    /// `surfaced_count` DESC (surfaced-but-never-used = noise in results).
+    /// Capped to `top_n`.
+    pub top_never_used: Vec<RetrievalOutcomeMemory>,
+}
+
 /// Sort order for `list_memories`.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -3074,6 +3129,21 @@ pub trait StateStore: Send + Sync {
     async fn memory_query_stats(&self, window_secs: i64) -> Result<MemoryQueryStats> {
         let _ = window_secs;
         Ok(MemoryQueryStats::default())
+    }
+
+    /// Retrieval-feedback readout — aggregate the `retrieval_surfacing`
+    /// telemetry (surfaced→used) over the last `window_secs`, returning up to
+    /// `top_n` reinforce candidates (used) and decay candidates (surfaced-never-
+    /// used). Read-only; default returns an empty [`RetrievalOutcomeSummary`] so
+    /// non-SQLite backends and unit tests degrade to "no data" (safe for a
+    /// diagnostic — unlike a ranking filter, an empty readout misleads nobody).
+    async fn retrieval_outcome_summary(
+        &self,
+        window_secs: i64,
+        top_n: usize,
+    ) -> Result<RetrievalOutcomeSummary> {
+        let _ = (window_secs, top_n);
+        Ok(RetrievalOutcomeSummary::default())
     }
 
     /// v21 α — Aggregate health snapshot for the synaptic trace graph,

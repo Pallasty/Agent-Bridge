@@ -30028,6 +30028,126 @@ impl McpTool for MemoryQueryStatsTool {
 }
 
 // ===========================================================================
+//     retrieval_outcome_report — surfaced→used feedback readout (read-only)
+// ===========================================================================
+
+pub struct RetrievalOutcomeReportTool {
+    hub: Hub,
+}
+impl RetrievalOutcomeReportTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for RetrievalOutcomeReportTool {
+    fn name(&self) -> &'static str {
+        "retrieval_outcome_report"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Read-only readout of the retrieval-feedback half of the \
+                 learning loop: aggregates the `retrieval_surfacing` telemetry \
+                 (surfaced→used) over the last `window_secs`. Reports overall \
+                 used-rate, avg rank (overall vs when-used), per-mode counts, and \
+                 the top reinforce candidates (memories whose surfacings were used) \
+                 + decay candidates (surfaced ≥2× but never used). Rows exist only \
+                 when the outcome collector (AGENT_BRIDGE_OUTCOME_COLLECTOR) is \
+                 enabled — an empty report means the gate is off or nothing has \
+                 accrued yet. Mutates nothing and carries no authority over ranking; \
+                 it exists to calibrate a later, separately-gated reinforce/decay \
+                 rule against the real distribution. Default window 7 days, top_n 15."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "window_secs": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 31_536_000,
+                        "default": 604_800,
+                        "description": "Lookback window in seconds. Default 7 days. Capped to 1 year."
+                    },
+                    "top_n": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 200,
+                        "default": 15,
+                        "description": "Max reinforce/decay candidates returned each. Default 15."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let window_secs = args
+            .get("window_secs")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(604_800)
+            .clamp(60, 31_536_000);
+        let top_n = args
+            .get("top_n")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(15)
+            .clamp(1, 200) as usize;
+
+        let s = store.retrieval_outcome_summary(window_secs, top_n).await?;
+
+        let used_rate = if s.total_surfacings > 0 {
+            (s.used_surfacings as f64 / s.total_surfacings as f64 * 1000.0).round() / 1000.0
+        } else {
+            0.0
+        };
+        let mem_json = |m: &ab_store::RetrievalOutcomeMemory| {
+            json!({
+                "key": m.key,
+                "surfaced_count": m.surfaced_count,
+                "used_count": m.used_count,
+                "used_ratio": if m.surfaced_count > 0 {
+                    (m.used_count as f64 / m.surfaced_count as f64 * 1000.0).round() / 1000.0
+                } else {
+                    0.0
+                },
+                "avg_rank": (m.avg_rank * 100.0).round() / 100.0,
+                "last_surfaced_at": m.last_surfaced_at,
+            })
+        };
+        let by_mode_json: Vec<Value> = s
+            .by_mode
+            .iter()
+            .map(|(m, n)| json!({ "mode": m, "count": n }))
+            .collect();
+        let reinforce_json: Vec<Value> = s.top_used.iter().map(mem_json).collect();
+        let decay_json: Vec<Value> = s.top_never_used.iter().map(mem_json).collect();
+
+        Ok(ToolResult::json_text(&json!({
+            "window_start": s.window_start,
+            "window_end": s.window_end,
+            "window_secs": window_secs,
+            "total_surfacings": s.total_surfacings,
+            "used_surfacings": s.used_surfacings,
+            "used_rate": used_rate,
+            "distinct_memories": s.distinct_memories,
+            "distinct_used_memories": s.distinct_used_memories,
+            "avg_rank_overall": (s.avg_rank_overall * 100.0).round() / 100.0,
+            "avg_rank_when_used": (s.avg_rank_when_used * 100.0).round() / 100.0,
+            "by_mode": by_mode_json,
+            "reinforce_candidates": reinforce_json,
+            "decay_candidates": decay_json,
+            "note": "surfaced→used telemetry (AGENT_BRIDGE_OUTCOME_COLLECTOR). Read-only; \
+                empty = gate off or nothing accrued yet. reinforce_candidates = memories \
+                whose surfacings were used; decay_candidates = surfaced ≥2× but never used.",
+        })))
+    }
+}
+
+// ===========================================================================
 //             memory_graph_topology — graph centrality readiness readout
 // ===========================================================================
 
@@ -60776,6 +60896,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         &mut reg,
         policy,
         Tier::Standard,
+        Arc::new(RetrievalOutcomeReportTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
         Arc::new(MemoryGraphTopologyTool::new(hub.clone())),
     );
     reg_if(
@@ -71097,6 +71223,66 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
 
         std::env::remove_var("AGENT_BRIDGE_PRESENTATIONS_DIR");
         let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&store_dir);
+    }
+
+    #[tokio::test]
+    async fn retrieval_outcome_report_shapes_used_rate_and_candidates() {
+        // The read-only report reads retrieval_surfacing directly (independent of
+        // the collector gate) and emits used_rate + reinforce/decay candidates.
+        let (hub, store_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        // alpha surfaced 2×, bravo surfaced 2× (both fts); alpha then gets used,
+        // then alpha is surfaced a 3rd time (unused) → surfaced 3 / used 2 so the
+        // reported used_ratio (0.667) is a non-trivial value, not 1.0.
+        for q in ["q1", "q2"] {
+            store
+                .record_retrieval_surfacing(
+                    &[("alpha".to_string(), 0), ("bravo".to_string(), 1)],
+                    q,
+                    "fts",
+                )
+                .await
+                .expect("record");
+        }
+        assert_eq!(
+            store.attribute_retrieval_get("alpha", 1800).await.unwrap(),
+            2,
+            "both existing alpha surfacings marked used"
+        );
+        store
+            .record_retrieval_surfacing(&[("alpha".to_string(), 0)], "q3", "fts")
+            .await
+            .expect("record");
+
+        let out = RetrievalOutcomeReportTool::new(hub.clone())
+            .execute(
+                json!({"window_secs": 31_536_000, "top_n": 15}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let res = result_text_as_json(&out);
+
+        assert_eq!(res["total_surfacings"], json!(5));
+        assert_eq!(res["used_surfacings"], json!(2));
+        assert_eq!(res["used_rate"], json!(0.4));
+        assert_eq!(res["distinct_memories"], json!(2));
+        assert_eq!(res["distinct_used_memories"], json!(1));
+        assert_eq!(res["by_mode"], json!([{ "mode": "fts", "count": 5 }]));
+
+        let reinforce = res["reinforce_candidates"].as_array().expect("reinforce");
+        assert_eq!(reinforce.len(), 1);
+        assert_eq!(reinforce[0]["key"], json!("alpha"));
+        assert_eq!(reinforce[0]["surfaced_count"], json!(3));
+        assert_eq!(reinforce[0]["used_count"], json!(2));
+        assert_eq!(reinforce[0]["used_ratio"], json!(0.667));
+
+        let decay = res["decay_candidates"].as_array().expect("decay");
+        assert_eq!(decay.len(), 1);
+        assert_eq!(decay[0]["key"], json!("bravo"));
+        assert_eq!(decay[0]["used_count"], json!(0));
+
         let _ = std::fs::remove_dir_all(&store_dir);
     }
 
