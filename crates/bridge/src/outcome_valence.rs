@@ -8,6 +8,21 @@
 //! `docs/design/OUTCOMES_VALENCE_TRANSPORT_CONTRACT_DESIGN_2026_06_30.md` §2.4:
 //! `(verify_status × decision) → base valence in [-1,1]`, scaled by a
 //! method-confidence factor. No model, no learning, no randomness.
+//!
+//! Revision v0.1 (2026-07-02): `verified` joins `rendered_ok` in the ok-class
+//! (session-manual outcome rows use the generic status), and `cargo_test` /
+//! `live_mcp` / `golden_gate` get explicit method-confidence factors instead
+//! of falling to the `unknown` 0.6. HONEST CHANGE LIST — this is a revision,
+//! not a pure widening: inputs carrying those facets DID derive under v0 via
+//! the fallback cells and now derive differently:
+//!   - `verified+approved`: +0.3 (other class) → +1.0 (ok class)
+//!   - `verified+rejected`: −0.5 (other class) → −0.4 (ok class)
+//!   - `verified+none`:      non-derivable     → +0.6
+//!   - rows with the three new methods: conf 0.6 → 1.0 / 0.9
+//! Rows carrying none of those facets (`rendered_ok`/`failed`/`empty`
+//! statuses, legacy methods) derive identically to v0 — locked by test.
+//! Already-stamped rows whose derivation changed re-qualify automatically
+//! (stamp mismatch) and are corrected by the audited apply pass.
 
 /// The normalized outcome facets the rule reads — exactly the
 /// `verify:`/`method:`/`decision:`/`embody:` tag prefixes that
@@ -49,8 +64,14 @@ pub struct ValenceDerivation {
     pub rule_path: String,
 }
 
-/// Derive a candidate valence from outcome facets via the v0 rule table.
-/// Deterministic; result is rounded to 1e-6 like the shadow tool always did.
+/// Versioned id of the derivation rule table below, echoed by every consumer
+/// (shadow envelope, apply envelope) so an auditor can tie a derivation to the
+/// exact table revision that produced it.
+pub const OUTCOME_VALENCE_RULE_SCHEMA: &str = "agent_bridge.outcome_valence_rule.v0_1";
+
+/// Derive a candidate valence from outcome facets via the versioned rule
+/// table ([`OUTCOME_VALENCE_RULE_SCHEMA`]). Deterministic; result is rounded
+/// to 1e-6 like the shadow tool always did.
 pub fn derive_valence(facets: &OutcomeFacets) -> ValenceDerivation {
     let method_label = if facets.method.is_empty() {
         "unknown".to_string()
@@ -63,7 +84,10 @@ pub fn derive_valence(facets: &OutcomeFacets) -> ValenceDerivation {
         _ => "none",
     };
     let vs_class = match facets.verify_status.as_str() {
-        "rendered_ok" => "ok",
+        // `verified` = the generic honest status session-manual outcome rows
+        // carry (tests + live verification) — same epistemic weight as a
+        // programmatic render verification. v0.1 widening.
+        "rendered_ok" | "verified" => "ok",
         "failed" | "error" => "failed",
         "" => "empty",
         _ => "other",
@@ -85,8 +109,11 @@ pub fn derive_valence(facets: &OutcomeFacets) -> ValenceDerivation {
         _ => None,
     };
     let conf = match method_label.as_str() {
-        "browser_eval" | "macos_ax_verify" => 1.0,
-        "desktop_verify" => 0.9,
+        // live_mcp = end-to-end through the deployed daemon: the strongest
+        // verification this system produces. v0.1 widening.
+        "browser_eval" | "macos_ax_verify" | "live_mcp" => 1.0,
+        // deterministic but indirect (verifies what the suite covers).
+        "desktop_verify" | "cargo_test" | "golden_gate" => 0.9,
         "lite_probe" => 0.7,
         "self_report" => 0.5,
         _ => 0.6,
@@ -238,6 +265,31 @@ mod tests {
         assert_eq!(d.valence, None);
         assert_eq!(d.method_label, "unknown");
         assert!(d.rule_path.contains("not derivable"));
+    }
+
+    #[test]
+    fn rule_v0_1_widening_verified_and_new_methods() {
+        // `verified` joins the ok-class: derivable WITHOUT a decision…
+        let d = derive_valence(&facets("verified", None, "live_mcp"));
+        assert_eq!(d.valence, Some(0.6));
+        // …and verified+approved reaches full strength at live_mcp conf 1.0.
+        let d = derive_valence(&facets("verified", Some("approved"), "live_mcp"));
+        assert_eq!(d.valence, Some(1.0));
+        // verified+rejected = display/claim contradicted by the owner.
+        let d = derive_valence(&facets("verified", Some("rejected"), "live_mcp"));
+        assert_eq!(d.valence, Some(-0.4));
+        // cargo_test / golden_gate: deterministic-but-indirect at 0.9.
+        let d = derive_valence(&facets("verified", Some("approved"), "cargo_test"));
+        assert_eq!(d.valence, Some(0.9));
+        let d = derive_valence(&facets("failed", None, "golden_gate"));
+        assert_eq!(d.valence, Some(-0.63));
+        // Cells NOT carrying the widened facets derive identically to v0
+        // (the honest invariance — verified/new-method cells DID change, see
+        // the module-header change list).
+        let d = derive_valence(&facets("rendered_ok", None, "browser_eval"));
+        assert_eq!(d.valence, Some(0.6));
+        let d = derive_valence(&facets("rendered_ok", None, "self_report"));
+        assert_eq!(d.valence, Some(0.3));
     }
 
     #[test]

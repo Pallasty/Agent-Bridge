@@ -29106,11 +29106,12 @@ impl McpTool for OutcomeValenceShadowTool {
                 "runtime_authority_granted": false
             },
             "rule": {
-                "schema": "agent_bridge.outcome_valence_rule.v0",
-                "note": "Transparent deterministic map (verify_status, decision) -> base valence, scaled by a method-confidence factor. No model, no learning, no randomness.",
+                "schema": crate::outcome_valence::OUTCOME_VALENCE_RULE_SCHEMA,
+                "note": "Transparent deterministic map (verify_status, decision) -> base valence, scaled by a method-confidence factor; v0_1 recognizes verified alongside rendered_ok in the ok-class. No model, no learning, no randomness.",
                 "valence_range": [-1.0, 1.0],
                 "method_confidence_factors": {
-                    "browser_eval": 1.0, "macos_ax_verify": 1.0, "desktop_verify": 0.9,
+                    "browser_eval": 1.0, "macos_ax_verify": 1.0, "live_mcp": 1.0,
+                    "desktop_verify": 0.9, "cargo_test": 0.9, "golden_gate": 0.9,
                     "lite_probe": 0.7, "self_report": 0.5, "unknown": 0.6
                 }
             },
@@ -29414,11 +29415,23 @@ impl McpTool for OutcomeValenceImportanceApplyTool {
                         }
                     }
                 }
-                // Durable label + one-shot stamp (additive tags; reversible by
-                // tag removal, no pre-image needed in the audit map).
+                // Durable label + one-shot stamp. REPLACE under the valence
+                // prefixes rather than append: a re-derivation (facet change,
+                // rule revision) must leave exactly ONE current label/stamp —
+                // stale contradictory scalars would otherwise accumulate
+                // forever and break tag-scan consistency (review finding,
+                // 2026-07-02). Reversible via the audit map + tag removal.
                 let mut stamp_tags = crate::outcome_valence::valence_label_tags(c.valence);
                 stamp_tags.push(crate::outcome_valence::valence_applied_tag(c.valence));
-                match store.memory_add_tags(&c.key, &stamp_tags).await {
+                let prefixes: Vec<String> = vec![
+                    crate::outcome_valence::VALENCE_TAG_PREFIX.to_string(),
+                    crate::outcome_valence::VALENCE_CLASS_TAG_PREFIX.to_string(),
+                    crate::outcome_valence::VALENCE_APPLIED_TAG_PREFIX.to_string(),
+                ];
+                match store
+                    .memory_replace_tag_prefixes(&c.key, &prefixes, &stamp_tags)
+                    .await
+                {
                     Ok(true) => stamped += 1,
                     Ok(false) | Err(_) => stamp_failed += 1,
                 }
@@ -29461,7 +29474,7 @@ impl McpTool for OutcomeValenceImportanceApplyTool {
                 "supplies_to_biocortex": false
             },
             "rule": {
-                "schema": "agent_bridge.outcome_valence_rule.v0",
+                "schema": crate::outcome_valence::OUTCOME_VALENCE_RULE_SCHEMA,
                 "importance_map": "clamp((valence + 1) / 2, floor, ceiling)",
                 "note": "Same shared deterministic rule as outcome_valence_shadow; consumer is AB's own retrieval ranking (importance blend), NOT biocortex."
             },
@@ -73987,8 +74000,13 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             (row.importance - 0.9).abs() < 1e-9,
             "re-derived to +1.0 target"
         );
-        // Later stamp wins on read (applied_stamp takes the last duplicate).
+        // Replace semantics: exactly ONE current stamp — the stale +0.600
+        // stamp is removed, not shadowed by append order.
         assert!(row.tags.contains(&"valence_applied:+1.000".to_string()));
+        assert!(
+            !row.tags.contains(&"valence_applied:+0.600".to_string()),
+            "stale stamp must be replaced, not accumulated"
+        );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }

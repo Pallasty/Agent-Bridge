@@ -6224,6 +6224,55 @@ impl StateStore for SqliteStore {
         Ok(rows)
     }
 
+    async fn memory_replace_tag_prefixes(
+        &self,
+        key: &str,
+        prefixes: &[String],
+        tags: &[String],
+    ) -> Result<bool> {
+        let key = key.to_string();
+        let prefixes: Vec<String> = prefixes.to_vec();
+        let add: Vec<String> = tags.to_vec();
+        let updated = self
+            .conn
+            .call(move |c| -> RusqliteResult<bool> {
+                let tx = c.unchecked_transaction()?;
+                let existing: Option<String> = tx
+                    .query_row(
+                        "SELECT tags FROM memories WHERE key = ?1 AND status = 'active'",
+                        params![key],
+                        |r| r.get::<_, Option<String>>(0),
+                    )
+                    .optional()?
+                    .flatten();
+                let Some(raw) = existing else {
+                    return Ok(false);
+                };
+                let mut merged: Vec<String> = serde_json::from_str(&raw).unwrap_or_default();
+                let before = merged.clone();
+                merged.retain(|t| !prefixes.iter().any(|p| t.starts_with(p.as_str())));
+                for t in add {
+                    if !merged.contains(&t) {
+                        merged.push(t);
+                    }
+                }
+                if merged != before {
+                    let tags_json =
+                        serde_json::to_string(&merged).unwrap_or_else(|_| "[]".to_string());
+                    tx.execute(
+                        "UPDATE memories SET tags = ?2 \
+                          WHERE key = ?1 AND status = 'active'",
+                        params![key, tags_json],
+                    )?;
+                }
+                tx.commit()?;
+                Ok(true)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_replace_tag_prefixes: {e}")))?;
+        Ok(updated)
+    }
+
     async fn memory_add_tags(&self, key: &str, tags: &[String]) -> Result<bool> {
         let key = key.to_string();
         let add: Vec<String> = tags.to_vec();
@@ -6242,8 +6291,7 @@ impl StateStore for SqliteStore {
                 let Some(raw) = existing else {
                     return Ok(false);
                 };
-                let mut merged: Vec<String> =
-                    serde_json::from_str(&raw).unwrap_or_default();
+                let mut merged: Vec<String> = serde_json::from_str(&raw).unwrap_or_default();
                 let mut changed = false;
                 for t in add {
                     if !merged.contains(&t) {
@@ -6254,8 +6302,8 @@ impl StateStore for SqliteStore {
                 if changed {
                     // Tags-column-only UPDATE — no timestamp churn, mirroring
                     // memory_set_importance.
-                    let tags_json = serde_json::to_string(&merged)
-                        .unwrap_or_else(|_| "[]".to_string());
+                    let tags_json =
+                        serde_json::to_string(&merged).unwrap_or_else(|_| "[]".to_string());
                     tx.execute(
                         "UPDATE memories SET tags = ?2 \
                           WHERE key = ?1 AND status = 'active'",

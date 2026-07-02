@@ -2901,6 +2901,23 @@ pub trait StateStore: Send + Sync {
         Ok(false)
     }
 
+    /// Replace one active memory's tags under the given prefixes: every
+    /// existing tag starting with ANY of `prefixes` is removed, then `tags`
+    /// are appended (unique). Single transaction, tags-column-only UPDATE.
+    /// Used by `outcome_valence_importance_apply` so a re-derivation (facet
+    /// change, rule revision) leaves exactly ONE current valence label/stamp
+    /// per row instead of accumulating stale contradictory ones. Returns
+    /// `true` iff the row exists and is active. Default impl is a no-op
+    /// `false` so non-SQLite stores stay trait-compatible.
+    async fn memory_replace_tag_prefixes(
+        &self,
+        _key: &str,
+        _prefixes: &[String],
+        _tags: &[String],
+    ) -> Result<bool> {
+        Ok(false)
+    }
+
     /// Semantic search: embed `query` via feature hashing, load all stored
     /// embeddings, return memories ranked by cosine similarity ≥ `threshold`.
     /// Falls back gracefully when no embeddings are stored yet.
