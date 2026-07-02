@@ -18191,24 +18191,29 @@ fn pick_evolution_neighbors(
 }
 
 /// Cold-path counterpart of [`pick_evolution_neighbors`]: build the evolution
-/// candidate set from `memory_search_semantic` hits when the embed cache is
-/// cold. Evolved edges are semantic-similarity links, so — exactly like the warm
-/// path — select and weight neighbors by PURE COSINE, not the importance/recency
-/// blended search `score`. `memory_search_semantic` returns hits blend-sorted and
-/// already `status='active'` + cosine-thresholded, so here we re-sort by cosine,
-/// drop self/skills, and truncate to `top_k`. Keeping both paths on cosine makes
-/// the auto-evolved graph (neighbor set AND edge weights) deterministic w.r.t.
-/// embed-cache warmth — previously the cold path linked by blended score and
-/// stamped the blended score as the edge weight.
-fn evolution_neighbors_from_hits(
-    hits: Vec<MemorySearchHit>,
+/// candidate set from a `memory_top_k_cosine` pull when the embed cache is cold.
+/// Evolved edges are semantic-similarity links, so — exactly like the warm path —
+/// select and weight neighbors by PURE COSINE.
+///
+/// The source is `memory_top_k_cosine` (pure-cosine top-k over ALL active rows),
+/// NOT `memory_search_semantic`: the latter truncates to its `limit` by the
+/// importance/recency BLENDED score BEFORE any cosine re-sort, so a high-cosine
+/// neighbor ranked past the blend cutoff was silently lost from the cold pool
+/// while the warm `pick_evolution_neighbors` (which cosine-ranks every cached
+/// row) kept it — a residual cache-warmth divergence (#54 follow-up). Pulling by
+/// cosine removes that: apply the same `threshold` the warm path uses (the cosine
+/// source is unthresholded), drop self/skills, re-sort by cosine, truncate to
+/// `top_k`. `memory_top_k_cosine` already filters `status='active'`.
+fn evolution_neighbors_from_cosine_hits(
+    hits: Vec<MemoryCosineHit>,
     new_key: &str,
+    threshold: f32,
     top_k: usize,
 ) -> Vec<(MemoryRecord, f64)> {
     let mut sims: Vec<(MemoryRecord, f64)> = hits
         .into_iter()
-        .filter(|h| h.record.key != new_key && h.record.kind != "skill")
-        .map(|h| (h.record, h.cosine.unwrap_or(0.0) as f64))
+        .filter(|h| h.record.key != new_key && h.record.kind != "skill" && h.cosine >= threshold)
+        .map(|h| (h.record, h.cosine as f64))
         .collect();
     sims.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
     sims.truncate(top_k);
@@ -18875,22 +18880,40 @@ impl McpTool for MemorySaveTool {
                                 n
                             } else {
                                 drop(guard);
+                                // Pull by PURE COSINE over all active rows, then
+                                // threshold/exclude to match the warm
+                                // pick_evolution_neighbors. Using
+                                // memory_search_semantic here would truncate by the
+                                // blended score first and drop high-cosine, low-
+                                // importance neighbors (#54 follow-up).
+                                //
+                                // `memory_top_k_cosine` truncates to k BY COSINE
+                                // over ALL active rows BEFORE this helper filters
+                                // self/skill. The true top-5-eligible is lost only
+                                // if >(k-5) INELIGIBLE rows outrank the 5th real
+                                // neighbor by cosine — i.e. self(1) + skill rows,
+                                // since any eligible row with cosine ≥ the 5th's is
+                                // itself one of the top-4. So loss needs ≥ k-5
+                                // active `kind="skill"` MEMORY rows more similar to
+                                // this save than its 5th neighbor. k=200 (corpus
+                                // has 0 such rows; skills live in the `skills`
+                                // table) makes that unreachable while staying cheap
+                                // — top_k_cosine already full-scans+cosines every
+                                // active row, so a larger k only grows the returned
+                                // Vec, which we immediately truncate to top_k.
                                 match store_for_evolve
-                                    .memory_search_semantic(
+                                    .memory_top_k_cosine(
                                         &new_content_for_evolve,
-                                        /* limit */ 15,
-                                        /* threshold */ 0.65,
+                                        /* k (headroom vs self+skill) */ 200,
                                     )
                                     .await
                                 {
                                     Ok(hits) => {
-                                        // Select + weight by PURE COSINE (same as
-                                        // the warm pick_evolution_neighbors), NOT
-                                        // the blended search score.
-                                        let n = evolution_neighbors_from_hits(
+                                        let n = evolution_neighbors_from_cosine_hits(
                                             hits,
                                             &new_key_for_evolve,
-                                            5,
+                                            /* threshold */ 0.65,
+                                            /* top_k */ 5,
                                         );
                                         tracing::debug!(
                                             target: "p4_evolve",
@@ -18906,7 +18929,7 @@ impl McpTool for MemorySaveTool {
                                             target: "p4_evolve",
                                             key = %new_key_for_evolve,
                                             error = %e,
-                                            "P4 evolve cold path memory_search_semantic FAILED"
+                                            "P4 evolve cold path memory_top_k_cosine FAILED"
                                         );
                                         Vec::new()
                                     }
@@ -75419,30 +75442,34 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
 
     #[test]
     fn evolution_neighbors_cold_path_selects_and_weights_by_cosine() {
-        // Regression: the cold P4-evolve path selected neighbors by the blended
-        // search score and stamped that score as the edge weight, diverging from
-        // the warm pick_evolution_neighbors (pure cosine). Hits below are arranged
-        // so blend-order (score) != cosine-order; the fix must follow cosine.
-        let hit = |key: &str, kind: &str, cosine: f32, score: f64| ab_store::MemorySearchHit {
+        // Regression: the cold P4-evolve path pulled candidates via
+        // memory_search_semantic, which truncates by the importance/recency
+        // BLENDED score BEFORE any cosine re-sort — so a high-cosine, low-
+        // importance neighbor past the blend cutoff was silently lost from the
+        // cold pool while the warm pick_evolution_neighbors (which cosine-ranks
+        // every cached row) kept it. The fix pulls by pure cosine
+        // (memory_top_k_cosine) and thresholds/excludes here. This helper is the
+        // threshold/exclude/cosine-sort stage over that pure-cosine pull.
+        let hit = |key: &str, kind: &str, cosine: f32| ab_store::MemoryCosineHit {
             record: b1_mem_with(key, kind, "body"),
-            score,
-            cosine: Some(cosine),
+            cosine,
         };
         let hits = vec![
-            hit("low_cos_top_score", "decision", 0.70, 9.9), // wins by score, loses by cosine
-            hit("high_cos_low_score", "decision", 0.95, 0.1), // must win by cosine
-            hit("probe", "decision", 0.99, 9.9),             // self → dropped
-            hit("a_skill", "skill", 0.98, 9.9),              // skill → dropped
-            hit("mid_cos", "lesson", 0.80, 0.2),
+            hit("high_cos", "decision", 0.95),     // wins by cosine
+            hit("probe", "decision", 0.99),        // self → dropped
+            hit("a_skill", "skill", 0.98),         // skill → dropped
+            hit("mid_cos", "lesson", 0.80),
+            hit("low_cos", "decision", 0.70),
+            hit("below_thresh", "decision", 0.60), // < 0.65 threshold → dropped
         ];
-        let picks = evolution_neighbors_from_hits(hits, "probe", 5);
+        let picks = evolution_neighbors_from_cosine_hits(hits, "probe", 0.65, 5);
         let keys: Vec<&str> = picks.iter().map(|(r, _)| r.key.as_str()).collect();
         assert_eq!(
             keys,
-            vec!["high_cos_low_score", "mid_cos", "low_cos_top_score"],
-            "self + skill dropped; remainder sorted by COSINE desc, not blended score"
+            vec!["high_cos", "mid_cos", "low_cos"],
+            "self + skill + below-threshold dropped; remainder sorted by COSINE desc"
         );
-        // Edge weight is the cosine, not the blended score.
+        // Edge weight is the cosine.
         assert!(
             (picks[0].1 - 0.95).abs() < 1e-6,
             "edge weight must be cosine; got {}",
@@ -75450,12 +75477,13 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         );
         assert!((picks[2].1 - 0.70).abs() < 1e-6);
         // top_k truncation keeps the highest-cosine neighbor.
-        let one = evolution_neighbors_from_hits(
+        let one = evolution_neighbors_from_cosine_hits(
             vec![
-                hit("a", "decision", 0.9, 0.0),
-                hit("b", "decision", 0.8, 0.0),
+                hit("a", "decision", 0.9),
+                hit("b", "decision", 0.8),
             ],
             "probe",
+            0.65,
             1,
         );
         assert_eq!(one.len(), 1);
