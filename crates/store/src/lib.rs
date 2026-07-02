@@ -797,6 +797,23 @@ pub struct MemoryCosineHit {
     pub cosine: f32,
 }
 
+/// Cheap, always-fresh ranking metadata for one active memory — everything
+/// the semantic blend needs EXCEPT the embedding. The bridge's warm embed
+/// cache is a frozen snapshot: it holds the expensive embeddings but its
+/// per-row `importance` / `last_accessed_at` / `access_count` / `status`
+/// go stale the moment another writer (valence apply, decay, reinforce,
+/// correction, archive) mutates the DB without touching the cache. A
+/// metadata-only overlay (no embedding blobs, so no overflow-page I/O)
+/// lets the warm path re-hydrate these fields per query and match the SQL
+/// path exactly, so `mode=semantic` ranking no longer depends on how long
+/// a daemon has been running.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MemoryLiveMeta {
+    pub importance: f64,
+    pub last_accessed_at: i64,
+    pub access_count: u64,
+}
+
 /// One co-activation edge — Hebbian "fire together, wire together" trace
 /// between two memories that surfaced in the same `memory_search` result.
 ///
@@ -2941,6 +2958,30 @@ pub trait StateStore: Send + Sync {
     async fn memory_top_k_cosine(&self, query: &str, k: u32) -> Result<Vec<MemoryCosineHit>> {
         let _ = (query, k);
         Ok(Vec::new())
+    }
+
+    /// Fresh ranking metadata for every `status='active'` memory, keyed by
+    /// `key`. A metadata-only scan (no embedding blobs) used by the bridge's
+    /// warm semantic path to re-hydrate the frozen embed cache: a key ABSENT
+    /// from the returned map is no longer active (superseded / archived /
+    /// deleted after the cache was primed) and must be dropped; a present key
+    /// carries the current importance/recency/access so the blend matches the
+    /// SQL path. Note the overlay is metadata-FOR-RANKING only — `kind` /
+    /// content / tags stay frozen with the cached embedding (changing any of
+    /// those requires a re-save, which re-embeds and re-primes anyway).
+    ///
+    /// Default impl returns `Err` (not `Ok(empty)`) on purpose: an empty map
+    /// means "every candidate is inactive" to the warm path, so a store that
+    /// primed the cache but forgot to implement this would silently return no
+    /// results. Erroring instead makes the warm path degrade to its cached
+    /// (possibly stale) metadata — the strictly safer failure. Only stores
+    /// that actually back the warm cache (SQLite) need to override.
+    async fn memory_active_meta(
+        &self,
+    ) -> Result<std::collections::HashMap<String, MemoryLiveMeta>> {
+        Err(ab_core::Error::Backend(
+            "memory_active_meta not implemented".into(),
+        ))
     }
 
     /// v21 α — Synaptic Trace: record co-activation between memories that

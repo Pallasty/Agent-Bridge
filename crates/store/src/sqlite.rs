@@ -65,8 +65,9 @@ use crate::{
     ForumPostRecord, ForumThreadExport, ForumThreadRecord, GraphTopology, HebbianCluster,
     IdentityWindow, ImportConflictPolicy, ImportReport, McpToolCallFilter, McpToolCallRow,
     McpToolCallStats, McpToolErrorRecord, McpToolSourceStats, MemoryCosineHit, MemoryEdge,
-    MemoryEdgeExport, MemoryExportFilter, MemoryExportResult, MemoryListSort, MemoryQueryRecord,
-    MemoryQueryStats, MemoryRecord, MemorySearchHit, MemoryStats, MisrankRow, ModeStats,
+    MemoryEdgeExport, MemoryExportFilter, MemoryExportResult, MemoryListSort, MemoryLiveMeta,
+    MemoryQueryRecord, MemoryQueryStats, MemoryRecord, MemorySearchHit, MemoryStats, MisrankRow,
+    ModeStats,
     NotificationRecord, OverlapPair, PlanRecord, PlanStep, ReinforceActiveStats, ReplayAuditRow,
     ReplayAuditStats, S234Counts, SessionFilter, SignalFidelityStats, StateStore, StoredSession,
     WaypointRow, WaypointStats, MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP,
@@ -6643,6 +6644,51 @@ impl StateStore for SqliteStore {
         });
         hits.truncate(k_usize);
         Ok(hits)
+    }
+
+    async fn memory_active_meta(
+        &self,
+    ) -> Result<std::collections::HashMap<String, MemoryLiveMeta>> {
+        let rows = self
+            .conn
+            .call(move |c| -> RusqliteResult<Vec<(String, f64, i64, i64)>> {
+                // Metadata-only projection: deliberately NOT selecting the
+                // `embedding` BLOB, so SQLite never touches the overflow pages
+                // that make `memory_load_embeddings` expensive. This is the
+                // cheap half of the warm cache — refreshed per query.
+                let mut stmt = c.prepare(
+                    "SELECT key, importance, last_accessed_at, access_count
+                     FROM memories
+                     WHERE status = 'active'",
+                )?;
+                let rows = stmt
+                    .query_map([], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, f64>(1).unwrap_or(0.5),
+                            row.get::<_, i64>(2)?,
+                            row.get::<_, i64>(3)?,
+                        ))
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_active_meta: {e}")))?;
+
+        Ok(rows
+            .into_iter()
+            .map(|(key, importance, last_accessed_at, access_count)| {
+                (
+                    key,
+                    MemoryLiveMeta {
+                        importance,
+                        last_accessed_at,
+                        access_count: access_count.max(0) as u64,
+                    },
+                )
+            })
+            .collect())
     }
 
     /// v21 α — record co-activation pairs from a single search result.
@@ -22406,6 +22452,100 @@ mod tests {
         assert!(
             gap > 0.4 && gap < 2.0,
             "expected score gap dominated by feedback boost (~1.0), got {gap}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_active_meta_is_fresh_and_active_only() {
+        // The bridge warm embed cache freezes per-row importance/status at
+        // prime time. `memory_active_meta` is the cheap overlay that re-hydrates
+        // it: it MUST (a) carry post-save importance mutations (valence apply /
+        // decay / reinforce all move importance via memory_set_importance), and
+        // (b) exclude any row no longer `status='active'` so the warm path can
+        // drop rows superseded/archived/deleted after priming.
+        use crate::MemoryRecord;
+        let temp_dir = fidelity_temp_dir("active_meta");
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store = SqliteStore::open(&temp_dir.join("state.db"))
+            .await
+            .expect("open store");
+
+        // Disjoint distinguishing tokens per row so memory_save's overlap-
+        // supersede trigger doesn't collapse the two (same trick as the
+        // feedback/importance tests).
+        let make = |key: &str, body: &str, imp: f64| MemoryRecord {
+            key: key.into(),
+            kind: "fact".into(),
+            content: body.into(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 1_700_000_000,
+            updated_at: 1_700_000_000,
+            last_accessed_at: 1_700_000_000,
+            access_count: 3,
+            importance: imp,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store
+            .memory_save(&make(
+                "tests:am_keep",
+                "active-meta probe alpha beta gamma delta epsilon zeta",
+                0.30,
+            ))
+            .await
+            .expect("save keep");
+        store
+            .memory_save(&make(
+                "tests:am_gone",
+                "active-meta probe iota kappa lambda mu nu xi omicron",
+                0.30,
+            ))
+            .await
+            .expect("save gone");
+
+        // Mutate importance AFTER save — exactly what valence apply / reinforce
+        // do (importance-only UPDATE, no status/timestamp churn).
+        assert!(store
+            .memory_set_importance("tests:am_keep", 0.90)
+            .await
+            .expect("bump"));
+        // Remove the other row (soft tombstone) — stands in for any active→
+        // non-active transition (supersede / archive / delete) the warm cache
+        // would otherwise still show as active.
+        assert!(store.memory_delete("tests:am_gone").await.expect("delete"));
+
+        let meta = store.memory_active_meta().await.expect("active meta");
+        let keep = meta.get("tests:am_keep").expect("keep present");
+        assert_eq!(
+            keep.importance, 0.90,
+            "importance must be the FRESH post-bump value, not the 0.30 at save"
+        );
+        assert!(
+            !meta.contains_key("tests:am_gone"),
+            "a row that left status='active' must be absent from the overlay"
+        );
+
+        // The overlay must agree with the DB truth the warm cache is built from
+        // (memory_load_embeddings) on recency/access, so re-hydration is exact.
+        let embeds = store.memory_load_embeddings().await.expect("load embeddings");
+        let keep_row = embeds
+            .iter()
+            .find(|(r, _)| r.key == "tests:am_keep")
+            .map(|(r, _)| r)
+            .expect("keep row in embeddings");
+        assert_eq!(keep.access_count, keep_row.access_count, "access_count == DB");
+        assert_eq!(
+            keep.last_accessed_at, keep_row.last_accessed_at,
+            "last_accessed_at == DB"
+        );
+        assert_eq!(
+            keep.importance, keep_row.importance,
+            "importance == DB (both read the same live row)"
         );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;

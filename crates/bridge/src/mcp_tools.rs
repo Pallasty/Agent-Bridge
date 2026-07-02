@@ -19576,30 +19576,83 @@ impl McpTool for MemorySearchTool {
                 .unwrap_or(0.3)
                 .clamp(0.0, 1.0) as f32;
             let cache_guard = self.hub.memory_embed_cache.lock().await;
-            if let Some(cached) = cache_guard.as_ref() {
-                let query_vec = embed_text(&q);
-                // Score via the SAME owner-approved weights + formula as the SQL
-                // path (memory_search_semantic), through the shared
-                // semantic_blend_score. Resolve weights + clock once per query.
-                // Before this fix the warm cache hardcoded `cosine + 0.2·importance`,
-                // silently ignoring the conservative rebalance and every
-                // AGENT_BRIDGE_SEMANTIC_* env knob whenever the embed cache was
-                // warm — so mode=semantic ranking diverged by cache state.
-                let weights = semantic_rank_weights();
-                let now = now_secs();
-                let mut hits: Vec<MemorySearchHit> = cached
-                    .iter()
-                    // Tombstone/supersede tolerance: cache cleanup is racy
-                    // (fire-and-forget spawn), so filter status here to
-                    // match the SQL fallback's `WHERE status='active'`.
-                    .filter(|(rec, _)| rec.status == "active")
-                    .filter_map(|(rec, emb)| {
-                        let cosine = cosine_similarity(&query_vec, emb);
-                        if cosine < threshold {
-                            return None;
-                        }
-                        Some(MemorySearchHit {
-                            score: semantic_blend_score(
+            // Under the lock, do ONLY the cosine sweep against the cached
+            // embeddings (the one thing that genuinely needs the frozen
+            // vectors), collecting above-threshold candidates. Everything else
+            // — fresh metadata, blend, sort — happens after we release the lock,
+            // so the one new DB await (metadata overlay) never holds the mutex.
+            // (The query embed stays inside the warm branch, as before, so the
+            // cold path doesn't pay a redundant embed the SQL fallback repeats.)
+            let warm_candidates: Option<Vec<(MemoryRecord, f32)>> =
+                cache_guard.as_ref().map(|cached| {
+                    let query_vec = embed_text(&q);
+                    cached
+                        .iter()
+                        // Racy-cleanup guard, retained for the DB-error fallback
+                        // below: cache removal (delete/compact) is a fire-and-
+                        // forget spawn, so a just-removed row may still sit here
+                        // with a stale `status`. The live-meta overlay is
+                        // stricter still (drops anything not active in the DB).
+                        .filter(|(rec, _)| rec.status == "active")
+                        .filter_map(|(rec, emb)| {
+                            let cosine = cosine_similarity(&query_vec, emb);
+                            if cosine < threshold {
+                                return None;
+                            }
+                            Some((rec.clone(), cosine))
+                        })
+                        .collect()
+                });
+            drop(cache_guard);
+            match warm_candidates {
+                Some(candidates) => {
+                    // Re-hydrate ranking metadata from the DB so warm ranking
+                    // matches the SQL path even when importance/status/access
+                    // changed after the cache was primed. The warm embed cache
+                    // is a frozen snapshot; valence-importance apply, decay,
+                    // reinforce, correction and archive all mutate the DB WITHOUT
+                    // touching it, so its per-row importance/status went stale —
+                    // making the arc6 valence boost invisible on warm daemons
+                    // and leaking superseded/archived rows into results. The
+                    // cache still owns the expensive embeddings; this overlay is
+                    // a metadata-only scan (no blobs). Score via the SAME
+                    // owner-approved weights + shared semantic_blend_score as the
+                    // SQL path (also: honors every AGENT_BRIDGE_SEMANTIC_* knob).
+                    let weights = semantic_rank_weights();
+                    let now = now_secs();
+                    let live_meta = store.memory_active_meta().await;
+                    if let Err(e) = &live_meta {
+                        tracing::warn!(
+                            target: "memory_semantic",
+                            error = %e,
+                            "warm-path live metadata refresh failed; falling back \
+                             to cached (possibly stale) metadata"
+                        );
+                    }
+                    let mut hits: Vec<MemorySearchHit> = candidates
+                        .into_iter()
+                        .filter_map(|(mut rec, cosine)| {
+                            if let Ok(meta_map) = &live_meta {
+                                match meta_map.get(&rec.key) {
+                                    // Fresh metadata → override the frozen
+                                    // importance/recency/access with live values.
+                                    Some(meta) => {
+                                        rec.importance = meta.importance;
+                                        rec.last_accessed_at = meta.last_accessed_at;
+                                        rec.access_count = meta.access_count;
+                                    }
+                                    // Absent from the active-metadata map → the
+                                    // row was superseded/archived/deleted after
+                                    // priming. Its cached `status` still reads
+                                    // "active"; drop it so warm never leaks a dead
+                                    // row the SQL path (WHERE status='active')
+                                    // would exclude.
+                                    None => return None,
+                                }
+                            }
+                            // else: DB fetch errored → keep the cached fields
+                            // (pre-fix behavior) rather than dropping everything.
+                            let score = semantic_blend_score(
                                 weights,
                                 cosine,
                                 rec.importance,
@@ -19607,25 +19660,27 @@ impl McpTool for MemorySearchTool {
                                 rec.access_count,
                                 &rec.kind,
                                 now,
-                            ),
-                            record: rec.clone(),
-                            cosine: Some(cosine),
+                            );
+                            Some(MemorySearchHit {
+                                score,
+                                record: rec,
+                                cosine: Some(cosine),
+                            })
                         })
-                    })
-                    .collect();
-                hits.sort_by(|a, b| {
-                    b.score
-                        .partial_cmp(&a.score)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                });
-                hits.truncate(inner_limit as usize);
-                drop(cache_guard);
-                hits
-            } else {
-                drop(cache_guard);
-                store
-                    .memory_search_semantic(&q, inner_limit, threshold)
-                    .await?
+                        .collect();
+                    hits.sort_by(|a, b| {
+                        b.score
+                            .partial_cmp(&a.score)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    hits.truncate(inner_limit as usize);
+                    hits
+                }
+                None => {
+                    store
+                        .memory_search_semantic(&q, inner_limit, threshold)
+                        .await?
+                }
             }
         } else {
             // Default (fts) path. Item B (2026-06-26, #120): owner-gated semantic
@@ -90733,6 +90788,143 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         // Identical scores ⇒ identical sorted order.
         let sql_order: Vec<String> = sql_hits.iter().map(|h| h.record.key.clone()).collect();
         assert_eq!(warm_order, sql_order, "warm-cache order must equal SQL order");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_search_semantic_warm_cache_reflects_post_prime_db_mutations() {
+        // Regression: the warm embed cache is a FROZEN snapshot. Mutations that
+        // change importance/status WITHOUT touching it — valence-importance
+        // apply, decay, reinforce, correction, archive — used to be invisible on
+        // the warm path: it leaked rows that left status='active' after priming
+        // AND scored with the stale frozen importance, so the arc6 valence boost
+        // never reached warm-daemon ranking. The live-meta overlay re-hydrates
+        // importance + drops now-inactive rows, so warm matches a FRESH SQL
+        // search taken AFTER the mutation. This fails on the pre-overlay code
+        // (warm_gone would still surface; warm_bump would score at 0.20).
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+
+        let now = ab_store::now_secs();
+        // Distinct kinds per row: memory_save's contradiction-supersede only
+        // fires within the SAME (kind, scope), and the shared anchor tokens push
+        // token-overlap > 0.5 — so same-kind rows would collapse into one active
+        // row before we could mutate them. Distinct kinds keep all three alive
+        // (same escape the sibling parity test uses).
+        let mk = |key: &str, kind: &str, suffix: &str, importance: f64| ab_store::MemoryRecord {
+            key: key.into(),
+            kind: kind.into(),
+            content: format!("shared semantic anchor tokens alpha bravo charlie {suffix}"),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: now,
+            updated_at: now,
+            last_accessed_at: now,
+            access_count: 3,
+            importance,
+            status: "active".into(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        let corpus = [
+            mk("warm_bump", "decision", "delta", 0.20), // importance bumped post-prime
+            mk("warm_gone", "lesson", "echo", 0.50),    // leaves status='active' post-prime
+            mk("warm_stable", "fact", "foxtrot", 0.40), // untouched control
+        ];
+        for rec in &corpus {
+            store.memory_save(rec).await.expect("save");
+        }
+
+        // Prime the warm cache with the ORIGINAL snapshot — importance
+        // 0.20/0.50/0.40, all active. This is the frozen state a long-running
+        // daemon holds.
+        let snapshot = store.memory_load_embeddings().await.expect("load embeddings");
+        *hub.memory_embed_cache.lock().await = Some(snapshot);
+
+        // Mutate the DB AFTER priming — the cache does NOT observe these.
+        assert!(store
+            .memory_set_importance("warm_bump", 0.95)
+            .await
+            .expect("bump importance"));
+        // Soft-delete stands in for any active→non-active transition (supersede/
+        // archive/delete). Call the STORE directly so the tool's cache-eviction
+        // spawn never fires — the frozen cache keeps warm_gone as "active",
+        // exactly reproducing the leak a real daemon would hit.
+        assert!(store.memory_delete("warm_gone").await.expect("delete"));
+
+        let query = "shared semantic anchor tokens alpha bravo charlie";
+
+        // Fresh SQL search = ground truth (reflects both mutations).
+        let sql_hits = store
+            .memory_search_semantic(query, 10, 0.0)
+            .await
+            .expect("sql semantic");
+        let sql_scores: std::collections::HashMap<String, f64> = sql_hits
+            .iter()
+            .map(|h| (h.record.key.clone(), h.score))
+            .collect();
+        assert!(
+            !sql_scores.contains_key("warm_gone"),
+            "sql ground truth must exclude the deleted row"
+        );
+
+        // Warm path through the tool.
+        let tool = MemorySearchTool::new(hub.clone());
+        let res = tool
+            .execute(
+                json!({"query": query, "mode": "semantic", "limit": 10, "threshold": 0.0}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("warm semantic");
+        let warm = result_text_as_json(&res);
+        let warm_arr = warm.as_array().expect("array result");
+        let warm_keys: Vec<String> = warm_arr
+            .iter()
+            .map(|h| h["record"]["key"].as_str().expect("key").to_string())
+            .collect();
+
+        // (1) The row that left status='active' after priming is DROPPED on warm,
+        //     even though the frozen cache still holds it as active.
+        assert!(
+            !warm_keys.contains(&"warm_gone".to_string()),
+            "warm must drop the row deleted after priming; got {warm_keys:?}"
+        );
+        assert_eq!(
+            warm_keys.len(),
+            2,
+            "only the 2 still-active rows remain, got {warm_keys:?}"
+        );
+
+        // (2) Warm scores now equal the FRESH SQL blend (fresh importance, not
+        //     the frozen 0.20/0.40).
+        for hit in warm_arr {
+            let key = hit["record"]["key"].as_str().expect("key").to_string();
+            let warm_score = hit["score"].as_f64().expect("score");
+            let sql_score = *sql_scores
+                .get(&key)
+                .unwrap_or_else(|| panic!("key {key} missing from fresh sql path"));
+            assert!(
+                (warm_score - sql_score).abs() < 1e-4,
+                "warm score {warm_score} must equal fresh sql blend {sql_score} for {key}"
+            );
+        }
+
+        // (3) The bumped row's returned record exposes the FRESH importance,
+        //     so downstream consumers see 0.95, not the frozen 0.20.
+        let bump_hit = warm_arr
+            .iter()
+            .find(|h| h["record"]["key"] == "warm_bump")
+            .expect("warm_bump present");
+        let bump_imp = bump_hit["record"]["importance"]
+            .as_f64()
+            .expect("record.importance");
+        assert!(
+            (bump_imp - 0.95).abs() < 1e-6,
+            "warm record must expose fresh importance 0.95, got {bump_imp}"
+        );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
