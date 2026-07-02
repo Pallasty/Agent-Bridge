@@ -12067,6 +12067,22 @@ impl McpTool for OutcomesMemoryDriftTool {
 /// surface is the read-only drift projection; this tool closes the loop only on
 /// explicit operator action with dry_run:false. Additive: no schema/column/table
 /// change, no event_spine write.
+/// Refresh-preserving importance for `present_outcomes_ingest`: when an ACTIVE
+/// row already exists for the deterministic outcome key, its stored importance
+/// carries lifecycle state owned by other writers (decay passes, reinforce,
+/// `outcome_valence_importance_apply`) — a content refresh must carry it
+/// forward. A brand-new row keeps the builder's initial importance (0.5, or
+/// the gated valence derivation).
+fn carry_forward_ingest_importance(
+    mut mem: MemoryRecord,
+    existing_importance: Option<f64>,
+) -> MemoryRecord {
+    if let Some(imp) = existing_importance {
+        mem.importance = imp;
+    }
+    mem
+}
+
 pub struct PresentOutcomesIngestTool {
     hub: Hub,
 }
@@ -12194,12 +12210,20 @@ impl McpTool for PresentOutcomesIngestTool {
             // superseded/tombstoned row (no non-mutating status-aware keyed read
             // exists in the store trait). Named `active_row_exists` accordingly;
             // it is not a resurrection oracle.
-            let active_row_exists = store
+            let existing_importance = store
                 .memory_search(&mem.key, &[], 5)
                 .await
                 .unwrap_or_default()
                 .iter()
-                .any(|h| h.record.key == mem.key);
+                .find(|h| h.record.key == mem.key)
+                .map(|h| h.record.importance);
+            let active_row_exists = existing_importance.is_some();
+            // Refresh must not reset lifecycle state: the existing row's
+            // importance is owned by other writers (decay, reinforce,
+            // outcome_valence_importance_apply) and the upsert would otherwise
+            // stomp it back to the builder's initial value with no audit
+            // (adversarial review finding, 2026-07-02).
+            let mem = carry_forward_ingest_importance(mem, existing_importance);
 
             let mut row = json!({
                 "key": mem.key,
@@ -29157,8 +29181,11 @@ impl McpTool for OutcomeValenceImportanceApplyTool {
                 Default confirm_apply=false ⇒ dry-run preview, no writes. With \
                 confirm_apply=true a full rollback map (old→new per key) is persisted as \
                 an audit memory record BEFORE any importance moves, so the pass is \
-                reversible. Affects only AB's own retrieval ranking; never touches \
-                biocortex. Ingest-side derivation for FUTURE rows is gated separately by \
+                reversible. Re-runs against an unchanged store are no-ops \
+                (min_delta), but decay/reinforce passes move importance between \
+                runs, so a repeated confirm pass acts as a RESTORING FORCE toward \
+                the static valence target — schedule with care. Affects only AB's \
+                own retrieval ranking; never touches biocortex. Ingest-side derivation for FUTURE rows is gated separately by \
                 the AB_OUTCOME_VALENCE_IMPORTANCE env (default OFF)."
                 .into(),
             input_schema: json!({
@@ -29256,7 +29283,15 @@ impl McpTool for OutcomeValenceImportanceApplyTool {
             // record already carries every old value. Raw keys are internal to
             // the store (only the tool RESULT redacts them).
             let now = unix_now_secs();
-            let audit_key = format!("outcome_valence_importance_apply_{now}");
+            // Sub-second nonce: two confirm passes in the same unix second must
+            // NOT share a key — memory_save is an upsert, so a collision would
+            // silently replace the previous pass's rollback map (adversarial
+            // review finding, 2026-07-02).
+            let audit_nonce = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.subsec_nanos())
+                .unwrap_or(0);
+            let audit_key = format!("outcome_valence_importance_apply_{now}_{audit_nonce:09}");
             let audit_rows: Vec<Value> = to_apply
                 .iter()
                 .map(|c| {
@@ -29294,7 +29329,13 @@ impl McpTool for OutcomeValenceImportanceApplyTool {
                     "rollback_map".to_string(),
                 ],
                 related_keys: Vec::new(),
-                scope: None,
+                // DISTINCT per-pass scope: successive audit maps are near
+                // token-identical boilerplate (Jaccard ≈ 0.9), so a shared
+                // NULL scope would let the same-kind+same-scope contradiction
+                // detector supersede every previous rollback map — the exact
+                // trap present_ingest::outcome_scope documents and guards
+                // against for the outcome rows themselves.
+                scope: Some(format!("valence-audit:{now}_{audit_nonce:09}")),
                 created_at: now,
                 updated_at: now,
                 last_accessed_at: now,
@@ -73696,6 +73737,78 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(v2["audit_memory_key"].is_null());
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn outcome_valence_importance_apply_rerun_preserves_prior_audit() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        seed_valence_apply_cohort(&store).await;
+
+        let tool = OutcomeValenceImportanceApplyTool::new(hub);
+        let v1 = result_json(
+            &tool
+                .execute(json!({"confirm_apply": true}), &ToolContext::default())
+                .await
+                .expect("pass 1"),
+        );
+        let audit1 = v1["audit_memory_key"].as_str().expect("audit 1").to_string();
+
+        // Immediate param-change rerun (same unix second is the hazard case):
+        // ceiling 0.7 re-qualifies the 0.9 row.
+        let v2 = result_json(
+            &tool
+                .execute(
+                    json!({"confirm_apply": true, "ceiling": 0.7}),
+                    &ToolContext::default(),
+                )
+                .await
+                .expect("pass 2"),
+        );
+        let audit2 = v2["audit_memory_key"].as_str().expect("audit 2").to_string();
+
+        // Distinct keys — pass 2 must never upsert-replace pass 1's map…
+        assert_ne!(audit1, audit2, "audit keys must be unique per pass");
+        // …and pass 1's map must survive ACTIVE (distinct scope defeats the
+        // same-kind contradiction supersede) still carrying the true pre-image.
+        let a1 = store
+            .memory_get(&audit1)
+            .await
+            .expect("get audit 1")
+            .expect("audit 1 exists");
+        assert_eq!(a1.status, "active", "prior rollback map must stay active");
+        assert!(
+            a1.content.contains("\"old_importance\": 0.5"),
+            "pass-1 map must keep the original pre-image values"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[test]
+    fn carry_forward_ingest_importance_preserves_existing() {
+        let mem = MemoryRecord {
+            key: "outcome_x".into(),
+            kind: "present_outcome".into(),
+            content: "row".into(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: Some("outcome:x".into()),
+            created_at: 1,
+            updated_at: 1,
+            last_accessed_at: 1,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".into(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        // Existing active row (e.g. valence-applied 0.9) → refresh carries it.
+        let kept = carry_forward_ingest_importance(mem.clone(), Some(0.9));
+        assert_eq!(kept.importance, 0.9);
+        // Brand-new row → builder's initial value stands.
+        let fresh = carry_forward_ingest_importance(mem, None);
+        assert_eq!(fresh.importance, 0.5);
     }
 
     #[test]
