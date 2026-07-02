@@ -18190,6 +18190,31 @@ fn pick_evolution_neighbors(
     sims
 }
 
+/// Cold-path counterpart of [`pick_evolution_neighbors`]: build the evolution
+/// candidate set from `memory_search_semantic` hits when the embed cache is
+/// cold. Evolved edges are semantic-similarity links, so — exactly like the warm
+/// path — select and weight neighbors by PURE COSINE, not the importance/recency
+/// blended search `score`. `memory_search_semantic` returns hits blend-sorted and
+/// already `status='active'` + cosine-thresholded, so here we re-sort by cosine,
+/// drop self/skills, and truncate to `top_k`. Keeping both paths on cosine makes
+/// the auto-evolved graph (neighbor set AND edge weights) deterministic w.r.t.
+/// embed-cache warmth — previously the cold path linked by blended score and
+/// stamped the blended score as the edge weight.
+fn evolution_neighbors_from_hits(
+    hits: Vec<MemorySearchHit>,
+    new_key: &str,
+    top_k: usize,
+) -> Vec<(MemoryRecord, f64)> {
+    let mut sims: Vec<(MemoryRecord, f64)> = hits
+        .into_iter()
+        .filter(|h| h.record.key != new_key && h.record.kind != "skill")
+        .map(|h| (h.record, h.cosine.unwrap_or(0.0) as f64))
+        .collect();
+    sims.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    sims.truncate(top_k);
+    sims
+}
+
 /// **Phase 1 P4b — LLM-driven evolution filter (A-MEM step 3).**
 ///
 /// Cosine similarity (Phase 1 P4) is necessary but not sufficient: two
@@ -18859,15 +18884,14 @@ impl McpTool for MemorySaveTool {
                                     .await
                                 {
                                     Ok(hits) => {
-                                        let n: Vec<(MemoryRecord, f64)> = hits
-                                            .into_iter()
-                                            .filter(|h| {
-                                                h.record.key != new_key_for_evolve
-                                                    && h.record.kind != "skill"
-                                            })
-                                            .take(5)
-                                            .map(|h| (h.record, h.score))
-                                            .collect();
+                                        // Select + weight by PURE COSINE (same as
+                                        // the warm pick_evolution_neighbors), NOT
+                                        // the blended search score.
+                                        let n = evolution_neighbors_from_hits(
+                                            hits,
+                                            &new_key_for_evolve,
+                                            5,
+                                        );
                                         tracing::debug!(
                                             target: "p4_evolve",
                                             key = %new_key_for_evolve,
@@ -75336,6 +75360,51 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         let keys: Vec<&str> = picks.iter().map(|(rec, _)| rec.key.as_str()).collect();
 
         assert_eq!(keys, vec!["active_kin"], "only active records evolve");
+    }
+
+    #[test]
+    fn evolution_neighbors_cold_path_selects_and_weights_by_cosine() {
+        // Regression: the cold P4-evolve path selected neighbors by the blended
+        // search score and stamped that score as the edge weight, diverging from
+        // the warm pick_evolution_neighbors (pure cosine). Hits below are arranged
+        // so blend-order (score) != cosine-order; the fix must follow cosine.
+        let hit = |key: &str, kind: &str, cosine: f32, score: f64| ab_store::MemorySearchHit {
+            record: b1_mem_with(key, kind, "body"),
+            score,
+            cosine: Some(cosine),
+        };
+        let hits = vec![
+            hit("low_cos_top_score", "decision", 0.70, 9.9), // wins by score, loses by cosine
+            hit("high_cos_low_score", "decision", 0.95, 0.1), // must win by cosine
+            hit("probe", "decision", 0.99, 9.9),             // self → dropped
+            hit("a_skill", "skill", 0.98, 9.9),              // skill → dropped
+            hit("mid_cos", "lesson", 0.80, 0.2),
+        ];
+        let picks = evolution_neighbors_from_hits(hits, "probe", 5);
+        let keys: Vec<&str> = picks.iter().map(|(r, _)| r.key.as_str()).collect();
+        assert_eq!(
+            keys,
+            vec!["high_cos_low_score", "mid_cos", "low_cos_top_score"],
+            "self + skill dropped; remainder sorted by COSINE desc, not blended score"
+        );
+        // Edge weight is the cosine, not the blended score.
+        assert!(
+            (picks[0].1 - 0.95).abs() < 1e-6,
+            "edge weight must be cosine; got {}",
+            picks[0].1
+        );
+        assert!((picks[2].1 - 0.70).abs() < 1e-6);
+        // top_k truncation keeps the highest-cosine neighbor.
+        let one = evolution_neighbors_from_hits(
+            vec![
+                hit("a", "decision", 0.9, 0.0),
+                hit("b", "decision", 0.8, 0.0),
+            ],
+            "probe",
+            1,
+        );
+        assert_eq!(one.len(), 1);
+        assert_eq!(one[0].0.key, "a");
     }
 
     #[test]
