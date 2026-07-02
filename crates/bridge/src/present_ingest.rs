@@ -108,7 +108,34 @@ pub fn outcome_integrity_ok(record: &Value) -> bool {
 /// - `tags = [present_outcome, verified_outcome, auto_ingested, verify:<s>, method:<m>, embody:<e>?]`
 /// - `related_keys = []` (graph-orphan by design in v0)
 /// - `importance = 0.5` (the `importance_for_kind` fallback for an unknown kind)
+///   — unless the `AB_OUTCOME_VALENCE_IMPORTANCE` env gate is on, in which case
+///   importance is derived from the same verify/decision/method facets via the
+///   shared v0 valence rule ([`crate::outcome_valence`]); non-derivable rows
+///   keep 0.5. Default OFF: behavior is unchanged without operator opt-in.
 pub fn build_outcome_memory(record: &Value, now: i64) -> Option<MemoryRecord> {
+    build_outcome_memory_gated(record, now, valence_importance_enabled())
+}
+
+/// Env gate for ingest-side valence→importance derivation (default OFF).
+fn valence_importance_enabled() -> bool {
+    std::env::var(crate::outcome_valence::OUTCOME_VALENCE_IMPORTANCE_ENV)
+        .ok()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
+/// [`build_outcome_memory`] with the valence→importance gate injected, so tests
+/// can exercise both sides without racing on process-global env vars.
+pub fn build_outcome_memory_gated(
+    record: &Value,
+    now: i64,
+    derive_importance: bool,
+) -> Option<MemoryRecord> {
     let artifact_id = record.get("artifact_id").and_then(Value::as_str)?;
     if artifact_id.is_empty() {
         return None;
@@ -226,6 +253,27 @@ pub fn build_outcome_memory(record: &Value, now: i64) -> Option<MemoryRecord> {
         tags.push(format!("embody:{e}"));
     }
 
+    // Gated valence→importance: derive from the SAME facets the tags carry via
+    // the shared v0 rule. Non-derivable (or gate off) keeps the historical 0.5.
+    let importance = if derive_importance {
+        let facets = crate::outcome_valence::OutcomeFacets {
+            verify_status: verify_status.to_string(),
+            method: verify_method.to_string(),
+            decision: decision.map(str::to_string),
+            embody: embody_status.map(str::to_string),
+        };
+        match crate::outcome_valence::derive_valence(&facets).valence {
+            Some(v) => crate::outcome_valence::importance_from_valence(
+                v,
+                crate::outcome_valence::IMPORTANCE_FLOOR_DEFAULT,
+                crate::outcome_valence::IMPORTANCE_CEILING_DEFAULT,
+            ),
+            None => 0.5,
+        }
+    } else {
+        0.5
+    };
+
     Some(MemoryRecord {
         key: format!("outcome_{artifact_id}"),
         kind: OUTCOME_MEMORY_KIND.to_string(),
@@ -237,7 +285,7 @@ pub fn build_outcome_memory(record: &Value, now: i64) -> Option<MemoryRecord> {
         updated_at: now,
         last_accessed_at: now,
         access_count: 0,
-        importance: 0.5,
+        importance,
         status: "active".to_string(),
         trigger_pattern: None,
         superseded_by: None,
@@ -262,8 +310,28 @@ mod tests {
     }
 
     #[test]
+    fn valence_importance_gate_off_keeps_hardcoded_half() {
+        let m = build_outcome_memory_gated(&rec("abc123def456"), 42, false).expect("builds");
+        assert_eq!(m.importance, 0.5);
+    }
+
+    #[test]
+    fn valence_importance_gate_on_derives_from_facets() {
+        // rendered_ok + no decision + browser_eval → valence +0.6 → importance 0.8.
+        let m = build_outcome_memory_gated(&rec("abc123def456"), 42, true).expect("builds");
+        assert!((m.importance - 0.8).abs() < 1e-9, "got {}", m.importance);
+
+        // failed + rejected → valence -1.0 → clamped to the 0.1 floor.
+        let mut failed = rec("feedbeef1234");
+        failed["verify_status"] = json!("failed");
+        failed["decision"] = json!("rejected");
+        let m = build_outcome_memory_gated(&failed, 42, true).expect("builds");
+        assert!((m.importance - 0.1).abs() < 1e-9, "got {}", m.importance);
+    }
+
+    #[test]
     fn builds_deterministic_key_and_distinct_kind() {
-        let m = build_outcome_memory(&rec("abc123def456"), 42).expect("builds");
+        let m = build_outcome_memory_gated(&rec("abc123def456"), 42, false).expect("builds");
         assert_eq!(m.key, "outcome_abc123def456");
         assert_eq!(m.kind, OUTCOME_MEMORY_KIND);
         assert_eq!(m.kind, "present_outcome");
@@ -329,6 +397,37 @@ mod tests {
         assert!(m.tags.contains(&"auto_ingested".to_string()));
         assert!(m.tags.contains(&"verify:rendered_ok".to_string()));
         assert!(m.tags.contains(&"method:browser_eval".to_string()));
+    }
+
+    #[test]
+    fn valence_importance_gate_defaults_off_and_can_derive() {
+        let mut v = rec("valencegate001");
+        v["decision"] = json!("approved");
+
+        let default = build_outcome_memory_gated(&v, 0, false).unwrap();
+        assert_eq!(default.importance, 0.5);
+
+        let derived = build_outcome_memory_gated(&v, 0, true).unwrap();
+        assert_eq!(
+            derived.importance,
+            crate::outcome_valence::IMPORTANCE_CEILING_DEFAULT
+        );
+        assert!(derived.tags.contains(&"decision:approved".to_string()));
+    }
+
+    #[test]
+    fn valence_importance_gate_keeps_nonderivable_neutral() {
+        let v = json!({
+            "artifact_id": "valencenone001",
+            "ts": 1u64,
+            "action_tool": "present",
+            "kind": "table",
+            "verify_status": "",
+            "verify_method": "",
+        });
+
+        let derived = build_outcome_memory_gated(&v, 0, true).unwrap();
+        assert_eq!(derived.importance, 0.5);
     }
 
     #[test]

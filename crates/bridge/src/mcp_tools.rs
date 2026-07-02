@@ -28944,75 +28944,22 @@ impl McpTool for OutcomeValenceShadowTool {
 
         for row in &meta_rows {
             let tags: Vec<String> = serde_json::from_str(&row.tags_json).unwrap_or_default();
-            let mut verify_status = String::new();
-            let mut method = String::new();
-            let mut decision: Option<String> = None;
-            let mut embody: Option<String> = None;
-            for t in &tags {
-                if let Some(v) = t.strip_prefix("verify:") {
-                    verify_status = v.to_string();
-                } else if let Some(m) = t.strip_prefix("method:") {
-                    method = m.to_string();
-                } else if let Some(d) = t.strip_prefix("decision:") {
-                    decision = Some(d.to_string());
-                } else if let Some(e) = t.strip_prefix("embody:") {
-                    embody = Some(e.to_string());
-                }
-            }
-            let method_label: String = if method.is_empty() {
-                "unknown".to_string()
-            } else {
-                method.clone()
-            };
-            let dec_class = match decision.as_deref() {
-                Some("approved") => "approved",
-                Some("rejected") => "rejected",
-                _ => "none",
-            };
-            let vs_class = match verify_status.as_str() {
-                "rendered_ok" => "ok",
-                "failed" | "error" => "failed",
-                "" => "empty",
-                _ => "other",
-            };
-            // Deterministic (verify_status × decision) → base valence. See §2.4 of
-            // the design doc. `_` arms collapse unrecognized decisions into "none".
-            let base: Option<f64> = match (vs_class, dec_class) {
-                ("ok", "approved") => Some(1.0),
-                ("ok", "rejected") => Some(-0.4),
-                ("ok", _) => Some(0.6),
-                ("failed", "approved") => Some(-0.2),
-                ("failed", "rejected") => Some(-1.0),
-                ("failed", _) => Some(-0.7),
-                ("empty", "approved") => Some(0.3),
-                ("empty", "rejected") => Some(-0.6),
-                ("empty", _) => None,
-                ("other", "approved") => Some(0.3),
-                ("other", "rejected") => Some(-0.5),
-                _ => None,
-            };
-            let conf = match method_label.as_str() {
-                "browser_eval" | "macos_ax_verify" => 1.0,
-                "desktop_verify" => 0.9,
-                "lite_probe" => 0.7,
-                "self_report" => 0.5,
-                _ => 0.6,
-            };
+            // Shared v0 rule (crate::outcome_valence) — the same table the gated
+            // importance-apply tool and the ingest path derive with.
+            let facets = crate::outcome_valence::facets_from_tags(&tags);
+            let derived = crate::outcome_valence::derive_valence(&facets);
+            let verify_status = facets.verify_status.clone();
+            let decision = facets.decision.clone();
+            let embody = facets.embody.clone();
+            let method_label = derived.method_label.clone();
 
             // facet tallies over the FULL set
             *by_verify.entry(verify_status.clone()).or_default() += 1;
             *by_decision.entry(decision.clone()).or_default() += 1;
             *by_method.entry(method_label.clone()).or_default() += 1;
 
-            let vs_disp = if verify_status.is_empty() {
-                "<empty>"
-            } else {
-                verify_status.as_str()
-            };
-            let (is_derivable, valence_opt, valence_class, rule_path) = match base {
-                Some(b) => {
-                    let v = (b * conf).clamp(-1.0, 1.0);
-                    let v = (v * 1_000_000.0).round() / 1_000_000.0;
+            let (is_derivable, valence_opt, valence_class, rule_path) = match derived.valence {
+                Some(v) => {
                     derivable += 1;
                     sum_v += v;
                     if v < min_v {
@@ -29041,23 +28988,9 @@ impl McpTool for OutcomeValenceShadowTool {
                         3
                     };
                     dist[idx] += 1;
-                    (
-                        true,
-                        Some(v),
-                        class,
-                        format!(
-                            "verify={vs_disp}+decision={dec_class} -> base={b:+.1} * conf({method_label}={conf:.1}) = {v:+.3}"
-                        ),
-                    )
+                    (true, Some(v), class, derived.rule_path.clone())
                 }
-                None => (
-                    false,
-                    None,
-                    "non_derivable",
-                    format!(
-                        "verify={vs_disp}+decision={dec_class} -> insufficient signal (not derivable)"
-                    ),
-                ),
+                None => (false, None, "non_derivable", derived.rule_path.clone()),
             };
 
             if rows_json.len() < ROWS_CAP {
@@ -29181,6 +29114,265 @@ impl McpTool for OutcomeValenceShadowTool {
                     "mean_valence": mean_v
                 },
                 "rollback": "No state changes to roll back — read-only projection."
+            }
+        })))
+    }
+}
+
+// ===========================================================================
+//                    outcome_valence_importance_apply
+// ===========================================================================
+
+/// Gated writer that closes the outcome→valence→importance loop for the rows
+/// already in the store: derives valence per active `present_outcome` row via
+/// the SAME shared v0 rule as `outcome_valence_shadow`, maps it onto the
+/// importance scale (`clamp((v+1)/2, floor, ceiling)`), and — ONLY with
+/// `confirm_apply=true` — updates the `importance` column (the same op class
+/// as `memory_decay_unused`; no supersede, no timestamp churn). Every applied
+/// pass first persists a full rollback map (old→new per raw key) as an audit
+/// memory record, so the write is reversible by construction. Default is a
+/// no-write dry-run preview. This touches ONLY AB's own retrieval ranking —
+/// it never supplies anything to biocortex (that channel stays ceiling-blocked
+/// and owner-gated; see the transport-contract design doc).
+pub struct OutcomeValenceImportanceApplyTool {
+    hub: Hub,
+}
+impl OutcomeValenceImportanceApplyTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+#[async_trait]
+impl McpTool for OutcomeValenceImportanceApplyTool {
+    fn name(&self) -> &'static str {
+        "outcome_valence_importance_apply"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Close the outcome→valence→importance loop retroactively: derive \
+                valence for each active present_outcome row (same shared v0 rule as \
+                outcome_valence_shadow) and set importance = clamp((valence+1)/2, floor, \
+                ceiling) — the same importance-only op class as memory_decay_unused. \
+                Default confirm_apply=false ⇒ dry-run preview, no writes. With \
+                confirm_apply=true a full rollback map (old→new per key) is persisted as \
+                an audit memory record BEFORE any importance moves, so the pass is \
+                reversible. Affects only AB's own retrieval ranking; never touches \
+                biocortex. Ingest-side derivation for FUTURE rows is gated separately by \
+                the AB_OUTCOME_VALENCE_IMPORTANCE env (default OFF)."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "confirm_apply": { "type": "boolean", "default": false, "description": "Final explicit write confirmation. Default false ⇒ preview only, no writes." },
+                    "floor": { "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.1, "description": "Importance never set below this (matches the memory_decay_unused floor)." },
+                    "ceiling": { "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.9, "description": "Importance never set above this (hand-pinned 1.0 records always outrank derived scores)." },
+                    "min_delta": { "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.01, "description": "Skip rows whose |new - old| is below this (makes re-runs idempotent)." },
+                    "max_apply_per_pass": { "type": "integer", "minimum": 1, "maximum": 500, "default": 50, "description": "Cap on importance updates applied this call." }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no memory store configured")),
+        };
+        let confirm_apply = args
+            .get("confirm_apply")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let floor = args
+            .get("floor")
+            .and_then(Value::as_f64)
+            .unwrap_or(crate::outcome_valence::IMPORTANCE_FLOOR_DEFAULT)
+            .clamp(0.0, 1.0);
+        let ceiling = args
+            .get("ceiling")
+            .and_then(Value::as_f64)
+            .unwrap_or(crate::outcome_valence::IMPORTANCE_CEILING_DEFAULT)
+            .clamp(0.0, 1.0);
+        if floor > ceiling {
+            return Ok(ToolResult::error(format!(
+                "floor ({floor}) must not exceed ceiling ({ceiling})"
+            )));
+        }
+        let min_delta = args
+            .get("min_delta")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.01)
+            .clamp(0.0, 1.0);
+        let max_apply = args
+            .get("max_apply_per_pass")
+            .and_then(Value::as_u64)
+            .unwrap_or(50)
+            .clamp(1, 500) as usize;
+
+        let meta_rows = store
+            .active_outcome_meta_rows()
+            .await
+            .map_err(|e| ab_core::Error::Backend(format!("active_outcome_meta_rows: {e}")))?;
+
+        struct Candidate {
+            key: String,
+            old: f64,
+            new: f64,
+            valence: f64,
+            rule_path: String,
+        }
+        let total_rows = meta_rows.len() as u64;
+        let mut derivable: u64 = 0;
+        let mut skipped_below_min_delta: u64 = 0;
+        let mut candidates: Vec<Candidate> = Vec::new();
+        for row in &meta_rows {
+            let tags: Vec<String> = serde_json::from_str(&row.tags_json).unwrap_or_default();
+            let facets = crate::outcome_valence::facets_from_tags(&tags);
+            let derived = crate::outcome_valence::derive_valence(&facets);
+            let Some(v) = derived.valence else { continue };
+            derivable += 1;
+            let target = crate::outcome_valence::importance_from_valence(v, floor, ceiling);
+            if (target - row.importance).abs() < min_delta {
+                skipped_below_min_delta += 1;
+                continue;
+            }
+            candidates.push(Candidate {
+                key: row.key.clone(),
+                old: row.importance,
+                new: target,
+                valence: v,
+                rule_path: derived.rule_path,
+            });
+        }
+        // Deterministic order so preview and apply agree run-to-run.
+        candidates.sort_by(|a, b| a.key.cmp(&b.key));
+        let capped_out = candidates.len().saturating_sub(max_apply) as u64;
+        let to_apply = &candidates[..candidates.len().min(max_apply)];
+
+        let mut applied: u64 = 0;
+        let mut failed: u64 = 0;
+        let mut audit_memory_key: Option<String> = None;
+        if confirm_apply && !to_apply.is_empty() {
+            // Rollback map FIRST: if the apply loop dies mid-pass, the audit
+            // record already carries every old value. Raw keys are internal to
+            // the store (only the tool RESULT redacts them).
+            let now = unix_now_secs();
+            let audit_key = format!("outcome_valence_importance_apply_{now}");
+            let audit_rows: Vec<Value> = to_apply
+                .iter()
+                .map(|c| {
+                    json!({
+                        "key": c.key,
+                        "old_importance": c.old,
+                        "new_importance": c.new,
+                        "valence": c.valence,
+                        "rule_path": c.rule_path,
+                    })
+                })
+                .collect();
+            let audit_body = json!({
+                "schema": "agent_bridge.outcome_valence_importance_audit.v0",
+                "applied_at": now,
+                "floor": floor,
+                "ceiling": ceiling,
+                "min_delta": min_delta,
+                "rollback": "for each row: memory_set_importance(key, old_importance)",
+                "rows": audit_rows,
+            });
+            let audit_rec = MemoryRecord {
+                key: audit_key.clone(),
+                kind: "observation".to_string(),
+                content: format!(
+                    "outcome_valence_importance_apply rollback map ({} rows)\n```json\n{}\n```",
+                    to_apply.len(),
+                    serde_json::to_string_pretty(&audit_body)
+                        .unwrap_or_else(|_| audit_body.to_string())
+                ),
+                tags: vec![
+                    "outcome_valence".to_string(),
+                    "importance_apply".to_string(),
+                    "audit".to_string(),
+                    "rollback_map".to_string(),
+                ],
+                related_keys: Vec::new(),
+                scope: None,
+                created_at: now,
+                updated_at: now,
+                last_accessed_at: now,
+                access_count: 0,
+                importance: 0.5,
+                status: "active".to_string(),
+                trigger_pattern: None,
+                superseded_by: None,
+            };
+            if let Err(e) = store.memory_save(&audit_rec).await {
+                return Ok(ToolResult::error(format!(
+                    "refusing to apply without a persisted rollback map: memory_save failed: {e}"
+                )));
+            }
+            audit_memory_key = Some(audit_key);
+            for c in to_apply {
+                match store.memory_set_importance(&c.key, c.new).await {
+                    Ok(true) => applied += 1,
+                    Ok(false) => failed += 1, // row vanished between read and write
+                    Err(_) => failed += 1,
+                }
+            }
+        }
+
+        let rows_json: Vec<Value> = to_apply
+            .iter()
+            .map(|c| {
+                json!({
+                    "key_sha256": outcome_valence_sha256(&c.key),
+                    "old_importance": c.old,
+                    "new_importance": c.new,
+                    "valence": c.valence,
+                    "rule_path": c.rule_path,
+                    "applied": confirm_apply,
+                })
+            })
+            .collect();
+
+        Ok(ToolResult::json_text(&json!({
+            "schema": "agent_bridge.outcome_valence_importance_apply.v0",
+            "read_only": !confirm_apply,
+            "boundary": {
+                "mode": if confirm_apply { "valence_importance_apply" } else { "valence_importance_dry_run" },
+                "read_only": !confirm_apply,
+                "mutates_ab_memory": applied > 0,
+                "recomputes_stored_importance": applied > 0,
+                "changes_memory_search_order": applied > 0,
+                "writes_valence": false,
+                "runs_biocortex": false,
+                "supplies_to_biocortex": false
+            },
+            "rule": {
+                "schema": "agent_bridge.outcome_valence_rule.v0",
+                "importance_map": "clamp((valence + 1) / 2, floor, ceiling)",
+                "note": "Same shared deterministic rule as outcome_valence_shadow; consumer is AB's own retrieval ranking (importance blend), NOT biocortex."
+            },
+            "params": {
+                "confirm_apply": confirm_apply,
+                "floor": floor,
+                "ceiling": ceiling,
+                "min_delta": min_delta,
+                "max_apply_per_pass": max_apply
+            },
+            "summary": {
+                "present_outcome_rows": total_rows,
+                "derivable_rows": derivable,
+                "candidates": candidates.len() as u64,
+                "applied": applied,
+                "failed": failed,
+                "skipped_below_min_delta": skipped_below_min_delta,
+                "capped_out": capped_out
+            },
+            "rows": rows_json,
+            "audit_memory_key": match &audit_memory_key { Some(k) => json!(k), None => Value::Null },
+            "rollback": if applied > 0 {
+                json!("restore old values from the audit record (audit_memory_key): memory_set_importance(key, old_importance) per row")
+            } else {
+                json!("no writes this call")
             }
         })))
     }
@@ -60316,6 +60508,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         &mut reg,
         policy,
         Tier::Standard,
+        Arc::new(OutcomeValenceImportanceApplyTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
         Arc::new(MemoryQueryStatsTool::new(hub.clone())),
     );
     reg_if(
@@ -73358,6 +73556,157 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         let schema = tool.schema();
         assert_eq!(schema.name, "outcome_valence_shadow");
         assert_eq!(schema.input_schema["type"], "object");
+    }
+
+    /// Seed the standard 3-row outcome cohort used by the importance-apply
+    /// tests: +1.0 (rendered_ok+approved), -1.0 (failed+rejected), and one
+    /// non-derivable bare row. Distinct scope per row (auto-supersede guard).
+    async fn seed_valence_apply_cohort(store: &std::sync::Arc<dyn ab_store::StateStore>) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() as i64;
+        let seeds: [(&str, &str, Vec<&str>); 3] = [
+            (
+                "outcome_ia",
+                "outcome:ia",
+                vec![
+                    "verify:rendered_ok",
+                    "decision:approved",
+                    "method:browser_eval",
+                ],
+            ),
+            (
+                "outcome_ib",
+                "outcome:ib",
+                vec!["verify:failed", "decision:rejected", "method:browser_eval"],
+            ),
+            ("outcome_ic", "outcome:ic", vec![]),
+        ];
+        for (key, scope, tags) in seeds {
+            let rec = MemoryRecord {
+                key: key.into(),
+                kind: "present_outcome".into(),
+                content: format!("outcome row {key} distinct alpha beta gamma"),
+                tags: tags.into_iter().map(|s| s.to_string()).collect(),
+                related_keys: vec![],
+                scope: Some(scope.into()),
+                created_at: now,
+                updated_at: now,
+                last_accessed_at: 0,
+                access_count: 0,
+                importance: 0.5,
+                status: "active".into(),
+                trigger_pattern: None,
+                superseded_by: None,
+            };
+            store.memory_save(&rec).await.expect("save");
+        }
+    }
+
+    #[tokio::test]
+    async fn outcome_valence_importance_apply_dry_run_writes_nothing() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        seed_valence_apply_cohort(&store).await;
+
+        let tool = OutcomeValenceImportanceApplyTool::new(hub);
+        let res = tool
+            .execute(json!({}), &ToolContext::default())
+            .await
+            .expect("execute ok");
+        assert!(!res.is_error, "dry run must succeed");
+        let v = result_json(&res);
+
+        assert_eq!(
+            v["schema"],
+            "agent_bridge.outcome_valence_importance_apply.v0"
+        );
+        assert_eq!(v["read_only"], true);
+        assert_eq!(v["boundary"]["mutates_ab_memory"], false);
+        assert_eq!(v["boundary"]["changes_memory_search_order"], false);
+        // +1.0 → 0.9 (ceiling) and -1.0 → 0.1 (floor); both |Δ|=0.4 ≥ min_delta.
+        assert_eq!(v["summary"]["present_outcome_rows"], 3);
+        assert_eq!(v["summary"]["derivable_rows"], 2);
+        assert_eq!(v["summary"]["candidates"], 2);
+        assert_eq!(v["summary"]["applied"], 0);
+        assert!(v["audit_memory_key"].is_null());
+
+        // Store untouched: every row still at the hardcoded 0.5.
+        let rows = store.active_outcome_meta_rows().await.expect("meta rows");
+        assert_eq!(rows.len(), 3);
+        assert!(rows.iter().all(|r| (r.importance - 0.5).abs() < 1e-9));
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn outcome_valence_importance_apply_confirm_applies_audits_and_is_idempotent() {
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        seed_valence_apply_cohort(&store).await;
+
+        let tool = OutcomeValenceImportanceApplyTool::new(hub);
+        let res = tool
+            .execute(json!({"confirm_apply": true}), &ToolContext::default())
+            .await
+            .expect("execute ok");
+        assert!(!res.is_error, "apply must succeed");
+        let v = result_json(&res);
+
+        assert_eq!(v["read_only"], false);
+        assert_eq!(v["boundary"]["mutates_ab_memory"], true);
+        assert_eq!(v["boundary"]["changes_memory_search_order"], true);
+        assert_eq!(v["summary"]["candidates"], 2);
+        assert_eq!(v["summary"]["applied"], 2);
+        assert_eq!(v["summary"]["failed"], 0);
+
+        // Importance really moved: +1.0 → ceiling 0.9, -1.0 → floor 0.1, bare → 0.5.
+        let rows = store.active_outcome_meta_rows().await.expect("meta rows");
+        let by_key: std::collections::HashMap<&str, f64> = rows
+            .iter()
+            .map(|r| (r.key.as_str(), r.importance))
+            .collect();
+        assert!((by_key["outcome_ia"] - 0.9).abs() < 1e-9, "ia -> ceiling");
+        assert!((by_key["outcome_ib"] - 0.1).abs() < 1e-9, "ib -> floor");
+        assert!((by_key["outcome_ic"] - 0.5).abs() < 1e-9, "ic untouched");
+
+        // Rollback map persisted BEFORE the writes, carrying the old values.
+        let audit_key = v["audit_memory_key"]
+            .as_str()
+            .expect("audit key")
+            .to_string();
+        let audit = store
+            .memory_get(&audit_key)
+            .await
+            .expect("get audit")
+            .expect("audit record exists");
+        assert!(audit.content.contains("outcome_ia"));
+        assert!(audit.content.contains("\"old_importance\": 0.5"));
+        assert!(audit.tags.iter().any(|t| t == "rollback_map"));
+
+        // Second confirm pass is a no-op: targets already reached (Δ < min_delta).
+        let res2 = tool
+            .execute(json!({"confirm_apply": true}), &ToolContext::default())
+            .await
+            .expect("execute ok");
+        let v2 = result_json(&res2);
+        assert_eq!(v2["summary"]["candidates"], 0);
+        assert_eq!(v2["summary"]["applied"], 0);
+        assert!(v2["audit_memory_key"].is_null());
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[test]
+    fn outcome_valence_importance_apply_schema_defaults_to_dry_run() {
+        let tool = OutcomeValenceImportanceApplyTool::new(crate::Hub::builder().build());
+        let schema = tool.schema();
+        assert_eq!(schema.name, "outcome_valence_importance_apply");
+        assert_eq!(
+            schema.input_schema["properties"]["confirm_apply"]["default"],
+            false
+        );
     }
 
     #[tokio::test]

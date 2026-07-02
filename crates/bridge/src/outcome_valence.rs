@@ -1,0 +1,205 @@
+//! Shared outcome→valence derivation rule (`agent_bridge.outcome_valence_rule.v0`).
+//!
+//! Extracted from the `outcome_valence_shadow` MCP tool so every consumer of the
+//! rule — the shadow diagnostic, the gated `outcome_valence_importance_apply`
+//! writer, and the ingest path (`present_ingest::build_outcome_memory`) — derives
+//! with the SAME reviewed table. Pure functions, no I/O, no store access. The
+//! rule is the transparent deterministic map specified in
+//! `docs/design/OUTCOMES_VALENCE_TRANSPORT_CONTRACT_DESIGN_2026_06_30.md` §2.4:
+//! `(verify_status × decision) → base valence in [-1,1]`, scaled by a
+//! method-confidence factor. No model, no learning, no randomness.
+
+/// The normalized outcome facets the rule reads — exactly the
+/// `verify:`/`method:`/`decision:`/`embody:` tag prefixes that
+/// `present_ingest::build_outcome_memory` writes. Never free-text content.
+#[derive(Debug, Clone, Default)]
+pub struct OutcomeFacets {
+    pub verify_status: String,
+    pub method: String,
+    pub decision: Option<String>,
+    pub embody: Option<String>,
+}
+
+/// Parse facets out of a memory record's tag list. Unknown tags are ignored;
+/// later duplicates of a prefix win (same as the original inline parser).
+pub fn facets_from_tags(tags: &[String]) -> OutcomeFacets {
+    let mut f = OutcomeFacets::default();
+    for t in tags {
+        if let Some(v) = t.strip_prefix("verify:") {
+            f.verify_status = v.to_string();
+        } else if let Some(m) = t.strip_prefix("method:") {
+            f.method = m.to_string();
+        } else if let Some(d) = t.strip_prefix("decision:") {
+            f.decision = Some(d.to_string());
+        } else if let Some(e) = t.strip_prefix("embody:") {
+            f.embody = Some(e.to_string());
+        }
+    }
+    f
+}
+
+/// One derivation result. `valence == None` means the facets carry insufficient
+/// signal (non-derivable); `rule_path` is always populated for auditability.
+#[derive(Debug, Clone)]
+pub struct ValenceDerivation {
+    pub valence: Option<f64>,
+    /// `"unknown"` when the method facet is empty — the label used in
+    /// rule paths and facet tallies.
+    pub method_label: String,
+    pub rule_path: String,
+}
+
+/// Derive a candidate valence from outcome facets via the v0 rule table.
+/// Deterministic; result is rounded to 1e-6 like the shadow tool always did.
+pub fn derive_valence(facets: &OutcomeFacets) -> ValenceDerivation {
+    let method_label = if facets.method.is_empty() {
+        "unknown".to_string()
+    } else {
+        facets.method.clone()
+    };
+    let dec_class = match facets.decision.as_deref() {
+        Some("approved") => "approved",
+        Some("rejected") => "rejected",
+        _ => "none",
+    };
+    let vs_class = match facets.verify_status.as_str() {
+        "rendered_ok" => "ok",
+        "failed" | "error" => "failed",
+        "" => "empty",
+        _ => "other",
+    };
+    // Deterministic (verify_status × decision) → base valence. See §2.4 of the
+    // design doc. `_` arms collapse unrecognized decisions into "none".
+    let base: Option<f64> = match (vs_class, dec_class) {
+        ("ok", "approved") => Some(1.0),
+        ("ok", "rejected") => Some(-0.4),
+        ("ok", _) => Some(0.6),
+        ("failed", "approved") => Some(-0.2),
+        ("failed", "rejected") => Some(-1.0),
+        ("failed", _) => Some(-0.7),
+        ("empty", "approved") => Some(0.3),
+        ("empty", "rejected") => Some(-0.6),
+        ("empty", _) => None,
+        ("other", "approved") => Some(0.3),
+        ("other", "rejected") => Some(-0.5),
+        _ => None,
+    };
+    let conf = match method_label.as_str() {
+        "browser_eval" | "macos_ax_verify" => 1.0,
+        "desktop_verify" => 0.9,
+        "lite_probe" => 0.7,
+        "self_report" => 0.5,
+        _ => 0.6,
+    };
+    let vs_disp = if facets.verify_status.is_empty() {
+        "<empty>"
+    } else {
+        facets.verify_status.as_str()
+    };
+    match base {
+        Some(b) => {
+            let v = (b * conf).clamp(-1.0, 1.0);
+            let v = (v * 1_000_000.0).round() / 1_000_000.0;
+            ValenceDerivation {
+                valence: Some(v),
+                method_label: method_label.clone(),
+                rule_path: format!(
+                    "verify={vs_disp}+decision={dec_class} -> base={b:+.1} * conf({method_label}={conf:.1}) = {v:+.3}"
+                ),
+            }
+        }
+        None => ValenceDerivation {
+            valence: None,
+            method_label,
+            rule_path: format!(
+                "verify={vs_disp}+decision={dec_class} -> insufficient signal (not derivable)"
+            ),
+        },
+    }
+}
+
+/// Default clamp bounds for the valence→importance map. The floor matches the
+/// `memory_decay_unused` floor (a valence-scored record never ranks below a
+/// fully-decayed one); the ceiling stays below 1.0 so hand-pinned
+/// `importance=1.0` records always outrank derived scores.
+pub const IMPORTANCE_FLOOR_DEFAULT: f64 = 0.1;
+pub const IMPORTANCE_CEILING_DEFAULT: f64 = 0.9;
+
+/// Map a valence scalar in [-1,1] onto the importance scale [0,1] with an
+/// affine transform, clamped to `[floor, ceiling]`:
+/// `importance = clamp((valence + 1) / 2, floor, ceiling)`.
+/// v=-1 → floor, v=0 → 0.5 (the current hardcoded default — a neutral outcome
+/// keeps today's rank), v=+0.6 → 0.8, v=+1 → ceiling.
+pub fn importance_from_valence(valence: f64, floor: f64, ceiling: f64) -> f64 {
+    let raw = (valence.clamp(-1.0, 1.0) + 1.0) / 2.0;
+    raw.clamp(floor, ceiling)
+}
+
+/// Env gate for the INGEST-side derivation: when truthy, new
+/// `present_outcome` records get `importance = importance_from_valence(...)`
+/// instead of the hardcoded 0.5. Default OFF — code behavior is unchanged
+/// unless the operator opts in. The retro `outcome_valence_importance_apply`
+/// tool is gated per-call (`confirm_apply`) instead.
+pub const OUTCOME_VALENCE_IMPORTANCE_ENV: &str = "AB_OUTCOME_VALENCE_IMPORTANCE";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn facets(verify: &str, decision: Option<&str>, method: &str) -> OutcomeFacets {
+        OutcomeFacets {
+            verify_status: verify.to_string(),
+            method: method.to_string(),
+            decision: decision.map(str::to_string),
+            embody: None,
+        }
+    }
+
+    #[test]
+    fn rule_table_spot_checks() {
+        // verified + approved + full-confidence method → +1.0
+        let d = derive_valence(&facets("rendered_ok", Some("approved"), "browser_eval"));
+        assert_eq!(d.valence, Some(1.0));
+        // failed + rejected → -1.0
+        let d = derive_valence(&facets("failed", Some("rejected"), "browser_eval"));
+        assert_eq!(d.valence, Some(-1.0));
+        // verified, no decision → +0.6
+        let d = derive_valence(&facets("rendered_ok", None, "browser_eval"));
+        assert_eq!(d.valence, Some(0.6));
+        assert!(d.rule_path.contains("base=+0.6"));
+        // low-confidence method scales magnitude down
+        let d = derive_valence(&facets("rendered_ok", None, "self_report"));
+        assert_eq!(d.valence, Some(0.3));
+        // no verify + no decision → non-derivable
+        let d = derive_valence(&facets("", None, ""));
+        assert_eq!(d.valence, None);
+        assert_eq!(d.method_label, "unknown");
+        assert!(d.rule_path.contains("not derivable"));
+    }
+
+    #[test]
+    fn facets_parse_from_tag_prefixes() {
+        let tags = vec![
+            "present_outcome".to_string(),
+            "verify:rendered_ok".to_string(),
+            "method:browser_eval".to_string(),
+            "decision:approved".to_string(),
+            "embody:embodied".to_string(),
+        ];
+        let f = facets_from_tags(&tags);
+        assert_eq!(f.verify_status, "rendered_ok");
+        assert_eq!(f.method, "browser_eval");
+        assert_eq!(f.decision.as_deref(), Some("approved"));
+        assert_eq!(f.embody.as_deref(), Some("embodied"));
+    }
+
+    #[test]
+    fn importance_map_is_affine_and_clamped() {
+        let (f, c) = (IMPORTANCE_FLOOR_DEFAULT, IMPORTANCE_CEILING_DEFAULT);
+        assert_eq!(importance_from_valence(0.0, f, c), 0.5); // neutral keeps today's default
+        assert_eq!(importance_from_valence(0.6, f, c), 0.8);
+        assert_eq!(importance_from_valence(1.0, f, c), c); // ceiling
+        assert_eq!(importance_from_valence(-1.0, f, c), f); // floor
+        assert_eq!(importance_from_valence(2.0, f, c), c); // out-of-range input clamped
+    }
+}

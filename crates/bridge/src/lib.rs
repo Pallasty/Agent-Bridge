@@ -55,6 +55,7 @@ pub mod lswr_snapshot_wrapper_preflight_report;
 pub mod mcp_tools;
 pub mod notion_api;
 pub mod openai_api;
+pub mod outcome_valence;
 pub mod palace_viewer;
 pub mod peer_client;
 pub mod pet_ground;

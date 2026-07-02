@@ -2016,6 +2016,10 @@ pub struct OutcomeMetaRow {
     pub key: String,
     pub scope: Option<String>,
     pub tags_json: String,
+    /// Current stored importance (0.0–1.0) — read so the gated
+    /// `outcome_valence_importance_apply` tool can report old→new diffs
+    /// without a second query. 0.5 is the historical hardcoded default.
+    pub importance: f64,
 }
 
 /// Memory kinds treated as bulk-imported reference catalog rather than
@@ -2874,6 +2878,16 @@ pub trait StateStore: Send + Sync {
     /// returns empty so non-SQLite stores stay trait-compatible.
     async fn active_outcome_meta_rows(&self) -> Result<Vec<OutcomeMetaRow>> {
         Ok(Vec::new())
+    }
+
+    /// Set one active memory's `importance` column directly (no supersede, no
+    /// timestamp churn — mirrors the decay/strengthen UPDATE semantics, which
+    /// also touch only `importance`). Returns `true` iff a row was updated.
+    /// Used by the gated `outcome_valence_importance_apply` writer; the audit
+    /// trail (old values) is the caller's responsibility. Default impl is a
+    /// no-op `false` so non-SQLite stores stay trait-compatible.
+    async fn memory_set_importance(&self, _key: &str, _importance: f64) -> Result<bool> {
+        Ok(false)
     }
 
     /// Semantic search: embed `query` via feature hashing, load all stored

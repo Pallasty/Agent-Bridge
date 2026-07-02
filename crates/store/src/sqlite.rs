@@ -6201,7 +6201,7 @@ impl StateStore for SqliteStore {
             .conn
             .call(move |c| -> RusqliteResult<Vec<crate::OutcomeMetaRow>> {
                 let mut stmt = c.prepare(
-                    "SELECT key, scope, tags \
+                    "SELECT key, scope, tags, importance \
                      FROM memories \
                      WHERE status = 'active' AND kind = 'present_outcome'",
                 )?;
@@ -6213,6 +6213,7 @@ impl StateStore for SqliteStore {
                             tags_json: row
                                 .get::<_, Option<String>>(2)?
                                 .unwrap_or_else(|| "[]".to_string()),
+                            importance: row.get::<_, f64>(3)?,
                         })
                     })?
                     .collect::<RusqliteResult<Vec<_>>>()?;
@@ -6221,6 +6222,25 @@ impl StateStore for SqliteStore {
             .await
             .map_err(|e| Error::Backend(format!("active_outcome_meta_rows: {e}")))?;
         Ok(rows)
+    }
+
+    async fn memory_set_importance(&self, key: &str, importance: f64) -> Result<bool> {
+        let key = key.to_string();
+        let importance = importance.clamp(0.0, 1.0);
+        let updated = self
+            .conn
+            .call(move |c| -> RusqliteResult<usize> {
+                // Only `importance` moves — no supersede, no timestamp churn —
+                // mirroring the decay/strengthen UPDATE semantics.
+                c.execute(
+                    "UPDATE memories SET importance = ?2 \
+                      WHERE key = ?1 AND status = 'active'",
+                    params![key, importance],
+                )
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("memory_set_importance: {e}")))?;
+        Ok(updated > 0)
     }
 
     async fn memory_stats(&self) -> Result<MemoryStats> {

@@ -337,6 +337,44 @@ All in `crates/bridge/src/mcp_tools.rs` `#[cfg(test)]`, using
 5. **`outcome_valence_shadow_schema_exposes_no_params`** — `schema().name=="outcome_valence_shadow"`,
    `input_schema["type"]=="object"`, no params.
 
+### 2.6 2026-07-02 addendum: AB-local importance loop, not biocortex transport
+
+The V0 recommendation and the ceiling language below remain correct for the
+**biocortex valence transport**: do not build a live biocortex channel, do not
+supply valence to the sibling repo, and do not imply a consumer that does not
+exist.
+
+The follow-up implemented in Agent-Bridge is deliberately narrower and local:
+AB's own `present_outcome` memory rows can reuse the deterministic
+`agent_bridge.outcome_valence_rule.v0` to derive `importance` for AB retrieval
+ranking only. This is not `ab.valence_transport.v1`, not a biocortex
+side-signal, and not a learned reward model.
+
+Two surfaces define the loop:
+
+1. **Retroactive apply tool**: `outcome_valence_importance_apply`.
+   - Default `confirm_apply=false`: dry-run only, no writes.
+   - With `confirm_apply=true`: writes only the `memories.importance` column for
+     active `kind=present_outcome` rows whose derived target differs by at least
+     `min_delta`.
+   - Before any importance update, it persists an audit memory record containing
+     the rollback map: raw key, old importance, new importance, valence, and rule
+     path.
+   - It never writes a valence column, never writes graph edges, never changes
+     schema, and never calls or supplies biocortex.
+
+2. **Future-row ingest gate**: `AB_OUTCOME_VALENCE_IMPORTANCE`.
+   - Default OFF: `present_outcomes_ingest` continues to write
+     `importance=0.5`.
+   - Truthy values (`1`, `true`, `yes`, `on`) make newly ingested
+     `present_outcome` rows derive `importance` from the same v0 rule.
+   - Non-derivable rows keep `importance=0.5`.
+
+Rollback for the retroactive tool is explicit: replay the persisted audit row's
+old values through `memory_set_importance(key, old_importance)`. The operation
+class is a narrow importance-only update, matching the decay/strengthen family:
+no supersede, no timestamp churn, no content mutation.
+
 ---
 
 ## 3. The transport contract schema — `ab.valence_transport.v1` (specification, not built)
@@ -602,12 +640,17 @@ channel; only the sibling repo can.
 
 ### 6.2 Global non-goals
 
-This design does **not**: write or recompute `importance=0.5` (`present_ingest.rs:240`);
-persist valence to any column/sidecar; supply valence to biocortex; change retrieval
-order or call `memory_search`; build a learned reward model; or build a multi-step
-credit-assignment engine. It introduces a learned reward model nowhere — only a
-transparent deterministic rule (§2.4). The transport schema (§3) builds no producer, no
-consumer, no writer; all write/learning/influence surfaces remain owner-gated FALSE.
+This design does **not**: persist valence to any column/sidecar; supply valence
+to biocortex; call a biocortex runtime; build a learned reward model; or build a
+multi-step credit-assignment engine. It introduces a learned reward model
+nowhere — only a transparent deterministic rule (§2.4).
+
+The original 2026-06-30 V0 shadow did not write or recompute
+`importance=0.5`. The 2026-07-02 addendum (§2.6) deliberately adds an
+AB-local, reversible importance-only loop for AB retrieval ranking. That
+addendum does not lift the biocortex transport ceiling: the transport schema
+(§3) still builds no producer, no consumer, no writer; all
+biocortex-facing write/learning/influence surfaces remain owner-gated FALSE.
 
 ### 6.3 Recommendation — the honest minimum
 
@@ -630,8 +673,13 @@ Rationale:
   deferred by design. Building them now would either be inert (V1) or dishonest (V2+
   implies a path to a consumer that does not exist).
 
-Do **not** advance past V0 in this arc. V1 (transport dry-run) is buildable but inert
-until V0 lands and is reviewed; V2+ require an owner decision and, for V4, a sibling-repo
-event that no AB work can produce. The honest minimum is: **land the read-only derivation
-shadow, keep the transport contract and gate ladder as a reviewed specification, and
-re-open arc5 only when a new biocortex plasticity axis creates a real consumer.**
+Do **not** advance past V0 in the biocortex-transport arc. V1 (transport
+dry-run) is buildable but inert until V0 lands and is reviewed; V2+ require an
+owner decision and, for V4, a sibling-repo event that no AB work can produce.
+The honest minimum for that arc is: **land the read-only derivation shadow, keep
+the transport contract and gate ladder as a reviewed specification, and re-open
+arc5 only when a new biocortex plasticity axis creates a real consumer.**
+
+The AB-local importance loop in §2.6 is a separate Agent-Bridge retrieval-ranking
+consumer of the same deterministic rule. It must not be represented as
+biocortex transport.
