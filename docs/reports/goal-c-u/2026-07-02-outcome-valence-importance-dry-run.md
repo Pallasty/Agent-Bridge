@@ -6,6 +6,11 @@ Scope: `project:/Data/CascadeProjects/agent-bridge`
 
 Status: read-only verification complete; no production apply needed
 
+Superseded current-state note: the live store later advanced to eight stamped
+active `present_outcome` rows. See
+`docs/reports/goal-c-u/2026-07-02-outcome-valence-production-convergence-audit.md`
+for the latest production readback.
+
 ## Summary
 
 The newly deployed `outcome_valence_importance_apply` tool was exercised in
