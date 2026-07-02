@@ -72,7 +72,7 @@ use crate::{
     RetrievalOutcomeMemory, RetrievalOutcomeSummary,
     ReplayAuditStats, S234Counts, SessionFilter, SignalFidelityStats, StateStore, StoredSession,
     WaypointRow, WaypointStats, MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP,
-    MEMORY_QUERY_LOG_RING_CAP, STDIO_CAP,
+    MEMORY_QUERY_LOG_RING_CAP, RETRIEVAL_SURFACING_RING_CAP, STDIO_CAP,
 };
 use tokio_rusqlite::rusqlite::OptionalExtension;
 
@@ -6807,7 +6807,9 @@ impl StateStore for SqliteStore {
 
     /// Outcome-collector prototype — see the trait doc. The v39
     /// `retrieval_surfacing` table is versioned schema; writes remain flag-gated
-    /// by the MCP layer. Append-only; fail-soft like record_coactivation.
+    /// by the MCP layer. FIFO ring-capped at [`RETRIEVAL_SURFACING_RING_CAP`] in
+    /// the same transaction as the insert (so concurrent writers can't slip past
+    /// the cap); fail-soft like record_coactivation.
     async fn record_retrieval_surfacing(
         &self,
         surfaced: &[(String, i64)],
@@ -6835,6 +6837,18 @@ impl StateStore for SqliteStore {
                         stmt.execute(rusqlite::params![key, query, mode, rank, now])?;
                     }
                 }
+                // Ring-buffer prune: keep at most RETRIEVAL_SURFACING_RING_CAP rows,
+                // FIFO by id. Oldest rows are far past the attribution window, so
+                // this never removes a surfacing still eligible for a used_at stamp.
+                tx.execute(
+                    "DELETE FROM retrieval_surfacing
+                       WHERE id IN (
+                           SELECT id FROM retrieval_surfacing
+                           ORDER BY id ASC
+                           LIMIT MAX(0, (SELECT COUNT(*) FROM retrieval_surfacing) - ?1)
+                       )",
+                    rusqlite::params![RETRIEVAL_SURFACING_RING_CAP],
+                )?;
                 tx.commit()?;
                 Ok(())
             })
@@ -17719,6 +17733,81 @@ mod tests {
             echo.last_surfaced_at > 1_000_000_000,
             "last_surfaced_at is a real epoch, not the avg_rank value"
         );
+    }
+
+    #[tokio::test]
+    async fn retrieval_surfacing_ring_caps_at_max() {
+        // Cross-call FIFO: phase 1 fills exactly to the cap (prune is a no-op at
+        // the boundary); a SEPARATE phase-2 call then crosses the cap and prunes
+        // phase 1's oldest rows, not its own. Proves the ring holds across the
+        // many small writes the real search path makes (≤10 rows/call), and that
+        // pruning is oldest-out. Mirrors memory_query_log_ring_caps_at_max.
+        let (_dir, store) = fresh_store("retrieval-surfacing-ring").await;
+        let cap = RETRIEVAL_SURFACING_RING_CAP;
+        let overshoot = 3i64;
+
+        // Phase 1: exactly `cap` rows in one call → MAX(0, cap-cap)=0, no prune.
+        let first: Vec<(String, i64)> = (0..cap).map(|i| (format!("k{i}"), i % 10)).collect();
+        store
+            .record_retrieval_surfacing(&first, "q1", "fts")
+            .await
+            .expect("phase1");
+        // Phase 2: a separate call of `overshoot` rows crosses the cap.
+        let second: Vec<(String, i64)> =
+            (0..overshoot).map(|i| (format!("n{i}"), i % 10)).collect();
+        store
+            .record_retrieval_surfacing(&second, "q2", "semantic")
+            .await
+            .expect("phase2");
+
+        let count: i64 = store
+            .conn
+            .call(|c| -> RusqliteResult<i64> {
+                c.query_row("SELECT COUNT(*) FROM retrieval_surfacing", [], |r| r.get(0))
+            })
+            .await
+            .expect("count");
+        assert_eq!(count, cap, "cross-call prune keeps table at the ring cap");
+
+        // FIFO across calls: exactly phase-1's oldest `overshoot` keys (k0..k2)
+        // are evicted; every phase-2 key (n0..n2) survives. Pinning the full
+        // eviction set proves FIFO-by-id — an ORDER BY memory_key prune
+        // (alphabetical: k0, k1, k10...) would evict a different set and fail.
+        let (evicted, phase2_kept): (i64, i64) = store
+            .conn
+            .call(move |c| -> RusqliteResult<(i64, i64)> {
+                let evicted: i64 = c.query_row(
+                    "SELECT COUNT(*) FROM retrieval_surfacing
+                      WHERE memory_key IN ('k0', 'k1', 'k2')",
+                    [],
+                    |r| r.get(0),
+                )?;
+                let kept: i64 = c.query_row(
+                    "SELECT COUNT(*) FROM retrieval_surfacing
+                      WHERE memory_key IN ('n0', 'n1', 'n2')",
+                    [],
+                    |r| r.get(0),
+                )?;
+                Ok((evicted, kept))
+            })
+            .await
+            .expect("fifo check");
+        assert_eq!(evicted, 0, "phase-1 oldest k0..k2 all pruned FIFO-by-id");
+        assert_eq!(phase2_kept, 3, "all phase-2 surfacings retained");
+        // k10 survives (id-order eviction, NOT alphabetical key-order which
+        // would have taken k0,k1,k10).
+        let k10: i64 = store
+            .conn
+            .call(|c| -> RusqliteResult<i64> {
+                c.query_row(
+                    "SELECT COUNT(*) FROM retrieval_surfacing WHERE memory_key = 'k10'",
+                    [],
+                    |r| r.get(0),
+                )
+            })
+            .await
+            .expect("k10 check");
+        assert_eq!(k10, 1, "k10 retained — prune is by id, not by key order");
     }
 
     #[tokio::test]

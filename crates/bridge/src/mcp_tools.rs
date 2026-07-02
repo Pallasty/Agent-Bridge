@@ -30056,7 +30056,10 @@ impl McpTool for RetrievalOutcomeReportTool {
                  + decay candidates (surfaced ≥2× but never used). Rows exist only \
                  when the outcome collector (AGENT_BRIDGE_OUTCOME_COLLECTOR) is \
                  enabled — an empty report means the gate is off or nothing has \
-                 accrued yet. Mutates nothing and carries no authority over ranking; \
+                 accrued yet. The telemetry table is FIFO ring-capped at \
+                 RETRIEVAL_SURFACING_RING_CAP (50k rows ≈ 7 days of moderate use), \
+                 so windows longer than the retained span under-report silently. \
+                 Mutates nothing and carries no authority over ranking; \
                  it exists to calibrate a later, separately-gated reinforce/decay \
                  rule against the real distribution. Default window 7 days, top_n 15."
                 .into(),

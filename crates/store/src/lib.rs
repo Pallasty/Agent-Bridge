@@ -187,6 +187,20 @@ pub const SEMANTIC_EVENT_RING_CAP: i64 = 5_000;
 /// 5k rows; tune via design review when telemetry exposes traffic shape.
 pub const MEMORY_QUERY_LOG_RING_CAP: i64 = 5_000;
 
+/// Cap on `retrieval_surfacing` rows (Outcome-collector feedback telemetry).
+/// Older rows are pruned FIFO on each `record_retrieval_surfacing` call so the
+/// table stays bounded once the collector is enabled. One search writes up to
+/// ~10 rows (top-k surfaced keys) vs one row for `memory_query_log`, so this is
+/// scaled ~10× for a comparable ~7-day window of moderate use. Under any
+/// non-pathological traffic the FIFO-by-id prune removes only rows far older
+/// than the 1800s attribution window, so it doesn't race with
+/// `attribute_retrieval_get` stamping used_at; the crossover is >~2.8
+/// searches/sec sustained for 30 min (50k rows ÷ 10 rows/search ÷ 1800s), where
+/// the worst case is losing used_at stamps on the oldest telemetry rows —
+/// bounded, telemetry-only. Tune via design review once the
+/// retrieval_outcome_report exposes real traffic shape.
+pub const RETRIEVAL_SURFACING_RING_CAP: i64 = 50_000;
+
 /// Hard cap on stdout/stderr we persist per agent session, to keep the DB
 /// file from growing unbounded if a sub-agent goes haywire.
 pub const STDIO_CAP: usize = 64 * 1024;
