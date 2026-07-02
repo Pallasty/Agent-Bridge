@@ -20,11 +20,12 @@ BioCortex state were changed.
 
 ## Runtime And Repo State
 
-Repository:
+Repository and deployed source:
 
 ```text
 master == origin/master
-HEAD = 5549f47 feat(memory): apply outcome valence to importance
+deployed source = f570624 docs(memory): record outcome valence dry run
+included code fix = 1815f44 fix(memory): valence-apply audit integrity + ingest importance carry-forward (#50)
 working tree clean
 ```
 
@@ -32,8 +33,8 @@ Installed binary:
 
 ```text
 /home/pallasting/.local/bin/agent-bridge.real
-size = 69098360 bytes
-sha256 = 7445f8a9992d05d65a10349c0598c71426fffd3093152a9ce42d6d137b755258
+size = 69098744 bytes
+sha256 = ba07e16f1f69e46e9d0d1990da342874ddb85879cfce22d83f66ed94bd1842b9
 ```
 
 Short-lived MCP `tools/list` with the all profile confirmed:
@@ -51,6 +52,55 @@ Doctor after the operator MCP reconnect:
 The warning is stale-client only: seven long-lived MCP child processes under
 other Cursor/Claude parents still execute deleted old `.real` binaries. The
 installed binary and short-lived tool surface are current.
+
+Rollback backup from the deploy:
+
+```text
+/home/pallasting/.local/bin/agent-bridge.real.bak-deploy-f570624-20260702T012341
+```
+
+Rollback command:
+
+```text
+cp '/home/pallasting/.local/bin/agent-bridge.real.bak-deploy-f570624-20260702T012341' '/home/pallasting/.local/bin/agent-bridge.real' && /mcp reconnect
+```
+
+## Focused Verification
+
+Before deploying `f570624`, the #50 repair tests were rerun on the current tree.
+
+```text
+CARGO_BUILD_JOBS=2 cargo test -p ab-bridge outcome_valence_importance_apply --lib -- --nocapture
+```
+
+Result:
+
+```text
+4 passed; 0 failed
+```
+
+Covered tests:
+
+- `outcome_valence_importance_apply_dry_run_writes_nothing`
+- `outcome_valence_importance_apply_confirm_applies_audits_and_is_idempotent`
+- `outcome_valence_importance_apply_rerun_preserves_prior_audit`
+- `outcome_valence_importance_apply_schema_defaults_to_dry_run`
+
+```text
+CARGO_BUILD_JOBS=2 cargo test -p ab-bridge carry_forward_ingest_importance_preserves_existing --lib -- --nocapture
+```
+
+Result:
+
+```text
+1 passed; 0 failed
+```
+
+Observed warnings were existing non-blocking warnings:
+
+- mixed-script Greek beta test name in `ab-store`;
+- `ToolPolicy` private-interface warning in `ab-bridge`;
+- release-build dead-code warnings for existing Option E helpers.
 
 ## Default Dry Run
 
@@ -81,7 +131,7 @@ Tool boundary:
 }
 ```
 
-Summary:
+Post-deploy summary:
 
 | Metric | Value |
 |---|---:|
@@ -102,7 +152,7 @@ target importance value differs from the stored value by less than the default
 A second read-only pass with `min_delta=0` was run only to inspect the suppressed
 rows. It did not write an audit memory and did not apply changes.
 
-Summary:
+Post-deploy summary:
 
 | Metric | Value |
 |---|---:|
