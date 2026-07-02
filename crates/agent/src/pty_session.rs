@@ -24,6 +24,7 @@ use ab_core::{Error, Result};
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
 
@@ -56,6 +57,11 @@ pub struct PtySession {
     output: Arc<Mutex<String>>,
     /// OS pid of the child, or 0 if the platform did not report one.
     pid: u32,
+    /// Set by the reader thread once `child.wait()` has reaped the child.
+    /// After the reap the OS may recycle the pid/pgid, so the SIGKILL paths
+    /// ([`Self::kill_group`], `Drop`) must become no-ops rather than risk
+    /// signalling an unrelated recycled process group.
+    reaped: Arc<AtomicBool>,
 }
 
 impl PtySession {
@@ -120,6 +126,8 @@ impl PtySession {
 
         let output = Arc::new(Mutex::new(String::new()));
         let output_for_thread = output.clone();
+        let reaped = Arc::new(AtomicBool::new(false));
+        let reaped_for_thread = reaped.clone();
         let (tx, rx) = oneshot::channel();
 
         std::thread::Builder::new()
@@ -143,6 +151,7 @@ impl PtySession {
                 }
                 // Reap for the exit code now that the master is at EOF.
                 let exit_code = child.wait().ok().map(|s| s.exit_code() as i32);
+                reaped_for_thread.store(true, Ordering::SeqCst);
                 let final_output = output_for_thread
                     .lock()
                     .map(|o| o.clone())
@@ -160,6 +169,7 @@ impl PtySession {
                 killer: Mutex::new(killer),
                 output,
                 pid,
+                reaped,
             },
             rx,
         ))
@@ -193,6 +203,11 @@ impl PtySession {
 
     /// Signal the child to terminate. Idempotent in practice: killing an
     /// already-dead child surfaces a harmless error the caller may ignore.
+    ///
+    /// On unix this is portable_pty's graceful kill — `SIGHUP` to the child
+    /// pid only — which a TUI can catch and survive (gemini's Ink TUI catches
+    /// SIGHUP and SIGTERM). Callers that must guarantee teardown follow up
+    /// with [`Self::kill_group`] after a grace period.
     pub fn kill(&self) -> Result<()> {
         let mut k = self
             .killer
@@ -200,6 +215,44 @@ impl PtySession {
             .map_err(|_| Error::Backend("pty killer lock poisoned".into()))?;
         k.kill()
             .map_err(|e| Error::Backend(format!("pty kill: {e}")))
+    }
+
+    /// Forcibly terminate the child's entire process group with an
+    /// uncatchable `SIGKILL`. Escalation path for children that catch and
+    /// survive the graceful [`Self::kill`]. The child is spawned as a session
+    /// leader (portable_pty calls `setsid` pre-exec), so its pgid equals its
+    /// pid and the group kill also reaps grandchildren the leader would
+    /// otherwise orphan. A group that already exited (`ESRCH`) is success,
+    /// and a child the reader thread already reaped is a no-op — after the
+    /// reap the pid/pgid may be recycled and the SIGKILL could hit an
+    /// unrelated process group.
+    #[cfg(unix)]
+    pub fn kill_group(&self) -> Result<()> {
+        if self.reaped.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+        if self.pid == 0 {
+            // No pid reported: the group is unaddressable, fall back to the
+            // killer handle.
+            return self.kill();
+        }
+        let rc = unsafe { libc::kill(-(self.pid as i32), libc::SIGKILL) };
+        if rc == 0 {
+            return Ok(());
+        }
+        let err = std::io::Error::last_os_error();
+        if err.raw_os_error() == Some(libc::ESRCH) {
+            Ok(())
+        } else {
+            Err(Error::Backend(format!("pty kill_group: {err}")))
+        }
+    }
+
+    /// Non-unix fallback: the platform killer is already a hard terminate
+    /// (`TerminateProcess` on Windows).
+    #[cfg(not(unix))]
+    pub fn kill_group(&self) -> Result<()> {
+        self.kill()
     }
 }
 
@@ -225,12 +278,15 @@ fn append_capped_output(out: &mut String, chunk: &str) {
 }
 
 impl Drop for PtySession {
-    /// Best-effort kill so a dropped session never leaks a live child + its
-    /// blocked reader thread. No-op if the child already exited.
+    /// Group-SIGKILL so a dropped session never leaks a live child + its
+    /// blocked reader thread — including TUIs that catch SIGHUP/SIGTERM
+    /// (gemini) and even survive the PTY master closing. This is the backstop
+    /// for the `kill_interactive` escalation task, which is cancelled if the
+    /// tokio runtime shuts down inside the grace window (e.g. a test that
+    /// kills and returns, or daemon stop right after `agent_kill`). No-op
+    /// once the reader thread has reaped the child (pid may be recycled).
     fn drop(&mut self) {
-        if let Ok(mut k) = self.killer.lock() {
-            let _ = k.kill();
-        }
+        let _ = self.kill_group();
     }
 }
 

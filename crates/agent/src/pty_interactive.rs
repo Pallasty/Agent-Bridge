@@ -27,6 +27,12 @@ use crate::{AgentSession, SpawnConfig};
 /// the runtime keeps one clone in its struct and hands the helpers a borrow.
 pub type InteractiveMap = Arc<DashMap<String, Arc<PtySession>>>;
 
+/// Grace between the graceful SIGHUP sent by [`kill_interactive`] and the
+/// process-group SIGKILL escalation for children that catch and survive it.
+/// gemini's Ink TUI catches SIGHUP *and* SIGTERM and keeps running (observed
+/// live 2026-07-01); well-behaved CLIs exit on SIGHUP long before this fires.
+const KILL_ESCALATION_GRACE: Duration = Duration::from_secs(3);
+
 /// How a runtime's interactive TUI accepts a submitted turn. Simple line REPLs
 /// (claude-code, `/bin/cat`) submit on a bare CR written together with the text;
 /// full-screen TUIs that enable the Kitty keyboard protocol (codex) only submit
@@ -291,6 +297,12 @@ pub async fn send_input(
 /// Kill a live interactive session if one exists. Returns `Some(result)` when
 /// `session` was an interactive PTY session (handled here); `None` to let the
 /// caller fall through to its one-shot kill path.
+///
+/// The graceful kill (SIGHUP to the leader) is followed by a background
+/// escalation: if the child has not exited within [`KILL_ESCALATION_GRACE`]
+/// (its finalise task removes the map entry on PTY EOF, so a lingering entry
+/// means a live child), the whole process group gets an uncatchable SIGKILL.
+/// Must be called from within a tokio runtime (all runtime `kill` paths are).
 pub fn kill_interactive(
     runtime_id: &str,
     interactive: &InteractiveMap,
@@ -300,6 +312,24 @@ pub fn kill_interactive(
     match sess.kill() {
         Ok(()) => {
             info!(session = %session, runtime = %runtime_id, pid = sess.pid(), "interactive PTY session killed");
+            let map = interactive.clone();
+            let key = session.as_str().to_string();
+            let rid = runtime_id.to_string();
+            tokio::spawn(async move {
+                tokio::time::sleep(KILL_ESCALATION_GRACE).await;
+                if !map.contains_key(&key) {
+                    return; // exited gracefully; finalise task cleaned up
+                }
+                warn!(
+                    session = %key,
+                    runtime = %rid,
+                    pid = sess.pid(),
+                    "interactive child survived SIGHUP grace; escalating to process-group SIGKILL"
+                );
+                if let Err(e) = sess.kill_group() {
+                    warn!(session = %key, runtime = %rid, error = %e, "SIGKILL escalation failed");
+                }
+            });
             Some(Ok(()))
         }
         Err(e) => Some(Err(e)),
@@ -383,5 +413,116 @@ mod tests {
         kill_interactive("test-runtime", &interactive, &sess.id)
             .expect("interactive session should be live")
             .expect("kill delayed-ready stand-in");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn kill_escalates_to_sigkill_when_child_ignores_hup_and_term() {
+        let interactive: InteractiveMap = Arc::new(DashMap::new());
+        let store: Option<Arc<dyn StateStore>> = None;
+        // Stand-in for signal-tolerant TUIs: gemini's Ink TUI catches SIGHUP
+        // AND SIGTERM and keeps running (observed live 2026-07-01), so the
+        // graceful SIGHUP from PtySession::kill never reaps it. The marker
+        // echo lets the test wait until the traps are armed — a SIGHUP that
+        // races trap setup kills the child outright and the test would pass
+        // without exercising escalation at all.
+        let args = vec![
+            "-c".to_string(),
+            "trap '' HUP TERM; echo TRAP-ARMED; while :; do sleep 0.1; done".to_string(),
+        ];
+        let sess = spawn_interactive(
+            "test-runtime",
+            "/bin/bash",
+            &args,
+            &store,
+            &interactive,
+            SpawnConfig {
+                cwd: "/tmp".into(),
+                interactive: true,
+                ..Default::default()
+            },
+            SubmitProfile::ENTER,
+        )
+        .await
+        .expect("spawn signal-immune stand-in");
+
+        let armed = wait_for(5000, 25, || {
+            interactive_output(&interactive, &sess.id)
+                .map(|o| o.contains("TRAP-ARMED"))
+                .unwrap_or(false)
+        })
+        .await;
+        assert!(armed, "stand-in must arm its traps before the kill");
+
+        kill_interactive("test-runtime", &interactive, &sess.id)
+            .expect("interactive session should be live")
+            .expect("kill signal-immune stand-in");
+
+        // Well inside the grace window the child must still be alive — it
+        // caught the graceful SIGHUP. This pins the reap below on the
+        // escalation, not on the SIGHUP itself.
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+        assert!(
+            interactive.contains_key(sess.id.as_str()),
+            "stand-in died to the plain SIGHUP; escalation path not exercised"
+        );
+
+        // The finalise task removes the map entry on child exit (PTY EOF), so
+        // entry removal == the child really died. Must happen within the
+        // escalation grace plus slack.
+        let reaped = wait_for(KILL_ESCALATION_GRACE.as_millis() as u64 + 5000, 100, || {
+            !interactive.contains_key(sess.id.as_str())
+        })
+        .await;
+        assert!(
+            reaped,
+            "a child that ignores SIGHUP/SIGTERM must be SIGKILLed after the grace period"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn dropping_session_group_kills_signal_immune_child() {
+        let interactive: InteractiveMap = Arc::new(DashMap::new());
+        let store: Option<Arc<dyn StateStore>> = None;
+        let args = vec![
+            "-c".to_string(),
+            "trap '' HUP TERM; echo TRAP-ARMED; while :; do sleep 0.1; done".to_string(),
+        ];
+        let sess = spawn_interactive(
+            "test-runtime",
+            "/bin/bash",
+            &args,
+            &store,
+            &interactive,
+            SpawnConfig {
+                cwd: "/tmp".into(),
+                interactive: true,
+                ..Default::default()
+            },
+            SubmitProfile::ENTER,
+        )
+        .await
+        .expect("spawn signal-immune stand-in");
+
+        let armed = wait_for(5000, 25, || {
+            interactive_output(&interactive, &sess.id)
+                .map(|o| o.contains("TRAP-ARMED"))
+                .unwrap_or(false)
+        })
+        .await;
+        assert!(armed, "stand-in must arm its traps before the drop");
+        let pid = interactive_pid(&interactive, &sess.id).expect("child pid") as i32;
+
+        // Dropping the last session handle (the map entry) must reap even a
+        // child that catches SIGHUP/SIGTERM: the kill_interactive escalation
+        // task is cancelled when the tokio runtime shuts down inside the
+        // grace window, leaving Drop as the only backstop.
+        interactive.remove(sess.id.as_str());
+        let dead = wait_for(5000, 50, || unsafe { libc::kill(pid, 0) } == -1).await;
+        assert!(
+            dead,
+            "dropping the session must SIGKILL a signal-immune child's process group"
+        );
     }
 }

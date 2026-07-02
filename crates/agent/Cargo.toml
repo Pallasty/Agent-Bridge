@@ -17,3 +17,8 @@ dashmap.workspace = true
 # Interactive PTY-backed agent sessions (live `send_input`). Same version as
 # the in-daemon PtyBackend in `ab-terminal` so they share one build of the dep.
 portable-pty = "0.9"
+
+# SIGKILL escalation for interactive children that catch and survive the
+# graceful SIGHUP portable-pty's ChildKiller sends (e.g. gemini's Ink TUI).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

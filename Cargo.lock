@@ -10,6 +10,7 @@ dependencies = [
  "ab-store",
  "async-trait",
  "dashmap",
+ "libc",
  "portable-pty",
  "serde",
  "serde_json",
