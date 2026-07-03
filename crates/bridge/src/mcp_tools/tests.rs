@@ -18638,6 +18638,209 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
+    fn quota_hit(key: &str, kind: &str, score: f64) -> MemorySearchHit {
+        MemorySearchHit {
+            score,
+            cosine: None,
+            record: mk_mem(key, kind, "", &[]),
+        }
+    }
+
+    fn no_protected() -> std::collections::HashSet<String> {
+        std::collections::HashSet::new()
+    }
+
+    #[test]
+    fn memory_class_quota_spec_parses_fail_soft() {
+        assert!(memory_class_quota_from(None).is_empty());
+        assert!(memory_class_quota_from(Some("")).is_empty());
+        // Kinds are lowercased so a case-variant spec still matches rows.
+        assert_eq!(
+            memory_class_quota_from(Some("Present_Outcome:2")),
+            vec![("present_outcome".to_string(), 2)]
+        );
+        // Whitespace tolerated; every malformed piece skipped; first spec for a
+        // kind wins; zero slots rejected.
+        assert_eq!(
+            memory_class_quota_from(Some(
+                " present_outcome : 2 ,nocolon, bad:x, :3, zero:0, lesson:1, present_outcome:9"
+            )),
+            vec![("present_outcome".to_string(), 2), ("lesson".to_string(), 1)]
+        );
+    }
+
+    #[test]
+    fn apply_class_quota_promotes_missing_class_within_page_invariants() {
+        let mut hits = vec![
+            quota_hit("a1", "decision", 0.9),
+            quota_hit("a2", "decision", 0.8),
+            quota_hit("b1", "session_handoff", 0.7),
+            quota_hit("o1", "present_outcome", 0.6),
+            quota_hit("a3", "decision", 0.5),
+            quota_hit("o2", "present_outcome", 0.4),
+        ];
+        let quotas = vec![("present_outcome".to_string(), 2)];
+        apply_class_quota(&mut hits, 3, &quotas, &no_protected());
+        assert_eq!(hits.len(), 6, "quota must never grow or shrink the vec");
+        let page: Vec<&str> = hits[..3].iter().map(|h| h.record.key.as_str()).collect();
+        assert_eq!(
+            page,
+            vec!["a1", "o1", "o2"],
+            "both pool outcome rows promoted, weakest non-quota rows displaced, \
+             page re-sorted by score"
+        );
+
+        // Partially satisfied: one on page already → promote exactly one more.
+        let mut partial = vec![
+            quota_hit("o1", "present_outcome", 0.9),
+            quota_hit("a1", "decision", 0.8),
+            quota_hit("a2", "decision", 0.7),
+            quota_hit("o2", "present_outcome", 0.6),
+        ];
+        apply_class_quota(&mut partial, 3, &quotas, &no_protected());
+        let page: Vec<&str> = partial[..3].iter().map(|h| h.record.key.as_str()).collect();
+        assert_eq!(page, vec!["o1", "a1", "o2"], "only the shortfall is filled");
+
+        // Store-side kind case variants still count and match (review A-5).
+        let mut cased = vec![
+            quota_hit("a1", "decision", 0.9),
+            quota_hit("a2", "decision", 0.8),
+            quota_hit("o1", "Present_Outcome", 0.4),
+        ];
+        apply_class_quota(&mut cased, 2, &quotas, &no_protected());
+        let page: Vec<&str> = cased[..2].iter().map(|h| h.record.key.as_str()).collect();
+        assert_eq!(page, vec!["a1", "o1"], "case-variant row is promotable");
+    }
+
+    #[test]
+    fn apply_class_quota_noops_are_byte_identical() {
+        let baseline = vec![
+            quota_hit("a1", "decision", 0.9),
+            quota_hit("a2", "decision", 0.8),
+            quota_hit("o1", "present_outcome", 0.7),
+            quota_hit("a3", "decision", 0.6),
+        ];
+        let keys = |hits: &[MemorySearchHit]| {
+            hits.iter()
+                .map(|h| h.record.key.clone())
+                .collect::<Vec<_>>()
+        };
+
+        // Empty spec (the default-OFF path).
+        let mut hits = baseline.clone();
+        apply_class_quota(&mut hits, 2, &[], &no_protected());
+        assert_eq!(keys(&hits), keys(&baseline));
+
+        // Pool fits the page → everything already visible.
+        let mut hits = baseline.clone();
+        apply_class_quota(
+            &mut hits,
+            10,
+            &[("present_outcome".to_string(), 2)],
+            &no_protected(),
+        );
+        assert_eq!(keys(&hits), keys(&baseline));
+
+        // Quota already satisfied on the page.
+        let mut hits = baseline.clone();
+        apply_class_quota(
+            &mut hits,
+            3,
+            &[("present_outcome".to_string(), 1)],
+            &no_protected(),
+        );
+        assert_eq!(keys(&hits), keys(&baseline));
+
+        // Quota class absent from the pool → nothing to promote.
+        let mut hits = baseline.clone();
+        apply_class_quota(&mut hits, 2, &[("skill".to_string(), 2)], &no_protected());
+        assert_eq!(keys(&hits), keys(&baseline));
+
+        // limit == 0 → degenerate page, untouched.
+        let mut hits = baseline.clone();
+        apply_class_quota(
+            &mut hits,
+            0,
+            &[("present_outcome".to_string(), 1)],
+            &no_protected(),
+        );
+        assert_eq!(keys(&hits), keys(&baseline));
+    }
+
+    #[test]
+    fn apply_class_quota_never_evicts_guaranteed_rows_of_another_class() {
+        // Page holds exactly the guaranteed rows of both classes: lesson wants
+        // 2 but the only rows on the page are within their own guarantees, so
+        // the shortfall is dropped instead of evicting `o1`.
+        let mut hits = vec![
+            quota_hit("o1", "present_outcome", 0.9),
+            quota_hit("l1", "lesson", 0.8),
+            quota_hit("l2", "lesson", 0.7),
+            quota_hit("o2", "present_outcome", 0.1),
+        ];
+        let quotas = vec![
+            ("present_outcome".to_string(), 1),
+            ("lesson".to_string(), 2),
+        ];
+        apply_class_quota(&mut hits, 2, &quotas, &no_protected());
+        let page: Vec<&str> = hits[..2].iter().map(|h| h.record.key.as_str()).collect();
+        assert_eq!(
+            page,
+            vec!["o1", "l1"],
+            "no evictable victim available → guaranteed rows stay put"
+        );
+    }
+
+    #[test]
+    fn apply_class_quota_evicts_another_classes_surplus_but_not_its_guarantee() {
+        // Review A-4: present_outcome organically saturates the page (3 rows,
+        // quota 1). lesson's guarantee must be fillable from that SURPLUS —
+        // the weakest surplus outcome row is evicted, but never the last
+        // `slots` rows of the class.
+        let mut hits = vec![
+            quota_hit("o1", "present_outcome", 0.9),
+            quota_hit("o2", "present_outcome", 0.8),
+            quota_hit("o3", "present_outcome", 0.7),
+            quota_hit("l1", "lesson", 0.5),
+        ];
+        let quotas = vec![
+            ("present_outcome".to_string(), 1),
+            ("lesson".to_string(), 1),
+        ];
+        apply_class_quota(&mut hits, 3, &quotas, &no_protected());
+        let page: Vec<&str> = hits[..3].iter().map(|h| h.record.key.as_str()).collect();
+        assert_eq!(
+            page,
+            vec!["o1", "o2", "l1"],
+            "lesson fills from present_outcome's surplus (weakest first)"
+        );
+    }
+
+    #[test]
+    fn apply_class_quota_skips_protected_cosurfaced_correctors() {
+        // Review B-3: a cosurfaced corrector sits at the page bottom (it
+        // carries its anchor's score, adjacency by insertion). Without
+        // protection it would be the first victim, stranding the stale anchor
+        // without its correction.
+        let mut hits = vec![
+            quota_hit("anchor", "decision", 0.9),
+            quota_hit("corr", "feedback", 0.9),
+            quota_hit("d2", "decision", 0.5),
+            quota_hit("o1", "present_outcome", 0.4),
+        ];
+        let quotas = vec![("present_outcome".to_string(), 1)];
+        let protected: std::collections::HashSet<String> =
+            std::iter::once("corr".to_string()).collect();
+        apply_class_quota(&mut hits, 3, &quotas, &protected);
+        let page: Vec<&str> = hits[..3].iter().map(|h| h.record.key.as_str()).collect();
+        assert_eq!(
+            page,
+            vec!["anchor", "corr", "o1"],
+            "d2 (weakest unprotected) is displaced; the corrector survives \
+             adjacent to its anchor"
+        );
+    }
+
     #[tokio::test]
     async fn memory_correction_errors_when_target_missing() {
         let (hub, temp_dir) = mk_test_hub_with_store().await;

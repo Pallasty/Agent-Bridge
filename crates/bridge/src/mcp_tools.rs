@@ -12635,11 +12635,18 @@ impl McpTool for MemorySearchTool {
         // When output filters are active, overfetch so the post-filter result
         // can still hit `limit`. 5× covers up to ~80% saturation; cap at 200
         // (the schema's hard upper bound) to avoid pathological queries.
-        let inner_limit = if exclude_kinds.is_empty() && scope_filter.is_none() {
-            limit
-        } else {
-            (limit.saturating_mul(5)).min(200)
-        };
+        // Class quota also needs a beyond-`limit` pool to promote from, but a
+        // flat 200 cap would leave that pool EMPTY at limit=200 and starved
+        // above 40 (review A-3) — so its branch always keeps ≥40 pool rows.
+        let class_quota = memory_class_quota();
+        let inner_limit =
+            if exclude_kinds.is_empty() && scope_filter.is_none() && class_quota.is_empty() {
+                limit
+            } else if class_quota.is_empty() {
+                (limit.saturating_mul(5)).min(200)
+            } else {
+                (limit.saturating_mul(5)).min(200.max(limit.saturating_add(40)))
+            };
 
         let started = Instant::now();
         let mut semantic_fallback_fired = false;
@@ -12756,11 +12763,7 @@ impl McpTool for MemorySearchTool {
                             })
                         })
                         .collect();
-                    hits.sort_by(|a, b| {
-                        b.score
-                            .partial_cmp(&a.score)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    });
+                    sort_hits_score_desc(&mut hits);
                     hits.truncate(inner_limit as usize);
                     hits
                 }
@@ -12804,11 +12807,33 @@ impl McpTool for MemorySearchTool {
             fts_hits
         };
 
+        // Quota-only overfetch must NOT widen what the pipeline stages below
+        // see: pre-quota, an unfiltered query ran seed boost / coactivation
+        // rerank / sampling over exactly `limit` rows, and inflating that pool
+        // via an ambient env var would silently change ranking for every
+        // query even when the quota itself no-ops (review B-1/G-4/F-3). Park
+        // the overfetched tail here, keeping only quota-class rows; the quota
+        // stage re-appends it after every rerank stage has run. Queries with
+        // caller filters (exclude_kinds / scope) already ran pool-wide before
+        // this feature and keep doing so.
+        let mut hits = hits;
+        let mut quota_reserve: Vec<MemorySearchHit> = Vec::new();
+        if !class_quota.is_empty()
+            && exclude_kinds.is_empty()
+            && scope_filter.is_none()
+            && hits.len() > limit as usize
+        {
+            quota_reserve = hits.split_off(limit as usize);
+            quota_reserve.retain(|h| {
+                class_quota
+                    .iter()
+                    .any(|(k, _)| h.record.kind.eq_ignore_ascii_case(k))
+            });
+        }
         // Scope mode is intentionally applied before Seed/coactivation rerank:
         // callers asking for local work should not let discarded cross-project
         // hits affect boosts, while exploratory mode keeps those hits as
         // demoted analogy candidates instead of letting them dominate top-k.
-        let mut hits = hits;
         if let Some(scope) = scope_filter.as_deref() {
             // Whether the caller *explicitly* chose a scope_mode. A deliberate
             // `scope_mode:"local_only"` is honored strictly (no silent widening);
@@ -12858,11 +12883,7 @@ impl McpTool for MemorySearchTool {
                         })
                         .collect();
                     let mut sorted = boosted;
-                    sorted.sort_by(|a, b| {
-                        b.score
-                            .partial_cmp(&a.score)
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    });
+                    sort_hits_score_desc(&mut sorted);
                     sorted
                 }
                 _ => hits,
@@ -12871,10 +12892,49 @@ impl McpTool for MemorySearchTool {
             hits
         };
 
-        // v21 α — Synaptic Trace. Record co-activation pairs for top hits as
-        // fire-and-forget background work; never block search latency.
+        // Apply caller's exclude_kinds and re-truncate to the requested limit.
+        let mut hits = hits;
+        if !exclude_kinds.is_empty() {
+            hits.retain(|h| !exclude_kinds.iter().any(|k| k == &h.record.kind));
+        }
+        // B1 — correction co-surface (gated; default-OFF → byte-identical to the
+        // pure ranking above). When AGENT_BRIDGE_CORRECTION_COSURFACE is enabled,
+        // any result that is the target of an INBOUND active `corrects` edge gets
+        // its corrector pulled in immediately after it, so a stale original never
+        // surfaces without the correction that supersedes its claim. Runs BEFORE
+        // the final truncate so the page stays within `limit` — a surfaced
+        // correction DISPLACES the weakest tail result rather than growing the
+        // page. Anchors are bounded to the prospective top-`limit`, so switch-on
+        // cost is at most one `memory_neighbors` lookup per visible result, and a
+        // page with no corrected original is left untouched.
+        let cosurfaced_keys: HashSet<String> = if correction_cosurface_enabled() {
+            cosurface_corrections(&store, &mut hits, limit as usize, &exclude_kinds).await
+        } else {
+            HashSet::new()
+        };
+        // Class-quota reservation (gated; empty spec → byte-identical). Runs
+        // LAST before the truncate so the guarantee survives every earlier
+        // rerank/co-surface stage. The parked reserve rejoins the pool here —
+        // only rows that cleared the mode's own match bar are promotable, and
+        // cosurfaced correctors are exempt from displacement so a stale
+        // original never sheds its correction (review B-3).
+        if !quota_reserve.is_empty() {
+            hits.append(&mut quota_reserve);
+        }
+        apply_class_quota(&mut hits, limit as usize, &class_quota, &cosurfaced_keys);
+        hits.truncate(limit as usize);
+
+        // v21 α — Synaptic Trace. Record co-activation pairs for the FINAL
+        // page as fire-and-forget background work; never block search latency.
         // ctx_centroid is None for now (mode-agnostic α); follow-up plumbs
         // hit embeddings through for richer trace.
+        //
+        // Sampled AFTER exclude/cosurface/quota/truncate (review G-1/C-2): the
+        // surfaced log and the coactivation writes must describe the page the
+        // caller actually sees. Pre-quota sampling logged displaced rows as
+        // surfaced (feeding retrieval_outcome_report false decay candidates)
+        // and structurally excluded quota-promoted rows from the very
+        // access/coactivation accrual the reservation exists to bootstrap.
         //
         // **Phase 1 P1.5 — skill filter.** Exclude `kind=skill` records
         // from coactivation writes. Skills are *procedures*, not knowledge
@@ -12921,26 +12981,6 @@ impl McpTool for MemorySearchTool {
                 let _ = store_clone.record_coactivation(&coact_keys, None).await;
             });
         }
-
-        // Apply caller's exclude_kinds and re-truncate to the requested limit.
-        let mut hits = hits;
-        if !exclude_kinds.is_empty() {
-            hits.retain(|h| !exclude_kinds.iter().any(|k| k == &h.record.kind));
-        }
-        // B1 — correction co-surface (gated; default-OFF → byte-identical to the
-        // pure ranking above). When AGENT_BRIDGE_CORRECTION_COSURFACE is enabled,
-        // any result that is the target of an INBOUND active `corrects` edge gets
-        // its corrector pulled in immediately after it, so a stale original never
-        // surfaces without the correction that supersedes its claim. Runs BEFORE
-        // the final truncate so the page stays within `limit` — a surfaced
-        // correction DISPLACES the weakest tail result rather than growing the
-        // page. Anchors are bounded to the prospective top-`limit`, so switch-on
-        // cost is at most one `memory_neighbors` lookup per visible result, and a
-        // page with no corrected original is left untouched.
-        if correction_cosurface_enabled() {
-            cosurface_corrections(&store, &mut hits, limit as usize, &exclude_kinds).await;
-        }
-        hits.truncate(limit as usize);
 
         let elapsed = started.elapsed();
 
@@ -13008,6 +13048,149 @@ fn correction_cosurface_enabled() -> bool {
     )
 }
 
+/// Parse the `AGENT_BRIDGE_MEMORY_CLASS_QUOTA` spec: comma-separated
+/// `kind:slots` pairs (e.g. `present_outcome:2,lesson:1`). Default-OFF: when
+/// unset / empty / all-malformed the search path is byte-identical to pure
+/// ranking. Malformed pieces are skipped fail-soft (mirrors the
+/// `AGENT_BRIDGE_SEMANTIC_W_*` override idiom); the first spec for a kind
+/// wins. Kinds are lowercased here and matched case-insensitively against
+/// rows (same contract as the coverage kind matcher) so a case-variant spec
+/// or store row never silently voids the quota (review A-5).
+fn memory_class_quota_from(env_val: Option<&str>) -> Vec<(String, usize)> {
+    let Some(raw) = env_val else {
+        return Vec::new();
+    };
+    let mut out: Vec<(String, usize)> = Vec::new();
+    for part in raw.split(',') {
+        let Some((kind, slots)) = part.split_once(':') else {
+            continue;
+        };
+        let kind = kind.trim().to_ascii_lowercase();
+        let Ok(slots) = slots.trim().parse::<usize>() else {
+            continue;
+        };
+        if kind.is_empty() || slots == 0 || out.iter().any(|(k, _)| *k == kind) {
+            continue;
+        }
+        out.push((kind, slots));
+    }
+    out
+}
+
+fn memory_class_quota() -> Vec<(String, usize)> {
+    memory_class_quota_from(
+        std::env::var("AGENT_BRIDGE_MEMORY_CLASS_QUOTA")
+            .ok()
+            .as_deref(),
+    )
+}
+
+/// Class-quota reservation — guarantee each configured `kind` at least `slots`
+/// rows on the final top-`limit` page, promoting that kind's best-scoring rows
+/// from the overfetched beyond-`limit` pool.
+///
+/// Motivation (2026-07-03 measurement, forum #102 post #2883): entrenched
+/// high-importance / high-access rows compound two flywheels — the frequency
+/// term grows on every surfacing, and the coactivation rerank multiplies
+/// scores only among rows already sharing a page — so a fresh thin row can
+/// hold a HIGHER cosine than most of the page yet never break in (best
+/// `present_outcome` row: cosine above 14 of top-20, ranked #29/737). A
+/// reserved slot is the cold-start diversity valve: the row surfaces, accrues
+/// access/coactivation organically, and competes on its own afterwards.
+///
+/// Contract: never grows the page, only promotes rows that already cleared
+/// the mode's own match bar (cosine threshold / FTS / RRF), and displacement
+/// never touches (a) another quota class's GUARANTEED rows — surplus rows
+/// beyond a class's own `slots` are fair game (review A-4) — or (b) rows in
+/// `protected` (cosurfaced correctors; evicting one would strand its stale
+/// anchor on the page, review B-3). After any swap the page is re-sorted by
+/// score — the stable sort keeps cosurfaced correctors adjacent to their
+/// anchors (equal scores). No-op when the pool fits the page or quotas are
+/// already satisfied.
+fn apply_class_quota(
+    hits: &mut Vec<MemorySearchHit>,
+    limit: usize,
+    quotas: &[(String, usize)],
+    protected: &HashSet<String>,
+) {
+    if quotas.is_empty() || hits.len() <= limit || limit == 0 {
+        return;
+    }
+    // Per-quota-kind page counts (quota kinds are pre-lowercased), maintained
+    // across swaps so later classes see the page the earlier ones produced.
+    let quota_slots = |kind_lower: &str| -> Option<usize> {
+        quotas
+            .iter()
+            .find(|(k, _)| *k == kind_lower)
+            .map(|(_, s)| *s)
+    };
+    let mut page_count: HashMap<String, usize> = HashMap::new();
+    for h in hits[..limit].iter() {
+        let kl = h.record.kind.to_ascii_lowercase();
+        if quota_slots(&kl).is_some() {
+            *page_count.entry(kl).or_insert(0) += 1;
+        }
+    }
+    let mut swapped = false;
+    for (kind, slots) in quotas {
+        let have = page_count.get(kind).copied().unwrap_or(0);
+        if have >= *slots {
+            continue;
+        }
+        // Pool is score-ordered, so the first matches are the best candidates.
+        let promote: Vec<usize> = (limit..hits.len())
+            .filter(|&i| hits[i].record.kind.eq_ignore_ascii_case(kind))
+            .take(*slots - have)
+            .collect();
+        if promote.is_empty() {
+            continue;
+        }
+        // Victims, bottom-up: skip protected rows; a quota-kind row is
+        // evictable only above its own class's guarantee. When the page
+        // yields fewer victims than candidates the shortfall is dropped
+        // rather than evicting a guaranteed or protected row.
+        let mut victims: Vec<usize> = Vec::new();
+        for i in (0..limit).rev() {
+            if victims.len() == promote.len() {
+                break;
+            }
+            if protected.contains(&hits[i].record.key) {
+                continue;
+            }
+            let vkind = hits[i].record.kind.to_ascii_lowercase();
+            match quota_slots(&vkind) {
+                None => victims.push(i),
+                Some(vslots) => {
+                    if page_count.get(&vkind).copied().unwrap_or(0) > vslots {
+                        victims.push(i);
+                        *page_count.entry(vkind).or_insert(1) -= 1;
+                    }
+                }
+            }
+        }
+        for (&v, &p) in victims.iter().zip(promote.iter()) {
+            hits.swap(v, p);
+            swapped = true;
+        }
+        *page_count.entry(kind.clone()).or_insert(0) += victims.len();
+    }
+    if swapped {
+        sort_hits_score_desc(&mut hits[..limit]);
+    }
+}
+
+/// Score-descending, NaN-tolerant ordering shared by every sort in the
+/// memory_search pipeline (semantic blend, coactivation rerank, class quota).
+/// Stable, so equal-score rows (e.g. a cosurfaced corrector carrying its
+/// anchor's score) keep their relative order.
+fn sort_hits_score_desc(hits: &mut [MemorySearchHit]) {
+    hits.sort_by(|a, b| {
+        b.score
+            .partial_cmp(&a.score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+}
+
 /// B1 — co-surface corrections next to the originals they correct.
 ///
 /// For each result within the prospective top-`anchor_limit` that is the `to_key`
@@ -13021,15 +13204,18 @@ fn correction_cosurface_enabled() -> bool {
 /// correctors are pulled per original (guards against a pathological fan-in of
 /// `corrects` edges to one hot record). `excluded_kinds` preserves the
 /// memory_search output filter contract even after gated co-surfacing. Reuses
-/// existing store methods — no new SQL.
+/// existing store methods — no new SQL. Returns the keys of the correctors it
+/// inserted so the class-quota stage can exempt them from displacement (an
+/// evicted corrector would strand its stale anchor on the page).
 async fn cosurface_corrections(
     store: &Arc<dyn StateStore>,
     hits: &mut Vec<MemorySearchHit>,
     anchor_limit: usize,
     excluded_kinds: &[String],
-) {
+) -> HashSet<String> {
+    let mut inserted: HashSet<String> = HashSet::new();
     if hits.is_empty() {
-        return;
+        return inserted;
     }
     const MAX_CORRECTORS_PER_ANCHOR: usize = 4;
     let mut present: HashSet<String> = hits.iter().map(|h| h.record.key.clone()).collect();
@@ -13064,6 +13250,7 @@ async fn cosurface_corrections(
             if let Ok(Some(rec)) = store.memory_get(&e.from_key).await {
                 if rec.status == "active" && !excluded_kinds.iter().any(|k| k == &rec.kind) {
                     present.insert(e.from_key.clone());
+                    inserted.insert(e.from_key.clone());
                     out.push(MemorySearchHit {
                         score: anchor_score,
                         record: rec,
@@ -13075,6 +13262,7 @@ async fn cosurface_corrections(
         }
     }
     *hits = out;
+    inserted
 }
 
 pub struct MemoryListTool {
