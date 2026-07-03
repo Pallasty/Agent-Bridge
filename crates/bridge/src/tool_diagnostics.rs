@@ -58,6 +58,9 @@ fn is_expected_input_validation(tool_name: &str, message: &str) -> bool {
             message,
             "missing or empty 'key'" | "missing or empty 'kind'"
         ),
+        // Retired producer (get now derives the slot key when key is omitted);
+        // kept so historical ring-buffer rows inside the audit window still
+        // classify as benign.
         "work_memory" => message == "get requires key",
         "changes_digest" => {
             message
@@ -68,7 +71,13 @@ fn is_expected_input_validation(tool_name: &str, message: &str) -> bool {
 }
 
 fn is_expected_lookup_miss(tool_name: &str, message: &str) -> bool {
-    tool_name == "plan_load" && message.starts_with("plan not found: ")
+    match tool_name {
+        "plan_load" => message.starts_with("plan not found: "),
+        // Since get falls back to the derived slot key, probing an empty slot
+        // is a routine outcome, not a tool failure.
+        "work_memory" => message == "work memory key not found",
+        _ => false,
+    }
 }
 
 fn is_expected_runtime_unavailable(tool_name: &str, message: &str) -> bool {
@@ -97,6 +106,24 @@ mod tests {
                 "changes_digest",
                 "invalid argument: unknown scope 'banana'; expected working_tree|staged|last_commit|branch_vs_main",
             ),
+            ToolErrorDiagnosticClass::UnclassifiedError
+        );
+    }
+
+    #[test]
+    fn classifies_work_memory_empty_slot_miss_as_expected_lookup_miss() {
+        assert_eq!(
+            classify_tool_error("work_memory", "work memory key not found"),
+            ToolErrorDiagnosticClass::ExpectedLookupMiss
+        );
+        // Historical ring rows from the retired keyless-get validation error
+        // stay benign within the audit window.
+        assert_eq!(
+            classify_tool_error("work_memory", "get requires key"),
+            ToolErrorDiagnosticClass::ExpectedInputValidation
+        );
+        assert_eq!(
+            classify_tool_error("work_memory", "key exists but is not work_memory"),
             ToolErrorDiagnosticClass::UnclassifiedError
         );
     }

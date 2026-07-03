@@ -20252,6 +20252,23 @@ fn work_memory_key(cwd: &str, session_id: Option<&str>, slot: &str) -> String {
     format!("work_memory_{}_{}_{}", &scope_hash[..12], owner, slot)
 }
 
+/// Resolve the effective work-memory key: an explicit non-empty `key` arg
+/// wins; otherwise fall back to the cwd/session_id/slot-derived slot key.
+/// Shared by the save/get/clear arms so their addressing cannot drift.
+fn work_memory_resolved_key(
+    args: &Value,
+    cwd: &str,
+    session_id: Option<&str>,
+    slot: &str,
+) -> String {
+    args.get("key")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| work_memory_key(cwd, session_id, slot))
+}
+
 /// Cross-node fan-in merge for `work_memory list`.
 ///
 /// `same_node` is the exact-scope result (today's behaviour); `broad` is all
@@ -20630,13 +20647,13 @@ impl McpTool for WorkMemoryTool {
                         "type": "string",
                         "enum": ["save", "list", "get", "clear", "peers"],
                         "default": "list",
-                        "description": "save overwrites a project/session slot; list returns recent work memories (with cross-node fan-in); get reads one key; clear deletes one slot/key; peers returns ONLY cross-node sibling lanes (a DIFFERENT node working this same project, surfaced via scope-alias) changed since `since_ts` — the cross-node wake delta: 'what did my peers change since I last looked'."
+                        "description": "save overwrites a project/session slot; list returns recent work memories (with cross-node fan-in); get reads one key (omitted key = the cwd/session_id/slot-derived slot key, same addressing as save); clear deletes one slot/key; peers returns ONLY cross-node sibling lanes (a DIFFERENT node working this same project, surfaced via scope-alias) changed since `since_ts` — the cross-node wake delta: 'what did my peers change since I last looked'."
                     },
                     "since_ts": { "type": "integer", "description": "[peers] Only return cross-node lanes with updated_at > this unix-seconds cursor. Pass back the response's next_cursor to poll incrementally. Default 0 = all peer lanes." },
                     "cwd": { "type": "string", "description": "Project path for scoping. Defaults to current working directory." },
                     "session_id": { "type": "string", "description": "Optional session namespace. Omit for a shared project slot." },
                     "slot": { "type": "string", "default": "active", "description": "Short slot name, e.g. active, release, precompact." },
-                    "key": { "type": "string", "description": "Explicit key for get/clear. If omitted for clear, cwd/session_id/slot derives the key." },
+                    "key": { "type": "string", "description": "Explicit key for save/get/clear. If omitted, cwd/session_id/slot derives the key (all three ops share the same slot addressing)." },
                     "title": { "type": "string" },
                     "summary": { "type": "string" },
                     "next_step": { "type": "string" },
@@ -20683,13 +20700,7 @@ impl McpTool for WorkMemoryTool {
                         Ok(v) => v,
                         Err(e) => return Ok(ToolResult::error(e)),
                     };
-                let key = args
-                    .get("key")
-                    .and_then(|v| v.as_str())
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .map(str::to_string)
-                    .unwrap_or_else(|| work_memory_key(&cwd, session_id, slot));
+                let key = work_memory_resolved_key(&args, &cwd, session_id, slot);
                 let scope = work_memory_scope(&cwd);
                 let ttl_days = args
                     .get("ttl_days")
@@ -20811,26 +20822,26 @@ impl McpTool for WorkMemoryTool {
                 }
             }
             "get" => {
-                let key = match args.get("key").and_then(|v| v.as_str()) {
-                    Some(s) if !s.trim().is_empty() => s.trim(),
-                    _ => return Ok(ToolResult::error("get requires key")),
-                };
-                match store.memory_get(key).await? {
-                    Some(row) if row.kind == WORK_MEMORY_KIND => Ok(ToolResult::json_text(
-                        &serde_json::to_value(row).unwrap_or(Value::Null),
-                    )),
+                // Symmetric with save/clear: an omitted key falls back to the
+                // cwd/session_id/slot-derived slot key instead of erroring.
+                let key = work_memory_resolved_key(&args, &cwd, session_id, slot);
+                match store.memory_get(&key).await? {
+                    // Match the list/bootstrap surface (both filter
+                    // status=='active'): retired scratchpad rows are not
+                    // readable, so get cannot resurrect an archived or
+                    // superseded slot that list no longer shows.
+                    Some(row) if row.kind == WORK_MEMORY_KIND && row.status == "active" => Ok(
+                        ToolResult::json_text(&serde_json::to_value(row).unwrap_or(Value::Null)),
+                    ),
+                    Some(row) if row.kind == WORK_MEMORY_KIND => {
+                        Ok(ToolResult::error("work memory key not found"))
+                    }
                     Some(_) => Ok(ToolResult::error("key exists but is not work_memory")),
                     None => Ok(ToolResult::error("work memory key not found")),
                 }
             }
             "clear" => {
-                let key = args
-                    .get("key")
-                    .and_then(|v| v.as_str())
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .map(str::to_string)
-                    .unwrap_or_else(|| work_memory_key(&cwd, session_id, slot));
+                let key = work_memory_resolved_key(&args, &cwd, session_id, slot);
                 let deleted = store.memory_delete(&key).await?;
                 Ok(ToolResult::json_text(
                     &json!({ "deleted": deleted, "key": key }),
@@ -64293,6 +64304,76 @@ com.example.multiline, , \"Line one\nLine two\"\n";
             .expect("explicit list");
         let explicit = result_json(&explicit);
         assert_eq!(explicit.as_array().expect("explicit rows").len(), 12);
+    }
+
+    #[tokio::test]
+    async fn work_memory_get_defaults_to_derived_slot_key() {
+        let (hub, _temp_dir) = mk_test_hub_with_store().await;
+        let ctx = ToolContext::default();
+        let cwd = "/tmp/agent-bridge-work-memory-get-default";
+        let store = hub.store.clone().expect("store");
+        let tool = WorkMemoryTool::new(hub);
+
+        tool.execute(
+            json!({
+                "op": "save",
+                "cwd": cwd,
+                "slot": "active",
+                "summary": "Keyless get should find this slot.",
+            }),
+            &ctx,
+        )
+        .await
+        .expect("save work memory");
+
+        // get without an explicit key resolves the same derived slot key as save.
+        let got = tool
+            .execute(json!({"op": "get", "cwd": cwd, "slot": "active"}), &ctx)
+            .await
+            .expect("get ok");
+        assert!(!got.is_error, "derived-key get must succeed");
+        let row = result_json(&got);
+        assert!(
+            row["content"]
+                .as_str()
+                .expect("content")
+                .contains("Keyless get should find this slot"),
+            "derived-key get must return the saved slot row"
+        );
+
+        // An empty slot still reports not-found rather than a validation error.
+        let missing = tool
+            .execute(json!({"op": "get", "cwd": cwd, "slot": "release"}), &ctx)
+            .await
+            .expect("execute ok");
+        assert!(missing.is_error, "empty slot must signal an error result");
+        assert!(
+            result_text(&missing).contains("work memory key not found"),
+            "empty derived slot should be a not-found, not 'get requires key'"
+        );
+
+        // A retired (non-active) slot row is hidden from get, matching the
+        // list/bootstrap surface — get must not resurrect archived slots.
+        let derived_key = work_memory_key(cwd, None, "active");
+        let mut retired_row = store
+            .memory_get(&derived_key)
+            .await
+            .expect("store get")
+            .expect("saved slot row exists");
+        retired_row.status = "archived".to_string();
+        store
+            .memory_save(&retired_row)
+            .await
+            .expect("archive slot row");
+        let retired = tool
+            .execute(json!({"op": "get", "cwd": cwd, "slot": "active"}), &ctx)
+            .await
+            .expect("execute ok");
+        assert!(retired.is_error, "archived slot must not be readable");
+        assert!(
+            result_text(&retired).contains("work memory key not found"),
+            "archived slot should read as not-found, matching list semantics"
+        );
     }
 
     #[tokio::test]
