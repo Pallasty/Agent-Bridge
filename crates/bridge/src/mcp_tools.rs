@@ -30151,6 +30151,275 @@ impl McpTool for RetrievalOutcomeReportTool {
 }
 
 // ===========================================================================
+//    retrieval_outcome_shadow — what-if harness for a reinforce/decay rule
+// ===========================================================================
+
+/// The parameterized rule `retrieval_outcome_shadow` simulates. Nothing here
+/// writes — the harness exists so the rule can be calibrated against the real
+/// surfaced→used distribution BEFORE any behavior-changing apply is built
+/// (which stays a separately-gated follow-up).
+#[derive(Debug, Clone, Copy)]
+struct RetrievalShadowParams {
+    reinforce_step: f64,
+    decay_step: f64,
+    min_surfaced_for_decay: u64,
+    floor: f64,
+    ceiling: f64,
+}
+
+/// One simulated outcome row (still nothing written).
+#[derive(Debug, Clone)]
+struct RetrievalShadowChange {
+    key: String,
+    surfaced_count: u64,
+    used_count: u64,
+    avg_rank: f64,
+    importance: f64,
+    would_be: f64,
+    action: &'static str,
+}
+
+/// Pure rule math, separated for direct unit-testing. Classes are disjoint by
+/// construction (used > 0 vs used == 0). Monotone clamps: reinforce never
+/// LOWERS a row already above the ceiling (skip, don't pull down), decay never
+/// RAISES one already at/below the floor (skip, don't lift up) — mirroring the
+/// memory_decay_unused floor semantics. Returns (changes, at_ceiling, at_floor).
+fn retrieval_shadow_apply_rule(
+    rows: &[ab_store::RetrievalOutcomeShadowRow],
+    p: &RetrievalShadowParams,
+) -> (Vec<RetrievalShadowChange>, u64, u64) {
+    let mut changes = Vec::new();
+    let mut at_ceiling = 0u64;
+    let mut at_floor = 0u64;
+    for r in rows {
+        let (would_be, action) = if r.used_count > 0 {
+            if r.importance >= p.ceiling {
+                at_ceiling += 1;
+                continue;
+            }
+            ((r.importance + p.reinforce_step).min(p.ceiling), "reinforce")
+        } else if r.surfaced_count >= p.min_surfaced_for_decay {
+            if r.importance <= p.floor {
+                at_floor += 1;
+                continue;
+            }
+            ((r.importance - p.decay_step).max(p.floor), "decay")
+        } else {
+            continue; // one-off surfacing with no use yet — no signal either way
+        };
+        if would_be == r.importance {
+            continue; // zero-step (or float-degenerate) params: nothing WOULD change
+        }
+        changes.push(RetrievalShadowChange {
+            key: r.key.clone(),
+            surfaced_count: r.surfaced_count,
+            used_count: r.used_count,
+            avg_rank: r.avg_rank,
+            importance: r.importance,
+            would_be,
+            action,
+        });
+    }
+    (changes, at_ceiling, at_floor)
+}
+
+pub struct RetrievalOutcomeShadowTool {
+    hub: Hub,
+}
+impl RetrievalOutcomeShadowTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for RetrievalOutcomeShadowTool {
+    fn name(&self) -> &'static str {
+        "retrieval_outcome_shadow"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "READ-ONLY what-if harness for a retrieval-feedback \
+                 reinforce/decay rule: simulates 'bump importance of memories whose \
+                 surfacings were used (+reinforce_step, ceiling-capped), shave memories \
+                 surfaced ≥min_surfaced_for_decay times but never used (−decay_step, \
+                 floor-capped)' against the live `retrieval_surfacing` telemetry and \
+                 CURRENT importances, and reports exactly what WOULD change. Writes \
+                 NOTHING — the behavior-changing apply is a separately-gated follow-up; \
+                 this harness exists so its parameters get calibrated against the real \
+                 surfaced→used distribution instead of guessed. Same telemetry bound as \
+                 retrieval_outcome_report (collector gate, FIFO ring cap). Honest-flags \
+                 low_sample when the distribution is too thin to calibrate against."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "window_secs": {
+                        "type": "integer",
+                        "minimum": 60,
+                        "maximum": 31_536_000,
+                        "default": 604_800,
+                        "description": "Telemetry lookback in seconds. Default 7 days."
+                    },
+                    "reinforce_step": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "default": 0.05,
+                        "description": "Importance bump for memories with ≥1 used surfacing. \
+                            0.0 disables this half (its rows then report no change). \
+                            Default 0.05 (the memory_decay_unused op-class step)."
+                    },
+                    "decay_step": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "default": 0.05,
+                        "description": "Importance shave for surfaced-never-used memories. \
+                            0.0 disables this half (its rows then report no change). Default 0.05."
+                    },
+                    "min_surfaced_for_decay": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 2,
+                        "description": "Only decay memories surfaced at least this many times with \
+                            zero uses (matches the report's decay-candidate rule). Default 2."
+                    },
+                    "floor": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "default": 0.1,
+                        "description": "Decay never takes importance below this; rows already at/below \
+                            are skipped, not lifted. Default 0.1 (memory_decay_unused floor)."
+                    },
+                    "ceiling": {
+                        "type": "number",
+                        "minimum": 0.0,
+                        "maximum": 1.0,
+                        "default": 0.9,
+                        "description": "Reinforce never takes importance above this; rows already \
+                            at/above are skipped, not pulled down. Default 0.9 (valence-rule ceiling)."
+                    },
+                    "top_n": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 200,
+                        "default": 15,
+                        "description": "Max would-change rows listed (summary always covers ALL rows). Default 15."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let window_secs = args
+            .get("window_secs")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(604_800)
+            .clamp(60, 31_536_000);
+        let f = |key: &str, default: f64| {
+            args.get(key)
+                .and_then(|v| v.as_f64())
+                .unwrap_or(default)
+                .clamp(0.0, 1.0)
+        };
+        let params = RetrievalShadowParams {
+            reinforce_step: f("reinforce_step", 0.05),
+            decay_step: f("decay_step", 0.05),
+            min_surfaced_for_decay: args
+                .get("min_surfaced_for_decay")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(2)
+                .max(1),
+            floor: f("floor", 0.1),
+            ceiling: f("ceiling", 0.9),
+        };
+        let top_n = args
+            .get("top_n")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(15)
+            .clamp(1, 200) as usize;
+
+        let rows = store.retrieval_outcome_shadow_rows(window_secs).await?;
+        let rows_considered = rows.len();
+        let (changes, at_ceiling, at_floor) = retrieval_shadow_apply_rule(&rows, &params);
+
+        let round3 = |x: f64| (x * 1000.0).round() / 1000.0;
+        let (mut n_reinforce, mut n_decay) = (0u64, 0u64);
+        let (mut delta_reinforce, mut delta_decay) = (0.0f64, 0.0f64);
+        for ch in &changes {
+            let d = ch.would_be - ch.importance;
+            if ch.action == "reinforce" {
+                n_reinforce += 1;
+                delta_reinforce += d;
+            } else {
+                n_decay += 1;
+                delta_decay += d;
+            }
+        }
+        // Store order is used DESC, surfaced DESC, key ASC — reinforce rows
+        // naturally lead. Keep it; just truncate honestly.
+        let truncated = changes.len() > top_n;
+        let changes_json: Vec<Value> = changes
+            .iter()
+            .take(top_n)
+            .map(|ch| {
+                json!({
+                    "key": ch.key,
+                    "action": ch.action,
+                    "surfaced_count": ch.surfaced_count,
+                    "used_count": ch.used_count,
+                    "avg_rank": (ch.avg_rank * 100.0).round() / 100.0,
+                    "importance": round3(ch.importance),
+                    "would_be": round3(ch.would_be),
+                    "delta": round3(ch.would_be - ch.importance),
+                })
+            })
+            .collect();
+
+        // Below ~10 distinct memories the distribution can't anchor thresholds
+        // (the collector doc itself warns the signal is sparse) — flag it.
+        let low_sample = rows_considered < 10;
+
+        Ok(ToolResult::json_text(&json!({
+            "schema": "agent_bridge.retrieval_outcome_shadow.v0",
+            "params": {
+                "window_secs": window_secs,
+                "reinforce_step": params.reinforce_step,
+                "decay_step": params.decay_step,
+                "min_surfaced_for_decay": params.min_surfaced_for_decay,
+                "floor": params.floor,
+                "ceiling": params.ceiling,
+            },
+            "rows_considered": rows_considered,
+            "reinforce": {
+                "would_change": n_reinforce,
+                "already_at_ceiling": at_ceiling,
+                "total_delta": round3(delta_reinforce),
+            },
+            "decay": {
+                "would_change": n_decay,
+                "already_at_floor": at_floor,
+                "total_delta": round3(delta_decay),
+            },
+            "net_importance_delta": round3(delta_reinforce + delta_decay),
+            "low_sample": low_sample,
+            "changes": changes_json,
+            "changes_truncated": truncated,
+            "note": "WHAT-IF ONLY — nothing was written. low_sample=true means too few \
+                distinct memories to calibrate against; let the collector accrue longer. \
+                Non-active memories and one-off unused surfacings are excluded by design.",
+        })))
+    }
+}
+
+// ===========================================================================
 //             memory_graph_topology — graph centrality readiness readout
 // ===========================================================================
 
@@ -60905,6 +61174,12 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         &mut reg,
         policy,
         Tier::Standard,
+        Arc::new(RetrievalOutcomeShadowTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
         Arc::new(MemoryGraphTopologyTool::new(hub.clone())),
     );
     reg_if(
@@ -71285,6 +71560,169 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         assert_eq!(decay.len(), 1);
         assert_eq!(decay[0]["key"], json!("bravo"));
         assert_eq!(decay[0]["used_count"], json!(0));
+
+        let _ = std::fs::remove_dir_all(&store_dir);
+    }
+
+    #[test]
+    fn retrieval_shadow_rule_clamps_and_classifies() {
+        // Pure rule math: monotone clamps (reinforce never pulls an over-ceiling
+        // row DOWN, decay never lifts an under-floor row UP), the disjoint
+        // used>0 / used==0 classes, and the min_surfaced_for_decay cutoff.
+        let mk = |key: &str, surfaced: u64, used: u64, imp: f64| {
+            ab_store::RetrievalOutcomeShadowRow {
+                key: key.into(),
+                surfaced_count: surfaced,
+                used_count: used,
+                avg_rank: 1.0,
+                last_surfaced_at: 1_700_000_000,
+                importance: imp,
+            }
+        };
+        let rows = vec![
+            mk("bump_plain", 3, 2, 0.50),   // reinforce: 0.50 → 0.55
+            mk("bump_clip", 2, 1, 0.88),    // reinforce: 0.88 → 0.90 (partial, ceiling)
+            mk("bump_over", 2, 1, 0.95),    // already above ceiling → SKIP, not pulled to 0.9
+            mk("bump_at", 2, 1, 0.90),      // EXACTLY at ceiling → SKIP (>= not >)
+            mk("shave_plain", 4, 0, 0.60),  // decay: 0.60 → 0.55
+            mk("shave_clip", 3, 0, 0.12),   // decay: 0.12 → 0.10 (partial, floor)
+            mk("shave_under", 2, 0, 0.05),  // already below floor → SKIP, not lifted to 0.1
+            mk("shave_at", 2, 0, 0.10),     // EXACTLY at floor → SKIP (<= not <)
+            mk("one_off", 1, 0, 0.50),      // surfaced once, unused → no signal, untouched
+        ];
+        let p = RetrievalShadowParams {
+            reinforce_step: 0.05,
+            decay_step: 0.05,
+            min_surfaced_for_decay: 2,
+            floor: 0.1,
+            ceiling: 0.9,
+        };
+        let (changes, at_ceiling, at_floor) = retrieval_shadow_apply_rule(&rows, &p);
+
+        let by_key: std::collections::HashMap<&str, &RetrievalShadowChange> =
+            changes.iter().map(|c| (c.key.as_str(), c)).collect();
+        assert_eq!(changes.len(), 4, "exactly 4 rows change");
+        assert_eq!(at_ceiling, 2, "bump_over AND exactly-at-ceiling both skipped");
+        assert_eq!(at_floor, 2, "shave_under AND exactly-at-floor both skipped");
+        assert!(!by_key.contains_key("one_off"), "below min_surfaced cutoff");
+
+        let c = by_key["bump_plain"];
+        assert_eq!(c.action, "reinforce");
+        assert!((c.would_be - 0.55).abs() < 1e-9);
+        let c = by_key["bump_clip"];
+        assert!((c.would_be - 0.90).abs() < 1e-9, "clipped AT ceiling, got {}", c.would_be);
+        let c = by_key["shave_plain"];
+        assert_eq!(c.action, "decay");
+        assert!((c.would_be - 0.55).abs() < 1e-9);
+        let c = by_key["shave_clip"];
+        assert!((c.would_be - 0.10).abs() < 1e-9, "clipped AT floor, got {}", c.would_be);
+
+        // Zero steps = both halves disabled: no delta-0 rows masquerading as
+        // "would change" (only clamp-skip counters still tick).
+        let zero = RetrievalShadowParams {
+            reinforce_step: 0.0,
+            decay_step: 0.0,
+            ..p
+        };
+        let (no_changes, z_ceil, z_floor) = retrieval_shadow_apply_rule(&rows, &zero);
+        assert!(no_changes.is_empty(), "step=0.0 must report zero changes");
+        assert_eq!((z_ceil, z_floor), (2, 2), "clamp-skip counters unaffected");
+    }
+
+    #[tokio::test]
+    async fn retrieval_outcome_shadow_reports_what_if_and_writes_nothing() {
+        // End-to-end shape + the core claim: the shadow computes deltas against
+        // LIVE importances and writes NOTHING (importances identical after).
+        let (hub, store_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        let mk_rec = |key: &str, body: &str, imp: f64| ab_store::MemoryRecord {
+            key: key.into(),
+            kind: "fact".into(),
+            content: body.into(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 1_700_000_000,
+            updated_at: 1_700_000_000,
+            last_accessed_at: 1_700_000_000,
+            access_count: 3,
+            importance: imp,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        // Disjoint tokens so overlap-supersede doesn't collapse the rows.
+        store
+            .memory_save(&mk_rec("sh_hit", "shadow tool probe alpha beta gamma", 0.40))
+            .await
+            .expect("save hit");
+        store
+            .memory_save(&mk_rec("sh_miss", "shadow tool probe delta epsilon zeta", 0.60))
+            .await
+            .expect("save miss");
+
+        // sh_hit surfaced + used; sh_miss surfaced twice, never used.
+        store
+            .record_retrieval_surfacing(
+                &[("sh_hit".to_string(), 0), ("sh_miss".to_string(), 1)],
+                "q1",
+                "fts",
+            )
+            .await
+            .expect("surface 1");
+        assert_eq!(store.attribute_retrieval_get("sh_hit", 1800).await.unwrap(), 1);
+        store
+            .record_retrieval_surfacing(&[("sh_miss".to_string(), 2)], "q2", "fts")
+            .await
+            .expect("surface 2");
+
+        let out = RetrievalOutcomeShadowTool::new(hub.clone())
+            .execute(
+                json!({"window_secs": 31_536_000, "top_n": 15}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute");
+        let res = result_text_as_json(&out);
+
+        assert_eq!(res["rows_considered"], json!(2));
+        assert_eq!(res["reinforce"]["would_change"], json!(1));
+        assert_eq!(res["decay"]["would_change"], json!(1));
+        assert_eq!(res["low_sample"], json!(true), "2 rows is a thin sample");
+        assert_eq!(res["changes_truncated"], json!(false));
+
+        let changes = res["changes"].as_array().expect("changes");
+        assert_eq!(changes.len(), 2);
+        // Store order: used DESC → sh_hit first.
+        assert_eq!(changes[0]["key"], json!("sh_hit"));
+        assert_eq!(changes[0]["action"], json!("reinforce"));
+        assert_eq!(changes[0]["importance"], json!(0.4));
+        assert_eq!(changes[0]["would_be"], json!(0.45));
+        assert_eq!(changes[0]["delta"], json!(0.05));
+        assert_eq!(changes[1]["key"], json!("sh_miss"));
+        assert_eq!(changes[1]["action"], json!("decay"));
+        assert_eq!(changes[1]["would_be"], json!(0.55));
+        assert_eq!(res["net_importance_delta"], json!(0.0));
+
+        // THE core claim: nothing was written — neither the importances the
+        // rule would touch, nor the telemetry it reads from.
+        let hit = store.memory_get("sh_hit").await.expect("get hit").expect("hit row");
+        let miss = store.memory_get("sh_miss").await.expect("get miss").expect("miss row");
+        assert!(
+            (hit.importance - 0.40).abs() < 1e-9 && (miss.importance - 0.60).abs() < 1e-9,
+            "shadow must write NOTHING: importances unchanged ({} / {})",
+            hit.importance,
+            miss.importance
+        );
+        let telemetry = store
+            .retrieval_outcome_summary(31_536_000, 5)
+            .await
+            .expect("summary");
+        assert_eq!(
+            (telemetry.total_surfacings, telemetry.used_surfacings),
+            (3, 1),
+            "retrieval_surfacing untouched by the shadow (3 surfaced / 1 used as seeded)"
+        );
 
         let _ = std::fs::remove_dir_all(&store_dir);
     }

@@ -69,7 +69,7 @@ use crate::{
     MemoryQueryRecord, MemoryQueryStats, MemoryRecord, MemorySearchHit, MemoryStats, MisrankRow,
     ModeStats,
     NotificationRecord, OverlapPair, PlanRecord, PlanStep, ReinforceActiveStats, ReplayAuditRow,
-    RetrievalOutcomeMemory, RetrievalOutcomeSummary,
+    RetrievalOutcomeMemory, RetrievalOutcomeShadowRow, RetrievalOutcomeSummary,
     ReplayAuditStats, S234Counts, SessionFilter, SignalFidelityStats, StateStore, StoredSession,
     WaypointRow, WaypointStats, MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP,
     MEMORY_QUERY_LOG_RING_CAP, RETRIEVAL_SURFACING_RING_CAP, STDIO_CAP,
@@ -7200,6 +7200,57 @@ impl StateStore for SqliteStore {
             })
             .await
             .map_err(|e| Error::Backend(format!("retrieval_outcome_summary: {e}")))
+    }
+
+    /// What-if raw material for `retrieval_outcome_shadow` — the same per-memory
+    /// CTE aggregate as `retrieval_outcome_summary`, JOINed with the live
+    /// `memories` row for CURRENT importance. INNER JOIN on status='active'
+    /// silently drops telemetry for deleted/superseded/archived memories — a
+    /// what-if over rows the rule could never touch would only mislead.
+    /// Strictly read-only; result size is bounded by distinct keys under the
+    /// `retrieval_surfacing` ring cap.
+    async fn retrieval_outcome_shadow_rows(
+        &self,
+        window_secs: i64,
+    ) -> Result<Vec<RetrievalOutcomeShadowRow>> {
+        let now = now_secs();
+        let window_start = now - window_secs.max(0);
+
+        self.conn
+            .call(move |c| -> RusqliteResult<Vec<RetrievalOutcomeShadowRow>> {
+                let mut stmt = c.prepare(
+                    "WITH agg AS (
+                        SELECT memory_key,
+                               COUNT(*) AS surfaced,
+                               SUM(CASE WHEN used_at IS NOT NULL THEN 1 ELSE 0 END) AS used,
+                               AVG(rank) AS avg_rank,
+                               MAX(surfaced_at) AS last_surf
+                          FROM retrieval_surfacing
+                         WHERE surfaced_at >= ?1
+                      GROUP BY memory_key
+                     )
+                     SELECT a.memory_key, a.surfaced, a.used, a.avg_rank, a.last_surf,
+                            m.importance
+                       FROM agg a
+                       JOIN memories m ON m.key = a.memory_key AND m.status = 'active'
+                   ORDER BY a.used DESC, a.surfaced DESC, a.memory_key ASC",
+                )?;
+                let rows: Vec<RetrievalOutcomeShadowRow> = stmt
+                    .query_map(rusqlite::params![window_start], |r| {
+                        Ok(RetrievalOutcomeShadowRow {
+                            key: r.get(0)?,
+                            surfaced_count: r.get::<_, i64>(1)? as u64,
+                            used_count: r.get::<_, i64>(2)? as u64,
+                            avg_rank: r.get(3)?,
+                            last_surfaced_at: r.get(4)?,
+                            importance: r.get(5)?,
+                        })
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("retrieval_outcome_shadow_rows: {e}")))
     }
 
     async fn memory_query_stats(&self, window_secs: i64) -> Result<MemoryQueryStats> {
@@ -17808,6 +17859,110 @@ mod tests {
             .await
             .expect("k10 check");
         assert_eq!(k10, 1, "k10 retained — prune is by id, not by key order");
+    }
+
+    #[tokio::test]
+    async fn retrieval_outcome_shadow_rows_joins_live_importance_active_only() {
+        // The what-if JOIN must (a) carry the CURRENT importance (post-save
+        // mutations, exactly what a reinforce/decay rule would read), (b) drop
+        // telemetry rows whose memory is no longer active (the rule could never
+        // touch them), and (c) aggregate surfaced/used per key like the report.
+        use crate::MemoryRecord;
+        let (_dir, store) = fresh_store("outcome-shadow-rows").await;
+        let make = |key: &str, body: &str, imp: f64| MemoryRecord {
+            key: key.into(),
+            kind: "fact".into(),
+            content: body.into(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 1_700_000_000,
+            updated_at: 1_700_000_000,
+            last_accessed_at: 1_700_000_000,
+            access_count: 3,
+            importance: imp,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        // Disjoint tokens so overlap-supersede doesn't collapse rows.
+        store
+            .memory_save(&make("sh_used", "shadow probe alpha beta gamma", 0.30))
+            .await
+            .expect("save used");
+        store
+            .memory_save(&make("sh_noise", "shadow probe delta epsilon zeta", 0.50))
+            .await
+            .expect("save noise");
+        store
+            .memory_save(&make("sh_gone", "shadow probe eta theta iota", 0.70))
+            .await
+            .expect("save gone");
+
+        // sh_used: surfaced twice (ranks 0,2), used once. sh_noise: surfaced
+        // twice, never used. sh_gone: surfaced, then deleted. ghost: telemetry
+        // for a key with no memory row at all (e.g. imported-then-purged).
+        store
+            .record_retrieval_surfacing(
+                &[
+                    ("sh_used".to_string(), 0),
+                    ("sh_noise".to_string(), 1),
+                    ("sh_gone".to_string(), 2),
+                    ("ghost".to_string(), 3),
+                ],
+                "q1",
+                "fts",
+            )
+            .await
+            .expect("surface 1");
+        assert_eq!(
+            store.attribute_retrieval_get("sh_used", 1800).await.expect("attr"),
+            1
+        );
+        store
+            .record_retrieval_surfacing(
+                &[("sh_used".to_string(), 2), ("sh_noise".to_string(), 4)],
+                "q2",
+                "fts",
+            )
+            .await
+            .expect("surface 2");
+
+        // Post-telemetry mutations the shadow must reflect.
+        assert!(store
+            .memory_set_importance("sh_used", 0.85)
+            .await
+            .expect("bump"));
+        assert!(store.memory_delete("sh_gone").await.expect("delete"));
+
+        let rows = store
+            .retrieval_outcome_shadow_rows(3600)
+            .await
+            .expect("shadow rows");
+        let keys: Vec<&str> = rows.iter().map(|r| r.key.as_str()).collect();
+        assert_eq!(
+            keys,
+            vec!["sh_used", "sh_noise"],
+            "used-first ordering; non-active (sh_gone) and ghost keys dropped"
+        );
+
+        let used = &rows[0];
+        assert_eq!(used.surfaced_count, 2);
+        assert_eq!(used.used_count, 1);
+        assert!(
+            (used.importance - 0.85).abs() < 1e-9,
+            "importance is the LIVE post-bump value, not 0.30 at save; got {}",
+            used.importance
+        );
+        assert!((used.avg_rank - 1.0).abs() < 1e-6, "AVG(0,2)=1.0");
+
+        let noise = &rows[1];
+        assert_eq!(noise.surfaced_count, 2);
+        assert_eq!(noise.used_count, 0);
+        assert!((noise.importance - 0.50).abs() < 1e-9);
+        // (Window filtering itself is covered by the retrieval_outcome_summary
+        // tests — same WHERE surfaced_at >= ?1 shape; a zero-width-window
+        // assertion here would race the same-second write.)
     }
 
     #[tokio::test]

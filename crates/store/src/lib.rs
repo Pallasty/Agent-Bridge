@@ -1072,6 +1072,26 @@ pub struct RetrievalOutcomeSummary {
     pub top_never_used: Vec<RetrievalOutcomeMemory>,
 }
 
+/// One memory's in-window surfacing tally JOINed with its CURRENT active
+/// importance — the raw material for the `retrieval_outcome_shadow` what-if
+/// harness. Same aggregates as [`RetrievalOutcomeMemory`] plus `importance`,
+/// so a parameterized reinforce/decay rule can be simulated (bridge-side)
+/// without writing anything. Rows exist only for memories still active.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct RetrievalOutcomeShadowRow {
+    pub key: String,
+    /// Times this memory was surfaced (top-10 search hit) in-window.
+    pub surfaced_count: u64,
+    /// Surfacings attributed a `used_at` (explicit get within the window).
+    pub used_count: u64,
+    /// Mean surfaced rank (0 = top of results).
+    pub avg_rank: f64,
+    /// Most recent `surfaced_at` (unix secs) in-window.
+    pub last_surfaced_at: i64,
+    /// The memory's CURRENT importance (live read at query time).
+    pub importance: f64,
+}
+
 /// Sort order for `list_memories`.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -3158,6 +3178,22 @@ pub trait StateStore: Send + Sync {
     ) -> Result<RetrievalOutcomeSummary> {
         let _ = (window_secs, top_n);
         Ok(RetrievalOutcomeSummary::default())
+    }
+
+    /// What-if raw material for the `retrieval_outcome_shadow` harness:
+    /// per-memory surfacing aggregates over the last `window_secs` JOINed with
+    /// each memory's CURRENT active importance. Strictly read-only — the
+    /// parameterized reinforce/decay rule is simulated by the caller; nothing
+    /// here (or there) writes. Bounded by the `retrieval_surfacing` ring cap.
+    /// Default returns empty for the same reason as
+    /// [`StateStore::retrieval_outcome_summary`]: an empty what-if is an honest
+    /// "no data yet", never a wrong answer.
+    async fn retrieval_outcome_shadow_rows(
+        &self,
+        window_secs: i64,
+    ) -> Result<Vec<RetrievalOutcomeShadowRow>> {
+        let _ = window_secs;
+        Ok(Vec::new())
     }
 
     /// v21 α — Aggregate health snapshot for the synaptic trace graph,
