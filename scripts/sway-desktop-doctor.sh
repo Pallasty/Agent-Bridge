@@ -227,8 +227,10 @@ doctor() {
         bar_sample="$(timeout 4 sh -c '(sleep 1) | "$HOME/.local/bin/sway-status" | sed -n "1,4p"' 2>/dev/null || true)"
         if printf '%s' "$bar_sample" | grep -Fq '"name":"agent"' &&
            printf '%s' "$bar_sample" | grep -Fq '"name":"wifi"' &&
+           printf '%s' "$bar_sample" | grep -Fq '"name":"vol"' &&
+           printf '%s' "$bar_sample" | grep -Fq '"name":"mic"' &&
            printf '%s' "$bar_sample" | grep -Fq '"name":"battery"'; then
-            add_check "runtime.statusbar_smoke" "ok" "agent, wifi, and battery blocks rendered"
+            add_check "runtime.statusbar_smoke" "ok" "agent, wifi, vol, mic, and battery blocks rendered"
         else
             add_check "runtime.statusbar_smoke" "warn" "statusbar smoke sample missing expected blocks" "run sway-status manually and inspect output"
         fi

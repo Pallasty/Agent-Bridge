@@ -35,7 +35,7 @@ if command -v apt-get >/dev/null 2>&1; then
         sway swaybg swayidle swaylock swaybar foot jq network-manager \
         fcitx5 fcitx5-chinese-addons upower pipewire wireplumber \
         xdg-desktop-portal xdg-desktop-portal-wlr xdg-desktop-portal-gtk \
-        brightnessctl pulseaudio-utils playerctl grim slurp wl-clipboard \
+        brightnessctl pulseaudio-utils pavucontrol playerctl grim slurp wl-clipboard \
         mako libnotify-bin rfkill wdisplays wlr-randr
     need_sudo apt-get install -y \
         mate-calc thunar rhythmbox xfce4-settings wmenu network-manager-gnome || true
@@ -145,6 +145,8 @@ ic_bat=$'\U0001f50b︎'   # 🔋 battery (on battery)
 ic_chg=$'⚡︎'       # ⚡ charging
 ic_cpu=$'⚙︎'       # ⚙ CPU
 ic_ram=$'▦'             # ▦ RAM
+ic_vol=$'\U0001f50a︎'  # 🔊 output volume
+ic_mic=$'\U0001f3a4︎'  # 🎤 microphone
 level_marks=(▁ ▃ ▅ ▇)
 
 prev_total=0
@@ -232,6 +234,23 @@ open_wifi_actions() {
 open_wifi_terminal() {
     if command -v "$HOME/.local/bin/ab-system-control" >/dev/null 2>&1; then
         setsid "$HOME/.local/bin/ab-system-control" wifi nmtui >>"$click_log" 2>&1 &
+    fi
+}
+
+# pavucontrol tabs: 1=playback 2=recording 3=output-devices 4=input-devices 5=config
+open_audio_panel() {
+    local tab="${1:-}"
+    command -v pavucontrol >/dev/null 2>&1 || return 0
+    if [ -n "$tab" ]; then
+        setsid pavucontrol -t "$tab" >>"$click_log" 2>&1 &
+    else
+        setsid pavucontrol >>"$click_log" 2>&1 &
+    fi
+}
+
+audio_action() {
+    if command -v "$HOME/.local/bin/sway-volume" >/dev/null 2>&1; then
+        setsid "$HOME/.local/bin/sway-volume" "$1" >>"$click_log" 2>&1 &
     fi
 }
 
@@ -393,6 +412,22 @@ handle_clicks() {
             *"\"name\": \"ram\""*|*"\"name\":\"ram\""*)
                 case "$event" in *"\"button\": 1"*|*"\"button\":1"*) log_event click "block=ram button=1 action=detail"; detail_ram & ;; esac
                 ;;
+            *"\"name\": \"vol\""*|*"\"name\":\"vol\""*)
+                case "$event" in
+                    *"\"button\": 1"*|*"\"button\":1"*) log_event click "block=vol button=1 action=panel"; open_audio_panel ;;
+                    *"\"button\": 2"*|*"\"button\":2"*) log_event click "block=vol button=2 action=mute"; audio_action mute ;;
+                    *"\"button\": 3"*|*"\"button\":3"*) log_event click "block=vol button=3 action=output-devices"; open_audio_panel 3 ;;
+                    *"\"button\": 4"*|*"\"button\":4"*) audio_action up ;;
+                    *"\"button\": 5"*|*"\"button\":5"*) audio_action down ;;
+                esac
+                ;;
+            *"\"name\": \"mic\""*|*"\"name\":\"mic\""*)
+                case "$event" in
+                    *"\"button\": 1"*|*"\"button\":1"*) log_event click "block=mic button=1 action=input-devices"; open_audio_panel 4 ;;
+                    *"\"button\": 2"*|*"\"button\":2"*) log_event click "block=mic button=2 action=micmute"; audio_action micmute ;;
+                    *"\"button\": 3"*|*"\"button\":3"*) log_event click "block=mic button=3 action=recording"; open_audio_panel 2 ;;
+                esac
+                ;;
             *"\"name\": \"battery\""*|*"\"name\":\"battery\""*)
                 case "$event" in
                     *"\"button\": 1"*|*"\"button\":1"*) log_event click "block=battery button=1 action=detail"; detail_battery & ;;
@@ -544,6 +579,42 @@ read_ime() {
     esac
 }
 
+read_volume() {
+    local out vol pct
+    if ! command -v wpctl >/dev/null 2>&1; then
+        printf '%s|#6c7086ff' "$ic_vol"
+        return
+    fi
+    out=$(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null || true)
+    vol=$(printf '%s' "$out" | awk '{print $2}')
+    case "$vol" in
+        ''|*[!0-9.]*) printf '%s×|#6c7086ff' "$ic_vol"; return ;;
+    esac
+    case "$out" in
+        *MUTED*)
+            printf '%s×|#6c7086ff' "$ic_vol"
+            ;;
+        *)
+            pct=$(awk -v v="$vol" 'BEGIN{p = v * 100 + 0.5; if (p > 100) p = 100; printf "%d", p}')
+            printf '%s%s|#89b4faff' "$ic_vol" "$(level_mark "$pct")"
+            ;;
+    esac
+}
+
+read_mic() {
+    local out
+    if ! command -v wpctl >/dev/null 2>&1; then
+        printf '%s|#6c7086ff' "$ic_mic"
+        return
+    fi
+    out=$(wpctl get-volume @DEFAULT_AUDIO_SOURCE@ 2>/dev/null || true)
+    case "$out" in
+        '') printf '%s×|#6c7086ff' "$ic_mic" ;;
+        *MUTED*) printf '%s×|#6c7086ff' "$ic_mic" ;;
+        *) printf '%s|#a6e3a1ff' "$ic_mic" ;;
+    esac
+}
+
 read_battery() {
     local battery info state percent pct color label conservation conservation_value
     if ! command -v upower >/dev/null 2>&1; then
@@ -604,6 +675,8 @@ run_status_loop() {
         cpu_color="$(level_color "$cpu_percent" inverted)"
         cpu_text="${ic_cpu}$(level_mark "$cpu_percent")"
         IFS='|' read -r ram_text ram_color <<<"$(read_ram)"
+        IFS='|' read -r vol_text vol_color <<<"$(read_volume)"
+        IFS='|' read -r mic_text mic_color <<<"$(read_mic)"
 
         if [ "$warp_tick" -ge 5 ]; then
             IFS='|' read -r warp_text warp_color <<<"$(read_warp)"
@@ -646,12 +719,14 @@ run_status_loop() {
             printf ','
         fi
 
-        printf '[%s,%s,%s,%s,%s,%s,%s,%s,%s]\n' \
+        printf '[%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s]\n' \
             "$(block agent "$agent_text" "#94e2d5ff")" \
             "$(block warp "$warp_text" "${warp_color:-#ffffffff}")" \
             "$(block wifi "$wifi_text" "${wifi_color:-#ffffffff}")" \
             "$(block lan "$lan_text" "${lan_color:-#ffffffff}")" \
             "$(block ime "$ime_text" "${ime_color:-#ffffffff}")" \
+            "$(block vol "$vol_text" "${vol_color:-#ffffffff}")" \
+            "$(block mic "$mic_text" "${mic_color:-#ffffffff}")" \
             "$(block battery "$battery_text" "${battery_color:-#ffffffff}")" \
             "$(block cpu "$cpu_text" "$cpu_color")" \
             "$(block ram "$ram_text" "${ram_color:-#cba6f7ff}")" \
@@ -665,7 +740,6 @@ status_pid=$!
 handle_clicks
 kill "$status_pid" 2>/dev/null || true
 wait "$status_pid" 2>/dev/null || true
-
 SWAY_STATUS
 
 cat > "$target_home/.config/mako/config" <<'MAKO_CONFIG'
@@ -1764,8 +1838,10 @@ doctor() {
         bar_sample="$(timeout 4 sh -c '(sleep 1) | "$HOME/.local/bin/sway-status" | sed -n "1,4p"' 2>/dev/null || true)"
         if printf '%s' "$bar_sample" | grep -Fq '"name":"agent"' &&
            printf '%s' "$bar_sample" | grep -Fq '"name":"wifi"' &&
+           printf '%s' "$bar_sample" | grep -Fq '"name":"vol"' &&
+           printf '%s' "$bar_sample" | grep -Fq '"name":"mic"' &&
            printf '%s' "$bar_sample" | grep -Fq '"name":"battery"'; then
-            add_check "runtime.statusbar_smoke" "ok" "agent, wifi, and battery blocks rendered"
+            add_check "runtime.statusbar_smoke" "ok" "agent, wifi, vol, mic, and battery blocks rendered"
         else
             add_check "runtime.statusbar_smoke" "warn" "statusbar smoke sample missing expected blocks" "run sway-status manually and inspect output"
         fi
