@@ -650,7 +650,12 @@ socket; bind `127.0.0.1:7878` if you want local-only.
 
 ## MCP tools
 
-Claude Code sees these tools when agent-bridge is registered as an MCP server:
+The full registry is **~296 tools** (2026-07 count), gated per client by
+toolsets/tiers (`claude-standard`, `codex-essential`, `gemini-lean`,
+`hook-lifecycle`, … — see `AGENT_BRIDGE_TOOLSET` above), so no client sees
+all of them at once. The table below is the stable core subset; discover
+the live surface with the `capabilities` tool and audit real traffic with
+`mcp_dispatch_audit`.
 
 | Group | Tool | What Claude can do |
 |-------|------|--------------------|
@@ -820,10 +825,10 @@ MCP tool (`limit` 1–500, default 20).
 |-------|-------------|-------------|
 | `Notifier` | `DbusNotifier` (Linux), `MacOsNotifier` | webhook, Slack, Pushover |
 | `BrowserBackend` | `ChromiumCdpBackend` | webkit, playwright, Firefox |
-| `AgentRuntime` | `ClaudeCodeRuntime` (one-shot), `OzAgentRuntime` (Warp cloud) | codex, aider, gemini-cli |
+| `AgentRuntime` | `ClaudeCodeRuntime`, `CodexRuntime`, `GeminiRuntime`, `OpenCodeFamilyRuntime` (kilo/opencode), `AuggieRuntime`, `OzAgentRuntime` (Warp cloud) | aider, ghostty-native |
 | `TerminalBackend` | `KittyBackend`, `ZellijBackend`, `WezTermBackend`, `WarpBackend` | ghostty, tmux |
 | `StateStore` | `SqliteStore` (rusqlite-bundled) | in-memory, postgres |
-| `McpTool` | 56 built-in tools | drop in any `Box<dyn McpTool>` |
+| `McpTool` | ~296 built-in tools (tier/toolset gated) | drop in any `Box<dyn McpTool>` |
 
 ## Configuration (env vars)
 
@@ -930,7 +935,7 @@ MCP **`capabilities`** reports `terminal.capabilities` (`TerminalCapabilities`),
 | P1-B | OSC 9/99/777 parser + terminal backends | ✅ |
 | P1-C | GitWorktreeManager + ClaudeCodeRuntime | ✅ |
 | P1-D | ChromiumCdpBackend (CDP) | ✅ |
-| P1-E | MCP stdio server (56 tools) | ✅ |
+| P1-E | MCP stdio server (~296 tools, profile-gated) | ✅ |
 | P1-F | Cross-session memory (FTS5 + graph edges + scopes) | ✅ |
 | P1-G | PreCompact curator hook + `agent-bridge setup` | ✅ |
 

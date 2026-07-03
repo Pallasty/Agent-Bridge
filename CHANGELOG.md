@@ -7,6 +7,56 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-07-02
+
+**Theme: interactive multi-agent PTY fan-out + the memory learning loop goes live.**
+
+This entry is a thematic rollup of the ~1,700 commits landed since 0.13.0
+(2026-05-07 → 2026-07-02); per-change detail lives in `git log` and the PR
+history. CHANGELOG cadence resumes from here.
+
+### Added
+- **Interactive agent sessions across five CLI backends.**
+  `agent_spawn(interactive=true)` drives live PTY sessions for `claude-code`,
+  `codex`, `gemini`, and the opencode family (`kilo`, `opencode`), with
+  per-backend submit-key handling verified against real binaries (golden gates
+  in `crates/agent/tests/*_real_interactive.rs`). Follow-up turns via
+  `agent_send_input`, screen reads via `agent_session_output` — the
+  spawn→send→read→kill loop is closed. `agent_spawn` gains an automatic
+  backend-failover chain (env-configurable).
+- **Memory learning loop (L5), live end-to-end**: outcome rows → valence rule
+  v0.1 → importance apply (`outcome_valence_shadow`,
+  `outcome_valence_importance_apply`), durable `valence:*` tag channel with
+  one-shot apply stamps, `retrieval_surfacing` telemetry (FIFO ring-capped)
+  with read-only consumers `retrieval_outcome_report` and the what-if
+  calibrator `retrieval_outcome_shadow`.
+- Tool-surface observability: `mcp_dispatch_audit` (traffic/profile audit),
+  `tool_atlas_snapshot`, `mcp_lifecycle_digest`, `context_governor_snapshot`.
+- Read-only LSWR bridge surfaces (`lswr_*`) and gated biocortex retrieval
+  opt-in experiment tooling (`biocortex_retrieval_opt_in_*`).
+- Remote embedding backend option (`AGENT_BRIDGE_EMBED_REMOTE_URL`) alongside
+  the local ONNX / hash backends.
+
+### Fixed
+- **`agent_kill` routes to the session's runtime** instead of the primary
+  runtime (#48); SIGTERM→SIGKILL process-group escalation for signal-immune
+  TUIs, with a Drop-guard against orphaned children (#49).
+- **Semantic ranking parity**: the warm embed-cache path now shares
+  `semantic_blend_score` with the cold SQL path (#53); the warm cache
+  refreshes importance and drops non-active rows via a metadata-only overlay
+  (#55); P4-evolve auto-linking selects neighbors by pure cosine on both cold
+  and warm paths (#54, #56).
+- **Sync**: stable export strips one-shot `valence_applied:*` stamps so
+  receiving nodes re-apply valence honestly (#60); version-vector merge
+  round-trips memories + edges + forum (the legacy `sync.sh` newer-wins flow
+  is retired).
+
+### Changed
+- The MCP registry has grown to **~296 registered tools** behind tier/toolset
+  gating (`claude-standard`, `codex-essential`, `codex-lean`, `gemini-lean`,
+  `hook-lifecycle`, `all-dev`). README / EVOLUTION-CORE counts corrected to
+  match reality.
+
 ## [0.13.0] - 2026-05-07
 
 **Theme: skills Phase B (refresh / discover / prune) + GitLab as a first-class forge.**

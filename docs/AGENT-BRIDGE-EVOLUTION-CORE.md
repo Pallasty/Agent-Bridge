@@ -1,7 +1,8 @@
 # Agent-Bridge 进化核心（智能体参照记忆）
 
 > 用途：任何挂载 Agent-Bridge MCP 的智能体，可将本文作为**跨会话的架构与行为契约**，结合 `memory_save` / `session_handoff` 写入实例化教训，形成闭环自我改进。  
-> 维护：重大行为或 schema 变更时同步更新本文与 `CHANGELOG.md`。
+> 维护：重大行为或 schema 变更时同步更新本文与 `CHANGELOG.md`。  
+> 校准：2026-07-02 收敛弧——Hub 字段、MemoryRecord、工具规模、export 边往返等事实与实现重新对齐。
 
 ---
 
@@ -29,15 +30,24 @@
 
 `Hub` 是运行时后端束，字段全部为可选 `Arc<dyn Trait>`，便于在无显示器、无浏览器等环境降级：
 
-```12:20:crates/bridge/src/hub.rs
+```15:36:crates/bridge/src/hub.rs
 #[derive(Clone)]
 pub struct Hub {
     pub notifiers: Vec<Arc<dyn Notifier>>,
     pub store: Option<Arc<dyn StateStore>>,
     pub terminal: Option<Arc<dyn TerminalBackend>>,
     pub browser: Option<Arc<dyn BrowserBackend>>,
+    /// 默认 agent runtime（AGENT_BRIDGE_AGENT_RUNTIME 启动时选定）
     pub agent: Option<Arc<dyn AgentRuntime>>,
+    /// 全部已装 CLI runtime 注册表，按 id() 键（"claude-code"、"codex"、
+    /// "gemini"、"opencode"/"kilo"、"warp-oz"、"auggie"）——agent_spawn
+    /// 按会话扇出到任意后端，无需改环境变量
+    pub agents: HashMap<String, Arc<dyn AgentRuntime>>,
     pub worktree: Option<Arc<GitWorktreeManager>>,
+    /// D2.3：每轮语义检索缓存（session_bootstrap 填充，memory_search 消费）
+    pub memory_embed_cache: Arc<tokio::sync::Mutex<Option<Vec<(MemoryRecord, Vec<f32>)>>>>,
+    /// Phase E：运行时安全策略（启动时读环境变量）
+    pub security: SecurityPolicy,
 }
 ```
 
@@ -74,7 +84,7 @@ pub trait AgentRuntime: Send + Sync {
 
 ### 4.1 `MemoryRecord` 语义
 
-```64:96:crates/store/src/lib.rs
+```217:254:crates/store/src/lib.rs
 pub struct MemoryRecord {
     pub key: String,
     pub kind: String,
@@ -95,6 +105,9 @@ pub struct MemoryRecord {
     pub status: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trigger_pattern: Option<String>,
+    /// Phase 1 P2：被 memory_save 自动判定替代时指向替代行的 key
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub superseded_by: Option<String>,
 }
 ```
 
@@ -182,7 +195,7 @@ pub async fn build_handoff_brief(
 | **agent** / **multi-session** | `agent_spawn` / `agent_message` / `agent_inbox` | 并行与协作进化 |
 | **worktree** | `create` / `list` / `remove` | 实验分支隔离 |
 
-完整 60 工具表见根目录 `README.md`。
+全量注册表约 **296 个工具**（2026-07 实测），按 tier / toolset 门控（`claude-standard`、`codex-essential`、`gemini-lean`、`hook-lifecycle` 等），任一客户端只见子集；README 表为稳定核心子集。实测暴露面用 `capabilities`，真实流量审计用 `mcp_dispatch_audit`。
 
 ---
 
@@ -197,14 +210,14 @@ pub async fn build_handoff_brief(
 5. **关系化知识**：相关决策 `memory_link`，用 `supersedes` 表达替代关系，便于 `memory_consolidate`。
 6. **仓库真相**：改代码前 `changes_digest` + `project_detect`，避免基于陈旧路径推理。
 7. **并行实验**：高风险重构 `worktree_create` 隔离，再在主 worktree 合并结论。
-8. **收束债务**：定期 `memory_compact` 使用 `healthy_default()` 语义；导出备份见 `memory_snapshots/README.md`（注意：**export 不含边**，重要拓扑需单独 `memory_link` 或图导出工具）。
+8. **收束债务**：定期 `memory_compact` 使用 `healthy_default()` 语义；导出备份见 `memory_snapshots/README.md`。`memory_export` / `memory_import` 与原生 `agent-bridge sync` 均已支持**边的往返**（loose 模式亦处理悬挂边）；图快照另有 `memory_graph_export`。
 
 ---
 
 ## 8. 与仓库外「记忆库」的关系
 
 - 运行时权威：`~/.local/share/agent-bridge/state.db`（SQLite）。
-- 可选 git 备份：私有 companion 仓库 + `sync.sh`（README）。
+- 可选 git 备份：私有 companion 仓库 + 原生 `agent-bridge sync`（版本向量合并，含边与 forum；旧 `sync.sh` newer-wins 流程已退役）。
 - **本文档**：语义层契约；变更应通过 PR 审查，避免与实现漂移。
 
 ### 8.1 AI 偏好批量注入 + 语义检索
