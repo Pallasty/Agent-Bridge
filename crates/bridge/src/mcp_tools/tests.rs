@@ -18651,6 +18651,20 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
     }
 
     #[test]
+    fn coactivation_rerank_disable_defaults_to_enabled() {
+        // Unset / empty / junk / explicit 0 keep the long-standing rerank ON
+        // (disabled == false): the knob is per-deployment, not a default flip.
+        assert!(!coactivation_rerank_disabled_from(None));
+        assert!(!coactivation_rerank_disabled_from(Some("")));
+        assert!(!coactivation_rerank_disabled_from(Some("0")));
+        assert!(!coactivation_rerank_disabled_from(Some("no")));
+        // Disable switch: same boolean idiom as AGENT_BRIDGE_SEED_BOOST_DISABLE.
+        assert!(coactivation_rerank_disabled_from(Some("1")));
+        assert!(coactivation_rerank_disabled_from(Some("true")));
+        assert!(coactivation_rerank_disabled_from(Some("TRUE")));
+    }
+
+    #[test]
     fn memory_class_quota_spec_parses_fail_soft() {
         assert!(memory_class_quota_from(None).is_empty());
         assert!(memory_class_quota_from(Some("")).is_empty());

@@ -12861,7 +12861,28 @@ impl McpTool for MemorySearchTool {
         // edges connecting it to OTHER hits in the same page. Boost score by
         // `1 + 0.2 * ln(1 + sum)`. Pure no-op when graph is empty (zero
         // edges → boost = 1.0 → score unchanged). Single SQL round-trip.
-        let hits = if hits.len() >= 2 {
+        //
+        // Operator disable knob (2026-07-03, forum #102):
+        // `AGENT_BRIDGE_COACTIVATION_RERANK_DISABLE=1` turns the multiplier
+        // off; DEFAULT KEEPS IT ON (upstream contract and design docs
+        // unchanged). Rationale for the knob: a joint offline A/B on one
+        // frozen store snapshot (6 fresh-target probes + the recall_eval
+        // curated corpus' 9 live cases, UNFILTERED top-limit regime only)
+        // measured the boost net-negative there — fresh-target MRR
+        // 0.312→0.667, curated 0.387→0.870 with it off — because veterans
+        // that repeatedly co-surface accrue dense mutual edges and boost
+        // each other ×1.4–1.7 past the semantically-correct hit. Honest
+        // limits of that evidence: 15 queries, a Python replication (not the
+        // binary), a graph grown under rerank-ON page composition, and the
+        // filtered regime (exclude_kinds/scope, where the rerank runs over
+        // the 5× pool and can change page MEMBERSHIP, not just order) was
+        // NOT modeled — hence a per-deployment knob, not a default flip.
+        // Re-evaluate after the graph regrows under the new policy. Note the
+        // coactivation WRITES below always stay: they feed dream_replay
+        // consolidation, memory_coactivation_top and prune/latch tooling
+        // (NOT hybrid RRF — that reads memory_edges only, which coactivation
+        // reaches solely via crystallization).
+        let hits = if !coactivation_rerank_disabled() && hits.len() >= 2 {
             let keys: Vec<String> = hits.iter().map(|h| h.record.key.clone()).collect();
             match store.coactivation_among(&keys).await {
                 Ok(edges) if !edges.is_empty() => {
@@ -13080,6 +13101,24 @@ fn memory_class_quota_from(env_val: Option<&str>) -> Vec<(String, usize)> {
 fn memory_class_quota() -> Vec<(String, usize)> {
     memory_class_quota_from(
         std::env::var("AGENT_BRIDGE_MEMORY_CLASS_QUOTA")
+            .ok()
+            .as_deref(),
+    )
+}
+
+/// True when the operator has disabled the P1 coactivation read-side rerank
+/// (`AGENT_BRIDGE_COACTIVATION_RERANK_DISABLE=1`). Default = enabled, i.e.
+/// unset keeps the long-standing behavior; the disable knob exists because a
+/// per-deployment offline A/B measured the multiplier net-negative on the
+/// unfiltered regime (see the gate site in MemorySearchTool::execute).
+/// Mirrors the `AGENT_BRIDGE_SEED_BOOST_DISABLE` idiom.
+fn coactivation_rerank_disabled_from(env_val: Option<&str>) -> bool {
+    matches!(env_val, Some(v) if v == "1" || v.eq_ignore_ascii_case("true"))
+}
+
+fn coactivation_rerank_disabled() -> bool {
+    coactivation_rerank_disabled_from(
+        std::env::var("AGENT_BRIDGE_COACTIVATION_RERANK_DISABLE")
             .ok()
             .as_deref(),
     )
