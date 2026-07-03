@@ -26656,7 +26656,9 @@ async fn mcp_lifecycle_digest_payload(args: &Value, hub: &Hub) -> Value {
         .unwrap_or(false);
 
     let current_tool_count = build_registry(hub.clone()).list().len();
-    let scoped_tool_count = build_registry_with_policy(hub.clone(), policy).list().len();
+    // Same reality semantics as current_tool_count (host detection applied) —
+    // pre-prune both used one builder and were always equal.
+    let scoped_tool_count = build_registry_current_view(policy).list().len();
     let readiness_args = json!({
         "repo_root": args.get("repo_root").cloned().unwrap_or(Value::Null),
         "include_local_install": include_local_install,
@@ -27405,7 +27407,9 @@ impl McpTool for MemorySyncStatusTool {
 }
 
 async fn mobile_capabilities_json(policy: ToolPolicy) -> Value {
-    let exposed: Vec<String> = build_registry_with_policy(Hub::builder().build(), policy)
+    // Reality view (host detection applied): without adb/macOS the mobile
+    // families are not registered, and this list truthfully comes back empty.
+    let exposed: Vec<String> = build_registry_current_view(policy)
         .list()
         .into_iter()
         .map(|s| s.name)
@@ -27598,9 +27602,9 @@ impl McpTool for CapabilitiesTool {
 
         let sec = &self.hub.security;
         let mobile = mobile_capabilities_json(policy).await;
-        let exposed_tool_count = build_registry_with_policy(Hub::builder().build(), policy)
-            .list()
-            .len();
+        // Reality view: count what this host actually exposes for the policy,
+        // not the nominal fully-available surface.
+        let exposed_tool_count = build_registry_current_view(policy).list().len();
         let instinct_observer = compact_instinct_observer_status_json(
             crate::instinct::observer_status_json(),
             include_instinct_sessions,
@@ -28294,6 +28298,7 @@ impl McpTool for McpConfigAuditTool {
             },
             "stdio_smoke": smoke,
             "tool_profile_divergence": collab_group_divergence(),
+            "tool_surface": hidden_tool_report(ToolPolicy::from_env()),
             "recommendations": mcp_audit_recommendations(&codex, &gemini, &cursor, &claude)
         })))
     }
@@ -28401,8 +28406,9 @@ async fn audit_cursor_config() -> Value {
     let client_ok = client.as_deref() == Some("cursor");
     // Cursor has no `mcp get` CLI — treat configured+existing binary as connected.
     let connected = configured && exists && toolset_ok && client_ok;
+    // Reality view: what a cursor-spawned server on THIS host would list.
     let expected_tools =
-        exposed_tool_count_for(Some("claude-standard"), Some("cursor"), Some("standard"));
+        exposed_tool_count_current(Some("claude-standard"), Some("cursor"), Some("standard"));
     json!({
         "configured": configured,
         "config_path": path.display().to_string(),
@@ -55129,7 +55135,8 @@ fn build_context_governor_snapshot(args: &Value) -> Value {
         source_env.as_deref(),
         profile_env.as_deref(),
     );
-    let exposed_tool_count = exposed_tool_count_for(
+    // Reality view: the governor sizes the surface this process actually serves.
+    let exposed_tool_count = exposed_tool_count_current(
         toolset_env.as_deref(),
         client_env.as_deref(),
         profile_env.as_deref(),
@@ -57600,7 +57607,7 @@ impl ToolSet {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct ToolPolicy {
+pub(crate) struct ToolPolicy {
     set: ToolSet,
     profile: ToolProfile,
 }
@@ -57848,6 +57855,15 @@ const CODEX_ESSENTIAL_DIRECT_EXTRAS: &[&str] = &[
     // Research cycle planner: read-only/advisory packet for Codex to review
     // automation proposals without gaining execute/spawn/write authority.
     "research_cycle_plan",
+    // 2026-07 prune continuity: these five were Tier::Essential (auto-included
+    // in codex-essential) and were demoted to Standard on 30d-zero-call
+    // telemetry. Kept here by name so the codex-essential surface is
+    // unchanged by the tier move.
+    "skills_recommend",
+    "skills_route",
+    "skills_feedback",
+    "session_finalize",
+    "pet_state_ritual",
 ];
 
 fn codex_essential_tool(tier: Tier, tool_name: &str) -> bool {
@@ -58020,6 +58036,162 @@ fn reg_if(reg: &mut ToolRegistry, policy: ToolPolicy, tier: Tier, tool: Arc<dyn 
     if policy.includes(tier, name) {
         reg.register(tool);
     }
+}
+
+/// `reg_if` with an availability precondition. Used for tool families whose
+/// backing device/credential can be absent (`HostSurface`) and for concluded
+/// governance-ceremony surfaces (`ceremony_tools_exposed`). An unavailable
+/// tool is not registered at all — for stdio MCP, exposure IS enforcement
+/// (a hidden tool is also uncallable), so callers that need one back must
+/// flip the corresponding env override and reconnect.
+fn reg_if_available(
+    reg: &mut ToolRegistry,
+    policy: ToolPolicy,
+    available: bool,
+    tier: Tier,
+    tool: Arc<dyn McpTool>,
+) {
+    if available {
+        reg_if(reg, policy, tier, tool);
+    }
+}
+
+/// Host-surface availability for device- and credential-backed tool families,
+/// computed once per registry build. The 2026-07 dispatch audit found 200 of
+/// 294 exposed tools 30-day cold; a third of those could never work on the
+/// host (no adb, no macOS, no API token) — permanently-unusable tools are
+/// registry noise for every client. Detection is deliberately cheap and
+/// static (binary presence / env presence at process start): plugging in a
+/// device or exporting a token takes effect on the next MCP (re)connect.
+///
+/// `AGENT_BRIDGE_EXPOSE_UNAVAILABLE=1` restores the old expose-everything
+/// behavior (useful for schema inspection and A/B comparison).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HostSurface {
+    /// `adb` on PATH — Android bridge family (`mobile_*` minus iOS).
+    pub android_adb: bool,
+    /// Running on macOS — `mobile_ios_*`, `mobile_apple_status`, `macos_ax_*`.
+    pub apple_host: bool,
+    /// `BRAVE_SEARCH_TOKEN` — `brave_web_search`.
+    pub brave: bool,
+    /// `NOTION_TOKEN` — `notion_*`.
+    pub notion: bool,
+    /// `CLOUDFLARE_API_TOKEN` — `cloudflare_*`.
+    pub cloudflare: bool,
+    /// `GITHUB_TOKEN` — `github_*`.
+    pub github_api: bool,
+    /// `GITLAB_TOKEN` — `gitlab_*` (API tools; git-over-ssh is unrelated).
+    pub gitlab_api: bool,
+    /// `TAILSCALE_OAUTH_CLIENT_ID` + `_SECRET` — `tailscale_acl_*`.
+    pub tailscale_api: bool,
+}
+
+impl HostSurface {
+    /// Everything exposed — pre-gating behavior. Used by the env override,
+    /// by tests that must not depend on the build host, and as the "full"
+    /// side of `hidden_tool_report`.
+    pub fn all_available() -> Self {
+        Self {
+            android_adb: true,
+            apple_host: true,
+            brave: true,
+            notion: true,
+            cloudflare: true,
+            github_api: true,
+            gitlab_api: true,
+            tailscale_api: true,
+        }
+    }
+
+    /// Probe the real host. Credential detection mirrors the exact env vars
+    /// the tool implementations read (brave_api.rs, notion_api.rs, …) so a
+    /// tool is hidden precisely when its first call would fail with
+    /// "credential missing".
+    pub fn detect() -> Self {
+        if env_flag_enabled("AGENT_BRIDGE_EXPOSE_UNAVAILABLE") {
+            return Self::all_available();
+        }
+        Self {
+            android_adb: binary_on_path("adb"),
+            apple_host: cfg!(target_os = "macos"),
+            brave: env_credential_present("BRAVE_SEARCH_TOKEN"),
+            notion: env_credential_present("NOTION_TOKEN"),
+            cloudflare: env_credential_present("CLOUDFLARE_API_TOKEN"),
+            github_api: env_credential_present("GITHUB_TOKEN"),
+            gitlab_api: env_credential_present("GITLAB_TOKEN"),
+            tailscale_api: env_credential_present("TAILSCALE_OAUTH_CLIENT_ID")
+                && env_credential_present("TAILSCALE_OAUTH_CLIENT_SECRET"),
+        }
+    }
+}
+
+fn env_flag_enabled(name: &str) -> bool {
+    // Case-insensitive, matching the other boolean flag parsers in this file.
+    std::env::var(name)
+        .map(|v| {
+            let v = v.trim();
+            v == "1"
+                || v.eq_ignore_ascii_case("true")
+                || v.eq_ignore_ascii_case("yes")
+                || v.eq_ignore_ascii_case("on")
+        })
+        .unwrap_or(false)
+}
+
+/// PATH scan without spawning a `which` subprocess: works in minimal
+/// containers that lack `which`, and never blocks an async worker on
+/// fork+exec. Executability check is a plain metadata mode test.
+fn binary_on_path(name: &str) -> bool {
+    let Some(path) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&path).any(|dir| {
+        let candidate = dir.join(name);
+        match std::fs::metadata(&candidate) {
+            Ok(meta) => {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    meta.is_file() && meta.permissions().mode() & 0o111 != 0
+                }
+                #[cfg(not(unix))]
+                {
+                    meta.is_file()
+                }
+            }
+            Err(_) => false,
+        }
+    })
+}
+
+fn env_credential_present(name: &str) -> bool {
+    std::env::var(name)
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false)
+}
+
+/// Concluded governance-ceremony tool surfaces (one-shot gate / review-packet
+/// / decision-record chains from finished arcs: BioCortex T6 candidate
+/// expansion, LSWR outcome admissions, outcome-gated consolidation, the
+/// retrieval opt-in ceremony ladder, trigger-recall gates). A finished
+/// ceremony should not be a permanent tool surface: these were 42+ of the
+/// 30-day-cold exposed tools in the 2026-07 audit. Hidden from every toolset
+/// **including `all`** by default; re-expose with
+/// `AGENT_BRIDGE_EXPOSE_CEREMONY=1` (or the `all-dev` toolset) when a new
+/// gate cycle starts.
+///
+/// Exactly these family members stay registered (30d live traffic or
+/// read-only status observability — see CEREMONY_GATED_TOOLS in tests for
+/// the gated pin list): `biocortex_retrieval_opt_in_runtime_transition_gate`,
+/// `biocortex_retrieval_opt_in_runtime_readiness_packet`,
+/// `biocortex_retrieval_opt_in_gated_store_trial`,
+/// `biocortex_retrieval_opt_in_gated_batch_diagnostics`,
+/// `biocortex_retrieval_opt_in_status`, `trigger_recall_opt_in_status`,
+/// `trigger_recall_opt_in_pre_policy_hold_simulation`. Everything else in
+/// those families — including their other `*_status`/`*_trial` variants —
+/// is gated.
+fn ceremony_tools_exposed(policy: ToolPolicy) -> bool {
+    matches!(policy.set, ToolSet::AllDev) || env_flag_enabled("AGENT_BRIDGE_EXPOSE_CEREMONY")
 }
 
 // ===========================================================================
@@ -58527,13 +58699,12 @@ pub const LSWR_READONLY_BRIDGE_DISPLAY_MCP_SURFACE_REPORT_SCHEMA: &str =
 pub fn lswr_readonly_bridge_display_mcp_surface_report() -> Value {
     const TOOL: &str = "lswr_readonly_bridge_display";
     let profile_rows = lswr_readonly_bridge_display_surface_profile_rows();
-    let all_schema = lswr_readonly_bridge_display_schema_for_policy(ToolPolicy::from_values(
-        None,
-        None,
-        None,
-        Some("all"),
-    ));
-    let schema_facts = lswr_readonly_bridge_display_schema_facts(all_schema.as_ref());
+    // Ceremony-gated (2026-07 prune): the schema is only reachable through
+    // all-dev / AGENT_BRIDGE_EXPOSE_CEREMONY, so fetch facts from that view.
+    let all_dev_schema = lswr_readonly_bridge_display_schema_for_policy(
+        ToolPolicy::from_values(Some("all-dev"), None, None, None),
+    );
+    let schema_facts = lswr_readonly_bridge_display_schema_facts(all_dev_schema.as_ref());
     let checks = lswr_readonly_bridge_display_surface_checks(&profile_rows, &schema_facts);
     let verdict = if checks.iter().all(|row| row["verdict"] == "passed") {
         "passed"
@@ -58568,7 +58739,7 @@ pub fn lswr_readonly_bridge_display_mcp_surface_report() -> Value {
         },
         "guidance": [
             "Use this report as post-registry evidence for profile exposure; live MCP clients still need redeploy/reconnect before their tool list changes.",
-            "The wrapper remains all-profile/all-dev only; do not add it to codex-essential extras without a separate acceptance slice.",
+            "The wrapper is ceremony-gated (2026-07 prune): all-dev / AGENT_BRIDGE_EXPOSE_CEREMONY only; do not add it to codex-essential extras without a separate acceptance slice.",
             "Use the P34 tool with an explicit report_packet object, not host paths or live runtime handles."
         ],
         "report_markdown": report_markdown
@@ -58578,7 +58749,10 @@ pub fn lswr_readonly_bridge_display_mcp_surface_report() -> Value {
 fn lswr_readonly_bridge_display_surface_profile_rows() -> Vec<Value> {
     [
         ("profile-standard", None, None, Some("standard"), false),
-        ("profile-all", None, None, Some("all"), true),
+        // Ceremony gating (2026-07): concluded governance surfaces are hidden
+        // even from profile-all; only all-dev / AGENT_BRIDGE_EXPOSE_CEREMONY
+        // re-expose them.
+        ("profile-all", None, None, Some("all"), false),
         (
             "codex-essential",
             Some("codex-essential"),
@@ -58685,7 +58859,7 @@ fn lswr_readonly_bridge_display_surface_checks(
     let profile_matrix_ok = profile_rows
         .iter()
         .all(|row| row["matches_expected"].as_bool().unwrap_or(false));
-    let all_visible = profile_registered(profile_rows, "profile-all");
+    let all_hidden = !profile_registered(profile_rows, "profile-all");
     let all_dev_visible = profile_registered(profile_rows, "all-dev");
     let standard_hidden = !profile_registered(profile_rows, "profile-standard");
     let codex_essential_hidden = !profile_registered(profile_rows, "codex-essential");
@@ -58708,19 +58882,19 @@ fn lswr_readonly_bridge_display_surface_checks(
             "profile_matrix",
             profile_matrix_ok,
             true,
-            "registered profiles match expected all-profile/all-dev exposure only",
+            "registered profiles match expected ceremony-gated (all-dev only) exposure",
         ),
         surface_check(
-            "all_profile_visible",
-            all_visible,
+            "all_profile_hidden",
+            all_hidden,
             true,
-            "profile=all exposes lswr_readonly_bridge_display",
+            "profile=all hides lswr_readonly_bridge_display (ceremony-gated, 2026-07 prune)",
         ),
         surface_check(
             "all_dev_visible",
             all_dev_visible,
             true,
-            "toolset=all-dev exposes lswr_readonly_bridge_display through all profile",
+            "toolset=all-dev exposes lswr_readonly_bridge_display",
         ),
         surface_check(
             "standard_hidden",
@@ -58738,7 +58912,7 @@ fn lswr_readonly_bridge_display_surface_checks(
             "schema_present",
             schema_present,
             true,
-            "all-profile registry includes a schema for the tool",
+            "all-dev (ceremony-exposed) registry includes a schema for the tool",
         ),
         surface_check(
             "explicit_packet_only",
@@ -58809,12 +58983,14 @@ pub const LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_MCP_SURFACE_REPORT_SCHEMA
 pub fn lswr_interaction_feedback_consumption_report_mcp_surface_report() -> Value {
     const TOOL: &str = "lswr_interaction_feedback_consumption_report";
     let profile_rows = lswr_interaction_feedback_consumption_report_surface_profile_rows();
-    let all_schema = lswr_interaction_feedback_consumption_report_schema_for_policy(
-        ToolPolicy::from_values(None, None, None, Some("all")),
+    // Ceremony-gated (2026-07 prune): fetch schema facts from the all-dev
+    // (ceremony-exposed) view — profile-all hides the wrapper by design.
+    let all_dev_schema = lswr_interaction_feedback_consumption_report_schema_for_policy(
+        ToolPolicy::from_values(Some("all-dev"), None, None, None),
     );
     let checks = lswr_interaction_feedback_consumption_report_surface_checks(
         &profile_rows,
-        all_schema.as_ref(),
+        all_dev_schema.as_ref(),
     );
     let verdict = if checks.iter().all(|row| row["verdict"] == "passed") {
         "passed"
@@ -58840,7 +59016,7 @@ pub fn lswr_interaction_feedback_consumption_report_mcp_surface_report() -> Valu
         "verdict": verdict,
         "visible_in": visible_in,
         "profile_rows": profile_rows,
-        "schema_present_in_all_profile": all_schema.is_some(),
+        "schema_present_in_all_dev": all_dev_schema.is_some(),
         "pure_report_schema": crate::lswr_interaction_feedback::LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_SCHEMA,
         "transport_envelope_schema": LSWR_INTERACTION_FEEDBACK_CONSUMPTION_REPORT_MCP_SCHEMA,
         "tool_tier": "niche",
@@ -58865,7 +59041,7 @@ pub fn lswr_interaction_feedback_consumption_report_mcp_surface_report() -> Valu
         },
         "checks": checks,
         "guidance": [
-            "Use this report as post-registration evidence that the wrapper is niche/all-only and hidden from default, Codex-essential, lean, Gemini, and hook profiles.",
+            "Use this report as post-registration evidence that the wrapper is ceremony-gated (all-dev / AGENT_BRIDGE_EXPOSE_CEREMONY only) and hidden from default, all, Codex-essential, lean, Gemini, and hook profiles.",
             "The MCP wrapper returns a transport envelope for explicit report_input JSON and embeds the pure consumption report unchanged.",
             "Do not add file paths, live runtime lookup, store access, #94 ingestion, Onsen mutation, or default/codex-essential exposure in follow-up commits."
         ],
@@ -58876,7 +59052,10 @@ pub fn lswr_interaction_feedback_consumption_report_mcp_surface_report() -> Valu
 fn lswr_interaction_feedback_consumption_report_surface_profile_rows() -> Vec<Value> {
     [
         ("profile-standard", None, None, Some("standard"), false),
-        ("profile-all", None, None, Some("all"), true),
+        // Ceremony gating (2026-07): concluded governance surfaces are hidden
+        // even from profile-all; only all-dev / AGENT_BRIDGE_EXPOSE_CEREMONY
+        // re-expose them.
+        ("profile-all", None, None, Some("all"), false),
         (
             "codex-essential",
             Some("codex-essential"),
@@ -58924,32 +59103,32 @@ fn lswr_interaction_feedback_consumption_report_schema_for_policy(
 
 fn lswr_interaction_feedback_consumption_report_surface_checks(
     profile_rows: &[Value],
-    all_schema: Option<&ToolSchema>,
+    all_dev_schema: Option<&ToolSchema>,
 ) -> Vec<Value> {
     let profile_matrix_ok = profile_rows
         .iter()
         .all(|row| row["matches_expected"].as_bool().unwrap_or(false));
-    let all_visible = profile_registered(profile_rows, "profile-all");
+    let all_hidden = !profile_registered(profile_rows, "profile-all");
     let all_dev_visible = profile_registered(profile_rows, "all-dev");
     let standard_hidden = !profile_registered(profile_rows, "profile-standard");
     let codex_essential_hidden = !profile_registered(profile_rows, "codex-essential");
     let codex_lean_hidden = !profile_registered(profile_rows, "codex-lean");
     let gemini_lean_hidden = !profile_registered(profile_rows, "gemini-lean");
     let hook_lifecycle_hidden = !profile_registered(profile_rows, "hook-lifecycle");
-    let explicit_report_input_only = all_schema
+    let explicit_report_input_only = all_dev_schema
         .and_then(|schema| schema.input_schema.get("properties"))
         .and_then(Value::as_object)
         .map(|props| props.len() == 1 && props.contains_key("report_input"))
         .unwrap_or(false);
-    let required_report_input = all_schema
+    let required_report_input = all_dev_schema
         .and_then(|schema| schema.input_schema.get("required"))
         .and_then(Value::as_array)
         .map(|required| required.len() == 1 && required.iter().any(|v| v == "report_input"))
         .unwrap_or(false);
-    let no_additional_properties = all_schema
+    let no_additional_properties = all_dev_schema
         .map(|schema| schema.input_schema["additionalProperties"] == Value::Bool(false))
         .unwrap_or(false);
-    let forbidden_inputs_absent = all_schema
+    let forbidden_inputs_absent = all_dev_schema
         .and_then(|schema| schema.input_schema.get("properties"))
         .and_then(Value::as_object)
         .map(|props| {
@@ -58967,19 +59146,19 @@ fn lswr_interaction_feedback_consumption_report_surface_checks(
             "profile_matrix",
             profile_matrix_ok,
             true,
-            "registered profiles match expected all-profile/all-dev exposure only",
+            "registered profiles match expected ceremony-gated (all-dev only) exposure",
         ),
         surface_check(
-            "all_profile_visible",
-            all_visible,
+            "all_profile_hidden",
+            all_hidden,
             true,
-            "profile=all exposes the candidate after the explicit registration slice",
+            "profile=all hides the candidate (ceremony-gated, 2026-07 prune)",
         ),
         surface_check(
             "all_dev_visible",
             all_dev_visible,
             true,
-            "toolset=all-dev exposes the candidate through the all profile",
+            "toolset=all-dev exposes the candidate",
         ),
         surface_check(
             "standard_hidden",
@@ -59001,9 +59180,9 @@ fn lswr_interaction_feedback_consumption_report_surface_checks(
         ),
         surface_check(
             "schema_present",
-            all_schema.is_some(),
+            all_dev_schema.is_some(),
             true,
-            "all-profile registry includes a schema for the candidate",
+            "all-dev (ceremony-exposed) registry includes a schema for the candidate",
         ),
         surface_check(
             "explicit_report_input_only",
@@ -59381,8 +59560,33 @@ fn tag_value_in(tags: &[String], prefix: &str) -> Option<String> {
         .map(|t| t[prefix.len()..].to_string())
 }
 
+/// The real serving entry point: env policy + **host detection** (device /
+/// credential availability gates unusable tool families; see `HostSurface`).
+/// This is what the MCP stdio server and every "what is this process actually
+/// exposing" audit path build.
 pub fn build_registry(hub: Hub) -> ToolRegistry {
-    build_registry_with_policy(hub, ToolPolicy::from_env())
+    let policy = ToolPolicy::from_env();
+    let surface = HostSurface::detect();
+    let ceremony = ceremony_tools_exposed(policy);
+    let reg = build_registry_with_policy_surface(hub, policy, surface, ceremony);
+    tracing::info!(
+        profile = policy.profile().label(),
+        toolset = policy.label(),
+        tools = reg.list().len(),
+        ceremony_tools = ceremony,
+        android_adb = surface.android_adb,
+        apple_host = surface.apple_host,
+        brave = surface.brave,
+        notion = surface.notion,
+        cloudflare = surface.cloudflare,
+        github_api = surface.github_api,
+        gitlab_api = surface.gitlab_api,
+        tailscale_api = surface.tailscale_api,
+        "MCP tool registry built (set AGENT_BRIDGE_TOOLSET or AGENT_BRIDGE_TOOL_PROFILE; \
+         false surface flags hide that family — AGENT_BRIDGE_EXPOSE_UNAVAILABLE / \
+         AGENT_BRIDGE_EXPOSE_CEREMONY override)"
+    );
+    reg
 }
 
 /// Count tools exposed for a given toolset/client/profile without spawning MCP.
@@ -60501,7 +60705,32 @@ impl McpTool for AgentOrchestrateScanTool {
     }
 }
 
+/// Policy-scoped registry over a **fully-available host surface**. This is
+/// the deterministic what-if/nominal view used by profile matrices, setup
+/// config generation, and tests — it must not depend on the build machine.
+/// Ceremony gating still applies (it is policy/env-scoped, not host-scoped).
+/// For "what does this process actually expose", use `build_registry`; for
+/// explicit control, use `build_registry_with_policy_surface`.
 pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry {
+    build_registry_with_policy_surface(
+        hub,
+        policy,
+        HostSurface::all_available(),
+        // Policy-only (all-dev), deliberately NOT the env flag: this view must
+        // stay deterministic under an exported AGENT_BRIDGE_EXPOSE_CEREMONY.
+        matches!(policy.set, ToolSet::AllDev),
+    )
+}
+
+/// Registry build with explicit availability inputs. `build_registry` probes
+/// the host; tests and audit comparisons pass a fixed `HostSurface` /
+/// `ceremony` so results don't depend on the build machine.
+pub(crate) fn build_registry_with_policy_surface(
+    hub: Hub,
+    policy: ToolPolicy,
+    surface: HostSurface,
+    ceremony: bool,
+) -> ToolRegistry {
     let mut reg = ToolRegistry::new();
 
     // ── ESSENTIAL ──────────────────────────────────────────────────────
@@ -60640,7 +60869,7 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(SystemControlTool::new(hub.clone())),
     );
     // Remote session steering (P2/P3/P4): AB-owned launch + gate-aware drive +
@@ -60648,19 +60877,19 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(AgentSteerLaunchTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(AgentSteerDriveTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(AgentSteerCaptureTool::new(hub.clone())),
     );
     reg_if(
@@ -60672,7 +60901,7 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(AgentSteerKillTool::new(hub.clone())),
     );
     reg_if(
@@ -60690,13 +60919,13 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
-        Tier::Essential,
+        Tier::Standard,
         Arc::new(SessionFinalizeTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(SessionReflectTool::new(hub.clone())),
     );
     reg_if(
@@ -60746,7 +60975,7 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(GosLiteSnapshotTool::new(hub.clone())),
     );
     // SSB integrity monitor: release-build safety net re-running the unified
@@ -60804,15 +61033,17 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     // macOS Semantic System Bus probe: read-only AX trust + bounded
     // frontmost-window observation. Exposed to Codex via direct extras; mutating
     // AX actions are not part of this tool.
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        surface.apple_host,
         Tier::Standard,
         Arc::new(MacosAxProbeTool::new(hub.clone())),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        surface.apple_host,
         Tier::Standard,
         Arc::new(MacosAxVerifyTool::new(hub.clone())),
     );
@@ -60837,13 +61068,13 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(SemanticBusPeerConformanceTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(VisionGroundingOcrTool::new(hub.clone())),
     );
     // Linux Computer Use T9c: gated desktop input injection (isolated-only MVP).
@@ -60852,7 +61083,7 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(DesktopActionTool::new(hub.clone())),
     );
     // Linux Computer Use L2: gated semantic AT-SPI invoke (isolated-only MVP).
@@ -60861,7 +61092,7 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(DesktopInvokeTool::new(hub.clone())),
     );
     // Linux Computer Use host-confirm phase 2: execute a human-approved host action by
@@ -60870,7 +61101,7 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(DesktopConfirmTool::new(hub.clone())),
     );
     reg_if(
@@ -60888,7 +61119,7 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
-        Tier::Essential,
+        Tier::Standard,
         Arc::new(PetStateRitualTool::new(hub.clone())),
     );
     reg_if(
@@ -60945,117 +61176,131 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(CodebaseSearchTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(CodebaseImportsTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(CodebaseCallsTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(CodebaseCallersTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(CodebaseImpactTool::new(hub.clone())),
     );
 
     // Mobile Device Bridge: Android-first install/debug/control via ADB.
     // Read tools give structure before screenshot; action tools remain explicit.
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        surface.android_adb,
         Tier::Niche,
         Arc::new(MobileListDevicesTool::new(hub.clone())),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        surface.android_adb,
         Tier::Niche,
         Arc::new(MobileCurrentFocusTool::new(hub.clone())),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        surface.android_adb,
         Tier::Niche,
         Arc::new(MobileScreenshotTool::new(hub.clone())),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        surface.android_adb,
         Tier::Niche,
         Arc::new(MobileHealthTool::new(hub.clone())),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        surface.android_adb,
         Tier::Niche,
         Arc::new(MobileUiSnapshotTool::new(hub.clone())),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        surface.android_adb,
         Tier::Niche,
         Arc::new(MobileLogcatTailTool::new(hub.clone())),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        surface.android_adb,
         Tier::Niche,
         Arc::new(MobileInstallApkTool::new(hub.clone())),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        surface.android_adb,
         Tier::Niche,
         Arc::new(MobileLaunchAppTool::new(hub.clone())),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        surface.android_adb,
         Tier::Niche,
         Arc::new(MobileClickTool::new(hub.clone())),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        surface.android_adb,
         Tier::Niche,
         Arc::new(MobileInputTextTool::new(hub.clone())),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        surface.apple_host,
         Tier::Niche,
         Arc::new(MobileAppleStatusTool::new(hub.clone())),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        surface.apple_host,
         Tier::Niche,
         Arc::new(MobileIosListDevicesTool::new(hub.clone())),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        surface.apple_host,
         Tier::Niche,
         Arc::new(MobileIosAppsTool::new(hub.clone())),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        surface.apple_host,
         Tier::Niche,
         Arc::new(MobileIosSyslogTailTool::new(hub.clone())),
     );
@@ -61118,7 +61363,7 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(CodebaseReindexTool::new(hub.clone())),
     );
     reg_if(
@@ -61202,108 +61447,121 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(SubstrateStatsTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(SubstrateNeighborsTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(BioCortexShadowDigestTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(BioCortexReplayCompareTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(BioCortexRetrievalOptInStatusTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Standard,
         Arc::new(BioCortexRetrievalOptInDryRunTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(BioCortexRetrievalOptInReviewPacketTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(BioCortexRetrievalOptInExecutionPacketTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(BioCortexRetrievalOptInRuntimeTrialTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(BioCortexRetrievalOptInRuntimeTrialReviewPacketTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(BioCortexRetrievalOptInOrderDiffPacketTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(BioCortexRetrievalOptInRedactedOrderArtifactTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(BioCortexRetrievalOptInAuthorizationDecisionPacketTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(BioCortexRetrievalOptInPostImplementationReviewGateTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(BioCortexRetrievalOptInRuntimeInfluenceReviewRequestTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(BioCortexRetrievalOptInStoreTrialTool::new(hub.clone())),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(BioCortexRetrievalOptInBatchDiagnosticsTool::new(
             hub.clone(),
@@ -61327,21 +61585,26 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Niche,
         Arc::new(BioCortexRetrievalOptInRuntimeTransitionGateTool::new()),
     );
+    // Read-only status observability stays exposed (parallel to
+    // biocortex_retrieval_opt_in_status); only the ceremony gates/trials of
+    // this family are ceremony-gated below.
     reg_if(
         &mut reg,
         policy,
         Tier::Niche,
         Arc::new(TriggerRecallOptInStatusTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(TriggerRecallOptInRuntimeTransitionGateTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(TriggerRecallOptInGatedBaselineTrialTool::new(hub.clone())),
     );
@@ -61353,15 +61616,17 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
             hub.clone(),
         )),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(TriggerRecallOptInGatedBatchDiagnosticsTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(TriggerRecallEnforceHoldApprovalPacketValidatorTool::new()),
     );
@@ -61389,7 +61654,7 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(IntrospectRecallTool::new(hub.clone())),
     );
     reg_if(
@@ -61442,46 +61707,51 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     );
     // Stage 1 + Stage 2 gate-ceremony surfaces — Niche like the trigger-recall /
     // biocortex opt-in gate tools, kept out of the eager Standard/codex set.
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(OutcomeGatedConsolidationStatusTool::new(hub.clone())),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(OutcomeGatedConsolidationTransitionGateTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(OutcomeGatedConsolidationApplyTrialTool::new(hub.clone())),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(OutcomeGatedConsolidationApprovalPacketTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(OutcomeGatedConsolidationApplyTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(MemoryBioCortexShadowTrialTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(MemoryBioCortexRedactedEvidenceAggregateTool::new()),
     );
     reg_if(
@@ -61496,147 +61766,168 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Tier::Standard,
         Arc::new(MemoryBioCortexRelevanceLiftSummaryTool::new(hub.clone())),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(MemoryBioCortexT6InfluenceGateTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(MemoryBioCortexT6CandidateExpansionReviewPacketTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(MemoryBioCortexT6CandidateExpansionDryRunPlanTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(MemoryBioCortexT6CandidateExpansionDryRunReportTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(MemoryBioCortexT6CandidateExpansionHumanReviewPacketTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(MemoryBioCortexT6CandidateExpansionOwnerDecisionRecordTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(MemoryBioCortexT6CandidateExpansionRuntimeGatePreflightTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(MemoryBioCortexT6CandidateExpansionRuntimeGateDesignArtifactTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(MemoryBioCortexT6CandidateExpansionRuntimeGateOwnerReviewRecordTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(
             MemoryBioCortexT6CandidateExpansionRuntimeGateImplementationPlanArtifactTool::new(),
         ),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(MemoryBioCortexT6CandidateExpansionRuntimeGateCodeImplementationGateTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(MemoryBioCortexT6CandidateExpansionShadowRuntimeGateTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(MemoryBioCortexT6CandidateExpansionShadowExecutionGateTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(MemoryBioCortexT6CandidateExpansionShadowExecutorPreflightTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(
             MemoryBioCortexT6CandidateExpansionShadowExecutorInvocationReportTool::new(),
         ),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(MemoryBioCortexT6CandidateExpansionShadowTelemetryReviewTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(MemoryBioCortexT6CandidateExpansionRuntimeEnablementReviewTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(
             MemoryBioCortexT6CandidateExpansionRuntimeEnablementOwnerDecisionRecordTool::new(),
         ),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(
             MemoryBioCortexT6CandidateExpansionRuntimeEnablementImplementationPlanArtifactTool::new(
             ),
         ),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(
             MemoryBioCortexT6CandidateExpansionRuntimeEnablementCodeImplementationGateTool::new(),
         ),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(MemoryBioCortexT6CandidateExpansionRuntimeEnablementShadowCodeGateTool::new()),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(MemoryNeuralCriticShadowEvalTool::new()),
     );
     reg_if(
@@ -61654,13 +61945,13 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(AgentMessageTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(AgentInboxTool::new(hub.clone())),
     );
     // Forum (v18): cross-process collaboration whiteboard.
@@ -61710,13 +62001,13 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(SessionIdentityTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(AgentPresenceAnnounceTool::new(hub.clone())),
     );
     reg_if(
@@ -61734,141 +62025,156 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(AvatarAdapterCapabilitiesTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(AvatarStateGetTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(AvatarSurfaceSnapshotTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(AvatarSurfaceReportTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(AvatarCortexRendererSnapshotTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(XiaoShuActionRequestTool::new(hub.clone())),
     );
     // Tailscale REST API: ACL editing without browser automation.
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        surface.tailscale_api,
         Tier::Standard,
         Arc::new(TailscaleAclGetTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        surface.tailscale_api,
         Tier::Standard,
         Arc::new(TailscaleAclSetTool::new()),
     );
     // GitHub REST API: issue/PR management without browser/gh-cli. Demoted
     // to Niche — Claude Code uses `gh` CLI; codex has native overlap.
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        surface.github_api,
         Tier::Niche,
         Arc::new(GithubIssueListTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        surface.github_api,
         Tier::Niche,
         Arc::new(GithubIssueCreateTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        surface.github_api,
         Tier::Niche,
         Arc::new(GithubPrListTool::new()),
     );
 
     // GitLab REST API v4: same pattern as github_*; primary forge for this project.
     // Demoted to Niche — `glab` CLI covers the same surface.
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        surface.gitlab_api,
         Tier::Niche,
         Arc::new(GitlabIssueListTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        surface.gitlab_api,
         Tier::Niche,
         Arc::new(GitlabIssueCreateTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        surface.gitlab_api,
         Tier::Niche,
         Arc::new(GitlabMrListTool::new()),
     );
 
     // Notion REST API: integration-token Bearer; complements memory system.
     // Demoted to Niche — 0 calls in 7-day audit window.
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        surface.notion,
         Tier::Niche,
         Arc::new(NotionSearchTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        surface.notion,
         Tier::Niche,
         Arc::new(NotionPageGetTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        surface.notion,
         Tier::Niche,
         Arc::new(NotionPageCreateTool::new()),
     );
 
     // Brave Search REST API: independent web search, fallback / fresh-results channel.
     // Demoted to Niche — Claude Code uses WebFetch/WebSearch built-ins.
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        surface.brave,
         Tier::Niche,
         Arc::new(BraveWebSearchTool::new()),
     );
 
     // Cloudflare REST API: zones / workers / R2 read scopes (others 403 with current token).
     // Demoted to Niche — 0 calls in 7-day audit window.
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        surface.cloudflare,
         Tier::Niche,
         Arc::new(CloudflareZoneListTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        surface.cloudflare,
         Tier::Niche,
         Arc::new(CloudflareWorkerListTool::new()),
     );
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        surface.cloudflare,
         Tier::Niche,
         Arc::new(CloudflareR2BucketListTool::new()),
     );
@@ -61881,7 +62187,7 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(SessionHandoffBriefTool::new(hub.clone())),
     );
     reg_if(
@@ -61899,7 +62205,7 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(CodebaseIndexTool::new(hub.clone())),
     );
     // Retired with rest of terminal_* after Warp drop.
@@ -61918,7 +62224,7 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(NotificationsRecentTool::new(hub.clone())),
     );
     // Skill library (Phase C): in-loop recommendation over the local skill index.
@@ -61927,19 +62233,19 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
-        Tier::Essential,
+        Tier::Standard,
         Arc::new(SkillsRecommendTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Essential,
+        Tier::Standard,
         Arc::new(SkillsRouteTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,
         policy,
-        Tier::Essential,
+        Tier::Standard,
         Arc::new(SkillsFeedbackTool::new(hub.clone())),
     );
     // External browser-lite discovery. Standard/read-only: exposes the probe
@@ -61947,7 +62253,7 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(BrowserLiteProbeTool::new()),
     );
 
@@ -61994,42 +62300,47 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     );
     // LSWR Step E2: read-only admission projection over Step D present artifacts.
     // Niche (opt-in), no memory writes or ingestion calls.
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(LswrOutcomeAdmissionsTool::new(hub.clone())),
     );
     // LSWR Step E3: dry-run adapter from E2 admissions to #94-compatible
     // present_outcome candidates. Niche (opt-in), no write flag.
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(LswrOutcomeAdmissionsDryRunTool::new(hub.clone())),
     );
     // LSWR Step E4c: read-only approval packet with deterministic plan_hash.
     // Niche (opt-in), no write flag and no memory writes.
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(LswrOutcomeAdmissionsApprovalPacketTool::new(hub.clone())),
     );
     // LSWR Step E4d: read-only future-write request validator over the E4c plan.
     // Niche (opt-in), no writer path and no memory writes.
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(LswrOutcomeAdmissionsWritePreflightTool::new(hub.clone())),
     );
     // LSWR Step E4d/E4e: the ONLY LSWR outcome writer. Niche (all-profile only),
     // dry_run=true default; a durable write requires the full owner approval
     // contract + active-row refusal + rollback packet before any memory_save.
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(LswrOutcomeAdmissionsIngestTool::new(hub.clone())),
     );
@@ -62083,18 +62394,20 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     // LSWR interaction feedback: MCP transport wrapper over the pure
     // consumption report builder. Niche/all only; accepts only one explicit
     // report_input object and keeps the embedded pure report unchanged.
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(LswrInteractionFeedbackConsumptionReportTool::new()),
     );
     // LSWR P34: real but gated read-only display wrapper over an explicit P28
     // report packet. Niche/all only; no host path, live runtime, GUI capture,
     // patch/action/invoke, or filesystem source is accepted.
-    reg_if(
+    reg_if_available(
         &mut reg,
         policy,
+        ceremony,
         Tier::Niche,
         Arc::new(LswrReadonlyBridgeDisplayTool::new()),
     );
@@ -62114,7 +62427,7 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(PresentApprovalTool::new(hub.clone())),
     );
     reg_if(
@@ -62369,7 +62682,7 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
     reg_if(
         &mut reg,
         policy,
-        Tier::Standard,
+        Tier::Niche,
         Arc::new(ToolCallAttentionReportTool::new(hub.clone())),
     );
     reg_if(
@@ -62416,13 +62729,91 @@ pub fn build_registry_with_policy(hub: Hub, policy: ToolPolicy) -> ToolRegistry 
         Arc::new(MemoryGraphExportTool::new(hub)),
     );
 
-    tracing::info!(
+    // debug-level here: what-if/nominal builds (audits, matrices, tests) call
+    // this too — the authoritative serving log is emitted by build_registry.
+    tracing::debug!(
         profile = policy.profile().label(),
         toolset = policy.label(),
         tools = reg.list().len(),
-        "MCP tool registry built (set AGENT_BRIDGE_TOOLSET or AGENT_BRIDGE_TOOL_PROFILE)"
+        ceremony_tools = ceremony,
+        "MCP tool registry built"
     );
     reg
+}
+
+/// Registry as the current env/host would actually serve it for `policy`:
+/// host detection + env-aware ceremony gate. This is the view every
+/// "current process / current host" readout must use (capabilities, doctor,
+/// context governor, config audit) — `build_registry_with_policy` is the
+/// deterministic nominal view and will overcount on hosts missing
+/// devices/credentials.
+pub(crate) fn build_registry_current_view(policy: ToolPolicy) -> ToolRegistry {
+    build_registry_with_policy_surface(
+        Hub::builder().build(),
+        policy,
+        HostSurface::detect(),
+        ceremony_tools_exposed(policy),
+    )
+}
+
+/// `exposed_tool_count_for`, but for what the host would actually serve.
+pub fn exposed_tool_count_current(
+    toolset: Option<&str>,
+    client: Option<&str>,
+    profile: Option<&str>,
+) -> usize {
+    build_registry_current_view(ToolPolicy::from_values(toolset, client, None, profile))
+        .list()
+        .len()
+}
+
+/// What the current env/host hides relative to a fully-available build of the
+/// same toolset/profile, split by reason. Surfaced through `mcp_config_audit`
+/// so "where did tool X go?" has a one-call answer.
+pub(crate) fn hidden_tool_report(policy: ToolPolicy) -> Value {
+    let surface = HostSurface::detect();
+    let ceremony = ceremony_tools_exposed(policy);
+    hidden_tool_report_with(policy, surface, ceremony)
+}
+
+/// Explicit-input core of `hidden_tool_report` — unit-testable without
+/// depending on the build host's env/binaries.
+pub(crate) fn hidden_tool_report_with(policy: ToolPolicy, surface: HostSurface, ceremony: bool) -> Value {
+    let names = |surface: HostSurface, ceremony: bool| -> std::collections::BTreeSet<String> {
+        build_registry_with_policy_surface(Hub::builder().build(), policy, surface, ceremony)
+            .list()
+            .into_iter()
+            .map(|schema| schema.name)
+            .collect()
+    };
+    let real = names(surface, ceremony);
+    let with_full_surface = names(HostSurface::all_available(), ceremony);
+    let full = names(HostSurface::all_available(), true);
+    let hidden_by_surface: Vec<&String> = with_full_surface.difference(&real).collect();
+    let hidden_ceremony: Vec<&String> = full.difference(&with_full_surface).collect();
+    json!({
+        "exposed_count": real.len(),
+        "host_surface": {
+            "android_adb": surface.android_adb,
+            "apple_host": surface.apple_host,
+            "brave": surface.brave,
+            "notion": surface.notion,
+            "cloudflare": surface.cloudflare,
+            "github_api": surface.github_api,
+            "gitlab_api": surface.gitlab_api,
+            "tailscale_api": surface.tailscale_api,
+        },
+        "ceremony_tools_exposed": ceremony,
+        "hidden_unavailable": hidden_by_surface,
+        "hidden_ceremony": hidden_ceremony,
+        "note": "hidden_unavailable = device/credential absent on this host \
+                 (AGENT_BRIDGE_EXPOSE_UNAVAILABLE=1 restores); hidden_ceremony = \
+                 concluded governance-ceremony surfaces \
+                 (AGENT_BRIDGE_EXPOSE_CEREMONY=1 or all-dev toolset restores). \
+                 Detection runs at call time; a live MCP session serves the \
+                 registry snapshot from its process start — reconnect to apply \
+                 device/credential changes.",
+    })
 }
 
 /// Path to the persistent user profile document.
@@ -68518,38 +68909,38 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     }
 
     #[test]
-    fn t6_gate_ceremony_tools_are_all_only() {
+    fn t6_gate_ceremony_tools_are_ceremony_gated() {
+        // 2026-07 prune: the concluded T6 gate ceremony is hidden even from
+        // profile-all; only all-dev (or AGENT_BRIDGE_EXPOSE_CEREMONY=1 at the
+        // serving entry) re-exposes it.
         let standard = ToolPolicy::from_values(None, None, None, Some("standard"));
         let all = ToolPolicy::from_values(None, None, None, Some("all"));
+        let all_dev = ToolPolicy::from_values(Some("all-dev"), None, None, None);
 
-        let standard_names: Vec<String> =
-            build_registry_with_policy(Hub::builder().build(), standard)
+        let names = |policy: ToolPolicy| -> Vec<String> {
+            build_registry_with_policy(Hub::builder().build(), policy)
                 .list()
                 .into_iter()
                 .map(|s| s.name)
-                .collect();
-        let all_names: Vec<String> = build_registry_with_policy(Hub::builder().build(), all)
-            .list()
-            .into_iter()
-            .map(|s| s.name)
-            .collect();
+                .collect()
+        };
+        let standard_names = names(standard);
+        let all_names = names(all);
+        let all_dev_names = names(all_dev);
 
         for tool_name in T6_GATE_CEREMONY_TOOLS {
-            assert!(
-                !standard.includes(Tier::Niche, tool_name),
-                "{tool_name} should be demoted out of Standard"
-            );
             assert!(
                 !standard_names.iter().any(|n| n == tool_name),
                 "{tool_name} schema should be absent from Standard"
             );
             assert!(
-                all.includes(Tier::Niche, tool_name),
-                "{tool_name} should remain available in all/Niche"
+                !all_names.iter().any(|n| n == tool_name),
+                "{tool_name} is a concluded ceremony surface and should be \
+                 hidden from profile-all by default"
             );
             assert!(
-                all_names.iter().any(|n| n == tool_name),
-                "{tool_name} schema should remain available in all/Niche"
+                all_dev_names.iter().any(|n| n == tool_name),
+                "{tool_name} should stay recoverable under the all-dev toolset"
             );
         }
     }
@@ -68569,6 +68960,12 @@ com.example.multiline, , \"Line one\nLine two\"\n";
                 .into_iter()
                 .map(|s| s.name)
                 .collect();
+        let all = ToolPolicy::from_values(None, None, None, Some("all"));
+        let all_names: Vec<String> = build_registry_with_policy(Hub::builder().build(), all)
+            .list()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
 
         for tool_name in [
             "browser_lite_probe",
@@ -68586,13 +68983,15 @@ com.example.multiline, , \"Line one\nLine two\"\n";
                 !codex_names.iter().any(|n| n == tool_name),
                 "{tool_name} schema should stay out of codex-essential"
             );
+            // 2026-07 prune: these 30d-cold tools were demoted Standard ->
+            // Niche; the broader escape hatch is now profile-all.
             assert!(
-                standard.includes(Tier::Standard, tool_name),
-                "{tool_name} should remain available in the broader standard profile"
+                !standard_names.iter().any(|n| n == tool_name),
+                "{tool_name} should be demoted out of the standard profile"
             );
             assert!(
-                standard_names.iter().any(|n| n == tool_name),
-                "{tool_name} schema should remain available in the broader standard profile"
+                all_names.iter().any(|n| n == tool_name),
+                "{tool_name} schema should remain available in the all profile"
             );
         }
     }
@@ -68630,7 +69029,9 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         // profiles, not codex-essential direct extras.
         // T6 candidate-expansion gate ceremony tools are all/Niche only and
         // must not re-enter Codex's eager direct extras.
-        assert_eq!(extras.len(), 61);
+        // 61 curated extras + 5 prune-continuity entries (2026-07: demoted
+        // Essential->Standard, kept in codex-essential by name).
+        assert_eq!(extras.len(), 66);
         assert!(extras.contains(&"ide_snapshot"));
         assert!(extras.contains(&"ide_command"));
         assert!(extras.contains(&"forum_post"));
@@ -68812,6 +69213,363 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         }
     }
 
+    /// Every ceremony-gated tool (2026-07 prune). Concluded one-shot
+    /// governance chains — hidden from ALL toolsets unless all-dev /
+    /// AGENT_BRIDGE_EXPOSE_CEREMONY re-exposes them. If you gate a new
+    /// ceremony tool at its reg_if_available site, add it here; if you
+    /// un-gate one, remove it. The assertions below fail loudly in both
+    /// drift directions.
+    const CEREMONY_GATED_TOOLS: &[&str] = &[
+        "biocortex_retrieval_opt_in_authorization_decision_packet",
+        "biocortex_retrieval_opt_in_batch_diagnostics",
+        "biocortex_retrieval_opt_in_dry_run",
+        "biocortex_retrieval_opt_in_execution_packet",
+        "biocortex_retrieval_opt_in_order_diff_packet",
+        "biocortex_retrieval_opt_in_post_implementation_review_gate",
+        "biocortex_retrieval_opt_in_redacted_order_artifact",
+        "biocortex_retrieval_opt_in_review_packet",
+        "biocortex_retrieval_opt_in_runtime_influence_decision_packet",
+        "biocortex_retrieval_opt_in_runtime_influence_review_request",
+        "biocortex_retrieval_opt_in_runtime_trial",
+        "biocortex_retrieval_opt_in_runtime_trial_review_packet",
+        "biocortex_retrieval_opt_in_store_trial",
+        "lswr_interaction_feedback_consumption_report",
+        "lswr_outcome_admissions",
+        "lswr_outcome_admissions_approval_packet",
+        "lswr_outcome_admissions_dry_run",
+        "lswr_outcome_admissions_ingest",
+        "lswr_outcome_admissions_write_preflight",
+        "lswr_readonly_bridge_display",
+        "memory_biocortex_t6_candidate_expansion_dry_run_plan",
+        "memory_biocortex_t6_candidate_expansion_dry_run_report",
+        "memory_biocortex_t6_candidate_expansion_human_review_packet",
+        "memory_biocortex_t6_candidate_expansion_owner_decision_record",
+        "memory_biocortex_t6_candidate_expansion_review_packet",
+        "memory_biocortex_t6_candidate_expansion_runtime_enablement_code_implementation_gate",
+        "memory_biocortex_t6_candidate_expansion_runtime_enablement_implementation_plan_artifact",
+        "memory_biocortex_t6_candidate_expansion_runtime_enablement_owner_decision_record",
+        "memory_biocortex_t6_candidate_expansion_runtime_enablement_review",
+        "memory_biocortex_t6_candidate_expansion_runtime_enablement_shadow_code_gate",
+        "memory_biocortex_t6_candidate_expansion_runtime_gate_code_implementation_gate",
+        "memory_biocortex_t6_candidate_expansion_runtime_gate_design_artifact",
+        "memory_biocortex_t6_candidate_expansion_runtime_gate_implementation_plan_artifact",
+        "memory_biocortex_t6_candidate_expansion_runtime_gate_owner_review_record",
+        "memory_biocortex_t6_candidate_expansion_runtime_gate_preflight",
+        "memory_biocortex_t6_candidate_expansion_shadow_execution_gate",
+        "memory_biocortex_t6_candidate_expansion_shadow_executor_invocation_report",
+        "memory_biocortex_t6_candidate_expansion_shadow_executor_preflight",
+        "memory_biocortex_t6_candidate_expansion_shadow_runtime_gate",
+        "memory_biocortex_t6_candidate_expansion_shadow_telemetry_review",
+        "memory_biocortex_t6_influence_gate",
+        "outcome_gated_consolidation_apply",
+        "outcome_gated_consolidation_apply_trial",
+        "outcome_gated_consolidation_approval_packet",
+        "outcome_gated_consolidation_status",
+        "outcome_gated_consolidation_transition_gate",
+        "trigger_recall_enforce_hold_approval_packet_validator",
+        "trigger_recall_opt_in_gated_baseline_trial",
+        "trigger_recall_opt_in_gated_batch_diagnostics",
+        "trigger_recall_opt_in_runtime_transition_gate"
+    ];
+
+    fn surface_names(
+        toolset: Option<&str>,
+        profile: Option<&str>,
+        surface: HostSurface,
+        ceremony: bool,
+    ) -> std::collections::BTreeSet<String> {
+        build_registry_with_policy_surface(
+            Hub::builder().build(),
+            ToolPolicy::from_values(toolset, None, None, profile),
+            surface,
+            ceremony,
+        )
+        .list()
+        .into_iter()
+        .map(|s| s.name)
+        .collect()
+    }
+
+    #[test]
+    fn ceremony_gated_tools_hidden_unless_opted_in() {
+        let full = HostSurface::all_available();
+        let hidden = surface_names(None, Some("all"), full, false);
+        let exposed = surface_names(None, Some("all"), full, true);
+        for name in CEREMONY_GATED_TOOLS {
+            assert!(
+                !hidden.contains(*name),
+                "{name} should be ceremony-hidden from profile-all by default"
+            );
+            assert!(
+                exposed.contains(*name),
+                "{name} should come back with ceremony exposure"
+            );
+        }
+        // Exactly the ceremony list separates the two builds — catches a new
+        // reg_if_available(ceremony) site that was not added to this pin list.
+        let diff: Vec<&String> = exposed.difference(&hidden).collect();
+        assert_eq!(
+            diff.len(),
+            CEREMONY_GATED_TOOLS.len(),
+            "ceremony-gated set drifted: {diff:?}"
+        );
+        // Live-traffic family members stay registered with ceremony OFF.
+        for name in [
+            "biocortex_retrieval_opt_in_runtime_transition_gate",
+            "biocortex_retrieval_opt_in_runtime_readiness_packet",
+            "biocortex_retrieval_opt_in_gated_store_trial",
+            "biocortex_retrieval_opt_in_gated_batch_diagnostics",
+            "biocortex_retrieval_opt_in_status",
+            "trigger_recall_opt_in_pre_policy_hold_simulation",
+            "outcome_valence_importance_apply",
+            "outcome_valence_shadow",
+            "retrieval_outcome_report",
+            "retrieval_outcome_shadow",
+        ] {
+            assert!(hidden.contains(name), "{name} must survive the ceremony gate");
+        }
+    }
+
+    #[test]
+    fn host_surface_gates_device_and_credential_families() {
+        let families: &[(&str, &[&str])] = &[
+            (
+                "android_adb",
+                &[
+                    "mobile_click",
+                    "mobile_current_focus",
+                    "mobile_health",
+                    "mobile_input_text",
+                    "mobile_install_apk",
+                    "mobile_launch_app",
+                    "mobile_list_devices",
+                    "mobile_logcat_tail",
+                    "mobile_screenshot",
+                    "mobile_ui_snapshot",
+                ],
+            ),
+            (
+                "apple_host",
+                &[
+                    "mobile_apple_status",
+                    "mobile_ios_apps",
+                    "mobile_ios_list_devices",
+                    "mobile_ios_syslog_tail",
+                    "macos_ax_probe",
+                    "macos_ax_verify",
+                ],
+            ),
+            ("brave", &["brave_web_search"]),
+            (
+                "notion",
+                &["notion_page_create", "notion_page_get", "notion_search"],
+            ),
+            (
+                "cloudflare",
+                &[
+                    "cloudflare_r2_bucket_list",
+                    "cloudflare_worker_list",
+                    "cloudflare_zone_list",
+                ],
+            ),
+            (
+                "github_api",
+                &["github_issue_create", "github_issue_list", "github_pr_list"],
+            ),
+            (
+                "gitlab_api",
+                &["gitlab_issue_create", "gitlab_issue_list", "gitlab_mr_list"],
+            ),
+            ("tailscale_api", &["tailscale_acl_get", "tailscale_acl_set"]),
+        ];
+        let baseline = surface_names(None, Some("all"), HostSurface::all_available(), true);
+        for (flag, members) in families {
+            let mut surface = HostSurface::all_available();
+            match *flag {
+                "android_adb" => surface.android_adb = false,
+                "apple_host" => surface.apple_host = false,
+                "brave" => surface.brave = false,
+                "notion" => surface.notion = false,
+                "cloudflare" => surface.cloudflare = false,
+                "github_api" => surface.github_api = false,
+                "gitlab_api" => surface.gitlab_api = false,
+                "tailscale_api" => surface.tailscale_api = false,
+                other => panic!("unknown flag {other}"),
+            }
+            let gated = surface_names(None, Some("all"), surface, true);
+            let removed: std::collections::BTreeSet<&String> =
+                baseline.difference(&gated).collect();
+            let expected: std::collections::BTreeSet<String> =
+                members.iter().map(|s| s.to_string()).collect();
+            assert_eq!(
+                removed.len(),
+                expected.len(),
+                "{flag}: gated set mismatch, removed={removed:?}"
+            );
+            for name in *members {
+                assert!(!gated.contains(*name), "{flag}=false should hide {name}");
+            }
+        }
+    }
+
+    #[test]
+    fn load_bearing_tools_survive_prune() {
+        // 30d-hot tools (2026-07 telemetry) pinned against accidental gating
+        // or demotion. Standard-profile pins first, Niche pins under all.
+        let standard = surface_names(None, Some("standard"), HostSurface::all_available(), false);
+        for name in [
+            "shell_exec",
+            "work_memory",
+            "memory_save",
+            "memory_search",
+            "memory_get",
+            "memory_list",
+            "memory_compact",
+            "forum_read",
+            "forum_post",
+            "forum_digest",
+            "plan_update",
+            "session_bootstrap",
+            "session_lifecycle_step",
+            "agent_spawn",
+            "agent_send_input",
+            "agent_session_get",
+            "agent_session_output",
+            "agent_presence_list",
+            "embed_text",
+            "outcome_valence_importance_apply",
+            "retrieval_outcome_report",
+            "retrieval_outcome_shadow",
+            "memory_graph_topology",
+            "pet_state_set",
+            "mcp_dispatch_audit",
+            "notify",
+        ] {
+            assert!(standard.contains(name), "{name} must stay in standard");
+        }
+        let all = surface_names(None, Some("all"), HostSurface::all_available(), false);
+        for name in [
+            "biocortex_retrieval_opt_in_runtime_transition_gate",
+            "biocortex_retrieval_opt_in_runtime_readiness_packet",
+            "biocortex_retrieval_opt_in_gated_store_trial",
+            "biocortex_retrieval_opt_in_gated_batch_diagnostics",
+            "trigger_recall_opt_in_pre_policy_hold_simulation",
+        ] {
+            assert!(all.contains(name), "{name} must stay in profile-all");
+        }
+    }
+
+    #[test]
+    fn cold_standard_tools_demoted_to_niche() {
+        // 2026-07 prune: 30d-cold Standard tools drop to Niche — out of the
+        // standard profile, still available under all.
+        let standard = surface_names(None, Some("standard"), HostSurface::all_available(), false);
+        let all = surface_names(None, Some("all"), HostSurface::all_available(), false);
+        for name in [
+            "codebase_search",
+            "codebase_index",
+            "agent_steer_launch",
+            "avatar_state_get",
+            "desktop_action",
+            "session_handoff",
+            "agent_inbox",
+            "system_control",
+            "vision_grounding_ocr",
+            "notifications_recent",
+            "biocortex_retrieval_opt_in_status",
+            "xiao_shu_action_request",
+        ] {
+            assert!(
+                !standard.contains(name),
+                "{name} should be demoted out of standard"
+            );
+            assert!(all.contains(name), "{name} should remain under all");
+        }
+        // Cold Essential tools drop to Standard (not further): still visible
+        // to standard-profile clients and to the name-allowlist toolsets.
+        let essential = surface_names(None, Some("essential"), HostSurface::all_available(), false);
+        for name in [
+            "skills_recommend",
+            "skills_route",
+            "skills_feedback",
+            "session_finalize",
+            "pet_state_ritual",
+        ] {
+            assert!(
+                !essential.contains(name),
+                "{name} should be demoted out of essential"
+            );
+            assert!(standard.contains(name), "{name} should remain in standard");
+        }
+        let hook = surface_names(
+            Some("hook-lifecycle"),
+            None,
+            HostSurface::all_available(),
+            false,
+        );
+        for name in ["session_finalize", "pet_state_ritual", "memory_compact"] {
+            assert!(hook.contains(name), "{name} must stay in hook-lifecycle");
+        }
+        let lean = surface_names(Some("codex-lean"), None, HostSurface::all_available(), false);
+        for name in ["skills_route", "session_finalize", "xiao_shu_action_request"] {
+            assert!(lean.contains(name), "{name} must stay in codex-lean");
+        }
+    }
+
+    #[test]
+    fn hidden_tool_report_shape() {
+        let report = hidden_tool_report(ToolPolicy::from_values(None, None, None, Some("all")));
+        assert!(report["exposed_count"].as_u64().unwrap_or(0) > 0);
+        for key in [
+            "android_adb",
+            "apple_host",
+            "brave",
+            "notion",
+            "cloudflare",
+            "github_api",
+            "gitlab_api",
+            "tailscale_api",
+        ] {
+            assert!(
+                report["host_surface"][key].is_boolean(),
+                "host_surface.{key} missing"
+            );
+        }
+        assert!(report["hidden_unavailable"].is_array());
+        assert!(report["hidden_ceremony"].is_array());
+    }
+
+    #[test]
+    fn hidden_tool_report_categories_are_correct() {
+        // Explicit inputs (no env/host dependence): adb missing + ceremony
+        // off must classify mobile tools as unavailable and t6 tools as
+        // ceremony-hidden — never the other way around.
+        let policy = ToolPolicy::from_values(None, None, None, Some("all"));
+        let mut surface = HostSurface::all_available();
+        surface.android_adb = false;
+        let report = hidden_tool_report_with(policy, surface, false);
+        let names = |key: &str| -> Vec<String> {
+            report[key]
+                .as_array()
+                .expect(key)
+                .iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        };
+        let unavailable = names("hidden_unavailable");
+        let ceremony = names("hidden_ceremony");
+        assert!(unavailable.iter().any(|n| n == "mobile_click"));
+        assert!(!unavailable.iter().any(|n| n == "memory_biocortex_t6_influence_gate"));
+        assert!(ceremony.iter().any(|n| n == "memory_biocortex_t6_influence_gate"));
+        assert!(ceremony.iter().any(|n| n == "lswr_readonly_bridge_display"));
+        assert!(!ceremony.iter().any(|n| n == "mobile_click"));
+        assert_eq!(report["host_surface"]["android_adb"], false);
+        assert_eq!(report["ceremony_tools_exposed"], false);
+        // Un-gated status observability is in neither hidden bucket.
+        assert!(!unavailable.iter().any(|n| n == "trigger_recall_opt_in_status"));
+        assert!(!ceremony.iter().any(|n| n == "trigger_recall_opt_in_status"));
+    }
+
     #[test]
     fn tool_profile_compact_accepts_legacy_aliases() {
         for raw in ["compact", "essential-plus", "Essential-Plus", "  compact "] {
@@ -68939,12 +69697,10 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     }
 
     #[test]
-    fn registry_exposes_gos_lite_snapshot_tool_in_standard_profile() {
-        // gos_lite_snapshot is registered at Tier::Standard (promoted from
-        // Niche): the SSB belief-graph synthesis over Essential-tier telemetry,
-        // so it is reachable through the default `standard` profile (and `all`),
-        // but still absent from the lean/codex name-allowlist surfaces, which
-        // gate by name rather than tier.
+    fn registry_exposes_gos_lite_snapshot_tool_in_all_profile() {
+        // gos_lite_snapshot is Tier::Niche (2026-07 prune demoted it out of
+        // standard after 30d of zero calls): reachable through `all`, absent
+        // from standard and from the lean/codex name-allowlist surfaces.
         let standard = ToolPolicy::from_values(None, None, None, Some("standard"));
         let standard_names: Vec<String> =
             build_registry_with_policy(Hub::builder().build(), standard)
@@ -68952,7 +69708,8 @@ com.example.multiline, , \"Line one\nLine two\"\n";
                 .into_iter()
                 .map(|s| s.name)
                 .collect();
-        assert!(standard_names.iter().any(|n| n == "gos_lite_snapshot"));
+        // 2026-07 prune: 30d-cold, demoted back to Niche — out of standard.
+        assert!(!standard_names.iter().any(|n| n == "gos_lite_snapshot"));
 
         let all = ToolPolicy::from_values(None, None, None, Some("all"));
         let all_names: Vec<String> = build_registry_with_policy(Hub::builder().build(), all)
@@ -69392,9 +70149,13 @@ com.example.multiline, , \"Line one\nLine two\"\n";
     }
 
     #[test]
-    fn registry_exposes_browser_lite_probe_to_standard_profile() {
-        let p = ToolPolicy::from_values(None, None, None, Some("standard"));
-        assert!(p.includes(Tier::Standard, "browser_lite_probe"));
+    fn registry_exposes_browser_lite_probe_to_all_profile() {
+        // 2026-07 prune: 30d-cold, demoted Standard -> Niche alongside the
+        // rest of the browser_* family; reachable via profile-all.
+        let p = ToolPolicy::from_values(None, None, None, Some("all"));
+        assert!(p.includes(Tier::Niche, "browser_lite_probe"));
+        let standard = ToolPolicy::from_values(None, None, None, Some("standard"));
+        assert!(!standard.includes(Tier::Niche, "browser_lite_probe"));
 
         let schemas = build_registry_with_policy(Hub::builder().build(), p).list();
         let tool = schemas
@@ -70970,6 +71731,14 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         assert!(!codex_essential.includes(Tier::Niche, "lswr_outcome_admissions_approval_packet"));
         assert!(!codex_essential.includes(Tier::Niche, "lswr_outcome_admissions_write_preflight"));
         let schemas = build_registry_with_policy(Hub::builder().build(), all).list();
+        // Ceremony-gated families (2026-07 prune) need the ceremony-exposed build.
+        let ceremony_schemas = build_registry_with_policy_surface(
+            Hub::builder().build(),
+            all,
+            HostSurface::all_available(),
+            true,
+        )
+        .list();
         assert!(
             schemas.iter().any(|s| s.name == "present"),
             "present must register under the all profile"
@@ -70987,29 +71756,29 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
             "present_outcomes must register under the all profile"
         );
         assert!(
-            schemas.iter().any(|s| s.name == "lswr_outcome_admissions"),
+            ceremony_schemas.iter().any(|s| s.name == "lswr_outcome_admissions"),
             "lswr_outcome_admissions must register under the all profile"
         );
         assert!(
-            schemas
+            ceremony_schemas
                 .iter()
                 .any(|s| s.name == "lswr_outcome_admissions_dry_run"),
             "lswr_outcome_admissions_dry_run must register under the all profile"
         );
         assert!(
-            schemas
+            ceremony_schemas
                 .iter()
                 .any(|s| s.name == "lswr_outcome_admissions_approval_packet"),
             "lswr_outcome_admissions_approval_packet must register under the all profile"
         );
         assert!(
-            schemas
+            ceremony_schemas
                 .iter()
                 .any(|s| s.name == "lswr_outcome_admissions_write_preflight"),
             "lswr_outcome_admissions_write_preflight must register under the all profile"
         );
         assert!(
-            schemas
+            ceremony_schemas
                 .iter()
                 .any(|s| s.name == "lswr_outcome_admissions_ingest"),
             "lswr_outcome_admissions_ingest must register under the all profile"
@@ -71030,13 +71799,13 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
             );
         }
         assert!(
-            schemas
+            ceremony_schemas
                 .iter()
                 .any(|s| s.name == "lswr_interaction_feedback_consumption_report"),
             "lswr_interaction_feedback_consumption_report must register under the all profile"
         );
         assert!(
-            schemas
+            ceremony_schemas
                 .iter()
                 .any(|s| s.name == "lswr_readonly_bridge_display"),
             "lswr_readonly_bridge_display must register under the all profile"
@@ -71127,7 +71896,14 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
     #[test]
     fn lswr_outcome_admissions_dry_run_schema_has_no_write_switch() {
         let all = ToolPolicy::from_values(None, None, None, Some("all"));
-        let schemas = build_registry_with_policy(Hub::builder().build(), all).list();
+        // Ceremony-gated (2026-07 prune): fetch the schema from a ceremony-exposed build.
+        let schemas = build_registry_with_policy_surface(
+            Hub::builder().build(),
+            all,
+            HostSurface::all_available(),
+            true,
+        )
+        .list();
         let tool = schemas
             .iter()
             .find(|s| s.name == "lswr_outcome_admissions_dry_run")
@@ -71153,7 +71929,14 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
     #[test]
     fn lswr_outcome_admissions_approval_packet_schema_has_no_write_switch() {
         let all = ToolPolicy::from_values(None, None, None, Some("all"));
-        let schemas = build_registry_with_policy(Hub::builder().build(), all).list();
+        // Ceremony-gated (2026-07 prune): fetch the schema from a ceremony-exposed build.
+        let schemas = build_registry_with_policy_surface(
+            Hub::builder().build(),
+            all,
+            HostSurface::all_available(),
+            true,
+        )
+        .list();
         let tool = schemas
             .iter()
             .find(|s| s.name == "lswr_outcome_admissions_approval_packet")
@@ -71191,7 +71974,14 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
     #[test]
     fn lswr_outcome_admissions_write_preflight_schema_is_read_only_validator() {
         let all = ToolPolicy::from_values(None, None, None, Some("all"));
-        let schemas = build_registry_with_policy(Hub::builder().build(), all).list();
+        // Ceremony-gated (2026-07 prune): fetch the schema from a ceremony-exposed build.
+        let schemas = build_registry_with_policy_surface(
+            Hub::builder().build(),
+            all,
+            HostSurface::all_available(),
+            true,
+        )
+        .list();
         let tool = schemas
             .iter()
             .find(|s| s.name == "lswr_outcome_admissions_write_preflight")
@@ -71246,7 +72036,14 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
     #[test]
     fn lswr_outcome_admissions_ingest_schema_is_dry_run_default_write_gated() {
         let all = ToolPolicy::from_values(None, None, None, Some("all"));
-        let schemas = build_registry_with_policy(Hub::builder().build(), all).list();
+        // Ceremony-gated (2026-07 prune): fetch the schema from a ceremony-exposed build.
+        let schemas = build_registry_with_policy_surface(
+            Hub::builder().build(),
+            all,
+            HostSurface::all_available(),
+            true,
+        )
+        .list();
         let tool = schemas
             .iter()
             .find(|s| s.name == "lswr_outcome_admissions_ingest")
@@ -71986,7 +72783,14 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
     #[test]
     fn lswr_interaction_feedback_consumption_report_mcp_schema_is_explicit_report_input_only() {
         let all = ToolPolicy::from_values(None, None, None, Some("all"));
-        let schemas = build_registry_with_policy(Hub::builder().build(), all).list();
+        // Ceremony-gated (2026-07 prune): fetch the schema from a ceremony-exposed build.
+        let schemas = build_registry_with_policy_surface(
+            Hub::builder().build(),
+            all,
+            HostSurface::all_available(),
+            true,
+        )
+        .list();
         let tool = schemas
             .iter()
             .find(|s| s.name == "lswr_interaction_feedback_consumption_report")
@@ -72055,7 +72859,9 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
         );
 
         for (policy, expected) in [
-            (all, true),
+            // Ceremony-gated (2026-07 prune): hidden from profile-all too;
+            // only all-dev keeps it without the env opt-in.
+            (all, false),
             (all_dev, true),
             (standard, false),
             (codex_essential, false),
@@ -72360,7 +73166,14 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
     #[test]
     fn lswr_readonly_bridge_display_schema_is_explicit_packet_only() {
         let all = ToolPolicy::from_values(None, None, None, Some("all"));
-        let schemas = build_registry_with_policy(Hub::builder().build(), all).list();
+        // Ceremony-gated (2026-07 prune): fetch the schema from a ceremony-exposed build.
+        let schemas = build_registry_with_policy_surface(
+            Hub::builder().build(),
+            all,
+            HostSurface::all_available(),
+            true,
+        )
+        .list();
         let tool = schemas
             .iter()
             .find(|s| s.name == "lswr_readonly_bridge_display")
@@ -72420,7 +73233,20 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
             .map(|schema| schema.name)
             .collect::<Vec<_>>();
 
-        assert!(all_names
+        // Ceremony-gated (2026-07 prune): absent from plain profile-all,
+        // recoverable under all-dev.
+        assert!(!all_names
+            .iter()
+            .any(|name| name == "lswr_readonly_bridge_display"));
+        let all_dev_names = build_registry_with_policy(
+            Hub::builder().build(),
+            ToolPolicy::from_values(Some("all-dev"), None, None, None),
+        )
+        .list()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect::<Vec<_>>();
+        assert!(all_dev_names
             .iter()
             .any(|name| name == "lswr_readonly_bridge_display"));
         assert!(!standard_names
@@ -72602,7 +73428,9 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
 
     #[test]
     fn desktop_action_schema_hides_host_unlock_flags() {
-        let p = ToolPolicy::from_values(Some("all"), None, None, None);
+        // 2026-07 prune demoted the mutating desktop trio to Niche — fetch
+        // the schema through profile-all.
+        let p = ToolPolicy::from_values(None, None, None, Some("all"));
         let schemas = build_registry_with_policy(Hub::builder().build(), p).list();
         let tool = schemas
             .iter()
@@ -72902,7 +73730,9 @@ print(json.dumps({"schema": "desktop_action/v1.2", "argv": sys.argv[1:]}))
 
     #[test]
     fn desktop_invoke_schema_hides_host_unlock_flags() {
-        let p = ToolPolicy::from_values(Some("all"), None, None, None);
+        // 2026-07 prune demoted the mutating desktop trio to Niche — fetch
+        // the schema through profile-all.
+        let p = ToolPolicy::from_values(None, None, None, Some("all"));
         let schemas = build_registry_with_policy(Hub::builder().build(), p).list();
         let tool = schemas
             .iter()
@@ -76618,12 +77448,15 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(props.get("memory_search").is_none());
         assert!(props.get("raw_content").is_none());
 
-        let names: Vec<String> = build_registry_with_policy(
+        let names: Vec<String> = build_registry_with_policy_surface(
             Hub::builder().build(),
             ToolPolicy {
                 set: ToolSet::Profile,
                 profile: ToolProfile::All,
             },
+            HostSurface::all_available(),
+            // Ceremony-gated (2026-07 prune): reachable via all-dev / env opt-in.
+            true,
         )
         .list()
         .into_iter()
@@ -76652,12 +77485,15 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(props.get("execute").is_none());
         assert!(props.get("confirm").is_none());
 
-        let names: Vec<String> = build_registry_with_policy(
+        let names: Vec<String> = build_registry_with_policy_surface(
             Hub::builder().build(),
             ToolPolicy {
                 set: ToolSet::Profile,
                 profile: ToolProfile::All,
             },
+            HostSurface::all_available(),
+            // Ceremony-gated (2026-07 prune): reachable via all-dev / env opt-in.
+            true,
         )
         .list()
         .into_iter()
@@ -79597,12 +80433,15 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(props.get("memory_search").is_none());
         assert!(props.get("raw_content").is_none());
 
-        let names: Vec<String> = build_registry_with_policy(
+        let names: Vec<String> = build_registry_with_policy_surface(
             Hub::builder().build(),
             ToolPolicy {
                 set: ToolSet::Profile,
                 profile: ToolProfile::All,
             },
+            HostSurface::all_available(),
+            // Ceremony-gated (2026-07 prune): reachable via all-dev / env opt-in.
+            true,
         )
         .list()
         .into_iter()
@@ -79769,12 +80608,15 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(props.get("raw_content").is_none());
         assert!(props.get("mutate").is_none());
 
-        let names: Vec<String> = build_registry_with_policy(
+        let names: Vec<String> = build_registry_with_policy_surface(
             Hub::builder().build(),
             ToolPolicy {
                 set: ToolSet::Profile,
                 profile: ToolProfile::All,
             },
+            HostSurface::all_available(),
+            // Ceremony-gated (2026-07 prune): reachable via all-dev / env opt-in.
+            true,
         )
         .list()
         .into_iter()
@@ -80282,12 +81124,15 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(props.get("raw_content").is_none());
         assert!(props.get("mutate").is_none());
 
-        let names: Vec<String> = build_registry_with_policy(
+        let names: Vec<String> = build_registry_with_policy_surface(
             Hub::builder().build(),
             ToolPolicy {
                 set: ToolSet::Profile,
                 profile: ToolProfile::All,
             },
+            HostSurface::all_available(),
+            // Ceremony-gated (2026-07 prune): reachable via all-dev / env opt-in.
+            true,
         )
         .list()
         .into_iter()
@@ -80486,6 +81331,21 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(props.get("raw_content").is_none());
         assert!(props.get("mutate").is_none());
 
+        // Ceremony-gated (2026-07 prune): hidden even from profile-all by
+        // default, reachable via all-dev / AGENT_BRIDGE_EXPOSE_CEREMONY.
+        let ceremony_names: Vec<String> = build_registry_with_policy_surface(
+            Hub::builder().build(),
+            ToolPolicy {
+                set: ToolSet::Profile,
+                profile: ToolProfile::All,
+            },
+            HostSurface::all_available(),
+            true,
+        )
+        .list()
+        .into_iter()
+        .map(|schema| schema.name)
+        .collect();
         let all_names: Vec<String> = build_registry_with_policy(
             Hub::builder().build(),
             ToolPolicy {
@@ -80497,19 +81357,8 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         .into_iter()
         .map(|schema| schema.name)
         .collect();
-        let standard_names: Vec<String> = build_registry_with_policy(
-            Hub::builder().build(),
-            ToolPolicy {
-                set: ToolSet::Profile,
-                profile: ToolProfile::Standard,
-            },
-        )
-        .list()
-        .into_iter()
-        .map(|schema| schema.name)
-        .collect();
-        assert!(all_names.contains(&schema.name));
-        assert!(!standard_names.contains(&schema.name));
+        assert!(ceremony_names.contains(&schema.name));
+        assert!(!all_names.contains(&schema.name));
     }
 
     #[tokio::test]
@@ -82445,12 +83294,15 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(props.get("apply").is_none());
         assert!(props.get("dry_run").is_none());
 
-        let names: Vec<String> = build_registry_with_policy(
+        let names: Vec<String> = build_registry_with_policy_surface(
             Hub::builder().build(),
             ToolPolicy {
                 set: ToolSet::Profile,
                 profile: ToolProfile::All,
             },
+            HostSurface::all_available(),
+            // Ceremony-gated (2026-07 prune): reachable via all-dev / env opt-in.
+            true,
         )
         .list()
         .into_iter()
@@ -82736,12 +83588,15 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(props.get("dry_run").is_none());
         assert!(props.get("execute").is_none());
 
-        let names: Vec<String> = build_registry_with_policy(
+        let names: Vec<String> = build_registry_with_policy_surface(
             Hub::builder().build(),
             ToolPolicy {
                 set: ToolSet::Profile,
                 profile: ToolProfile::All,
             },
+            HostSurface::all_available(),
+            // Ceremony-gated (2026-07 prune): reachable via all-dev / env opt-in.
+            true,
         )
         .list()
         .into_iter()
@@ -83129,12 +83984,15 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(props.get("apply").is_none());
         assert!(props.get("execute").is_none());
 
-        let names: Vec<String> = build_registry_with_policy(
+        let names: Vec<String> = build_registry_with_policy_surface(
             Hub::builder().build(),
             ToolPolicy {
                 set: ToolSet::Profile,
                 profile: ToolProfile::All,
             },
+            HostSurface::all_available(),
+            // Ceremony-gated (2026-07 prune): reachable via all-dev / env opt-in.
+            true,
         )
         .list()
         .into_iter()
@@ -83464,12 +84322,15 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(props.get("confirm_apply").is_some());
         assert!(props.get("max_apply_per_pass").is_some());
 
-        let names: Vec<String> = build_registry_with_policy(
+        let names: Vec<String> = build_registry_with_policy_surface(
             Hub::builder().build(),
             ToolPolicy {
                 set: ToolSet::Profile,
                 profile: ToolProfile::All,
             },
+            HostSurface::all_available(),
+            // Ceremony-gated (2026-07 prune): reachable via all-dev / env opt-in.
+            true,
         )
         .list()
         .into_iter()

@@ -1,21 +1,21 @@
 {
   "checks": [
     {
-      "evidence": "registered profiles match expected all-profile/all-dev exposure only",
+      "evidence": "registered profiles match expected ceremony-gated (all-dev only) exposure",
       "label": "profile_matrix",
       "required": true,
       "tone": "success",
       "verdict": "passed"
     },
     {
-      "evidence": "profile=all exposes lswr_readonly_bridge_display",
-      "label": "all_profile_visible",
+      "evidence": "profile=all hides lswr_readonly_bridge_display (ceremony-gated, 2026-07 prune)",
+      "label": "all_profile_hidden",
       "required": true,
       "tone": "success",
       "verdict": "passed"
     },
     {
-      "evidence": "toolset=all-dev exposes lswr_readonly_bridge_display through all profile",
+      "evidence": "toolset=all-dev exposes lswr_readonly_bridge_display",
       "label": "all_dev_visible",
       "required": true,
       "tone": "success",
@@ -36,7 +36,7 @@
       "verdict": "passed"
     },
     {
-      "evidence": "all-profile registry includes a schema for the tool",
+      "evidence": "all-dev (ceremony-exposed) registry includes a schema for the tool",
       "label": "schema_present",
       "required": true,
       "tone": "success",
@@ -59,7 +59,7 @@
   ],
   "guidance": [
     "Use this report as post-registry evidence for profile exposure; live MCP clients still need redeploy/reconnect before their tool list changes.",
-    "The wrapper remains all-profile/all-dev only; do not add it to codex-essential extras without a separate acceptance slice.",
+    "The wrapper is ceremony-gated (2026-07 prune): all-dev / AGENT_BRIDGE_EXPOSE_CEREMONY only; do not add it to codex-essential extras without a separate acceptance slice.",
     "Use the P34 tool with an explicit report_packet object, not host paths or live runtime handles."
   ],
   "profile_rows": [
@@ -72,11 +72,11 @@
       "toolset": "profile"
     },
     {
-      "expected_registered": true,
+      "expected_registered": false,
       "label": "profile-all",
       "matches_expected": true,
       "profile": "all",
-      "registered": true,
+      "registered": false,
       "toolset": "profile"
     },
     {
@@ -128,7 +128,7 @@
       "toolset": "all-dev"
     }
   ],
-  "report_markdown": "# LSWR Read-Only Bridge MCP Surface\n\nVerdict: `passed`\n\n## Profiles\n\n- `profile-standard`: registered=`false` expected=`false`\n- `profile-all`: registered=`true` expected=`true`\n- `codex-essential`: registered=`false` expected=`false`\n- `codex-lean`: registered=`false` expected=`false`\n- `claude-standard`: registered=`false` expected=`false`\n- `gemini-lean`: registered=`false` expected=`false`\n- `hook-lifecycle`: registered=`false` expected=`false`\n- `all-dev`: registered=`true` expected=`true`\n\n## Checks\n\n- `profile_matrix`: `passed` (success) - registered profiles match expected all-profile/all-dev exposure only\n- `all_profile_visible`: `passed` (success) - profile=all exposes lswr_readonly_bridge_display\n- `all_dev_visible`: `passed` (success) - toolset=all-dev exposes lswr_readonly_bridge_display through all profile\n- `standard_hidden`: `passed` (success) - standard/default profile hides lswr_readonly_bridge_display\n- `codex_essential_hidden`: `passed` (success) - codex-essential hides lswr_readonly_bridge_display\n- `schema_present`: `passed` (success) - all-profile registry includes a schema for the tool\n- `explicit_packet_only`: `passed` (success) - schema exposes only required report_packet and denies additional properties\n- `forbidden_inputs_absent`: `passed` (success) - path/live-runtime/gui-capture/mutation inputs are absent from the schema\n",
+  "report_markdown": "# LSWR Read-Only Bridge MCP Surface\n\nVerdict: `passed`\n\n## Profiles\n\n- `profile-standard`: registered=`false` expected=`false`\n- `profile-all`: registered=`false` expected=`false`\n- `codex-essential`: registered=`false` expected=`false`\n- `codex-lean`: registered=`false` expected=`false`\n- `claude-standard`: registered=`false` expected=`false`\n- `gemini-lean`: registered=`false` expected=`false`\n- `hook-lifecycle`: registered=`false` expected=`false`\n- `all-dev`: registered=`true` expected=`true`\n\n## Checks\n\n- `profile_matrix`: `passed` (success) - registered profiles match expected ceremony-gated (all-dev only) exposure\n- `all_profile_hidden`: `passed` (success) - profile=all hides lswr_readonly_bridge_display (ceremony-gated, 2026-07 prune)\n- `all_dev_visible`: `passed` (success) - toolset=all-dev exposes lswr_readonly_bridge_display\n- `standard_hidden`: `passed` (success) - standard/default profile hides lswr_readonly_bridge_display\n- `codex_essential_hidden`: `passed` (success) - codex-essential hides lswr_readonly_bridge_display\n- `schema_present`: `passed` (success) - all-dev (ceremony-exposed) registry includes a schema for the tool\n- `explicit_packet_only`: `passed` (success) - schema exposes only required report_packet and denies additional properties\n- `forbidden_inputs_absent`: `passed` (success) - path/live-runtime/gui-capture/mutation inputs are absent from the schema\n",
   "safety_boundary": {
     "adds_additional_mcp_tool": false,
     "gui_capture": false,
@@ -170,7 +170,6 @@
   },
   "verdict": "passed",
   "visible_in": [
-    "profile-all",
     "all-dev"
   ]
 }

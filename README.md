@@ -626,14 +626,28 @@ socket; bind `127.0.0.1:7878` if you want local-only.
 The full registry is **~296 tools** (2026-07 count), gated per client by
 toolsets/tiers (`claude-standard`, `codex-essential`, `gemini-lean`,
 `hook-lifecycle`, … — see `AGENT_BRIDGE_TOOLSET` above), so no client sees
-all of them at once. The table below is the stable core subset; discover
-the live surface with the `capabilities` tool and audit real traffic with
-`mcp_dispatch_audit`.
+all of them at once. On top of the toolset gates, two availability gates
+trim tools that could not work anyway (2026-07 prune):
+
+- **Host surface** — device/credential-backed families (`mobile_*`,
+  `macos_ax_*`, `brave`/`notion`/`cloudflare`/`github`/`gitlab`/`tailscale`)
+  are only registered when the backing binary/token is present (e.g. `adb`
+  on PATH, `GITHUB_TOKEN` set). `AGENT_BRIDGE_EXPOSE_UNAVAILABLE=1` restores
+  the full nominal surface.
+- **Ceremony gate** — concluded one-shot governance-ceremony surfaces
+  (review packets, decision records, gate chains from finished arcs) are
+  hidden from every profile including `all`. Re-expose with
+  `AGENT_BRIDGE_EXPOSE_CEREMONY=1` or the `all-dev` toolset when a new gate
+  cycle starts.
+
+The table below is the stable core subset; discover the live surface with
+the `capabilities` tool, audit real traffic with `mcp_dispatch_audit`, and
+ask `mcp_config_audit` (`tool_surface`) what is hidden on this host and why.
 
 | Group | Tool | What Claude can do |
 |-------|------|--------------------|
 | notify | `notify` | Ping the human via desktop notification |
-| | `notifications_recent` | Self-check past pings to avoid duplicates |
+| | `notifications_recent` | Self-check past pings to avoid duplicates (Niche since the 2026-07 prune — needs profile `all`) |
 | | `osc_parse` | Parse OSC 9/99/777 sequences and dispatch |
 | terminal | `terminal_list` | Discover panes (Kitty / Zellij / WezTerm) |
 | | `terminal_send_keys` | Type into a sibling pane |
@@ -672,15 +686,15 @@ the live surface with the `capabilities` tool and audit real traffic with
 | | `memory_orphan_inventory` | Scoped, read-only inventory of remaining orphan memories by kind/tag/age/key |
 | | `memory_graph_export` | Export memory graph as Graphviz DOT or JSON (v0.11) |
 | | `memory_auto_curate` | Automated batch curation from `session_handoff` memories (v0.12) |
-| multi-session | `agent_message` | Append JSON payload to another session's inbox (`agent_messages`, SQLite v10 / W6) |
-| | `agent_inbox` | Fetch inbox rows (`since_id`, `unread_only`, `limit`) |
+| multi-session | `agent_message` | Append JSON payload to another session's inbox (`agent_messages`, SQLite v10 / W6; Niche since the 2026-07 prune — the forum tools are the live path) |
+| | `agent_inbox` | Fetch inbox rows (`since_id`, `unread_only`, `limit`; Niche since the 2026-07 prune) |
 | plan | `plan_save` | Persist a structured task plan (steps, deps, per-step status) to SQLite (W5) |
 | | `plan_load` | Load plan + `progress` / `next_step_id` summary |
 | | `plan_update` | Set one step's status by id |
 | session | `session_bootstrap` | Build a compact memory bootstrap block for the current session |
 | | `session_curate` | Extract structured memories from conversation text (two-pass pipeline) |
 | | `session_finalize` | Session-end: importance decay + compact stale memories + optional export |
-| | `session_handoff` | Structured JSON brief: todos + `session_handoff` memories + git snapshot (W3) |
+| | `session_handoff` | Structured JSON brief: todos + `session_handoff` memories + git snapshot (W3; Niche since the 2026-07 prune — `session_lifecycle_step` is the live successor) |
 | | `session_lifecycle_step` | Dispatch `bootstrap` / `precompact` (curate+finalize) / `finalize` in one call |
 | meta | `capabilities` | Report what agent-bridge can do in this environment |
 | | `readiness_audit` | Read-only readiness snapshot over setup/tool profiles, hooks, skills, audit surfaces, and ECC-derived non-goals |

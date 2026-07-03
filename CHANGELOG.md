@@ -8,6 +8,32 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Changed
+- **MCP tool-surface prune** (30-day all-source telemetry driven; 294 exposed
+  / 94 with traffic → standard profile 145→96, profile-all 294→~215 on a
+  typical host). Three mechanisms, each with an escape hatch:
+  - *Ceremony gate*: 50 concluded governance-ceremony tools (BioCortex T6
+    candidate-expansion family, LSWR outcome admissions, outcome-gated
+    consolidation, retrieval opt-in ceremony ladder, cold trigger-recall
+    gates) are hidden from every toolset **including `all`**. Re-expose via
+    `AGENT_BRIDGE_EXPOSE_CEREMONY=1` or the `all-dev` toolset. Exactly these
+    family members stay registered: the four live biocortex runtime tools
+    (`runtime_transition_gate`, `runtime_readiness_packet`, `gated_store_trial`,
+    `gated_batch_diagnostics`), both read-only status tools
+    (`biocortex_retrieval_opt_in_status`, `trigger_recall_opt_in_status`), and
+    `trigger_recall_opt_in_pre_policy_hold_simulation`.
+  - *Host-surface gating*: device/credential-backed families (`mobile_*`
+    without `adb`, `mobile_ios_*`/`macos_ax_*` off macOS, brave/notion/
+    cloudflare/github/gitlab/tailscale without their tokens) are not
+    registered at all. `AGENT_BRIDGE_EXPOSE_UNAVAILABLE=1` restores them.
+  - *Tier demotions*: 43 cold Standard tools → Niche (codebase_*,
+    agent_steer_*, avatar_*, mutating desktop trio, session reflections,
+    research shadow surfaces, system_control, …); 5 cold Essential →
+    Standard (skills_*, session_finalize, pet_state_ritual). The
+    name-allowlist toolsets keep every tool they listed, and the five
+    Essential demotions were added to the codex-essential extras so that
+    surface is byte-identical to before.
+  `mcp_config_audit` gains a `tool_surface` section (what is hidden on this
+  host and why); the registry-build log now prints the surface flags.
 - **Distribution policy: source only.** agent-bridge no longer publishes
   prebuilt release binaries. Code is published to both GitHub and GitLab;
   install via `cargo install --git` or a source checkout (see README

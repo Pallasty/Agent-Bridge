@@ -5,7 +5,7 @@ use ab_bridge::mcp_tools::{
 use serde_json::Value;
 
 #[test]
-fn mcp_surface_report_exposes_candidate_only_under_all_profiles() {
+fn mcp_surface_report_exposes_candidate_under_all_dev_only() {
     let report = lswr_interaction_feedback_consumption_report_mcp_surface_report();
 
     assert_eq!(
@@ -22,13 +22,11 @@ fn mcp_surface_report_exposes_candidate_only_under_all_profiles() {
         "IMPLEMENTED_AS_NICHE_MCP_TOOL"
     );
     assert_eq!(report["verdict"], "passed");
-    assert_eq!(
-        report["visible_in"],
-        serde_json::json!(["profile-all", "all-dev"])
-    );
-    assert_eq!(report["schema_present_in_all_profile"], true);
+    // Ceremony-gated (2026-07 prune): hidden from profile-all by default.
+    assert_eq!(report["visible_in"], serde_json::json!(["all-dev"]));
+    assert_eq!(report["schema_present_in_all_dev"], true);
 
-    assert_profile(&report, "profile-all", true);
+    assert_profile(&report, "profile-all", false);
     assert_profile(&report, "all-dev", true);
     assert_profile(&report, "profile-standard", false);
     assert_profile(&report, "codex-essential", false);
@@ -92,7 +90,7 @@ fn mcp_surface_report_lists_required_checks_and_markdown() {
 
     for label in [
         "profile_matrix",
-        "all_profile_visible",
+        "all_profile_hidden",
         "all_dev_visible",
         "standard_hidden",
         "codex_essential_hidden",
@@ -109,7 +107,7 @@ fn mcp_surface_report_lists_required_checks_and_markdown() {
     let markdown = report["report_markdown"].as_str().expect("markdown");
     assert!(markdown.contains("# LSWR Interaction Feedback Consumption Report MCP Surface"));
     assert!(markdown.contains("Decision: `REGISTERED_NICHE_MCP_GATE`"));
-    assert!(markdown.contains("`profile-all`: registered=`true` expected=`true`"));
+    assert!(markdown.contains("`profile-all`: registered=`false` expected=`false`"));
     assert!(markdown.contains("`all-dev`: registered=`true` expected=`true`"));
     assert!(markdown.contains("`profile-standard`: registered=`false` expected=`false`"));
     assert!(markdown.contains("`explicit_report_input_only`: `passed`"));

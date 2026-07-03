@@ -20,7 +20,7 @@ use anyhow::Result;
 use serde_json::{json, Value};
 
 use ab_bridge::instinct;
-use ab_bridge::mcp_tools::exposed_tool_count_for;
+use ab_bridge::mcp_tools::exposed_tool_count_current;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Status {
@@ -743,9 +743,11 @@ fn check_mcp_servers(dir: &Path) -> Check {
 }
 
 fn check_mcp_tool_surface() -> Check {
+    // Reality view (host detection applied): report what servers on THIS
+    // host actually expose, not the nominal fully-available surface.
     let cursor_count =
-        exposed_tool_count_for(Some("claude-standard"), Some("cursor"), Some("standard"));
-    let process_count = exposed_tool_count_for(
+        exposed_tool_count_current(Some("claude-standard"), Some("cursor"), Some("standard"));
+    let process_count = exposed_tool_count_current(
         std::env::var("AGENT_BRIDGE_TOOLSET").ok().as_deref(),
         std::env::var("AGENT_BRIDGE_CLIENT").ok().as_deref(),
         std::env::var("AGENT_BRIDGE_TOOL_PROFILE").ok().as_deref(),

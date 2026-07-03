@@ -15,7 +15,7 @@ fn mcp_surface_fixture_matches_builder() {
 }
 
 #[test]
-fn mcp_surface_reports_all_only_visibility() {
+fn mcp_surface_reports_all_dev_only_visibility() {
     let report = lswr_readonly_bridge_display_mcp_surface_report();
 
     assert_eq!(
@@ -23,12 +23,10 @@ fn mcp_surface_reports_all_only_visibility() {
         LSWR_READONLY_BRIDGE_DISPLAY_MCP_SURFACE_REPORT_SCHEMA
     );
     assert_eq!(report["verdict"], "passed");
-    assert_eq!(
-        report["visible_in"],
-        serde_json::json!(["profile-all", "all-dev"])
-    );
+    // Ceremony-gated (2026-07 prune): hidden from profile-all by default.
+    assert_eq!(report["visible_in"], serde_json::json!(["all-dev"]));
 
-    assert_profile(&report, "profile-all", true);
+    assert_profile(&report, "profile-all", false);
     assert_profile(&report, "all-dev", true);
     assert_profile(&report, "profile-standard", false);
     assert_profile(&report, "codex-essential", false);
@@ -67,7 +65,7 @@ fn mcp_surface_markdown_lists_profiles_and_checks() {
     let markdown = report["report_markdown"].as_str().expect("report markdown");
 
     assert!(markdown.contains("# LSWR Read-Only Bridge MCP Surface"));
-    assert!(markdown.contains("`profile-all`: registered=`true` expected=`true`"));
+    assert!(markdown.contains("`profile-all`: registered=`false` expected=`false`"));
     assert!(markdown.contains("`profile-standard`: registered=`false` expected=`false`"));
     assert!(markdown.contains("`codex-essential`: registered=`false` expected=`false`"));
     assert!(markdown.contains("`explicit_packet_only`: `passed`"));
