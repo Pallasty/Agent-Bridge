@@ -9,75 +9,48 @@ orchestration, and sub-agent spawning — all pluggable via Rust traits.
 
 ## Install
 
-Pick whichever is easiest:
+agent-bridge is distributed as **source only** — there are no prebuilt
+binaries or release tarballs. The code is published to two forges; either
+works as your install source:
 
-| Method | When to use | Time |
-|---|---|---|
-| **Pre-built tarball** | Default — works on macOS (Apple Silicon / Intel) and x86_64 Linux | ~10 s |
-| **`cargo install --git`** | You already have a Rust toolchain | ~2–3 min cold |
-| **Source build** | You're hacking on agent-bridge itself | same |
+- GitHub: `https://github.com/pallasting/Agent-Bridge`
+- GitLab: `https://gitlab.com/pallasting/agent-bridge`
 
-### Pre-built tarball (recommended)
+You need a Rust toolchain ([rustup](https://rustup.rs)) and a working C
+linker; no system libraries otherwise (`zbus` and `rusqlite` with the
+bundled feature are pure Rust).
 
-Prebuilt binaries are published on GitHub Releases for three targets:
-
-- `aarch64-apple-darwin` — Apple Silicon (M1/M2/M3/M4)
-- `x86_64-apple-darwin` — Intel Mac
-- `x86_64-unknown-linux-gnu` — x86_64 Linux (built on Ubuntu 22.04, runs
-  on any glibc 2.35+ distro: Ubuntu 22.04+, Debian 12+, Fedora 36+, Arch,
-  Amazon Linux 2023)
-
-Prebuilt binaries are compiled with `--no-default-features` to drop the
-ONNX sentence-transformer backend, falling back to a built-in 384-dim
-hash embedding. Memory and embedding APIs work identically; semantic
-search quality is lower. If you want the full ONNX backend, use
-`cargo install --git` instead — it builds with default features.
+### `cargo install --git` (recommended)
 
 ```bash
-# 1. Pick your target.
-TARGET=aarch64-apple-darwin           # Apple Silicon
-# TARGET=x86_64-apple-darwin          # Intel Mac
-# TARGET=x86_64-unknown-linux-gnu     # x86_64 Linux (any glibc 2.35+)
-
-# 2. Download the latest release (or pin to a specific vX.Y.Z).
-# NOTE: prebuilt tarballs are still on GitHub during the GitLab migration
-# until the equivalent GitLab CI release pipeline lands. Source repo is on
-# GitLab — see `cargo install --git` and Source build sections below.
-VER=$(curl -sSL https://api.github.com/repos/pallasting/Agent-Bridge/releases/latest \
-        | grep -o '"tag_name": *"[^"]*"' | cut -d'"' -f4)
-curl -L "https://github.com/pallasting/Agent-Bridge/releases/download/${VER}/agent-bridge-${VER}-${TARGET}.tar.gz" \
-   | tar -xz -C /tmp
-install -m 755 "/tmp/agent-bridge-${VER}-${TARGET}/agent-bridge" ~/.local/bin/agent-bridge
-```
-
-Then jump to **[Configure](#configure)** below.
-
-> **Windows users:** v0.1 ships Linux + macOS only. Run agent-bridge inside
-> WSL2 (Ubuntu) — there is no native Windows build yet. See `docs/` for the
-> Windows port roadmap.
-
-### `cargo install --git` (any platform with Rust)
-
-```bash
+cargo install --git https://github.com/pallasting/Agent-Bridge.git --bin agent-bridge
+# or from GitLab:
 cargo install --git https://gitlab.com/pallasting/agent-bridge.git --bin agent-bridge
 ```
 
-Then jump to **[Configure](#configure)**.
+Cold compile ≈ 2–3 min on a modern laptop. Builds with default features,
+including the local ONNX sentence-transformer embedding backend. Then jump
+to **[Configure](#configure)**.
 
-### Source build
+### Source build (for hacking on agent-bridge itself)
 
 ```bash
-git clone git@gitlab.com:pallasting/agent-bridge.git ~/agent-bridge
+git clone https://github.com/pallasting/Agent-Bridge.git ~/agent-bridge
+# or: git clone git@gitlab.com:pallasting/agent-bridge.git ~/agent-bridge
 cd ~/agent-bridge && cargo build --release
 ```
 
-Cold compile ≈ 2–3 min on a modern laptop; incremental < 15 s. The
-binary lands at `target/release/agent-bridge`. Then jump to
-**[Configure](#configure)**.
+Incremental rebuilds < 15 s. The binary lands at
+`target/release/agent-bridge`. Then jump to **[Configure](#configure)**.
 
-> **Linux notes for source builds:** no system libraries required —
-> `zbus` (D-Bus client) and `rusqlite` (SQLite, bundled feature) are
-> both pure Rust. You only need `cargo` and a working C linker.
+> **Lower-footprint build:** add `--no-default-features` to drop the ONNX
+> embedding backend and fall back to the built-in 384-dim hash embedding —
+> a ~3× smaller binary with no model download. Memory and embedding APIs
+> work identically; semantic search quality is lower.
+
+> **Windows users:** Linux + macOS only. Run agent-bridge inside WSL2
+> (Ubuntu) — there is no native Windows build yet. See `docs/` for the
+> Windows port roadmap.
 
 ## Configure
 

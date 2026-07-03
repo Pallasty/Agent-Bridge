@@ -7,6 +7,15 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+- **Distribution policy: source only.** agent-bridge no longer publishes
+  prebuilt release binaries. Code is published to both GitHub and GitLab;
+  install via `cargo install --git` or a source checkout (see README
+  "Install"). The GitHub `release.yml` workflow and the GitLab tag-driven
+  `build:release:linux` / `publish:release` jobs are removed; version tags
+  (`v*`) remain as source markers. Existing v0.x GitHub releases stay
+  downloadable but frozen.
+
 ## [0.14.0] - 2026-07-02
 
 **Theme: interactive multi-agent PTY fan-out + the memory learning loop goes live.**

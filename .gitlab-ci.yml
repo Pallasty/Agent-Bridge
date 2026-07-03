@@ -1,30 +1,23 @@
 # GitLab CI/CD for agent-bridge
 #
-# Replicates the equivalent logic in .github/workflows/{ci,release}.yml on
-# GitLab Shared Runners. Coverage is **Linux x86_64 only** on the free
-# tier — macOS prebuilts continue from the GitHub workflow until the user
-# either opts into GitLab SaaS macOS runners (paid) or wires self-hosted
-# Apple Silicon. See README "install" section for the source-of-truth on
-# which platforms come from where.
+# Replicates the CI logic in .github/workflows/ci.yml on GitLab Shared
+# Runners. Coverage is **Linux x86_64 only** on the free tier.
+#
+# Distribution policy (2026-07-03): agent-bridge ships SOURCE ONLY — no
+# prebuilt binaries and no release pipelines. Users install with
+# `cargo install --git` or a source checkout (see README "Install").
+# Version tags (v*) are source markers and intentionally trigger nothing.
 #
 # Triggers:
 #   - merge_request_event / push to master  → test:linux
-#   - tag matching v*                       → build:release:linux + publish:release
 #
 # Notes:
-#   - `image: rust:bookworm` ships Rust stable; `rust-toolchain.toml`
+#   - `image: rust:trixie` ships Rust stable; `rust-toolchain.toml`
 #     pins channel to `stable`, so this matches.
 #   - Cargo cache is keyed on Cargo.lock — invalidates on dep bumps.
-#   - Release artifacts are uploaded to the project's Generic Package
-#     Registry, then the release-cli attaches them as Release links.
-#     The Generic Package Registry is enabled by default on GitLab.com
-#     and counts against project storage; if you ever exceed quota,
-#     prune old package versions in Packages → Generic.
 
 stages:
   - test
-  - build
-  - release
 
 variables:
   CARGO_TERM_COLOR: "always"
@@ -62,86 +55,3 @@ test:linux:
     - cargo test --workspace --no-fail-fast
     # Clippy emits warnings only — do not gate the pipeline.
     - cargo clippy --workspace --all-targets -- -W clippy::all || true
-
-# ── Release: tag-driven prebuilt + GitLab Release ──────────────────────────
-
-build:release:linux:
-  extends: .rust-base
-  stage: build
-  rules:
-    - if: $CI_COMMIT_TAG =~ /^v.*/
-  timeout: 30m
-  variables:
-    TARGET: "x86_64-unknown-linux-gnu"
-  script:
-    - rustup target add "$TARGET"
-    # --no-default-features drops the ONNX backend (fastembed + ort-sys);
-    # see release.yml comment for the full rationale.
-    - cargo build --release -p ab-bridge --bin agent-bridge --no-default-features --target "$TARGET"
-    # Smoke-test only --version / --help — guaranteed across all v* tags.
-    - "./target/${TARGET}/release/agent-bridge --version"
-    - "./target/${TARGET}/release/agent-bridge --help > /dev/null"
-    - mkdir -p dist
-    - |
-      set -euo pipefail
-      tag="$CI_COMMIT_TAG"
-      name="agent-bridge-${tag}-${TARGET}"
-      stage="$(mktemp -d)/${name}"
-      mkdir -p "$stage"
-      cp "target/${TARGET}/release/agent-bridge" "$stage/"
-      cp README.md LICENSE CHANGELOG.md "$stage/"
-      tar -czf "dist/${name}.tar.gz" -C "$(dirname "$stage")" "$name"
-      ( cd dist && sha256sum "${name}.tar.gz" > "${name}.sha256" )
-      ls -la dist/
-  artifacts:
-    paths:
-      - dist/
-    expire_in: 1 week
-
-publish:release:
-  stage: release
-  image: registry.gitlab.com/gitlab-org/release-cli:latest
-  rules:
-    - if: $CI_COMMIT_TAG =~ /^v.*/
-  needs:
-    - job: build:release:linux
-      artifacts: true
-  script:
-    # release-cli's base image is alpine; install curl for upload.
-    - apk add --no-cache curl
-    # Combine per-tarball .sha256 files into a single SHA256SUMS.
-    - |
-      set -euo pipefail
-      cd dist
-      cat *.sha256 > SHA256SUMS
-      rm -f *.sha256
-      ls -la
-      cd ..
-    # Upload each artifact to the Generic Package Registry. The release
-    # block below references these URLs as asset links.
-    - |
-      set -euo pipefail
-      for f in dist/*.tar.gz dist/SHA256SUMS; do
-        bn="$(basename "$f")"
-        echo "uploading ${bn} …"
-        curl --fail-with-body --silent --show-error \
-             --header "JOB-TOKEN: $CI_JOB_TOKEN" \
-             --upload-file "$f" \
-             "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/agent-bridge/${CI_COMMIT_TAG}/${bn}"
-        echo
-      done
-  release:
-    tag_name: "$CI_COMMIT_TAG"
-    name: "$CI_COMMIT_TAG"
-    description: |
-      Linux x86_64 prebuilt — Apple Silicon and Intel Mac prebuilts
-      remain on GitHub Releases until macOS runners are wired up here.
-      See README install instructions for which platforms come from where.
-    assets:
-      links:
-        - name: "agent-bridge-${CI_COMMIT_TAG}-x86_64-unknown-linux-gnu.tar.gz"
-          url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/agent-bridge/${CI_COMMIT_TAG}/agent-bridge-${CI_COMMIT_TAG}-x86_64-unknown-linux-gnu.tar.gz"
-          link_type: "package"
-        - name: "SHA256SUMS"
-          url: "${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/packages/generic/agent-bridge/${CI_COMMIT_TAG}/SHA256SUMS"
-          link_type: "other"
