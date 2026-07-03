@@ -3196,6 +3196,69 @@ pub trait StateStore: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// Raw material for the behavior-changing `retrieval_outcome_apply` pass —
+    /// the same per-memory aggregate shape as
+    /// [`StateStore::retrieval_outcome_shadow_rows`], but over the UNCONSUMED,
+    /// MATURE slice of the telemetry: rows not yet counted toward a prior
+    /// action (`consumed_at IS NULL`) and old enough that the used_at
+    /// attribution windows have closed (`surfaced_at <= cutoff`). The caller
+    /// computes `cutoff` ONCE per pass and hands the same value to
+    /// [`StateStore::consume_retrieval_surfacings`] so the consumed set is
+    /// exactly the aggregated set. Default is an ERROR, not an empty vec — a
+    /// backend that silently reports "nothing pending" to an apply pass would
+    /// disguise a dead learning loop as a quiet one (the memory_active_meta
+    /// lesson, 2026-07-02).
+    async fn retrieval_outcome_apply_rows(
+        &self,
+        cutoff: i64,
+    ) -> Result<Vec<RetrievalOutcomeShadowRow>> {
+        let _ = cutoff;
+        Err(ab_core::Error::Backend(
+            "retrieval_outcome_apply_rows unsupported by this store backend".into(),
+        ))
+    }
+
+    /// Mark every still-unconsumed surfacing of `key` with `surfaced_at <=
+    /// cutoff` as consumed (counted toward exactly one reinforce/decay
+    /// action). Same predicate as [`StateStore::retrieval_outcome_apply_rows`]
+    /// by construction, so a pass consumes exactly what it aggregated even if
+    /// new surfacings of the same key land mid-pass. Returns rows marked.
+    /// Default is an ERROR for the same reason as `retrieval_outcome_apply_rows`.
+    async fn consume_retrieval_surfacings(&self, key: &str, cutoff: i64) -> Result<u64> {
+        let _ = (key, cutoff);
+        Err(ab_core::Error::Backend(
+            "consume_retrieval_surfacings unsupported by this store backend".into(),
+        ))
+    }
+
+    /// ONE transaction: consume `key`'s pending mature surfacings and, iff
+    /// any were consumed, write `importance`. Returns (rows_consumed,
+    /// importance_written). Consume-first makes concurrent apply passes safe:
+    /// the race loser consumes 0 rows and must not write. Default is an ERROR
+    /// for the same reason as `retrieval_outcome_apply_rows`.
+    async fn consume_and_apply_importance(
+        &self,
+        key: &str,
+        importance: f64,
+        cutoff: i64,
+    ) -> Result<(u64, bool)> {
+        let _ = (key, importance, cutoff);
+        Err(ab_core::Error::Backend(
+            "consume_and_apply_importance unsupported by this store backend".into(),
+        ))
+    }
+
+    /// Consume pending mature surfacings whose memory is no longer active —
+    /// the apply aggregate INNER JOINs on status='active', so these rows
+    /// would otherwise sit pending forever. Returns rows marked. Default is
+    /// an ERROR for the same reason as `retrieval_outcome_apply_rows`.
+    async fn consume_orphaned_surfacings(&self, cutoff: i64) -> Result<u64> {
+        let _ = cutoff;
+        Err(ab_core::Error::Backend(
+            "consume_orphaned_surfacings unsupported by this store backend".into(),
+        ))
+    }
+
     /// v21 α — Aggregate health snapshot for the synaptic trace graph,
     /// powering the `agent-bridge dream stats` subcommand and the β
     /// trigger decision (top10/median ratio ≥ 5 indicates clusters).

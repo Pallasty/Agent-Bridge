@@ -68,6 +68,7 @@ pub mod project;
 pub mod project_identity;
 pub mod remote_steer;
 pub mod rescue;
+pub mod retrieval_outcome;
 pub mod router;
 pub mod security;
 pub mod seed_substrate;

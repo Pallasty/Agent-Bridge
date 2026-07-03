@@ -7,6 +7,30 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+- **`retrieval_outcome_apply`** (Tier::Standard): the behavior-changing
+  counterpart of `retrieval_outcome_shadow` — one reinforce/decay pass over
+  the `retrieval_surfacing` surfaced→used telemetry against live importances
+  (used ⇒ +step ceiling-capped; surfaced-never-used ⇒ −step floor-capped).
+  Schema **v40** adds a `consumed_at` marker (+ pending partial index): each
+  telemetry row is counted toward at most ONE action, in one consume-first
+  transaction per key (concurrent passes race-safe), only after a 7h
+  maturation (used_at attribution windows must close first);
+  below-threshold evidence stays pending and accumulates; clamped/zero-step
+  keys and orphaned rows (memory no longer active) are consumed and
+  reported. Dry-run by default; a confirmed pass persists a rollback-map
+  audit memory before any write and amends it with per-row outcomes after.
+- **Daemon reinforce/decay tick** (default OFF): gate
+  `AGENT_BRIDGE_RETRIEVAL_OUTCOME_APPLY=1`, cadence
+  `AB_RETRIEVAL_OUTCOME_APPLY_TICK_SECS` (default daily), rule knobs
+  `AB_RETRIEVAL_OUTCOME_APPLY_{REINFORCE_STEP,DECAY_STEP,MIN_SURFACED,FLOOR,CEILING}`
+  — shadow-tool recalibration re-points the actuator without a redeploy.
+- **`memory_retrieval_feedback(outcome=used)` now stamps `used_at`** on the
+  judged key's recent surfacings (6h window, collector-gated) — the missing
+  positive channel: search hits consumed in place never trigger the
+  `memory_get` attribution hook. The surfacing ring prune now evicts
+  consumed history before pending evidence.
+
 ### Changed
 - **MCP tool-surface prune** (30-day all-source telemetry driven; 294 exposed
   / 94 with traffic → standard profile 145→96, profile-all 294→~215 on a

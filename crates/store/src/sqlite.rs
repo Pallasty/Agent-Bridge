@@ -570,6 +570,19 @@ CREATE INDEX IF NOT EXISTS idx_retrieval_surfacing_key ON retrieval_surfacing(me
 CREATE INDEX IF NOT EXISTS idx_retrieval_surfacing_at  ON retrieval_surfacing(surfaced_at DESC);
 "#;
 
+// v40 — retrieval-outcome apply consumption marker: `consumed_at` records that
+// a surfacing row has been counted toward exactly ONE reinforce/decay action
+// by `retrieval_outcome_apply` (NULL = still pending). Rows of keys below the
+// decay threshold are deliberately left unconsumed so their evidence
+// accumulates across passes — a memory surfaced once a day must eventually
+// cross the threshold instead of having its signal silently discarded each
+// pass. The partial index keeps the pending-slice aggregate cheap as the ring
+// fills with consumed history.
+const SCHEMA_V40_RETRIEVAL_SURFACING_CONSUMED: &str = r#"
+CREATE INDEX IF NOT EXISTS idx_retrieval_surfacing_pending
+    ON retrieval_surfacing(memory_key, surfaced_at) WHERE consumed_at IS NULL;
+"#;
+
 // v32 — timestamp integrity guard for sync/export tables.
 //
 // SQLite's dynamic typing allows TEXT to land in INTEGER columns. A handful of
@@ -1615,6 +1628,46 @@ impl SqliteStore {
             if cur.as_str() == "38" {
                 c.execute_batch(SCHEMA_V39_RETRIEVAL_SURFACING)?;
                 let _ = c.execute("UPDATE schema_meta SET value='39' WHERE key='version'", []);
+            }
+
+            // ── v40: retrieval-outcome apply consumption marker. The column
+            // exists after migration; it is written only by the separately
+            // gated retrieval_outcome_apply pass. Version-gated like v38, with
+            // the same pragma_table_info guard so a partially-applied rung
+            // (column added, version bump lost) cannot fail on re-open.
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "39".to_string());
+            if cur.as_str() == "39" {
+                let exists: i64 = c
+                    .query_row(
+                        "SELECT COUNT(*) FROM pragma_table_info('retrieval_surfacing') \
+                         WHERE name='consumed_at'",
+                        [],
+                        |r| r.get(0),
+                    )
+                    .unwrap_or(0);
+                if exists == 0 {
+                    // Tolerate the concurrent-first-open race: daemon and MCP
+                    // server are separate processes; both can read version=39
+                    // and exists==0 before either commits the ALTER. The loser
+                    // must not fail its entire store open over a column the
+                    // winner just added.
+                    if let Err(e) = c.execute(
+                        "ALTER TABLE retrieval_surfacing ADD COLUMN consumed_at INTEGER",
+                        [],
+                    ) {
+                        if !e.to_string().contains("duplicate column name") {
+                            return Err(e);
+                        }
+                    }
+                }
+                c.execute_batch(SCHEMA_V40_RETRIEVAL_SURFACING_CONSUMED)?;
+                let _ = c.execute("UPDATE schema_meta SET value='40' WHERE key='version'", []);
             }
             Ok(())
         })
@@ -6847,14 +6900,17 @@ impl StateStore for SqliteStore {
                         stmt.execute(rusqlite::params![key, query, mode, rank, now])?;
                     }
                 }
-                // Ring-buffer prune: keep at most RETRIEVAL_SURFACING_RING_CAP rows,
-                // FIFO by id. Oldest rows are far past the attribution window, so
-                // this never removes a surfacing still eligible for a used_at stamp.
+                // Ring-buffer prune: keep at most RETRIEVAL_SURFACING_RING_CAP rows.
+                // Consumed rows go first (they are spent history), then FIFO by
+                // id — so pending below-threshold evidence, which v40 promises
+                // accumulates across apply passes, is the LAST thing cap
+                // pressure can evict, and oldest-first among the consumed keeps
+                // stamp-eligible young rows safe (review finding, 2026-07-03).
                 tx.execute(
                     "DELETE FROM retrieval_surfacing
                        WHERE id IN (
                            SELECT id FROM retrieval_surfacing
-                           ORDER BY id ASC
+                           ORDER BY (consumed_at IS NULL) ASC, id ASC
                            LIMIT MAX(0, (SELECT COUNT(*) FROM retrieval_surfacing) - ?1)
                        )",
                     rusqlite::params![RETRIEVAL_SURFACING_RING_CAP],
@@ -6874,6 +6930,9 @@ impl StateStore for SqliteStore {
 
     /// Outcome-collector prototype — attribute an explicit get to recent
     /// surfacings of `key` (used_at stamp). Returns rows newly marked used.
+    /// `consumed_at IS NULL` is defense in depth for the maturation boundary:
+    /// a row the apply pass already counted (as unused) must not gain a stamp
+    /// the pass can never read — report and apply would silently disagree.
     async fn attribute_retrieval_get(&self, key: &str, window_secs: i64) -> Result<u64> {
         let key = key.to_string();
         let now = now_secs();
@@ -6886,6 +6945,7 @@ impl StateStore for SqliteStore {
                         SET used_at = ?1
                       WHERE memory_key = ?2
                         AND used_at IS NULL
+                        AND consumed_at IS NULL
                         AND surfaced_at >= ?3",
                     rusqlite::params![now, key, cutoff],
                 )?;
@@ -7261,6 +7321,148 @@ impl StateStore for SqliteStore {
             })
             .await
             .map_err(|e| Error::Backend(format!("retrieval_outcome_shadow_rows: {e}")))
+    }
+
+    /// Apply-pass raw material — the shadow aggregate restricted to the
+    /// unconsumed, mature telemetry slice. `cutoff` (not a window) bounds the
+    /// young end: rows newer than it may still receive a late `used_at` stamp,
+    /// so they stay pending. The old end needs no bound — consumed rows are
+    /// excluded by predicate and the ring cap bounds total history.
+    async fn retrieval_outcome_apply_rows(
+        &self,
+        cutoff: i64,
+    ) -> Result<Vec<RetrievalOutcomeShadowRow>> {
+        self.conn
+            .call(move |c| -> RusqliteResult<Vec<RetrievalOutcomeShadowRow>> {
+                let mut stmt = c.prepare(
+                    "WITH agg AS (
+                        SELECT memory_key,
+                               COUNT(*) AS surfaced,
+                               SUM(CASE WHEN used_at IS NOT NULL THEN 1 ELSE 0 END) AS used,
+                               AVG(rank) AS avg_rank,
+                               MAX(surfaced_at) AS last_surf
+                          FROM retrieval_surfacing
+                         WHERE consumed_at IS NULL
+                           AND surfaced_at <= ?1
+                      GROUP BY memory_key
+                     )
+                     SELECT a.memory_key, a.surfaced, a.used, a.avg_rank, a.last_surf,
+                            m.importance
+                       FROM agg a
+                       JOIN memories m ON m.key = a.memory_key AND m.status = 'active'
+                   ORDER BY a.used DESC, a.surfaced DESC, a.memory_key ASC",
+                )?;
+                let rows: Vec<RetrievalOutcomeShadowRow> = stmt
+                    .query_map(rusqlite::params![cutoff], |r| {
+                        Ok(RetrievalOutcomeShadowRow {
+                            key: r.get(0)?,
+                            surfaced_count: r.get::<_, i64>(1)? as u64,
+                            used_count: r.get::<_, i64>(2)? as u64,
+                            avg_rank: r.get(3)?,
+                            last_surfaced_at: r.get(4)?,
+                            importance: r.get(5)?,
+                        })
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+                Ok(rows)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("retrieval_outcome_apply_rows: {e}")))
+    }
+
+    /// Mark `key`'s unconsumed surfacings up to `cutoff` as consumed. NOT
+    /// fail-soft: the caller must know whether consumption happened, because
+    /// an importance write whose telemetry was NOT consumed would be
+    /// double-counted by the next pass.
+    async fn consume_retrieval_surfacings(&self, key: &str, cutoff: i64) -> Result<u64> {
+        let key = key.to_string();
+        let now = now_secs();
+        self.conn
+            .call(move |c| -> RusqliteResult<u64> {
+                let n = c.execute(
+                    "UPDATE retrieval_surfacing
+                        SET consumed_at = ?1
+                      WHERE memory_key = ?2
+                        AND consumed_at IS NULL
+                        AND surfaced_at <= ?3",
+                    rusqlite::params![now, key, cutoff],
+                )?;
+                Ok(n as u64)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("consume_retrieval_surfacings: {e}")))
+    }
+
+    /// ONE transaction: consume `key`'s pending mature surfacings and, iff any
+    /// were consumed, write the importance. Consume-FIRST makes concurrent
+    /// passes (daemon tick vs a manual MCP-tool pass, possibly in different
+    /// processes) safe by construction: the race loser consumes 0 rows and
+    /// writes nothing, so one batch of evidence can never step a key twice —
+    /// and a crash can no longer land between write and consume (the
+    /// double-count direction); the residual failure mode is consumed-but-
+    /// unwritten, which loses at most one step instead of repeating it.
+    async fn consume_and_apply_importance(
+        &self,
+        key: &str,
+        importance: f64,
+        cutoff: i64,
+    ) -> Result<(u64, bool)> {
+        let key = key.to_string();
+        let importance = importance.clamp(0.0, 1.0);
+        let now = now_secs();
+        self.conn
+            .call(move |c| -> RusqliteResult<(u64, bool)> {
+                let tx = c.transaction()?;
+                let n = tx.execute(
+                    "UPDATE retrieval_surfacing
+                        SET consumed_at = ?1
+                      WHERE memory_key = ?2
+                        AND consumed_at IS NULL
+                        AND surfaced_at <= ?3",
+                    rusqlite::params![now, key, cutoff],
+                )?;
+                let wrote = if n > 0 {
+                    // Same shape as memory_set_importance: only `importance`
+                    // moves — no supersede, no timestamp churn.
+                    tx.execute(
+                        "UPDATE memories SET importance = ?2 \
+                          WHERE key = ?1 AND status = 'active'",
+                        rusqlite::params![key, importance],
+                    )? > 0
+                } else {
+                    false
+                };
+                tx.commit()?;
+                Ok((n as u64, wrote))
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("consume_and_apply_importance: {e}")))
+    }
+
+    /// Consume pending mature surfacings whose memory is no longer active
+    /// (deleted / archived / superseded). The apply aggregate INNER JOINs on
+    /// status='active', so without this sweep such rows would sit pending
+    /// forever — invisible to every pass yet occupying the pending partial
+    /// index and, worse, ambushing a memory later re-created under the same
+    /// key with stale never-used evidence (review finding, 2026-07-03).
+    async fn consume_orphaned_surfacings(&self, cutoff: i64) -> Result<u64> {
+        let now = now_secs();
+        self.conn
+            .call(move |c| -> RusqliteResult<u64> {
+                let n = c.execute(
+                    "UPDATE retrieval_surfacing
+                        SET consumed_at = ?1
+                      WHERE consumed_at IS NULL
+                        AND surfaced_at <= ?2
+                        AND memory_key NOT IN (
+                            SELECT key FROM memories WHERE status = 'active'
+                        )",
+                    rusqlite::params![now, cutoff],
+                )?;
+                Ok(n as u64)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("consume_orphaned_surfacings: {e}")))
     }
 
     async fn memory_query_stats(&self, window_secs: i64) -> Result<MemoryQueryStats> {
@@ -17685,7 +17887,7 @@ mod tests {
             .await
             .expect("inspect migrated rows");
 
-        assert_eq!(version, "39"); // v39 = retrieval_surfacing outcome telemetry table; latest after all migrations
+        assert_eq!(version, "40"); // v40 = retrieval_surfacing consumed_at marker; latest after all migrations
         assert_eq!(bad_count, 0);
         assert_eq!(mem_created, 1_779_641_229_i64);
         assert_eq!(post_created, 1_779_641_229_i64);
@@ -19432,7 +19634,7 @@ mod tests {
             })
             .await
             .expect("probe schema");
-        assert_eq!(v, "39", "schema after v39");
+        assert_eq!(v, "40", "schema after all migrations");
         assert_eq!(n, 1, "last_cofire_at present exactly once");
 
         seed_pair_for_decay(&store, "a", "b", 3, 1_000).await; // insert without last_cofire_at
@@ -19482,7 +19684,7 @@ mod tests {
             })
             .await
             .expect("probe after upgrade");
-        assert_eq!(v, "39", "re-open ran through v39");
+        assert_eq!(v, "40", "re-open ran through all migrations");
         assert_eq!(lcf, 5_000, "backfill seeded last_cofire_at from first_at");
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
@@ -19522,10 +19724,88 @@ mod tests {
             })
             .await
             .expect("probe v39 schema");
-        assert_eq!(v, "39", "schema after v39");
+        assert_eq!(v, "40", "schema after all migrations");
         assert_eq!(table_n, 1, "retrieval_surfacing table exists");
         assert_eq!(key_idx_n, 1, "key/surfaced_at index exists");
         assert_eq!(at_idx_n, 1, "surfaced_at index exists");
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn v40_schema_adds_consumed_at_column_and_pending_index() {
+        // The apply-pass consumption marker: column + partial index must exist
+        // after open, and both store-level primitives must round-trip — an
+        // aggregate over the pending slice, a cutoff-bounded consume, then an
+        // empty re-aggregate (one surfacing, one action).
+        let (dir, store) = fresh_store("v40-consumed-at").await;
+        let (v, col_n, idx_n): (String, i64, i64) = store
+            .conn
+            .call(|c| -> RusqliteResult<(String, i64, i64)> {
+                let v: String = c.query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                let col_n: i64 = c.query_row(
+                    "SELECT COUNT(*) FROM pragma_table_info('retrieval_surfacing') \
+                     WHERE name='consumed_at'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                let idx_n: i64 = c.query_row(
+                    "SELECT COUNT(*) FROM sqlite_master \
+                     WHERE type='index' AND name='idx_retrieval_surfacing_pending'",
+                    [],
+                    |r| r.get(0),
+                )?;
+                Ok((v, col_n, idx_n))
+            })
+            .await
+            .expect("probe v40 schema");
+        assert_eq!(v, "40", "schema after v40");
+        assert_eq!(col_n, 1, "consumed_at column exists exactly once");
+        assert_eq!(idx_n, 1, "pending partial index exists");
+
+        // Round-trip: one active memory, two mature surfacings.
+        store.memory_save(&mk_active("v40k")).await.expect("save");
+        store
+            .record_retrieval_surfacing(
+                &[("v40k".to_string(), 0), ("v40k".to_string(), 1)],
+                "q",
+                "fts",
+            )
+            .await
+            .expect("surface");
+        let future_cutoff = now_secs() + 10;
+        let rows = store
+            .retrieval_outcome_apply_rows(future_cutoff)
+            .await
+            .expect("apply rows");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].surfaced_count, 2);
+        let consumed = store
+            .consume_retrieval_surfacings("v40k", future_cutoff)
+            .await
+            .expect("consume");
+        assert_eq!(consumed, 2);
+        let rows = store
+            .retrieval_outcome_apply_rows(future_cutoff)
+            .await
+            .expect("apply rows after consume");
+        assert!(rows.is_empty(), "consumed rows never re-aggregate");
+        // A cutoff in the past excludes immature rows entirely.
+        store
+            .record_retrieval_surfacing(&[("v40k".to_string(), 2)], "q2", "fts")
+            .await
+            .expect("surface fresh");
+        let rows = store
+            .retrieval_outcome_apply_rows(now_secs() - 3600)
+            .await
+            .expect("apply rows immature");
+        assert!(
+            rows.is_empty(),
+            "immature rows invisible to the apply slice"
+        );
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
@@ -22829,7 +23109,7 @@ mod tests {
         let v = store.schema_meta_version().await.expect("query");
         assert_eq!(
             v.as_deref(),
-            Some("39"),
+            Some("40"),
             "if schema bumped, update both this assertion and S5 docs"
         );
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
@@ -23432,7 +23712,7 @@ mod tests {
             })
             .await
             .expect("probe schema");
-        assert_eq!(probe.0, "39", "schema must be at v39");
+        assert_eq!(probe.0, "40", "schema must be at the latest version");
         assert_eq!(
             (probe.1, probe.2, probe.3),
             (1, 1, 1),
@@ -23465,8 +23745,8 @@ mod tests {
             .expect("probe after reopen");
         assert_eq!(
             again,
-            ("39".to_string(), 2),
-            "re-open stays at v39 with both columns, no duplicate ALTER"
+            ("40".to_string(), 2),
+            "re-open stays at the latest version with both columns, no duplicate ALTER"
         );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;

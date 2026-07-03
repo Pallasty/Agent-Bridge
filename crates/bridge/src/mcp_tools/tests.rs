@@ -8280,6 +8280,8 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
     // the tool reads the wrong dir). Poison-tolerant so one failing test does not
     // cascade into false failures in the others.
     static PRESENTATIONS_DIR_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    /// Serializes tests that flip the process-global outcome-collector gate.
+    static OUTCOME_COLLECTOR_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn lswr_outcome_admissions_ingest_schema_is_dry_run_default_write_gated() {
@@ -8849,6 +8851,389 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
             (3, 1),
             "retrieval_surfacing untouched by the shadow (3 surfaced / 1 used as seeded)"
         );
+
+        let _ = std::fs::remove_dir_all(&store_dir);
+    }
+
+    #[tokio::test]
+    async fn retrieval_outcome_apply_confirm_moves_consumes_and_accumulates() {
+        // The four core apply invariants end-to-end against a real SQLite
+        // store: (1) dry-run writes and consumes nothing; (2) a confirmed
+        // pass moves importance, persists a rollback map FIRST, and consumes
+        // exactly the acted slice; (3) an immediate re-run is a no-op — one
+        // surfacing, one action; (4) below-threshold evidence is NOT consumed
+        // and accumulates until it crosses min_surfaced_for_decay.
+        use crate::retrieval_outcome::{run_apply_pass, RuleParams};
+        let (hub, store_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        let mk_rec = |key: &str, body: &str, imp: f64| ab_store::MemoryRecord {
+            key: key.into(),
+            kind: "fact".into(),
+            content: body.into(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: None,
+            created_at: 1_700_000_000,
+            updated_at: 1_700_000_000,
+            last_accessed_at: 1_700_000_000,
+            access_count: 3,
+            importance: imp,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store
+            .memory_save(&mk_rec("ra_used", "apply probe alpha beta gamma", 0.40))
+            .await
+            .expect("save used");
+        store
+            .memory_save(&mk_rec("ra_unused", "apply probe delta epsilon zeta", 0.60))
+            .await
+            .expect("save unused");
+        store
+            .memory_save(&mk_rec("ra_single", "apply probe eta theta iota", 0.50))
+            .await
+            .expect("save single");
+
+        // ra_used: surfaced once, used. ra_unused: surfaced twice, never used.
+        // ra_single: surfaced once, never used (below min_surfaced_for_decay).
+        store
+            .record_retrieval_surfacing(
+                &[("ra_used".to_string(), 0), ("ra_unused".to_string(), 1)],
+                "q1",
+                "fts",
+            )
+            .await
+            .expect("surface 1");
+        assert_eq!(
+            store.attribute_retrieval_get("ra_used", 1800).await.unwrap(),
+            1
+        );
+        store
+            .record_retrieval_surfacing(&[("ra_unused".to_string(), 2)], "q2", "fts")
+            .await
+            .expect("surface 2");
+        store
+            .record_retrieval_surfacing(&[("ra_single".to_string(), 0)], "q3", "fts")
+            .await
+            .expect("surface 3");
+
+        // Fresh rows are immature for a real-clock pass; a future `now` puts
+        // them past APPLY_MATURATION_SECS without touching the store.
+        let future_now = unix_now_secs() + 100_000;
+        let p = RuleParams::default();
+
+        // (1) Dry-run: correct preview, zero writes, zero consumption.
+        let dry = run_apply_pass(&store, &p, 200, false, future_now)
+            .await
+            .expect("dry pass");
+        assert!(dry.dry_run);
+        assert_eq!(dry.rows_considered, 3);
+        assert_eq!(dry.changes.len(), 2);
+        assert_eq!(dry.pending_below_min, 1);
+        assert_eq!((dry.applied, dry.consumed_rows), (0, 0));
+        assert!(dry.audit_memory_key.is_none());
+        let unchanged = store.memory_get("ra_used").await.unwrap().unwrap();
+        assert!((unchanged.importance - 0.40).abs() < 1e-9, "dry-run wrote");
+
+        // (2) Confirmed pass: reinforce ra_used 0.40→0.45, decay ra_unused
+        // 0.60→0.55, consume their 3 rows; ra_single stays pending.
+        let pass1 = run_apply_pass(&store, &p, 200, true, future_now)
+            .await
+            .expect("pass 1");
+        assert!(!pass1.dry_run);
+        assert_eq!(pass1.applied, 2);
+        assert_eq!(pass1.failed, 0);
+        assert_eq!(pass1.consumed_rows, 3, "1 ra_used + 2 ra_unused rows");
+        assert_eq!(pass1.pending_below_min, 1);
+        assert!((pass1.net_importance_delta - 0.0).abs() < 1e-9);
+        let used = store.memory_get("ra_used").await.unwrap().unwrap();
+        let unused = store.memory_get("ra_unused").await.unwrap().unwrap();
+        let single = store.memory_get("ra_single").await.unwrap().unwrap();
+        assert!((used.importance - 0.45).abs() < 1e-9, "reinforced");
+        assert!((unused.importance - 0.55).abs() < 1e-9, "decayed");
+        assert!((single.importance - 0.50).abs() < 1e-9, "below-min untouched");
+        let audit_key = pass1.audit_memory_key.clone().expect("audit key");
+        let audit = store
+            .memory_get(&audit_key)
+            .await
+            .expect("audit get")
+            .expect("audit row exists");
+        assert!(audit.content.contains("ra_used") && audit.content.contains("0.4"));
+        assert!(audit.tags.iter().any(|t| t == "rollback_map"));
+
+        // (3) Immediate re-run: consumed evidence is gone; only the pending
+        // below-min key remains, still untouched. One surfacing, one action.
+        let pass2 = run_apply_pass(&store, &p, 200, true, future_now)
+            .await
+            .expect("pass 2");
+        assert_eq!(pass2.rows_considered, 1, "only ra_single's pending row");
+        assert_eq!(pass2.changes.len(), 0);
+        assert_eq!((pass2.applied, pass2.consumed_rows), (0, 0));
+        assert_eq!(pass2.pending_below_min, 1);
+        assert!(pass2.audit_memory_key.is_none(), "no writes → no audit");
+        let used = store.memory_get("ra_used").await.unwrap().unwrap();
+        assert!((used.importance - 0.45).abs() < 1e-9, "no double reinforce");
+
+        // (4) A second unused surfacing crosses the threshold: accumulated
+        // evidence (one row per pass-epoch) now decays ra_single.
+        store
+            .record_retrieval_surfacing(&[("ra_single".to_string(), 1)], "q4", "fts")
+            .await
+            .expect("surface 4");
+        let pass3 = run_apply_pass(&store, &p, 200, true, future_now)
+            .await
+            .expect("pass 3");
+        assert_eq!(pass3.applied, 1);
+        assert_eq!(pass3.consumed_rows, 2, "both accumulated ra_single rows");
+        let single = store.memory_get("ra_single").await.unwrap().unwrap();
+        assert!(
+            (single.importance - 0.45).abs() < 1e-9,
+            "below-min evidence accumulated across passes, then decayed once"
+        );
+
+        let _ = std::fs::remove_dir_all(&store_dir);
+    }
+
+    #[tokio::test]
+    async fn retrieval_outcome_apply_consumes_clamped_keys_without_writes() {
+        // Keys already at the floor (or ceiling) can't move, but their
+        // telemetry must still be consumed — otherwise the same dead slice
+        // re-aggregates forever.
+        use crate::retrieval_outcome::{run_apply_pass, RuleParams};
+        let (hub, store_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        store
+            .memory_save(&ab_store::MemoryRecord {
+                key: "ra_floor".into(),
+                kind: "fact".into(),
+                content: "clamped probe kappa lambda mu".into(),
+                tags: vec![],
+                related_keys: vec![],
+                scope: None,
+                created_at: 1_700_000_000,
+                updated_at: 1_700_000_000,
+                last_accessed_at: 1_700_000_000,
+                access_count: 1,
+                importance: 0.10,
+                status: String::new(),
+                trigger_pattern: None,
+                superseded_by: None,
+            })
+            .await
+            .expect("save");
+        store
+            .record_retrieval_surfacing(
+                &[("ra_floor".to_string(), 0), ("ra_floor".to_string(), 1)],
+                "q",
+                "fts",
+            )
+            .await
+            .expect("surface");
+
+        let future_now = unix_now_secs() + 100_000;
+        let pass = run_apply_pass(&store, &RuleParams::default(), 200, true, future_now)
+            .await
+            .expect("pass");
+        assert_eq!(pass.at_floor, 1);
+        assert_eq!(pass.consumed_noaction_keys, 1);
+        assert_eq!(pass.consumed_rows, 2);
+        assert_eq!(pass.applied, 0);
+        let row = store.memory_get("ra_floor").await.unwrap().unwrap();
+        assert!((row.importance - 0.10).abs() < 1e-9, "clamped key untouched");
+
+        let rerun = run_apply_pass(&store, &RuleParams::default(), 200, true, future_now)
+            .await
+            .expect("rerun");
+        assert_eq!(rerun.rows_considered, 0, "clamped slice fully consumed");
+
+        let _ = std::fs::remove_dir_all(&store_dir);
+    }
+
+    #[tokio::test]
+    async fn retrieval_outcome_apply_sweeps_orphaned_telemetry() {
+        // A memory surfaced and then deleted/archived is invisible to the
+        // aggregate's status='active' JOIN — without the orphan sweep its
+        // pending rows would re-scan forever and ambush a later re-creation
+        // of the same key with stale never-used evidence.
+        use crate::retrieval_outcome::{run_apply_pass, RuleParams};
+        let (hub, store_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        store
+            .memory_save(&ab_store::MemoryRecord {
+                key: "ra_orphan".into(),
+                kind: "fact".into(),
+                content: "orphan probe tau upsilon phi".into(),
+                tags: vec![],
+                related_keys: vec![],
+                scope: None,
+                created_at: 1_700_000_000,
+                updated_at: 1_700_000_000,
+                last_accessed_at: 1_700_000_000,
+                access_count: 1,
+                importance: 0.50,
+                status: String::new(),
+                trigger_pattern: None,
+                superseded_by: None,
+            })
+            .await
+            .expect("save");
+        store
+            .record_retrieval_surfacing(
+                &[("ra_orphan".to_string(), 0), ("ra_orphan".to_string(), 1)],
+                "q",
+                "fts",
+            )
+            .await
+            .expect("surface");
+        store.memory_delete("ra_orphan").await.expect("delete");
+
+        let future_now = unix_now_secs() + 100_000;
+        let pass = run_apply_pass(&store, &RuleParams::default(), 200, true, future_now)
+            .await
+            .expect("pass");
+        assert_eq!(pass.rows_considered, 0, "inactive key invisible to the aggregate");
+        assert_eq!(pass.orphans_consumed, 2, "orphan sweep retired both rows");
+
+        let rerun = run_apply_pass(&store, &RuleParams::default(), 200, true, future_now)
+            .await
+            .expect("rerun");
+        assert_eq!(rerun.orphans_consumed, 0, "sweep is one-shot per row");
+
+        let _ = std::fs::remove_dir_all(&store_dir);
+    }
+
+    #[tokio::test]
+    async fn retrieval_outcome_apply_tool_dry_run_hides_immature_rows() {
+        // Tool-boundary checks: default is a dry-run, and freshly-surfaced
+        // rows (younger than APPLY_MATURATION_SECS) are invisible — their
+        // used_at attribution windows are still open.
+        let (hub, store_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        store
+            .memory_save(&ab_store::MemoryRecord {
+                key: "ra_fresh".into(),
+                kind: "fact".into(),
+                content: "immature probe nu xi omicron".into(),
+                tags: vec![],
+                related_keys: vec![],
+                scope: None,
+                created_at: 1_700_000_000,
+                updated_at: 1_700_000_000,
+                last_accessed_at: 1_700_000_000,
+                access_count: 1,
+                importance: 0.50,
+                status: String::new(),
+                trigger_pattern: None,
+                superseded_by: None,
+            })
+            .await
+            .expect("save");
+        store
+            .record_retrieval_surfacing(
+                &[("ra_fresh".to_string(), 0), ("ra_fresh".to_string(), 1)],
+                "q",
+                "fts",
+            )
+            .await
+            .expect("surface");
+
+        let out = RetrievalOutcomeApplyTool::new(hub.clone())
+            .execute(json!({}), &ToolContext::default())
+            .await
+            .expect("execute");
+        let res = result_text_as_json(&out);
+        assert_eq!(
+            res["schema"],
+            json!("agent_bridge.retrieval_outcome_apply.v0")
+        );
+        assert_eq!(res["dry_run"], json!(true), "confirm_apply must default false");
+        assert_eq!(res["rows_considered"], json!(0), "immature rows invisible");
+        assert_eq!(res["applied"], json!(0));
+        assert_eq!(res["consumed_rows"], json!(0));
+        let row = store.memory_get("ra_fresh").await.unwrap().unwrap();
+        assert!((row.importance - 0.50).abs() < 1e-9);
+
+        let _ = std::fs::remove_dir_all(&store_dir);
+    }
+
+    #[tokio::test]
+    async fn retrieval_feedback_used_stamps_surfacings_when_collector_on() {
+        // The explicit `used` judgement must feed the SAME telemetry the
+        // reinforce/decay pass reads — this was the 4%-used-rate gap: search
+        // hits consumed in place never trigger a memory_get, so feedback was
+        // the missing positive channel.
+        let (hub, store_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        store
+            .memory_save(&ab_store::MemoryRecord {
+                key: "fb_target".into(),
+                kind: "fact".into(),
+                content: "feedback stamp probe pi rho sigma".into(),
+                tags: vec![],
+                related_keys: vec![],
+                scope: None,
+                created_at: 1_700_000_000,
+                updated_at: 1_700_000_000,
+                last_accessed_at: 1_700_000_000,
+                access_count: 1,
+                importance: 0.50,
+                status: String::new(),
+                trigger_pattern: None,
+                superseded_by: None,
+            })
+            .await
+            .expect("save");
+        store
+            .record_retrieval_surfacing(&[("fb_target".to_string(), 0)], "q", "fts")
+            .await
+            .expect("surface");
+
+        let out = {
+            let _env = OUTCOME_COLLECTOR_ENV_LOCK
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            std::env::set_var("AGENT_BRIDGE_OUTCOME_COLLECTOR", "1");
+            let out = MemoryRetrievalFeedbackTool::new(hub.clone())
+                .execute(
+                    json!({"outcome": "used", "memory_key": "fb_target", "query": "q"}),
+                    &ToolContext::default(),
+                )
+                .await;
+            // Always clear before releasing the lock, even on error paths.
+            std::env::remove_var("AGENT_BRIDGE_OUTCOME_COLLECTOR");
+            out.expect("execute")
+        };
+        let res = result_text_as_json(&out);
+        assert_eq!(res["status"], json!("ok"));
+        assert_eq!(
+            res["used_at_stamped"],
+            json!(1),
+            "surfacing attributed as used"
+        );
+        let telemetry = store
+            .retrieval_outcome_summary(31_536_000, 5)
+            .await
+            .expect("summary");
+        assert_eq!(
+            (telemetry.total_surfacings, telemetry.used_surfacings),
+            (1, 1)
+        );
+
+        // Gate off ⇒ no stamping (and the result reports it honestly).
+        store
+            .record_retrieval_surfacing(&[("fb_target".to_string(), 1)], "q2", "fts")
+            .await
+            .expect("surface 2");
+        let out = MemoryRetrievalFeedbackTool::new(hub.clone())
+            .execute(
+                json!({"outcome": "used", "memory_key": "fb_target", "query": "q2"}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute 2");
+        let res = result_text_as_json(&out);
+        assert_eq!(res["used_at_stamped"], json!(0), "collector off ⇒ no stamp");
 
         let _ = std::fs::remove_dir_all(&store_dir);
     }

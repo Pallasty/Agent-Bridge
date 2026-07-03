@@ -15813,6 +15813,26 @@ impl McpTool for MemoryRetrievalFeedbackTool {
             }
         }
 
+        // Outcome-collector (flag-gated): an explicit `used` judgement is the
+        // strongest positive retrieval signal there is — stamp `used_at` on
+        // the judged key's recent surfacings so the reinforce/decay pass sees
+        // it. Wider window than the memory_get hook (feedback often lands at
+        // session end, hours after the search); ≤ APPLY_MATURATION_SECS so a
+        // stamp can never chase an already-consumed row. Fail-soft: the store
+        // impl warns and returns 0 on error.
+        let mut used_at_stamped = 0u64;
+        if outcome == MemoryRetrievalFeedbackOutcome::Used && outcome_collector_enabled() {
+            if let Some(target_key) = &target_key {
+                used_at_stamped = store
+                    .attribute_retrieval_get(
+                        target_key,
+                        crate::retrieval_outcome::FEEDBACK_ATTRIBUTION_WINDOW_SECS,
+                    )
+                    .await
+                    .unwrap_or(0);
+            }
+        }
+
         Ok(ToolResult::json_text(&json!({
             "status": "ok",
             "feedback_key": feedback_key,
@@ -15822,6 +15842,7 @@ impl McpTool for MemoryRetrievalFeedbackTool {
             "edge": edge,
             "linked_related_keys": linked_related_keys,
             "importance": importance,
+            "used_at_stamped": used_at_stamped,
             "hint": "telemetry recorded; default FTS order is unchanged, but graph-aware hybrid retrieval may observe the new feedback memory and edges",
         })))
     }
@@ -23488,48 +23509,44 @@ struct RetrievalShadowChange {
     action: &'static str,
 }
 
-/// Pure rule math, separated for direct unit-testing. Classes are disjoint by
-/// construction (used > 0 vs used == 0). Monotone clamps: reinforce never
-/// LOWERS a row already above the ceiling (skip, don't pull down), decay never
-/// RAISES one already at/below the floor (skip, don't lift up) — mirroring the
-/// memory_decay_unused floor semantics. Returns (changes, at_ceiling, at_floor).
+/// Pure rule math — delegates to [`crate::retrieval_outcome::classify_rows`],
+/// the SINGLE source shared with the behavior-changing
+/// `retrieval_outcome_apply` pass, so preview and apply can never disagree on
+/// what the rule prescribes. Classes are disjoint by construction (used > 0
+/// vs used == 0); monotone clamps mirror the memory_decay_unused floor
+/// semantics. Returns (changes, at_ceiling, at_floor).
 fn retrieval_shadow_apply_rule(
     rows: &[ab_store::RetrievalOutcomeShadowRow],
     p: &RetrievalShadowParams,
 ) -> (Vec<RetrievalShadowChange>, u64, u64) {
-    let mut changes = Vec::new();
-    let mut at_ceiling = 0u64;
-    let mut at_floor = 0u64;
-    for r in rows {
-        let (would_be, action) = if r.used_count > 0 {
-            if r.importance >= p.ceiling {
-                at_ceiling += 1;
-                continue;
-            }
-            ((r.importance + p.reinforce_step).min(p.ceiling), "reinforce")
-        } else if r.surfaced_count >= p.min_surfaced_for_decay {
-            if r.importance <= p.floor {
-                at_floor += 1;
-                continue;
-            }
-            ((r.importance - p.decay_step).max(p.floor), "decay")
-        } else {
-            continue; // one-off surfacing with no use yet — no signal either way
-        };
-        if would_be == r.importance {
-            continue; // zero-step (or float-degenerate) params: nothing WOULD change
-        }
-        changes.push(RetrievalShadowChange {
-            key: r.key.clone(),
-            surfaced_count: r.surfaced_count,
-            used_count: r.used_count,
-            avg_rank: r.avg_rank,
-            importance: r.importance,
-            would_be,
-            action,
-        });
-    }
-    (changes, at_ceiling, at_floor)
+    let classified = crate::retrieval_outcome::classify_rows(
+        rows,
+        &crate::retrieval_outcome::RuleParams {
+            reinforce_step: p.reinforce_step,
+            decay_step: p.decay_step,
+            min_surfaced_for_decay: p.min_surfaced_for_decay,
+            floor: p.floor,
+            ceiling: p.ceiling,
+        },
+    );
+    let changes = classified
+        .changes
+        .into_iter()
+        .map(|c| RetrievalShadowChange {
+            key: c.key,
+            surfaced_count: c.surfaced_count,
+            used_count: c.used_count,
+            avg_rank: c.avg_rank,
+            importance: c.importance,
+            would_be: c.would_be,
+            action: c.action,
+        })
+        .collect();
+    (
+        changes,
+        classified.at_ceiling_keys.len() as u64,
+        classified.at_floor_keys.len() as u64,
+    )
 }
 
 pub struct RetrievalOutcomeShadowTool {
@@ -23724,6 +23741,213 @@ impl McpTool for RetrievalOutcomeShadowTool {
             "note": "WHAT-IF ONLY — nothing was written. low_sample=true means too few \
                 distinct memories to calibrate against; let the collector accrue longer. \
                 Non-active memories and one-off unused surfacings are excluded by design.",
+        })))
+    }
+}
+
+// ===========================================================================
+//   retrieval_outcome_apply — behavior-changing reinforce/decay pass
+// ===========================================================================
+
+pub struct RetrievalOutcomeApplyTool {
+    hub: Hub,
+}
+impl RetrievalOutcomeApplyTool {
+    pub fn new(hub: Hub) -> Self {
+        Self { hub }
+    }
+}
+
+#[async_trait]
+impl McpTool for RetrievalOutcomeApplyTool {
+    fn name(&self) -> &'static str {
+        "retrieval_outcome_apply"
+    }
+    fn schema(&self) -> ToolSchema {
+        ToolSchema {
+            name: self.name().into(),
+            description: "Behavior-changing counterpart of retrieval_outcome_shadow: \
+                 run ONE reinforce/decay pass over the retrieval_surfacing telemetry \
+                 (surfaced→used) against live importances. Memories with a used \
+                 surfacing gain +reinforce_step (ceiling-capped); memories surfaced \
+                 ≥min_surfaced_for_decay times with zero uses lose −decay_step \
+                 (floor-capped). Each telemetry row is counted toward at most ONE \
+                 action (v40 consumed_at marker) — immediate re-runs are no-ops, so \
+                 pacing comes from evidence accrual, not call frequency. Only rows \
+                 older than 6h are eligible (used_at attribution windows must close \
+                 first); below-threshold evidence stays pending and accumulates. \
+                 Default confirm_apply=false ⇒ dry-run preview of exactly the slice a \
+                 confirmed pass would consume, no writes. With confirm_apply=true a \
+                 full rollback map (old→new per key) is persisted as an audit memory \
+                 BEFORE any importance moves. Importance-only op class (same as \
+                 memory_decay_unused); never touches tags, content, or biocortex. The \
+                 daemon runs this automatically only when \
+                 AGENT_BRIDGE_RETRIEVAL_OUTCOME_APPLY is enabled (default OFF)."
+                .into(),
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "reinforce_step": {
+                        "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.05,
+                        "description": "Importance bump for memories with ≥1 used surfacing. \
+                            0.0 disables this half. Default 0.05 (memory_decay_unused op-class step)."
+                    },
+                    "decay_step": {
+                        "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.05,
+                        "description": "Importance shave for surfaced-never-used memories. \
+                            0.0 disables this half. Default 0.05."
+                    },
+                    "min_surfaced_for_decay": {
+                        "type": "integer", "minimum": 1, "default": 2,
+                        "description": "Only decay memories with at least this many pending unused \
+                            surfacings. Below-threshold rows stay pending (NOT consumed). Default 2."
+                    },
+                    "floor": {
+                        "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.1,
+                        "description": "Decay never takes importance below this; rows already at/below \
+                            are skipped (their telemetry is still consumed). Default 0.1."
+                    },
+                    "ceiling": {
+                        "type": "number", "minimum": 0.0, "maximum": 1.0, "default": 0.9,
+                        "description": "Reinforce never takes importance above this; rows already \
+                            at/above are skipped (their telemetry is still consumed). Default 0.9."
+                    },
+                    "max_changes": {
+                        "type": "integer", "minimum": 1, "maximum": 500, "default": 200,
+                        "description": "Cap on importance writes this pass. Deferred rows keep their \
+                            telemetry unconsumed and are reported in capped_out — never silently dropped."
+                    },
+                    "confirm_apply": {
+                        "type": "boolean", "default": false,
+                        "description": "Final explicit write confirmation. Default false ⇒ preview only: \
+                            no importance writes, no telemetry consumption."
+                    },
+                    "top_n": {
+                        "type": "integer", "minimum": 1, "maximum": 200, "default": 15,
+                        "description": "Max change rows listed in the result (counts always cover ALL rows)."
+                    }
+                }
+            }),
+        }
+    }
+    async fn execute(&self, args: Value, _ctx: &ToolContext) -> Result<ToolResult> {
+        let store = match &self.hub.store {
+            Some(s) => s.clone(),
+            None => return Ok(ToolResult::error("no store configured")),
+        };
+        let f = |key: &str, default: f64| {
+            args.get(key)
+                .and_then(|v| v.as_f64())
+                .unwrap_or(default)
+                .clamp(0.0, 1.0)
+        };
+        let params = crate::retrieval_outcome::RuleParams {
+            reinforce_step: f("reinforce_step", 0.05),
+            decay_step: f("decay_step", 0.05),
+            min_surfaced_for_decay: args
+                .get("min_surfaced_for_decay")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(2)
+                .max(1),
+            floor: f("floor", 0.1),
+            ceiling: f("ceiling", 0.9),
+        };
+        let max_changes = args
+            .get("max_changes")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(200)
+            .clamp(1, 500) as usize;
+        let confirm = args
+            .get("confirm_apply")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let top_n = args
+            .get("top_n")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(15)
+            .clamp(1, 200) as usize;
+
+        if let Err(e) = params.validate() {
+            return Ok(ToolResult::error(e));
+        }
+        let report = crate::retrieval_outcome::run_apply_pass(
+            &store,
+            &params,
+            max_changes,
+            confirm,
+            unix_now_secs(),
+        )
+        .await?;
+
+        let round3 = |x: f64| (x * 1000.0).round() / 1000.0;
+        let (mut n_reinforce, mut n_decay) = (0u64, 0u64);
+        for ch in &report.changes {
+            if ch.action == "reinforce" {
+                n_reinforce += 1;
+            } else {
+                n_decay += 1;
+            }
+        }
+        let truncated = report.changes.len() > top_n;
+        let changes_json: Vec<Value> = report
+            .changes
+            .iter()
+            .take(top_n)
+            .map(|ch| {
+                json!({
+                    "key": ch.key,
+                    "action": ch.action,
+                    "surfaced_count": ch.surfaced_count,
+                    "used_count": ch.used_count,
+                    "avg_rank": (ch.avg_rank * 100.0).round() / 100.0,
+                    "importance": round3(ch.importance),
+                    "new_importance": round3(ch.would_be),
+                    "delta": round3(ch.would_be - ch.importance),
+                })
+            })
+            .collect();
+
+        Ok(ToolResult::json_text(&json!({
+            "schema": "agent_bridge.retrieval_outcome_apply.v0",
+            "dry_run": report.dry_run,
+            "params": {
+                "reinforce_step": params.reinforce_step,
+                "decay_step": params.decay_step,
+                "min_surfaced_for_decay": params.min_surfaced_for_decay,
+                "floor": params.floor,
+                "ceiling": params.ceiling,
+                "max_changes": max_changes,
+                "maturation_secs": crate::retrieval_outcome::APPLY_MATURATION_SECS,
+            },
+            "rows_considered": report.rows_considered,
+            "reinforce": n_reinforce,
+            "decay": n_decay,
+            "at_ceiling": report.at_ceiling,
+            "at_floor": report.at_floor,
+            "zero_step": report.zero_step,
+            "pending_below_min": report.pending_below_min,
+            "capped_out": report.capped_out,
+            "applied": report.applied,
+            "failed": report.failed,
+            "skipped_raced": report.skipped_raced,
+            "consumed_rows": report.consumed_rows,
+            "consumed_noaction_keys": report.consumed_noaction_keys,
+            "orphans_consumed": report.orphans_consumed,
+            "net_importance_delta": round3(report.net_importance_delta),
+            "audit_memory_key": report.audit_memory_key,
+            "changes": changes_json,
+            "changes_truncated": truncated,
+            "note": if report.dry_run {
+                "DRY-RUN — nothing written, nothing consumed. This previews the exact \
+                 unconsumed+mature slice a confirmed pass would act on (unlike \
+                 retrieval_outcome_shadow, which windows over ALL telemetry). \
+                 Rollback: restore old values from audit_memory_key via \
+                 memory_set_importance."
+            } else {
+                "APPLIED — importance moved and telemetry consumed. Rollback: restore \
+                 old values from the audit_memory_key record via \
+                 memory_set_importance(key, old_importance)."
+            },
         })))
     }
 }
@@ -40545,6 +40769,12 @@ pub(crate) fn build_registry_with_policy_surface(
         policy,
         Tier::Standard,
         Arc::new(RetrievalOutcomeShadowTool::new(hub.clone())),
+    );
+    reg_if(
+        &mut reg,
+        policy,
+        Tier::Standard,
+        Arc::new(RetrievalOutcomeApplyTool::new(hub.clone())),
     );
     reg_if(
         &mut reg,

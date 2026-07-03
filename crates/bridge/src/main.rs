@@ -7413,6 +7413,81 @@ async fn real_main() -> Result<()> {
                     }
                 });
             }
+
+            // Retrieval-outcome apply tick — the gated consumer that closes
+            // the surfaced→used learning loop (reinforce/decay on importance).
+            // Default OFF: enable per-deployment via
+            // AGENT_BRIDGE_RETRIEVAL_OUTCOME_APPLY=1. Cadence is the pacing
+            // knob (default daily = at most ±0.05/day per memory); the v40
+            // consumed_at marker makes extra ticks after daemon restarts
+            // harmless no-ops.
+            if !ab_bridge::retrieval_outcome::apply_tick_enabled() {
+                tracing::info!(
+                    "retrieval-outcome-apply: disabled (AGENT_BRIDGE_RETRIEVAL_OUTCOME_APPLY unset)"
+                );
+            } else if let Some(store) = hub.store.clone() {
+                let tick_secs = ab_bridge::retrieval_outcome::apply_tick_secs();
+                tracing::info!(
+                    tick_secs,
+                    "retrieval-outcome-apply: spawning reinforce/decay tick"
+                );
+                tokio::spawn(async move {
+                    let mut interval =
+                        tokio::time::interval(std::time::Duration::from_secs(tick_secs));
+                    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                    // Skip the t=0 immediate fire: a daemon that restarts
+                    // several times a day must not turn "daily" into
+                    // "per-restart" (consumption bounds the damage, but a
+                    // fresh evidence batch could still be acted on early).
+                    interval.tick().await;
+                    loop {
+                        interval.tick().await;
+                        let now = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_secs() as i64)
+                            .unwrap_or(0);
+                        // Rule params are machine.env-steerable
+                        // (AB_RETRIEVAL_OUTCOME_APPLY_{REINFORCE_STEP,DECAY_STEP,
+                        // MIN_SURFACED,FLOOR,CEILING}) so shadow-tool
+                        // recalibration doesn't need a redeploy.
+                        let params = ab_bridge::retrieval_outcome::tick_rule_params();
+                        match ab_bridge::retrieval_outcome::run_apply_pass(
+                            &store, &params, 200, true, now,
+                        )
+                        .await
+                        {
+                            Ok(r) => {
+                                if r.applied > 0 || r.failed > 0 || r.capped_out > 0 {
+                                    tracing::info!(
+                                        applied = r.applied,
+                                        failed = r.failed,
+                                        skipped_raced = r.skipped_raced,
+                                        consumed_rows = r.consumed_rows,
+                                        orphans_consumed = r.orphans_consumed,
+                                        pending_below_min = r.pending_below_min,
+                                        capped_out = r.capped_out,
+                                        net_delta = r.net_importance_delta,
+                                        audit = r.audit_memory_key.as_deref().unwrap_or(""),
+                                        "retrieval-outcome-apply: pass ran"
+                                    );
+                                } else {
+                                    tracing::debug!(
+                                        rows = r.rows_considered,
+                                        pending_below_min = r.pending_below_min,
+                                        orphans_consumed = r.orphans_consumed,
+                                        "retrieval-outcome-apply: nothing to do"
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, "retrieval-outcome-apply: pass error");
+                            }
+                        }
+                    }
+                });
+            } else {
+                tracing::info!("retrieval-outcome-apply: no store configured, skipping");
+            }
             serve(&socket, Router::new(hub)).await
         }
         Cmd::Mcp => {
