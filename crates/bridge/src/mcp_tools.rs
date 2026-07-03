@@ -74594,6 +74594,103 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
     }
 
     #[tokio::test]
+    async fn stable_sync_roundtrip_receiver_rederives_stripped_stamp() {
+        // End-to-end proof of the stamp-strip fix's healing claim: node A
+        // applies (importance derived + stamp minted BY THE REAL TOOL, so the
+        // bridge's valence_applied_tag constant is exercised against the store
+        // export's hardcoded strip prefix — a drift guard for the duplicated
+        // literal); the stable export drops the stamp; node B imports the row
+        // and its own apply pass RE-derives importance and re-stamps, instead
+        // of being pinned at kind-default by a travelled stamp (the pre-fix
+        // failure).
+        let (hub_a, dir_a) = mk_test_hub_with_store().await;
+        let store_a = hub_a.store.clone().expect("store a");
+        seed_valence_apply_cohort(&store_a).await;
+        OutcomeValenceImportanceApplyTool::new(hub_a)
+            .execute(json!({"confirm_apply": true}), &ToolContext::default())
+            .await
+            .expect("apply on node A");
+        let ia = store_a
+            .memory_get("outcome_ia")
+            .await
+            .expect("get ia")
+            .expect("ia exists");
+        assert!(
+            (ia.importance - 0.9).abs() < 1e-9
+                && ia.tags.contains(&"valence_applied:+1.000".to_string()),
+            "precondition: node A applied + stamped"
+        );
+
+        let jsonl = dir_a.join("stable-sync.jsonl");
+        store_a
+            .memory_export(
+                &ab_store::MemoryExportFilter {
+                    stable_sync_metadata: true,
+                    ..Default::default()
+                },
+                &jsonl,
+            )
+            .await
+            .expect("stable export");
+
+        let (hub_b, dir_b) = mk_test_hub_with_store().await;
+        let store_b = hub_b.store.clone().expect("store b");
+        store_b
+            .memory_import(&jsonl, ab_store::ImportConflictPolicy::Skip, None)
+            .await
+            .expect("import on node B");
+
+        let ia_b = store_b
+            .memory_get("outcome_ia")
+            .await
+            .expect("get ia b")
+            .expect("ia imported");
+        assert!(
+            (ia_b.importance - 0.5).abs() < 1e-9,
+            "received row at kind-default importance, got {}",
+            ia_b.importance
+        );
+        assert!(
+            !ia_b.tags.iter().any(|t| t.starts_with("valence_applied:")),
+            "received row carries no stamp, got {:?}",
+            ia_b.tags
+        );
+        assert!(
+            ia_b.tags.contains(&"verify:rendered_ok".to_string()),
+            "facet tags travel (they drive derivation)"
+        );
+
+        // Node B's own apply pass heals: derives from facets, writes, stamps.
+        let res_b = OutcomeValenceImportanceApplyTool::new(hub_b)
+            .execute(json!({"confirm_apply": true}), &ToolContext::default())
+            .await
+            .expect("apply on node B");
+        let vb = result_json(&res_b);
+        assert!(
+            vb["summary"]["applied"].as_u64().unwrap_or(0) >= 1,
+            "receiver re-derives instead of skipping: {}",
+            vb["summary"]
+        );
+        let ia_b2 = store_b
+            .memory_get("outcome_ia")
+            .await
+            .expect("get ia b2")
+            .expect("ia exists b2");
+        assert!(
+            (ia_b2.importance - 0.9).abs() < 1e-9,
+            "receiver importance re-derived to 0.9, got {}",
+            ia_b2.importance
+        );
+        assert!(
+            ia_b2.tags.contains(&"valence_applied:+1.000".to_string()),
+            "receiver minted its own stamp"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&dir_a).await;
+        let _ = tokio::fs::remove_dir_all(&dir_b).await;
+    }
+
+    #[tokio::test]
     async fn outcome_valence_importance_apply_rerun_preserves_prior_audit() {
         let (hub, temp_dir) = mk_test_hub_with_store().await;
         let store = hub.store.clone().expect("store");

@@ -2405,6 +2405,16 @@ fn stabilise_sync_metadata(record: &mut MemoryRecord) {
     record.last_accessed_at = 0;
     record.access_count = 0;
     record.importance = importance_for_kind(&record.kind);
+    // Importance is node-local DERIVED state (reset above) — so its derivation
+    // MARKER must not travel either. A row exported with default importance but
+    // a still-attached `valence_applied:` stamp permanently pins the receiver:
+    // its apply pass sees "already applied" and skips, so the stripped
+    // importance is never re-derived there. Strip the stamp; keep the durable
+    // `valence:`/`valence_class:` labels (they describe the CONTENT, not this
+    // node's usage) so the receiver's own apply re-derives and re-stamps.
+    record
+        .tags
+        .retain(|t| !t.starts_with("valence_applied:"));
     if record.status == "archived" {
         record.status = "active".to_string();
     }
@@ -12826,6 +12836,137 @@ mod tests {
         assert_eq!(exported["access_count"], 0);
         assert_eq!(exported["importance"], 0.7);
         assert_eq!(exported["status"], "active");
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
+    async fn memory_export_stable_sync_strips_valence_applied_stamp_keeps_labels() {
+        // The valence_applied: stamp marks "importance was derived+applied on
+        // THIS node" — node-local execution state, same class as the importance
+        // that stabilise already resets. If the stamp travelled while the
+        // importance was stripped, the receiver's apply pass would see "already
+        // applied", skip forever, and pin the row at kind-default importance.
+        // Stable export must drop the stamp but keep the durable valence:/
+        // valence_class: labels (content-derived, they SHOULD travel). Raw
+        // (backup) export keeps everything.
+        use crate::{MemoryExportFilter, MemoryRecord};
+
+        let temp_dir = std::env::temp_dir().join(format!(
+            "ab-memory-stamp-strip-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        tokio::fs::create_dir_all(&temp_dir).await.expect("mkdir");
+        let store_a = SqliteStore::open(&temp_dir.join("a.db"))
+            .await
+            .expect("open a");
+        let store_b = SqliteStore::open(&temp_dir.join("b.db"))
+            .await
+            .expect("open b");
+
+        let base_tags = vec![
+            "present_outcome".to_string(),
+            "valence:+1.000".to_string(),
+            "valence_class:positive".to_string(),
+        ];
+        let rec = MemoryRecord {
+            key: "stamp_strip_probe".to_string(),
+            kind: "present_outcome".to_string(),
+            content: "verified outcome probe row".to_string(),
+            tags: base_tags.clone(),
+            related_keys: vec![],
+            scope: Some("outcome:stamp_strip_probe".to_string()),
+            created_at: 1_780_000_000,
+            updated_at: 1_780_000_100,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.5,
+            status: "active".to_string(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store_a.memory_save(&rec).await.expect("save a");
+        store_b.memory_save(&rec).await.expect("save b");
+
+        // Node A runs its valence apply: importance derived + stamp minted.
+        // Node B never applied. This is exactly the local divergence sync
+        // stability must erase.
+        assert!(store_a
+            .memory_add_tags("stamp_strip_probe", &["valence_applied:+1.000".to_string()])
+            .await
+            .expect("stamp a"));
+        assert!(store_a
+            .memory_set_importance("stamp_strip_probe", 0.9)
+            .await
+            .expect("apply a"));
+
+        let stable_filter = MemoryExportFilter {
+            stable_sync_metadata: true,
+            ..Default::default()
+        };
+        let stable_a = temp_dir.join("stable-a.jsonl");
+        let stable_b = temp_dir.join("stable-b.jsonl");
+        store_a
+            .memory_export(&stable_filter, &stable_a)
+            .await
+            .expect("stable export a");
+        store_b
+            .memory_export(&stable_filter, &stable_b)
+            .await
+            .expect("stable export b");
+        let stable_a_s = tokio::fs::read_to_string(&stable_a).await.expect("a");
+        let stable_b_s = tokio::fs::read_to_string(&stable_b).await.expect("b");
+        assert_eq!(
+            stable_a_s, stable_b_s,
+            "a node-local apply (stamp + importance) must not change the stable export"
+        );
+        let row: serde_json::Value =
+            serde_json::from_str(stable_a_s.lines().next().expect("one row")).expect("parse");
+        let tags: Vec<String> = row["tags"]
+            .as_array()
+            .expect("tags array")
+            .iter()
+            .map(|t| t.as_str().unwrap_or_default().to_string())
+            .collect();
+        assert!(
+            !tags.iter().any(|t| t.starts_with("valence_applied:")),
+            "stamp stripped from stable export, got {tags:?}"
+        );
+        assert!(
+            tags.contains(&"valence:+1.000".to_string())
+                && tags.contains(&"valence_class:positive".to_string()),
+            "durable valence labels still travel, got {tags:?}"
+        );
+
+        // Raw (backup) export is untouched: stamp + applied importance kept.
+        let raw_a = temp_dir.join("raw-a.jsonl");
+        store_a
+            .memory_export(&MemoryExportFilter::default(), &raw_a)
+            .await
+            .expect("raw export a");
+        let raw_row: serde_json::Value = serde_json::from_str(
+            tokio::fs::read_to_string(&raw_a)
+                .await
+                .expect("raw a")
+                .lines()
+                .next()
+                .expect("one row"),
+        )
+        .expect("parse raw");
+        let raw_tags: Vec<String> = raw_row["tags"]
+            .as_array()
+            .expect("raw tags")
+            .iter()
+            .map(|t| t.as_str().unwrap_or_default().to_string())
+            .collect();
+        assert!(
+            raw_tags.contains(&"valence_applied:+1.000".to_string()),
+            "backup export keeps the stamp, got {raw_tags:?}"
+        );
+        assert_eq!(raw_row["importance"], 0.9, "backup export keeps applied importance");
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
