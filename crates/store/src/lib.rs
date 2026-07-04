@@ -58,6 +58,26 @@ pub struct StoredSession {
     /// URL to the full cloud run transcript on Warp.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cloud_session_link: Option<String>,
+    // ── v41: local child process identity (orphan reaper) ────────────
+    /// OS pid of the spawned local child (PTY leader), when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proc_pid: Option<i64>,
+    /// Child's process group id (== pid: portable_pty setsids the child).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proc_pgid: Option<i64>,
+    /// `/proc/<pid>/stat` starttime at spawn — the anti-pid-reuse token: a
+    /// recycled pid has a different starttime, so a reaper that checks this
+    /// can never signal an unrelated process.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proc_start_ticks: Option<i64>,
+    /// Pid of the OS process that owns the in-memory PTY handle (the MCP
+    /// server / daemon that spawned the child). A session whose owner is
+    /// gone is an orphan: nothing holds its PTY and no Drop will ever fire.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_pid: Option<i64>,
+    /// starttime of the owner process — same anti-reuse token for the owner.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_start_ticks: Option<i64>,
 }
 
 /// One persisted notification, with its server-assigned timestamp.
@@ -2335,6 +2355,26 @@ pub struct ImportReport {
 #[async_trait]
 pub trait StateStore: Send + Sync {
     async fn save_session(&self, session: &StoredSession) -> Result<()>;
+
+    /// v41 — stamp the spawned child's process identity (pid/pgid/starttime
+    /// plus owning-process identity) onto its session row so an orphan reaper
+    /// can later kill proven-abandoned process groups. Default is an ERROR:
+    /// a backend that silently drops the stamp would leave the reaper blind
+    /// while looking wired-up.
+    async fn update_session_process(
+        &self,
+        id: &SessionId,
+        proc_pid: i64,
+        proc_pgid: i64,
+        proc_start_ticks: Option<i64>,
+        owner_pid: i64,
+        owner_start_ticks: Option<i64>,
+    ) -> Result<bool> {
+        let _ = (id, proc_pid, proc_pgid, proc_start_ticks, owner_pid, owner_start_ticks);
+        Err(ab_core::Error::Backend(
+            "update_session_process unsupported by this store backend".into(),
+        ))
+    }
 
     async fn load_session(&self, id: &SessionId) -> Result<Option<StoredSession>>;
 

@@ -205,6 +205,11 @@ pub async fn spawn_interactive(
             cloud_run_id: None,
             cloud_run_state: None,
             cloud_session_link: None,
+            proc_pid: None,
+            proc_pgid: None,
+            proc_start_ticks: None,
+            owner_pid: None,
+            owner_start_ticks: None,
         };
         if let Err(e) = store.save_session(&initial).await {
             warn!(session = %session_id, error = %e, "store: save_session failed");
@@ -216,6 +221,30 @@ pub async fn spawn_interactive(
     let pid = session.pid();
     interactive.insert(session_id.as_str().to_string(), session.clone());
     info!(session = %session_id, runtime = %runtime_id, pid, cwd = %cwd, "interactive (PTY) session started");
+
+    // v41: stamp the child's process identity onto the session row so the
+    // orphan reaper can later kill a proven-abandoned process group even
+    // after this owning process is SIGKILLed (no Drop ever fires then).
+    // pgid == pid: portable_pty setsids the child (see PtySession::kill_group).
+    // Fail-soft: an unstamped row just stays reaper-invisible (legacy rule).
+    if let Some(store) = store {
+        if pid != 0 {
+            let owner_pid = std::process::id();
+            if let Err(e) = store
+                .update_session_process(
+                    &session_id,
+                    pid as i64,
+                    pid as i64,
+                    crate::pty_session::proc_start_ticks(pid),
+                    owner_pid as i64,
+                    crate::pty_session::proc_start_ticks(owner_pid),
+                )
+                .await
+            {
+                warn!(session = %session_id, error = %e, "store: update_session_process failed");
+            }
+        }
+    }
 
     // Optional first turn: type the initial prompt and submit it.
     if let Some(p) = cfg.initial_prompt.as_deref() {

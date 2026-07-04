@@ -7488,6 +7488,67 @@ async fn real_main() -> Result<()> {
             } else {
                 tracing::info!("retrieval-outcome-apply: no store configured, skipping");
             }
+
+            // Orphan reaper — kills agent process groups whose owning bridge
+            // process is provably gone (v41 starttime tokens make misfire
+            // impossible). Default OFF: AGENT_BRIDGE_ORPHAN_REAPER=1 enables.
+            // First pass runs IMMEDIATELY: recovering right after a daemon
+            // crash/restart is the scenario this exists for.
+            if !ab_bridge::orphan_reaper::reaper_enabled() {
+                tracing::info!(
+                    "orphan-reaper: disabled (AGENT_BRIDGE_ORPHAN_REAPER unset)"
+                );
+            } else if let Some(store) = hub.store.clone() {
+                let tick_secs = ab_bridge::orphan_reaper::reaper_tick_secs();
+                tracing::info!(tick_secs, "orphan-reaper: spawning reaper tick");
+                tokio::spawn(async move {
+                    let mut interval =
+                        tokio::time::interval(std::time::Duration::from_secs(tick_secs));
+                    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                    loop {
+                        interval.tick().await; // fires immediately at t=0
+                        let now = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_secs() as i64)
+                            .unwrap_or(0);
+                        match ab_bridge::orphan_reaper::run_reaper_pass(
+                            &store,
+                            ab_bridge::orphan_reaper::reaper_stale_secs(),
+                            std::time::Duration::from_secs(3),
+                            now,
+                        )
+                        .await
+                        {
+                            Ok(r) => {
+                                if r.reaped > 0 || r.finalised_gone > 0 || r.still_alive > 0 || r.errors > 0 {
+                                    tracing::info!(
+                                        scanned = r.scanned,
+                                        reaped = r.reaped,
+                                        finalised_gone = r.finalised_gone,
+                                        still_alive = r.still_alive,
+                                        owner_alive = r.owner_alive,
+                                        legacy = r.legacy_untracked,
+                                        errors = r.errors,
+                                        "orphan-reaper: pass ran"
+                                    );
+                                } else {
+                                    tracing::debug!(
+                                        scanned = r.scanned,
+                                        owner_alive = r.owner_alive,
+                                        legacy = r.legacy_untracked,
+                                        "orphan-reaper: nothing to reap"
+                                    );
+                                }
+                            }
+                            Err(e) => {
+                                tracing::warn!(error = %e, "orphan-reaper: pass error");
+                            }
+                        }
+                    }
+                });
+            } else {
+                tracing::info!("orphan-reaper: no store configured, skipping");
+            }
             serve(&socket, Router::new(hub)).await
         }
         Cmd::Mcp => {

@@ -10606,12 +10606,21 @@ impl McpTool for AgentSessionReconcileTool {
         let mut skipped_unsupported_runtime = 0usize;
         let mut skipped_alive = 0usize;
         let mut skipped_untracked = 0usize;
+        let mut skipped_reaper_owned = 0usize;
         let mut errors = Vec::new();
 
         for session in rows {
             let age_secs = now.saturating_sub(session.started_at);
             if age_secs < stale_after_secs {
                 skipped_recent += 1;
+                continue;
+            }
+            // v41: rows carrying a proven process identity belong to the
+            // orphan reaper — it can actually KILL the process group, while
+            // finalising here would hide the row from every future reaper
+            // pass with the process still alive (review finding, 2026-07-03).
+            if session.proc_pid.is_some() && session.proc_start_ticks.is_some() {
+                skipped_reaper_owned += 1;
                 continue;
             }
             if !is_local_process_agent_runtime(&session.runtime_id) {
@@ -10683,6 +10692,7 @@ impl McpTool for AgentSessionReconcileTool {
             "skipped_unsupported_runtime": skipped_unsupported_runtime,
             "skipped_alive": skipped_alive,
             "skipped_untracked": skipped_untracked,
+            "skipped_reaper_owned": skipped_reaper_owned,
             "errors": errors,
             "candidates": candidates,
             "deferred_untracked": deferred_untracked,

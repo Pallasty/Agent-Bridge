@@ -256,6 +256,33 @@ impl PtySession {
     }
 }
 
+/// Read `/proc/<pid>/stat` field 22 (starttime, clock ticks since boot) —
+/// the canonical anti-pid-reuse token: a recycled pid gets a different
+/// starttime, so identity checks against a stored value can never be fooled
+/// into signalling an unrelated process. `None` when the process is gone or
+/// the platform has no procfs.
+pub fn proc_start_ticks(pid: u32) -> Option<i64> {
+    #[cfg(unix)]
+    {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        parse_stat_start_ticks(&stat)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        None
+    }
+}
+
+/// Parse the starttime field out of a `/proc/<pid>/stat` line. The comm
+/// field (2) is parenthesised and may itself contain spaces or `)`, so all
+/// indexing is anchored AFTER the last `)`: state is overall field 3,
+/// starttime overall field 22 ⇒ index 19 of the post-comm split.
+fn parse_stat_start_ticks(stat: &str) -> Option<i64> {
+    let after = &stat[stat.rfind(')')? + 1..];
+    after.split_ascii_whitespace().nth(19)?.parse().ok()
+}
+
 fn append_capped_output(out: &mut String, chunk: &str) {
     out.push_str(chunk);
     let char_count = out.chars().count();
@@ -293,6 +320,18 @@ impl Drop for PtySession {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_stat_start_ticks_survives_hostile_comm() {
+        // comm with spaces and parens — everything anchors after the LAST ')'.
+        let stat = "1234 (my (weird) comm) S 1 1234 1234 0 -1 4194560 100 0 0 0 \
+5 3 0 0 20 0 1 0 987654 12345678 100 18446744073709551615 1 1 0 0 0 0 0 0 0 0 0 0 17 3 0 0 0 0 0";
+        assert_eq!(super::parse_stat_start_ticks(stat), Some(987_654));
+        assert_eq!(super::parse_stat_start_ticks("no parens"), None);
+        // own process: readable and positive on any linux CI
+        #[cfg(unix)]
+        assert!(super::proc_start_ticks(std::process::id()).unwrap_or(0) > 0);
+    }
     use std::time::Duration;
 
     async fn wait_for<F: FnMut() -> bool>(total_ms: u64, step_ms: u64, mut predicate: F) -> bool {

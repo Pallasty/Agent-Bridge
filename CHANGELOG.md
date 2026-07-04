@@ -8,6 +8,20 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Orphan reaper** (default OFF, `AGENT_BRIDGE_ORPHAN_REAPER=1`): daemon
+  tick (first pass at startup, then `AB_ORPHAN_REAPER_TICK_SECS`, default
+  hourly) that kills agent process groups whose owning bridge process is
+  provably gone — the kill-routing arc residual where a SIGKILLed owner
+  leaks its setsid'd PTY children forever. Schema **v41** stamps child
+  pid/pgid + `/proc` starttime and owner pid + starttime at spawn; both
+  starttime tokens are anti-pid-reuse guards, so the reaper can never
+  signal a recycled pid and never touches sessions owned by a living
+  process. SIGTERM → grace → SIGKILL by process group, zombie-aware, boot-fenced
+  (rows predating the current boot are never signalled), pgid-shape
+  validated (only `pgid == pid > 1`), and rows are finalised only when the
+  kill verifiably landed. `agent_session_reconcile` now defers
+  identity-stamped rows to the reaper (`skipped_reaper_owned`); pre-v41
+  legacy rows remain the tool's, as before.
 - **`retrieval_outcome_apply`** (Tier::Standard): the behavior-changing
   counterpart of `retrieval_outcome_shadow` — one reinforce/decay pass over
   the `retrieval_surfacing` surfaced→used telemetry against live importances

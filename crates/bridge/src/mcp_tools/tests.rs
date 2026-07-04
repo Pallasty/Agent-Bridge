@@ -13457,6 +13457,11 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
                 cloud_run_id: None,
                 cloud_run_state: None,
                 cloud_session_link: None,
+                proc_pid: None,
+                proc_pgid: None,
+                proc_start_ticks: None,
+                owner_pid: None,
+                owner_start_ticks: None,
             })
             .await
             .expect("seed running session");

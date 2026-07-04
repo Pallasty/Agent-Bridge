@@ -212,6 +212,11 @@ impl AgentRuntime for GeminiRuntime {
                 cloud_run_id: None,
                 cloud_run_state: None,
                 cloud_session_link: None,
+                proc_pid: None,
+                proc_pgid: None,
+                proc_start_ticks: None,
+                owner_pid: None,
+                owner_start_ticks: None,
             };
             if let Err(e) = store.save_session(&initial).await {
                 warn!(session = %session_id, error = %e, "store: save_session failed");

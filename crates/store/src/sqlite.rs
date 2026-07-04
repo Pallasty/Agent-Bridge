@@ -1669,6 +1669,47 @@ impl SqliteStore {
                 c.execute_batch(SCHEMA_V40_RETRIEVAL_SURFACING_CONSUMED)?;
                 let _ = c.execute("UPDATE schema_meta SET value='40' WHERE key='version'", []);
             }
+
+            // ── v41: local child process identity on sessions (orphan
+            // reaper). Columns are written at spawn; the reaper uses the
+            // starttime tokens to guarantee it can never signal a recycled
+            // pid. Same guarded rung shape as v40 (pragma check + tolerate
+            // the concurrent-first-open duplicate-column race).
+            let cur: String = c
+                .query_row(
+                    "SELECT value FROM schema_meta WHERE key='version'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| "40".to_string());
+            if cur.as_str() == "40" {
+                for col in [
+                    "proc_pid",
+                    "proc_pgid",
+                    "proc_start_ticks",
+                    "owner_pid",
+                    "owner_start_ticks",
+                ] {
+                    let exists: i64 = c
+                        .query_row(
+                            "SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name=?1",
+                            rusqlite::params![col],
+                            |r| r.get(0),
+                        )
+                        .unwrap_or(0);
+                    if exists == 0 {
+                        if let Err(e) = c.execute(
+                            &format!("ALTER TABLE sessions ADD COLUMN {col} INTEGER"),
+                            [],
+                        ) {
+                            if !e.to_string().contains("duplicate column name") {
+                                return Err(e);
+                            }
+                        }
+                    }
+                }
+                let _ = c.execute("UPDATE schema_meta SET value='41' WHERE key='version'", []);
+            }
             Ok(())
         })
         .await
@@ -2722,8 +2763,10 @@ impl StateStore for SqliteStore {
                 c.execute(
                     "INSERT OR REPLACE INTO sessions
                        (id, runtime_id, cwd, started_at, ended_at, exit_code, stdout, stderr,
-                        cloud_run_id, cloud_run_state, cloud_session_link)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+                        cloud_run_id, cloud_run_state, cloud_session_link,
+                        proc_pid, proc_pgid, proc_start_ticks, owner_pid, owner_start_ticks)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+                             ?12, ?13, ?14, ?15, ?16)",
                     params![
                         s.id.as_str(),
                         s.runtime_id,
@@ -2735,7 +2778,12 @@ impl StateStore for SqliteStore {
                         s.stderr,
                         s.cloud_run_id,
                         s.cloud_run_state,
-                        s.cloud_session_link
+                        s.cloud_session_link,
+                        s.proc_pid,
+                        s.proc_pgid,
+                        s.proc_start_ticks,
+                        s.owner_pid,
+                        s.owner_start_ticks
                     ],
                 )?;
                 Ok(())
@@ -2745,6 +2793,36 @@ impl StateStore for SqliteStore {
         Ok(())
     }
 
+    /// v41 — stamp the spawned child's process identity onto its session row
+    /// (called once, right after the runtime learns the pid). Never clobbers
+    /// a finalised row: the guard on `ended_at IS NULL` makes a late stamp
+    /// racing a fast exit harmless.
+    async fn update_session_process(
+        &self,
+        id: &SessionId,
+        proc_pid: i64,
+        proc_pgid: i64,
+        proc_start_ticks: Option<i64>,
+        owner_pid: i64,
+        owner_start_ticks: Option<i64>,
+    ) -> Result<bool> {
+        let key = id.as_str().to_string();
+        let n = self
+            .conn
+            .call(move |c| -> RusqliteResult<usize> {
+                c.execute(
+                    "UPDATE sessions
+                        SET proc_pid = ?2, proc_pgid = ?3, proc_start_ticks = ?4,
+                            owner_pid = ?5, owner_start_ticks = ?6
+                      WHERE id = ?1 AND ended_at IS NULL",
+                    params![key, proc_pid, proc_pgid, proc_start_ticks, owner_pid, owner_start_ticks],
+                )
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("update_session_process: {e}")))?;
+        Ok(n > 0)
+    }
+
     async fn load_session(&self, id: &SessionId) -> Result<Option<StoredSession>> {
         let key = id.as_str().to_string();
         let row = self
@@ -2752,7 +2830,8 @@ impl StateStore for SqliteStore {
             .call(move |c| -> RusqliteResult<Option<StoredSession>> {
                 let mut stmt = c.prepare(
                     "SELECT id, runtime_id, cwd, started_at, ended_at, exit_code, stdout, stderr,
-                            cloud_run_id, cloud_run_state, cloud_session_link
+                            cloud_run_id, cloud_run_state, cloud_session_link,
+                            proc_pid, proc_pgid, proc_start_ticks, owner_pid, owner_start_ticks
                      FROM sessions WHERE id=?1",
                 )?;
                 let r = stmt
@@ -2769,6 +2848,11 @@ impl StateStore for SqliteStore {
                             cloud_run_id: row.get(8)?,
                             cloud_run_state: row.get(9)?,
                             cloud_session_link: row.get(10)?,
+                            proc_pid: row.get(11)?,
+                            proc_pgid: row.get(12)?,
+                            proc_start_ticks: row.get(13)?,
+                            owner_pid: row.get(14)?,
+                            owner_start_ticks: row.get(15)?,
                         })
                     })
                     .ok();
@@ -2808,7 +2892,8 @@ impl StateStore for SqliteStore {
 
                 let mut stmt = c.prepare(
                     "SELECT id, runtime_id, cwd, started_at, ended_at, exit_code, stdout, stderr,
-                            cloud_run_id, cloud_run_state, cloud_session_link
+                            cloud_run_id, cloud_run_state, cloud_session_link,
+                            proc_pid, proc_pgid, proc_start_ticks, owner_pid, owner_start_ticks
                      FROM sessions
                      WHERE (?1 IS NULL OR runtime_id = ?1)
                        AND (?2 IS NULL OR cwd LIKE ?2 ESCAPE '\\')
@@ -2836,6 +2921,11 @@ impl StateStore for SqliteStore {
                                 cloud_run_id: row.get(8)?,
                                 cloud_run_state: row.get(9)?,
                                 cloud_session_link: row.get(10)?,
+                                proc_pid: row.get(11)?,
+                                proc_pgid: row.get(12)?,
+                                proc_start_ticks: row.get(13)?,
+                                owner_pid: row.get(14)?,
+                                owner_start_ticks: row.get(15)?,
                             })
                         },
                     )?
@@ -17887,7 +17977,7 @@ mod tests {
             .await
             .expect("inspect migrated rows");
 
-        assert_eq!(version, "40"); // v40 = retrieval_surfacing consumed_at marker; latest after all migrations
+        assert_eq!(version, "41"); // v41 = sessions process identity (orphan reaper); latest after all migrations
         assert_eq!(bad_count, 0);
         assert_eq!(mem_created, 1_779_641_229_i64);
         assert_eq!(post_created, 1_779_641_229_i64);
@@ -19634,7 +19724,7 @@ mod tests {
             })
             .await
             .expect("probe schema");
-        assert_eq!(v, "40", "schema after all migrations");
+        assert_eq!(v, "41", "schema after all migrations");
         assert_eq!(n, 1, "last_cofire_at present exactly once");
 
         seed_pair_for_decay(&store, "a", "b", 3, 1_000).await; // insert without last_cofire_at
@@ -19684,7 +19774,7 @@ mod tests {
             })
             .await
             .expect("probe after upgrade");
-        assert_eq!(v, "40", "re-open ran through all migrations");
+        assert_eq!(v, "41", "re-open ran through all migrations");
         assert_eq!(lcf, 5_000, "backfill seeded last_cofire_at from first_at");
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
@@ -19724,7 +19814,7 @@ mod tests {
             })
             .await
             .expect("probe v39 schema");
-        assert_eq!(v, "40", "schema after all migrations");
+        assert_eq!(v, "41", "schema after all migrations");
         assert_eq!(table_n, 1, "retrieval_surfacing table exists");
         assert_eq!(key_idx_n, 1, "key/surfaced_at index exists");
         assert_eq!(at_idx_n, 1, "surfaced_at index exists");
@@ -19762,7 +19852,7 @@ mod tests {
             })
             .await
             .expect("probe v40 schema");
-        assert_eq!(v, "40", "schema after v40");
+        assert_eq!(v, "41", "schema after v40+v41");
         assert_eq!(col_n, 1, "consumed_at column exists exactly once");
         assert_eq!(idx_n, 1, "pending partial index exists");
 
@@ -19806,6 +19896,61 @@ mod tests {
             rows.is_empty(),
             "immature rows invisible to the apply slice"
         );
+        let _ = tokio::fs::remove_dir_all(&dir).await;
+    }
+
+    #[tokio::test]
+    async fn v41_session_process_identity_roundtrip_and_finalise_guard() {
+        // Columns exist after open; update_session_process stamps a running
+        // row, round-trips through load/list, and refuses to touch a
+        // finalised row (late stamp racing a fast exit must be harmless).
+        let (dir, store) = fresh_store("v41-process-identity").await;
+        let sid = SessionId::from_raw("v41-sess".to_string());
+        store
+            .save_session(&StoredSession {
+                id: sid.clone(),
+                runtime_id: "gemini".into(),
+                cwd: "/tmp".into(),
+                started_at: 1_700_000_000,
+                ended_at: None,
+                exit_code: None,
+                stdout: None,
+                stderr: None,
+                cloud_run_id: None,
+                cloud_run_state: None,
+                cloud_session_link: None,
+                proc_pid: None,
+                proc_pgid: None,
+                proc_start_ticks: None,
+                owner_pid: None,
+                owner_start_ticks: None,
+            })
+            .await
+            .expect("save");
+        assert!(store
+            .update_session_process(&sid, 4242, 4242, Some(987_654), 1111, Some(555))
+            .await
+            .expect("stamp"));
+        let row = store.load_session(&sid).await.expect("load").expect("row");
+        assert_eq!(row.proc_pid, Some(4242));
+        assert_eq!(row.proc_pgid, Some(4242));
+        assert_eq!(row.proc_start_ticks, Some(987_654));
+        assert_eq!(row.owner_pid, Some(1111));
+        assert_eq!(row.owner_start_ticks, Some(555));
+
+        store
+            .finalise_session(&sid, 1_700_000_100, Some(0), None, None)
+            .await
+            .expect("finalise");
+        assert!(
+            !store
+                .update_session_process(&sid, 9999, 9999, Some(1), 2, Some(3))
+                .await
+                .expect("stamp after finalise"),
+            "ended rows must not be restamped"
+        );
+        let row = store.load_session(&sid).await.expect("load").expect("row");
+        assert_eq!(row.proc_pid, Some(4242), "finalised row untouched");
         let _ = tokio::fs::remove_dir_all(&dir).await;
     }
 
@@ -23109,7 +23254,7 @@ mod tests {
         let v = store.schema_meta_version().await.expect("query");
         assert_eq!(
             v.as_deref(),
-            Some("40"),
+            Some("41"),
             "if schema bumped, update both this assertion and S5 docs"
         );
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
@@ -23712,7 +23857,7 @@ mod tests {
             })
             .await
             .expect("probe schema");
-        assert_eq!(probe.0, "40", "schema must be at the latest version");
+        assert_eq!(probe.0, "41", "schema must be at the latest version");
         assert_eq!(
             (probe.1, probe.2, probe.3),
             (1, 1, 1),
@@ -23745,7 +23890,7 @@ mod tests {
             .expect("probe after reopen");
         assert_eq!(
             again,
-            ("40".to_string(), 2),
+            ("41".to_string(), 2),
             "re-open stays at the latest version with both columns, no duplicate ALTER"
         );
 
