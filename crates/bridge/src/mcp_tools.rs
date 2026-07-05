@@ -10243,10 +10243,11 @@ impl McpTool for AgentSendInputTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Send one follow-up turn to a live PTY-backed agent session opened \
-                 with agent_spawn(interactive=true). The session row's runtime_id selects \
-                 the runtime, so input is never sent to the daemon default by accident. \
-                 One-shot or finished sessions reject this call."
+            description: "Deliver one follow-up turn of input to a live interactive agent \
+                 session this bridge started via agent_spawn(interactive=true). The session \
+                 row's runtime_id selects the runtime, so the input always reaches the \
+                 session you opened and never the daemon default by accident. One-shot or \
+                 finished sessions reject this call."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -10329,7 +10330,8 @@ impl McpTool for AgentKillTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Send SIGTERM to a running agent session. Use when a sub-agent \
+            description: "Gracefully stop a running agent session this bridge started — sends \
+                 SIGTERM to that session's own process. Use when a sub-agent you launched \
                  stalled, went off-task, or its result is no longer needed. The background \
                  wait task finalises the session with the signal exit code; \
                  agent_session_get(id) still shows captured output."
@@ -39522,8 +39524,9 @@ impl McpTool for AgentSteerDriveTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Drive a steerable session: send `input`, then poll the pane \
-                 until `expect` appears (or timeout). Auto-answers ONLY the \
+            description: "Drive a steerable session this bridge launched (a terminal-multiplexer \
+                 pane it owns, local or on a tailnet node you administer): send `input`, then \
+                 poll the pane until `expect` appears (or timeout). Auto-answers ONLY the \
                  trust-folder gate (when auto_gate); quota/approval/unknown prompts \
                  are returned as `awaiting_gate` with needs_human=true and are never \
                  auto-answered. Echoes `purpose` — purpose='research' flags the \
@@ -39977,8 +39980,9 @@ impl McpTool for AgentSteerKillTool {
     fn schema(&self) -> ToolSchema {
         ToolSchema {
             name: self.name().into(),
-            description: "Kill a steerable session. Identify by `session` or \
-                 `project`+`role`. Presence handle is marked stale when the mux is missing or killed."
+            description: "Stop a steerable session this bridge launched (a terminal-multiplexer \
+                 pane it owns, local or on a tailnet node you administer). Identify by `session` \
+                 or `project`+`role`. Presence handle is marked stale when the mux is missing or stopped."
                 .into(),
             input_schema: json!({
                 "type": "object",
