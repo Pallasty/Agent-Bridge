@@ -1132,6 +1132,16 @@ pub struct RetrievalOutcomeShadowRow {
     pub last_surfaced_at: i64,
     /// The memory's CURRENT importance (live read at query time).
     pub importance: f64,
+    /// Constraint-class flag: kind=feedback (owner corrections/behavioral
+    /// feedback) or a continuity tag marking must_block actionability /
+    /// constraint / warning role. These rows are consumed ambiently (the
+    /// bootstrap continuity kernel and feedback preamble) where nothing
+    /// stamps `used_at`, so surfaced-never-used telemetry on them is
+    /// class-level attribution bias, not deadness — the decay half of the
+    /// reinforce/decay rule skips them unless protection is explicitly
+    /// disabled (AB_RETRIEVAL_OUTCOME_APPLY_PROTECT_DISABLE=1).
+    #[serde(default)]
+    pub protected: bool,
 }
 
 /// Sort order for `list_memories`.

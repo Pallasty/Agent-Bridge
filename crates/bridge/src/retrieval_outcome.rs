@@ -84,6 +84,13 @@ pub struct RuleParams {
     pub min_surfaced_for_decay: u64,
     pub floor: f64,
     pub ceiling: f64,
+    /// When true (default), rows the store aggregate flags `protected`
+    /// (kind=feedback, continuity must_block / constraint / warning) are
+    /// exempt from the decay half: their consumption channel — ambient
+    /// injection — never stamps `used_at`, so never-used telemetry on them
+    /// is attribution bias, not deadness. Reinforce is unaffected. Kill
+    /// switch: AB_RETRIEVAL_OUTCOME_APPLY_PROTECT_DISABLE=1.
+    pub protect_classes: bool,
 }
 
 impl Default for RuleParams {
@@ -94,6 +101,7 @@ impl Default for RuleParams {
             min_surfaced_for_decay: 2,
             floor: 0.1,
             ceiling: 0.9,
+            protect_classes: true,
         }
     }
 }
@@ -139,6 +147,10 @@ pub struct Classified {
     pub at_ceiling_keys: Vec<String>,
     pub at_floor_keys: Vec<String>,
     pub zero_step_keys: Vec<String>,
+    /// Constraint-class rows the decay half declined to touch (see
+    /// `RuleParams::protect_classes`). Consumed by an apply pass like the
+    /// clamped buckets — declined evidence must not re-aggregate forever.
+    pub protected_decay_keys: Vec<String>,
     pub pending_below_min: u64,
 }
 
@@ -159,6 +171,14 @@ pub fn classify_rows(rows: &[RetrievalOutcomeShadowRow], p: &RuleParams) -> Clas
                 "reinforce",
             )
         } else if r.surfaced_count >= p.min_surfaced_for_decay {
+            if p.protect_classes && r.protected {
+                // Constraint-class row: never-used telemetry is attribution
+                // bias (ambient consumption channel), so the rule declines
+                // to decay. Bucketed, not dropped — the apply pass consumes
+                // the evidence exactly like the clamped buckets.
+                out.protected_decay_keys.push(r.key.clone());
+                continue;
+            }
             if r.importance <= p.floor {
                 out.at_floor_keys.push(r.key.clone());
                 continue;
@@ -201,6 +221,9 @@ pub struct ApplyReport {
     pub at_ceiling: u64,
     pub at_floor: u64,
     pub zero_step: u64,
+    /// Constraint-class rows the decay half skipped under
+    /// `RuleParams::protect_classes` (evidence still consumed).
+    pub protected_skipped: u64,
     pub pending_below_min: u64,
     pub capped_out: u64,
     pub applied: u64,
@@ -258,6 +281,7 @@ pub async fn run_apply_pass(
             at_ceiling: classified.at_ceiling_keys.len() as u64,
             at_floor: classified.at_floor_keys.len() as u64,
             zero_step: classified.zero_step_keys.len() as u64,
+            protected_skipped: classified.protected_decay_keys.len() as u64,
             pending_below_min: classified.pending_below_min,
             capped_out,
             applied: 0,
@@ -420,14 +444,15 @@ pub async fn run_apply_pass(
         }
     }
 
-    // Clamped and zero-step keys: the rule cannot (or will not) act on them,
-    // but their rows are real observed signal — consume so they don't pile
-    // up as a permanently re-aggregated dead slice.
+    // Clamped, zero-step, and protected keys: the rule cannot (or will not)
+    // act on them, but their rows are real observed signal — consume so they
+    // don't pile up as a permanently re-aggregated dead slice.
     for key in classified
         .at_ceiling_keys
         .iter()
         .chain(classified.at_floor_keys.iter())
         .chain(classified.zero_step_keys.iter())
+        .chain(classified.protected_decay_keys.iter())
     {
         match store.consume_retrieval_surfacings(key, cutoff).await {
             Ok(n) => {
@@ -475,6 +500,7 @@ pub async fn run_apply_pass(
         at_ceiling: classified.at_ceiling_keys.len() as u64,
         at_floor: classified.at_floor_keys.len() as u64,
         zero_step: classified.zero_step_keys.len() as u64,
+        protected_skipped: classified.protected_decay_keys.len() as u64,
         pending_below_min: classified.pending_below_min,
         capped_out,
         applied,
@@ -524,6 +550,23 @@ fn apply_tick_secs_from(v: Option<&str>) -> u64 {
         .clamp(3_600, 7 * 86_400)
 }
 
+/// Constraint-class decay protection, default ON.
+/// AB_RETRIEVAL_OUTCOME_APPLY_PROTECT_DISABLE=1 (or true) turns it off —
+/// same knob family as the other apply-rule overrides, so recalibration is
+/// a machine.env edit, not a redeploy.
+pub fn protect_classes_enabled() -> bool {
+    protect_classes_enabled_from(
+        std::env::var("AB_RETRIEVAL_OUTCOME_APPLY_PROTECT_DISABLE")
+            .ok()
+            .as_deref(),
+    )
+}
+
+fn protect_classes_enabled_from(v: Option<&str>) -> bool {
+    !v.map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+}
+
 /// Rule params for the daemon tick, steerable per-deployment via machine.env —
 /// the shadow tool's calibration story ("tune params = re-run the read-only
 /// tool") needs an actuator that can be re-pointed without a redeploy
@@ -538,6 +581,7 @@ pub fn tick_rule_params() -> RuleParams {
         read("AB_RETRIEVAL_OUTCOME_APPLY_MIN_SURFACED").as_deref(),
         read("AB_RETRIEVAL_OUTCOME_APPLY_FLOOR").as_deref(),
         read("AB_RETRIEVAL_OUTCOME_APPLY_CEILING").as_deref(),
+        read("AB_RETRIEVAL_OUTCOME_APPLY_PROTECT_DISABLE").as_deref(),
     );
     if params.validate().is_err() {
         tracing::warn!(
@@ -555,6 +599,7 @@ fn tick_rule_params_from(
     min_surfaced: Option<&str>,
     floor: Option<&str>,
     ceiling: Option<&str>,
+    protect_disable: Option<&str>,
 ) -> RuleParams {
     let d = RuleParams::default();
     let f = |v: Option<&str>, default: f64| {
@@ -571,6 +616,7 @@ fn tick_rule_params_from(
             .unwrap_or(d.min_surfaced_for_decay),
         floor: f(floor, d.floor),
         ceiling: f(ceiling, d.ceiling),
+        protect_classes: protect_classes_enabled_from(protect_disable),
     }
 }
 
@@ -586,7 +632,48 @@ mod tests {
             avg_rank: 1.0,
             last_surfaced_at: 0,
             importance,
+            protected: false,
         }
+    }
+
+    fn prow(key: &str, surfaced: u64, used: u64, importance: f64) -> RetrievalOutcomeShadowRow {
+        RetrievalOutcomeShadowRow {
+            protected: true,
+            ..row(key, surfaced, used, importance)
+        }
+    }
+
+    #[test]
+    fn classify_protected_rows_skip_decay_but_still_reinforce() {
+        let rows = vec![
+            prow("prot_unused", 5, 0, 0.9), // decay half declines — bucketed
+            prow("prot_used", 2, 1, 0.5),   // reinforce unaffected
+            row("plain_unused", 5, 0, 0.9), // decays normally
+        ];
+        let c = classify_rows(&rows, &RuleParams::default());
+        assert_eq!(c.protected_decay_keys, vec!["prot_unused".to_string()]);
+        let keys: Vec<&str> = c.changes.iter().map(|ch| ch.key.as_str()).collect();
+        assert_eq!(keys, vec!["prot_used", "plain_unused"]);
+        assert_eq!(c.changes[0].action, "reinforce");
+        assert_eq!(c.changes[1].action, "decay");
+
+        // Kill switch: with protection off the same slice decays normally.
+        let off = RuleParams {
+            protect_classes: false,
+            ..RuleParams::default()
+        };
+        let c2 = classify_rows(&rows, &off);
+        assert!(c2.protected_decay_keys.is_empty());
+        assert_eq!(c2.changes.len(), 3);
+    }
+
+    #[test]
+    fn protect_env_parsing_default_on() {
+        assert!(protect_classes_enabled_from(None));
+        assert!(protect_classes_enabled_from(Some("0")));
+        assert!(protect_classes_enabled_from(Some("garbage")));
+        assert!(!protect_classes_enabled_from(Some("1")));
+        assert!(!protect_classes_enabled_from(Some("TRUE")));
     }
 
     #[test]
@@ -687,22 +774,25 @@ mod tests {
 
     #[test]
     fn tick_rule_params_env_overrides_and_defaults() {
-        let d = tick_rule_params_from(None, None, None, None, None);
+        let d = tick_rule_params_from(None, None, None, None, None, None);
         assert!((d.reinforce_step - 0.05).abs() < 1e-9);
         assert_eq!(d.min_surfaced_for_decay, 2);
+        assert!(d.protect_classes, "protection defaults ON");
         let t = tick_rule_params_from(
             Some("0.02"),
             Some("0.01"),
             Some("4"),
             Some("0.2"),
             Some("0.8"),
+            Some("1"),
         );
         assert!((t.reinforce_step - 0.02).abs() < 1e-9);
         assert!((t.decay_step - 0.01).abs() < 1e-9);
         assert_eq!(t.min_surfaced_for_decay, 4);
         assert!((t.floor - 0.2).abs() < 1e-9 && (t.ceiling - 0.8).abs() < 1e-9);
+        assert!(!t.protect_classes, "PROTECT_DISABLE=1 turns protection off");
         // Garbage falls back per-field; out-of-range clamps; min>=1.
-        let g = tick_rule_params_from(Some("abc"), Some("7.0"), Some("0"), None, None);
+        let g = tick_rule_params_from(Some("abc"), Some("7.0"), Some("0"), None, None, None);
         assert!((g.reinforce_step - 0.05).abs() < 1e-9);
         assert!((g.decay_step - 1.0).abs() < 1e-9);
         assert_eq!(g.min_surfaced_for_decay, 1);

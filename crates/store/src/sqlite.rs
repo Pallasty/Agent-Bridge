@@ -76,6 +76,19 @@ use crate::{
 };
 use tokio_rusqlite::rusqlite::OptionalExtension;
 
+/// SQL predicate marking constraint-class memories whose never-used decay
+/// evidence is structurally biased: their real consumption channel (ambient
+/// injection — bootstrap continuity kernel, feedback preamble) never stamps
+/// `used_at`. Covers owner feedback rows and continuity-tagged must_block /
+/// constraint / warning rows. Shared by the shadow and apply aggregates so
+/// preview and apply can never disagree on protection. The LIKE patterns
+/// include the JSON-array element quotes, so a substring mention inside
+/// another tag (e.g. a retrieval_trigger phrase) does NOT match.
+const PROTECTED_CLASS_CASE_SQL: &str = "CASE WHEN m.kind = 'feedback' \
+    OR m.tags LIKE '%\"continuity_actionability:must_block\"%' \
+    OR m.tags LIKE '%\"continuity_role:constraint\"%' \
+    OR m.tags LIKE '%\"continuity_role:warning\"%' THEN 1 ELSE 0 END";
+
 const SCHEMA_V1: &str = r#"
 CREATE TABLE IF NOT EXISTS schema_meta (
     key   TEXT PRIMARY KEY,
@@ -7398,7 +7411,7 @@ impl StateStore for SqliteStore {
 
         self.conn
             .call(move |c| -> RusqliteResult<Vec<RetrievalOutcomeShadowRow>> {
-                let mut stmt = c.prepare(
+                let sql = format!(
                     "WITH agg AS (
                         SELECT memory_key,
                                COUNT(*) AS surfaced,
@@ -7411,11 +7424,12 @@ impl StateStore for SqliteStore {
                       GROUP BY memory_key
                      )
                      SELECT a.memory_key, a.surfaced, a.used, a.avg_rank, a.last_surf,
-                            m.importance
+                            m.importance, {PROTECTED_CLASS_CASE_SQL} AS protected
                        FROM agg a
                        JOIN memories m ON m.key = a.memory_key AND m.status = 'active'
-                   ORDER BY a.used DESC, a.surfaced DESC, a.memory_key ASC",
-                )?;
+                   ORDER BY a.used DESC, a.surfaced DESC, a.memory_key ASC"
+                );
+                let mut stmt = c.prepare(&sql)?;
                 let rows: Vec<RetrievalOutcomeShadowRow> = stmt
                     .query_map(rusqlite::params![window_start, AMBIENT_SURFACING_MODE], |r| {
                         Ok(RetrievalOutcomeShadowRow {
@@ -7425,6 +7439,7 @@ impl StateStore for SqliteStore {
                             avg_rank: r.get(3)?,
                             last_surfaced_at: r.get(4)?,
                             importance: r.get(5)?,
+                            protected: r.get::<_, i64>(6)? != 0,
                         })
                     })?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -7445,7 +7460,7 @@ impl StateStore for SqliteStore {
     ) -> Result<Vec<RetrievalOutcomeShadowRow>> {
         self.conn
             .call(move |c| -> RusqliteResult<Vec<RetrievalOutcomeShadowRow>> {
-                let mut stmt = c.prepare(
+                let sql = format!(
                     "WITH agg AS (
                         SELECT memory_key,
                                COUNT(*) AS surfaced,
@@ -7459,11 +7474,12 @@ impl StateStore for SqliteStore {
                       GROUP BY memory_key
                      )
                      SELECT a.memory_key, a.surfaced, a.used, a.avg_rank, a.last_surf,
-                            m.importance
+                            m.importance, {PROTECTED_CLASS_CASE_SQL} AS protected
                        FROM agg a
                        JOIN memories m ON m.key = a.memory_key AND m.status = 'active'
-                   ORDER BY a.used DESC, a.surfaced DESC, a.memory_key ASC",
-                )?;
+                   ORDER BY a.used DESC, a.surfaced DESC, a.memory_key ASC"
+                );
+                let mut stmt = c.prepare(&sql)?;
                 let rows: Vec<RetrievalOutcomeShadowRow> = stmt
                     .query_map(rusqlite::params![cutoff, AMBIENT_SURFACING_MODE], |r| {
                         Ok(RetrievalOutcomeShadowRow {
@@ -7473,6 +7489,7 @@ impl StateStore for SqliteStore {
                             avg_rank: r.get(3)?,
                             last_surfaced_at: r.get(4)?,
                             importance: r.get(5)?,
+                            protected: r.get::<_, i64>(6)? != 0,
                         })
                     })?
                     .collect::<std::result::Result<Vec<_>, _>>()?;

@@ -23682,6 +23682,7 @@ struct RetrievalShadowParams {
     min_surfaced_for_decay: u64,
     floor: f64,
     ceiling: f64,
+    protect_classes: bool,
 }
 
 /// One simulated outcome row (still nothing written).
@@ -23705,7 +23706,7 @@ struct RetrievalShadowChange {
 fn retrieval_shadow_apply_rule(
     rows: &[ab_store::RetrievalOutcomeShadowRow],
     p: &RetrievalShadowParams,
-) -> (Vec<RetrievalShadowChange>, u64, u64) {
+) -> (Vec<RetrievalShadowChange>, u64, u64, Vec<String>) {
     let classified = crate::retrieval_outcome::classify_rows(
         rows,
         &crate::retrieval_outcome::RuleParams {
@@ -23714,6 +23715,7 @@ fn retrieval_shadow_apply_rule(
             min_surfaced_for_decay: p.min_surfaced_for_decay,
             floor: p.floor,
             ceiling: p.ceiling,
+            protect_classes: p.protect_classes,
         },
     );
     let changes = classified
@@ -23733,6 +23735,7 @@ fn retrieval_shadow_apply_rule(
         changes,
         classified.at_ceiling_keys.len() as u64,
         classified.at_floor_keys.len() as u64,
+        classified.protected_decay_keys,
     )
 }
 
@@ -23815,6 +23818,14 @@ impl McpTool for RetrievalOutcomeShadowTool {
                         "description": "Reinforce never takes importance above this; rows already \
                             at/above are skipped, not pulled down. Default 0.9 (valence-rule ceiling)."
                     },
+                    "protect": {
+                        "type": "boolean",
+                        "description": "Exempt constraint-class rows (kind=feedback, continuity \
+                            must_block/constraint/warning tags) from the decay half — their ambient \
+                            consumption channel never stamps used_at, so never-used telemetry on \
+                            them is attribution bias. Default: on unless \
+                            AB_RETRIEVAL_OUTCOME_APPLY_PROTECT_DISABLE=1."
+                    },
                     "top_n": {
                         "type": "integer",
                         "minimum": 1,
@@ -23852,6 +23863,10 @@ impl McpTool for RetrievalOutcomeShadowTool {
                 .max(1),
             floor: f("floor", 0.1),
             ceiling: f("ceiling", 0.9),
+            protect_classes: args
+                .get("protect")
+                .and_then(Value::as_bool)
+                .unwrap_or_else(crate::retrieval_outcome::protect_classes_enabled),
         };
         let top_n = args
             .get("top_n")
@@ -23861,7 +23876,8 @@ impl McpTool for RetrievalOutcomeShadowTool {
 
         let rows = store.retrieval_outcome_shadow_rows(window_secs).await?;
         let rows_considered = rows.len();
-        let (changes, at_ceiling, at_floor) = retrieval_shadow_apply_rule(&rows, &params);
+        let (changes, at_ceiling, at_floor, protected_keys) =
+            retrieval_shadow_apply_rule(&rows, &params);
 
         let round3 = |x: f64| (x * 1000.0).round() / 1000.0;
         let (mut n_reinforce, mut n_decay) = (0u64, 0u64);
@@ -23909,6 +23925,7 @@ impl McpTool for RetrievalOutcomeShadowTool {
                 "min_surfaced_for_decay": params.min_surfaced_for_decay,
                 "floor": params.floor,
                 "ceiling": params.ceiling,
+                "protect_classes": params.protect_classes,
             },
             "rows_considered": rows_considered,
             "reinforce": {
@@ -23919,8 +23936,10 @@ impl McpTool for RetrievalOutcomeShadowTool {
             "decay": {
                 "would_change": n_decay,
                 "already_at_floor": at_floor,
+                "protected_skipped": protected_keys.len(),
                 "total_delta": round3(delta_decay),
             },
+            "protected_keys": protected_keys,
             "net_importance_delta": round3(delta_reinforce + delta_decay),
             "low_sample": low_sample,
             "changes": changes_json,
@@ -23971,7 +23990,13 @@ impl McpTool for RetrievalOutcomeApplyTool {
                  Ambient bootstrap telemetry (mode=bootstrap, from session_bootstrap \
                  injections) is excluded from the aggregate and merely retired each \
                  confirmed pass (ambient_retired) — stage-1 telemetry-only, pending a \
-                 calibrated ambient rule. The daemon runs this automatically only when \
+                 calibrated ambient rule. Constraint-class rows (kind=feedback, \
+                 continuity must_block/constraint/warning tags) are decay-exempt by \
+                 default — their ambient consumption channel never stamps used_at, so \
+                 never-used telemetry on them is attribution bias; they are reported \
+                 as protected_skipped and their evidence is still consumed \
+                 (AB_RETRIEVAL_OUTCOME_APPLY_PROTECT_DISABLE=1 disables). The daemon \
+                 runs this automatically only when \
                  AGENT_BRIDGE_RETRIEVAL_OUTCOME_APPLY is enabled (default OFF)."
                 .into(),
             input_schema: json!({
@@ -24007,6 +24032,12 @@ impl McpTool for RetrievalOutcomeApplyTool {
                         "description": "Cap on importance writes this pass. Deferred rows keep their \
                             telemetry unconsumed and are reported in capped_out — never silently dropped."
                     },
+                    "protect": {
+                        "type": "boolean",
+                        "description": "Exempt constraint-class rows (kind=feedback, continuity \
+                            must_block/constraint/warning tags) from the decay half. Default: on \
+                            unless AB_RETRIEVAL_OUTCOME_APPLY_PROTECT_DISABLE=1."
+                    },
                     "confirm_apply": {
                         "type": "boolean", "default": false,
                         "description": "Final explicit write confirmation. Default false ⇒ preview only: \
@@ -24041,6 +24072,10 @@ impl McpTool for RetrievalOutcomeApplyTool {
                 .max(1),
             floor: f("floor", 0.1),
             ceiling: f("ceiling", 0.9),
+            protect_classes: args
+                .get("protect")
+                .and_then(Value::as_bool)
+                .unwrap_or_else(crate::retrieval_outcome::protect_classes_enabled),
         };
         let max_changes = args
             .get("max_changes")
@@ -24106,6 +24141,7 @@ impl McpTool for RetrievalOutcomeApplyTool {
                 "min_surfaced_for_decay": params.min_surfaced_for_decay,
                 "floor": params.floor,
                 "ceiling": params.ceiling,
+                "protect_classes": params.protect_classes,
                 "max_changes": max_changes,
                 "maturation_secs": crate::retrieval_outcome::APPLY_MATURATION_SECS,
             },
@@ -24115,6 +24151,7 @@ impl McpTool for RetrievalOutcomeApplyTool {
             "at_ceiling": report.at_ceiling,
             "at_floor": report.at_floor,
             "zero_step": report.zero_step,
+            "protected_skipped": report.protected_skipped,
             "pending_below_min": report.pending_below_min,
             "capped_out": report.capped_out,
             "applied": report.applied,

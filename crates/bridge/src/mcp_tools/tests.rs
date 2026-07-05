@@ -8705,6 +8705,7 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
                 avg_rank: 1.0,
                 last_surfaced_at: 1_700_000_000,
                 importance: imp,
+                protected: false,
             }
         };
         let rows = vec![
@@ -8724,8 +8725,11 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
             min_surfaced_for_decay: 2,
             floor: 0.1,
             ceiling: 0.9,
+            protect_classes: true,
         };
-        let (changes, at_ceiling, at_floor) = retrieval_shadow_apply_rule(&rows, &p);
+        let (changes, at_ceiling, at_floor, protected_keys) =
+            retrieval_shadow_apply_rule(&rows, &p);
+        assert!(protected_keys.is_empty(), "no protected rows seeded");
 
         let by_key: std::collections::HashMap<&str, &RetrievalShadowChange> =
             changes.iter().map(|c| (c.key.as_str(), c)).collect();
@@ -8752,7 +8756,7 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
             decay_step: 0.0,
             ..p
         };
-        let (no_changes, z_ceil, z_floor) = retrieval_shadow_apply_rule(&rows, &zero);
+        let (no_changes, z_ceil, z_floor, _) = retrieval_shadow_apply_rule(&rows, &zero);
         assert!(no_changes.is_empty(), "step=0.0 must report zero changes");
         assert_eq!((z_ceil, z_floor), (2, 2), "clamp-skip counters unaffected");
     }
@@ -8991,6 +8995,151 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
             (single.importance - 0.45).abs() < 1e-9,
             "below-min evidence accumulated across passes, then decayed once"
         );
+
+        let _ = std::fs::remove_dir_all(&store_dir);
+    }
+
+    #[tokio::test]
+    async fn retrieval_outcome_apply_protects_constraint_class_rows() {
+        // Constraint-class rows (kind=feedback, continuity must_block tag) are
+        // consumed ambiently (bootstrap continuity kernel / feedback preamble)
+        // where nothing stamps used_at, so surfaced-never-used telemetry on them
+        // is attribution bias, not deadness. The decay half must skip them
+        // (protected_skipped), consume their evidence exactly once, leave
+        // reinforce untouched — and decay them normally when the kill switch
+        // turns protection off. A substring mention of a protected tag inside
+        // ANOTHER tag must NOT protect (quoted-element LIKE).
+        use crate::retrieval_outcome::{run_apply_pass, RuleParams};
+        let (hub, store_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        let mk_rec = |key: &str, kind: &str, tags: Vec<String>, imp: f64| ab_store::MemoryRecord {
+            key: key.into(),
+            kind: kind.into(),
+            content: format!("protect probe {key}"),
+            tags,
+            related_keys: vec![],
+            scope: None,
+            created_at: 1_700_000_000,
+            updated_at: 1_700_000_000,
+            last_accessed_at: 1_700_000_000,
+            access_count: 3,
+            importance: imp,
+            status: String::new(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        store
+            .memory_save(&mk_rec("rp_feedback", "feedback", vec![], 0.9))
+            .await
+            .expect("save feedback");
+        store
+            .memory_save(&mk_rec(
+                "rp_mustblock",
+                "decision",
+                vec!["continuity_actionability:must_block".into()],
+                0.9,
+            ))
+            .await
+            .expect("save mustblock");
+        store
+            .memory_save(&mk_rec(
+                "rp_plain",
+                "decision",
+                vec!["continuity_retrieval_trigger:when must_block rows change".into()],
+                0.9,
+            ))
+            .await
+            .expect("save plain");
+        store
+            .memory_save(&mk_rec("rp_fb_used", "feedback", vec![], 0.5))
+            .await
+            .expect("save fb_used");
+
+        for q in ["q1", "q2"] {
+            store
+                .record_retrieval_surfacing(
+                    &[
+                        ("rp_feedback".to_string(), 0),
+                        ("rp_mustblock".to_string(), 1),
+                        ("rp_plain".to_string(), 2),
+                    ],
+                    q,
+                    "fts",
+                )
+                .await
+                .expect("surface");
+        }
+        store
+            .record_retrieval_surfacing(&[("rp_fb_used".to_string(), 0)], "q3", "fts")
+            .await
+            .expect("surface used");
+        assert_eq!(
+            store
+                .attribute_retrieval_get("rp_fb_used", 1800)
+                .await
+                .unwrap(),
+            1
+        );
+
+        let future_now = unix_now_secs() + 100_000;
+
+        // Pass 1 (protection ON by default): rp_plain decays despite its
+        // substring tag mention, both protected rows are skipped with their
+        // evidence consumed, and the protected-but-used row still reinforces.
+        let pass1 = run_apply_pass(&store, &RuleParams::default(), 200, true, future_now)
+            .await
+            .expect("pass 1");
+        assert_eq!(pass1.protected_skipped, 2, "feedback + must_block skipped");
+        assert_eq!(pass1.applied, 2, "plain decay + used-feedback reinforce");
+        let fb = store.memory_get("rp_feedback").await.unwrap().unwrap();
+        let mb = store.memory_get("rp_mustblock").await.unwrap().unwrap();
+        let pl = store.memory_get("rp_plain").await.unwrap().unwrap();
+        let fu = store.memory_get("rp_fb_used").await.unwrap().unwrap();
+        assert!((fb.importance - 0.9).abs() < 1e-9, "protected feedback untouched");
+        assert!((mb.importance - 0.9).abs() < 1e-9, "protected must_block untouched");
+        assert!(
+            (pl.importance - 0.85).abs() < 1e-9,
+            "substring tag mention decays normally (quoted-element LIKE)"
+        );
+        assert!((fu.importance - 0.55).abs() < 1e-9, "reinforce unaffected");
+
+        // Consumed exactly once: an immediate re-run sees nothing pending.
+        let pass2 = run_apply_pass(&store, &RuleParams::default(), 200, true, future_now)
+            .await
+            .expect("pass 2");
+        assert_eq!(
+            pass2.rows_considered, 0,
+            "protected evidence consumed, not re-aggregated forever"
+        );
+        assert_eq!(pass2.protected_skipped, 0);
+
+        // Kill switch: fresh evidence + protect_classes=false decays them.
+        for q in ["q4", "q5"] {
+            store
+                .record_retrieval_surfacing(
+                    &[
+                        ("rp_feedback".to_string(), 0),
+                        ("rp_mustblock".to_string(), 1),
+                    ],
+                    q,
+                    "fts",
+                )
+                .await
+                .expect("surface off");
+        }
+        let off = RuleParams {
+            protect_classes: false,
+            ..RuleParams::default()
+        };
+        let pass3 = run_apply_pass(&store, &off, 200, true, future_now)
+            .await
+            .expect("pass 3");
+        assert_eq!(pass3.protected_skipped, 0);
+        assert_eq!(pass3.applied, 2);
+        let fb = store.memory_get("rp_feedback").await.unwrap().unwrap();
+        let mb = store.memory_get("rp_mustblock").await.unwrap().unwrap();
+        assert!((fb.importance - 0.85).abs() < 1e-9, "kill switch restores decay");
+        assert!((mb.importance - 0.85).abs() < 1e-9, "kill switch restores decay");
 
         let _ = std::fs::remove_dir_all(&store_dir);
     }

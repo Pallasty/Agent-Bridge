@@ -7454,7 +7454,7 @@ async fn real_main() -> Result<()> {
                             .unwrap_or(0);
                         // Rule params are machine.env-steerable
                         // (AB_RETRIEVAL_OUTCOME_APPLY_{REINFORCE_STEP,DECAY_STEP,
-                        // MIN_SURFACED,FLOOR,CEILING}) so shadow-tool
+                        // MIN_SURFACED,FLOOR,CEILING,PROTECT_DISABLE}) so shadow-tool
                         // recalibration doesn't need a redeploy.
                         let params = ab_bridge::retrieval_outcome::tick_rule_params();
                         match ab_bridge::retrieval_outcome::run_apply_pass(
@@ -7471,6 +7471,7 @@ async fn real_main() -> Result<()> {
                                         consumed_rows = r.consumed_rows,
                                         orphans_consumed = r.orphans_consumed,
                                         ambient_retired = r.ambient_retired,
+                                        protected_skipped = r.protected_skipped,
                                         pending_below_min = r.pending_below_min,
                                         capped_out = r.capped_out,
                                         net_delta = r.net_importance_delta,
