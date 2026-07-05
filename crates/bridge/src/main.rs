@@ -3205,11 +3205,11 @@ enum BioCortexOp {
     /// Prepare a human runtime-influence review request without approval.
     ///
     /// This consumes the post-implementation review gate, redacted order
-    /// artifact summary, optional redacted evidence aggregate, and optional
-    /// post-runtime evidence summary. It requests a separate human review for
-    /// explicit opt-in FTS runtime influence only; it does not approve runtime
-    /// adapter influence, call `memory_search`, run BioCortex, or change
-    /// retrieval order.
+    /// artifact summary, optional redacted evidence aggregate, optional
+    /// post-runtime evidence summary, and optional capability-ledger report
+    /// packet. It requests a separate human review for explicit opt-in FTS
+    /// runtime influence only; it does not approve runtime adapter influence,
+    /// call `memory_search`, run BioCortex, or change retrieval order.
     RetrievalOptInRuntimeInfluenceReviewRequest {
         /// JSON file produced by retrieval-opt-in-post-implementation-review-gate.
         #[arg(long = "post-implementation-review-gate-json")]
@@ -3223,6 +3223,9 @@ enum BioCortexOp {
         /// Optional JSON file produced by retrieval-opt-in-evidence-summary.
         #[arg(long = "evidence-summary-json")]
         evidence_summary_json: Option<PathBuf>,
+        /// Optional JSON file produced by the BioCortex capability-ledger report-packet consumer.
+        #[arg(long = "capability-ledger-report-packet-json")]
+        capability_ledger_report_packet_json: Option<PathBuf>,
         /// Reviewer identity or handle.
         #[arg(long)]
         reviewer: Option<String>,
@@ -5733,6 +5736,7 @@ async fn real_main() -> Result<()> {
                 redacted_order_artifact_json,
                 redacted_evidence_aggregate_json,
                 evidence_summary_json,
+                capability_ledger_report_packet_json,
                 reviewer,
                 commit,
                 forum_post_id,
@@ -5744,11 +5748,13 @@ async fn real_main() -> Result<()> {
                     redacted_order_artifact_json,
                     redacted_evidence_aggregate_json.as_deref(),
                     evidence_summary_json.as_deref(),
+                    capability_ledger_report_packet_json.as_deref(),
                     BioCortexRetrievalOptInRuntimeInfluenceReviewRequestOptions {
                         post_implementation_review_gate: Value::Null,
                         redacted_order_artifact: Value::Null,
                         redacted_evidence_aggregate: None,
                         evidence_summary: None,
+                        capability_ledger_report_packet: None,
                         reviewer: reviewer.clone(),
                         commit: commit.clone(),
                         forum_post_id: forum_post_id.clone(),
@@ -12029,6 +12035,7 @@ async fn run_biocortex_retrieval_opt_in_runtime_influence_review_request(
     redacted_order_artifact_json: &std::path::Path,
     redacted_evidence_aggregate_json: Option<&std::path::Path>,
     evidence_summary_json: Option<&std::path::Path>,
+    capability_ledger_report_packet_json: Option<&std::path::Path>,
     mut opts: BioCortexRetrievalOptInRuntimeInfluenceReviewRequestOptions,
     as_json: bool,
 ) -> Result<()> {
@@ -12072,6 +12079,20 @@ async fn run_biocortex_retrieval_opt_in_runtime_influence_review_request(
         opts.evidence_summary = Some(serde_json::from_str(&evidence_body).map_err(|e| {
             anyhow::anyhow!("parse opt-in evidence summary JSON at {evidence_summary_json:?}: {e}")
         })?);
+    }
+    if let Some(capability_ledger_report_packet_json) = capability_ledger_report_packet_json {
+        let ledger_body =
+            std::fs::read_to_string(capability_ledger_report_packet_json).map_err(|e| {
+                anyhow::anyhow!(
+                    "read BioCortex capability ledger report packet JSON at {capability_ledger_report_packet_json:?}: {e}"
+                )
+            })?;
+        opts.capability_ledger_report_packet =
+            Some(serde_json::from_str(&ledger_body).map_err(|e| {
+                anyhow::anyhow!(
+                    "parse BioCortex capability ledger report packet JSON at {capability_ledger_report_packet_json:?}: {e}"
+                )
+            })?);
     }
     let payload = biocortex_retrieval_opt_in_runtime_influence_review_request(opts);
     if as_json {

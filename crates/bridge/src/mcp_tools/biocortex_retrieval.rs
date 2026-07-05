@@ -2330,9 +2330,9 @@ impl McpTool for BioCortexRetrievalOptInPostImplementationReviewGateTool {
 
 /// Read-only BioCortex retrieval opt-in runtime-influence review request. This
 /// tool accepts the post-implementation review gate plus redacted order artifact
-/// and may accept a redacted evidence aggregate summary. It emits a human
-/// review request for explicit opt-in FTS influence. It never approves runtime
-/// adapter influence, calls `memory_search`, runs BioCortex, or changes
+/// and may accept redacted evidence plus capability-ledger summaries. It emits
+/// a human review request for explicit opt-in FTS influence. It never approves
+/// runtime adapter influence, calls `memory_search`, runs BioCortex, or changes
 /// retrieval order.
 pub struct BioCortexRetrievalOptInRuntimeInfluenceReviewRequestTool;
 
@@ -2360,9 +2360,10 @@ impl McpTool for BioCortexRetrievalOptInRuntimeInfluenceReviewRequestTool {
             description: "Read-only BioCortex retrieval opt-in \
                  runtime-influence review request. Accepts a post-implementation \
                  review gate, redacted order artifact, optional redacted \
-                 evidence aggregate, and optional post-runtime evidence \
-                 summary, then emits a request for separate human review of \
-                 explicit opt-in FTS influence. Does not call \
+                 evidence aggregate, optional post-runtime evidence \
+                 summary, and optional capability ledger report packet, then \
+                 emits a request for separate human review of explicit opt-in \
+                 FTS influence. Does not call \
                  memory_search, run BioCortex, mutate memory, include raw \
                  query/keys/content, register an EmbeddingBackend, approve \
                  runtime influence, or alter retrieval order."
@@ -2386,6 +2387,10 @@ impl McpTool for BioCortexRetrievalOptInRuntimeInfluenceReviewRequestTool {
                     "evidence_summary": {
                         "type": "object",
                         "description": "Optional JSON object produced by biocortex_retrieval_opt_in_evidence_summary. Unknown/raw fields are ignored; the input body is not copied to output."
+                    },
+                    "capability_ledger_report_packet": {
+                        "type": "object",
+                        "description": "Optional JSON object produced by the BioCortex capability-ledger report-packet consumer. Unknown/raw fields are ignored; the input body and report markdown are not copied to output."
                     },
                     "reviewer": {
                         "type": "string",
@@ -2419,6 +2424,8 @@ impl McpTool for BioCortexRetrievalOptInRuntimeInfluenceReviewRequestTool {
             .unwrap_or(Value::Null);
         let redacted_evidence_aggregate = args.get("redacted_evidence_aggregate").cloned();
         let evidence_summary = args.get("evidence_summary").cloned();
+        let capability_ledger_report_packet =
+            args.get("capability_ledger_report_packet").cloned();
         let reviewer = args
             .get("reviewer")
             .and_then(Value::as_str)
@@ -2441,6 +2448,7 @@ impl McpTool for BioCortexRetrievalOptInRuntimeInfluenceReviewRequestTool {
                 redacted_order_artifact,
                 redacted_evidence_aggregate,
                 evidence_summary,
+                capability_ledger_report_packet,
                 reviewer,
                 commit,
                 forum_post_id,
@@ -4092,4 +4100,3 @@ impl McpTool for BioCortexRetrievalShadowTool {
         Ok(ToolResult::json_text(&payload))
     }
 }
-

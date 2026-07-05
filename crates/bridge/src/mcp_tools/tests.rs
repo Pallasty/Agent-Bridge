@@ -15874,6 +15874,9 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             .description
             .contains("optional redacted evidence aggregate"));
         assert!(schema.description.contains("post-runtime evidence summary"));
+        assert!(schema
+            .description
+            .contains("capability ledger report packet"));
         assert!(schema.description.contains("Does not call memory_search"));
         assert!(schema.description.contains("run BioCortex"));
         assert!(schema
@@ -15891,6 +15894,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(required.contains(&json!("redacted_order_artifact")));
         assert!(!required.contains(&json!("redacted_evidence_aggregate")));
         assert!(!required.contains(&json!("evidence_summary")));
+        assert!(!required.contains(&json!("capability_ledger_report_packet")));
         let props = schema
             .input_schema
             .get("properties")
@@ -15900,6 +15904,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(props.get("redacted_order_artifact").is_some());
         assert!(props.get("redacted_evidence_aggregate").is_some());
         assert!(props.get("evidence_summary").is_some());
+        assert!(props.get("capability_ledger_report_packet").is_some());
         assert!(props.get("reviewer").is_some());
         assert!(props.get("commit").is_some());
         assert!(props.get("forum_post_id").is_some());
@@ -16090,6 +16095,39 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
                         "raw_key": "secret_evidence_summary_key",
                         "content": "secret evidence summary content"
                     },
+                    "capability_ledger_report_packet": {
+                        "schema": "agent_bridge.biocortex_capability_ledger.report_packet.v0",
+                        "summary_schema": "agent_bridge.biocortex_capability_ledger.consumer_dry_run.v0",
+                        "report_schema": "agent_bridge.biocortex_capability_ledger.review_artifact.v0",
+                        "input_schema": "biocortex.capability_ledger.v3",
+                        "input_schema_version": "3",
+                        "input_mode": "read_only_shadow",
+                        "input_generated_by": "capability_ledger_shadow_adapter",
+                        "verdict": "accepted",
+                        "read_only_confirmed": true,
+                        "downstream_action": "surface_static_ledger_review_artifact",
+                        "integration_decision": "accepted_for_review_only",
+                        "safety": {
+                            "static_artifact_only": true,
+                            "memory_write_attempted": false,
+                            "retrieval_order_change_attempted": false,
+                            "runtime_authority_observed": false,
+                            "executor_enablement_observed": false,
+                            "mcp_tool_registration": false,
+                            "nexus_world_tick_touched": false,
+                            "aiot_runtime_called": false,
+                            "language_generation_observed": false,
+                            "cognition_claim_observed": false
+                        },
+                        "summary": {
+                            "schema": "agent_bridge.biocortex_capability_ledger.consumer_dry_run.v0",
+                            "verdict": "accepted"
+                        },
+                        "report_markdown": "secret ledger markdown",
+                        "raw_query": "secret ledger query",
+                        "raw_key": "secret_ledger_key",
+                        "content": "secret ledger content"
+                    },
                     "reviewer": "codex",
                     "commit": "runtime-review-request-commit",
                     "forum_post_id": "104",
@@ -16115,6 +16153,10 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(!text.contains("secret evidence summary query"));
         assert!(!text.contains("secret_evidence_summary_key"));
         assert!(!text.contains("secret evidence summary content"));
+        assert!(!text.contains("secret ledger markdown"));
+        assert!(!text.contains("secret ledger query"));
+        assert!(!text.contains("secret_ledger_key"));
+        assert!(!text.contains("secret ledger content"));
 
         let v: Value = serde_json::from_str(&text).expect("valid json");
         assert_eq!(
@@ -16155,6 +16197,14 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             json!(false)
         );
         assert_eq!(
+            v["input_contract"]["capability_ledger_report_packet_schema"],
+            json!("agent_bridge.biocortex_capability_ledger.report_packet.v0")
+        );
+        assert_eq!(
+            v["input_contract"]["capability_ledger_report_packet_included"],
+            json!(false)
+        );
+        assert_eq!(
             v["requested_authorization"]["request_runtime_adapter_review"],
             json!(true)
         );
@@ -16188,6 +16238,18 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         );
         assert_eq!(
             v["requested_authorization"]["requires_post_runtime_evidence_summary"],
+            json!(false)
+        );
+        assert_eq!(
+            v["requested_authorization"]["accepts_capability_ledger_report_packet"],
+            json!(true)
+        );
+        assert_eq!(
+            v["requested_authorization"]["requires_capability_ledger_report_packet"],
+            json!(false)
+        );
+        assert_eq!(
+            v["requested_authorization"]["capability_ledger_can_authorize_runtime_influence"],
             json!(false)
         );
         assert_eq!(
@@ -16227,6 +16289,22 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             json!("runtime_transition_gated_batch_diagnostics")
         );
         assert_eq!(
+            v["evidence_summary"]["capability_ledger_report_packet_provided"],
+            json!(true)
+        );
+        assert_eq!(
+            v["evidence_summary"]["capability_ledger_report_packet_accepted"],
+            json!(true)
+        );
+        assert_eq!(
+            v["evidence_summary"]["capability_ledger_read_only_confirmed"],
+            json!(true)
+        );
+        assert_eq!(
+            v["evidence_summary"]["capability_ledger_report_packet_included"],
+            json!(false)
+        );
+        assert_eq!(
             v["boundary_check"]["runtime_influence_review_request_ready"],
             json!(true)
         );
@@ -16244,6 +16322,14 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         );
         assert_eq!(
             v["boundary_check"]["post_runtime_evidence_summary_safe_for_review"],
+            json!(true)
+        );
+        assert_eq!(
+            v["boundary_check"]["capability_ledger_report_packet_provided"],
+            json!(true)
+        );
+        assert_eq!(
+            v["boundary_check"]["capability_ledger_report_packet_safe_for_review"],
             json!(true)
         );
         assert_eq!(v["boundary_check"]["blockers"], json!([]));
