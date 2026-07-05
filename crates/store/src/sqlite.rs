@@ -72,7 +72,7 @@ use crate::{
     RetrievalOutcomeMemory, RetrievalOutcomeShadowRow, RetrievalOutcomeSummary,
     ReplayAuditStats, S234Counts, SessionFilter, SignalFidelityStats, StateStore, StoredSession,
     WaypointRow, WaypointStats, MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP,
-    MEMORY_QUERY_LOG_RING_CAP, RETRIEVAL_SURFACING_RING_CAP, STDIO_CAP,
+    AMBIENT_SURFACING_MODE, MEMORY_QUERY_LOG_RING_CAP, RETRIEVAL_SURFACING_RING_CAP, STDIO_CAP,
 };
 use tokio_rusqlite::rusqlite::OptionalExtension;
 
@@ -6991,19 +6991,27 @@ impl StateStore for SqliteStore {
                     }
                 }
                 // Ring-buffer prune: keep at most RETRIEVAL_SURFACING_RING_CAP rows.
-                // Consumed rows go first (they are spent history), then FIFO by
-                // id — so pending below-threshold evidence, which v40 promises
-                // accumulates across apply passes, is the LAST thing cap
-                // pressure can evict, and oldest-first among the consumed keeps
-                // stamp-eligible young rows safe (review finding, 2026-07-03).
+                // Consumed rows go first (they are spent history), then pending
+                // AMBIENT rows, then FIFO by id — so pending below-threshold
+                // SEARCH evidence, which v40 promises accumulates across apply
+                // passes, is the LAST thing cap pressure can evict, and
+                // oldest-first among the consumed keeps stamp-eligible young
+                // rows safe (review finding, 2026-07-03). The ambient tier makes
+                // that promise deployment-independent: with the collector ON but
+                // no confirmed apply pass running (retirement never fires),
+                // ambient volume (~60 rows/injection vs ~10/search) would
+                // otherwise fill the ring and FIFO-evict the oldest pending
+                // search rows first (review finding, 2026-07-05).
                 tx.execute(
                     "DELETE FROM retrieval_surfacing
                        WHERE id IN (
                            SELECT id FROM retrieval_surfacing
-                           ORDER BY (consumed_at IS NULL) ASC, id ASC
+                           ORDER BY (consumed_at IS NULL) ASC,
+                                    (mode <> ?2) ASC,
+                                    id ASC
                            LIMIT MAX(0, (SELECT COUNT(*) FROM retrieval_surfacing) - ?1)
                        )",
-                    rusqlite::params![RETRIEVAL_SURFACING_RING_CAP],
+                    rusqlite::params![RETRIEVAL_SURFACING_RING_CAP, AMBIENT_SURFACING_MODE],
                 )?;
                 tx.commit()?;
                 Ok(())
@@ -7226,8 +7234,28 @@ impl StateStore for SqliteStore {
 
         self.conn
             .call(move |c| -> RusqliteResult<RetrievalOutcomeSummary> {
+                // Per-mode surfacing counts, most-first. Computed FIRST and
+                // UNFILTERED, before the ambient-excluded scalar can early-
+                // return: bootstrap volume must stay visible in the report
+                // even when it is the only telemetry in the window —
+                // otherwise a bootstrap-only window reads as "collector dead"
+                // instead of "ambient-only".
+                let mut mode_stmt = c.prepare(
+                    "SELECT mode, COUNT(*) FROM retrieval_surfacing
+                      WHERE surfaced_at >= ?1
+                   GROUP BY mode ORDER BY COUNT(*) DESC, mode ASC",
+                )?;
+                let by_mode: Vec<(String, u64)> = mode_stmt
+                    .query_map(rusqlite::params![window_start], |r| {
+                        Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64))
+                    })?
+                    .collect::<std::result::Result<Vec<_>, _>>()?;
+
                 // Scalar aggregate over the window. COUNT(DISTINCT CASE …) over
                 // all-NULL = 0; AVG over an empty (no-used) set = NULL → COALESCE.
+                // Ambient bootstrap rows are excluded (see AMBIENT_SURFACING_MODE):
+                // mixing ~60-row injections into used_rate/avg_rank would drown
+                // the explicit-search signal this readout exists to calibrate.
                 let (total, used, distinct_mem, distinct_used, avg_rank, avg_rank_used): (
                     i64,
                     i64,
@@ -7244,8 +7272,9 @@ impl StateStore for SqliteStore {
                         COALESCE(AVG(rank), 0.0),
                         COALESCE(AVG(CASE WHEN used_at IS NOT NULL THEN rank END), 0.0)
                        FROM retrieval_surfacing
-                      WHERE surfaced_at >= ?1",
-                    rusqlite::params![window_start],
+                      WHERE surfaced_at >= ?1
+                        AND mode <> ?2",
+                    rusqlite::params![window_start, AMBIENT_SURFACING_MODE],
                     |r| {
                         Ok((
                             r.get(0)?,
@@ -7262,21 +7291,10 @@ impl StateStore for SqliteStore {
                     return Ok(RetrievalOutcomeSummary {
                         window_start,
                         window_end: now,
+                        by_mode,
                         ..Default::default()
                     });
                 }
-
-                // Per-mode surfacing counts, most-first.
-                let mut mode_stmt = c.prepare(
-                    "SELECT mode, COUNT(*) FROM retrieval_surfacing
-                      WHERE surfaced_at >= ?1
-                   GROUP BY mode ORDER BY COUNT(*) DESC, mode ASC",
-                )?;
-                let by_mode: Vec<(String, u64)> = mode_stmt
-                    .query_map(rusqlite::params![window_start], |r| {
-                        Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as u64))
-                    })?
-                    .collect::<std::result::Result<Vec<_>, _>>()?;
 
                 // Per-memory aggregates via a CTE so the derived columns are real
                 // columns (referenceable inside ORDER BY expressions — a bare
@@ -7291,6 +7309,7 @@ impl StateStore for SqliteStore {
                                MAX(surfaced_at) AS last_surf
                           FROM retrieval_surfacing
                          WHERE surfaced_at >= ?1
+                           AND mode <> ?3
                       GROUP BY memory_key
                      )
                      SELECT memory_key, surfaced, used, avg_rank, last_surf
@@ -7301,7 +7320,7 @@ impl StateStore for SqliteStore {
                       LIMIT ?2",
                 )?;
                 let top_used: Vec<RetrievalOutcomeMemory> = used_stmt
-                    .query_map(rusqlite::params![window_start, top_n], |r| {
+                    .query_map(rusqlite::params![window_start, top_n, AMBIENT_SURFACING_MODE], |r| {
                         Ok(RetrievalOutcomeMemory {
                             key: r.get(0)?,
                             surfaced_count: r.get::<_, i64>(1)? as u64,
@@ -7324,6 +7343,7 @@ impl StateStore for SqliteStore {
                                MAX(surfaced_at) AS last_surf
                           FROM retrieval_surfacing
                          WHERE surfaced_at >= ?1
+                           AND mode <> ?3
                       GROUP BY memory_key
                      )
                      SELECT memory_key, surfaced, avg_rank, last_surf
@@ -7333,7 +7353,7 @@ impl StateStore for SqliteStore {
                       LIMIT ?2",
                 )?;
                 let top_never_used: Vec<RetrievalOutcomeMemory> = never_stmt
-                    .query_map(rusqlite::params![window_start, top_n], |r| {
+                    .query_map(rusqlite::params![window_start, top_n, AMBIENT_SURFACING_MODE], |r| {
                         Ok(RetrievalOutcomeMemory {
                             key: r.get(0)?,
                             surfaced_count: r.get::<_, i64>(1)? as u64,
@@ -7387,6 +7407,7 @@ impl StateStore for SqliteStore {
                                MAX(surfaced_at) AS last_surf
                           FROM retrieval_surfacing
                          WHERE surfaced_at >= ?1
+                           AND mode <> ?2
                       GROUP BY memory_key
                      )
                      SELECT a.memory_key, a.surfaced, a.used, a.avg_rank, a.last_surf,
@@ -7396,7 +7417,7 @@ impl StateStore for SqliteStore {
                    ORDER BY a.used DESC, a.surfaced DESC, a.memory_key ASC",
                 )?;
                 let rows: Vec<RetrievalOutcomeShadowRow> = stmt
-                    .query_map(rusqlite::params![window_start], |r| {
+                    .query_map(rusqlite::params![window_start, AMBIENT_SURFACING_MODE], |r| {
                         Ok(RetrievalOutcomeShadowRow {
                             key: r.get(0)?,
                             surfaced_count: r.get::<_, i64>(1)? as u64,
@@ -7434,6 +7455,7 @@ impl StateStore for SqliteStore {
                           FROM retrieval_surfacing
                          WHERE consumed_at IS NULL
                            AND surfaced_at <= ?1
+                           AND mode <> ?2
                       GROUP BY memory_key
                      )
                      SELECT a.memory_key, a.surfaced, a.used, a.avg_rank, a.last_surf,
@@ -7443,7 +7465,7 @@ impl StateStore for SqliteStore {
                    ORDER BY a.used DESC, a.surfaced DESC, a.memory_key ASC",
                 )?;
                 let rows: Vec<RetrievalOutcomeShadowRow> = stmt
-                    .query_map(rusqlite::params![cutoff], |r| {
+                    .query_map(rusqlite::params![cutoff, AMBIENT_SURFACING_MODE], |r| {
                         Ok(RetrievalOutcomeShadowRow {
                             key: r.get(0)?,
                             surfaced_count: r.get::<_, i64>(1)? as u64,
@@ -7463,7 +7485,11 @@ impl StateStore for SqliteStore {
     /// Mark `key`'s unconsumed surfacings up to `cutoff` as consumed. NOT
     /// fail-soft: the caller must know whether consumption happened, because
     /// an importance write whose telemetry was NOT consumed would be
-    /// double-counted by the next pass.
+    /// double-counted by the next pass. Ambient rows are excluded to keep the
+    /// trait promise exact ("a pass consumes exactly what it aggregated") —
+    /// the aggregate excludes them by mode, so a mixed-evidence key must not
+    /// have its ambient rows billed to an action they never justified; the
+    /// ambient retirement sweep is their one consume path.
     async fn consume_retrieval_surfacings(&self, key: &str, cutoff: i64) -> Result<u64> {
         let key = key.to_string();
         let now = now_secs();
@@ -7474,8 +7500,9 @@ impl StateStore for SqliteStore {
                         SET consumed_at = ?1
                       WHERE memory_key = ?2
                         AND consumed_at IS NULL
-                        AND surfaced_at <= ?3",
-                    rusqlite::params![now, key, cutoff],
+                        AND surfaced_at <= ?3
+                        AND mode <> ?4",
+                    rusqlite::params![now, key, cutoff, AMBIENT_SURFACING_MODE],
                 )?;
                 Ok(n as u64)
             })
@@ -7503,13 +7530,18 @@ impl StateStore for SqliteStore {
         self.conn
             .call(move |c| -> RusqliteResult<(u64, bool)> {
                 let tx = c.transaction()?;
+                // Ambient rows excluded for the same consumed==aggregated
+                // invariant as consume_retrieval_surfacings — and here it is
+                // also load-bearing for correctness: a key whose ONLY pending
+                // rows are ambient must consume 0 and therefore write nothing.
                 let n = tx.execute(
                     "UPDATE retrieval_surfacing
                         SET consumed_at = ?1
                       WHERE memory_key = ?2
                         AND consumed_at IS NULL
-                        AND surfaced_at <= ?3",
-                    rusqlite::params![now, key, cutoff],
+                        AND surfaced_at <= ?3
+                        AND mode <> ?4",
+                    rusqlite::params![now, key, cutoff, AMBIENT_SURFACING_MODE],
                 )?;
                 let wrote = if n > 0 {
                     // Same shape as memory_set_importance: only `importance`
@@ -7553,6 +7585,26 @@ impl StateStore for SqliteStore {
             })
             .await
             .map_err(|e| Error::Backend(format!("consume_orphaned_surfacings: {e}")))
+    }
+
+    async fn consume_ambient_surfacings(&self, cutoff: i64) -> Result<u64> {
+        let now = now_secs();
+        self.conn
+            .call(move |c| -> RusqliteResult<u64> {
+                // used_at survives retirement: stage-2 calibration reads the
+                // ambient slice by mode+window, not by pending status.
+                let n = c.execute(
+                    "UPDATE retrieval_surfacing
+                        SET consumed_at = ?1
+                      WHERE consumed_at IS NULL
+                        AND surfaced_at <= ?2
+                        AND mode = ?3",
+                    rusqlite::params![now, cutoff, AMBIENT_SURFACING_MODE],
+                )?;
+                Ok(n as u64)
+            })
+            .await
+            .map_err(|e| Error::Backend(format!("consume_ambient_surfacings: {e}")))
     }
 
     async fn memory_query_stats(&self, window_secs: i64) -> Result<MemoryQueryStats> {

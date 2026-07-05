@@ -9104,6 +9104,278 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
     }
 
     #[tokio::test]
+    async fn retrieval_outcome_ambient_rows_excluded_and_retired() {
+        // Stage-1 ambient telemetry (mode=bootstrap, from session_bootstrap
+        // injections) must be invisible to every reinforce/decay surface —
+        // aggregate, per-key consume, report scalars/candidates, shadow —
+        // while staying visible in by_mode counts and getting retired by the
+        // apply pass so it can never squat the ring's pending slice.
+        use crate::retrieval_outcome::{run_apply_pass, RuleParams};
+        let (hub, store_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        // Disjoint tokens so overlap-supersede doesn't collapse the rows
+        // (same trap the shadow what-if test documents).
+        for (key, body, imp) in [
+            ("amb_mixed", "ambient mixed probe chi psi omega", 0.50),
+            ("amb_only", "bootstrap injection furniture rho sigma tau", 0.50),
+            ("amb_floor", "floor clamped resident kappa lambda mu", 0.10),
+        ] {
+            store
+                .memory_save(&ab_store::MemoryRecord {
+                    key: key.into(),
+                    kind: "fact".into(),
+                    content: body.into(),
+                    tags: vec![],
+                    related_keys: vec![],
+                    scope: None,
+                    created_at: 1_700_000_000,
+                    updated_at: 1_700_000_000,
+                    last_accessed_at: 1_700_000_000,
+                    access_count: 1,
+                    importance: imp,
+                    status: String::new(),
+                    trigger_pattern: None,
+                    superseded_by: None,
+                })
+                .await
+                .expect("save");
+        }
+        // amb_mixed: 2 real fts rows (a decay candidate) + 1 ambient row.
+        // amb_only: 3 ambient rows, one of which gets a used_at stamp, and
+        //   NOTHING else — if any exclusion leaks (aggregate, top_used, or
+        //   per-key consume), this key moves or surfaces and the test catches
+        //   it (mutation review, 2026-07-05: top_used was the uncovered one).
+        // amb_floor: 2 fts rows at the floor + 1 ambient row — pins the
+        //   noaction consume path (consume_retrieval_surfacings) leaving
+        //   ambient rows to the retirement sweep.
+        store
+            .record_retrieval_surfacing(
+                &[("amb_mixed".to_string(), 0), ("amb_mixed".to_string(), 1)],
+                "q",
+                "fts",
+            )
+            .await
+            .expect("fts rows");
+        store
+            .record_retrieval_surfacing(
+                &[("amb_floor".to_string(), 0), ("amb_floor".to_string(), 1)],
+                "q floor",
+                "fts",
+            )
+            .await
+            .expect("fts floor rows");
+        store
+            .record_retrieval_surfacing(
+                &[("amb_mixed".to_string(), 0), ("amb_only".to_string(), 1)],
+                "boot q1",
+                ab_store::AMBIENT_SURFACING_MODE,
+            )
+            .await
+            .expect("ambient rows 1");
+        store
+            .record_retrieval_surfacing(
+                &[
+                    ("amb_only".to_string(), 0),
+                    ("amb_only".to_string(), 2),
+                    ("amb_floor".to_string(), 3),
+                ],
+                "boot q2",
+                ab_store::AMBIENT_SURFACING_MODE,
+            )
+            .await
+            .expect("ambient rows 2");
+        // used_at stamping is deliberately mode-agnostic — a memory_get after
+        // an injection stamps ambient rows too.
+        let stamped = store
+            .attribute_retrieval_get("amb_only", 21_600)
+            .await
+            .expect("stamp");
+        assert_eq!(stamped, 3, "stamping reaches ambient rows");
+
+        // Report: scalars and candidates exclude ambient; by_mode shows it.
+        let summary = store
+            .retrieval_outcome_summary(3_600, 10)
+            .await
+            .expect("summary");
+        assert_eq!(summary.total_surfacings, 4, "fts rows only");
+        assert_eq!(
+            summary.used_surfacings, 0,
+            "ambient used stamps stay out of the scalars"
+        );
+        assert!(
+            summary
+                .by_mode
+                .contains(&(ab_store::AMBIENT_SURFACING_MODE.to_string(), 5)),
+            "ambient volume stays visible per-mode: {:?}",
+            summary.by_mode
+        );
+        assert!(
+            summary.top_used.iter().all(|m| m.key != "amb_only"),
+            "a used ambient row must not mint a reinforce candidate"
+        );
+        assert!(
+            summary.top_never_used.iter().all(|m| m.key != "amb_only"),
+            "ambient-only key must not be a decay candidate"
+        );
+        assert!(
+            summary
+                .top_never_used
+                .iter()
+                .any(|m| m.key == "amb_mixed" && m.surfaced_count == 2),
+            "mixed key's candidate counts exclude its ambient row"
+        );
+
+        // Shadow mirrors the apply aggregate: ambient-only key absent.
+        let shadow = store.retrieval_outcome_shadow_rows(3_600).await.expect("shadow");
+        assert!(shadow.iter().any(|r| r.key == "amb_mixed"));
+        assert!(shadow.iter().all(|r| r.key != "amb_only"));
+
+        let future_now = unix_now_secs() + 100_000;
+        let pass = run_apply_pass(&store, &RuleParams::default(), 200, true, future_now)
+            .await
+            .expect("pass");
+        assert_eq!(pass.applied, 1, "only the fts-evidenced key acts");
+        assert_eq!(pass.at_floor, 1, "clamped key hits the noaction path");
+        assert_eq!(
+            pass.consumed_rows, 4,
+            "both consume paths bill exactly the aggregated (non-ambient) rows"
+        );
+        assert_eq!(pass.ambient_retired, 5, "retirement sweeps every ambient row");
+        let mixed = store.memory_get("amb_mixed").await.unwrap().unwrap();
+        assert!(
+            (mixed.importance - 0.45).abs() < 1e-9,
+            "one decay step from fts evidence, got {}",
+            mixed.importance
+        );
+        let only = store.memory_get("amb_only").await.unwrap().unwrap();
+        assert!(
+            (only.importance - 0.50).abs() < 1e-9,
+            "used+unused ambient surfacings must move nothing, got {}",
+            only.importance
+        );
+        let floor = store.memory_get("amb_floor").await.unwrap().unwrap();
+        assert!(
+            (floor.importance - 0.10).abs() < 1e-9,
+            "floor-clamped key untouched, got {}",
+            floor.importance
+        );
+
+        let rerun = run_apply_pass(&store, &RuleParams::default(), 200, true, future_now)
+            .await
+            .expect("rerun");
+        assert_eq!(rerun.ambient_retired, 0, "retirement is one-shot per row");
+        assert_eq!(rerun.rows_considered, 0, "nothing pending after the pass");
+
+        let _ = std::fs::remove_dir_all(&store_dir);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn session_bootstrap_semantic_page_logs_ambient_surfacing() {
+        // The write site itself: a semantic-path bootstrap logs its page as
+        // mode=bootstrap when the collector is on; the static path and the
+        // kill switch both stay silent. Env-mutating → global test lock.
+        let _guard = frontend_env_test_setup();
+        let prev_collector = std::env::var("AGENT_BRIDGE_OUTCOME_COLLECTOR").ok();
+        let prev_disable = std::env::var("AB_BOOTSTRAP_SURFACING_DISABLE").ok();
+        std::env::set_var("AGENT_BRIDGE_OUTCOME_COLLECTOR", "1");
+        std::env::remove_var("AB_BOOTSTRAP_SURFACING_DISABLE");
+
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let cwd = temp_dir.display().to_string();
+        let store = hub.store.clone().expect("store");
+        // A handoff row reaches the semantic page via the Recent-8 prepend
+        // even with no embedder configured (semantic hits legitimately empty).
+        store
+            .memory_save(&ab_store::MemoryRecord {
+                key: "amb_handoff".into(),
+                kind: "session_handoff".into(),
+                content: "ambient telemetry probe handoff".into(),
+                tags: vec![],
+                related_keys: vec![],
+                scope: Some(format!("project:{cwd}")),
+                created_at: 1_700_000_000,
+                updated_at: 1_700_000_000,
+                last_accessed_at: 1_700_000_000,
+                access_count: 0,
+                importance: 0.6,
+                status: "active".into(),
+                trigger_pattern: None,
+                superseded_by: None,
+            })
+            .await
+            .expect("save handoff");
+
+        let ambient_count = |store: Arc<dyn StateStore>| async move {
+            store
+                .retrieval_outcome_summary(3_600, 5)
+                .await
+                .expect("summary")
+                .by_mode
+                .iter()
+                .find(|(m, _)| m == ab_store::AMBIENT_SURFACING_MODE)
+                .map(|(_, n)| *n)
+                .unwrap_or(0)
+        };
+
+        let out = SessionBootstrapTool::new(hub.clone())
+            .execute(
+                json!({"cwd": cwd, "limit": 10, "frontend": "claude-code",
+                       "query": "ambient telemetry probe"}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("semantic bootstrap");
+        assert!(result_text(&out).contains("amb_handoff"), "page has the row");
+        // The write is fire-and-forget — poll briefly for the spawned task.
+        let mut logged = 0;
+        for _ in 0..100 {
+            logged = ambient_count(store.clone()).await;
+            if logged > 0 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+        assert_eq!(logged, 1, "semantic page logged one ambient surfacing row");
+        assert_eq!(
+            store
+                .retrieval_outcome_summary(3_600, 5)
+                .await
+                .expect("summary")
+                .total_surfacings,
+            0,
+            "ambient rows stay out of the calibration scalars"
+        );
+
+        // Static path (no query): furniture, never logged.
+        SessionBootstrapTool::new(hub.clone())
+            .execute(
+                json!({"cwd": cwd, "limit": 10, "frontend": "claude-code"}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("static bootstrap");
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert_eq!(ambient_count(store.clone()).await, 1, "static path logs nothing");
+
+        // Kill switch: semantic path goes silent without touching anything else.
+        std::env::set_var("AB_BOOTSTRAP_SURFACING_DISABLE", "1");
+        SessionBootstrapTool::new(hub.clone())
+            .execute(
+                json!({"cwd": cwd, "limit": 10, "frontend": "claude-code",
+                       "query": "ambient telemetry probe again"}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("disabled bootstrap");
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert_eq!(ambient_count(store).await, 1, "kill switch stops the writer");
+
+        restore_env_var("AGENT_BRIDGE_OUTCOME_COLLECTOR", prev_collector);
+        restore_env_var("AB_BOOTSTRAP_SURFACING_DISABLE", prev_disable);
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[tokio::test]
     async fn retrieval_outcome_apply_tool_dry_run_hides_immature_rows() {
         // Tool-boundary checks: default is a dry-run, and freshly-surfaced
         // rows (younger than APPLY_MATURATION_SECS) are invisible — their

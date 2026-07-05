@@ -7464,6 +7464,7 @@ async fn real_main() -> Result<()> {
                                         skipped_raced = r.skipped_raced,
                                         consumed_rows = r.consumed_rows,
                                         orphans_consumed = r.orphans_consumed,
+                                        ambient_retired = r.ambient_retired,
                                         pending_below_min = r.pending_below_min,
                                         capped_out = r.capped_out,
                                         net_delta = r.net_importance_delta,
@@ -7475,6 +7476,7 @@ async fn real_main() -> Result<()> {
                                         rows = r.rows_considered,
                                         pending_below_min = r.pending_below_min,
                                         orphans_consumed = r.orphans_consumed,
+                                        ambient_retired = r.ambient_retired,
                                         "retrieval-outcome-apply: nothing to do"
                                     );
                                 }

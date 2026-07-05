@@ -33,6 +33,7 @@ use ab_store::{
     prioritize_session_handoff,
     semantic_blend_score,
     semantic_rank_weights,
+    AMBIENT_SURFACING_MODE,
     // MemoryStats is used indirectly via store.memory_stats() — no direct struct access needed.
     AgentPresenceRecord,
     CompactPolicy,
@@ -12443,7 +12444,9 @@ fn recall_semantic_fallback_enabled() -> bool {
 
 /// Outcome-collector prototype gate. **Default-OFF** — only an explicit
 /// `AGENT_BRIDGE_OUTCOME_COLLECTOR=1`/`true` enables the surfaced-key logging
-/// (in `memory_search`) and the `memory_get` "used" attribution. The v39 table
+/// (in `memory_search`, plus the ambient session_bootstrap page writer, which
+/// `ambient_surfacing_disabled` can turn off separately) and the `memory_get`
+/// "used" attribution. The v39 table
 /// exists after store migration, but no rows are written while the flag is off.
 /// Pure (env split out) so the policy is unit-testable. See the Phase-0 study:
 /// the signal is real + de-contaminated but sparse, so this only SEEDS accrual.
@@ -12454,6 +12457,24 @@ fn outcome_collector_enabled_from(env_val: Option<&str>) -> bool {
 fn outcome_collector_enabled() -> bool {
     outcome_collector_enabled_from(
         std::env::var("AGENT_BRIDGE_OUTCOME_COLLECTOR")
+            .ok()
+            .as_deref(),
+    )
+}
+
+/// Stage-1 ambient-surfacing kill switch: `AB_BOOTSTRAP_SURFACING_DISABLE=1`
+/// stops session_bootstrap from logging its semantic page to
+/// `retrieval_surfacing` (mode = [`AMBIENT_SURFACING_MODE`]) without touching
+/// the search-side collector. The writer is telemetry-only, so disabling
+/// loses data and changes no ranking. Pure split for unit-testability,
+/// mirroring `outcome_collector_enabled_from`.
+fn ambient_surfacing_disabled_from(env_val: Option<&str>) -> bool {
+    matches!(env_val, Some(v) if v == "1" || v.eq_ignore_ascii_case("true"))
+}
+
+fn ambient_surfacing_disabled() -> bool {
+    ambient_surfacing_disabled_from(
+        std::env::var("AB_BOOTSTRAP_SURFACING_DISABLE")
             .ok()
             .as_deref(),
     )
@@ -12480,9 +12501,22 @@ fn fallback_embedder_ready() -> bool {
 #[cfg(test)]
 mod recall_semantic_fallback_tests {
     use super::{
-        correction_cosurface_enabled_from, outcome_collector_enabled_from,
-        recall_semantic_fallback_enabled_from,
+        ambient_surfacing_disabled_from, correction_cosurface_enabled_from,
+        outcome_collector_enabled_from, recall_semantic_fallback_enabled_from,
     };
+
+    #[test]
+    fn ambient_surfacing_kill_switch_default_off_unless_truthy() {
+        // Default: the ambient writer runs (subject to the collector gate).
+        assert!(!ambient_surfacing_disabled_from(None));
+        assert!(!ambient_surfacing_disabled_from(Some("0")));
+        assert!(!ambient_surfacing_disabled_from(Some("")));
+        assert!(!ambient_surfacing_disabled_from(Some("off")));
+        // Only an explicit truthy value disables it.
+        assert!(ambient_surfacing_disabled_from(Some("1")));
+        assert!(ambient_surfacing_disabled_from(Some("true")));
+        assert!(ambient_surfacing_disabled_from(Some("TRUE")));
+    }
 
     #[test]
     fn semantic_fallback_default_off_unless_truthy() {
@@ -12620,7 +12654,15 @@ impl McpTool for MemorySearchTool {
             .and_then(|v| v.as_u64())
             .unwrap_or(20)
             .min(200) as u32;
-        let mode = args.get("mode").and_then(|v| v.as_str()).unwrap_or("fts");
+        // Clamp to the schema enum: off-enum values already fell through to
+        // the fts path, but the raw string also reached the surfacing writer
+        // as a telemetry label — a client passing mode="bootstrap" would have
+        // its search logged under the writer-reserved ambient mode and voided
+        // from every learning aggregate (review finding, 2026-07-05).
+        let mode = match args.get("mode").and_then(|v| v.as_str()).unwrap_or("fts") {
+            m @ ("hybrid" | "semantic") => m,
+            _ => "fts",
+        };
         let scope_filter = args
             .get("scope")
             .and_then(|v| v.as_str())
@@ -16486,7 +16528,11 @@ impl McpTool for SessionBootstrapTool {
             description: "Build a compact memory bootstrap block. Returns top scoped \
                  memories (global + project), session_handoff rows first. query= enables \
                  semantic ranking. frontend='cursor'|'warp' uses compact format; default \
-                 'claude-code' is full."
+                 'claude-code' is full. When the outcome collector \
+                 (AGENT_BRIDGE_OUTCOME_COLLECTOR) is on, the semantic page is logged to \
+                 retrieval_surfacing as mode=bootstrap — telemetry-only (excluded from \
+                 reinforce/decay aggregates until a calibrated ambient rule exists); \
+                 AB_BOOTSTRAP_SURFACING_DISABLE=1 turns just this writer off."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -16629,6 +16675,46 @@ impl McpTool for SessionBootstrapTool {
             let rows: Vec<_> = rows.into_iter().filter(|r| r.status == "active").collect();
             prioritize_session_handoff(rows)
         };
+
+        // Outcome-collector, ambient leg (stage 1, 2026-07-05): log the
+        // semantic bootstrap page to `retrieval_surfacing` under
+        // AMBIENT_SURFACING_MODE so injected rows participate in used_at
+        // attribution at all — hook v5.0 made this page the primary ambient
+        // read path, and it was the learning loop's largest blind spot.
+        // Telemetry-only: every reinforce/decay aggregate excludes this mode
+        // until a calibrated bootstrap rule exists (stage 2), and the apply
+        // pass retires the rows, so nothing here can move importance.
+        // Conventions mirror the memory_search writer: the logged set is the
+        // page the caller actually receives (post dedup/truncate — review
+        // G-1/C-2), minus `kind=skill` (Phase 1 P1.5). Both this and the
+        // record_session_bootstrap_event readback draw from the same `rows`
+        // vec, but the readback counts skill rows and this filter drops
+        // them, so the two counts diverge by exactly the on-page skill rows;
+        // the per-block line budget can also trim tail lines at render,
+        // which this deliberately ignores (bounded, display-only skew).
+        // Static (no-query) pages are importance-sorted furniture, not
+        // ranked retrieval — never logged.
+        if query.is_some()
+            && outcome_collector_enabled()
+            && !ambient_surfacing_disabled()
+            && !rows.is_empty()
+        {
+            let surfaced: Vec<(String, i64)> = rows
+                .iter()
+                .filter(|r| r.kind != "skill")
+                .enumerate()
+                .map(|(i, r)| (r.key.clone(), i as i64))
+                .collect();
+            if !surfaced.is_empty() {
+                let store_clone = store.clone();
+                let q_owned = query.clone().unwrap_or_default();
+                tokio::spawn(async move {
+                    let _ = store_clone
+                        .record_retrieval_surfacing(&surfaced, &q_owned, AMBIENT_SURFACING_MODE)
+                        .await;
+                });
+            }
+        }
 
         if rows.is_empty() && error_section.is_empty() {
             let lifecycle_hint = session_lifecycle_hint();
@@ -23396,7 +23482,9 @@ impl McpTool for RetrievalOutcomeReportTool {
                  + decay candidates (surfaced ≥2× but never used). Rows exist only \
                  when the outcome collector (AGENT_BRIDGE_OUTCOME_COLLECTOR) is \
                  enabled — an empty report means the gate is off or nothing has \
-                 accrued yet. The telemetry table is FIFO ring-capped at \
+                 accrued yet. Ambient bootstrap telemetry (mode=bootstrap) is \
+                 excluded from used-rate/candidate aggregates (uncalibrated ambient \
+                 signal); its volume stays visible in the per-mode counts. The telemetry table is FIFO ring-capped at \
                  RETRIEVAL_SURFACING_RING_CAP (50k rows ≈ 7 days of moderate use), \
                  so windows longer than the retained span under-report silently. \
                  Mutates nothing and carries no authority over ranking; \
@@ -23790,8 +23878,11 @@ impl McpTool for RetrievalOutcomeApplyTool {
                  confirmed pass would consume, no writes. With confirm_apply=true a \
                  full rollback map (old→new per key) is persisted as an audit memory \
                  BEFORE any importance moves. Importance-only op class (same as \
-                 memory_decay_unused); never touches tags, content, or biocortex. The \
-                 daemon runs this automatically only when \
+                 memory_decay_unused); never touches tags, content, or biocortex. \
+                 Ambient bootstrap telemetry (mode=bootstrap, from session_bootstrap \
+                 injections) is excluded from the aggregate and merely retired each \
+                 confirmed pass (ambient_retired) — stage-1 telemetry-only, pending a \
+                 calibrated ambient rule. The daemon runs this automatically only when \
                  AGENT_BRIDGE_RETRIEVAL_OUTCOME_APPLY is enabled (default OFF)."
                 .into(),
             input_schema: json!({
@@ -23943,6 +24034,7 @@ impl McpTool for RetrievalOutcomeApplyTool {
             "consumed_rows": report.consumed_rows,
             "consumed_noaction_keys": report.consumed_noaction_keys,
             "orphans_consumed": report.orphans_consumed,
+            "ambient_retired": report.ambient_retired,
             "net_importance_delta": round3(report.net_importance_delta),
             "audit_memory_key": report.audit_memory_key,
             "changes": changes_json,

@@ -33,9 +33,12 @@
 //!    with per-row outcomes, so the map records what actually happened, not
 //!    just intent.
 //! 5. **No slice lingers silently.** Clamped keys (at ceiling/floor),
-//!    zero-step keys (a rule half disabled), and orphaned rows (memory no
-//!    longer active) all get their telemetry consumed and reported — nothing
-//!    re-aggregates forever as an invisible pending residue.
+//!    zero-step keys (a rule half disabled), orphaned rows (memory no
+//!    longer active), and ambient bootstrap rows (mode-excluded from the
+//!    aggregate, stage-1 telemetry-only — see
+//!    [`ab_store::AMBIENT_SURFACING_MODE`]) all get their telemetry consumed
+//!    and reported — nothing re-aggregates forever as an invisible pending
+//!    residue.
 //!
 //! Honest limits: `now` is the wall clock — a clock step larger than the
 //! maturation window can consume rows early (misreading a future "used") or
@@ -209,6 +212,11 @@ pub struct ApplyReport {
     pub consumed_noaction_keys: u64,
     /// Pending mature rows of non-active memories swept this pass.
     pub orphans_consumed: u64,
+    /// Pending mature ambient (bootstrap-mode) rows retired this pass —
+    /// telemetry-only in stage 1, so retirement is their only consume path
+    /// (it runs before the orphan sweep, so dead memories' ambient rows are
+    /// counted here, not in orphans_consumed).
+    pub ambient_retired: u64,
     pub audit_memory_key: Option<String>,
     pub net_importance_delta: f64,
 }
@@ -258,6 +266,7 @@ pub async fn run_apply_pass(
             consumed_rows: 0,
             consumed_noaction_keys: 0,
             orphans_consumed: 0,
+            ambient_retired: 0,
             audit_memory_key: None,
             // Preview delta: what the writes below WOULD sum to.
             net_importance_delta: changes.iter().map(|c| c.would_be - c.importance).sum(),
@@ -432,6 +441,22 @@ pub async fn run_apply_pass(
         }
     }
 
+    // Ambient retirement FIRST: bootstrap-mode rows are mode-excluded from
+    // the aggregate (stage-1 telemetry-only), so no per-key consume ever
+    // reaches them. Retire the mature slice here or it squats the pending
+    // pool. Running before the orphan sweep keeps the two counters exact:
+    // this sweep has no status filter, so ambient rows of dead memories are
+    // billed to ambient_retired, and orphans_consumed counts only real
+    // (non-ambient) evidence of dead memories (review finding, 2026-07-05).
+    // Fail-soft: a failed retirement only delays, never corrupts.
+    let ambient_retired = match store.consume_ambient_surfacings(cutoff).await {
+        Ok(n) => n,
+        Err(e) => {
+            tracing::warn!(error = %e, "retrieval_outcome_apply: ambient retirement failed");
+            0
+        }
+    };
+
     // Orphan sweep: pending mature rows whose memory is no longer active are
     // invisible to the aggregate's status='active' JOIN — retire them so the
     // pending slice stays a truthful work queue (and a later re-creation of
@@ -458,6 +483,7 @@ pub async fn run_apply_pass(
         consumed_rows,
         consumed_noaction_keys,
         orphans_consumed,
+        ambient_retired,
         audit_memory_key,
         // Applied delta: what the successful writes actually summed to
         // (intentionally ≠ the preview definition when writes fail or race).

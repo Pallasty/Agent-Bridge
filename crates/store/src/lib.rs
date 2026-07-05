@@ -217,9 +217,31 @@ pub const MEMORY_QUERY_LOG_RING_CAP: i64 = 5_000;
 /// `attribute_retrieval_get` stamping used_at; the crossover is >~2.8
 /// searches/sec sustained for 30 min (50k rows ÷ 10 rows/search ÷ 1800s), where
 /// the worst case is losing used_at stamps on the oldest telemetry rows —
-/// bounded, telemetry-only. Tune via design review once the
-/// retrieval_outcome_report exposes real traffic shape.
+/// bounded, telemetry-only. The ambient session_bootstrap writer (2026-07-05)
+/// adds up to ~60 [`AMBIENT_SURFACING_MODE`] rows per injection, shrinking the
+/// retained span (~1.2k rows/day at hook cadence ≈ ring full in ~6 weeks if
+/// nothing consumes); the prune evicts pending ambient rows before pending
+/// search evidence, so that arithmetic degrades ambient history first. Tune
+/// via design review once the retrieval_outcome_report exposes real traffic
+/// shape.
 pub const RETRIEVAL_SURFACING_RING_CAP: i64 = 50_000;
+
+/// `retrieval_surfacing.mode` value for AMBIENT bootstrap injections — the
+/// session_bootstrap semantic page (hook-driven or agent-called), logged so
+/// injected memories participate in used_at attribution at all.
+///
+/// Stage 1 is telemetry-only (2026-07-05): rows with this mode are excluded
+/// from every reinforce/decay aggregate (`retrieval_outcome_summary`
+/// candidates, `retrieval_outcome_shadow_rows`, `retrieval_outcome_apply_rows`)
+/// because "injected and not used" is a far weaker negative signal than
+/// "searched for and not used" — one injection surfaces up to ~60 rows vs ~10
+/// per search, so an uncalibrated shared rule would let ambient volume decay
+/// memories that were never actually noise. The rows still receive used_at
+/// stamps (memory_get / feedback attribution is mode-agnostic) and are retired
+/// each confirmed apply pass via [`StateStore::consume_ambient_surfacings`].
+/// Acting on this slice (a calibrated bootstrap-specific rule) is the stage-2
+/// follow-up, gated on the data this stage accumulates.
+pub const AMBIENT_SURFACING_MODE: &str = "bootstrap";
 
 /// Hard cap on stdout/stderr we persist per agent session, to keep the DB
 /// file from growing unbounded if a sub-agent goes haywire.
@@ -3296,6 +3318,22 @@ pub trait StateStore: Send + Sync {
         let _ = cutoff;
         Err(ab_core::Error::Backend(
             "consume_orphaned_surfacings unsupported by this store backend".into(),
+        ))
+    }
+
+    /// Retire pending mature AMBIENT surfacings (mode =
+    /// [`AMBIENT_SURFACING_MODE`]). The apply aggregate excludes that mode, so
+    /// no per-key consume path ever reaches these rows; without this sweep
+    /// they would sit pending forever — and because the ring prune eats
+    /// consumed rows first, ambient history would paradoxically outlive real
+    /// search evidence under cap pressure. Same `cutoff` discipline as the
+    /// other consume paths: rows younger than the maturation window keep
+    /// their used_at stamp eligibility. Returns rows marked. Default is an
+    /// ERROR for the same reason as `retrieval_outcome_apply_rows`.
+    async fn consume_ambient_surfacings(&self, cutoff: i64) -> Result<u64> {
+        let _ = cutoff;
+        Err(ab_core::Error::Backend(
+            "consume_ambient_surfacings unsupported by this store backend".into(),
         ))
     }
 
