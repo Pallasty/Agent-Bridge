@@ -11628,7 +11628,137 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         assert!(schema.description.contains("interactive"));
         assert!(schema.description.contains("agent_send_input"));
         assert_eq!(schema.input_schema["properties"]["id"]["type"], "string");
+        // Slimming knobs are optional: `required` must stay ["id"] so existing
+        // callers keep the full-transcript behavior unchanged.
+        assert_eq!(schema.input_schema["properties"]["tail_bytes"]["type"], "integer");
+        assert_eq!(schema.input_schema["properties"]["strip_ansi"]["type"], "boolean");
         assert_eq!(schema.input_schema["required"], json!(["id"]));
+    }
+
+    #[test]
+    fn shape_session_output_strip_tail_and_utf8_boundary() {
+        // Passthrough: no knobs → identity, nothing reported truncated.
+        let (out, total, ret, trunc) = shape_session_output("hello world".into(), false, None);
+        assert_eq!((out.as_str(), total, ret, trunc), ("hello world", 11, 11, false));
+
+        // Tail smaller than content cuts from the end.
+        let (out, total, ret, trunc) =
+            shape_session_output("hello world".into(), false, Some(5));
+        assert_eq!((out.as_str(), total, ret, trunc), ("world", 11, 5, true));
+
+        // Tail >= content returns everything untruncated.
+        let (out, total, ret, trunc) = shape_session_output("abc".into(), false, Some(10));
+        assert_eq!((out.as_str(), total, ret, trunc), ("abc", 3, 3, false));
+
+        // ANSI strip mirrors remote_steer::clean_capture semantics (escape
+        // sequences dropped, trailing blank lines trimmed).
+        let raw = "\u{1b}[31mred\u{1b}[0m line\n\u{1b}]0;title\u{07}ok\n\n\n";
+        let (out, total, ret, trunc) = shape_session_output(raw.into(), true, None);
+        assert_eq!(out, "red line\nok");
+        assert_eq!((total, ret, trunc), (out.len(), out.len(), false));
+
+        // tail_bytes counts post-strip bytes: 2 bytes of "red line\nok" = "ok".
+        let (out, total, ret, trunc) = shape_session_output(raw.into(), true, Some(2));
+        assert_eq!((out.as_str(), total, ret, trunc), ("ok", 11, 2, true));
+
+        // A cut landing mid-UTF-8-char rounds forward to the next boundary
+        // instead of panicking: "日本語" is 9 bytes, tail 4 → boundary 6 → "語".
+        let (out, total, ret, trunc) = shape_session_output("日本語".into(), false, Some(4));
+        assert_eq!((out.as_str(), total, ret, trunc), ("語", 9, 3, true));
+    }
+
+    #[tokio::test]
+    async fn agent_session_output_finalized_slimming_knobs() {
+        use ab_core::SessionId;
+        use ab_store::StoredSession;
+
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.as_ref().expect("store").clone();
+        let session_id = SessionId::from_raw("ses-sessout-slim".to_string());
+        let raw = "\u{1b}[31mred\u{1b}[0m line\n\u{1b}]0;title\u{07}ok\n\n\n";
+        store
+            .save_session(&StoredSession {
+                id: session_id.clone(),
+                runtime_id: "kilo".to_string(),
+                cwd: temp_dir.display().to_string(),
+                started_at: dispatch_now_secs() - 60,
+                ended_at: Some(dispatch_now_secs() - 5),
+                exit_code: Some(0),
+                stdout: Some(raw.to_string()),
+                stderr: None,
+                cloud_run_id: None,
+                cloud_run_state: None,
+                cloud_session_link: None,
+                proc_pid: None,
+                proc_pgid: None,
+                proc_start_ticks: None,
+                owner_pid: None,
+                owner_start_ticks: None,
+            })
+            .await
+            .expect("seed finalized session");
+
+        let tool = AgentSessionOutputTool::new(hub.clone());
+
+        // Backward compat: no knobs → raw transcript byte-for-byte, with the
+        // new size metadata reporting nothing withheld.
+        let full = tool
+            .execute(json!({"id": session_id.as_str()}), &ToolContext::default())
+            .await
+            .expect("execute full");
+        assert!(!full.is_error, "full read should succeed: {full:?}");
+        let fp = result_text_as_json(&full);
+        assert_eq!(fp["source"], json!("finalized"));
+        assert_eq!(fp["output"], json!(raw));
+        assert_eq!(fp["total_bytes"], json!(raw.len()));
+        assert_eq!(fp["returned_bytes"], json!(raw.len()));
+        assert_eq!(fp["truncated"], json!(false));
+
+        // strip_ansi + tail_bytes: post-strip transcript is "red line\nok"
+        // (11 bytes), tail 2 → "ok", truncated=true, total reports the
+        // post-strip size the tail was applied against.
+        let slim = tool
+            .execute(
+                json!({"id": session_id.as_str(), "strip_ansi": true, "tail_bytes": 2}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute slim");
+        assert!(!slim.is_error, "slim read should succeed: {slim:?}");
+        let sp = result_text_as_json(&slim);
+        assert_eq!(sp["output"], json!("ok"));
+        assert_eq!(sp["total_bytes"], json!(11));
+        assert_eq!(sp["returned_bytes"], json!(2));
+        assert_eq!(sp["truncated"], json!(true));
+
+        // Present-but-invalid tail_bytes must ERROR, never silently no-op —
+        // failing open would return the exact full-size payload the knob
+        // exists to avoid (review finding). 0, negatives, and floats all
+        // fall outside `as_u64() >= 1`.
+        for bad in [json!(0), json!(-4096), json!(2.5), json!("64")] {
+            let r = tool
+                .execute(
+                    json!({"id": session_id.as_str(), "tail_bytes": bad}),
+                    &ToolContext::default(),
+                )
+                .await
+                .expect("execute invalid tail_bytes");
+            assert!(
+                r.is_error,
+                "tail_bytes={bad} must be rejected, got: {r:?}"
+            );
+        }
+        // Explicit null is treated as absent, not invalid.
+        let nul = tool
+            .execute(
+                json!({"id": session_id.as_str(), "tail_bytes": Value::Null}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute null tail_bytes");
+        assert!(!nul.is_error, "tail_bytes=null should read fully: {nul:?}");
+        assert_eq!(result_text_as_json(&nul)["truncated"], json!(false));
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
     #[tokio::test]

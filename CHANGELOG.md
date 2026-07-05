@@ -8,6 +8,21 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **`agent_session_output` slimming knobs** (`tail_bytes`, `strip_ansi`):
+  optional, lossless trims for the heaviest recurring MCP payload
+  (mcp_call_stats 30d: ~74 KB avg per read, full merged PTY transcript on
+  every poll). `strip_ansi` reuses `remote_steer::clean_capture`
+  (CSI + OSC + designator escapes, trailing-blank trim); `tail_bytes`
+  returns the last N post-strip bytes, cut rounded forward to a UTF-8
+  boundary. Both the finalized and live paths now also report
+  `total_bytes` / `returned_bytes` / `truncated` so callers know when more
+  transcript is available. No knobs ⇒ byte-identical previous behavior;
+  present-but-invalid `tail_bytes` errors instead of failing open to the
+  full payload. `clean_capture` also now consumes 3-byte designator
+  escapes (`ESC ( B` et al) instead of leaking their final byte into
+  cleaned output. Follow-up (tracked, not in this change):
+  `agent_session_wait`/`agent_session_get` still return full inline stdout
+  (bounded by the 64 KiB store cap).
 - **Orphan reaper** (default OFF, `AGENT_BRIDGE_ORPHAN_REAPER=1`): daemon
   tick (first pass at startup, then `AB_ORPHAN_REAPER_TICK_SECS`, default
   hourly) that kills agent process groups whose owning bridge process is

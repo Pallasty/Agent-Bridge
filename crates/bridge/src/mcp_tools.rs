@@ -10818,6 +10818,48 @@ impl McpTool for AgentSessionGetTool {
 //                       agent_session_output (v0.9)
 // ===========================================================================
 
+/// Post-process a session transcript for `agent_session_output`: optionally
+/// strip ANSI escapes (reusing [`crate::remote_steer::clean_capture`]), then
+/// optionally keep only the last `tail_bytes` bytes, rounding the cut forward
+/// to a UTF-8 char boundary so the result stays valid for JSON.
+///
+/// Order matters: strip first, then tail — a byte-tail over raw PTY output
+/// could cut mid-escape-sequence, and `tail_bytes` should count content the
+/// caller actually reads, not TUI redraw noise. Both knobs are lossless in
+/// the sense that the full transcript stays available (re-call without
+/// `tail_bytes`); `total_bytes`/`truncated` in the response tell the caller
+/// when there is more.
+///
+/// Returns `(output, total_bytes, returned_bytes, truncated)` where
+/// `total_bytes` is the post-strip size the tail was applied against.
+fn shape_session_output(
+    raw: String,
+    strip_ansi: bool,
+    tail_bytes: Option<u64>,
+) -> (String, usize, usize, bool) {
+    let full = if strip_ansi {
+        crate::remote_steer::clean_capture(&raw)
+    } else {
+        raw
+    };
+    let total = full.len();
+    // Saturating on 32-bit targets: a wrapping `as usize` cast would turn a
+    // huge tail request into a tiny (or empty) slice instead of "everything".
+    let tail = tail_bytes.map(|n| usize::try_from(n).unwrap_or(usize::MAX));
+    let output = match tail {
+        Some(n) if n < total => {
+            let mut start = total - n;
+            while start < total && !full.is_char_boundary(start) {
+                start += 1;
+            }
+            full[start..].to_string()
+        }
+        _ => full,
+    };
+    let returned = output.len();
+    (output, total, returned, returned < total)
+}
+
 /// Read the live PTY transcript of an interactive session. `agent_send_input`
 /// only confirms `status:"sent"` and `agent_session_get` shows `stdout:null`
 /// until a session finalises — so without this tool a programmatic multi-turn
@@ -10846,11 +10888,26 @@ impl McpTool for AgentSessionOutputTool {
                  confirms delivery and does not echo output. For a finished session it \
                  returns the stdout finalised to the store (source=\"finalized\"). A \
                  one-shot session, or one whose runtime has no interactive buffer, returns \
-                 source=\"none\"."
+                 source=\"none\". Transcripts are the heaviest recurring MCP payload \
+                 (often tens of KB): pass tail_bytes to read only the newest slice and \
+                 strip_ansi to drop TUI redraw/escape noise. Nothing is discarded \
+                 server-side — total_bytes/truncated describe the post-strip_ansi \
+                 transcript the tail was applied to; re-call with neither knob for \
+                 the full raw transcript."
                 .into(),
             input_schema: json!({
                 "type": "object",
-                "properties": { "id": { "type": "string", "description": "Session id returned by agent_spawn." } },
+                "properties": {
+                    "id": { "type": "string", "description": "Session id returned by agent_spawn." },
+                    "tail_bytes": {
+                        "type": "integer", "minimum": 1,
+                        "description": "Return only the last N bytes of the transcript (after strip_ansi, cut rounded forward to a UTF-8 boundary). Omit for the full transcript."
+                    },
+                    "strip_ansi": {
+                        "type": "boolean", "default": false,
+                        "description": "Strip ANSI/OSC escape sequences and trailing blank lines before returning. Recommended for TUI-heavy runtimes (gemini, opencode)."
+                    }
+                },
                 "required": ["id"]
             }),
         }
@@ -10867,6 +10924,24 @@ impl McpTool for AgentSessionOutputTool {
             Some(s) => SessionId::from_raw(s.to_string()),
             None => return Ok(ToolResult::error("missing 'id'")),
         };
+        let strip_ansi = args
+            .get("strip_ansi")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        // Strict: a present-but-invalid tail_bytes (0, negative, float, string)
+        // must error, not silently no-op — failing open returns the exact
+        // full-size payload this knob exists to avoid, with zero signal.
+        let tail_bytes = match args.get("tail_bytes") {
+            None | Some(Value::Null) => None,
+            Some(v) => match v.as_u64() {
+                Some(n) if n >= 1 => Some(n),
+                _ => {
+                    return Ok(ToolResult::error(
+                        "'tail_bytes' must be an integer >= 1",
+                    ))
+                }
+            },
+        };
         let session = match store.load_session(&id).await? {
             Some(s) => s,
             None => return Ok(ToolResult::error(format!("unknown agent session {id}"))),
@@ -10874,6 +10949,8 @@ impl McpTool for AgentSessionOutputTool {
         // Finished sessions carry their full transcript in the persisted stdout;
         // the live in-memory buffer is gone once the PTY finalises.
         if session.ended_at.is_some() {
+            let (output, total, returned, truncated) =
+                shape_session_output(session.stdout.unwrap_or_default(), strip_ansi, tail_bytes);
             return Ok(ToolResult::json_text(&json!({
                 "id": id.as_str(),
                 "runtime_id": session.runtime_id,
@@ -10881,7 +10958,10 @@ impl McpTool for AgentSessionOutputTool {
                 "source": "finalized",
                 "ended": true,
                 "exit_code": session.exit_code,
-                "output": session.stdout.unwrap_or_default(),
+                "output": output,
+                "total_bytes": total,
+                "returned_bytes": returned,
+                "truncated": truncated,
             })));
         }
         // Running session: pull the live buffer straight from the runtime.
@@ -10890,14 +10970,21 @@ impl McpTool for AgentSessionOutputTool {
             Err(e) => return Ok(ToolResult::error(e)),
         };
         match agent.read_interactive_output(&id) {
-            Some(output) => Ok(ToolResult::json_text(&json!({
-                "id": id.as_str(),
-                "runtime_id": session.runtime_id,
-                "cwd": session.cwd,
-                "source": "live",
-                "ended": false,
-                "output": output,
-            }))),
+            Some(output) => {
+                let (output, total, returned, truncated) =
+                    shape_session_output(output, strip_ansi, tail_bytes);
+                Ok(ToolResult::json_text(&json!({
+                    "id": id.as_str(),
+                    "runtime_id": session.runtime_id,
+                    "cwd": session.cwd,
+                    "source": "live",
+                    "ended": false,
+                    "output": output,
+                    "total_bytes": total,
+                    "returned_bytes": returned,
+                    "truncated": truncated,
+                })))
+            }
             None => Ok(ToolResult::json_text(&json!({
                 "id": id.as_str(),
                 "runtime_id": session.runtime_id,

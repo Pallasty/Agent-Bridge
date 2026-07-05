@@ -731,6 +731,20 @@ pub fn clean_capture(raw: &str) -> String {
                         }
                     }
                 }
+                // 3-byte escapes with an intermediate designator — charset
+                // selection (ESC ( B), line-size (ESC # 8), character-set
+                // switch (ESC % G) — drop the designator AND its final byte;
+                // consuming only the designator would leak the final byte
+                // (a stray literal 'B' every redraw) into "cleaned" output.
+                Some('(') | Some(')') | Some('*') | Some('+') | Some('#') | Some('%') => {
+                    chars.next();
+                    // Re-sync on a following ESC (aborted sequence at a PTY
+                    // chunk edge) instead of eating it as the final byte and
+                    // leaking the next escape's body as literal text.
+                    if chars.peek() != Some(&'\u{1b}') {
+                        chars.next();
+                    }
+                }
                 // Other 2-byte escapes — drop the escape, keep nothing extra.
                 _ => {
                     chars.next();
@@ -1171,6 +1185,20 @@ mod tests {
     fn clean_capture_strips_ansi_and_trailing_blanks() {
         let raw = "\u{1b}[31mred\u{1b}[0m line\n\u{1b}]0;title\u{07}ok\n\n\n";
         assert_eq!(clean_capture(raw), "red line\nok");
+    }
+
+    #[test]
+    fn clean_capture_drops_charset_designator_escapes() {
+        // ESC ( B (charset select) is ubiquitous in TUI redraw streams; the
+        // final byte must be consumed with the designator, not leak as a
+        // literal 'B' into cleaned output. Same for ESC ) X / ESC # X.
+        let raw = "\u{1b}(Bhello\u{1b})0 world\u{1b}#8!";
+        assert_eq!(clean_capture(raw), "hello world!");
+        // Truncated designator escape at end of buffer terminates cleanly.
+        assert_eq!(clean_capture("ok\u{1b}("), "ok");
+        // An aborted designator followed by a real escape re-syncs on the
+        // ESC instead of leaking the next escape's body as literal text.
+        assert_eq!(clean_capture("\u{1b}(\u{1b}[31mred"), "red");
     }
 
     #[test]
