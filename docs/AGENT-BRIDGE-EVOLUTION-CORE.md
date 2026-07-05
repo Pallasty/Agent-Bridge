@@ -233,15 +233,20 @@ pub async fn build_handoff_brief(
 - **路线图（分阶段）**：`docs/AGENT-BRIDGE-AGENT-UX-ROADMAP.md` — 说明「使用者」在文档里多指**人类运维**，智能体通过 schema + 同一事实源受益；并列出可观测性、图导出、多前端矩阵、安全默认等 **Phase B–E**。
 - **可导入记忆卡片**：`memory_snapshots/inject/ab_ai_bridge_feedback_v1.jsonl` — `tags` 含 `ab-feedback`，与 `ab-inject` 内核包区分；导入后可用 `memory_search(..., tags_any=["ab-feedback"])` 拉取本组建议。
 
-### 8.3 Hook 静态 / Agent 语义 分层（2026-05-03 决策）
+### 8.3 Hook 静态 / Agent 语义 分层（2026-05-03 决策；**2026-07-05 v5.0 修订**）
 
-`UserPromptSubmit` hook（`ab-memory-hook`）**只做静态 SQL 排序**——不嵌入用户 prompt、不做 cosine、不调 ONNX。理由：
+**修订（2026-07-05，hook v5.0）**：hook 主路现在**走 `session_bootstrap(query=<用户 prompt 前 300 字>)` 语义排序**。原决策的两个前提已失效：
 
-- **延迟敏感**：hook 阻塞用户首条消息显示。ONNX 模型首次加载 ~1 s，每次 hook 重新启动一个 Python 解释器都会重复这个成本。
-- **确定性**：hook 是裸进程，没有失败重试通道；任何模型错误都会让 hook 输出空，吞掉重要 memory 注入。
-- **职责分离**：hook 注入"高频访问 + 高重要性 + 项目相关"的稳定上下文（concept 节点 + session_handoff + top-N），保证语义不偏。**真正的语义对齐由 agent 主动调** `session_bootstrap(query="...")` 或 `memory_search(mode=semantic)` —— 这两个路径走持久 MCP 进程，模型仅加载一次，每次查询 ~25 ms。
+- 延迟前提失效：共享 embedding 委托（daemon `/embed`）落地后，冷启 `agent-bridge mcp` 不再本地加载 ONNX，端到端 ~0.2-0.4 s（实测），远在 hook 5 s 预算内；且冷却门控让该成本只发生在每 `AB_MEMORY_COOLDOWN_TURNS`（默认 8）轮一次的注入轮。
+- 确定性前提失效：v5.0 保留 v4 pure-SQL 块作为兜底（MCP 失败/超时/空结果/`AB_MEMORY_HOOK_STATIC=1`），标头 `static-fallback`——模型错误不再吞注入，只是降级。
 
-**反面教训**：v2.0 hook（2026-05-03 当日）尝试在 hook 里做 Python FNV-1a 嵌入 + cosine。维度从 512 迁到 384 后，hook 仍写 512，`zip()` 静默截断到 384，分数全是噪声。**两小时内回归 v3.0 静态排序**。
+嵌入发生在服务端、与 agent 主动调用完全同路径同模型，**不重演 v2.0 的客户端嵌入分叉**。原 2026-05-03 理由存档如下：
+
+> - **延迟敏感**：hook 阻塞用户首条消息显示。ONNX 模型首次加载 ~1 s，每次 hook 重新启动一个 Python 解释器都会重复这个成本。
+> - **确定性**：hook 是裸进程，没有失败重试通道；任何模型错误都会让 hook 输出空，吞掉重要 memory 注入。
+> - **职责分离**：hook 注入"高频访问 + 高重要性 + 项目相关"的稳定上下文，真正的语义对齐由 agent 主动调 `session_bootstrap(query="...")` 或 `memory_search(mode=semantic)`。
+
+**反面教训（仍然成立）**：v2.0 hook（2026-05-03 当日）尝试在 hook 里做 Python FNV-1a 嵌入 + cosine。维度从 512 迁到 384 后，hook 仍写 512，`zip()` 静默截断到 384，分数全是噪声。**两小时内回归 v3.0 静态排序**。教训的一般形：**客户端不得自建与服务端平行的打分/嵌入实现**——v5.0 之所以安全，正因为它把嵌入送回了单一事实源。
 
 ### 8.4 嵌入后端可插拔（路线图 §B）
 

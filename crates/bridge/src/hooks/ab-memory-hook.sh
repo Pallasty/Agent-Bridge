@@ -1,6 +1,22 @@
 #!/usr/bin/env bash
 # UserPromptSubmit hook — inject scope-relevant agent-bridge memories.
 #
+# v5.0 (2026-07-05): route through session_bootstrap (true semantic ranking).
+#   - Primary path spawns the local `agent-bridge mcp` server and calls
+#     session_bootstrap(query=<user prompt>): GTE semantic ranking, feedback
+#     preamble, work_memory slot, continuity kernel, retrieval-class quotas —
+#     all server-side and identical to what agents get when they call
+#     session_bootstrap themselves. Cold spawn is ~0.2 s on hosts with the
+#     shared-embedding daemon (MCP delegates query embedding to /embed).
+#   - The v4 pure-SQL static block remains as the fallback path (MCP failure,
+#     timeout, empty result, or AB_MEMORY_HOOK_STATIC=1) and is labelled
+#     `static-fallback` in its header so live output identifies the path.
+#   - Drops the always-inject access_count self-bump: it was a ranking
+#     flywheel (injected → access up → static rank higher → injected more)
+#     and it silently no-oped on hosts without the sqlite3 CLI anyway.
+#   - Env: AB_MEMORY_HOOK_STATIC=1 forces the legacy static path;
+#     AB_MEMORY_HOOK_AB_BIN overrides the agent-bridge binary (tests).
+#
 # v4.0 (2026-05-19): A1 cooldown softening per docs/DESIGN-A1-B1-B3-RECALL-TIMING-v0.md §2.2.
 #   - The v3.0 one-shot lock fired memory injection only once per session
 #     (audit-gap A1 root cause: 17 untouched §6.5 working-def gap).
@@ -185,6 +201,71 @@ fi
 
 CWD="${PWD:-/}"
 
+# ── v5.0 primary path: session_bootstrap via local MCP (semantic ranking) ─────
+AB_BIN="${AB_MEMORY_HOOK_AB_BIN:-$(command -v agent-bridge 2>/dev/null || echo "$HOME/.local/bin/agent-bridge")}"
+OUTPUT=""
+if [[ "${AB_MEMORY_HOOK_STATIC:-}" != "1" && -x "$AB_BIN" ]]; then
+    OUTPUT=$(AB_HOOK_PAYLOAD="$HOOK_PAYLOAD" timeout 4 python3 - "$AB_BIN" <<'PY' 2>/dev/null
+import json, os, re, subprocess, sys
+
+AB = sys.argv[1]
+
+prompt = ""
+try:
+    payload = json.loads(os.environ.get("AB_HOOK_PAYLOAD", "") or "{}")
+    prompt = str(payload.get("prompt") or "")
+except Exception:
+    pass
+# Collapse whitespace; cap so a pasted wall of text stays a cheap query.
+query = re.sub(r"\s+", " ", prompt).strip()[:300]
+
+args = {"query": query} if query else {}
+msgs = [
+    {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": "2024-11-05", "capabilities": {},
+        "clientInfo": {"name": "ab-memory-hook", "version": "5.0"}}},
+    {"jsonrpc": "2.0", "method": "notifications/initialized"},
+    {"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {
+        "name": "session_bootstrap", "arguments": args}},
+]
+inp = "\n".join(json.dumps(m) for m in msgs) + "\n"
+try:
+    proc = subprocess.run(
+        [AB, "mcp"], input=inp, capture_output=True, text=True, timeout=3.5,
+    )
+except Exception:
+    sys.exit(1)
+
+text = ""
+for line in proc.stdout.splitlines():
+    try:
+        d = json.loads(line)
+    except Exception:
+        continue
+    if d.get("id") == 2:
+        result = d.get("result") or {}
+        if result.get("isError"):
+            sys.exit(1)
+        content = result.get("content") or []
+        if content and isinstance(content[0], dict):
+            text = str(content[0].get("text") or "")
+
+text = text.strip()
+if not text or text.startswith("(no scoped memories"):
+    sys.exit(1)
+
+print(json.dumps({
+    "hookSpecificOutput": {
+        "hookEventName": "UserPromptSubmit",
+        "additionalContext": text,
+    }
+}))
+PY
+    ) || OUTPUT=""
+fi
+
+# ── Fallback: v4 pure-SQL static ranking (daemon-free, ~10-50 ms) ─────────────
+if [[ -z "$OUTPUT" ]]; then
 OUTPUT=$(python3 - "$DB" "$CWD" <<'PY'
 import sys, sqlite3, json
 
@@ -256,7 +337,7 @@ if not lines:
     sys.exit(0)
 
 block = (
-    f"=== Agent-Bridge Memory (scope: {CWD} | static) ===\n"
+    f"=== Agent-Bridge Memory (scope: {CWD} | static-fallback) ===\n"
     "Use memory_get <key> for full content. For semantic ranking call\n"
     "session_bootstrap(query='<task description>') or memory_search(mode=semantic).\n\n"
     + "\n".join(lines)
@@ -270,14 +351,7 @@ print(json.dumps({
 }))
 PY
 )
-
-# Bump access counts for injected always-inject rows.
-sqlite3 "$DB" \
-  "UPDATE memories
-   SET access_count=access_count+1,
-       last_accessed_at=CAST(strftime('%s','now') AS INTEGER)
-   WHERE status='active' AND kind IN ('concept','session_handoff')
-   ORDER BY (access_count*86400+updated_at) DESC LIMIT 15" 2>/dev/null || true
+fi
 
 _OUT_BYTES=${#OUTPUT}
 trap "_ab_log_hook_run \$? $_OUT_BYTES" EXIT

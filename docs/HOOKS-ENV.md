@@ -8,7 +8,7 @@
 
 | Hook | CC 事件 | 源 | 职责 |
 |---|---|---|---|
-| `ab-memory-hook` | UserPromptSubmit | `crates/bridge/src/hooks/ab-memory-hook.sh`(setup.rs `include_str!`)| 注入记忆上下文 |
+| `ab-memory-hook` | UserPromptSubmit | `crates/bridge/src/hooks/ab-memory-hook.sh`(setup.rs `include_str!`)| 注入记忆上下文(v5.0 起主路走 `session_bootstrap(query=<prompt>)` 语义排序,MCP 失败/超时退 v4 pure-SQL `static-fallback`;不再自增 always-inject 行的 access_count) |
 | `ab-seed-familiarity-hook` | UserPromptSubmit | ⚠️ 已部署,**源不在 setup.rs/repo**(孤儿,pre-existing)| substrate familiarity 探针 |
 | `ab-precompact-hook` | PreCompact | `crates/bridge/src/hooks/ab-precompact-hook.sh` | compact 前策展 |
 | `ab-session-end-hook` | Stop | `crates/bridge/src/hooks/ab-session-end-hook.sh` | session-end finalize |
@@ -32,6 +32,7 @@ merge settings.json 的 `UserPromptSubmit/Stop/PreCompact`。
 | `AB_SEED_FAMILIARITY_OFF` | seed-familiarity | unset(开)| `=1` → `exit 0`,关闭 |
 | `AB_PET_STATE_DISABLE` | memory, session-end | unset(开)| `=1` → 跳过 pet state |
 | `AB_SESSION_END_CURATE` | session-end | unset(**关**)| `=1` → 跑 end-of-session 策展(+ precompact)|
+| `AB_MEMORY_HOOK_STATIC` | memory | unset(**semantic**)| `=1` → 跳过 session_bootstrap 语义主路,强制 v4 pure-SQL static |
 
 **Config(配置值)**
 
@@ -48,6 +49,7 @@ merge settings.json 的 `UserPromptSubmit/Stop/PreCompact`。
 | Env | 说明 |
 |---|---|
 | `AB_MEMORY_CURATOR` | precompact 设 `=1`,memory-hook 见之即 `exit 0`(re-entry guard)|
+| `AB_MEMORY_HOOK_AB_BIN` | memory-hook 语义主路的 agent-bridge binary override(测试注入失败路径用)|
 | `AB_HOOK_LOG` / `AB_HOOK_PAYLOAD` / `AB_HOOK_START` / `AB_HOOK_EVENT` / `AB_HOOK_OUTPUT_BYTES` | hook 自我日志 plumbing |
 
 ## delta④(b) profile 判断
