@@ -423,7 +423,7 @@ json_run "$runtime_decision_packet_with_aggregate" "${base_cmd[@]}" \
     --forum-post-id controlled-trial-local \
     --memory-key controlled-trial-local \
     --json
-assert_json '.schema == "agent_bridge.biocortex_retrieval.opt_in_runtime_influence_decision_packet.v0" and .request_summary.redacted_evidence_aggregate_ready == true and .implementation_allowed == true and .runtime_adapter_approved == true and .default_search_order_change_allowed == false and .default_calls_unchanged == true' "$runtime_decision_packet_with_aggregate"
+assert_json '.schema == "agent_bridge.biocortex_retrieval.opt_in_runtime_influence_decision_packet.v0" and .request_summary.redacted_evidence_aggregate_ready == true and .request_summary.capability_ledger_backed_review_request == true and .request_summary.capability_ledger_report_packet_accepted == true and .request_summary.capability_ledger_can_authorize_runtime_influence == false and .boundary_check.capability_ledger_safe_for_decision == true and .implementation_allowed == true and .runtime_adapter_approved == true and .default_search_order_change_allowed == false and .default_calls_unchanged == true' "$runtime_decision_packet_with_aggregate"
 leak_guard "$runtime_decision_packet_with_aggregate"
 
 jq -n \
@@ -494,7 +494,10 @@ jq -n \
             runtime_adapter_approved: $decision[0].runtime_adapter_approved,
             ordering_behavior_connection_authorized: $decision[0].ordering_behavior_connection_authorized,
             default_search_order_change_allowed: $decision[0].default_search_order_change_allowed,
-            default_calls_unchanged: $decision[0].default_calls_unchanged
+            default_calls_unchanged: $decision[0].default_calls_unchanged,
+            capability_ledger_backed_review_request: $decision[0].request_summary.capability_ledger_backed_review_request,
+            capability_ledger_safe_for_decision: $decision[0].boundary_check.capability_ledger_safe_for_decision,
+            capability_ledger_can_authorize_runtime_influence: $decision[0].request_summary.capability_ledger_can_authorize_runtime_influence
         },
         safety: {
             writes_approval: false,
@@ -516,7 +519,7 @@ jq -n \
             runtime_decision_packet_with_aggregate: "16-runtime-influence-decision-packet-with-aggregate.json"
         }
     }' > "$summary_json"
-assert_json '.schema == "agent_bridge.biocortex_retrieval.controlled_trial_run_summary.v0" and .status == "controlled_trial_redacted_evidence_ready" and .movement.actual_order_changed_count >= 1 and .coverage.query_count >= 5 and .aggregate.aggregate_evidence_ready == true and .capability_ledger.verdict == "accepted" and .capability_ledger.input_schema == "biocortex.capability_ledger.v5" and .runtime_review_request.capability_ledger_safe_for_review == true and .safety.default_search_order_change_allowed == false and .safety.default_calls_unchanged == true' "$summary_json"
+assert_json '.schema == "agent_bridge.biocortex_retrieval.controlled_trial_run_summary.v0" and .status == "controlled_trial_redacted_evidence_ready" and .movement.actual_order_changed_count >= 1 and .coverage.query_count >= 5 and .aggregate.aggregate_evidence_ready == true and .capability_ledger.verdict == "accepted" and .capability_ledger.input_schema == "biocortex.capability_ledger.v5" and .runtime_review_request.capability_ledger_safe_for_review == true and .runtime_decision_packet.capability_ledger_backed_review_request == true and .runtime_decision_packet.capability_ledger_safe_for_decision == true and .runtime_decision_packet.capability_ledger_can_authorize_runtime_influence == false and .safety.default_search_order_change_allowed == false and .safety.default_calls_unchanged == true' "$summary_json"
 leak_guard "$summary_json"
 
 {
@@ -534,6 +537,7 @@ leak_guard "$summary_json"
     echo "- coverage experimental_source_count: $(jq -r '.coverage.experimental_source_count' "$summary_json")"
     echo "- aggregate_evidence_ready: $(jq -r '.aggregate.aggregate_evidence_ready' "$summary_json")"
     echo "- capability_ledger: $(jq -r '.capability_ledger.input_schema' "$summary_json") / $(jq -r '.capability_ledger.verdict' "$summary_json")"
+    echo "- decision capability_ledger_safe_for_decision: $(jq -r '.runtime_decision_packet.capability_ledger_safe_for_decision' "$summary_json")"
     echo "- recommended_next_step: $(jq -r '.aggregate.recommended_next_step' "$summary_json")"
     echo
     echo "## Boundary"

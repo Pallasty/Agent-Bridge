@@ -17144,6 +17144,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
                 "runtime_influence_decision_included": false,
                 "runtime_influence_review_request_included": false,
                 "redacted_evidence_aggregate_included": false,
+                "capability_ledger_report_packet_included": false,
                 "raw_query_included": false,
                 "raw_keys_included": false,
                 "content_included": false,
@@ -17386,6 +17387,14 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             v["input_contract"]["batch_diagnostics_included"],
             json!(false)
         );
+        assert_eq!(
+            v["input_contract"]["accepts_capability_ledger_backed_decision_packet"],
+            json!(true)
+        );
+        assert_eq!(
+            v["input_contract"]["capability_ledger_report_packet_included"],
+            json!(false)
+        );
         assert_eq!(v["input_contract"]["raw_queries_included"], json!(false));
         assert_eq!(v["input_contract"]["raw_keys_included"], json!(false));
         assert_eq!(v["input_contract"]["content_included"], json!(false));
@@ -17395,6 +17404,14 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         );
         assert_eq!(
             v["decision_summary"]["runtime_influence_authorized"],
+            json!(true)
+        );
+        assert_eq!(
+            v["decision_summary"]["capability_ledger_backed_review_request"],
+            json!(false)
+        );
+        assert_eq!(
+            v["decision_summary"]["capability_ledger_safe_for_decision"],
             json!(true)
         );
         assert_eq!(v["store_trial_summary"]["baseline_key_count"], json!(0));
@@ -17410,6 +17427,14 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             json!(true)
         );
         assert_eq!(v["boundary_check"]["runtime_readiness_ready"], json!(true));
+        assert_eq!(
+            v["boundary_check"]["capability_ledger_backed_decision_packet"],
+            json!(false)
+        );
+        assert_eq!(
+            v["boundary_check"]["capability_ledger_safe_for_readiness"],
+            json!(true)
+        );
         assert_eq!(v["boundary_check"]["blockers"], json!([]));
         assert_eq!(v["approval_state"], json!("runtime_readiness_only"));
         assert_eq!(v["writes_approval"], json!(false));
