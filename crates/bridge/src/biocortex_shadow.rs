@@ -368,6 +368,7 @@ pub struct BioCortexRetrievalOptInRuntimeTransitionGateOptions {
 pub struct BioCortexRetrievalDownstreamAioRuntimeEvidenceHandoffOptions {
     pub checkpoint_selection: Value,
     pub post_semantic_diverse_review: Value,
+    pub controlled_trial_readiness: Option<Value>,
     pub reviewer: Option<String>,
     pub commit: Option<String>,
     pub forum_post_id: Option<String>,
@@ -1487,6 +1488,251 @@ fn biocortex_retrieval_controlled_trial_readiness_summary(
         .unwrap_or(false);
     let gated_batch_ready = !gated_batch_provided || (gated_batch_schema_ok && gated_batch_ready);
 
+    let readiness_capability_ledger_backed = runtime_readiness_packet
+        .map(|packet| {
+            value_bool_is(
+                packet.pointer("/decision_summary/capability_ledger_backed_review_request"),
+                true,
+            ) || value_bool_is(
+                packet.pointer("/boundary_check/capability_ledger_backed_decision_packet"),
+                true,
+            )
+        })
+        .unwrap_or(false);
+    let readiness_capability_ledger_safe = runtime_readiness_packet
+        .map(|packet| {
+            value_bool_is(
+                packet.pointer("/decision_summary/capability_ledger_safe_for_decision"),
+                true,
+            ) && value_bool_is(
+                packet.pointer("/boundary_check/capability_ledger_safe_for_readiness"),
+                true,
+            )
+        })
+        .unwrap_or(false);
+    let readiness_capability_ledger_authorizes_runtime_influence = runtime_readiness_packet
+        .map(|packet| {
+            value_bool_is(
+                packet.pointer(
+                    "/decision_summary/capability_ledger_can_authorize_runtime_influence",
+                ),
+                true,
+            ) || value_bool_is(
+                packet.pointer("/boundary_check/capability_ledger_authorizes_runtime_influence"),
+                true,
+            )
+        })
+        .unwrap_or(false);
+    let readiness_capability_ledger_report_packet_included = runtime_readiness_packet
+        .map(|packet| {
+            value_bool_is(
+                packet.pointer("/input_contract/capability_ledger_report_packet_included"),
+                true,
+            ) || value_bool_is(
+                packet.pointer("/decision_summary/capability_ledger_report_packet_included"),
+                true,
+            )
+        })
+        .unwrap_or(false);
+    let readiness_capability_ledger_ready = !readiness_capability_ledger_backed
+        || (readiness_capability_ledger_safe
+            && !readiness_capability_ledger_authorizes_runtime_influence
+            && !readiness_capability_ledger_report_packet_included);
+
+    let transition_capability_ledger_backed = runtime_transition_gate
+        .map(|gate| {
+            value_bool_is(
+                gate.pointer("/readiness_summary/capability_ledger_backed_review_request"),
+                true,
+            ) || value_bool_is(
+                gate.pointer("/boundary_check/capability_ledger_backed_readiness_packet"),
+                true,
+            )
+        })
+        .unwrap_or(false);
+    let transition_capability_ledger_safe = runtime_transition_gate
+        .map(|gate| {
+            value_bool_is(
+                gate.pointer("/readiness_summary/capability_ledger_safe_for_transition"),
+                true,
+            ) && value_bool_is(
+                gate.pointer("/boundary_check/capability_ledger_safe_for_transition"),
+                true,
+            )
+        })
+        .unwrap_or(false);
+    let transition_capability_ledger_authorizes_runtime_influence = runtime_transition_gate
+        .map(|gate| {
+            value_bool_is(
+                gate.pointer(
+                    "/readiness_summary/capability_ledger_can_authorize_runtime_influence",
+                ),
+                true,
+            ) || value_bool_is(
+                gate.pointer("/transition/capability_ledger_can_authorize_runtime_influence"),
+                true,
+            ) || value_bool_is(
+                gate.pointer("/boundary_check/capability_ledger_authorizes_runtime_influence"),
+                true,
+            )
+        })
+        .unwrap_or(false);
+    let transition_capability_ledger_report_packet_included = runtime_transition_gate
+        .map(|gate| {
+            value_bool_is(
+                gate.pointer("/input_contract/capability_ledger_report_packet_included"),
+                true,
+            ) || value_bool_is(
+                gate.pointer("/readiness_summary/capability_ledger_report_packet_included"),
+                true,
+            )
+        })
+        .unwrap_or(false);
+    let transition_capability_ledger_ready = !transition_capability_ledger_backed
+        || (transition_capability_ledger_safe
+            && !transition_capability_ledger_authorizes_runtime_influence
+            && !transition_capability_ledger_report_packet_included);
+
+    let gated_store_capability_ledger_backed = gated_store_trial
+        .map(|trial| {
+            value_bool_is(
+                trial.pointer(
+                    "/runtime_transition_preflight/gate_capability_ledger_backed_review_request",
+                ),
+                true,
+            )
+        })
+        .unwrap_or(false);
+    let gated_store_capability_ledger_safe = gated_store_trial
+        .map(|trial| {
+            value_bool_is(
+                trial.pointer(
+                    "/runtime_transition_preflight/gate_capability_ledger_safe_for_transition",
+                ),
+                true,
+            )
+        })
+        .unwrap_or(false);
+    let gated_store_capability_ledger_authorizes_runtime_influence = gated_store_trial
+        .map(|trial| {
+            value_bool_is(
+                trial.pointer(
+                    "/runtime_transition_preflight/gate_capability_ledger_can_authorize_runtime_influence",
+                ),
+                true,
+            )
+        })
+        .unwrap_or(false);
+    let gated_store_capability_ledger_report_packet_included = gated_store_trial
+        .map(|trial| {
+            value_bool_is(
+                trial.pointer(
+                    "/runtime_transition_preflight/gate_capability_ledger_report_packet_included",
+                ),
+                true,
+            )
+        })
+        .unwrap_or(false);
+    let gated_store_capability_ledger_preflight_ok = gated_store_trial
+        .map(|trial| {
+            value_bool_is(
+                trial.pointer("/runtime_transition_preflight/gate_capability_ledger_preflight_ok"),
+                true,
+            )
+        })
+        .unwrap_or(false);
+    let gated_store_capability_ledger_ready = !gated_store_capability_ledger_backed
+        || (gated_store_capability_ledger_safe
+            && !gated_store_capability_ledger_authorizes_runtime_influence
+            && !gated_store_capability_ledger_report_packet_included
+            && gated_store_capability_ledger_preflight_ok);
+
+    let gated_batch_capability_ledger_backed_count = gated_batch_diagnostics
+        .and_then(|batch| batch.pointer("/summary/gate_capability_ledger_backed_count"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let gated_batch_capability_ledger_safe_count = gated_batch_diagnostics
+        .and_then(|batch| batch.pointer("/summary/gate_capability_ledger_safe_count"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let gated_batch_capability_ledger_authorizes_runtime_influence_count =
+        gated_batch_diagnostics
+            .and_then(|batch| {
+                batch.pointer(
+                    "/summary/gate_capability_ledger_authorizes_runtime_influence_count",
+                )
+            })
+            .and_then(Value::as_u64)
+            .unwrap_or(0);
+    let gated_batch_capability_ledger_report_packet_included_count = gated_batch_diagnostics
+        .and_then(|batch| {
+            batch.pointer("/summary/gate_capability_ledger_report_packet_included_count")
+        })
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let gated_batch_capability_ledger_backed =
+        gated_batch_capability_ledger_backed_count > 0;
+    let gated_batch_capability_ledger_safe = gated_batch_capability_ledger_backed
+        && gated_batch_capability_ledger_safe_count == gated_batch_capability_ledger_backed_count
+        && gated_batch_diagnostics
+            .map(|batch| {
+                value_bool_is(
+                    batch.pointer("/safety/gate_capability_ledger_safe_for_transition_all"),
+                    true,
+                )
+            })
+            .unwrap_or(false);
+    let gated_batch_capability_ledger_authorizes_runtime_influence =
+        gated_batch_capability_ledger_authorizes_runtime_influence_count > 0
+            || gated_batch_diagnostics
+                .map(|batch| {
+                    value_bool_is(
+                        batch.pointer(
+                            "/safety/gate_capability_ledger_authorizes_runtime_influence_any",
+                        ),
+                        true,
+                    )
+                })
+                .unwrap_or(false);
+    let gated_batch_capability_ledger_report_packet_included =
+        gated_batch_capability_ledger_report_packet_included_count > 0
+            || gated_batch_diagnostics
+                .map(|batch| {
+                    value_bool_is(
+                        batch.pointer(
+                            "/safety/gate_capability_ledger_report_packet_included_any",
+                        ),
+                        true,
+                    )
+                })
+                .unwrap_or(false);
+    let gated_batch_capability_ledger_ready = !gated_batch_capability_ledger_backed
+        || (gated_batch_capability_ledger_safe
+            && !gated_batch_capability_ledger_authorizes_runtime_influence
+            && !gated_batch_capability_ledger_report_packet_included);
+
+    let capability_ledger_backed_evidence = readiness_capability_ledger_backed
+        || transition_capability_ledger_backed
+        || gated_store_capability_ledger_backed
+        || gated_batch_capability_ledger_backed;
+    let capability_ledger_can_authorize_runtime_influence =
+        readiness_capability_ledger_authorizes_runtime_influence
+            || transition_capability_ledger_authorizes_runtime_influence
+            || gated_store_capability_ledger_authorizes_runtime_influence
+            || gated_batch_capability_ledger_authorizes_runtime_influence;
+    let capability_ledger_report_packet_included =
+        readiness_capability_ledger_report_packet_included
+            || transition_capability_ledger_report_packet_included
+            || gated_store_capability_ledger_report_packet_included
+            || gated_batch_capability_ledger_report_packet_included;
+    let capability_ledger_ready = !capability_ledger_backed_evidence
+        || (readiness_capability_ledger_ready
+            && transition_capability_ledger_ready
+            && gated_store_capability_ledger_ready
+            && gated_batch_capability_ledger_ready
+            && !capability_ledger_can_authorize_runtime_influence
+            && !capability_ledger_report_packet_included);
+
     let evidence_provided =
         readiness_provided || transition_provided || gated_store_provided || gated_batch_provided;
     let mut blockers = Vec::new();
@@ -1554,6 +1800,34 @@ fn biocortex_retrieval_controlled_trial_readiness_summary(
                 "gated_batch_post_runtime_evidence_not_ready",
             );
         }
+        if readiness_capability_ledger_backed {
+            push_string_blocker(
+                &mut blockers,
+                readiness_capability_ledger_ready,
+                "readiness_capability_ledger_not_ready",
+            );
+        }
+        if transition_capability_ledger_backed {
+            push_string_blocker(
+                &mut blockers,
+                transition_capability_ledger_ready,
+                "transition_capability_ledger_not_ready",
+            );
+        }
+        if gated_store_capability_ledger_backed {
+            push_string_blocker(
+                &mut blockers,
+                gated_store_capability_ledger_ready,
+                "gated_store_capability_ledger_not_ready",
+            );
+        }
+        if gated_batch_capability_ledger_backed {
+            push_string_blocker(
+                &mut blockers,
+                gated_batch_capability_ledger_ready,
+                "gated_batch_capability_ledger_not_ready",
+            );
+        }
     }
     let ready_for_controlled_trial = evidence_provided
         && blockers.is_empty()
@@ -1582,6 +1856,25 @@ fn biocortex_retrieval_controlled_trial_readiness_summary(
         "requires_runtime_transition_gate": true,
         "gated_store_trial_optional_evidence": true,
         "gated_batch_diagnostics_optional_evidence": true,
+        "capability_ledger_optional_evidence": true,
+        "capability_ledger": {
+            "backed_evidence": capability_ledger_backed_evidence,
+            "ready": capability_ledger_backed_evidence && capability_ledger_ready,
+            "legacy_evidence_without_capability_ledger_allowed": !capability_ledger_backed_evidence,
+            "can_authorize_runtime_influence": capability_ledger_can_authorize_runtime_influence,
+            "report_packet_included": capability_ledger_report_packet_included,
+            "may_grant_new_authorization": false,
+            "may_change_default_retrieval": false,
+            "raw_report_included": false,
+            "source_summary": {
+                "runtime_readiness_packet_backed": readiness_capability_ledger_backed,
+                "runtime_transition_gate_backed": transition_capability_ledger_backed,
+                "gated_store_trial_backed": gated_store_capability_ledger_backed,
+                "gated_batch_diagnostics_backed": gated_batch_capability_ledger_backed,
+                "gated_batch_backed_count": gated_batch_capability_ledger_backed_count,
+                "gated_batch_safe_count": gated_batch_capability_ledger_safe_count,
+            },
+        },
         "runtime_readiness_packet": {
             "provided": readiness_provided,
             "schema_ok": readiness_schema_ok,
@@ -1603,6 +1896,19 @@ fn biocortex_retrieval_controlled_trial_readiness_summary(
                 .and_then(|packet| packet.pointer("/batch_summary/evidence_source"))
                 .cloned()
                 .unwrap_or(Value::Null),
+            "capability_ledger_backed_review_request": readiness_capability_ledger_backed,
+            "capability_ledger_ready": readiness_capability_ledger_backed
+                && readiness_capability_ledger_ready,
+            "capability_ledger_input_schema": runtime_readiness_packet
+                .and_then(|packet| packet.pointer("/decision_summary/capability_ledger_input_schema"))
+                .cloned()
+                .unwrap_or(Value::Null),
+            "capability_ledger_input_schema_version": runtime_readiness_packet
+                .and_then(|packet| packet.pointer("/decision_summary/capability_ledger_input_schema_version"))
+                .cloned()
+                .unwrap_or(Value::Null),
+            "capability_ledger_can_authorize_runtime_influence": readiness_capability_ledger_authorizes_runtime_influence,
+            "capability_ledger_report_packet_included": readiness_capability_ledger_report_packet_included,
         },
         "runtime_transition_gate": {
             "provided": transition_provided,
@@ -1621,6 +1927,19 @@ fn biocortex_retrieval_controlled_trial_readiness_summary(
                 .and_then(|gate| gate.pointer("/readiness_summary/post_runtime_batch_evidence_source"))
                 .cloned()
                 .unwrap_or(Value::Null),
+            "capability_ledger_backed_review_request": transition_capability_ledger_backed,
+            "capability_ledger_safe_for_transition": transition_capability_ledger_backed
+                && transition_capability_ledger_ready,
+            "capability_ledger_input_schema": runtime_transition_gate
+                .and_then(|gate| gate.pointer("/readiness_summary/capability_ledger_input_schema"))
+                .cloned()
+                .unwrap_or(Value::Null),
+            "capability_ledger_input_schema_version": runtime_transition_gate
+                .and_then(|gate| gate.pointer("/readiness_summary/capability_ledger_input_schema_version"))
+                .cloned()
+                .unwrap_or(Value::Null),
+            "capability_ledger_can_authorize_runtime_influence": transition_capability_ledger_authorizes_runtime_influence,
+            "capability_ledger_report_packet_included": transition_capability_ledger_report_packet_included,
         },
         "gated_store_trial": {
             "provided": gated_store_provided,
@@ -1644,6 +1963,12 @@ fn biocortex_retrieval_controlled_trial_readiness_summary(
                 .and_then(|trial| trial.get("changes_memory_search_order"))
                 .cloned()
                 .unwrap_or(Value::Bool(false)),
+            "capability_ledger_backed_review_request": gated_store_capability_ledger_backed,
+            "capability_ledger_safe_for_transition": gated_store_capability_ledger_backed
+                && gated_store_capability_ledger_ready,
+            "capability_ledger_can_authorize_runtime_influence": gated_store_capability_ledger_authorizes_runtime_influence,
+            "capability_ledger_report_packet_included": gated_store_capability_ledger_report_packet_included,
+            "capability_ledger_preflight_ok": gated_store_capability_ledger_preflight_ok,
         },
         "gated_batch_diagnostics": {
             "provided": gated_batch_provided,
@@ -1667,6 +1992,17 @@ fn biocortex_retrieval_controlled_trial_readiness_summary(
                 .and_then(|batch| batch.pointer("/safety/runs_biocortex_any"))
                 .cloned()
                 .unwrap_or(Value::Bool(false)),
+            "capability_ledger_backed_count": gated_batch_capability_ledger_backed_count,
+            "capability_ledger_safe_count": gated_batch_capability_ledger_safe_count,
+            "capability_ledger_authorizes_runtime_influence_count": gated_batch_capability_ledger_authorizes_runtime_influence_count,
+            "capability_ledger_report_packet_included_count": gated_batch_capability_ledger_report_packet_included_count,
+            "capability_ledger_backed_all": gated_batch_diagnostics
+                .and_then(|batch| batch.pointer("/safety/gate_capability_ledger_backed_all"))
+                .cloned()
+                .unwrap_or(Value::Bool(false)),
+            "capability_ledger_safe_for_transition_all": gated_batch_capability_ledger_safe,
+            "capability_ledger_authorizes_runtime_influence_any": gated_batch_capability_ledger_authorizes_runtime_influence,
+            "capability_ledger_report_packet_included_any": gated_batch_capability_ledger_report_packet_included,
         },
         "status_surface_calls_memory_search": false,
         "status_surface_runs_biocortex": false,
@@ -11033,6 +11369,8 @@ pub fn biocortex_retrieval_downstream_aio_runtime_evidence_handoff(
 ) -> Value {
     let checkpoint = opts.checkpoint_selection;
     let review = opts.post_semantic_diverse_review;
+    let controlled_trial_readiness = opts.controlled_trial_readiness;
+    let controlled_trial_readiness_ref = controlled_trial_readiness.as_ref();
 
     let checkpoint_schema_ok = value_str_eq(
         checkpoint.get("schema"),
@@ -11249,6 +11587,73 @@ pub fn biocortex_retrieval_downstream_aio_runtime_evidence_handoff(
         && total_runs_biocortex_count >= 8
         && total_actual_order_changed_count >= 8;
 
+    let controlled_trial_readiness_provided = controlled_trial_readiness_ref.is_some();
+    let controlled_trial_readiness_schema_ok = controlled_trial_readiness_ref
+        .map(|summary| {
+            value_str_eq(
+                summary.get("schema"),
+                "agent_bridge.biocortex_retrieval.controlled_trial_readiness_summary.v0",
+            ) && value_bool_is(summary.get("read_only"), true)
+        })
+        .unwrap_or(false);
+    let controlled_trial_readiness_ready = controlled_trial_readiness_ref
+        .map(|summary| {
+            value_str_eq(summary.get("status"), "ready_for_controlled_explicit_opt_in_fts_trial")
+                && value_bool_is(summary.get("ready_for_controlled_trial"), true)
+                && json_string_array(summary.get("blockers")).is_empty()
+        })
+        .unwrap_or(false);
+    let controlled_trial_capability_ledger_backed = controlled_trial_readiness_ref
+        .map(|summary| {
+            value_bool_is(summary.pointer("/capability_ledger/backed_evidence"), true)
+        })
+        .unwrap_or(false);
+    let controlled_trial_capability_ledger_ready = controlled_trial_readiness_ref
+        .map(|summary| {
+            value_bool_is(summary.pointer("/capability_ledger/ready"), true)
+                && value_bool_is(
+                    summary.pointer("/capability_ledger/can_authorize_runtime_influence"),
+                    false,
+                )
+                && value_bool_is(
+                    summary.pointer("/capability_ledger/report_packet_included"),
+                    false,
+                )
+                && value_bool_is(
+                    summary.pointer("/capability_ledger/may_grant_new_authorization"),
+                    false,
+                )
+                && value_bool_is(
+                    summary.pointer("/capability_ledger/may_change_default_retrieval"),
+                    false,
+                )
+                && value_bool_is(summary.pointer("/capability_ledger/raw_report_included"), false)
+        })
+        .unwrap_or(false);
+    let controlled_trial_capability_ledger_authorizes_runtime_influence =
+        controlled_trial_readiness_ref
+            .map(|summary| {
+                value_bool_is(
+                    summary.pointer("/capability_ledger/can_authorize_runtime_influence"),
+                    true,
+                )
+            })
+            .unwrap_or(false);
+    let controlled_trial_capability_ledger_report_packet_included =
+        controlled_trial_readiness_ref
+            .map(|summary| {
+                value_bool_is(
+                    summary.pointer("/capability_ledger/report_packet_included"),
+                    true,
+                )
+            })
+            .unwrap_or(false);
+    let controlled_trial_capability_ledger_safe_for_handoff =
+        !controlled_trial_capability_ledger_backed
+            || (controlled_trial_capability_ledger_ready
+                && !controlled_trial_capability_ledger_authorizes_runtime_influence
+                && !controlled_trial_capability_ledger_report_packet_included);
+
     let mut blockers = Vec::new();
     push_string_blocker(
         &mut blockers,
@@ -11368,6 +11773,25 @@ pub fn biocortex_retrieval_downstream_aio_runtime_evidence_handoff(
         evidence_counts_ok,
         "review_evidence_counts_insufficient",
     );
+    if controlled_trial_readiness_provided {
+        push_string_blocker(
+            &mut blockers,
+            controlled_trial_readiness_schema_ok,
+            "controlled_trial_readiness_schema_invalid",
+        );
+        push_string_blocker(
+            &mut blockers,
+            controlled_trial_readiness_ready,
+            "controlled_trial_readiness_not_ready",
+        );
+        if controlled_trial_capability_ledger_backed {
+            push_string_blocker(
+                &mut blockers,
+                controlled_trial_capability_ledger_safe_for_handoff,
+                "controlled_trial_capability_ledger_not_ready",
+            );
+        }
+    }
 
     let ready = blockers.is_empty();
 
@@ -11387,10 +11811,20 @@ pub fn biocortex_retrieval_downstream_aio_runtime_evidence_handoff(
         "input_contract": {
             "checkpoint_selection_schema": checkpoint.get("schema").cloned().unwrap_or(Value::Null),
             "post_semantic_diverse_review_schema": review.get("schema").cloned().unwrap_or(Value::Null),
+            "controlled_trial_readiness_schema": controlled_trial_readiness_ref
+                .and_then(|summary| summary.get("schema"))
+                .cloned()
+                .unwrap_or(Value::Null),
             "checkpoint_selection_included": false,
             "post_semantic_diverse_review_included": false,
+            "controlled_trial_readiness_included": false,
             "requires_checkpoint_status": "downstream_aio_integration_checkpoint_selected",
             "requires_review_status": "post_semantic_diverse_review_recorded",
+            "accepts_controlled_trial_readiness_summary": true,
+            "requires_controlled_trial_ready_when_provided": true,
+            "accepts_capability_ledger_backed_controlled_readiness": true,
+            "requires_capability_ledger_safe_when_provided": true,
+            "capability_ledger_report_packet_included": false,
             "raw_queries_included": false,
             "raw_keys_included": false,
             "content_included": false,
@@ -11446,12 +11880,39 @@ pub fn biocortex_retrieval_downstream_aio_runtime_evidence_handoff(
             "content_included": false,
             "side_signal_raw_included": false,
         },
+        "controlled_trial_readiness_summary": {
+            "provided": controlled_trial_readiness_provided,
+            "schema_ok": controlled_trial_readiness_schema_ok,
+            "ready_for_controlled_trial": controlled_trial_readiness_ready,
+            "status": controlled_trial_readiness_ref
+                .and_then(|summary| summary.get("status"))
+                .cloned()
+                .unwrap_or(Value::Null),
+            "blocker_count": controlled_trial_readiness_ref
+                .and_then(|summary| summary.get("blockers"))
+                .and_then(Value::as_array)
+                .map(|items| items.len())
+                .unwrap_or(0),
+            "capability_ledger_backed_evidence": controlled_trial_capability_ledger_backed,
+            "capability_ledger_safe_for_handoff": controlled_trial_capability_ledger_backed
+                && controlled_trial_capability_ledger_safe_for_handoff,
+            "legacy_controlled_readiness_without_capability_ledger_allowed": !controlled_trial_capability_ledger_backed,
+            "capability_ledger_can_authorize_runtime_influence": controlled_trial_capability_ledger_authorizes_runtime_influence,
+            "capability_ledger_report_packet_included": controlled_trial_capability_ledger_report_packet_included,
+            "capability_ledger_raw_report_included": false,
+        },
         "ssb_handoff": {
             "target_schema_family": "agent_bridge.semantic_bus.action_result.v0",
             "target_checkpoint": "semantic_system_bus_lswr_action_result_runtime_evidence_checkpoint",
             "runtime_backed_evidence": true,
             "verification_boundary_required": true,
             "no_laundering_boundary_required": true,
+            "capability_ledger_backed_audit_context": controlled_trial_capability_ledger_backed,
+            "capability_ledger_safe_for_handoff": controlled_trial_capability_ledger_backed
+                && controlled_trial_capability_ledger_safe_for_handoff,
+            "capability_ledger_can_authorize_runtime_influence": controlled_trial_capability_ledger_authorizes_runtime_influence,
+            "capability_ledger_report_packet_included": controlled_trial_capability_ledger_report_packet_included,
+            "may_use_capability_ledger_as_runtime_authority": false,
             "recover": if ready { "proceed_to_read_only_ssb_review" } else { "fix_handoff_blockers" },
             "raw_available": false,
             "raw_available_must_not_expose_raw_payload": true,
@@ -11471,6 +11932,11 @@ pub fn biocortex_retrieval_downstream_aio_runtime_evidence_handoff(
             "this_packet_allows_default_search_order_change": false,
             "this_packet_calls_aiot_runtime": false,
             "this_packet_executes_lswr_actions": false,
+            "capability_ledger_backed_controlled_readiness": controlled_trial_capability_ledger_backed,
+            "capability_ledger_safe_for_handoff": !controlled_trial_capability_ledger_backed
+                || controlled_trial_capability_ledger_safe_for_handoff,
+            "capability_ledger_authorizes_runtime_influence": controlled_trial_capability_ledger_authorizes_runtime_influence,
+            "capability_ledger_report_packet_included": controlled_trial_capability_ledger_report_packet_included,
         },
         "approval_state": "downstream_aio_handoff_only",
         "authorization_state": if ready {
@@ -18635,6 +19101,7 @@ mod tests {
             BioCortexRetrievalDownstreamAioRuntimeEvidenceHandoffOptions {
                 checkpoint_selection: downstream_aio_checkpoint_selection_fixture(),
                 post_semantic_diverse_review: downstream_aio_post_semantic_diverse_review_fixture(),
+                controlled_trial_readiness: None,
                 reviewer: Some("codex".to_string()),
                 commit: Some("downstream-aio-handoff-commit".to_string()),
                 forum_post_id: Some("104".to_string()),
@@ -18728,6 +19195,7 @@ mod tests {
             BioCortexRetrievalDownstreamAioRuntimeEvidenceHandoffOptions {
                 checkpoint_selection: checkpoint,
                 post_semantic_diverse_review: review,
+                controlled_trial_readiness: None,
                 reviewer: None,
                 commit: None,
                 forum_post_id: None,
@@ -19340,6 +19808,7 @@ mod tests {
             BioCortexRetrievalDownstreamAioRuntimeEvidenceHandoffOptions {
                 checkpoint_selection,
                 post_semantic_diverse_review: review,
+                controlled_trial_readiness: None,
                 reviewer: Some("codex".to_string()),
                 commit: Some("handoff-commit".to_string()),
                 forum_post_id: Some("104".to_string()),
@@ -19645,7 +20114,7 @@ mod tests {
         );
         let transition_gate = biocortex_retrieval_opt_in_runtime_transition_gate(
             BioCortexRetrievalOptInRuntimeTransitionGateOptions {
-                runtime_readiness_packet: readiness,
+                runtime_readiness_packet: readiness.clone(),
                 mode: "fts".to_string(),
                 per_call_opt_in: true,
                 operator_disabled: false,
@@ -19815,7 +20284,7 @@ mod tests {
         );
         let transition_gate = biocortex_retrieval_opt_in_runtime_transition_gate(
             BioCortexRetrievalOptInRuntimeTransitionGateOptions {
-                runtime_readiness_packet: readiness,
+                runtime_readiness_packet: readiness.clone(),
                 mode: "fts".to_string(),
                 per_call_opt_in: true,
                 operator_disabled: false,
@@ -19898,8 +20367,8 @@ mod tests {
         let batch = biocortex_retrieval_opt_in_gated_batch_diagnostics(
             &store,
             BioCortexRetrievalOptInGatedBatchDiagnosticsOptions {
-                runtime_transition_gate: transition_gate,
-                runtime_influence_decision_packet: decision_packet,
+                runtime_transition_gate: transition_gate.clone(),
+                runtime_influence_decision_packet: decision_packet.clone(),
                 queries: vec![BioCortexRetrievalOptInBatchQueryCase {
                     query: "secret gated capability ledger batch query".to_string(),
                     class_label: Some("Capability Ledger".to_string()),
@@ -19981,9 +20450,135 @@ mod tests {
             json!(true)
         );
 
+        let controlled_readiness = biocortex_retrieval_controlled_trial_readiness_summary(
+            "fts",
+            true,
+            Some(&readiness),
+            Some(&transition_gate),
+            Some(&trial),
+            Some(&batch),
+        );
+        assert_eq!(
+            controlled_readiness["status"],
+            json!("ready_for_controlled_explicit_opt_in_fts_trial")
+        );
+        assert_eq!(
+            controlled_readiness["capability_ledger"]["backed_evidence"],
+            json!(true)
+        );
+        assert_eq!(
+            controlled_readiness["capability_ledger"]["ready"],
+            json!(true)
+        );
+        assert_eq!(
+            controlled_readiness["capability_ledger"]["can_authorize_runtime_influence"],
+            json!(false)
+        );
+        assert_eq!(
+            controlled_readiness["capability_ledger"]["report_packet_included"],
+            json!(false)
+        );
+        assert_eq!(
+            controlled_readiness["runtime_transition_gate"]
+                ["capability_ledger_safe_for_transition"],
+            json!(true)
+        );
+        assert_eq!(
+            controlled_readiness["gated_store_trial"]["capability_ledger_preflight_ok"],
+            json!(true)
+        );
+        assert_eq!(
+            controlled_readiness["gated_batch_diagnostics"]["capability_ledger_backed_count"],
+            json!(1)
+        );
+
+        let handoff = biocortex_retrieval_downstream_aio_runtime_evidence_handoff(
+            BioCortexRetrievalDownstreamAioRuntimeEvidenceHandoffOptions {
+                checkpoint_selection: downstream_aio_checkpoint_selection_fixture(),
+                post_semantic_diverse_review: downstream_aio_post_semantic_diverse_review_fixture(),
+                controlled_trial_readiness: Some(controlled_readiness.clone()),
+                reviewer: Some("codex".to_string()),
+                commit: Some("runtime-transition-ledger-commit".to_string()),
+                forum_post_id: Some("104".to_string()),
+                memory_key: Some("downstream-aio-ledger-handoff-memory".to_string()),
+            },
+        );
+        assert_eq!(handoff["status"], json!("ready"));
+        assert_eq!(
+            handoff["input_contract"]["accepts_capability_ledger_backed_controlled_readiness"],
+            json!(true)
+        );
+        assert_eq!(
+            handoff["input_contract"]["capability_ledger_report_packet_included"],
+            json!(false)
+        );
+        assert_eq!(
+            handoff["controlled_trial_readiness_summary"]
+                ["capability_ledger_backed_evidence"],
+            json!(true)
+        );
+        assert_eq!(
+            handoff["controlled_trial_readiness_summary"]
+                ["capability_ledger_safe_for_handoff"],
+            json!(true)
+        );
+        assert_eq!(
+            handoff["controlled_trial_readiness_summary"]
+                ["capability_ledger_can_authorize_runtime_influence"],
+            json!(false)
+        );
+        assert_eq!(
+            handoff["ssb_handoff"]["capability_ledger_backed_audit_context"],
+            json!(true)
+        );
+        assert_eq!(
+            handoff["ssb_handoff"]["capability_ledger_safe_for_handoff"],
+            json!(true)
+        );
+        assert_eq!(
+            handoff["ssb_handoff"]["may_use_capability_ledger_as_runtime_authority"],
+            json!(false)
+        );
+        assert_eq!(
+            handoff["boundary_check"]["capability_ledger_authorizes_runtime_influence"],
+            json!(false)
+        );
+
+        let mut bad_controlled_readiness = controlled_readiness.clone();
+        bad_controlled_readiness["capability_ledger"]["ready"] = json!(false);
+        bad_controlled_readiness["capability_ledger"]["can_authorize_runtime_influence"] =
+            json!(true);
+        let blocked_handoff = biocortex_retrieval_downstream_aio_runtime_evidence_handoff(
+            BioCortexRetrievalDownstreamAioRuntimeEvidenceHandoffOptions {
+                checkpoint_selection: downstream_aio_checkpoint_selection_fixture(),
+                post_semantic_diverse_review: downstream_aio_post_semantic_diverse_review_fixture(),
+                controlled_trial_readiness: Some(bad_controlled_readiness),
+                reviewer: Some("codex".to_string()),
+                commit: Some("runtime-transition-ledger-commit".to_string()),
+                forum_post_id: Some("104".to_string()),
+                memory_key: Some("downstream-aio-ledger-blocked-memory".to_string()),
+            },
+        );
+        assert_eq!(blocked_handoff["status"], json!("blocked"));
+        let blockers = blocked_handoff["boundary_check"]["blockers"]
+            .as_array()
+            .expect("handoff blockers");
+        assert!(blockers.contains(&json!("controlled_trial_capability_ledger_not_ready")));
+        assert_eq!(
+            blocked_handoff["ssb_handoff"]["may_emit_ssb_adapter_fixture"],
+            json!(false)
+        );
+        assert_eq!(
+            blocked_handoff["boundary_check"]["capability_ledger_authorizes_runtime_influence"],
+            json!(true)
+        );
+
         let serialized = serde_json::to_string(&json!({
             "trial": trial,
             "batch": batch,
+            "controlled_readiness": controlled_readiness,
+            "handoff": handoff,
+            "blocked_handoff": blocked_handoff,
         }))
         .expect("gated ledger consumer json");
         assert!(!serialized.contains("secret gated capability ledger store query"));
