@@ -17576,17 +17576,45 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             v["input_contract"]["runtime_readiness_packet_included"],
             json!(false)
         );
+        assert_eq!(
+            v["input_contract"]["accepts_capability_ledger_backed_readiness_packet"],
+            json!(true)
+        );
+        assert_eq!(
+            v["input_contract"]["capability_ledger_report_packet_included"],
+            json!(false)
+        );
         assert_eq!(v["requested_transition"]["mode"], json!("fts"));
         assert_eq!(v["requested_transition"]["mode_authorized"], json!(true));
         assert_eq!(v["requested_transition"]["per_call_opt_in"], json!(true));
         assert_eq!(v["requested_transition"]["operator_disabled"], json!(false));
+        assert_eq!(
+            v["readiness_summary"]["capability_ledger_backed_review_request"],
+            json!(false)
+        );
+        assert_eq!(
+            v["readiness_summary"]["capability_ledger_safe_for_transition"],
+            json!(true)
+        );
         assert_eq!(v["transition"]["transition_allowed"], json!(true));
         assert_eq!(
             v["transition"]["may_run_runtime_adapter_for_explicit_opt_in_fts"],
             json!(true)
         );
         assert_eq!(
+            v["transition"]["capability_ledger_can_authorize_runtime_influence"],
+            json!(false)
+        );
+        assert_eq!(
             v["boundary_check"]["runtime_transition_allowed"],
+            json!(true)
+        );
+        assert_eq!(
+            v["boundary_check"]["capability_ledger_backed_readiness_packet"],
+            json!(false)
+        );
+        assert_eq!(
+            v["boundary_check"]["capability_ledger_safe_for_transition"],
             json!(true)
         );
         assert_eq!(v["boundary_check"]["blockers"], json!([]));

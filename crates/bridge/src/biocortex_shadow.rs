@@ -10562,6 +10562,38 @@ pub fn biocortex_retrieval_opt_in_runtime_transition_gate(
     let readiness_post_runtime_evidence_chain_ok = readiness_post_runtime_evidence_ready
         && readiness_store_post_runtime_preflight_ok
         && readiness_batch_post_runtime_preflight_ok;
+    let readiness_capability_ledger_backed = value_bool_is(
+        readiness.pointer("/decision_summary/capability_ledger_backed_review_request"),
+        true,
+    ) || value_bool_is(
+        readiness.pointer("/boundary_check/capability_ledger_backed_decision_packet"),
+        true,
+    );
+    let readiness_capability_ledger_safe = value_bool_is(
+        readiness.pointer("/decision_summary/capability_ledger_safe_for_decision"),
+        true,
+    ) && value_bool_is(
+        readiness.pointer("/boundary_check/capability_ledger_safe_for_readiness"),
+        true,
+    );
+    let readiness_capability_ledger_authorizes_nothing = value_bool_is(
+        readiness.pointer("/decision_summary/capability_ledger_can_authorize_runtime_influence"),
+        false,
+    ) && value_bool_is(
+        readiness.pointer("/boundary_check/capability_ledger_authorizes_runtime_influence"),
+        false,
+    );
+    let readiness_capability_ledger_redacted = value_bool_is(
+        readiness.pointer("/input_contract/capability_ledger_report_packet_included"),
+        false,
+    ) && value_bool_is(
+        readiness.pointer("/decision_summary/capability_ledger_report_packet_included"),
+        false,
+    );
+    let readiness_capability_ledger_ok = !readiness_capability_ledger_backed
+        || (readiness_capability_ledger_safe
+            && readiness_capability_ledger_authorizes_nothing
+            && readiness_capability_ledger_redacted);
     let boundary_ready = value_bool_is(
         readiness.pointer("/boundary_check/runtime_readiness_ready"),
         true,
@@ -10606,6 +10638,9 @@ pub fn biocortex_retrieval_opt_in_runtime_transition_gate(
         false,
     ) && value_bool_is(
         readiness.pointer("/input_contract/batch_diagnostics_included"),
+        false,
+    ) && value_bool_is(
+        readiness.pointer("/input_contract/capability_ledger_report_packet_included"),
         false,
     ) && value_bool_is(
         readiness.pointer("/input_contract/raw_queries_included"),
@@ -10689,6 +10724,13 @@ pub fn biocortex_retrieval_opt_in_runtime_transition_gate(
             &mut blockers,
             readiness_post_runtime_evidence_chain_ok,
             "readiness_post_runtime_evidence_summary_not_ready",
+        );
+    }
+    if readiness_capability_ledger_backed {
+        push_string_blocker(
+            &mut blockers,
+            readiness_capability_ledger_ok,
+            "readiness_capability_ledger_not_safe",
         );
     }
     push_string_blocker(
@@ -10776,6 +10818,9 @@ pub fn biocortex_retrieval_opt_in_runtime_transition_gate(
             "requires_per_call_opt_in": true,
             "requires_mode_fts": true,
             "requires_operator_disable_absent": true,
+            "accepts_capability_ledger_backed_readiness_packet": true,
+            "requires_capability_ledger_safe_when_provided": true,
+            "capability_ledger_report_packet_included": false,
             "unknown_fields_ignored": true,
             "raw_queries_included": false,
             "raw_keys_included": false,
@@ -10823,6 +10868,19 @@ pub fn biocortex_retrieval_opt_in_runtime_transition_gate(
                 ),
             "store_post_runtime_evidence_preflight_ok": readiness_store_post_runtime_preflight_ok,
             "batch_post_runtime_evidence_preflight_ok": readiness_batch_post_runtime_preflight_ok,
+            "capability_ledger_backed_review_request": readiness_capability_ledger_backed,
+            "capability_ledger_safe_for_transition": readiness_capability_ledger_ok,
+            "legacy_readiness_packet_without_capability_ledger_allowed": !readiness_capability_ledger_backed,
+            "capability_ledger_input_schema": readiness
+                .pointer("/decision_summary/capability_ledger_input_schema")
+                .cloned()
+                .unwrap_or(Value::Null),
+            "capability_ledger_input_schema_version": readiness
+                .pointer("/decision_summary/capability_ledger_input_schema_version")
+                .cloned()
+                .unwrap_or(Value::Null),
+            "capability_ledger_can_authorize_runtime_influence": false,
+            "capability_ledger_report_packet_included": false,
             "boundary_ready": boundary_ready,
             "readiness_blockers": readiness_blockers,
             "raw_inputs_absent": readiness_input_raw_absent,
@@ -10840,6 +10898,7 @@ pub fn biocortex_retrieval_opt_in_runtime_transition_gate(
             "must_fail_open_to_baseline": true,
             "must_keep_redacted_audit_only": true,
             "must_keep_baseline_candidate_recall": true,
+            "capability_ledger_can_authorize_runtime_influence": false,
             "may_change_default_memory_search_order": false,
             "default_influence_ready": false,
             "recommended_next_step": if transition_allowed {
@@ -10851,6 +10910,11 @@ pub fn biocortex_retrieval_opt_in_runtime_transition_gate(
         "boundary_check": {
             "runtime_transition_allowed": transition_allowed,
             "blockers": blockers,
+            "capability_ledger_backed_readiness_packet": readiness_capability_ledger_backed,
+            "capability_ledger_safe_for_transition": readiness_capability_ledger_ok,
+            "legacy_readiness_packet_without_capability_ledger_allowed": !readiness_capability_ledger_backed,
+            "capability_ledger_authorizes_runtime_influence": readiness_capability_ledger_backed
+                && !readiness_capability_ledger_authorizes_nothing,
             "this_packet_grants_new_authorization": false,
             "this_packet_calls_memory_search": false,
             "this_packet_runs_biocortex": false,
@@ -18636,6 +18700,175 @@ mod tests {
                 .len(),
             0
         );
+        assert_eq!(gate["calls_memory_search"], json!(false));
+        assert_eq!(gate["runs_biocortex"], json!(false));
+        assert_eq!(gate["changes_memory_search_order"], json!(false));
+        assert_eq!(gate["default_search_order_change_allowed"], json!(false));
+    }
+
+    #[test]
+    fn opt_in_runtime_transition_gate_preserves_capability_ledger_context() {
+        let decision_packet = biocortex_retrieval_opt_in_runtime_influence_decision_packet(
+            BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketOptions {
+                runtime_influence_review_request:
+                    opt_in_aggregate_and_ledger_backed_runtime_influence_review_request_fixture(),
+                runtime_influence_decision: opt_in_runtime_influence_decision_fixture(),
+                reviewer: Some("codex".to_string()),
+                commit: Some("runtime-decision-commit".to_string()),
+                forum_post_id: Some("104".to_string()),
+                memory_key: Some("runtime-decision-memory".to_string()),
+            },
+        );
+        let readiness = biocortex_retrieval_opt_in_runtime_readiness_packet(
+            BioCortexRetrievalOptInRuntimeReadinessPacketOptions {
+                runtime_influence_decision_packet: decision_packet,
+                store_trial: opt_in_runtime_readiness_store_trial_fixture(),
+                batch_diagnostics: opt_in_runtime_readiness_batch_fixture(),
+                reviewer: Some("codex".to_string()),
+                commit: Some("runtime-readiness-commit".to_string()),
+                forum_post_id: Some("104".to_string()),
+                memory_key: Some("runtime-readiness-memory".to_string()),
+            },
+        );
+
+        let gate = biocortex_retrieval_opt_in_runtime_transition_gate(
+            BioCortexRetrievalOptInRuntimeTransitionGateOptions {
+                runtime_readiness_packet: readiness,
+                mode: "fts".to_string(),
+                per_call_opt_in: true,
+                operator_disabled: false,
+                reviewer: Some("codex".to_string()),
+                commit: Some("runtime-transition-commit".to_string()),
+                forum_post_id: Some("104".to_string()),
+                memory_key: Some("runtime-transition-memory".to_string()),
+            },
+        );
+
+        assert_eq!(gate["status"], json!("transition_allowed"));
+        assert_eq!(
+            gate["input_contract"]["accepts_capability_ledger_backed_readiness_packet"],
+            json!(true)
+        );
+        assert_eq!(
+            gate["input_contract"]["requires_capability_ledger_safe_when_provided"],
+            json!(true)
+        );
+        assert_eq!(
+            gate["input_contract"]["capability_ledger_report_packet_included"],
+            json!(false)
+        );
+        assert_eq!(
+            gate["readiness_summary"]["capability_ledger_backed_review_request"],
+            json!(true)
+        );
+        assert_eq!(
+            gate["readiness_summary"]["capability_ledger_safe_for_transition"],
+            json!(true)
+        );
+        assert_eq!(
+            gate["readiness_summary"]["legacy_readiness_packet_without_capability_ledger_allowed"],
+            json!(false)
+        );
+        assert_eq!(
+            gate["readiness_summary"]["capability_ledger_input_schema"],
+            json!("biocortex.capability_ledger.v3")
+        );
+        assert_eq!(
+            gate["readiness_summary"]["capability_ledger_input_schema_version"],
+            json!("3")
+        );
+        assert_eq!(
+            gate["readiness_summary"]["capability_ledger_can_authorize_runtime_influence"],
+            json!(false)
+        );
+        assert_eq!(
+            gate["readiness_summary"]["capability_ledger_report_packet_included"],
+            json!(false)
+        );
+        assert_eq!(
+            gate["transition"]["capability_ledger_can_authorize_runtime_influence"],
+            json!(false)
+        );
+        assert_eq!(
+            gate["boundary_check"]["capability_ledger_backed_readiness_packet"],
+            json!(true)
+        );
+        assert_eq!(
+            gate["boundary_check"]["capability_ledger_safe_for_transition"],
+            json!(true)
+        );
+        assert_eq!(
+            gate["boundary_check"]["legacy_readiness_packet_without_capability_ledger_allowed"],
+            json!(false)
+        );
+        assert_eq!(
+            gate["boundary_check"]["capability_ledger_authorizes_runtime_influence"],
+            json!(false)
+        );
+        assert_eq!(gate["boundary_check"]["blockers"], json!([]));
+        assert_eq!(gate["calls_memory_search"], json!(false));
+        assert_eq!(gate["runs_biocortex"], json!(false));
+        assert_eq!(gate["default_search_order_change_allowed"], json!(false));
+
+        let serialized = serde_json::to_string(&gate).expect("transition gate json");
+        assert!(!serialized.contains("secret ledger markdown"));
+        assert!(!serialized.contains("secret ledger raw query"));
+        assert!(!serialized.contains("secret_ledger_key"));
+        assert!(!serialized.contains("secret ledger content"));
+        assert!(!serialized.contains("report_markdown"));
+        assert!(!serialized.contains("secret readiness store query"));
+        assert!(!serialized.contains("secret_readiness_store_key"));
+        assert!(!serialized.contains("secret readiness batch query"));
+        assert!(!serialized.contains("secret_readiness_batch_key"));
+    }
+
+    #[test]
+    fn opt_in_runtime_transition_gate_blocks_bad_capability_ledger_readiness() {
+        let mut readiness = opt_in_runtime_transition_readiness_fixture();
+        readiness["decision_summary"]["capability_ledger_backed_review_request"] = json!(true);
+        readiness["decision_summary"]["capability_ledger_safe_for_decision"] = json!(false);
+        readiness["decision_summary"]["legacy_decision_packet_without_capability_ledger_allowed"] =
+            json!(false);
+        readiness["decision_summary"]["capability_ledger_can_authorize_runtime_influence"] =
+            json!(true);
+        readiness["decision_summary"]["capability_ledger_report_packet_included"] = json!(false);
+        readiness["boundary_check"]["capability_ledger_backed_decision_packet"] = json!(true);
+        readiness["boundary_check"]["capability_ledger_safe_for_readiness"] = json!(false);
+        readiness["boundary_check"]["legacy_decision_packet_without_capability_ledger_allowed"] =
+            json!(false);
+        readiness["boundary_check"]["capability_ledger_authorizes_runtime_influence"] = json!(true);
+
+        let gate = biocortex_retrieval_opt_in_runtime_transition_gate(
+            BioCortexRetrievalOptInRuntimeTransitionGateOptions {
+                runtime_readiness_packet: readiness,
+                mode: "fts".to_string(),
+                per_call_opt_in: true,
+                operator_disabled: false,
+                reviewer: None,
+                commit: None,
+                forum_post_id: None,
+                memory_key: None,
+            },
+        );
+
+        assert_eq!(gate["status"], json!("blocked"));
+        assert_eq!(gate["transition"]["transition_allowed"], json!(false));
+        assert_eq!(
+            gate["readiness_summary"]["capability_ledger_backed_review_request"],
+            json!(true)
+        );
+        assert_eq!(
+            gate["readiness_summary"]["capability_ledger_safe_for_transition"],
+            json!(false)
+        );
+        assert_eq!(
+            gate["boundary_check"]["capability_ledger_authorizes_runtime_influence"],
+            json!(true)
+        );
+        let blockers = gate["boundary_check"]["blockers"]
+            .as_array()
+            .expect("blockers");
+        assert!(blockers.contains(&json!("readiness_capability_ledger_not_safe")));
         assert_eq!(gate["calls_memory_search"], json!(false));
         assert_eq!(gate["runs_biocortex"], json!(false));
         assert_eq!(gate["changes_memory_search_order"], json!(false));
