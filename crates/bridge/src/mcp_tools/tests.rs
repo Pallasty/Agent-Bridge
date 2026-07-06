@@ -153,7 +153,14 @@
             mk("plain", vec!["ordinary"]),
         ];
 
-        let block = format_continuity_kernel_block(&rows, false, 80).expect("kernel block");
+        let block = format_continuity_kernel_block(
+            &rows,
+            false,
+            80,
+            BUDGET_CONTINUITY_KERNEL,
+            BUDGET_CONTINUITY_KERNEL_INDEX,
+        )
+        .expect("kernel block");
         let joined = block.join("\n");
         assert!(joined.contains("Continuity Kernel"));
         assert!(joined.contains("-- must-block / constraints --"));
@@ -164,6 +171,243 @@
             joined.find("constraint").unwrap() < joined.find("state").unwrap()
                 && joined.find("state").unwrap() < joined.find("background").unwrap(),
             "expected tier order, got:\n{joined}"
+        );
+    }
+
+    // ---- D1 fix (2026-07-06): kernel floor index lines -------------------
+    // Selected rows must never vanish without a trace: over budget they
+    // degrade to `  - [kind] key {trigger}` index lines instead of being
+    // cut bottom-up by cap_block_lines.
+
+    /// Realistic kernel-selected row: long snake_case key with date suffix,
+    /// continuity tags (tier + optional retrieval trigger), long content.
+    fn mk_kernel_row(idx: usize, tier_tag: &str, trigger: Option<&str>) -> MemoryRecord {
+        let mut tags = vec![tier_tag.to_string()];
+        if let Some(t) = trigger {
+            tags.push(format!("continuity_retrieval_trigger:{t}"));
+        }
+        MemoryRecord {
+            key: format!("kernel_floor_case_row_{idx:02}_arc_{}", 20260600 + idx),
+            kind: "decision".into(),
+            content: format!(
+                "Row {idx}: long-form continuity payload that costs real budget when \
+                 rendered as a full kernel row — snippet text padded well past the \
+                 compact width so a handful of rows exhausts the full-text budget."
+            ),
+            tags,
+            related_keys: vec![],
+            scope: None,
+            created_at: 0,
+            updated_at: 0,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 1.0 - idx as f64 * 0.001,
+            status: "active".into(),
+            trigger_pattern: None,
+            superseded_by: None,
+        }
+    }
+
+    fn kernel_block_token_sum(block: &[String]) -> usize {
+        block
+            .iter()
+            .map(|l| estimate_tokens_from_text(l) as usize)
+            .sum()
+    }
+
+    // REQ4(a): over-budget selection — every selected key still appears in
+    // the output (full row or index line), and must-block rows keep their
+    // full-text priority ahead of the index section.
+    #[test]
+    fn continuity_kernel_over_budget_every_selected_key_surfaces() {
+        let mut rows: Vec<MemoryRecord> = Vec::new();
+        for i in 0..8 {
+            rows.push(mk_kernel_row(
+                i,
+                "continuity_actionability:must_block",
+                Some("before touching retrieval ranking weights check quota"),
+            ));
+        }
+        for i in 8..22 {
+            rows.push(mk_kernel_row(i, "continuity_role:state", None));
+        }
+        for i in 22..34 {
+            rows.push(mk_kernel_row(
+                i,
+                "continuity_role:evidence",
+                Some("when adding cross node sync for zoned memories check export"),
+            ));
+        }
+
+        let block = format_continuity_kernel_block(
+            &rows,
+            false,
+            120,
+            BUDGET_CONTINUITY_KERNEL,
+            BUDGET_CONTINUITY_KERNEL_INDEX,
+        )
+        .expect("kernel block");
+        let joined = block.join("\n");
+
+        for row in &rows {
+            assert!(
+                joined.contains(&row.key),
+                "selected row vanished without a trace: {}\n{joined}",
+                row.key
+            );
+        }
+        assert!(
+            joined.contains("-- index (full text over budget"),
+            "expected index section under over-budget load:\n{joined}"
+        );
+        assert!(
+            !joined.contains("omitted, use memory_search"),
+            "34-row typical load must fit the index budget without omission:\n{joined}"
+        );
+        // REQ3: highest-importance must-block row renders as a FULL row
+        // (with reason + snippet), before the index section starts.
+        let first_full = joined
+            .find("- [decision] kernel_floor_case_row_00")
+            .expect("top must-block row rendered");
+        let index_at = joined.find("-- index").unwrap();
+        assert!(
+            first_full < index_at,
+            "must-block full text must precede index section:\n{joined}"
+        );
+        assert!(
+            joined.contains("{why: must_block"),
+            "full must-block row keeps reason rendering:\n{joined}"
+        );
+    }
+
+    // REQ4(b): full section + index section stay within the combined budget
+    // upper bound; the extreme overflow path emits the omission marker with
+    // an accurate remainder count instead of silently dropping rows.
+    #[test]
+    fn continuity_kernel_full_plus_index_stay_within_budget() {
+        let trigger =
+            "extremely verbose retrieval trigger cue that maximises the per line index cost";
+        let mut rows: Vec<MemoryRecord> = Vec::new();
+        for i in 0..60 {
+            let tier = match i % 3 {
+                0 => "continuity_actionability:must_block",
+                1 => "continuity_role:state",
+                _ => "continuity_role:evidence",
+            };
+            rows.push(mk_kernel_row(i, tier, Some(trigger)));
+        }
+
+        let block = format_continuity_kernel_block(
+            &rows,
+            false,
+            120,
+            BUDGET_CONTINUITY_KERNEL,
+            BUDGET_CONTINUITY_KERNEL_INDEX,
+        )
+        .expect("kernel block");
+        let joined = block.join("\n");
+
+        // Accounting bound: everything except the final omission marker is
+        // charged against the two budgets; the marker itself is one short
+        // line (~17 tokens — 24 of slack).
+        let total = kernel_block_token_sum(&block);
+        assert!(
+            total <= BUDGET_CONTINUITY_KERNEL + BUDGET_CONTINUITY_KERNEL_INDEX + 24,
+            "kernel block blew its combined budget: {total} tokens"
+        );
+        assert!(
+            estimate_tokens_from_text(&joined) as usize <= total,
+            "joined estimate must not exceed per-line accounting"
+        );
+
+        let marker_line = block
+            .iter()
+            .find(|l| l.contains("more selected rows omitted, use memory_search"))
+            .expect("extreme overflow must surface an omission marker");
+        let omitted: usize = marker_line
+            .trim()
+            .trim_start_matches("[...")
+            .split(' ')
+            .next()
+            .and_then(|n| n.parse().ok())
+            .expect("marker carries a count");
+        let index_lines = block
+            .iter()
+            .filter(|l| l.starts_with("  - ["))
+            .count();
+        let full_lines = block
+            .iter()
+            .filter(|l| l.starts_with("- ["))
+            .count();
+        assert_eq!(
+            full_lines + index_lines + omitted,
+            60,
+            "every selected row is either rendered or counted in the marker:\n{joined}"
+        );
+    }
+
+    // REQ4(c): under-budget selection — output is byte-identical to the
+    // unbudgeted rendering (no index section, no markers), i.e. the old
+    // behavior where cap_block_lines was a no-op.
+    #[test]
+    fn continuity_kernel_under_budget_matches_unbudgeted_output() {
+        let mut rows = vec![
+            mk_kernel_row(0, "continuity_actionability:must_block", Some("short cue")),
+            mk_kernel_row(1, "continuity_role:state", None),
+            mk_kernel_row(2, "continuity_role:evidence", None),
+        ];
+        for r in &mut rows {
+            r.content = format!("short content for {}", r.key);
+        }
+
+        let budgeted = format_continuity_kernel_block(
+            &rows,
+            false,
+            120,
+            BUDGET_CONTINUITY_KERNEL,
+            BUDGET_CONTINUITY_KERNEL_INDEX,
+        )
+        .expect("budgeted block");
+        let unbudgeted =
+            format_continuity_kernel_block(&rows, false, 120, usize::MAX, usize::MAX)
+                .expect("unbudgeted block");
+        assert_eq!(
+            budgeted, unbudgeted,
+            "under budget the D1 renderer must reproduce the old output"
+        );
+        let joined = budgeted.join("\n");
+        assert!(!joined.contains("-- index"), "no index section: {joined}");
+        assert!(!joined.contains("omitted"), "no omission marker: {joined}");
+    }
+
+    // Measurement backing BUDGET_CONTINUITY_KERNEL_INDEX (see the constant's
+    // comment): the D1 live case (34 selected rows) rendered purely as index
+    // lines must fit the index budget in one piece.
+    #[test]
+    fn continuity_kernel_typical_index_corpus_fits_index_budget() {
+        let corpus: Vec<MemoryRecord> = (0..34)
+            .map(|i| {
+                let trigger = match i % 4 {
+                    0 => Some("before changing retrieval ranking weights or class quotas"),
+                    1 => Some("when adding cross node sync for zoned memories check export"),
+                    2 => Some("before signalling any reclaimed process group verify token"),
+                    _ => None,
+                };
+                mk_kernel_row(i, "continuity_role:state", trigger)
+            })
+            .collect();
+        let header = "-- index (full text over budget; memory_get <key> to expand) --";
+        let measured: usize = estimate_tokens_from_text(header) as usize
+            + corpus
+                .iter()
+                .map(|r| {
+                    estimate_tokens_from_text(&format_continuity_kernel_index_line(r)) as usize
+                })
+                .sum::<usize>();
+        assert!(
+            measured <= BUDGET_CONTINUITY_KERNEL_INDEX,
+            "typical 34-row index corpus ({measured} tokens) must fit \
+             BUDGET_CONTINUITY_KERNEL_INDEX ({BUDGET_CONTINUITY_KERNEL_INDEX})"
         );
     }
 

@@ -16234,11 +16234,14 @@ fn format_continuity_kernel_row(r: &MemoryRecord, snippet_len: usize) -> String 
     )
 }
 
-fn format_continuity_kernel_block(
+/// Bucket + sort the kernel selection (unchanged from the original
+/// `format_continuity_kernel_block` body): active rows carrying continuity
+/// metadata, tiered must-block → active → evidence, importance-desc inside
+/// each bucket. `None` when nothing qualifies.
+#[allow(clippy::type_complexity)]
+fn select_continuity_kernel_buckets(
     rows: &[MemoryRecord],
-    is_compact: bool,
-    snippet_len: usize,
-) -> Option<Vec<String>> {
+) -> Option<(Vec<&MemoryRecord>, Vec<&MemoryRecord>, Vec<&MemoryRecord>)> {
     let mut must_block: Vec<&MemoryRecord> = Vec::new();
     let mut active: Vec<&MemoryRecord> = Vec::new();
     let mut evidence: Vec<&MemoryRecord> = Vec::new();
@@ -16267,6 +16270,57 @@ fn format_continuity_kernel_block(
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
     }
+    Some((must_block, active, evidence))
+}
+
+/// D1 index-line trigger prefix cap — keys must stay verbatim (they are the
+/// drill-down handle), the trigger is only a recall cue so it truncates.
+const CONTINUITY_KERNEL_INDEX_TRIGGER_CHARS: usize = 60;
+
+/// D1 floor line: `  - [kind] key {trigger prefix}` — the minimum trace a
+/// selected row may leave in bootstrap output. Carries exactly what a new
+/// session needs to drill down (`memory_get key`) plus the retrieval trigger
+/// as a "when would I need this" cue; trigger section omitted when absent.
+fn format_continuity_kernel_index_line(r: &MemoryRecord) -> String {
+    let trigger = memory_continuity_metadata_from_tags(&r.tags, r.superseded_by.as_deref())
+        .and_then(|m| m.retrieval_trigger)
+        .map(|t| {
+            let prefix: String = t.chars().take(CONTINUITY_KERNEL_INDEX_TRIGGER_CHARS).collect();
+            format!(" {{{prefix}}}")
+        })
+        .unwrap_or_default();
+    format!("  - [{}] {}{}", r.kind, r.key, trigger)
+}
+
+/// Budget-aware Continuity Kernel renderer (D1 fix, 2026-07-06).
+///
+/// The old pipeline (`format_continuity_kernel_block` → `cap_block_lines`)
+/// truncated the block bottom-up at `BUDGET_CONTINUITY_KERNEL`, so most
+/// selected rows vanished without even their key surfacing — a new session
+/// could not `memory_get` what it never saw (live measurement: 34 rows
+/// selected, ~160 text lines trimmed). This renderer self-accounts instead:
+///
+/// 1. Full rows render in the existing bucket order (must-block → active →
+///    evidence, per-bucket caps unchanged) with running token accounting via
+///    `estimate_tokens_from_text` against `full_budget`. The first row that
+///    would overflow demotes ITSELF AND every later selected row — bucket
+///    order is thus preserved and must-block rows keep full-text priority.
+/// 2. Demoted rows (budget overflow + the rows beyond per-bucket caps, which
+///    previously vanished silently) emit one index line each under a separate
+///    `index_budget`. Only in the extreme case where even index lines do not
+///    fit does a final `[...N more selected rows omitted, use memory_search]`
+///    marker appear.
+///
+/// Under budget the output is byte-identical to the old renderer (no index
+/// section). The block no longer goes through `cap_block_lines`.
+fn format_continuity_kernel_block(
+    rows: &[MemoryRecord],
+    is_compact: bool,
+    snippet_len: usize,
+    full_budget: usize,
+    index_budget: usize,
+) -> Option<Vec<String>> {
+    let (must_block, active, evidence) = select_continuity_kernel_buckets(rows)?;
 
     let total = must_block.len() + active.len() + evidence.len();
     let mut out = vec![
@@ -16277,18 +16331,59 @@ fn format_continuity_kernel_block(
         },
         String::new(),
     ];
-    let mut append_bucket = |title: &str, bucket: &[&MemoryRecord], cap: usize| {
-        if bucket.is_empty() {
-            return;
+    let mut used: usize = out
+        .iter()
+        .map(|l| estimate_tokens_from_text(l) as usize)
+        .sum();
+    let mut demoted: Vec<&MemoryRecord> = Vec::new();
+    let mut full_exhausted = false;
+    for (title, bucket, cap) in [
+        ("-- must-block / constraints --", &must_block, 4usize),
+        ("-- active state / procedures --", &active, 4),
+        ("-- evidence / background --", &evidence, 3),
+    ] {
+        let mut title_pending = Some(title);
+        for (i, &row) in bucket.iter().enumerate() {
+            if full_exhausted || i >= cap {
+                demoted.push(row);
+                continue;
+            }
+            let line = format_continuity_kernel_row(row, snippet_len);
+            let title_tokens = title_pending
+                .map(|t| estimate_tokens_from_text(t) as usize)
+                .unwrap_or(0);
+            let line_tokens = estimate_tokens_from_text(&line) as usize;
+            if used.saturating_add(title_tokens).saturating_add(line_tokens) > full_budget {
+                full_exhausted = true;
+                demoted.push(row);
+                continue;
+            }
+            if let Some(title) = title_pending.take() {
+                out.push(title.to_string());
+            }
+            used += title_tokens + line_tokens;
+            out.push(line);
         }
-        out.push(title.to_string());
-        for row in bucket.iter().take(cap) {
-            out.push(format_continuity_kernel_row(row, snippet_len));
+    }
+
+    if !demoted.is_empty() {
+        let header = "-- index (full text over budget; memory_get <key> to expand) --";
+        out.push(header.to_string());
+        let mut index_used = estimate_tokens_from_text(header) as usize;
+        for (i, row) in demoted.iter().enumerate() {
+            let line = format_continuity_kernel_index_line(row);
+            let line_tokens = estimate_tokens_from_text(&line) as usize;
+            if index_used.saturating_add(line_tokens) > index_budget {
+                out.push(format!(
+                    "  [...{} more selected rows omitted, use memory_search]",
+                    demoted.len() - i
+                ));
+                break;
+            }
+            index_used += line_tokens;
+            out.push(line);
         }
-    };
-    append_bucket("-- must-block / constraints --", &must_block, 4);
-    append_bucket("-- active state / procedures --", &active, 4);
-    append_bucket("-- evidence / background --", &evidence, 3);
+    }
     out.push(String::new());
     Some(out)
 }
@@ -16477,6 +16572,19 @@ const BUDGET_CROSS_NODE_PEERS: usize = 160;
 const BUDGET_DECISIONS_DUE: usize = 200;
 const BUDGET_ERROR_PATTERNS: usize = 200;
 const BUDGET_CONTINUITY_KERNEL: usize = 260;
+// D1 fix (2026-07-06) — separate budget for the kernel INDEX section (the
+// one-line-per-row floor for selected rows that lost full-text rendering).
+// Measured with `estimate_tokens_from_text` on 34 realistic index lines
+// (snake_case keys ~37 chars with date suffix, ≤60-char trigger prefix on
+// 3 of 4 rows): header 20 + Σ lines 1044 = 1064 tokens (per line: min 20
+// without trigger, max 34 with trigger) — the measurement lives in test
+// `continuity_kernel_typical_index_corpus_fits_index_budget`. The typical
+// live case demotes ~28 of 34 rows (~900 tokens), so 1100 holds the full
+// 34-row measured corpus; anything beyond degrades to the
+// `[...N more selected rows omitted, use memory_search]` marker. The
+// initially suggested 200 was rejected by measurement — it holds only ~6
+// index lines, reintroducing the trace-less-vanish bug for typical load.
+const BUDGET_CONTINUITY_KERNEL_INDEX: usize = 1_100;
 const BUDGET_BOOTSTRAP_ROWS: usize = 500;
 const BUDGET_GAMMA_BFS: usize = 200;
 const BUDGET_DELTA_TRANSITIONS: usize = 150;
@@ -17095,8 +17203,17 @@ impl McpTool for SessionBootstrapTool {
         }
 
         lines.extend(cap_block_lines(error_section, BUDGET_ERROR_PATTERNS));
-        if let Some(block) = format_continuity_kernel_block(&rows, is_compact, snippet_len) {
-            lines.extend(cap_block_lines(block, BUDGET_CONTINUITY_KERNEL));
+        // D1: the kernel block self-accounts (full rows vs index floor) —
+        // routing it through cap_block_lines again would re-truncate the
+        // index lines the floor exists to protect.
+        if let Some(block) = format_continuity_kernel_block(
+            &rows,
+            is_compact,
+            snippet_len,
+            BUDGET_CONTINUITY_KERNEL,
+            BUDGET_CONTINUITY_KERNEL_INDEX,
+        ) {
+            lines.extend(block);
         }
         lines.extend(cap_block_lines(
             format_bootstrap_memory_rows(&rows, snippet_len),
