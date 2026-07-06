@@ -62,8 +62,8 @@ fn assert_niche_only(report: &Value) -> Result<()> {
         .iter()
         .filter_map(Value::as_str)
         .collect::<Vec<_>>();
-    if visible != ["profile-all", "all-dev"] {
-        bail!("visible_in must be exactly [profile-all, all-dev], got {visible:?}");
+    if visible != ["all-dev"] {
+        bail!("visible_in must be exactly [all-dev], got {visible:?}");
     }
 
     let safety = &report["safety_boundary"];

@@ -374,10 +374,11 @@ Observed acceptance output:
 
 - `runtime_boundary_precise`: baseline and advisory both rank
   `decision_biocortex_demo_fixture_clarified_20260610` first; regressed=false.
-- `runtime_label_ambiguous`: baseline ranks
-  `biocortex_retrieval_shadow_codex_exposed_20260610` first, advisory ranks
-  `decision_biocortex_demo_fixture_clarified_20260610` first; regressed=true by
-  label design. This is an expected ambiguity sentinel, not runtime approval.
-- summary: `status=pass`, `case_count=2`, `expected_regression_cases=1`,
+- `runtime_label_ambiguous`: baseline and advisory now both rank
+  `decision_biocortex_demo_fixture_clarified_20260610` first; regressed=false.
+  The previous ambiguity sentinel has been resolved by the current BioCortex
+  side-signal/baseline ranking behavior; this remains runtime observation, not
+  runtime approval.
+- summary: `status=pass`, `case_count=2`, `expected_regression_cases=0`,
   `read_only=true`, `runtime_adapter_approved=false`,
   `default_search_order_changed=false`.

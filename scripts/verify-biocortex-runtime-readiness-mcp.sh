@@ -6,7 +6,11 @@ cd "$repo_root"
 
 tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/ab-biocortex-readiness-mcp-XXXXXX")"
 cleanup() {
-    rm -rf "$tmpdir"
+    if [[ "${AB_KEEP_TMP:-0}" == "1" ]]; then
+        echo "keeping tmpdir=$tmpdir" >&2
+    else
+        rm -rf "$tmpdir"
+    fi
 }
 trap cleanup EXIT
 
@@ -63,6 +67,7 @@ def decision_fixture():
             "runtime_influence_decision_included": False,
             "runtime_influence_review_request_included": False,
             "redacted_evidence_aggregate_included": False,
+            "capability_ledger_report_packet_included": False,
             "raw_query_included": False,
             "raw_keys_included": False,
             "content_included": False,
@@ -85,10 +90,6 @@ def decision_fixture():
         "runs_biocortex": False,
         "changes_memory_search_order": False,
         "ordering_behavior_connected": False,
-        "raw_query": "secret readiness decision query",
-        "raw_key": "secret_readiness_decision_key",
-        "content": "secret readiness decision content",
-        "human_decision_text": "secret readiness human decision",
     }
 
 
@@ -127,9 +128,6 @@ def store_trial_fixture():
         "raw_keys_included": False,
         "content_included": False,
         "side_signal_raw_included": False,
-        "raw_query": "secret readiness store query",
-        "raw_key": "secret_readiness_store_key",
-        "content": "secret readiness store content",
     }
 
 
@@ -169,9 +167,6 @@ def batch_fixture():
                     "blocker_count": 1,
                 },
                 "baseline": {"key_count": 0},
-                "raw_query": "secret readiness batch query",
-                "raw_key": "secret_readiness_batch_key",
-                "content": "secret readiness batch content",
             }
         ],
         "safety": {
@@ -240,9 +235,6 @@ def gated_batch_fixture():
                 "runs_biocortex": False,
                 "changes_memory_search_order": False,
                 "default_calls_unchanged": True,
-                "raw_query": "secret readiness gated batch query",
-                "raw_key": "secret_readiness_gated_batch_key",
-                "content": "secret readiness gated batch content",
             }
         ],
         "safety": {
@@ -282,6 +274,7 @@ def runtime_readiness_packet_fixture():
             "runtime_influence_decision_packet_included": False,
             "store_trial_included": False,
             "batch_diagnostics_included": False,
+            "capability_ledger_report_packet_included": False,
             "raw_queries_included": False,
             "raw_keys_included": False,
             "content_included": False,
@@ -322,10 +315,6 @@ def runtime_readiness_packet_fixture():
         "content_included": False,
         "side_signal_raw_included": False,
         "human_decision_text_included": False,
-        "raw_query": "secret transition readiness query",
-        "raw_key": "secret_transition_readiness_key",
-        "content": "secret transition readiness content",
-        "human_decision_text": "secret transition human decision",
     }
 
 
@@ -339,6 +328,7 @@ def blocked_runtime_transition_gate_fixture():
         "status": "blocked",
         "input_contract": {
             "runtime_readiness_packet_included": False,
+            "capability_ledger_report_packet_included": False,
             "raw_queries_included": False,
             "raw_keys_included": False,
             "content_included": False,
@@ -395,9 +385,6 @@ def blocked_runtime_transition_gate_fixture():
         "content_included": False,
         "side_signal_raw_included": False,
         "human_decision_text_included": False,
-        "raw_query": "secret gated transition gate query",
-        "raw_key": "secret_gated_transition_gate_key",
-        "content": "secret gated transition gate content",
     }
 
 
@@ -438,14 +425,6 @@ def post_runtime_decision_fixture():
             "post_runtime_evidence_summary_redacted": True,
         }
     )
-    decision.update(
-        {
-            "raw_query": "secret post runtime decision query",
-            "raw_key": "secret_post_runtime_decision_key",
-            "content": "secret post runtime decision content",
-            "human_decision_text": "secret post runtime decision human decision",
-        }
-    )
     return decision
 
 
@@ -471,13 +450,6 @@ def post_runtime_store_trial_fixture():
             "decision_packet_post_runtime_readiness_requirement_met": True,
             "decision_packet_post_runtime_gated_batch_evidence_ready": True,
             "decision_packet_post_runtime_batch_transition_gated": True,
-        }
-    )
-    trial.update(
-        {
-            "raw_query": "secret post runtime store query",
-            "raw_key": "secret_post_runtime_store_key",
-            "content": "secret post runtime store content",
         }
     )
     return trial
@@ -513,13 +485,6 @@ def post_runtime_gated_batch_fixture():
             "legacy_decision_packet_without_post_runtime_evidence_summary_allowed": False,
             "decision_packet_post_runtime_evidence_summary_safe_for_trial": True,
             "decision_packet_post_runtime_evidence_summary_state": "post_runtime_evidence_ready",
-        }
-    )
-    row.update(
-        {
-            "raw_query": "secret post runtime gated batch query",
-            "raw_key": "secret_post_runtime_gated_batch_key",
-            "content": "secret post runtime gated batch content",
         }
     )
     return batch
@@ -567,14 +532,6 @@ def post_runtime_readiness_packet_fixture():
         "store_trial_called_count": 1,
         "calls_memory_search_count": 1,
     }
-    packet.update(
-        {
-            "raw_query": "secret post runtime readiness query",
-            "raw_key": "secret_post_runtime_readiness_key",
-            "content": "secret post runtime readiness content",
-            "human_decision_text": "secret post runtime readiness human decision",
-        }
-    )
     return packet
 
 
@@ -620,9 +577,6 @@ def post_runtime_transition_gate_fixture():
     gate.update(
         {
             "registers_embedding_backend": False,
-            "raw_query": "secret post runtime transition gate query",
-            "raw_key": "secret_post_runtime_transition_gate_key",
-            "content": "secret post runtime transition gate content",
         }
     )
     return gate
@@ -813,11 +767,17 @@ with open(path, "w", encoding="utf-8") as f:
         f.write(json.dumps(message, separators=(",", ":")) + "\n")
 PY
 
-run_with_timeout "${AB_MCP_SMOKE_TIMEOUT_SECS:-180}" \
-    env -u AB_BIOCORTEX_RETRIEVAL_DISABLE \
-    AGENT_BRIDGE_TOOL_PROFILE="${AGENT_BRIDGE_TOOL_PROFILE:-standard}" \
-    cargo run -q -p ab-bridge --no-default-features -- mcp \
-    <"$input_jsonl" >"$output_jsonl" 2>"$stderr_log" || {
+cargo build -q -p ab-bridge
+
+mcp_input="$(cat "$input_jsonl")"
+(
+    unset AB_BIOCORTEX_RETRIEVAL_DISABLE AGENT_BRIDGE_DIM_GUARD_STRICT
+    XDG_DATA_HOME="$tmpdir/xdg-data" \
+        RUST_LOG=debug \
+        AGENT_BRIDGE_TOOLSET=all-dev \
+        AGENT_BRIDGE_TOOL_PROFILE=all \
+        "$repo_root/target/debug/agent-bridge" mcp <<< "$mcp_input"
+) >"$output_jsonl" 2>"$stderr_log" || {
         echo "FAIL: MCP smoke command failed" >&2
         tail -200 "$stderr_log" >&2 || true
         exit 1

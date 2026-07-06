@@ -46,6 +46,16 @@ The redacted evidence summary remains count-only:
 - total experimental-source count: 8;
 - total protected opt-in order-change count: 8.
 
+The handoff also carries capability-ledger-backed controlled-readiness context
+as a redacted audit summary. That context is safe for handoff review only:
+
+- ledger-backed evidence: true;
+- safe for handoff: true;
+- can authorize runtime influence: false;
+- ledger report packet included: false;
+- raw ledger report included: false;
+- usable as runtime authority: false.
+
 ## Boundary
 
 This handoff does not:
@@ -74,6 +84,7 @@ action-result runtime evidence contract. It carries:
 - `raw_available=false`;
 - explicit `may_execute_lswr_actions=false`;
 - explicit `may_call_aiot_runtime=false`.
+- explicit `may_use_capability_ledger_as_runtime_authority=false`.
 
 ## SSB Review Fixture
 

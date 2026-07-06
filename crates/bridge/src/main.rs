@@ -3581,6 +3581,9 @@ enum BioCortexOp {
         /// JSON file produced by the post-semantic-diverse review slice.
         #[arg(long = "post-semantic-diverse-review-json")]
         post_semantic_diverse_review_json: PathBuf,
+        /// Optional JSON file produced by controlled trial readiness summary.
+        #[arg(long = "controlled-trial-readiness-json")]
+        controlled_trial_readiness_json: Option<PathBuf>,
         /// Reviewer identity or handle.
         #[arg(long)]
         reviewer: Option<String>,
@@ -6020,6 +6023,7 @@ async fn real_main() -> Result<()> {
             BioCortexOp::RetrievalDownstreamAioRuntimeEvidenceHandoff {
                 checkpoint_selection_json,
                 post_semantic_diverse_review_json,
+                controlled_trial_readiness_json,
                 reviewer,
                 commit,
                 forum_post_id,
@@ -6028,9 +6032,11 @@ async fn real_main() -> Result<()> {
             } => run_biocortex_retrieval_downstream_aio_runtime_evidence_handoff(
                 checkpoint_selection_json,
                 post_semantic_diverse_review_json,
+                controlled_trial_readiness_json.as_deref(),
                 BioCortexRetrievalDownstreamAioRuntimeEvidenceHandoffOptions {
                     checkpoint_selection: Value::Null,
                     post_semantic_diverse_review: Value::Null,
+                    controlled_trial_readiness: None,
                     reviewer: reviewer.clone(),
                     commit: commit.clone(),
                     forum_post_id: forum_post_id.clone(),
@@ -12784,6 +12790,7 @@ fn run_biocortex_retrieval_opt_in_runtime_transition_gate(
 fn run_biocortex_retrieval_downstream_aio_runtime_evidence_handoff(
     checkpoint_selection_json: &std::path::Path,
     post_semantic_diverse_review_json: &std::path::Path,
+    controlled_trial_readiness_json: Option<&std::path::Path>,
     mut opts: BioCortexRetrievalDownstreamAioRuntimeEvidenceHandoffOptions,
     as_json: bool,
 ) -> Result<()> {
@@ -12807,6 +12814,20 @@ fn run_biocortex_retrieval_downstream_aio_runtime_evidence_handoff(
             "parse post-semantic-diverse review JSON at {post_semantic_diverse_review_json:?}: {e}"
         )
     })?;
+    if let Some(controlled_trial_readiness_json) = controlled_trial_readiness_json {
+        let controlled_body =
+            std::fs::read_to_string(controlled_trial_readiness_json).map_err(|e| {
+                anyhow::anyhow!(
+                    "read controlled trial readiness JSON at {controlled_trial_readiness_json:?}: {e}"
+                )
+            })?;
+        opts.controlled_trial_readiness =
+            Some(serde_json::from_str(&controlled_body).map_err(|e| {
+                anyhow::anyhow!(
+                    "parse controlled trial readiness JSON at {controlled_trial_readiness_json:?}: {e}"
+                )
+            })?);
+    }
 
     let payload = biocortex_retrieval_downstream_aio_runtime_evidence_handoff(opts);
     if as_json {

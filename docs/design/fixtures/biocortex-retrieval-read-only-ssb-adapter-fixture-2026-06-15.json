@@ -12,6 +12,9 @@
   },
   "input_contract": {
     "review_fixture_included": false,
+    "accepts_capability_ledger_backed_review_fixture": true,
+    "requires_capability_ledger_safe_when_provided": true,
+    "capability_ledger_report_packet_included": false,
     "raw_queries_included": false,
     "raw_keys_included": false,
     "content_included": false,
@@ -24,8 +27,22 @@
     "runtime_executed": false,
     "executes_lswr_actions": false,
     "emits_runtime_action_result": false,
+    "uses_capability_ledger_as_runtime_authority": false,
     "requires_live_lswr_evidence_before_verified": true,
     "purpose": "Project the BioCortex handoff into the Semantic System Bus action_result shape without pretending an LSWR runtime action occurred."
+  },
+  "capability_ledger_audit_context": {
+    "source": "ssb_lswr_action_result_review_fixture",
+    "backed_evidence": true,
+    "safe_for_adapter_fixture": true,
+    "can_authorize_runtime_influence": false,
+    "report_packet_included": false,
+    "raw_report_included": false,
+    "may_grant_new_authorization": false,
+    "may_change_default_retrieval": false,
+    "may_call_aiot_runtime": false,
+    "may_execute_lswr_actions": false,
+    "may_emit_runtime_action_result": false
   },
   "candidate_action_result": {
     "schema": "agent_bridge.semantic_bus.action_result.v0",
@@ -51,6 +68,8 @@
     "must_not_be_ingested_as_runtime_evidence": true,
     "must_not_be_used_for_training": true,
     "requires_future_live_runtime_evidence": true,
+    "capability_ledger_not_runtime_evidence": true,
+    "may_use_capability_ledger_as_runtime_authority": false,
     "no_laundering_reason": "BioCortex handoff counts are runtime-backed retrieval evidence, not LSWR host action-result evidence."
   },
   "handoff_evidence_projection": {
@@ -62,6 +81,10 @@
     "total_side_signal_ok_count": 8,
     "total_experimental_source_count": 8,
     "total_actual_order_changed_count": 8,
+    "capability_ledger_backed_audit_context": true,
+    "capability_ledger_safe_for_adapter_fixture": true,
+    "capability_ledger_can_authorize_runtime_influence": false,
+    "capability_ledger_report_packet_included": false,
     "raw_payload_absent": true
   },
   "boundary": {
@@ -73,6 +96,9 @@
     "calls_aiot_runtime": false,
     "executes_lswr_actions": false,
     "emits_runtime_action_result": false,
+    "capability_ledger_authorizes_runtime_influence": false,
+    "capability_ledger_report_packet_included": false,
+    "may_use_capability_ledger_as_runtime_authority": false,
     "mutates_default_agent_bridge_db": false,
     "raw_queries_included": false,
     "raw_keys_included": false,

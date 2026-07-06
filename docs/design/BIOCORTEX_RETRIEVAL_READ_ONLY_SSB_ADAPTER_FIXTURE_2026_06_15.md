@@ -41,6 +41,12 @@ The projected `candidate_action_result` is deliberately conservative:
 This is a contract-shape fixture, not LSWR runtime evidence. It must not be
 ingested as runtime evidence or used for training.
 
+Capability-ledger context remains outside the `candidate_action_result`. The
+adapter fixture carries it only as audit metadata proving that the upstream
+handoff was ledger-backed and safe. The ledger cannot authorize runtime
+influence, change retrieval behavior, emit an action result, call AiOT, or
+execute LSWR actions.
+
 ## Boundary
 
 This adapter fixture does not:
@@ -53,6 +59,7 @@ This adapter fixture does not:
 - write approval state;
 - mutate the default Agent-Bridge DB;
 - change default `memory_search` return order;
+- use the capability ledger as runtime authority;
 - include raw query text, raw memory keys, memory content, raw side-signal
   rows, or human decision text.
 

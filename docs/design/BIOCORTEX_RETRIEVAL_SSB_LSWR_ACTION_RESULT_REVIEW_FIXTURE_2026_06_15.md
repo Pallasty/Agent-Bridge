@@ -34,6 +34,11 @@ itself an LSWR action result. Fields such as `world_tool`, `action_id`,
 SSB `recover` value require a future read-only SSB adapter fixture or runtime
 evidence source.
 
+The fixture now also carries the handoff's capability-ledger audit context.
+That context is available only to compare readiness provenance against the SSB
+contract. It is not inserted into the SSB `action_result` payload, does not
+authorize runtime influence, and does not allow AiOT or LSWR execution.
+
 ## Boundary
 
 This review fixture does not:
@@ -46,6 +51,7 @@ This review fixture does not:
 - write approval state;
 - mutate the default Agent-Bridge DB;
 - change default `memory_search` return order;
+- use the capability ledger as runtime authority;
 - include raw query text, raw memory keys, memory content, raw side-signal
   rows, or human decision text.
 

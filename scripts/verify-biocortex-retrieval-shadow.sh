@@ -36,6 +36,19 @@ run() {
     "$@"
 }
 
+run_env() {
+    local env_display=()
+    while [[ $# -gt 0 && "$1" == *=* ]]; do
+        env_display+=("$1")
+        shift
+    done
+    printf '\n==> env %s %s\n' "${env_display[*]}" "$*" >&2
+    (
+        export "${env_display[@]}"
+        "$@"
+    )
+}
+
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.runtime_approval_packet_template.v0"
     and .approval_state == "not_approved"
@@ -152,7 +165,7 @@ jq -e '
     .schema == "agent_bridge.lswr.interaction_feedback_consumption_report_mcp_surface_report.v0"
     and .tool == "lswr_interaction_feedback_consumption_report"
     and .verdict == "passed"
-    and .visible_in == ["profile-all", "all-dev"]
+    and .visible_in == ["all-dev"]
     and .safety_boundary.read_only == true
     and .safety_boundary.live_runtime_lookup == false
     and .safety_boundary.store_access == false
@@ -2009,8 +2022,14 @@ jq -e '
     and .authorization_scope == "explicit_opt_in_fts_runtime_influence"
     and .input_contract.checkpoint_selection_schema == "agent_bridge.biocortex_retrieval.downstream_aio_checkpoint_selection.v0"
     and .input_contract.post_semantic_diverse_review_schema == "agent_bridge.biocortex_retrieval.post_semantic_diverse_review.v0"
+    and .input_contract.controlled_trial_readiness_schema == "agent_bridge.biocortex_retrieval.controlled_trial_readiness_summary.v0"
     and .input_contract.checkpoint_selection_included == false
     and .input_contract.post_semantic_diverse_review_included == false
+    and .input_contract.controlled_trial_readiness_included == false
+    and .input_contract.accepts_controlled_trial_readiness_summary == true
+    and .input_contract.accepts_capability_ledger_backed_controlled_readiness == true
+    and .input_contract.requires_capability_ledger_safe_when_provided == true
+    and .input_contract.capability_ledger_report_packet_included == false
     and .input_contract.raw_queries_included == false
     and .input_contract.raw_keys_included == false
     and .input_contract.content_included == false
@@ -2032,9 +2051,21 @@ jq -e '
     and .redacted_evidence_summary.raw_keys_included == false
     and .redacted_evidence_summary.content_included == false
     and .redacted_evidence_summary.side_signal_raw_included == false
+    and .controlled_trial_readiness_summary.provided == true
+    and .controlled_trial_readiness_summary.ready_for_controlled_trial == true
+    and .controlled_trial_readiness_summary.capability_ledger_backed_evidence == true
+    and .controlled_trial_readiness_summary.capability_ledger_safe_for_handoff == true
+    and .controlled_trial_readiness_summary.capability_ledger_can_authorize_runtime_influence == false
+    and .controlled_trial_readiness_summary.capability_ledger_report_packet_included == false
+    and .controlled_trial_readiness_summary.capability_ledger_raw_report_included == false
     and .ssb_handoff.target_schema_family == "agent_bridge.semantic_bus.action_result.v0"
     and .ssb_handoff.target_checkpoint == "semantic_system_bus_lswr_action_result_runtime_evidence_checkpoint"
     and .ssb_handoff.recover == "proceed_to_read_only_ssb_review"
+    and .ssb_handoff.capability_ledger_backed_audit_context == true
+    and .ssb_handoff.capability_ledger_safe_for_handoff == true
+    and .ssb_handoff.capability_ledger_can_authorize_runtime_influence == false
+    and .ssb_handoff.capability_ledger_report_packet_included == false
+    and .ssb_handoff.may_use_capability_ledger_as_runtime_authority == false
     and .ssb_handoff.may_compare_against_ssb_runtime_evidence_contract == true
     and .ssb_handoff.may_emit_ssb_adapter_fixture == true
     and .ssb_handoff.may_execute_lswr_actions == false
@@ -2045,6 +2076,10 @@ jq -e '
     and .boundary_check.this_packet_runs_biocortex == false
     and .boundary_check.this_packet_calls_aiot_runtime == false
     and .boundary_check.this_packet_executes_lswr_actions == false
+    and .boundary_check.capability_ledger_backed_controlled_readiness == true
+    and .boundary_check.capability_ledger_safe_for_handoff == true
+    and .boundary_check.capability_ledger_authorizes_runtime_influence == false
+    and .boundary_check.capability_ledger_report_packet_included == false
     and .calls_memory_search == false
     and .runs_biocortex == false
     and .writes_approval == false
@@ -2061,6 +2096,9 @@ jq -e '
     and .source_handoff.status == "ready"
     and .source_handoff.fixture == "docs/design/fixtures/biocortex-retrieval-downstream-aio-runtime-evidence-handoff-2026-06-15.json"
     and .input_contract.handoff_included == false
+    and .input_contract.accepts_capability_ledger_backed_handoff == true
+    and .input_contract.requires_capability_ledger_safe_when_provided == true
+    and .input_contract.capability_ledger_report_packet_included == false
     and .input_contract.raw_queries_included == false
     and .input_contract.raw_keys_included == false
     and .input_contract.content_included == false
@@ -2076,6 +2114,11 @@ jq -e '
     and .handoff_alignment.verification_boundary_required == true
     and .handoff_alignment.no_laundering_boundary_required == true
     and .handoff_alignment.redacted_evidence_ready == true
+    and .handoff_alignment.capability_ledger_backed_audit_context == true
+    and .handoff_alignment.capability_ledger_safe_for_review_fixture == true
+    and .handoff_alignment.capability_ledger_can_authorize_runtime_influence == false
+    and .handoff_alignment.capability_ledger_report_packet_included == false
+    and .handoff_alignment.may_use_capability_ledger_as_runtime_authority == false
     and .handoff_alignment.fixture_count == 4
     and .handoff_alignment.total_query_count == 8
     and .handoff_alignment.total_actual_order_changed_count == 8
@@ -2085,8 +2128,18 @@ jq -e '
     and .review_fixture.emits_action_result == false
     and .review_fixture.fabricates_lswr_result == false
     and .review_fixture.executes_lswr_actions == false
+    and .capability_ledger_audit_context.backed_evidence == true
+    and .capability_ledger_audit_context.safe_for_review_fixture == true
+    and .capability_ledger_audit_context.safe_for_adapter_fixture == true
+    and .capability_ledger_audit_context.can_authorize_runtime_influence == false
+    and .capability_ledger_audit_context.report_packet_included == false
+    and .capability_ledger_audit_context.raw_report_included == false
+    and .capability_ledger_audit_context.may_grant_new_authorization == false
+    and .capability_ledger_audit_context.may_call_aiot_runtime == false
+    and .capability_ledger_audit_context.may_execute_lswr_actions == false
     and .gap_matrix.bio_cortex_handoff_is_not_lswr_action_result == true
     and .gap_matrix.requires_future_ssb_adapter_fixture == true
+    and (.gap_matrix.fields_available_from_handoff | index("capability_ledger_audit_context") != null)
     and (.gap_matrix.fields_requiring_adapter_fixture | index("world_tool") != null)
     and (.gap_matrix.fields_requiring_adapter_fixture | index("verification_method") != null)
     and .boundary.calls_memory_search == false
@@ -2097,6 +2150,9 @@ jq -e '
     and .boundary.calls_aiot_runtime == false
     and .boundary.executes_lswr_actions == false
     and .boundary.emits_action_result == false
+    and .boundary.capability_ledger_authorizes_runtime_influence == false
+    and .boundary.capability_ledger_report_packet_included == false
+    and .boundary.may_use_capability_ledger_as_runtime_authority == false
     and .boundary.raw_queries_included == false
     and .boundary.raw_keys_included == false
     and .boundary.content_included == false
@@ -2112,6 +2168,9 @@ jq -e '
     and .source_review_fixture.status == "ready"
     and .source_review_fixture.fixture == "docs/design/fixtures/biocortex-retrieval-ssb-lswr-action-result-review-fixture-2026-06-15.json"
     and .input_contract.review_fixture_included == false
+    and .input_contract.accepts_capability_ledger_backed_review_fixture == true
+    and .input_contract.requires_capability_ledger_safe_when_provided == true
+    and .input_contract.capability_ledger_report_packet_included == false
     and .input_contract.raw_queries_included == false
     and .input_contract.raw_keys_included == false
     and .input_contract.content_included == false
@@ -2121,7 +2180,17 @@ jq -e '
     and .adapter_fixture.runtime_executed == false
     and .adapter_fixture.executes_lswr_actions == false
     and .adapter_fixture.emits_runtime_action_result == false
+    and .adapter_fixture.uses_capability_ledger_as_runtime_authority == false
     and .adapter_fixture.requires_live_lswr_evidence_before_verified == true
+    and .capability_ledger_audit_context.backed_evidence == true
+    and .capability_ledger_audit_context.safe_for_adapter_fixture == true
+    and .capability_ledger_audit_context.can_authorize_runtime_influence == false
+    and .capability_ledger_audit_context.report_packet_included == false
+    and .capability_ledger_audit_context.raw_report_included == false
+    and .capability_ledger_audit_context.may_grant_new_authorization == false
+    and .capability_ledger_audit_context.may_call_aiot_runtime == false
+    and .capability_ledger_audit_context.may_execute_lswr_actions == false
+    and .capability_ledger_audit_context.may_emit_runtime_action_result == false
     and .candidate_action_result.schema == "agent_bridge.semantic_bus.action_result.v0"
     and .candidate_action_result.source_schema == "agent_bridge.world_tool.v0"
     and .candidate_action_result.adapter == "biocortex.downstream_aio.read_only_fixture"
@@ -2141,9 +2210,15 @@ jq -e '
     and .action_result_boundary.must_not_be_ingested_as_runtime_evidence == true
     and .action_result_boundary.must_not_be_used_for_training == true
     and .action_result_boundary.requires_future_live_runtime_evidence == true
+    and .action_result_boundary.capability_ledger_not_runtime_evidence == true
+    and .action_result_boundary.may_use_capability_ledger_as_runtime_authority == false
     and .handoff_evidence_projection.fixture_count == 4
     and .handoff_evidence_projection.total_query_count == 8
     and .handoff_evidence_projection.total_actual_order_changed_count == 8
+    and .handoff_evidence_projection.capability_ledger_backed_audit_context == true
+    and .handoff_evidence_projection.capability_ledger_safe_for_adapter_fixture == true
+    and .handoff_evidence_projection.capability_ledger_can_authorize_runtime_influence == false
+    and .handoff_evidence_projection.capability_ledger_report_packet_included == false
     and .boundary.calls_memory_search == false
     and .boundary.runs_biocortex == false
     and .boundary.writes_approval == false
@@ -2152,6 +2227,9 @@ jq -e '
     and .boundary.calls_aiot_runtime == false
     and .boundary.executes_lswr_actions == false
     and .boundary.emits_runtime_action_result == false
+    and .boundary.capability_ledger_authorizes_runtime_influence == false
+    and .boundary.capability_ledger_report_packet_included == false
+    and .boundary.may_use_capability_ledger_as_runtime_authority == false
     and .boundary.raw_queries_included == false
     and .boundary.raw_keys_included == false
     and .boundary.content_included == false
@@ -2889,7 +2967,7 @@ run cargo test -p ab-bridge --lib --no-default-features \
     biocortex_retrieval_opt_in_runtime_influence_decision_packet_ -- --nocapture
 run cargo test -p ab-bridge --lib --no-default-features \
     biocortex_retrieval_opt_in_store_trial_ -- --nocapture --test-threads=1
-run env AB_BIOCORTEX_RS="$biocortex_rs" AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
+run_env AB_BIOCORTEX_RS="$biocortex_rs" AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
     cargo test -p ab-bridge --lib --no-default-features --features biocortex-retrieval-opt-in \
     biocortex_retrieval_opt_in_store_trial_ -- --nocapture --test-threads=1
 run cargo test -p ab-bridge --lib --no-default-features \
@@ -2900,7 +2978,7 @@ run cargo test -p ab-bridge --lib --no-default-features \
     biocortex_retrieval_opt_in_runtime_transition_gate_ -- --nocapture
 run cargo test -p ab-bridge --lib --no-default-features \
     opt_in_gated_store_trial_ -- --nocapture
-run env AGENT_BRIDGE_TOOL_PROFILE=all "$repo_root/scripts/verify-biocortex-runtime-readiness-mcp.sh"
+run_env AGENT_BRIDGE_TOOLSET=all-dev "$repo_root/scripts/verify-biocortex-runtime-readiness-mcp.sh"
 
 opt_in_status_disabled="$tmpdir/opt-in-status-disabled.json"
 run cargo run -p ab-bridge --no-default-features -- \
@@ -2938,7 +3016,7 @@ if grep -q 'verify secret query text\|verify_secret_key_a\|verify_secret_key_b' 
 fi
 
 opt_in_status_ready="$tmpdir/opt-in-status-ready.json"
-run env AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
+run_env AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
     cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
     bio-cortex retrieval-opt-in-status \
     --mode fts \
@@ -3011,7 +3089,7 @@ if grep -q 'verify dry secret query text\|verify_dry_secret_key_a\|verify_dry_se
 fi
 
 opt_in_dry_run_ready="$tmpdir/opt-in-dry-run-ready.json"
-run env AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
+run_env AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
     cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
     bio-cortex retrieval-opt-in-dry-run \
     --mode fts \
@@ -3155,7 +3233,7 @@ jq -n '{
     ]
 }' > "$opt_in_runtime_trial_input"
 opt_in_runtime_trial="$tmpdir/opt-in-runtime-trial.json"
-run env AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
+run_env AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
     cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
     bio-cortex retrieval-opt-in-runtime-trial \
     --execution-packet-json "$opt_in_execution_packet" \
@@ -3448,7 +3526,7 @@ if grep -q 'verify runtime trial secret query\|verify_runtime_trial_secret_key\|
     exit 1
 fi
 
-run env AB_BIOCORTEX_RS="$biocortex_rs" CARGO_INCREMENTAL=0 \
+run_env AB_BIOCORTEX_RS="$biocortex_rs" CARGO_INCREMENTAL=0 \
     cargo run -p ab-bridge \
     --example biocortex_retrieval_shadow_acceptance \
     --features biocortex-retrieval-shadow
@@ -4650,7 +4728,7 @@ if grep -q 'verify runtime influence decision secret wording\|verify runtime inf
 fi
 
 opt_in_store_trial_disabled="$tmpdir/opt-in-store-trial-disabled.json"
-run env AGENT_BRIDGE_DB="$tmpdir/opt-in-store-trial-disabled.db" \
+run_env AGENT_BRIDGE_DB="$tmpdir/opt-in-store-trial-disabled.db" \
     cargo run -p ab-bridge --no-default-features -- \
     bio-cortex retrieval-opt-in-store-trial \
     --runtime-influence-decision-packet-json "$opt_in_runtime_influence_decision_packet" \
@@ -4707,7 +4785,7 @@ if grep -q 'verify store trial secret query\|verify_runtime_trial_secret_key\|ve
 fi
 
 opt_in_store_trial_empty="$tmpdir/opt-in-store-trial-empty.json"
-run env AGENT_BRIDGE_DB="$tmpdir/opt-in-store-trial-empty.db" \
+run_env AGENT_BRIDGE_DB="$tmpdir/opt-in-store-trial-empty.db" \
     AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
     cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
     bio-cortex retrieval-opt-in-store-trial \
@@ -4756,7 +4834,7 @@ if grep -q 'verify store trial ready secret query\|verify_runtime_trial_secret_k
 fi
 
 opt_in_batch_diagnostics_disabled="$tmpdir/opt-in-batch-diagnostics-disabled.json"
-run env AGENT_BRIDGE_DB="$tmpdir/opt-in-batch-diagnostics-disabled.db" \
+run_env AGENT_BRIDGE_DB="$tmpdir/opt-in-batch-diagnostics-disabled.db" \
     cargo run -p ab-bridge --no-default-features -- \
     bio-cortex retrieval-opt-in-batch-diagnostics \
     --runtime-influence-decision-packet-json "$opt_in_runtime_influence_decision_packet" \
@@ -4818,7 +4896,7 @@ if grep -q 'biocortex opt-in runtime adapter\|runtime influence decision packet\
 fi
 
 opt_in_batch_diagnostics_empty="$tmpdir/opt-in-batch-diagnostics-empty.json"
-run env AGENT_BRIDGE_DB="$tmpdir/opt-in-batch-diagnostics-empty.db" \
+run_env AGENT_BRIDGE_DB="$tmpdir/opt-in-batch-diagnostics-empty.db" \
     AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
     cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
     bio-cortex retrieval-opt-in-batch-diagnostics \
@@ -4867,7 +4945,7 @@ if grep -q 'biocortex opt-in runtime adapter\|runtime influence decision packet\
 fi
 
 opt_in_controlled_order="$tmpdir/opt-in-controlled-order-fixture.json"
-run env AGENT_BRIDGE_DB="$tmpdir/opt-in-controlled-order-fixture.db" \
+run_env AGENT_BRIDGE_DB="$tmpdir/opt-in-controlled-order-fixture.db" \
     AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
     cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
     bio-cortex retrieval-opt-in-controlled-order-fixture \
@@ -5004,7 +5082,7 @@ if grep -q 'cortexdelta\|cortexepsilon\|cortexzeta\|cortexeta\|cortextheta\|cort
 fi
 
 opt_in_expanded_corpus="$tmpdir/opt-in-expanded-controlled-corpus.json"
-run env AGENT_BRIDGE_DB="$tmpdir/opt-in-expanded-controlled-corpus.db" \
+run_env AGENT_BRIDGE_DB="$tmpdir/opt-in-expanded-controlled-corpus.db" \
     AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
     cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
     bio-cortex retrieval-opt-in-controlled-order-fixture \
@@ -5390,7 +5468,7 @@ if grep -q 'cortexdelta\|cortexepsilon\|cortexzeta\|cortexeta\|cortextheta\|cort
 fi
 
 opt_in_store_trial_empty_with_aggregate="$tmpdir/opt-in-store-trial-empty-with-aggregate.json"
-run env AGENT_BRIDGE_DB="$tmpdir/opt-in-store-trial-empty-with-aggregate.db" \
+run_env AGENT_BRIDGE_DB="$tmpdir/opt-in-store-trial-empty-with-aggregate.db" \
     AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
     cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
     bio-cortex retrieval-opt-in-store-trial \
@@ -5437,7 +5515,7 @@ if grep -q 'verify aggregate-backed store trial ready secret query\|cortexdelta\
 fi
 
 opt_in_batch_diagnostics_empty_with_aggregate="$tmpdir/opt-in-batch-diagnostics-empty-with-aggregate.json"
-run env AGENT_BRIDGE_DB="$tmpdir/opt-in-batch-diagnostics-empty-with-aggregate.db" \
+run_env AGENT_BRIDGE_DB="$tmpdir/opt-in-batch-diagnostics-empty-with-aggregate.db" \
     AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
     cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
     bio-cortex retrieval-opt-in-batch-diagnostics \
@@ -5669,7 +5747,7 @@ jq -e '
 ' "$opt_in_runtime_transition_gate_blocked" >/dev/null
 
 opt_in_gated_store_trial_empty_with_aggregate="$tmpdir/opt-in-gated-store-trial-empty-with-aggregate.json"
-run env AGENT_BRIDGE_DB="$tmpdir/opt-in-gated-store-trial-empty-with-aggregate.db" \
+run_env AGENT_BRIDGE_DB="$tmpdir/opt-in-gated-store-trial-empty-with-aggregate.db" \
     AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
     cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
     bio-cortex retrieval-opt-in-gated-store-trial \
@@ -5733,7 +5811,7 @@ if grep -q 'verify gated store trial allowed secret query\|verify aggregate-back
 fi
 
 opt_in_gated_store_trial_blocked="$tmpdir/opt-in-gated-store-trial-blocked.json"
-run env AGENT_BRIDGE_DB="$tmpdir/opt-in-gated-store-trial-blocked.db" \
+run_env AGENT_BRIDGE_DB="$tmpdir/opt-in-gated-store-trial-blocked.db" \
     cargo run -p ab-bridge --no-default-features -- \
     bio-cortex retrieval-opt-in-gated-store-trial \
     --runtime-transition-gate-json "$opt_in_runtime_transition_gate_blocked" \
@@ -5772,7 +5850,7 @@ if grep -q 'verify gated store trial blocked secret query\|verify aggregate-back
 fi
 
 opt_in_gated_batch_diagnostics_empty_with_aggregate="$tmpdir/opt-in-gated-batch-diagnostics-empty-with-aggregate.json"
-run env AGENT_BRIDGE_DB="$tmpdir/opt-in-gated-batch-diagnostics-empty-with-aggregate.db" \
+run_env AGENT_BRIDGE_DB="$tmpdir/opt-in-gated-batch-diagnostics-empty-with-aggregate.db" \
     AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
     cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
     bio-cortex retrieval-opt-in-gated-batch-diagnostics \
@@ -6242,7 +6320,7 @@ if grep -q 'verify gated batch allowed secret query one\|verify gated batch allo
 fi
 
 opt_in_store_trial_empty_with_evidence_summary="$tmpdir/opt-in-store-trial-empty-with-evidence-summary.json"
-run env AGENT_BRIDGE_DB="$tmpdir/opt-in-store-trial-empty-with-evidence-summary.db" \
+run_env AGENT_BRIDGE_DB="$tmpdir/opt-in-store-trial-empty-with-evidence-summary.db" \
     AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
     cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
     bio-cortex retrieval-opt-in-store-trial \
@@ -6294,7 +6372,7 @@ if grep -q 'verify evidence-summary store trial ready secret query\|secret evide
 fi
 
 opt_in_gated_store_trial_empty_with_evidence_summary="$tmpdir/opt-in-gated-store-trial-empty-with-evidence-summary.json"
-run env AGENT_BRIDGE_DB="$tmpdir/opt-in-gated-store-trial-empty-with-evidence-summary.db" \
+run_env AGENT_BRIDGE_DB="$tmpdir/opt-in-gated-store-trial-empty-with-evidence-summary.db" \
     AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
     cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
     bio-cortex retrieval-opt-in-gated-store-trial \
@@ -6366,7 +6444,7 @@ if grep -q 'verify evidence-summary gated store trial secret query\|verify gated
 fi
 
 opt_in_gated_batch_diagnostics_empty_with_evidence_summary="$tmpdir/opt-in-gated-batch-diagnostics-empty-with-evidence-summary.json"
-run env AGENT_BRIDGE_DB="$tmpdir/opt-in-gated-batch-diagnostics-empty-with-evidence-summary.db" \
+run_env AGENT_BRIDGE_DB="$tmpdir/opt-in-gated-batch-diagnostics-empty-with-evidence-summary.db" \
     AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
     cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
     bio-cortex retrieval-opt-in-gated-batch-diagnostics \
@@ -6577,7 +6655,7 @@ if grep -q 'verify evidence-summary store trial ready secret query\|verify evide
 fi
 
 opt_in_gated_store_trial_with_evidence_summary_transition="$tmpdir/opt-in-gated-store-trial-with-evidence-summary-transition.json"
-run env AGENT_BRIDGE_DB="$tmpdir/opt-in-gated-store-trial-with-evidence-summary-transition.db" \
+run_env AGENT_BRIDGE_DB="$tmpdir/opt-in-gated-store-trial-with-evidence-summary-transition.db" \
     AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
     cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
     bio-cortex retrieval-opt-in-gated-store-trial \
@@ -6626,7 +6704,7 @@ if grep -q 'verify evidence-summary transition gated store trial secret query\|v
 fi
 
 opt_in_gated_batch_diagnostics_with_evidence_summary_transition="$tmpdir/opt-in-gated-batch-diagnostics-with-evidence-summary-transition.json"
-run env AGENT_BRIDGE_DB="$tmpdir/opt-in-gated-batch-diagnostics-with-evidence-summary-transition.db" \
+run_env AGENT_BRIDGE_DB="$tmpdir/opt-in-gated-batch-diagnostics-with-evidence-summary-transition.db" \
     AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
     cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
     bio-cortex retrieval-opt-in-gated-batch-diagnostics \
@@ -6676,7 +6754,7 @@ if grep -q 'verify evidence-summary transition gated batch secret query\|verify 
 fi
 
 opt_in_status_controlled_trial_readiness="$tmpdir/opt-in-status-controlled-trial-readiness.json"
-run env AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
+run_env AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
     cargo run -p ab-bridge --no-default-features --features biocortex-retrieval-opt-in -- \
     bio-cortex retrieval-opt-in-status \
     --mode fts \
@@ -6754,7 +6832,7 @@ if grep -q 'verify controlled status secret query\|verify_controlled_status_secr
 fi
 
 opt_in_gated_batch_diagnostics_blocked="$tmpdir/opt-in-gated-batch-diagnostics-blocked.json"
-run env AGENT_BRIDGE_DB="$tmpdir/opt-in-gated-batch-diagnostics-blocked.db" \
+run_env AGENT_BRIDGE_DB="$tmpdir/opt-in-gated-batch-diagnostics-blocked.db" \
     cargo run -p ab-bridge --no-default-features -- \
     bio-cortex retrieval-opt-in-gated-batch-diagnostics \
     --runtime-transition-gate-json "$opt_in_runtime_transition_gate_blocked" \
@@ -7160,7 +7238,7 @@ hard_report="$tmpdir/hard-report.md"
 run cargo run --manifest-path "$biocortex_rs/Cargo.toml" \
     --example ab_retrieval_side_signal_adapter \
     -- "$repo_root/$current_corpus" > "$current_side"
-run env BIOCORTEX_RETRIEVAL_ALPHA_POLICY=candidate-strong \
+run_env BIOCORTEX_RETRIEVAL_ALPHA_POLICY=candidate-strong \
     BIOCORTEX_RETRIEVAL_SIDE_SIGNAL="$current_side" \
     cargo run -p ab-bridge --example biocortex_retrieval_gate_eval > "$current_report"
 assert_summary_pass "$current_report" "side_signal_passes_offline_gate" "current"
@@ -7168,7 +7246,7 @@ assert_summary_pass "$current_report" "side_signal_passes_offline_gate" "current
 run cargo run --manifest-path "$biocortex_rs/Cargo.toml" \
     --example ab_retrieval_side_signal_adapter \
     -- "$repo_root/$hard_corpus" > "$hard_side"
-run env BIOCORTEX_RETRIEVAL_CORPUS="$hard_corpus" \
+run_env BIOCORTEX_RETRIEVAL_CORPUS="$hard_corpus" \
     BIOCORTEX_RETRIEVAL_ALPHA_POLICY=candidate-strong \
     BIOCORTEX_RETRIEVAL_SIDE_SIGNAL="$hard_side" \
     cargo run -p ab-bridge --example biocortex_retrieval_gate_eval > "$hard_report"
