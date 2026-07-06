@@ -16292,6 +16292,14 @@ fn format_continuity_kernel_index_line(r: &MemoryRecord) -> String {
     format!("  - [{}] {}{}", r.kind, r.key, trigger)
 }
 
+/// Third-stage degradation: bare `  - [kind] key` with no trigger cue.
+/// Used once trigger-bearing index lines overflow `index_budget` — bare keys
+/// keep the `memory_get` drill-down handle for every selected row at a
+/// fraction of the cost (CJK triggers dominate index-line token cost).
+fn format_continuity_kernel_bare_index_line(r: &MemoryRecord) -> String {
+    format!("  - [{}] {}", r.kind, r.key)
+}
+
 /// Budget-aware Continuity Kernel renderer (D1 fix, 2026-07-06).
 ///
 /// The old pipeline (`format_continuity_kernel_block` → `cap_block_lines`)
@@ -16307,8 +16315,12 @@ fn format_continuity_kernel_index_line(r: &MemoryRecord) -> String {
 ///    order is thus preserved and must-block rows keep full-text priority.
 /// 2. Demoted rows (budget overflow + the rows beyond per-bucket caps, which
 ///    previously vanished silently) emit one index line each under a separate
-///    `index_budget`. Only in the extreme case where even index lines do not
-///    fit does a final `[...N more selected rows omitted, use memory_search]`
+///    `index_budget`. If the trigger-bearing rendering of ALL demoted rows
+///    would overflow that budget, the whole section drops to bare
+///    `  - [kind] key` lines (live 2026-07-06: CJK triggers cost ~2.5× the
+///    ASCII corpus the budget was measured on — 25 of 40 trigger lines
+///    exhausted it, dropping 14 keys). Only when even bare lines do not fit
+///    does a final `[...N more selected rows omitted, use memory_search]`
 ///    marker appear.
 ///
 /// Under budget the output is byte-identical to the old renderer (no index
@@ -16370,18 +16382,38 @@ fn format_continuity_kernel_block(
         let header = "-- index (full text over budget; memory_get <key> to expand) --";
         out.push(header.to_string());
         let mut index_used = estimate_tokens_from_text(header) as usize;
-        for (i, row) in demoted.iter().enumerate() {
-            let line = format_continuity_kernel_index_line(row);
-            let line_tokens = estimate_tokens_from_text(&line) as usize;
+        // Two-pass format decision: if the trigger-bearing rendering of ALL
+        // demoted rows fits, keep triggers; otherwise the WHOLE section drops
+        // to bare `- [kind] key` lines — key coverage beats trigger cues, and
+        // switching mid-stream would only rescue the last sliver of budget.
+        let with_triggers: Vec<String> = demoted
+            .iter()
+            .map(|row| format_continuity_kernel_index_line(row))
+            .collect();
+        let triggers_total: usize = index_used
+            + with_triggers
+                .iter()
+                .map(|l| estimate_tokens_from_text(l) as usize)
+                .sum::<usize>();
+        let index_lines: Vec<String> = if triggers_total <= index_budget {
+            with_triggers
+        } else {
+            demoted
+                .iter()
+                .map(|row| format_continuity_kernel_bare_index_line(row))
+                .collect()
+        };
+        for (i, line) in index_lines.iter().enumerate() {
+            let line_tokens = estimate_tokens_from_text(line) as usize;
             if index_used.saturating_add(line_tokens) > index_budget {
                 out.push(format!(
                     "  [...{} more selected rows omitted, use memory_search]",
-                    demoted.len() - i
+                    index_lines.len() - i
                 ));
                 break;
             }
             index_used += line_tokens;
-            out.push(line);
+            out.push(line.clone());
         }
     }
     out.push(String::new());

@@ -411,6 +411,65 @@
         );
     }
 
+    // Live regression (2026-07-06 pre-deploy verify): 40 selected rows with
+    // CJK retrieval triggers cost ~2.5× the ASCII measurement corpus — the
+    // trigger-bearing index rendering blew the budget after 25 lines and
+    // DROPPED 14 keys into the omission marker. The two-pass format decision
+    // must fall back to bare `- [kind] key` lines so every key still surfaces.
+    #[test]
+    fn continuity_kernel_cjk_triggers_degrade_to_bare_keys_not_omission() {
+        let cjk_triggers = [
+            "在主树读代码准备打补丁或编辑，或 Edit 锚点对不上时需要先回忆隔离 worktree 纪律",
+            "部署二进制或重建前，确认出自合并后 master 并核对备份路径与 wrapper 保护约定",
+            "记忆价值决策权、要不要问 owner 记忆操作、curation 授权、蒸馏归档权限相关判断",
+            "session_finalize 更新 AGENT.md/USER.md 或 profile 相关改动时执行维护三规则",
+        ];
+        let rows: Vec<MemoryRecord> = (0..40)
+            .map(|i| {
+                mk_kernel_row(
+                    i,
+                    "continuity_role:state",
+                    Some(cjk_triggers[i % cjk_triggers.len()]),
+                )
+            })
+            .collect();
+
+        let block = format_continuity_kernel_block(
+            &rows,
+            false,
+            120,
+            BUDGET_CONTINUITY_KERNEL,
+            BUDGET_CONTINUITY_KERNEL_INDEX,
+        )
+        .expect("kernel block");
+        let joined = block.join("\n");
+
+        for row in &rows {
+            assert!(
+                joined.contains(&row.key),
+                "CJK-trigger load dropped a key: {}\n{joined}",
+                row.key
+            );
+        }
+        assert!(
+            !joined.contains("omitted, use memory_search"),
+            "40-row CJK load must fit via bare degradation, not omission:\n{joined}"
+        );
+        // Bare mode engaged: index lines carry no trigger braces.
+        assert!(
+            block
+                .iter()
+                .filter(|l| l.starts_with("  - ["))
+                .all(|l| !l.contains('{')),
+            "expected bare index lines under CJK overflow:\n{joined}"
+        );
+        let total = kernel_block_token_sum(&block);
+        assert!(
+            total <= BUDGET_CONTINUITY_KERNEL + BUDGET_CONTINUITY_KERNEL_INDEX + 24,
+            "kernel block blew its combined budget: {total} tokens"
+        );
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn session_bootstrap_surfaces_continuity_kernel_from_selected_rows() {
         let (hub, temp_dir) = mk_test_hub_with_store().await;
