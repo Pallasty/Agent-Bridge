@@ -40,11 +40,30 @@ sourced and the embedder works). Override with `--binary`.
    enforcement; this lint is its minimal enforcement form. Output is a
    report — disposition stays a curation decision.
 
+   **v1 role split**: rows tagged `continuity_role:constraint` are
+   conditional gates — they block an action until its gates are satisfied,
+   and age alone does not expire them (adjudications 2026-07-05/06 both
+   kept flagged constraint rows). They are excluded from `suspects` and
+   surface in `aging_constraints` only past 45 days, framed as periodic
+   review, not staleness. All other roles (`state`, `procedure`, `warning`,
+   …) keep the 14-day suspect threshold.
+
 ## Baselines
 
 First baseline per day is written to `baselines/<date>.json`; commit it with
-the change that motivated the run. `--compare` prints per-metric deltas and
-a PASS/REGRESS verdict (retrieval MRR drop > 0.05 or any required continuity
+the change that motivated the run. The compare baseline is loaded **before**
+this run writes its own file, so same-day compares diff against the committed
+state, not against themselves (v1 fix — the original ordering made every
+same-day compare a trivial +0.000 PASS).
+
+Only **any_mode** MRR gates the verdict. Single modes breathe on a living
+corpus (measured 2026-07-06: hybrid ±0.06 on an unchanged DB as the
+coactivation graph moves; one near-tie fts rank flip per ~10-row write day
+= 0.056 MRR swing on 9 pairs). Per-mode deltas print as informational
+notes. Pairs whose query legitimately matches several rows list them in
+`expected_any` (best rank counts) — label the adjudication in a `note`.
+`--compare` prints per-metric deltas and
+a PASS/REGRESS verdict (any_mode MRR drop > eps or any required continuity
 probe lost ⇒ REGRESS).
 
 ## Fixture update discipline

@@ -20,7 +20,19 @@ DEFAULT_BINARY = os.path.expanduser("~/.local/bin/agent-bridge")
 DEFAULT_DB = os.path.expanduser("~/.local/share/agent-bridge/state.db")
 PROJECT_CWD = "/Data/CascadeProjects/agent-bridge"
 LINT_STALE_DAYS = 14
+# Conditional gates (continuity_role:constraint) are age-tolerant: they block
+# an action until its gates are satisfied, and age alone does not expire them
+# (two consecutive adjudications, 2026-07-05/06, both kept flagged constraint
+# rows). They surface separately, on a longer leash, for periodic review.
+LINT_CONSTRAINT_STALE_DAYS = 45
 MRR_REGRESS_EPS = 0.05
+# Only any_mode (the per-pair best-rank union) gates REGRESS. Single modes
+# breathe on a living corpus — measured same-day 2026-07-06: hybrid drifted
+# ±0.06 on an unchanged DB (coactivation graph moves under the searches
+# themselves), and each ~10-row write day joggles some near-tie pair one
+# fts rank (= 0.056 MRR on 9 pairs, a guaranteed false REGRESS). any_mode
+# stayed exactly 0.679 through all of it; a real code regression drags the
+# union down too. Per-mode deltas still print as informational notes.
 
 
 class McpClient:
@@ -80,7 +92,13 @@ def eval_retrieval(mcp):
     modes = ["fts", "hybrid", "semantic"]
     per_pair = []
     for pair in fixture["pairs"]:
-        row = {"query": pair["query"][:50], "expected": pair["expected_key"], "ranks": {}}
+        # `expected_any` lists every key that legitimately satisfies the
+        # query (living corpus: near-tie relevant rows swap ranks as recency
+        # drifts); the pair scores by the best-ranked accepted key.
+        accepted = pair.get("expected_any") or [pair["expected_key"]]
+        row = {"query": pair["query"][:50], "expected": accepted[0], "ranks": {}}
+        if len(accepted) > 1:
+            row["accepted"] = accepted
         for mode in modes:
             try:
                 text = mcp.call_tool("memory_search", {
@@ -90,8 +108,8 @@ def eval_retrieval(mcp):
             except Exception as e:  # search failure = miss, keep the run going
                 keys = []
                 row.setdefault("errors", {})[mode] = str(e)[:120]
-            rank = keys.index(pair["expected_key"]) + 1 if pair["expected_key"] in keys else 0
-            row["ranks"][mode] = rank  # 0 = miss
+            found = [keys.index(k) + 1 for k in accepted if k in keys]
+            row["ranks"][mode] = min(found) if found else 0  # 0 = miss
         per_pair.append(row)
 
     metrics = {}
@@ -148,35 +166,48 @@ def eval_continuity(mcp):
 def eval_governance_lint(db_path):
     db = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     rows = db.execute(
-        """SELECT key, kind, created_at FROM memories WHERE status='active'
+        """SELECT key, kind, created_at, tags FROM memories WHERE status='active'
            AND tags LIKE '%\"continuity_actionability:must_block\"%'
            AND (tags LIKE '%\"continuity_freshness_policy:version_bound\"%'
              OR tags LIKE '%\"continuity_freshness_policy:project_phase_bound\"%')
            AND created_at < strftime('%s','now') - ? * 86400
            ORDER BY created_at""", (LINT_STALE_DAYS,)).fetchall()
     db.close()
+    now = datetime.datetime.now().timestamp()
+    suspects, aging_constraints = [], []
+    for k, kind, c, tags in rows:
+        age = round((now - c) / 86400)
+        entry = {"key": k, "kind": kind, "age_days": age}
+        if '"continuity_role:constraint"' in tags:
+            # v1: conditional gates are age-tolerant — only long-idle ones
+            # surface, and only for periodic review, never as stale suspects.
+            if age >= LINT_CONSTRAINT_STALE_DAYS:
+                aging_constraints.append(entry)
+        else:
+            suspects.append(entry)
     return {
         "stale_days_threshold": LINT_STALE_DAYS,
-        "suspects": [
-            {"key": k, "kind": kind,
-             "age_days": round((datetime.datetime.now().timestamp() - c) / 86400)}
-            for k, kind, c in rows
-        ],
+        "constraint_stale_days_threshold": LINT_CONSTRAINT_STALE_DAYS,
+        "suspects": suspects,
+        "aging_constraints": aging_constraints,
     }
 
 
 # ------------------------------------------------------------------ compare
-def compare(baseline_path, current):
-    with open(baseline_path, encoding="utf-8") as f:
-        base = json.load(f)
+def compare(base, current):
+    """`base` is the pre-loaded baseline dict — loaded BEFORE this run wrote
+    its own baseline file, so a same-day compare (the standard discipline
+    usage) diffs against the committed morning state instead of itself."""
     verdict, notes = "PASS", []
     b_m = base.get("retrieval", {}).get("metrics", {})
     c_m = current.get("retrieval", {}).get("metrics", {})
     for mode in c_m:
         if mode in b_m:
             delta = c_m[mode]["mrr"] - b_m[mode]["mrr"]
-            notes.append(f"retrieval {mode} MRR {b_m[mode]['mrr']} -> {c_m[mode]['mrr']} ({delta:+.3f})")
-            if delta < -MRR_REGRESS_EPS:
+            gates = mode == "any_mode"
+            tag = "" if gates or delta >= -MRR_REGRESS_EPS else " [drift, informational]"
+            notes.append(f"retrieval {mode} MRR {b_m[mode]['mrr']} -> {c_m[mode]['mrr']} ({delta:+.3f}){tag}")
+            if gates and delta < -MRR_REGRESS_EPS:
                 verdict = "REGRESS"
     b_miss = set(base.get("continuity", {}).get("missing_required", []))
     c_miss = set(current.get("continuity", {}).get("missing_required", []))
@@ -202,6 +233,14 @@ def main():
     ap.add_argument("--compare", default=None, metavar="BASELINE_JSON")
     ap.add_argument("--out", default=None, help="output path (default baselines/<date>.json)")
     args = ap.parse_args()
+
+    # Load the compare baseline FIRST: the default output path is
+    # baselines/<today>.json, so a same-day --compare would otherwise read
+    # the file this run just overwrote and trivially PASS with +0.000.
+    baseline_data = None
+    if args.compare:
+        with open(args.compare, encoding="utf-8") as f:
+            baseline_data = json.load(f)
 
     result = {
         "date": datetime.date.today().isoformat(),
@@ -240,9 +279,11 @@ def main():
     if "governance_lint" in result:
         for s in result["governance_lint"]["suspects"]:
             print(f"lint suspect: {s['key']} ({s['kind']}, {s['age_days']}d)")
+        for s in result["governance_lint"].get("aging_constraints", []):
+            print(f"lint aging constraint (review, not stale): {s['key']} ({s['kind']}, {s['age_days']}d)")
 
     if args.compare:
-        verdict, notes = compare(args.compare, result)
+        verdict, notes = compare(baseline_data, result)
         print(f"\ncompare vs {args.compare}: {verdict}")
         for n in notes:
             print(f"  {n}")

@@ -9,19 +9,19 @@
   "pairs": 9,
   "metrics": {
    "fts": {
-    "hit@5": 0.667,
+    "hit@5": 0.556,
     "hit@10": 0.667,
-    "mrr": 0.578
+    "mrr": 0.519
    },
    "hybrid": {
-    "hit@5": 0.556,
-    "hit@10": 0.556,
-    "mrr": 0.417
+    "hit@5": 0.667,
+    "hit@10": 0.667,
+    "mrr": 0.444
    },
    "semantic": {
     "hit@5": 0.444,
-    "hit@10": 0.556,
-    "mrr": 0.318
+    "hit@10": 0.667,
+    "mrr": 0.334
    },
    "any_mode": {
     "hit@5": 0.667,
@@ -35,7 +35,7 @@
     "expected": "next_arc_survey_20260702",
     "ranks": {
      "fts": 1,
-     "hybrid": 1,
+     "hybrid": 2,
      "semantic": 0
     }
    },
@@ -44,16 +44,20 @@
     "expected": "next_arc_survey_20260702",
     "ranks": {
      "fts": 1,
-     "hybrid": 0,
-     "semantic": 0
-    }
+     "hybrid": 1,
+     "semantic": 7
+    },
+    "accepted": [
+     "next_arc_survey_20260702",
+     "outcome_retrieval_outcome_apply_pr69_20260703"
+    ]
    },
    {
     "query": "warm cache coherence semantic",
     "expected": "next_arc_survey_20260702",
     "ranks": {
      "fts": 1,
-     "hybrid": 2,
+     "hybrid": 1,
      "semantic": 4
     }
    },
@@ -61,8 +65,8 @@
     "query": "correction cosurface memory",
     "expected": "correction_cosurface_live_backfill_preflight_20260701",
     "ranks": {
-     "fts": 5,
-     "hybrid": 1,
+     "fts": 6,
+     "hybrid": 4,
      "semantic": 1
     }
    },
@@ -79,7 +83,7 @@
     "query": "GitHub token 凭证读取 中文路径修复",
     "expected": "github_token_access_arrangement_20260627",
     "ranks": {
-     "fts": 1,
+     "fts": 2,
      "hybrid": 1,
      "semantic": 2
     }
@@ -114,7 +118,7 @@
   ]
  },
  "continuity": {
-  "bootstrap_chars": 9083,
+  "bootstrap_chars": 9212,
   "tiers": {
    "T1": {
     "total": 8,
@@ -285,12 +289,8 @@
  },
  "governance_lint": {
   "stale_days_threshold": 14,
-  "suspects": [
-   {
-    "key": "ghp1b_tiny_write_review_packet_20260622",
-    "kind": "decision",
-    "age_days": 14
-   }
-  ]
+  "constraint_stale_days_threshold": 45,
+  "suspects": [],
+  "aging_constraints": []
  }
 }
