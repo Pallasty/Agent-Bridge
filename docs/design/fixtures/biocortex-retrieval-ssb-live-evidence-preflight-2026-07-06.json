@@ -1,0 +1,112 @@
+{
+  "schema": "agent_bridge.biocortex_retrieval.ssb_live_evidence_preflight.v0",
+  "created_at": "2026-07-06T00:00:00Z",
+  "status": "blocked_pending_owner_live_runtime_gate",
+  "read_only": true,
+  "implementation_stage": "ssb_live_evidence_owner_gate_preflight",
+  "source_status_surface": {
+    "schema": "agent_bridge.biocortex_retrieval.thread_104_status_surface.v0",
+    "status": "active_review_gated",
+    "fixture": "docs/design/fixtures/biocortex-retrieval-thread-104-status-surface-2026-07-06.json",
+    "included": false
+  },
+  "source_adapter_fixture": {
+    "schema": "agent_bridge.biocortex_retrieval.read_only_ssb_adapter_fixture.v0",
+    "status": "ready",
+    "fixture": "docs/design/fixtures/biocortex-retrieval-read-only-ssb-adapter-fixture-2026-06-15.json",
+    "included": false
+  },
+  "source_live_observation": {
+    "schema": "agent_bridge.biocortex_retrieval.live_lswr_action_result_runtime_evidence.v0",
+    "status": "observed_not_verified",
+    "fixture": "docs/design/fixtures/biocortex-retrieval-live-lswr-action-result-runtime-evidence-2026-06-15.json",
+    "verified_runtime_action_result_collected": false,
+    "not_verified_runtime_action_result_collected": true,
+    "included": false
+  },
+  "source_loopback_fixture_probe": {
+    "schema": "agent_bridge.biocortex_retrieval.loopback_lswr_action_result_verified_probe.v0",
+    "status": "verified_fixture_host_observed",
+    "fixture": "docs/design/fixtures/biocortex-retrieval-loopback-lswr-action-result-verified-probe-2026-06-15.json",
+    "fixture_host": true,
+    "real_onsen_runtime": false,
+    "included": false
+  },
+  "source_host_attach_preflight": {
+    "schema": "agent_bridge.biocortex_retrieval.loopback_lswr_host_attach_preflight.v0",
+    "status": "blocked_missing_loopback_host_checkout",
+    "fixture": "docs/design/fixtures/biocortex-retrieval-loopback-lswr-host-attach-preflight-2026-06-15.json",
+    "can_collect_verified_runtime_action_result_now": false,
+    "included": false
+  },
+  "source_onsen_step_b_resolution": {
+    "schema": "agent_bridge.biocortex_retrieval.onsen_step_b_source_resolution.v0",
+    "status": "blocked_missing_onsen_step_b_source",
+    "fixture": "docs/design/fixtures/biocortex-retrieval-onsen-step-b-source-resolution-2026-06-15.json",
+    "can_launch_real_onsen_step_b_host_now": false,
+    "included": false
+  },
+  "target_contract": {
+    "schema": "agent_bridge.semantic_bus.action_result.v0",
+    "source_schema_expected": "agent_bridge.world_tool.v0",
+    "world_tool": "world_visibility_query",
+    "action_type": "world.visibility.query",
+    "verified_verdict_required_for_verified_evidence": "verified",
+    "not_verified_must_not_be_ingested_as_verified_evidence": true,
+    "raw_host_response_must_be_redacted": true
+  },
+  "required_owner_gates": {
+    "accepted_onsen_step_b_host_source": false,
+    "operator_supplied_endpoint": false,
+    "endpoint_identity_verified": false,
+    "newline_json_tcp_protocol_confirmed": false,
+    "timeout_budget_approved": false,
+    "no_action_execution_constraint_approved": false,
+    "post_lookup_redaction_rule_approved": false,
+    "human_visible_viewport_verification_required": true,
+    "not_verified_ingestion_block_required": true
+  },
+  "preflight_result": {
+    "ready_for_operator_submission_review": false,
+    "ready_for_live_runtime_contact": false,
+    "ready_for_verified_action_result_collection": false,
+    "runtime_contact_attempted": false,
+    "socket_open_attempted": false,
+    "blocked_by": [
+      "accepted_onsen_step_b_host_source_missing",
+      "operator_supplied_endpoint_missing",
+      "owner_live_runtime_contact_gate_missing",
+      "verified_real_onsen_action_result_absent"
+    ]
+  },
+  "capability_ledger_boundary": {
+    "audit_context_may_be_consulted": true,
+    "capability_ledger_report_packet_included": false,
+    "capability_ledger_raw_report_included": false,
+    "may_use_capability_ledger_as_runtime_authority": false,
+    "may_grant_new_authorization": false,
+    "may_call_aiot_runtime": false,
+    "may_execute_lswr_actions": false,
+    "may_emit_runtime_action_result": false
+  },
+  "boundary": {
+    "contacts_live_runtime": false,
+    "opens_socket": false,
+    "calls_memory_search": false,
+    "runs_biocortex": false,
+    "writes_approval": false,
+    "changes_memory_search_order": false,
+    "default_search_order_change_allowed": false,
+    "calls_aiot_runtime": false,
+    "executes_lswr_actions": false,
+    "emits_durable_runtime_action_result": false,
+    "mutates_default_agent_bridge_db": false,
+    "host_response_included": false,
+    "raw_queries_included": false,
+    "raw_keys_included": false,
+    "content_included": false,
+    "side_signal_raw_included": false,
+    "human_decision_text_included": false
+  },
+  "next_step": "owner_supplies_onsen_step_b_host_source_or_declines_live_evidence_lane"
+}

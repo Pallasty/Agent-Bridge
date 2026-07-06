@@ -80,6 +80,8 @@ downstream_aio_checkpoint_selection="docs/design/fixtures/biocortex-retrieval-do
 downstream_aio_runtime_evidence_handoff="docs/design/fixtures/biocortex-retrieval-downstream-aio-runtime-evidence-handoff-2026-06-15.json"
 ssb_lswr_action_result_review_fixture="docs/design/fixtures/biocortex-retrieval-ssb-lswr-action-result-review-fixture-2026-06-15.json"
 read_only_ssb_adapter_fixture="docs/design/fixtures/biocortex-retrieval-read-only-ssb-adapter-fixture-2026-06-15.json"
+thread_104_status_surface="docs/design/fixtures/biocortex-retrieval-thread-104-status-surface-2026-07-06.json"
+ssb_live_evidence_preflight="docs/design/fixtures/biocortex-retrieval-ssb-live-evidence-preflight-2026-07-06.json"
 live_lswr_action_result_runtime_evidence="docs/design/fixtures/biocortex-retrieval-live-lswr-action-result-runtime-evidence-2026-06-15.json"
 loopback_lswr_action_result_verified_probe="docs/design/fixtures/biocortex-retrieval-loopback-lswr-action-result-verified-probe-2026-06-15.json"
 loopback_lswr_host_attach_preflight="docs/design/fixtures/biocortex-retrieval-loopback-lswr-host-attach-preflight-2026-06-15.json"
@@ -2237,6 +2239,124 @@ jq -e '
     and .next_step == "completed_by_live_lswr_action_result_runtime_evidence_observation"
     and .next_step_completed == true
 ' "$read_only_ssb_adapter_fixture" >/dev/null
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.thread_104_status_surface.v0"
+    and .status == "active_review_gated"
+    and .read_only == true
+    and .thread_id == 104
+    and .implementation_stage == "canonical_status_surface"
+    and .last_completed_checkpoint.commit == "4415b37b"
+    and .last_completed_checkpoint.forum_post_id == 2913
+    and .last_completed_checkpoint.memory_key == "biocortex_104_capability_ledger_ssb_fixture_propagated_20260706"
+    and .project_vision.biocortex_rs_role == "independent_read_only_side_signal_experiment"
+    and .project_vision.agent_bridge_role == "governance_evidence_authorization_and_consumer_integration_layer"
+    and .project_vision.default_retrieval_change_requires_separate_authorization == true
+    and .lane_state.biocortex_rs_crate_lane == "documented_resting_point"
+    and .lane_state.agent_bridge_thread_104_lane == "active_downstream_consumer"
+    and .lane_state.live_runtime_lane == "blocked_before_verified_evidence_collection"
+    and .verified_surfaces.downstream_aio_runtime_evidence_handoff.status == "ready"
+    and .verified_surfaces.ssb_lswr_action_result_review_fixture.status == "ready"
+    and .verified_surfaces.read_only_ssb_adapter_fixture.status == "ready"
+    and .verified_surfaces.live_lswr_action_result_runtime_evidence.status == "observed_not_verified"
+    and .verified_surfaces.loopback_lswr_action_result_verified_probe.status == "verified_fixture_host_observed"
+    and .verified_surfaces.loopback_lswr_host_attach_preflight.status == "blocked_missing_loopback_host_checkout"
+    and .verified_surfaces.onsen_step_b_source_resolution.status == "blocked_missing_onsen_step_b_source"
+    and .verified_surfaces.retrieval_shadow_acceptance.expected_regression_cases == 0
+    and .verified_surfaces.retrieval_shadow_acceptance.default_search_order_changed == false
+    and .capability_ledger_boundary.audit_context_propagated == true
+    and .capability_ledger_boundary.safe_for_adapter_fixture == true
+    and .capability_ledger_boundary.raw_report_included == false
+    and .capability_ledger_boundary.report_packet_included == false
+    and .capability_ledger_boundary.may_grant_new_authorization == false
+    and .capability_ledger_boundary.may_authorize_runtime_influence == false
+    and .capability_ledger_boundary.may_call_aiot_runtime == false
+    and .capability_ledger_boundary.may_execute_lswr_actions == false
+    and .capability_ledger_boundary.may_emit_runtime_action_result == false
+    and .capability_ledger_boundary.inside_candidate_action_result == false
+    and (.falsified_expectations | length) == 3
+    and (.falsified_expectations[] | select(.claim == "runtime_label_ambiguous_expected_regression_remains").status) == "falsified"
+    and .current_blockers.human_runtime_influence_go == false
+    and .current_blockers.accepted_onsen_step_b_source_available == false
+    and .current_blockers.live_lswr_host_reachable == false
+    and .current_blockers.verified_real_onsen_action_result_collected == false
+    and .current_blockers.owner_live_runtime_contact_gate == false
+    and .authority_boundary.calls_memory_search == false
+    and .authority_boundary.runs_biocortex == false
+    and .authority_boundary.writes_approval == false
+    and .authority_boundary.default_search_order_change_allowed == false
+    and .authority_boundary.default_retrieval_influence_authorized == false
+    and .authority_boundary.runtime_adapter_approved == false
+    and .authority_boundary.ordering_behavior_connected == false
+    and .authority_boundary.calls_aiot_runtime == false
+    and .authority_boundary.executes_lswr_actions == false
+    and .authority_boundary.emits_durable_runtime_action_result == false
+    and .authority_boundary.capability_ledger_report_packet_included == false
+    and .next_step == "build_ssb_live_evidence_owner_gate_preflight"
+' "$thread_104_status_surface" >/dev/null
+jq -e '
+    .schema == "agent_bridge.biocortex_retrieval.ssb_live_evidence_preflight.v0"
+    and .status == "blocked_pending_owner_live_runtime_gate"
+    and .read_only == true
+    and .implementation_stage == "ssb_live_evidence_owner_gate_preflight"
+    and .source_status_surface.schema == "agent_bridge.biocortex_retrieval.thread_104_status_surface.v0"
+    and .source_status_surface.status == "active_review_gated"
+    and .source_status_surface.included == false
+    and .source_adapter_fixture.schema == "agent_bridge.biocortex_retrieval.read_only_ssb_adapter_fixture.v0"
+    and .source_adapter_fixture.status == "ready"
+    and .source_adapter_fixture.included == false
+    and .source_live_observation.status == "observed_not_verified"
+    and .source_live_observation.verified_runtime_action_result_collected == false
+    and .source_live_observation.not_verified_runtime_action_result_collected == true
+    and .source_live_observation.included == false
+    and .source_loopback_fixture_probe.status == "verified_fixture_host_observed"
+    and .source_loopback_fixture_probe.fixture_host == true
+    and .source_loopback_fixture_probe.real_onsen_runtime == false
+    and .source_host_attach_preflight.status == "blocked_missing_loopback_host_checkout"
+    and .source_host_attach_preflight.can_collect_verified_runtime_action_result_now == false
+    and .source_onsen_step_b_resolution.status == "blocked_missing_onsen_step_b_source"
+    and .source_onsen_step_b_resolution.can_launch_real_onsen_step_b_host_now == false
+    and .target_contract.schema == "agent_bridge.semantic_bus.action_result.v0"
+    and .target_contract.source_schema_expected == "agent_bridge.world_tool.v0"
+    and .target_contract.world_tool == "world_visibility_query"
+    and .target_contract.verified_verdict_required_for_verified_evidence == "verified"
+    and .target_contract.not_verified_must_not_be_ingested_as_verified_evidence == true
+    and .target_contract.raw_host_response_must_be_redacted == true
+    and .required_owner_gates.accepted_onsen_step_b_host_source == false
+    and .required_owner_gates.operator_supplied_endpoint == false
+    and .required_owner_gates.endpoint_identity_verified == false
+    and .required_owner_gates.no_action_execution_constraint_approved == false
+    and .required_owner_gates.human_visible_viewport_verification_required == true
+    and .required_owner_gates.not_verified_ingestion_block_required == true
+    and .preflight_result.ready_for_operator_submission_review == false
+    and .preflight_result.ready_for_live_runtime_contact == false
+    and .preflight_result.ready_for_verified_action_result_collection == false
+    and .preflight_result.runtime_contact_attempted == false
+    and .preflight_result.socket_open_attempted == false
+    and (.preflight_result.blocked_by | index("owner_live_runtime_contact_gate_missing") != null)
+    and .capability_ledger_boundary.audit_context_may_be_consulted == true
+    and .capability_ledger_boundary.capability_ledger_report_packet_included == false
+    and .capability_ledger_boundary.capability_ledger_raw_report_included == false
+    and .capability_ledger_boundary.may_use_capability_ledger_as_runtime_authority == false
+    and .capability_ledger_boundary.may_grant_new_authorization == false
+    and .capability_ledger_boundary.may_call_aiot_runtime == false
+    and .capability_ledger_boundary.may_execute_lswr_actions == false
+    and .capability_ledger_boundary.may_emit_runtime_action_result == false
+    and .boundary.contacts_live_runtime == false
+    and .boundary.opens_socket == false
+    and .boundary.calls_memory_search == false
+    and .boundary.runs_biocortex == false
+    and .boundary.writes_approval == false
+    and .boundary.changes_memory_search_order == false
+    and .boundary.default_search_order_change_allowed == false
+    and .boundary.calls_aiot_runtime == false
+    and .boundary.executes_lswr_actions == false
+    and .boundary.emits_durable_runtime_action_result == false
+    and .boundary.host_response_included == false
+    and .boundary.raw_queries_included == false
+    and .boundary.raw_keys_included == false
+    and .boundary.content_included == false
+    and .next_step == "owner_supplies_onsen_step_b_host_source_or_declines_live_evidence_lane"
+' "$ssb_live_evidence_preflight" >/dev/null
 jq -e '
     .schema == "agent_bridge.biocortex_retrieval.live_lswr_action_result_runtime_evidence.v0"
     and .status == "observed_not_verified"
