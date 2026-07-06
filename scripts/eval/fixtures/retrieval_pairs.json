@@ -1,0 +1,62 @@
+{
+  "_source": "retrieval_surfacing rows with used_at set, hand-curated 2026-07-06 (13 distinct pairs total at curation time)",
+  "pairs": [
+    {
+      "query": "valence importance loop learning feedback",
+      "expected_key": "next_arc_survey_20260702",
+      "origin_mode": "fts"
+    },
+    {
+      "query": "learning loop next arc reinforce decay calibration",
+      "expected_key": "next_arc_survey_20260702",
+      "origin_mode": "fts"
+    },
+    {
+      "query": "warm cache coherence semantic",
+      "expected_key": "next_arc_survey_20260702",
+      "origin_mode": "fts"
+    },
+    {
+      "query": "correction cosurface memory",
+      "expected_key": "correction_cosurface_live_backfill_preflight_20260701",
+      "origin_mode": "fts"
+    },
+    {
+      "query": "retrieval feedback ring cap telemetry",
+      "expected_key": "workflow_feedback_loop_research_20260630",
+      "origin_mode": "fts"
+    },
+    {
+      "query": "GitHub token 凭证读取 中文路径修复",
+      "expected_key": "github_token_access_arrangement_20260627",
+      "origin_mode": "semantic",
+      "note": "CJK semantic pair — guards the multilingual embedder path"
+    },
+    {
+      "query": "验证 ambient bootstrap 遥测写入 retrieval surfacing 学习环盲区第二次",
+      "expected_key": "session_handoff_triple_arc_retrieval_governance_20260703",
+      "origin_mode": "bootstrap"
+    },
+    {
+      "query": "我们来检查Agent-Bridge记忆中项目的当前状态，结合设计愿景，说说你关心的问题。",
+      "expected_key": "agent_bridge_northstar_bidirectional_bridge_20260529",
+      "origin_mode": "bootstrap",
+      "note": "vision-review opener; drove the 2026-07-05 concerns review"
+    },
+    {
+      "query": "非常棒！看来项目的又一个阶段达成。那么让我们来回顾项目愿景，以及截至目前为止所遇到的问题、超出预期、期望达成但被证伪的，说说你的看法、建议和下一步规划。",
+      "expected_key": "biocortex_rs_resting_point_reconciled_with_ab_downstream_20260705",
+      "origin_mode": "bootstrap"
+    }
+  ],
+  "excluded": [
+    {
+      "query": "继续推进，D1 完成后按你的序列走基尺弧即可。",
+      "keys": [
+        "decision_ab_project_review_local_v38_preflight_20260629",
+        "agent_bridge_gte_dimension_gate_anchor_289f962_20260624"
+      ],
+      "reason": "used_at stamped by governance forensic memory_get during the 2026-07-06 kernel-bucket curation pass, not by task use — the label-pollution case documented in README"
+    }
+  ]
+}

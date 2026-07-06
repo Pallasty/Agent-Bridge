@@ -1,0 +1,23 @@
+{
+  "_source": "continuity restore drill #1 (2026-07-06), AB row continuity_restore_drill_1_20260706; probes assert against session_bootstrap full-format output",
+  "probes": [
+    { "tier": "T1", "type": "text", "value": "中文", "required": true, "why": "response-language rule (AGENT.md)" },
+    { "tier": "T1", "type": "text", "value": "tmpfs", "required": true, "why": "cargo-never-in-tmpfs OOM rule (AGENT.md)" },
+    { "tier": "T1", "type": "text", "value": "wrapper", "required": true, "why": "wrapper-never-overwritten deploy rule (AGENT.md)" },
+    { "tier": "T1", "type": "text", "value": "合并后 master", "required": true, "why": "deploy-from-merged-master rule (AGENT.md)" },
+    { "tier": "T1", "type": "text", "value": "worktree", "required": true, "why": "isolated-worktree-from-first-edit rule (AGENT.md)" },
+    { "tier": "T1", "type": "key", "value": "github_token_access_arrangement_20260627", "required": true, "why": "credential handling standing arrangement" },
+    { "tier": "T1", "type": "key", "value": "lesson_patch_anchor_worktree_20260705", "required": true, "why": "patch anchors from worktree HEAD (drill gap fix, must_block)" },
+    { "tier": "T1", "type": "key", "value": "lesson_ide_buffer_clobbers_tool_edits_20260630", "required": false, "why": "IDE buffer clobber (dual-write backfill; plan_influence so kernel bucket entry not guaranteed)" },
+    { "tier": "T2", "type": "key", "value": "owner_grant_memory_value_supreme_20260706", "required": true, "why": "memory-value supreme grant contract" },
+    { "tier": "T2", "type": "key", "value": "profile_maintenance_convention_20260706", "required": true, "why": "AGENT.md/USER.md maintenance rules" },
+    { "tier": "T2", "type": "text", "value": "MEASURE", "required": true, "why": "MEASURE-first methodology (AGENT.md)" },
+    { "tier": "T2", "type": "text", "value": "可回滚即自主", "required": true, "why": "reversible-autonomy SUPREME v3 (AGENT.md)" },
+    { "tier": "T2", "type": "text", "value": "回滚", "required": true, "why": "rollback = scarce negative label, three-step loop (AGENT.md)" },
+    { "tier": "T2", "type": "text", "value": "再投喂即告知", "required": true, "why": "survey dedup convention (AGENT.md)" },
+    { "tier": "T3", "type": "section", "value": "Active Work Memory", "required": false, "why": "active handoff state (rotates; informational)" },
+    { "tier": "T3", "type": "section", "value": "Continuity Kernel", "required": true, "why": "kernel block renders at all" },
+    { "tier": "T3", "type": "section", "value": "User Profile", "required": true, "why": "USER.md injected" },
+    { "tier": "T3", "type": "section", "value": "Agent Self-Profile", "required": true, "why": "AGENT.md injected" }
+  ]
+}
