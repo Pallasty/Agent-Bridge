@@ -1248,6 +1248,179 @@ com.example.multiline, , \"Line one\nLine two\"\n";
         assert_eq!(explicit.as_array().expect("explicit rows").len(), 12);
     }
 
+    /// Rows get DISTINCT scopes: memory_save's write-time contradiction
+    /// detection supersedes >0.5-overlap rows within the SAME kind+scope, so
+    /// same-scope near-duplicates never survive to consolidation. Cross-scope
+    /// duplicates are exactly the population memory_consolidate exists for.
+    fn mk_consolidate_row(
+        key: &str,
+        content: &str,
+        importance: f64,
+        scope: Option<&str>,
+    ) -> MemoryRecord {
+        MemoryRecord {
+            key: key.to_string(),
+            kind: "fact".to_string(),
+            content: content.to_string(),
+            tags: vec![],
+            related_keys: vec![],
+            scope: scope.map(|s| s.to_string()),
+            created_at: 1_780_000_000,
+            updated_at: 1_780_000_000,
+            last_accessed_at: 1_780_000_000,
+            access_count: 0,
+            importance,
+            status: "active".to_string(),
+            trigger_pattern: None,
+            superseded_by: None,
+        }
+    }
+
+    #[test]
+    fn consolidate_merge_uplift_target_math() {
+        // Rise scales with the absorbed row's strength.
+        assert!((consolidate_merge_uplift_target(0.7, 0.6, 0.15, 0.9) - 0.79).abs() < 1e-9);
+        // The cap bounds the rise.
+        assert!((consolidate_merge_uplift_target(0.85, 0.9, 0.15, 0.9) - 0.9).abs() < 1e-9);
+        // A winner already above the cap is never lowered.
+        assert!((consolidate_merge_uplift_target(0.95, 0.9, 0.15, 0.9) - 0.95).abs() < 1e-9);
+        // Step 0 is a no-op.
+        assert!((consolidate_merge_uplift_target(0.5, 0.8, 0.0, 0.9) - 0.5).abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn consolidate_merge_uplift_raises_winner_and_archives_loser() {
+        let (hub, _temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        let content_a = "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima";
+        let content_b = "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo mike";
+        store
+            .memory_save(&mk_consolidate_row("uplift_winner", content_a, 0.7, None))
+            .await
+            .expect("save winner");
+        store
+            .memory_save(&mk_consolidate_row("uplift_loser", content_b, 0.6, Some("project:/tmp/uplift-t1")))
+            .await
+            .expect("save loser");
+
+        let tool = MemoryConsolidateTool::new(hub);
+        let res = tool
+            .execute(
+                json!({"kind": "fact", "dry_run": false}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute ok");
+        let res = result_json(&res);
+        assert_eq!(res["consolidated"], 1, "one merge expected: {res}");
+        assert_eq!(res["pairs"][0]["winner"], "uplift_winner");
+        assert_eq!(res["pairs"][0]["archived"], "uplift_loser");
+        let uplift = &res["pairs"][0]["winner_uplift"];
+        assert!((uplift["before"].as_f64().expect("before") - 0.7).abs() < 1e-6);
+        assert!((uplift["after"].as_f64().expect("after") - 0.79).abs() < 1e-6);
+
+        let winner = store
+            .memory_get("uplift_winner")
+            .await
+            .expect("get winner")
+            .expect("winner row");
+        assert!(
+            (winner.importance - 0.79).abs() < 1e-6,
+            "uplift must persist, got {}",
+            winner.importance
+        );
+        let loser = store
+            .memory_get("uplift_loser")
+            .await
+            .expect("get loser")
+            .expect("loser row");
+        assert_eq!(loser.status, "archived");
+    }
+
+    #[tokio::test]
+    async fn consolidate_dry_run_projects_uplift_without_writing() {
+        let (hub, _temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        let content_a = "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima";
+        let content_b = "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo mike";
+        store
+            .memory_save(&mk_consolidate_row("uplift_dry_winner", content_a, 0.7, None))
+            .await
+            .expect("save winner");
+        store
+            .memory_save(&mk_consolidate_row("uplift_dry_loser", content_b, 0.6, Some("project:/tmp/uplift-t2")))
+            .await
+            .expect("save loser");
+
+        let tool = MemoryConsolidateTool::new(hub);
+        let res = tool
+            .execute(json!({"kind": "fact"}), &ToolContext::default())
+            .await
+            .expect("dry run ok");
+        let res = result_json(&res);
+        assert_eq!(res["dry_run"], true);
+        let projected = &res["pairs"][0]["winner_uplift_projected"];
+        assert!((projected["before"].as_f64().expect("before") - 0.7).abs() < 1e-6);
+        assert!((projected["after"].as_f64().expect("after") - 0.79).abs() < 1e-6);
+
+        let winner = store
+            .memory_get("uplift_dry_winner")
+            .await
+            .expect("get winner")
+            .expect("winner row");
+        assert!(
+            (winner.importance - 0.7).abs() < 1e-6,
+            "dry run must not write, got {}",
+            winner.importance
+        );
+        let loser = store
+            .memory_get("uplift_dry_loser")
+            .await
+            .expect("get loser")
+            .expect("loser row");
+        assert_eq!(loser.status, "active");
+    }
+
+    #[tokio::test]
+    async fn consolidate_merge_uplift_at_cap_leaves_winner_unchanged() {
+        let (hub, _temp_dir) = mk_test_hub_with_store().await;
+        let store = hub.store.clone().expect("store");
+        let content_a = "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima";
+        let content_b = "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo mike";
+        store
+            .memory_save(&mk_consolidate_row("uplift_cap_winner", content_a, 0.95, None))
+            .await
+            .expect("save winner");
+        store
+            .memory_save(&mk_consolidate_row("uplift_cap_loser", content_b, 0.9, Some("project:/tmp/uplift-t3")))
+            .await
+            .expect("save loser");
+
+        let tool = MemoryConsolidateTool::new(hub);
+        let res = tool
+            .execute(
+                json!({"kind": "fact", "dry_run": false}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("execute ok");
+        let res = result_json(&res);
+        assert_eq!(res["consolidated"], 1, "one merge expected: {res}");
+        let uplift = &res["pairs"][0]["winner_uplift"];
+        assert_eq!(uplift["at_cap"], true, "above-cap winner stays put: {res}");
+
+        let winner = store
+            .memory_get("uplift_cap_winner")
+            .await
+            .expect("get winner")
+            .expect("winner row");
+        assert!(
+            (winner.importance - 0.95).abs() < 1e-6,
+            "hand-pinned high importance must never be lowered, got {}",
+            winner.importance
+        );
+    }
+
     #[tokio::test]
     async fn work_memory_get_defaults_to_derived_slot_key() {
         let (hub, _temp_dir) = mk_test_hub_with_store().await;

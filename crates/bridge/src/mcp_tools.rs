@@ -17671,6 +17671,37 @@ fn jaccard_words_with_overlap(a: &str, b: &str) -> (f64, usize, usize, Vec<Strin
     (sim, inter_n, union_n, overlap_terms)
 }
 
+/// Merge uplift: an absorbed near-duplicate independently restated the same
+/// fact, which is corroborating evidence — the surviving row's importance
+/// rises, scaled by how strong the absorbed row was. Step 0 disables the
+/// uplift without a redeploy; the cap mirrors the valence-apply ceiling so
+/// hand-pinned 1.0 rows always outrank derived scores.
+const CONSOLIDATE_MERGE_UPLIFT_STEP_DEFAULT: f64 = 0.15;
+const CONSOLIDATE_MERGE_UPLIFT_CAP_DEFAULT: f64 = 0.9;
+
+fn consolidate_merge_uplift_step() -> f64 {
+    std::env::var("AB_CONSOLIDATE_MERGE_UPLIFT_STEP")
+        .ok()
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .unwrap_or(CONSOLIDATE_MERGE_UPLIFT_STEP_DEFAULT)
+        .clamp(0.0, 1.0)
+}
+
+fn consolidate_merge_uplift_cap() -> f64 {
+    std::env::var("AB_CONSOLIDATE_MERGE_UPLIFT_CAP")
+        .ok()
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .unwrap_or(CONSOLIDATE_MERGE_UPLIFT_CAP_DEFAULT)
+        .clamp(0.0, 1.0)
+}
+
+/// Pure uplift target shared by the dry-run preview and the executor:
+/// `max(cur, min(cap, cur + step * loser_importance))` — never lowers the
+/// winner, even when it already sits above the cap.
+fn consolidate_merge_uplift_target(cur: f64, loser_importance: f64, step: f64, cap: f64) -> f64 {
+    (cur + step * loser_importance).min(cap).max(cur)
+}
+
 #[async_trait]
 impl McpTool for MemoryConsolidateTool {
     fn name(&self) -> &'static str {
@@ -17683,7 +17714,9 @@ impl McpTool for MemoryConsolidateTool {
                  similarity. Groups memories by kind and compares within each group. \
                  Pairs above the similarity threshold are merge candidates. \
                  The higher-importance memory wins; the other is archived with a \
-                 'supersedes' edge linking winner → loser. \
+                 'supersedes' edge linking winner → loser, and the winner's importance \
+                 rises (merge uplift: an independent duplicate is corroborating evidence; \
+                 AB_CONSOLIDATE_MERGE_UPLIFT_STEP / _CAP tune it, step 0 disables). \
                  Default dry_run=true — previews include overlap_terms, token_stats, and rank scores. \
                  Execute merges only after reviewing dry-run output."
                 .into(),
@@ -17744,6 +17777,8 @@ impl McpTool for MemoryConsolidateTool {
             .get("dry_run")
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
+        let uplift_step = consolidate_merge_uplift_step();
+        let uplift_cap = consolidate_merge_uplift_cap();
 
         // ── Load memories ─────────────────────────────────────────────────
         let all = store
@@ -17840,6 +17875,14 @@ impl McpTool for MemoryConsolidateTool {
                     let rank_loser = loser_rec
                         .map(|m| m.importance * (1.0 + m.access_count as f64))
                         .unwrap_or(0.0);
+                    let winner_importance = winner_rec.map(|m| m.importance).unwrap_or(0.0);
+                    let loser_importance = loser_rec.map(|m| m.importance).unwrap_or(0.0);
+                    let uplift_projected = consolidate_merge_uplift_target(
+                        winner_importance,
+                        loser_importance,
+                        uplift_step,
+                        uplift_cap,
+                    );
                     json!({
                         "key_a": p.key_a,
                         "key_b": p.key_b,
@@ -17856,6 +17899,10 @@ impl McpTool for MemoryConsolidateTool {
                         },
                         "rank_score_winner": (rank_winner * 1000.0).round() / 1000.0,
                         "rank_score_loser": (rank_loser * 1000.0).round() / 1000.0,
+                        "winner_uplift_projected": {
+                            "before": (winner_importance * 1000.0).round() / 1000.0,
+                            "after": (uplift_projected * 1000.0).round() / 1000.0,
+                        },
                     })
                 })
                 .collect();
@@ -17883,6 +17930,12 @@ impl McpTool for MemoryConsolidateTool {
             .as_secs() as i64;
         let mut merged: Vec<Value> = Vec::new();
         let mut errors: Vec<String> = Vec::new();
+        // Winner importance tracked locally so one row absorbing several
+        // losers accumulates correctly WITHOUT re-fetching via memory_get —
+        // that would stamp access_count/last_accessed_at and pollute the
+        // usage telemetry the learning loop reads.
+        let mut live_importance: std::collections::HashMap<String, f64> =
+            std::collections::HashMap::new();
 
         for p in &pairs {
             let loser_key = if p.winner == p.key_a {
@@ -17922,6 +17975,43 @@ impl McpTool for MemoryConsolidateTool {
                 errors.push(format!("link {}->{loser_key}: {e}", p.winner));
             }
 
+            // Merge uplift.
+            let mut winner_uplift = json!(null);
+            if uplift_step > 0.0 {
+                let cur = *live_importance.entry(p.winner.clone()).or_insert_with(|| {
+                    memories
+                        .iter()
+                        .find(|m| m.key == p.winner)
+                        .map(|m| m.importance)
+                        .unwrap_or(0.0)
+                });
+                let target = consolidate_merge_uplift_target(
+                    cur,
+                    loser_rec.importance,
+                    uplift_step,
+                    uplift_cap,
+                );
+                if target > cur {
+                    match store.memory_set_importance(&p.winner, target).await {
+                        Ok(true) => {
+                            live_importance.insert(p.winner.clone(), target);
+                            winner_uplift = json!({
+                                "before": (cur * 1000.0).round() / 1000.0,
+                                "after": (target * 1000.0).round() / 1000.0,
+                            });
+                        }
+                        Ok(false) => errors.push(format!("uplift {}: row not active", p.winner)),
+                        Err(e) => errors.push(format!("uplift {}: {e}", p.winner)),
+                    }
+                } else {
+                    winner_uplift = json!({
+                        "before": (cur * 1000.0).round() / 1000.0,
+                        "after": (cur * 1000.0).round() / 1000.0,
+                        "at_cap": true,
+                    });
+                }
+            }
+
             let win_txt = memories
                 .iter()
                 .find(|m| m.key == p.winner)
@@ -17939,6 +18029,7 @@ impl McpTool for MemoryConsolidateTool {
                 "archived": loser_key,
                 "similarity": (p.sim * 100.0).round() / 100.0,
                 "overlap_terms": overlap_terms,
+                "winner_uplift": winner_uplift,
             }));
         }
 
