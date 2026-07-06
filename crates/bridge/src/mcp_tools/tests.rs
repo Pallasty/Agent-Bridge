@@ -20240,6 +20240,23 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
     }
 
     #[test]
+    fn memory_search_env_exclude_kinds_parses_fail_soft() {
+        assert!(memory_search_env_exclude_kinds_from(None).is_empty());
+        assert!(memory_search_env_exclude_kinds_from(Some("")).is_empty());
+        assert!(memory_search_env_exclude_kinds_from(Some(" , ,, ")).is_empty());
+        // Trimmed, deduped, order preserved; NOT case-folded — the downstream
+        // filter matches the stored kind exactly.
+        assert_eq!(
+            memory_search_env_exclude_kinds_from(Some(" feedback , skill, feedback ")),
+            vec!["feedback".to_string(), "skill".to_string()]
+        );
+        assert_eq!(
+            memory_search_env_exclude_kinds_from(Some("Feedback")),
+            vec!["Feedback".to_string()]
+        );
+    }
+
+    #[test]
     fn apply_class_quota_promotes_missing_class_within_page_invariants() {
         let mut hits = vec![
             quota_hit("a1", "decision", 0.9),

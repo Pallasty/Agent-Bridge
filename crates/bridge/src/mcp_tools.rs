@@ -12764,7 +12764,7 @@ impl McpTool for MemorySearchTool {
             .unwrap_or(false);
         let scope_mode = memory_search_scope_mode(&args, include_global);
 
-        let exclude_kinds: Vec<String> = args
+        let mut exclude_kinds: Vec<String> = args
             .get("exclude_kinds")
             .and_then(|v| v.as_array())
             .map(|a| {
@@ -12773,6 +12773,16 @@ impl McpTool for MemorySearchTool {
                     .collect()
             })
             .unwrap_or_default();
+        // Machine-level default exclusions, unioned with the caller's list.
+        // Bookkeeping kinds parasitize their own target's queries (e.g. a
+        // retrieval_feedback row quotes the query text it was stamped for,
+        // so it outranks the content row on exactly that query). Default
+        // unset = byte-identical behavior.
+        for k in memory_search_env_exclude_kinds() {
+            if !exclude_kinds.contains(&k) {
+                exclude_kinds.push(k);
+            }
+        }
         // When output filters are active, overfetch so the post-filter result
         // can still hit `limit`. 5× covers up to ~80% saturation; cap at 200
         // (the schema's hard upper bound) to avoid pathological queries.
@@ -13242,6 +13252,36 @@ fn memory_class_quota_from(env_val: Option<&str>) -> Vec<(String, usize)> {
 fn memory_class_quota() -> Vec<(String, usize)> {
     memory_class_quota_from(
         std::env::var("AGENT_BRIDGE_MEMORY_CLASS_QUOTA")
+            .ok()
+            .as_deref(),
+    )
+}
+
+/// Parse `AGENT_BRIDGE_MEMORY_SEARCH_EXCLUDE_KINDS`: comma-separated kinds
+/// dropped from every memory_search OUTPUT, unioned with the caller's
+/// `exclude_kinds` param. Fail-soft like the class-quota parser; default
+/// unset / empty = no machine-level exclusion. Values are trimmed but NOT
+/// case-folded — the downstream filter is an exact match against the stored
+/// kind (kinds are conventionally lowercase), same contract as the caller
+/// param. The inner search already overfetches 5× whenever exclusions are
+/// active, and α coactivation still learns from the pre-filter hit set.
+fn memory_search_env_exclude_kinds_from(env_val: Option<&str>) -> Vec<String> {
+    let Some(raw) = env_val else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = Vec::new();
+    for part in raw.split(',') {
+        let k = part.trim().to_string();
+        if !k.is_empty() && !out.contains(&k) {
+            out.push(k);
+        }
+    }
+    out
+}
+
+fn memory_search_env_exclude_kinds() -> Vec<String> {
+    memory_search_env_exclude_kinds_from(
+        std::env::var("AGENT_BRIDGE_MEMORY_SEARCH_EXCLUDE_KINDS")
             .ok()
             .as_deref(),
     )
