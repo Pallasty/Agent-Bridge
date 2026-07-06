@@ -2,6 +2,9 @@ use ab_agent::{
     AgentRuntime, AuggieRuntime, ClaudeCodeRuntime, CodexRuntime, GeminiRuntime,
     GitWorktreeManager, OpenCodeFamilyRuntime, OzAgentRuntime,
 };
+use ab_bridge::biocortex_capability_ledger::{
+    build_biocortex_capability_ledger_report_packet, consume_biocortex_capability_ledger,
+};
 use ab_bridge::biocortex_shadow::{
     biocortex_replay_comparison, biocortex_retrieval_downstream_aio_runtime_evidence_handoff,
     biocortex_retrieval_opt_in_audit_report,
@@ -2840,6 +2843,20 @@ enum BioCortexOp {
         #[arg(long)]
         json: bool,
     },
+    /// Wrap a static BioCortex capability ledger as a read-only report packet.
+    ///
+    /// This consumes an explicit line-oriented ledger file, emits the stable
+    /// `agent_bridge.biocortex_capability_ledger.report_packet.v0` payload, and
+    /// does not run BioCortex, mutate memory, register MCP tools, grant runtime
+    /// authority, or affect retrieval order.
+    CapabilityLedgerReportPacket {
+        /// Line-oriented ledger file produced by capability_ledger_shadow_adapter.
+        #[arg(long)]
+        ledger: PathBuf,
+        /// Emit raw JSON instead of pretty text.
+        #[arg(long)]
+        json: bool,
+    },
     /// Compare an AB shadow-cortex replay fixture with a BioCortex shadow digest.
     ///
     /// This is side-by-side evidence only: BioCortex does not yet consume AB
@@ -5397,6 +5414,9 @@ async fn real_main() -> Result<()> {
                     *json,
                 )
                 .await
+            }
+            BioCortexOp::CapabilityLedgerReportPacket { ledger, json } => {
+                run_biocortex_capability_ledger_report_packet(ledger, *json).await
             }
             BioCortexOp::ReplayCompare {
                 window_days,
@@ -11124,6 +11144,48 @@ async fn run_biocortex_shadow_digest(
         shadow_json_display(boundary.get("links_biocortex_into_ab_runtime"), "false"),
         shadow_json_display(boundary.get("mutates_ab_memory"), "false"),
         shadow_json_display(boundary.get("changes_retrieval_vector"), "false")
+    );
+    Ok(())
+}
+
+async fn run_biocortex_capability_ledger_report_packet(
+    ledger: &std::path::Path,
+    as_json: bool,
+) -> Result<()> {
+    let ledger_body = std::fs::read_to_string(ledger)
+        .map_err(|e| anyhow::anyhow!("read BioCortex capability ledger at {ledger:?}: {e}"))?;
+    let summary = consume_biocortex_capability_ledger(&ledger_body);
+    let packet = build_biocortex_capability_ledger_report_packet(&summary);
+
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&packet)?);
+        return Ok(());
+    }
+
+    println!("# BioCortex capability ledger report packet");
+    println!("schema={}", packet.schema);
+    println!("input_schema={}", packet.input_schema);
+    println!(
+        "input_schema_version={}",
+        packet.input_schema_version.as_deref().unwrap_or("-")
+    );
+    println!("verdict={}", packet.verdict);
+    println!("read_only_confirmed={}", packet.read_only_confirmed);
+    println!("downstream_action={}", packet.downstream_action);
+    println!("integration_decision={}", packet.integration_decision);
+    println!(
+        "static_artifact_only={} memory_write_attempted={} retrieval_order_change_attempted={} runtime_authority_observed={}",
+        packet.safety.static_artifact_only,
+        packet.safety.memory_write_attempted,
+        packet.safety.retrieval_order_change_attempted,
+        packet.safety.runtime_authority_observed
+    );
+    println!(
+        "executor_enablement_observed={} mcp_tool_registration={} language_generation_observed={} cognition_claim_observed={}",
+        packet.safety.executor_enablement_observed,
+        packet.safety.mcp_tool_registration,
+        packet.safety.language_generation_observed,
+        packet.safety.cognition_claim_observed
     );
     Ok(())
 }

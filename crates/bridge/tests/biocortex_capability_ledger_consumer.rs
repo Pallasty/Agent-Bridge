@@ -4,6 +4,7 @@ use ab_bridge::biocortex_capability_ledger::{
 };
 
 const LEDGER: &str = include_str!("fixtures/biocortex_capability_ledger_schema_v3.txt");
+const LEDGER_V5: &str = include_str!("fixtures/biocortex_capability_ledger_schema_v5.txt");
 const SUMMARY_JSON: &str =
     include_str!("fixtures/biocortex_capability_ledger_consumer_summary_v0.json");
 
@@ -38,6 +39,49 @@ fn capability_ledger_consumer_keeps_readonly_boundary_visible() {
     assert!(!summary.safety.aiot_runtime_called);
     assert!(!summary.safety.language_generation_observed);
     assert!(!summary.safety.cognition_claim_observed);
+}
+
+#[test]
+fn capability_ledger_consumer_accepts_current_schema_v5() {
+    let summary = consume_biocortex_capability_ledger(LEDGER_V5);
+
+    assert_eq!(summary.schema, BIOCORTEX_CAPABILITY_LEDGER_CONSUMER_SCHEMA);
+    assert_eq!(summary.input_schema, "biocortex.capability_ledger.v5");
+    assert_eq!(summary.input_schema_version.as_deref(), Some("5"));
+    assert_eq!(summary.input_mode.as_deref(), Some("read_only_shadow"));
+    assert_eq!(
+        summary.input_generated_by.as_deref(),
+        Some("capability_ledger_shadow_adapter")
+    );
+    assert_eq!(summary.verdict, "accepted");
+    assert!(summary.read_only_confirmed);
+    assert_eq!(summary.downstream_action, "display_or_review_only");
+    assert_eq!(
+        summary.integration_decision,
+        "shadow_only_no_runtime_admission"
+    );
+    assert_eq!(check_verdict(&summary, "six_axis_ledger_contract"), "passed");
+    assert!(summary.safety.static_artifact_only);
+    assert!(!summary.safety.memory_write_attempted);
+    assert!(!summary.safety.retrieval_order_change_attempted);
+    assert!(!summary.safety.runtime_authority_observed);
+    assert!(!summary.safety.executor_enablement_observed);
+}
+
+#[test]
+fn capability_ledger_consumer_rejects_schema_v5_ceiling_tamper() {
+    let tampered = LEDGER_V5.replace(
+        "timing_discovery_ceiling_holds=true",
+        "timing_discovery_ceiling_holds=false",
+    );
+    let summary = consume_biocortex_capability_ledger(&tampered);
+
+    assert_eq!(summary.verdict, "rejected");
+    assert!(!summary.read_only_confirmed);
+    assert_eq!(
+        failed_check(&summary, "six_axis_timing_discovery_ceiling"),
+        "timing_discovery_ceiling_holds=false, expected=true"
+    );
 }
 
 #[test]
@@ -100,4 +144,16 @@ fn failed_check<'a>(summary: &'a BioCortexCapabilityLedgerConsumerSummary, check
         .expect("expected dry-run check")
         .evidence
         .as_str()
+}
+
+fn check_verdict<'a>(
+    summary: &'a BioCortexCapabilityLedgerConsumerSummary,
+    check: &str,
+) -> &'a str {
+    summary
+        .checks
+        .iter()
+        .find(|candidate| candidate.check == check)
+        .map(|candidate| candidate.verdict.as_str())
+        .unwrap_or("<missing>")
 }

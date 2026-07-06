@@ -8,6 +8,7 @@ use ab_bridge::biocortex_capability_ledger::{
 };
 
 const LEDGER: &str = include_str!("fixtures/biocortex_capability_ledger_schema_v3.txt");
+const LEDGER_V5: &str = include_str!("fixtures/biocortex_capability_ledger_schema_v5.txt");
 const REVIEW_ARTIFACT: &str =
     include_str!("fixtures/biocortex_capability_ledger_review_artifact_v0.md");
 
@@ -95,6 +96,33 @@ fn display_model_is_ready_for_report_and_board_without_authority() {
     );
     assert!(display_model.failed_checks.is_empty());
     assert_eq!(display_model.report_markdown, REVIEW_ARTIFACT);
+}
+
+#[test]
+fn report_packet_wraps_current_schema_v5_for_review_request() {
+    let summary = consume_biocortex_capability_ledger(LEDGER_V5);
+    let packet = build_biocortex_capability_ledger_report_packet(&summary);
+
+    assert_eq!(
+        packet.schema,
+        BIOCORTEX_CAPABILITY_LEDGER_REPORT_PACKET_SCHEMA
+    );
+    assert_eq!(packet.input_schema, "biocortex.capability_ledger.v5");
+    assert_eq!(packet.input_schema_version.as_deref(), Some("5"));
+    assert_eq!(packet.verdict, "accepted");
+    assert!(packet.read_only_confirmed);
+    assert_eq!(packet.downstream_action, "display_or_review_only");
+    assert_eq!(
+        packet.integration_decision,
+        "shadow_only_no_runtime_admission"
+    );
+    assert!(packet.safety.static_artifact_only);
+    assert!(!packet.safety.memory_write_attempted);
+    assert!(!packet.safety.retrieval_order_change_attempted);
+    assert!(!packet.safety.runtime_authority_observed);
+    assert!(!packet.safety.executor_enablement_observed);
+    assert!(!packet.safety.mcp_tool_registration);
+    assert!(packet.report_markdown.contains("input_schema_version: 5"));
 }
 
 #[test]

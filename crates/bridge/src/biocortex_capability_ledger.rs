@@ -1,7 +1,7 @@
 //! Static BioCortex capability-ledger consumer dry-run.
 //!
-//! This module parses a precomputed BioCortex schema-v3 capability ledger as an
-//! inert artifact. It deliberately does not call BioCortex, Agent-Bridge memory,
+//! This module parses a precomputed BioCortex capability ledger as an inert
+//! artifact. It deliberately does not call BioCortex, Agent-Bridge memory,
 //! retrieval, MCP registration, Nexus, AiOT, network APIs, or runtime/executor
 //! paths.
 
@@ -20,7 +20,7 @@ pub const BIOCORTEX_CAPABILITY_LEDGER_DISPLAY_MODEL_SCHEMA: &str =
 const PASSED: &str = "passed";
 const FAILED: &str = "failed";
 
-const REQUIRED_FIELDS: &[(&str, &str, &str)] = &[
+const V3_REQUIRED_FIELDS: &[(&str, &str, &str)] = &[
     ("schema_version", "3", "schema_version"),
     (
         "generated_by",
@@ -82,6 +82,179 @@ const REQUIRED_FIELDS: &[(&str, &str, &str)] = &[
         "valence_is_supplied_world_interface",
         "true",
         "boundary_valence_supplied",
+    ),
+    (
+        "runtime_authority_granted",
+        "false",
+        "hard_false_runtime_authority",
+    ),
+    ("executor_enabled", "false", "hard_false_executor"),
+    (
+        "adapter_mutation_api_exposed",
+        "false",
+        "hard_false_adapter_mutation",
+    ),
+    ("ab_memory_mutated", "false", "hard_false_ab_memory"),
+    (
+        "retrieval_order_mutated",
+        "false",
+        "hard_false_retrieval_order",
+    ),
+    (
+        "language_generated",
+        "false",
+        "hard_false_language_generation",
+    ),
+    ("cognition_claimed", "false", "hard_false_cognition"),
+];
+
+const V5_REQUIRED_FIELDS: &[(&str, &str, &str)] = &[
+    ("schema_version", "5", "schema_version"),
+    (
+        "generated_by",
+        "capability_ledger_shadow_adapter",
+        "producer_identity",
+    ),
+    ("mode", "read_only_shadow", "shadow_mode"),
+    (
+        "source_kind_scaled_morphology_benchmark",
+        "executable_report",
+        "source_scaled_morphology",
+    ),
+    (
+        "source_kind_temporal_credit_window",
+        "executable_report",
+        "source_temporal_credit",
+    ),
+    (
+        "source_kind_scale_capstone",
+        "executable_report",
+        "source_scale_capstone",
+    ),
+    (
+        "source_kind_retrieval_engine",
+        "executable_report",
+        "source_retrieval_engine",
+    ),
+    (
+        "source_kind_composed_kcap_retrieval",
+        "executable_report",
+        "source_composed_kcap_retrieval",
+    ),
+    (
+        "source_kind_nonlinear_expander",
+        "executable_report",
+        "source_nonlinear_expander",
+    ),
+    (
+        "source_kind_g_next_verdict",
+        "prose_verdict",
+        "source_g_next_boundary",
+    ),
+    (
+        "source_kind_scale_axis_verdict",
+        "prose_verdict",
+        "source_scale_axis_boundary",
+    ),
+    (
+        "source_kind_substrate_capability_and_boundary",
+        "prose_verdict",
+        "source_substrate_capability_boundary",
+    ),
+    (
+        "regional_scale_positive",
+        "true",
+        "capability_regional_scale",
+    ),
+    (
+        "retrieval_projection_positive_read_only",
+        "true",
+        "capability_retrieval_projection_read_only",
+    ),
+    (
+        "capacity_scales_with_size",
+        "true",
+        "capability_capacity_scales_with_size",
+    ),
+    (
+        "composed_kcap_retrieval_positive_read_only",
+        "true",
+        "capability_composed_kcap_retrieval",
+    ),
+    (
+        "nonlinear_representation_crossing",
+        "true",
+        "capability_nonlinear_representation_crossing",
+    ),
+    (
+        "ledger_contract",
+        "six_axis_ceilings_enumerated_unweakenable",
+        "six_axis_ledger_contract",
+    ),
+    (
+        "composed_retrieval_linearly_decodable_ceiling_holds",
+        "true",
+        "six_axis_composed_retrieval_ceiling",
+    ),
+    (
+        "compose_plasticity_last_layer_credit_only",
+        "true",
+        "six_axis_compose_credit_ceiling",
+    ),
+    (
+        "timing_representation_exceeds_finite_matrix",
+        "true",
+        "six_axis_timing_representation_boundary",
+    ),
+    (
+        "timing_discovery_ceiling_holds",
+        "true",
+        "six_axis_timing_discovery_ceiling",
+    ),
+    (
+        "supplied_primitive_crosses_capability_discover_ceiling_holds",
+        "true",
+        "six_axis_supplied_primitive_ceiling",
+    ),
+    (
+        "bright_line_holds_all_six_axes",
+        "true",
+        "six_axis_bright_line",
+    ),
+    (
+        "substrate_never_exceeds_arithmetic_control",
+        "true",
+        "six_axis_arithmetic_control_ceiling",
+    ),
+    (
+        "scale_new_function_emergence",
+        "false",
+        "boundary_no_new_function_emergence",
+    ),
+    (
+        "valence_is_supplied_world_interface",
+        "true",
+        "boundary_valence_supplied",
+    ),
+    (
+        "credit_without_outcome_absent",
+        "true",
+        "boundary_outcome_required",
+    ),
+    (
+        "scale_per_resource_boundary_present",
+        "true",
+        "boundary_scale_per_resource",
+    ),
+    (
+        "temporal_credit_window_bounded",
+        "true",
+        "boundary_temporal_credit_bounded",
+    ),
+    (
+        "science_governance_separated",
+        "true",
+        "boundary_science_governance_separated",
     ),
     (
         "runtime_authority_granted",
@@ -235,18 +408,23 @@ pub fn consume_biocortex_capability_ledger(
     let (fields, parse_check) = parse_ledger(ledger);
     let mut checks = vec![parse_check];
     if !fields.is_empty() {
-        checks.extend(REQUIRED_FIELDS.iter().map(|(field, expected, check_name)| {
-            required_field_check(&fields, field, expected, check_name)
-        }));
+        checks.extend(
+            required_fields_for(&fields)
+                .iter()
+                .map(|(field, expected, check_name)| {
+                    required_field_check(&fields, field, expected, check_name)
+                }),
+        );
     }
 
     let accepted = checks.iter().all(|check| check.verdict == PASSED);
     let verdict = if accepted { "accepted" } else { "rejected" };
+    let input_schema_version = fields.get("schema_version").cloned();
 
     BioCortexCapabilityLedgerConsumerSummary {
         schema: BIOCORTEX_CAPABILITY_LEDGER_CONSUMER_SCHEMA.to_string(),
-        input_schema: "biocortex.capability_ledger.v3".to_string(),
-        input_schema_version: fields.get("schema_version").cloned(),
+        input_schema: input_schema_for(input_schema_version.as_deref()).to_string(),
+        input_schema_version,
         input_mode: fields.get("mode").cloned(),
         input_generated_by: fields.get("generated_by").cloned(),
         verdict: verdict.to_string(),
@@ -277,6 +455,23 @@ pub fn consume_biocortex_capability_ledger(
         },
         checks,
         guidance: guidance_for(verdict),
+    }
+}
+
+fn required_fields_for(
+    fields: &BTreeMap<String, String>,
+) -> &'static [(&'static str, &'static str, &'static str)] {
+    match fields.get("schema_version").map(String::as_str) {
+        Some("5") => V5_REQUIRED_FIELDS,
+        _ => V3_REQUIRED_FIELDS,
+    }
+}
+
+fn input_schema_for(schema_version: Option<&str>) -> &'static str {
+    match schema_version {
+        Some("5") => "biocortex.capability_ledger.v5",
+        Some("3") | None => "biocortex.capability_ledger.v3",
+        Some(_) => "biocortex.capability_ledger.unknown",
     }
 }
 

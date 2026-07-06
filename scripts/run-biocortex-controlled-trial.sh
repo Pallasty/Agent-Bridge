@@ -17,7 +17,8 @@ the scope focused on controlled ranking evidence:
   2. prepare implementation authorization and post-implementation gates;
   3. consume a runtime-influence decision fixture for explicit opt-in FTS only;
   4. seed non-production stores for movement and coverage fixtures;
-  5. emit redacted JSON artifacts plus a compact Markdown report.
+  5. attach the BioCortex capability ledger as read-only review evidence;
+  6. emit redacted JSON artifacts plus a compact Markdown report.
 
 It writes only to the selected output directory and temporary non-production
 SQLite DBs. It never writes Agent-Bridge approval state, mutates the default
@@ -138,12 +139,14 @@ runtime_decision_packet="$out_dir/11-runtime-influence-decision-packet.json"
 movement_run="$out_dir/12-controlled-order-movement.json"
 coverage_run="$out_dir/13-expanded-coverage.json"
 evidence_aggregate="$out_dir/14-redacted-evidence-aggregate.json"
+capability_ledger="$out_dir/14a-capability-ledger.txt"
+capability_ledger_report_packet="$out_dir/14b-capability-ledger-report-packet.json"
 runtime_review_request_with_aggregate="$out_dir/15-runtime-influence-review-request-with-aggregate.json"
 runtime_decision_packet_with_aggregate="$out_dir/16-runtime-influence-decision-packet-with-aggregate.json"
 summary_json="$out_dir/controlled-trial-summary.json"
 report_md="$out_dir/CONTROLLED_TRIAL_REPORT.md"
 
-json_run "$dry_run" env AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
+AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 json_run "$dry_run" \
     "${opt_in_cmd[@]}" \
     bio-cortex retrieval-opt-in-dry-run \
     --mode fts \
@@ -188,7 +191,7 @@ jq -n '{
     ]
 }' > "$runtime_trial_input"
 
-json_run "$runtime_trial" env AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
+AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 json_run "$runtime_trial" \
     "${opt_in_cmd[@]}" \
     bio-cortex retrieval-opt-in-runtime-trial \
     --execution-packet-json "$execution_packet" \
@@ -336,7 +339,7 @@ json_run "$runtime_decision_packet" "${base_cmd[@]}" \
 assert_json '.schema == "agent_bridge.biocortex_retrieval.opt_in_runtime_influence_decision_packet.v0" and .implementation_allowed == true and .runtime_adapter_approved == true and .default_search_order_change_allowed == false and .default_calls_unchanged == true' "$runtime_decision_packet"
 leak_guard "$runtime_decision_packet"
 
-json_run "$movement_run" env AGENT_BRIDGE_DB="$out_dir/db/movement.db" AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
+AGENT_BRIDGE_DB="$out_dir/db/movement.db" AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 json_run "$movement_run" \
     "${opt_in_cmd[@]}" \
     bio-cortex retrieval-opt-in-controlled-order-fixture \
     --runtime-influence-decision-packet-json "$runtime_decision_packet" \
@@ -352,7 +355,7 @@ json_run "$movement_run" env AGENT_BRIDGE_DB="$out_dir/db/movement.db" AB_BIOCOR
 assert_json '.schema == "agent_bridge.biocortex_retrieval.opt_in_controlled_order_fixture_run.v0" and .expected.met == true and .diagnostics.summary.actual_order_changed_count >= 1 and .default_search_order_change_allowed == false and .default_calls_unchanged == true' "$movement_run"
 leak_guard "$movement_run"
 
-json_run "$coverage_run" env AGENT_BRIDGE_DB="$out_dir/db/coverage.db" AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 \
+AGENT_BRIDGE_DB="$out_dir/db/coverage.db" AB_BIOCORTEX_RETRIEVAL_OPT_IN=1 json_run "$coverage_run" \
     "${opt_in_cmd[@]}" \
     bio-cortex retrieval-opt-in-controlled-order-fixture \
     --runtime-influence-decision-packet-json "$runtime_decision_packet" \
@@ -380,18 +383,36 @@ json_run "$evidence_aggregate" "${base_cmd[@]}" \
 assert_json '.schema == "agent_bridge.biocortex_retrieval.opt_in_redacted_evidence_aggregate.v0" and .interpretation.aggregate_evidence_ready == true and .interpretation.controlled_rank_movement_observed == true and .interpretation.expanded_coverage_without_additional_movement == true and .default_search_order_change_allowed == false' "$evidence_aggregate"
 leak_guard "$evidence_aggregate"
 
+run cargo run --quiet --manifest-path "$biocortex_rs/Cargo.toml" --example capability_ledger_shadow_adapter > "$capability_ledger"
+grep -q '^schema_version=5$' "$capability_ledger"
+grep -q '^generated_by=capability_ledger_shadow_adapter$' "$capability_ledger"
+grep -q '^ledger_contract=six_axis_ceilings_enumerated_unweakenable$' "$capability_ledger"
+grep -q '^runtime_authority_granted=false$' "$capability_ledger"
+grep -q '^retrieval_order_mutated=false$' "$capability_ledger"
+
+json_run "$capability_ledger_report_packet" "${base_cmd[@]}" \
+    bio-cortex capability-ledger-report-packet \
+    --ledger "$capability_ledger" \
+    --json
+assert_json '.schema == "agent_bridge.biocortex_capability_ledger.report_packet.v0" and .input_schema == "biocortex.capability_ledger.v5" and .verdict == "accepted" and .read_only_confirmed == true and .safety.static_artifact_only == true and .safety.memory_write_attempted == false and .safety.retrieval_order_change_attempted == false and .safety.runtime_authority_observed == false' "$capability_ledger_report_packet"
+
 json_run "$runtime_review_request_with_aggregate" "${base_cmd[@]}" \
     bio-cortex retrieval-opt-in-runtime-influence-review-request \
     --post-implementation-review-gate-json "$post_impl_gate" \
     --redacted-order-artifact-json "$redacted_order" \
     --redacted-evidence-aggregate-json "$evidence_aggregate" \
+    --capability-ledger-report-packet-json "$capability_ledger_report_packet" \
     --reviewer "$reviewer" \
     --commit "$commit" \
     --forum-post-id controlled-trial-local \
     --memory-key controlled-trial-local \
     --json
-assert_json '.schema == "agent_bridge.biocortex_retrieval.opt_in_runtime_influence_review_request.v0" and .evidence_summary.redacted_evidence_aggregate_ready == true and .boundary_check.runtime_influence_review_request_ready == true and .default_search_order_change_allowed == false' "$runtime_review_request_with_aggregate"
+assert_json '.schema == "agent_bridge.biocortex_retrieval.opt_in_runtime_influence_review_request.v0" and .evidence_summary.redacted_evidence_aggregate_ready == true and .evidence_summary.capability_ledger_report_packet_provided == true and .evidence_summary.capability_ledger_report_packet_accepted == true and .evidence_summary.capability_ledger_input_schema == "biocortex.capability_ledger.v5" and .boundary_check.capability_ledger_report_packet_safe_for_review == true and .boundary_check.runtime_influence_review_request_ready == true and .requested_authorization.capability_ledger_can_authorize_runtime_influence == false and .default_search_order_change_allowed == false' "$runtime_review_request_with_aggregate"
 leak_guard "$runtime_review_request_with_aggregate"
+if grep -q 'BioCortex Capability Ledger Review Artifact\|report_markdown\|source_reports=scaled_morphology_benchmark' "$runtime_review_request_with_aggregate"; then
+    echo "runtime review request copied capability ledger body/report text" >&2
+    exit 1
+fi
 
 json_run "$runtime_decision_packet_with_aggregate" "${base_cmd[@]}" \
     bio-cortex retrieval-opt-in-runtime-influence-decision-packet \
@@ -413,6 +434,7 @@ jq -n \
     --slurpfile movement "$movement_run" \
     --slurpfile coverage "$coverage_run" \
     --slurpfile aggregate "$evidence_aggregate" \
+    --slurpfile ledger "$capability_ledger_report_packet" \
     --slurpfile review "$runtime_review_request_with_aggregate" \
     --slurpfile decision "$runtime_decision_packet_with_aggregate" \
     '{
@@ -449,9 +471,22 @@ jq -n \
             human_review_required: $aggregate[0].interpretation.human_review_required,
             recommended_next_step: $aggregate[0].interpretation.recommended_next_step
         },
+        capability_ledger: {
+            packet_schema: $ledger[0].schema,
+            input_schema: $ledger[0].input_schema,
+            input_schema_version: $ledger[0].input_schema_version,
+            verdict: $ledger[0].verdict,
+            read_only_confirmed: $ledger[0].read_only_confirmed,
+            static_artifact_only: $ledger[0].safety.static_artifact_only,
+            runtime_authority_observed: $ledger[0].safety.runtime_authority_observed,
+            retrieval_order_change_attempted: $ledger[0].safety.retrieval_order_change_attempted
+        },
         runtime_review_request: {
             ready: $review[0].boundary_check.runtime_influence_review_request_ready,
             aggregate_ready: $review[0].evidence_summary.redacted_evidence_aggregate_ready,
+            capability_ledger_provided: $review[0].evidence_summary.capability_ledger_report_packet_provided,
+            capability_ledger_accepted: $review[0].evidence_summary.capability_ledger_report_packet_accepted,
+            capability_ledger_safe_for_review: $review[0].boundary_check.capability_ledger_report_packet_safe_for_review,
             grants_request: $review[0].requested_authorization.this_packet_grants_request
         },
         runtime_decision_packet: {
@@ -475,11 +510,13 @@ jq -n \
             movement_run: "12-controlled-order-movement.json",
             coverage_run: "13-expanded-coverage.json",
             redacted_evidence_aggregate: "14-redacted-evidence-aggregate.json",
+            capability_ledger: "14a-capability-ledger.txt",
+            capability_ledger_report_packet: "14b-capability-ledger-report-packet.json",
             runtime_review_request_with_aggregate: "15-runtime-influence-review-request-with-aggregate.json",
             runtime_decision_packet_with_aggregate: "16-runtime-influence-decision-packet-with-aggregate.json"
         }
     }' > "$summary_json"
-assert_json '.schema == "agent_bridge.biocortex_retrieval.controlled_trial_run_summary.v0" and .status == "controlled_trial_redacted_evidence_ready" and .movement.actual_order_changed_count >= 1 and .coverage.query_count >= 5 and .aggregate.aggregate_evidence_ready == true and .safety.default_search_order_change_allowed == false and .safety.default_calls_unchanged == true' "$summary_json"
+assert_json '.schema == "agent_bridge.biocortex_retrieval.controlled_trial_run_summary.v0" and .status == "controlled_trial_redacted_evidence_ready" and .movement.actual_order_changed_count >= 1 and .coverage.query_count >= 5 and .aggregate.aggregate_evidence_ready == true and .capability_ledger.verdict == "accepted" and .capability_ledger.input_schema == "biocortex.capability_ledger.v5" and .runtime_review_request.capability_ledger_safe_for_review == true and .safety.default_search_order_change_allowed == false and .safety.default_calls_unchanged == true' "$summary_json"
 leak_guard "$summary_json"
 
 {
@@ -496,6 +533,7 @@ leak_guard "$summary_json"
     echo "- coverage queries: $(jq -r '.coverage.query_count' "$summary_json")"
     echo "- coverage experimental_source_count: $(jq -r '.coverage.experimental_source_count' "$summary_json")"
     echo "- aggregate_evidence_ready: $(jq -r '.aggregate.aggregate_evidence_ready' "$summary_json")"
+    echo "- capability_ledger: $(jq -r '.capability_ledger.input_schema' "$summary_json") / $(jq -r '.capability_ledger.verdict' "$summary_json")"
     echo "- recommended_next_step: $(jq -r '.aggregate.recommended_next_step' "$summary_json")"
     echo
     echo "## Boundary"
