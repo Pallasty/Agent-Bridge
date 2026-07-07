@@ -2117,6 +2117,26 @@ enum DreamOp {
         #[arg(long)]
         promote_report: Option<PathBuf>,
     },
+    /// **P2** — Nightly distillation draft queue (propose-only). Picks the
+    /// top-N verified, still-undistilled mechanism rows (the same S1
+    /// detector session_bootstrap surfaces), asks `claude -p` for a
+    /// distill/merge/reject verdict + pub_* draft per candidate, and writes
+    /// `distill_draft_*` review rows. NEVER writes pub_* rows itself —
+    /// every draft goes through per-row agent review in the bootstrap
+    /// "Distill drafts pending review" block (pilot ruling: the distiller
+    /// has a measured permissive bias). Designed for cron (e.g.
+    /// `30 4 * * *`); cost ≈ 62 s/candidate on the default model.
+    Distill {
+        /// Maximum candidates to draft this round.
+        #[arg(long, default_value_t = 5)]
+        top_n: usize,
+        /// Inspect-only: print the picked queue but skip LLM + writes.
+        #[arg(long)]
+        dry_run: bool,
+        /// Per-candidate `claude -p` timeout in seconds.
+        #[arg(long, default_value_t = 600)]
+        timeout_secs: u64,
+    },
     /// 呼吸式画布 / Hebbian feedback — Promote strong co-activation pairs
     /// (`memory_coactivation` rows with count ≥ `--min-count`) into explicit
     /// `cofires` edges in `memory_edges`. Pairs that already have a `cofires`
@@ -6224,6 +6244,11 @@ async fn real_main() -> Result<()> {
                 }
                 Ok(())
             }
+            DreamOp::Distill {
+                top_n,
+                dry_run,
+                timeout_secs,
+            } => ab_bridge::dream_distill::run(*top_n, *dry_run, *timeout_secs).await,
             DreamOp::Promote {
                 min_count,
                 limit,

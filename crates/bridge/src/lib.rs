@@ -28,6 +28,7 @@ pub mod continuity;
 pub mod creds;
 pub mod curate;
 pub mod daemon_http;
+pub mod dream_distill;
 pub mod dream_replay;
 pub mod embedding_dim_guard;
 pub mod event_spine;

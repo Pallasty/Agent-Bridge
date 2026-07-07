@@ -1,0 +1,22 @@
+{
+ "verdict": "distill",
+ "reasoning": "弱网下整库传输反复尾部损坏但小请求稳定，是可迁移的调研策略机制。",
+ "existing_key": null,
+ "draft": {
+  "key": "pub_weak_network_repo_survey_pattern",
+  "scope": "domain:devops",
+  "content": "# 弱网下调研代码仓：放弃整库传输，API 文件树 + 按文件精准拉取（实测蒸馏，公共行）\n\n**情境**：网络对大流量单连接不稳（长传输在尾部被 reset/损坏——实测 git clone 差 34KB 被重置、30MB tarball 两次尾部损坏），但小请求稳定。此时反复重试整库传输是徒劳：失败概率随传输时长累积，越大的包越接近必败。\n\n**做法**：①用 forge API 拿全仓文件树（GitHub: `/repos/{owner}/{repo}/git/trees/{branch}?recursive=1`，几百 KB，一次成功）；②从树里按调研问题定位关键实现文件（grep 路径名：extract/retriev/dedup/prompt 等）；③raw 文件端点逐文件并行拉取（每个几十 KB，实测 8 文件全成功）。调研场景本就该按需读文件——弱网只是把\"全量克隆是惰性默认\"暴露出来了。\n\n**边界**：需要跑测试/构建时仍需完整源码；API 匿名限流严，带 token 认证。弯路勿走：第三次重试整包下载、或换镜像站碰运气——失败模式是传输时长不是源站。",
+  "tags": [
+   "zone:public",
+   "derived:distilled",
+   "weak-network",
+   "github-api",
+   "code-survey",
+   "download-strategy"
+  ],
+  "retrieval_trigger": "git clone fails RPC reset / tarball corrupt truncated / slow network research repo / fetch specific files raw",
+  "related_keys": [
+   "<输入行的key>"
+  ]
+ }
+}

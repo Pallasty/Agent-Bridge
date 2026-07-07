@@ -602,6 +602,39 @@
             ))
             .await
             .expect("save outcome");
+        // P2 review surface: a drafted candidate + its pending draft row,
+        // plus a draft whose source is already provenance-closed (must
+        // self-clean out of the pending queue).
+        store
+            .memory_save(&mk(
+                "dc_drafted_source",
+                "lesson",
+                "verified mechanism that the nightly batch already drafted",
+                vec!["continuity_confidence:verified".into()],
+                vec![],
+            ))
+            .await
+            .expect("save drafted source");
+        store
+            .memory_save(&mk(
+                "distill_draft_dc_drafted_source",
+                "distill_draft",
+                "# 蒸馏草稿（propose-only）…",
+                vec!["verdict:distill".into(), "proposes:pub_dc_new".into()],
+                vec!["dc_drafted_source".into()],
+            ))
+            .await
+            .expect("save pending draft");
+        store
+            .memory_save(&mk(
+                "distill_draft_dc_distilled_source",
+                "distill_draft",
+                "# 蒸馏草稿（已被出处反连接关闭）…",
+                vec!["verdict:distill".into(), "proposes:pub_dc_already_distilled".into()],
+                vec!["dc_distilled_source".into()],
+            ))
+            .await
+            .expect("save resolved draft");
 
         let out = SessionBootstrapTool::new(hub)
             .execute(
@@ -647,6 +680,30 @@
         assert!(
             !block_body.contains("dc_dismissed"),
             "distill:no dismissal must hold: {block_body}"
+        );
+        assert!(
+            !block_body.contains("dc_drafted_source"),
+            "a drafted candidate's surfaced item is its draft row, not an S1 slot: {block_body}"
+        );
+
+        // P2 review surface: the pending draft renders with verdict + target;
+        // the provenance-closed draft self-cleans. Negative checks scoped to
+        // the drafts block body, same framing rule as above.
+        let drafts_body = text
+            .split("Distill drafts pending review")
+            .nth(1)
+            .expect("drafts block present")
+            .split("\n\n")
+            .next()
+            .expect("drafts block body")
+            .to_string();
+        assert!(
+            drafts_body.contains("- distill_draft_dc_drafted_source [distill → pub_dc_new]"),
+            "{drafts_body}"
+        );
+        assert!(
+            !drafts_body.contains("distill_draft_dc_distilled_source"),
+            "provenance-closed draft must leave the pending queue: {drafts_body}"
         );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
@@ -701,6 +758,53 @@
     fn format_distillation_candidates_block_empty_is_none() {
         assert!(format_distillation_candidates_block(&[], false).is_none());
         assert!(format_distillation_candidates_block(&[], true).is_none());
+    }
+
+    #[test]
+    fn format_distill_drafts_block_labels_and_overflow() {
+        let mk = |key: &str, tags: Vec<&str>| MemoryRecord {
+            key: key.into(),
+            kind: "distill_draft".into(),
+            content: "c".into(),
+            tags: tags.into_iter().map(String::from).collect(),
+            related_keys: vec![],
+            scope: None,
+            created_at: 1,
+            updated_at: 1,
+            last_accessed_at: 0,
+            access_count: 0,
+            importance: 0.4,
+            status: "active".into(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        assert!(format_distill_drafts_block(&[], false).is_none());
+        assert!(format_distill_drafts_block(&[], true).is_none());
+
+        // verdict + target labels come from tags
+        let rows = vec![
+            mk("distill_draft_a", vec!["verdict:distill", "proposes:pub_new"]),
+            mk("distill_draft_b", vec!["verdict:merge", "merge_into:pub_old"]),
+            mk("distill_draft_c", vec!["verdict:reject"]),
+        ];
+        let block = format_distill_drafts_block(&rows, false).unwrap();
+        let body = block.join("\n");
+        assert!(block[0].contains("pending review (3"), "header: {}", block[0]);
+        assert!(body.contains("- distill_draft_a [distill → pub_new]"), "{body}");
+        assert!(body.contains("- distill_draft_b [merge → pub_old]"), "{body}");
+        assert!(body.contains("- distill_draft_c [reject]"), "{body}");
+
+        // >5 pending: row lines cap at 5, overflow marker carries the rest
+        let many: Vec<MemoryRecord> = (0..7)
+            .map(|i| mk(&format!("distill_draft_{i}"), vec!["verdict:distill"]))
+            .collect();
+        let block = format_distill_drafts_block(&many, true).unwrap();
+        let row_lines = block.iter().filter(|l| l.starts_with("- ")).count();
+        assert_eq!(row_lines, 5);
+        assert!(
+            block.iter().any(|l| l.contains("…2 more pending")),
+            "{block:?}"
+        );
     }
 
     fn result_json(res: &ToolResult) -> Value {

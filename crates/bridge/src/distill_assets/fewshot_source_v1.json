@@ -1,0 +1,7 @@
+{
+ "key": "curated_lesson_7af8a57a_6本机网络对_GitHub_大流量传输不稳",
+ "kind": "lesson",
+ "scope": null,
+ "tags": "[\"auto_curated\"]",
+ "content": "本机网络对 GitHub 大流量传输不稳（git clone 差 34KB 被 reset、codeload tarball 31MB 两次 TAR_BAD），但小请求稳定——有效替代 = GitHub API 拿全仓文件树 + raw.githubusercontent 逐文件精准拉取（8 核心文件+6 YAML 全成功）。调研场景按需拉文件本就优于全量克隆。"
+}

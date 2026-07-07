@@ -16613,7 +16613,10 @@ fn format_feedback_preamble_block(
 /// `pub_provenance` = non-pub keys already cited by a pub_* row's
 /// related_keys — already-distilled rows leave the queue. `distill:no` is
 /// the manual dismissal tag.
-fn pick_distillation_candidates(
+///
+/// `pub(crate)` since P2: the nightly draft batch (`dream_distill::run`)
+/// feeds off the same picker so CLI queue and bootstrap queue can't drift.
+pub(crate) fn pick_distillation_candidates(
     rows: Vec<MemoryRecord>,
     pub_provenance: &std::collections::HashSet<String>,
     k: usize,
@@ -16665,6 +16668,52 @@ fn format_distillation_candidates_block(
             .find_map(|t| t.strip_prefix("continuity_blast_radius:"))
             .unwrap_or("unlabeled");
         out.push(format!("- {} [{} · radius:{}]", r.key, r.kind, radius));
+    }
+    out.push(String::new());
+    Some(out)
+}
+
+/// Formats the P2 "distill drafts pending review" bootstrap block — the
+/// review surface over rows the nightly `dream distill` batch wrote. Shows
+/// at most `DISTILL_DRAFTS_SHOWN` newest drafts; the queue is self-cleaning
+/// (see `dream_distill::pending_distill_drafts`), so a long list means
+/// review debt, not staleness. Returns `None` when empty.
+fn format_distill_drafts_block(rows: &[MemoryRecord], is_compact: bool) -> Option<Vec<String>> {
+    const DISTILL_DRAFTS_SHOWN: usize = 5;
+    if rows.is_empty() {
+        return None;
+    }
+    let header = if is_compact {
+        format!("=== Distill drafts ({}) ===", rows.len())
+    } else {
+        format!(
+            "=== Distill drafts pending review ({} — memory_get the draft, apply its 评审动作; queue self-clears) ===",
+            rows.len()
+        )
+    };
+    let mut out = vec![header];
+    for r in rows.iter().take(DISTILL_DRAFTS_SHOWN) {
+        let verdict = r
+            .tags
+            .iter()
+            .find_map(|t| t.strip_prefix("verdict:"))
+            .unwrap_or("?");
+        let target = r
+            .tags
+            .iter()
+            .find_map(|t| {
+                t.strip_prefix("proposes:")
+                    .or_else(|| t.strip_prefix("merge_into:"))
+            })
+            .map(|k| format!(" → {k}"))
+            .unwrap_or_default();
+        out.push(format!("- {} [{verdict}{target}]", r.key));
+    }
+    if rows.len() > DISTILL_DRAFTS_SHOWN {
+        out.push(format!(
+            "  …{} more pending (memory_list kind=distill_draft)",
+            rows.len() - DISTILL_DRAFTS_SHOWN
+        ));
     }
     out.push(String::new());
     Some(out)
@@ -16768,6 +16817,10 @@ const BUDGET_DISTILL_CANDIDATES: usize = 120;
 // initially suggested 200 was rejected by measurement — it holds only ~6
 // index lines, reintroducing the trace-less-vanish bug for typical load.
 const BUDGET_CONTINUITY_KERNEL_INDEX: usize = 1_100;
+// P2 draft review surface (2026-07-07): header + ≤5 draft lines + overflow
+// marker. Draft keys/verdict targets are ASCII; the full header carries a
+// short CJK span (评审动作), so 200 holds the 5-line worst case with room.
+const BUDGET_DISTILL_DRAFTS: usize = 200;
 const BUDGET_BOOTSTRAP_ROWS: usize = 500;
 const BUDGET_GAMMA_BFS: usize = 200;
 const BUDGET_DELTA_TRANSITIONS: usize = 150;
@@ -17257,15 +17310,44 @@ impl McpTool for SessionBootstrapTool {
                         .unwrap_or_default(),
                 );
             }
+            let draft_rows = store
+                .list_memories(
+                    Some(crate::dream_distill::DRAFT_KIND),
+                    MemoryListSort::Newest,
+                    100,
+                )
+                .await
+                .unwrap_or_default();
             let pub_provenance: std::collections::HashSet<String> = pool
                 .iter()
                 .filter(|r| r.key.starts_with("pub_"))
                 .flat_map(|r| r.related_keys.iter().cloned())
                 .filter(|k| !k.starts_with("pub_"))
                 .collect();
-            let picked = pick_distillation_candidates(pool, &pub_provenance, 3);
+            let sources_distill_no: std::collections::HashSet<String> = pool
+                .iter()
+                .filter(|r| r.tags.iter().any(|t| t == "distill:no"))
+                .map(|r| r.key.clone())
+                .collect();
+            // P2: a drafted candidate's surfaced item is its DRAFT row (the
+            // review block below) — exclude it here so one mechanism never
+            // occupies two queue slots at once.
+            let mut exclusion = pub_provenance.clone();
+            exclusion.extend(crate::dream_distill::drafted_source_keys(&draft_rows));
+            let picked = pick_distillation_candidates(pool, &exclusion, 3);
             if let Some(block) = format_distillation_candidates_block(&picked, is_compact) {
                 lines.extend(cap_block_lines(block, BUDGET_DISTILL_CANDIDATES));
+            }
+            // P2 review surface — pending drafts from the nightly
+            // `dream distill` batch; self-cleaning, see
+            // `dream_distill::pending_distill_drafts` for exit conditions.
+            let pending = crate::dream_distill::pending_distill_drafts(
+                draft_rows,
+                &pub_provenance,
+                &sources_distill_no,
+            );
+            if let Some(block) = format_distill_drafts_block(&pending, is_compact) {
+                lines.extend(cap_block_lines(block, BUDGET_DISTILL_DRAFTS));
             }
         }
 
