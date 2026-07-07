@@ -12569,6 +12569,22 @@ fn ambient_surfacing_disabled() -> bool {
     )
 }
 
+/// S1 distillation-surfacing kill switch: `AB_DISTILL_SURFACING_DISABLE=1`
+/// drops the "Distillation candidates" bootstrap block. Presentation-only:
+/// the eval-side detector and all ranking are untouched. Same shape as the
+/// stage-1 ambient switch above.
+fn distill_surfacing_disabled_from(env_val: Option<&str>) -> bool {
+    matches!(env_val, Some(v) if v == "1" || v.eq_ignore_ascii_case("true"))
+}
+
+fn distill_surfacing_disabled() -> bool {
+    distill_surfacing_disabled_from(
+        std::env::var("AB_DISTILL_SURFACING_DISABLE")
+            .ok()
+            .as_deref(),
+    )
+}
+
 /// Item B real-embedder gate: would a query embed produce a REAL vector (not the
 /// hash fallback)? Under remote delegation the embed runs on a warm peer, so the
 /// local model state is irrelevant. Otherwise the local ONNX model must have
@@ -12591,8 +12607,20 @@ fn fallback_embedder_ready() -> bool {
 mod recall_semantic_fallback_tests {
     use super::{
         ambient_surfacing_disabled_from, correction_cosurface_enabled_from,
-        outcome_collector_enabled_from, recall_semantic_fallback_enabled_from,
+        distill_surfacing_disabled_from, outcome_collector_enabled_from,
+        recall_semantic_fallback_enabled_from,
     };
+
+    #[test]
+    fn distill_surfacing_kill_switch_default_off_unless_truthy() {
+        assert!(!distill_surfacing_disabled_from(None));
+        assert!(!distill_surfacing_disabled_from(Some("0")));
+        assert!(!distill_surfacing_disabled_from(Some("")));
+        assert!(!distill_surfacing_disabled_from(Some("off")));
+        assert!(distill_surfacing_disabled_from(Some("1")));
+        assert!(distill_surfacing_disabled_from(Some("true")));
+        assert!(distill_surfacing_disabled_from(Some("TRUE")));
+    }
 
     #[test]
     fn ambient_surfacing_kill_switch_default_off_unless_truthy() {
@@ -16574,6 +16602,74 @@ fn format_feedback_preamble_block(
     Some(out)
 }
 
+/// S1 distillation-candidate picker (design packet
+/// `design_s1_distillation_surfacing_arc_20260707`). Propose-only: selects
+/// verified, still-undistilled mechanism rows as candidates for manual
+/// pub_* distillation; nothing here writes.
+///
+/// The verified signal spans TWO tag vocabularies — continuity tags on
+/// lesson-class rows, verify facets on outcome-class rows; filtering on one
+/// alone loses half the ground truth (measured 2026-07-07: recall 2/7 → 4/4).
+/// `pub_provenance` = non-pub keys already cited by a pub_* row's
+/// related_keys — already-distilled rows leave the queue. `distill:no` is
+/// the manual dismissal tag.
+fn pick_distillation_candidates(
+    rows: Vec<MemoryRecord>,
+    pub_provenance: &std::collections::HashSet<String>,
+    k: usize,
+) -> Vec<MemoryRecord> {
+    let mut out: Vec<MemoryRecord> = rows
+        .into_iter()
+        .filter(memory_record_active)
+        .filter(|r| !r.key.starts_with("pub_"))
+        .filter(|r| !r.tags.iter().any(|t| t == "zone:public" || t == "distill:no"))
+        .filter(|r| match r.kind.as_str() {
+            "lesson" | "error_pattern" => r
+                .tags
+                .iter()
+                .any(|t| t == "continuity_confidence:verified"),
+            "present_outcome" | "outcome" => r.tags.iter().any(|t| t == "verify:verified"),
+            _ => false,
+        })
+        .filter(|r| !pub_provenance.contains(&r.key))
+        .collect();
+    out.sort_by(|a, b| b.created_at.cmp(&a.created_at).then(a.key.cmp(&b.key)));
+    out.truncate(k);
+    out
+}
+
+/// Formats the S1 "distillation candidates" bootstrap block. Shows each
+/// row's blast_radius tag: radius labels are known-miscalibrated against
+/// real portability (zones MEASURE, 2026-07-06), so the distiller re-judges
+/// radius at distill time. Returns `None` when empty (no hollow header).
+fn format_distillation_candidates_block(
+    rows: &[MemoryRecord],
+    is_compact: bool,
+) -> Option<Vec<String>> {
+    if rows.is_empty() {
+        return None;
+    }
+    let header = if is_compact {
+        format!("=== Distill candidates ({}) ===", rows.len())
+    } else {
+        format!(
+            "=== Distillation candidates ({} — distill to pub_* or dismiss with tag distill:no) ===",
+            rows.len()
+        )
+    };
+    let mut out = vec![header];
+    for r in rows {
+        let radius = r
+            .tags
+            .iter()
+            .find_map(|t| t.strip_prefix("continuity_blast_radius:"))
+            .unwrap_or("unlabeled");
+        out.push(format!("- {} [{} · radius:{}]", r.key, r.kind, radius));
+    }
+    out.push(String::new());
+    Some(out)
+}
+
 /// **B1 audit-gap v0 (2026-05-19)** — project-state digest block formatter.
 /// Compact "where am I right now" orientation card for session bootstrap.
 /// Three buckets (caller-sourced + pre-filtered):
@@ -16656,6 +16752,9 @@ const BUDGET_CROSS_NODE_PEERS: usize = 160;
 const BUDGET_DECISIONS_DUE: usize = 200;
 const BUDGET_ERROR_PATTERNS: usize = 200;
 const BUDGET_CONTINUITY_KERNEL: usize = 260;
+// S1 distillation surfacing (2026-07-07): header + 3 key lines. Keys are
+// ASCII but budget is token-estimated, so CJK-safe by construction.
+const BUDGET_DISTILL_CANDIDATES: usize = 120;
 // D1 fix (2026-07-06) — separate budget for the kernel INDEX section (the
 // one-line-per-row floor for selected rows that lost full-text rendering).
 // Measured with `estimate_tokens_from_text` on 34 realistic index lines
@@ -16813,7 +16912,9 @@ impl McpTool for SessionBootstrapTool {
                  (AGENT_BRIDGE_OUTCOME_COLLECTOR) is on, the semantic page is logged to \
                  retrieval_surfacing as mode=bootstrap — telemetry-only (excluded from \
                  reinforce/decay aggregates until a calibrated ambient rule exists); \
-                 AB_BOOTSTRAP_SURFACING_DISABLE=1 turns just this writer off."
+                 AB_BOOTSTRAP_SURFACING_DISABLE=1 turns just this writer off. Also \
+                 surfaces an S1 distillation-candidates block (propose-only; \
+                 AB_DISTILL_SURFACING_DISABLE=1 drops it)."
                 .into(),
             input_schema: json!({
                 "type": "object",
@@ -17138,6 +17239,33 @@ impl McpTool for SessionBootstrapTool {
             let picked = pick_top_feedback(feedback_pool, 5, now_ts);
             if let Some(block) = format_feedback_preamble_block(&picked, is_compact, snippet_len) {
                 lines.extend(cap_block_lines(block, BUDGET_FEEDBACK_PREAMBLE));
+            }
+        }
+
+        // S1 distillation surfacing — propose-only queue of verified,
+        // still-undistilled mechanism rows for manual pub_* distillation
+        // (design_s1_distillation_surfacing_arc_20260707). Scope-less pools:
+        // pub_* rows live under domain:* scopes and candidates under project
+        // scopes, so the in-scope list would miss both.
+        if !distill_surfacing_disabled() {
+            let mut pool: Vec<MemoryRecord> = Vec::new();
+            for kind in ["lesson", "error_pattern", "present_outcome", "outcome"] {
+                pool.extend(
+                    store
+                        .list_memories(Some(kind), MemoryListSort::Newest, 200)
+                        .await
+                        .unwrap_or_default(),
+                );
+            }
+            let pub_provenance: std::collections::HashSet<String> = pool
+                .iter()
+                .filter(|r| r.key.starts_with("pub_"))
+                .flat_map(|r| r.related_keys.iter().cloned())
+                .filter(|k| !k.starts_with("pub_"))
+                .collect();
+            let picked = pick_distillation_candidates(pool, &pub_provenance, 3);
+            if let Some(block) = format_distillation_candidates_block(&picked, is_compact) {
+                lines.extend(cap_block_lines(block, BUDGET_DISTILL_CANDIDATES));
             }
         }
 

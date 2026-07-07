@@ -518,6 +518,191 @@
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
 
+    #[tokio::test]
+    async fn session_bootstrap_surfaces_distillation_candidates_propose_only() {
+        // S1 surfacing: a verified lesson that is NOT yet distilled shows up
+        // in the candidates block; a lesson already cited by a pub_* row's
+        // related_keys (provenance closure) does not; the pub_* row itself
+        // never does; distill:no dismissal holds. Radius tag renders beside
+        // the key for distill-time recalibration.
+        let (hub, temp_dir) = mk_test_hub_with_store().await;
+        let cwd = temp_dir.display().to_string();
+        let store = hub.store.clone().expect("store");
+        // Contents are deliberately token-disjoint: memory_save's write-time
+        // contradiction detection supersedes same-kind+scope rows whose token
+        // overlap exceeds 0.5 (the consolidate arc lesson, 2026-07-06).
+        let mk = |key: &str, kind: &str, content: &str, tags: Vec<String>, related: Vec<String>| {
+            MemoryRecord {
+                key: key.into(),
+                kind: kind.into(),
+                content: content.into(),
+                tags,
+                related_keys: related,
+                scope: Some(format!("project:{cwd}")),
+                created_at: 1_700_000_100,
+                updated_at: 1_700_000_100,
+                last_accessed_at: 1_700_000_100,
+                access_count: 0,
+                importance: 0.7,
+                status: "active".into(),
+                trigger_pattern: None,
+                superseded_by: None,
+            }
+        };
+        store
+            .memory_save(&mk(
+                "dc_fresh_lesson",
+                "lesson",
+                "cargo tmpfs builds exhaust memory quickly",
+                vec![
+                    "continuity_confidence:verified".into(),
+                    "continuity_blast_radius:cross_project".into(),
+                ],
+                vec![],
+            ))
+            .await
+            .expect("save fresh");
+        store
+            .memory_save(&mk(
+                "dc_distilled_source",
+                "lesson",
+                "terminal submit keystrokes vary across coding CLIs",
+                vec!["continuity_confidence:verified".into()],
+                vec![],
+            ))
+            .await
+            .expect("save source");
+        store
+            .memory_save(&mk(
+                "pub_dc_already_distilled",
+                "lesson",
+                "portable wisdom: interactive agents disagree about enter",
+                vec!["zone:public".into(), "derived:distilled".into()],
+                vec!["dc_distilled_source".into()],
+            ))
+            .await
+            .expect("save pub");
+        store
+            .memory_save(&mk(
+                "dc_dismissed",
+                "lesson",
+                "workspace idiosyncrasy judged nonportable here",
+                vec!["continuity_confidence:verified".into(), "distill:no".into()],
+                vec![],
+            ))
+            .await
+            .expect("save dismissed");
+        store
+            .memory_save(&mk(
+                "dc_verified_outcome",
+                "present_outcome",
+                "deployed feature confirmed through live smoke",
+                vec!["verify:verified".into()],
+                vec![],
+            ))
+            .await
+            .expect("save outcome");
+
+        let out = SessionBootstrapTool::new(hub)
+            .execute(
+                json!({"cwd": cwd, "limit": 10, "frontend": "claude-code"}),
+                &ToolContext::default(),
+            )
+            .await
+            .expect("bootstrap execute");
+        let text = result_text(&out);
+        assert!(text.contains("Distillation candidates"), "{text}");
+        assert!(
+            text.contains("- dc_fresh_lesson [lesson · radius:cross_project]"),
+            "{text}"
+        );
+        assert!(
+            text.contains("- dc_verified_outcome [present_outcome · radius:unlabeled]"),
+            "{text}"
+        );
+        // Negative checks are scoped to the block BODY (ends at the first
+        // blank line): excluded rows legitimately appear later in the main
+        // bootstrap listing — they are active memories, just not candidates.
+        let block_body = text
+            .split("Distillation candidates")
+            .nth(1)
+            .expect("block present")
+            .split("\n\n")
+            .next()
+            .expect("block body")
+            .to_string();
+        let candidate_lines = block_body
+            .lines()
+            .filter(|l| l.starts_with("- "))
+            .count();
+        assert_eq!(candidate_lines, 2, "exactly the two survivors: {block_body}");
+        assert!(
+            !block_body.contains("dc_distilled_source"),
+            "provenance-closed row must leave the queue: {block_body}"
+        );
+        assert!(
+            !block_body.contains("pub_dc_already_distilled"),
+            "pub_ rows are never candidates: {block_body}"
+        );
+        assert!(
+            !block_body.contains("dc_dismissed"),
+            "distill:no dismissal must hold: {block_body}"
+        );
+
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    }
+
+    #[test]
+    fn pick_distillation_candidates_dual_vocabulary_and_exclusions() {
+        let mk = |key: &str, kind: &str, tags: Vec<&str>, created: i64| MemoryRecord {
+            key: key.into(),
+            kind: kind.into(),
+            content: "c".into(),
+            tags: tags.into_iter().map(String::from).collect(),
+            related_keys: vec![],
+            scope: None,
+            created_at: created,
+            updated_at: created,
+            last_accessed_at: created,
+            access_count: 0,
+            importance: 0.7,
+            status: "active".into(),
+            trigger_pattern: None,
+            superseded_by: None,
+        };
+        let provenance: std::collections::HashSet<String> =
+            ["already_distilled".to_string()].into_iter().collect();
+        let rows = vec![
+            mk("v_lesson", "lesson", vec!["continuity_confidence:verified"], 30),
+            mk("v_outcome", "present_outcome", vec!["verify:verified"], 40),
+            // wrong vocabulary for its kind -> excluded
+            mk("x_lesson_facet", "lesson", vec!["verify:verified"], 50),
+            mk("x_outcome_cont", "outcome", vec!["continuity_confidence:verified"], 50),
+            // unverified / wrong kind / public / dismissed / distilled / pub_
+            mk("x_unverified", "lesson", vec![], 50),
+            mk("x_decision", "decision", vec!["continuity_confidence:verified"], 50),
+            mk("x_public", "lesson", vec!["continuity_confidence:verified", "zone:public"], 50),
+            mk("x_dismissed", "lesson", vec!["continuity_confidence:verified", "distill:no"], 50),
+            mk("already_distilled", "lesson", vec!["continuity_confidence:verified"], 50),
+            mk("pub_row", "lesson", vec!["continuity_confidence:verified"], 50),
+        ];
+        let picked = pick_distillation_candidates(rows.clone(), &provenance, 3);
+        let keys: Vec<&str> = picked.iter().map(|r| r.key.as_str()).collect();
+        // newest-first: v_outcome (40) before v_lesson (30); nothing else survives
+        assert_eq!(keys, vec!["v_outcome", "v_lesson"]);
+
+        // k truncation keeps the newest
+        let picked1 = pick_distillation_candidates(rows, &provenance, 1);
+        assert_eq!(picked1.len(), 1);
+        assert_eq!(picked1[0].key, "v_outcome");
+    }
+
+    #[test]
+    fn format_distillation_candidates_block_empty_is_none() {
+        assert!(format_distillation_candidates_block(&[], false).is_none());
+        assert!(format_distillation_candidates_block(&[], true).is_none());
+    }
+
     fn result_json(res: &ToolResult) -> Value {
         serde_json::from_str(&result_text(res)).expect("valid json result")
     }
