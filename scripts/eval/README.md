@@ -58,6 +58,13 @@ sourced and the embedder works). Override with `--binary`.
    review, not staleness. All other roles (`state`, `procedure`, `warning`,
    …) keep the 14-day suspect threshold.
 
+## Sibling probes (not benchmark components)
+
+`ambient_gate.py` — ambient stage-2 data-gate probe (OPEN/WAIT): is the
+mode=bootstrap telemetry slice ripe enough to calibrate an ambient-specific
+reinforce rule? Maturation gate for a parked lane, not a regression component;
+it never touches baselines. Run: `python3 scripts/eval/ambient_gate.py`.
+
 ## Baselines
 
 First baseline per day is written to `baselines/<date>.json`; commit it with
