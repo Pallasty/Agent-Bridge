@@ -162,6 +162,59 @@ def eval_continuity(mcp):
     }
 
 
+# ------------------------------------------------------------- distillation
+def eval_distillation(db_path):
+    """S1 distillation-candidate detector, measured against the hand-curated
+    pub_* corpus (ground truth = the corpus rows' non-pub provenance links).
+
+    The detector is the draft S1 heuristic (validated 2026-07-07, in-store
+    recall 4/4): verified lessons/error_patterns by continuity tag, plus
+    verified outcomes by facet tag — two different tag vocabularies, both
+    required. Rows already public or dismissed (distill:no) are excluded.
+    Gate: below 10 corpus rows there is nothing to evaluate honestly.
+    """
+    db = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    pubs = db.execute(
+        "SELECT key, related_keys FROM memories WHERE key LIKE 'pub_%' AND status='active'"
+    ).fetchall()
+    if len(pubs) < 10:
+        db.close()
+        return {"status": "gated", "reason": f"pub_* corpus < 10 rows ({len(pubs)})"}
+    sources = set()
+    for _, rk in pubs:
+        for k in json.loads(rk or "[]"):
+            if not k.startswith("pub_"):
+                sources.add(k)
+    in_store = {s for s in sources
+                if db.execute("SELECT 1 FROM memories WHERE key=? AND status='active'",
+                              (s,)).fetchone()}
+    cands = db.execute(
+        """SELECT key FROM memories WHERE status='active'
+           AND key NOT LIKE 'pub_%'
+           AND tags NOT LIKE '%\"zone:public\"%'
+           AND tags NOT LIKE '%\"distill:no\"%'
+           AND ((kind IN ('lesson','error_pattern')
+                 AND tags LIKE '%\"continuity_confidence:verified\"%')
+             OR (kind IN ('present_outcome','outcome')
+                 AND tags LIKE '%\"verify:verified\"%'))"""
+    ).fetchall()
+    db.close()
+    cand_keys = {c[0] for c in cands}
+    hits = sorted(in_store & cand_keys)
+    return {
+        "status": "active",
+        "corpus_rows": len(pubs),
+        "provenance_sources": len(sources),
+        # File-archive provenance (session memory files) is invisible to a
+        # store-side detector by construction; recall is scored on the
+        # in-store subset only.
+        "provenance_in_store": len(in_store),
+        "detector_population": len(cand_keys),
+        "detector_recall_hits": hits,
+        "detector_recall": f"{len(hits)}/{len(in_store)}",
+    }
+
+
 # ---------------------------------------------------------- governance lint
 def eval_governance_lint(db_path):
     db = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
@@ -229,7 +282,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--binary", default=DEFAULT_BINARY)
     ap.add_argument("--db", default=DEFAULT_DB)
-    ap.add_argument("--component", choices=["retrieval", "continuity", "lint"], default=None)
+    ap.add_argument("--component",
+                    choices=["retrieval", "continuity", "lint", "distillation"],
+                    default=None)
     ap.add_argument("--compare", default=None, metavar="BASELINE_JSON")
     ap.add_argument("--out", default=None, help="output path (default baselines/<date>.json)")
     args = ap.parse_args()
@@ -245,7 +300,6 @@ def main():
     result = {
         "date": datetime.date.today().isoformat(),
         "binary": args.binary,
-        "distillation": {"status": "gated", "reason": "pub_* corpus < 10 rows"},
     }
     need_mcp = args.component in (None, "retrieval", "continuity")
     mcp = McpClient(args.binary) if need_mcp else None
@@ -256,6 +310,8 @@ def main():
             result["continuity"] = eval_continuity(mcp)
         if args.component in (None, "lint"):
             result["governance_lint"] = eval_governance_lint(args.db)
+        if args.component in (None, "distillation"):
+            result["distillation"] = eval_distillation(args.db)
     finally:
         if mcp:
             mcp.close()
@@ -296,6 +352,14 @@ def main():
         if not result["governance_lint"]["suspects"] \
                 and not result["governance_lint"].get("aging_constraints"):
             print("lint: clean (no suspects, no aging constraints)")
+    if "distillation" in result:
+        d = result["distillation"]
+        if d["status"] == "gated":
+            print(f"distillation: gated ({d['reason']})")
+        else:
+            print(f"distillation: corpus={d['corpus_rows']} "
+                  f"detector recall {d['detector_recall']} (in-store provenance), "
+                  f"population={d['detector_population']}")
 
     if args.compare:
         verdict, notes = compare(baseline_data, result)

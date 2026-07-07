@@ -32,8 +32,18 @@ sourced and the embedder works). Override with `--binary`.
    T2 conventions must surface (as full rows, index lines — floor lines from
    PR#75/#76 — or profile text); T3 probes are informational (ephemeral state
    rotates). This is drill #1 (2026-07-06) mechanized.
-3. **distillation** — GATED, not implemented: corpus < 10 pub_* rows gives
-   nothing to evaluate honestly. Unlock with P1 corpus growth.
+3. **distillation** — active since 2026-07-07 (corpus gate ≥10 pub_* rows
+   met at 11). Scores the S1 candidate detector against the hand-curated
+   corpus: ground truth = the pub_* rows' non-pub provenance links, recall
+   on the in-store subset (file-archive provenance is invisible to a
+   store-side detector by construction — those lessons reach pub_* through
+   the session double-write convention instead). Also reports detector
+   population (propose-only queue size). Detector heuristic: verified
+   lessons/error_patterns (`continuity_confidence:verified`) + verified
+   outcomes (`verify:verified` facet — different tag vocabulary, both
+   required), excluding zone:public and `distill:no`-dismissed rows.
+   Informational — does not gate the compare verdict. Falls back to gated
+   below 10 corpus rows.
 4. **governance lint** — read-only sweep for suspicious stale high-privilege
    rows: `must_block` + `version_bound`/`project_phase_bound` freshness +
    older than 14 days. `freshness_policy` is declarative with no runtime
