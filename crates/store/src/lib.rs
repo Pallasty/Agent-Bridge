@@ -2762,7 +2762,10 @@ pub trait StateStore: Send + Sync {
     /// confounding the M7 `r_touched` reading. Filtering `["feedback"]`
     /// yields a pure-P-α subset reading; combined with the unfiltered
     /// run in dual-report mode, the audit can distinguish P-α signal
-    /// from L5 P3 artifact.
+    /// from L5 P3 artifact. (Since 2026-07-07 the machine-written retrieval
+    /// telemetry rows use kind=retrieval_feedback; kind=feedback is
+    /// corrections / owner feedback only, so an equivalent audit today
+    /// would filter both kinds.)
     ///
     /// Default no-op: returns empty `SignalFidelityStats`. SQLite impl
     /// extends the base query with `AND kind NOT IN (...)`. When

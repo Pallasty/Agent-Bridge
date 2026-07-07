@@ -9530,6 +9530,12 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
             .memory_save(&mk_rec("rp_fb_used", "feedback", vec![], 0.5))
             .await
             .expect("save fb_used");
+        // kind=retrieval_feedback telemetry (2026-07-07 split) must NOT be
+        // protected: decay is its desired cleanup channel.
+        store
+            .memory_save(&mk_rec("rp_rekind", "retrieval_feedback", vec![], 0.9))
+            .await
+            .expect("save rekind telemetry");
 
         for q in ["q1", "q2"] {
             store
@@ -9538,6 +9544,7 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
                         ("rp_feedback".to_string(), 0),
                         ("rp_mustblock".to_string(), 1),
                         ("rp_plain".to_string(), 2),
+                        ("rp_rekind".to_string(), 3),
                     ],
                     q,
                     "fts",
@@ -9566,11 +9573,15 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
             .await
             .expect("pass 1");
         assert_eq!(pass1.protected_skipped, 2, "feedback + must_block skipped");
-        assert_eq!(pass1.applied, 2, "plain decay + used-feedback reinforce");
+        assert_eq!(
+            pass1.applied, 3,
+            "plain decay + rekind-telemetry decay + used-feedback reinforce"
+        );
         let fb = store.memory_get("rp_feedback").await.unwrap().unwrap();
         let mb = store.memory_get("rp_mustblock").await.unwrap().unwrap();
         let pl = store.memory_get("rp_plain").await.unwrap().unwrap();
         let fu = store.memory_get("rp_fb_used").await.unwrap().unwrap();
+        let rk = store.memory_get("rp_rekind").await.unwrap().unwrap();
         assert!((fb.importance - 0.9).abs() < 1e-9, "protected feedback untouched");
         assert!((mb.importance - 0.9).abs() < 1e-9, "protected must_block untouched");
         assert!(
@@ -9578,6 +9589,10 @@ print(json.dumps({"schema": "vision_grounding_result.v0", "argv": sys.argv[1:]})
             "substring tag mention decays normally (quoted-element LIKE)"
         );
         assert!((fu.importance - 0.55).abs() < 1e-9, "reinforce unaffected");
+        assert!(
+            (rk.importance - 0.85).abs() < 1e-9,
+            "kind=retrieval_feedback telemetry is NOT protected — decays normally"
+        );
 
         // Consumed exactly once: an immediate re-run sees nothing pending.
         let pass2 = run_apply_pass(&store, &RuleParams::default(), 200, true, future_now)
@@ -20562,7 +20577,7 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             .await
             .expect("get feedback")
             .expect("feedback exists");
-        assert_eq!(saved.kind, "feedback");
+        assert_eq!(saved.kind, "retrieval_feedback");
         assert!(saved.tags.contains(&"retrieval_feedback".to_string()));
         assert!(saved.tags.contains(&"retrieval_feedback:stale".to_string()));
         assert!(saved.tags.contains(&"retrieval_source:memory_search".to_string()));
@@ -20782,9 +20797,11 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
                 0,
                 0.6,
             ),
+            // Post-split kind: the multi-source quorum below only holds if the
+            // consumer accepts kind=retrieval_feedback alongside legacy feedback.
             t4_memory_record(
                 "fb_stale_2",
-                "feedback",
+                "retrieval_feedback",
                 "outcome: stale",
                 &["retrieval_feedback", "retrieval_feedback:stale", "retrieval_source:memory_get"],
                 &["tgt_stale"],

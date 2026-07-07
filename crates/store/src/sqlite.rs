@@ -84,6 +84,10 @@ use tokio_rusqlite::rusqlite::OptionalExtension;
 /// preview and apply can never disagree on protection. The LIKE patterns
 /// include the JSON-array element quotes, so a substring mention inside
 /// another tag (e.g. a retrieval_trigger phrase) does NOT match.
+///
+/// kind=retrieval_feedback telemetry rows are deliberately NOT protected
+/// (2026-07-07 re-kind decision): their lifecycle signal is `consumed_at`,
+/// not `used_at`, so decay is the desired cleanup channel for them.
 const PROTECTED_CLASS_CASE_SQL: &str = "CASE WHEN m.kind = 'feedback' \
     OR m.tags LIKE '%\"continuity_actionability:must_block\"%' \
     OR m.tags LIKE '%\"continuity_role:constraint\"%' \
@@ -2276,7 +2280,9 @@ fn compute_signal_fidelity_from_rows(
 /// that observations rot in days while decisions stay relevant for months.
 fn decay_tau_days(kind: &str) -> f64 {
     match kind {
-        "observation" | "note" => 7.0,
+        // retrieval_feedback: machine telemetry is observation-class — its
+        // recency relevance dies as fast as any observation's.
+        "observation" | "note" | "retrieval_feedback" => 7.0,
         "todo" | "action" => 14.0,
         "lesson" | "bug" | "fix" | "pitfall" | "error_pattern" => 60.0,
         "decision" | "architecture" | "design" => 90.0,
@@ -2305,7 +2311,7 @@ fn importance_for_kind(kind: &str) -> f64 {
         "error_pattern" => 0.72,
         "todo" | "action" => 0.6,
         "fact" | "context" | "preference" | "session_handoff" => 0.5,
-        "observation" | "note" => 0.3,
+        "observation" | "note" | "retrieval_feedback" => 0.3,
         _ => 0.5,
     }
 }
@@ -2325,6 +2331,10 @@ fn importance_for_kind(kind: &str) -> f64 {
 /// - semantic path: the feedback boost is now one component of the
 ///   configurable [`semantic_rank_weights`] vector (default `w_fb` = 0.03);
 ///   see that fn for the owner-signed-off rebalance rationale.
+///
+/// kind=retrieval_feedback telemetry rows deliberately get NO boost (either
+/// path, 2026-07-07 re-kind): measured on the fixture query, this +1.0 was
+/// what held a telemetry row above non-feedback content rows.
 fn feedback_kind_boost_fts(kind: &str) -> f64 {
     if kind == "feedback" {
         1.0
@@ -23524,6 +23534,8 @@ mod tests {
         assert_eq!(feedback_kind_boost_fts("lesson"), 0.0);
         assert_eq!(feedback_kind_boost_fts("fact"), 0.0);
         assert_eq!(feedback_kind_boost_fts(""), 0.0);
+        // Telemetry kind (2026-07-07 split) deliberately gets no boost.
+        assert_eq!(feedback_kind_boost_fts("retrieval_feedback"), 0.0);
     }
 
     #[test]

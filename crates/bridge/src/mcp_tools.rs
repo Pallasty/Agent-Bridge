@@ -15776,6 +15776,14 @@ fn memory_retrieval_feedback_content(
     lines.join("\n")
 }
 
+/// Kind for the machine-written retrieval telemetry rows this tool saves
+/// (`retrieval_feedback:*` keys). Split out of `feedback` (2026-07-07) so
+/// telemetry never rides the behavioral-feedback surfaces — the FTS/semantic
+/// kind boosts, the decay protection class, and the session-start preamble
+/// all key on `feedback` and are meant for corrections / owner feedback,
+/// which stay kind=feedback (`correction:*` writer untouched).
+pub(crate) const RETRIEVAL_FEEDBACK_KIND: &str = "retrieval_feedback";
+
 #[async_trait]
 impl McpTool for MemoryRetrievalFeedbackTool {
     fn name(&self) -> &'static str {
@@ -15785,7 +15793,8 @@ impl McpTool for MemoryRetrievalFeedbackTool {
         ToolSchema {
             name: self.name().into(),
             description: "Record low-friction feedback about retrieved memories. \
-                 Writes a kind=feedback memory tagged with retrieval_feedback and, \
+                 Writes a kind=retrieval_feedback telemetry memory tagged with \
+                 retrieval_feedback and, \
                  when memory_key exists, links feedback -> memory_key with an \
                  outcome-specific edge such as retrieval_used or retrieval_stale. \
                  outcome=missing may be recorded without a target. This does not \
@@ -15928,7 +15937,7 @@ impl McpTool for MemoryRetrievalFeedbackTool {
 
         let rec = MemoryRecord {
             key: feedback_key.clone(),
-            kind: "feedback".to_string(),
+            kind: RETRIEVAL_FEEDBACK_KIND.to_string(),
             content,
             tags,
             related_keys: related_keys.clone(),
@@ -16527,6 +16536,9 @@ fn feedback_preamble_score(importance: f64, updated_at: i64, now: i64) -> f64 {
 fn pick_top_feedback(rows: Vec<MemoryRecord>, k: usize, now: i64) -> Vec<MemoryRecord> {
     let mut scored: Vec<(f64, MemoryRecord)> = rows
         .into_iter()
+        // kind=retrieval_feedback telemetry rows are deliberately outside the
+        // preamble pool: only behavioral feedback (corrections, owner notes)
+        // belongs in the session-start preamble.
         .filter(|r| r.status == "active" && r.kind == "feedback")
         .map(|r| {
             let score = feedback_preamble_score(r.importance, r.updated_at, now);
@@ -28798,6 +28810,14 @@ fn memory_consolidation_feedback_target<'a>(
         .find_map(|key| by_key.get(key).copied())
 }
 
+/// Telemetry rows written by memory_retrieval_feedback: kind=retrieval_feedback
+/// since the 2026-07-07 split, kind=feedback before it. Consumers accept both
+/// so pre-split history keeps flowing through consolidation.
+fn is_retrieval_feedback_telemetry(rec: &MemoryRecord) -> bool {
+    (rec.kind == RETRIEVAL_FEEDBACK_KIND || rec.kind == "feedback")
+        && rec.tags.iter().any(|tag| tag == "retrieval_feedback")
+}
+
 fn memory_consolidation_has_induced_edge(
     key: &str,
     edges_by_key: &HashMap<String, Vec<MemoryEdge>>,
@@ -28913,7 +28933,7 @@ fn memory_consolidation_gated_actions(
 
     let mut agg: BTreeMap<String, NegAgg> = BTreeMap::new();
     for rec in active {
-        if rec.kind != "feedback" || !rec.tags.iter().any(|tag| tag == "retrieval_feedback") {
+        if !is_retrieval_feedback_telemetry(rec) {
             continue;
         }
         let Some(target) = memory_consolidation_feedback_target(rec, by_key) else {
@@ -29087,7 +29107,7 @@ fn memory_consolidation_queue_from_records(
             );
         }
 
-        if rec.kind != "feedback" || !rec.tags.iter().any(|tag| tag == "retrieval_feedback") {
+        if !is_retrieval_feedback_telemetry(rec) {
             continue;
         }
         let Some(target) = memory_consolidation_feedback_target(rec, &by_key) else {
