@@ -11,12 +11,12 @@
    "fts": {
     "hit@5": 0.556,
     "hit@10": 0.667,
-    "mrr": 0.519
+    "mrr": 0.574
    },
    "hybrid": {
     "hit@5": 0.667,
     "hit@10": 0.667,
-    "mrr": 0.467
+    "mrr": 0.522
    },
    "semantic": {
     "hit@5": 0.444,
@@ -35,7 +35,7 @@
     "expected": "next_arc_survey_20260702",
     "ranks": {
      "fts": 1,
-     "hybrid": 2,
+     "hybrid": 1,
      "semantic": 0
     }
    },
@@ -83,7 +83,7 @@
     "query": "GitHub token 凭证读取 中文路径修复",
     "expected": "github_token_access_arrangement_20260627",
     "ranks": {
-     "fts": 2,
+     "fts": 1,
      "hybrid": 1,
      "semantic": 2
     }
@@ -118,7 +118,7 @@
   ]
  },
  "continuity": {
-  "bootstrap_chars": 9328,
+  "bootstrap_chars": 9694,
   "tiers": {
    "T1": {
     "total": 8,
