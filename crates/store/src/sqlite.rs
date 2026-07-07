@@ -23539,6 +23539,17 @@ mod tests {
     }
 
     #[test]
+    fn semantic_blend_score_gives_no_fb_bonus_to_retrieval_feedback() {
+        // The semantic leg of the same contract: w_fb fires only for
+        // kind=feedback, never for the telemetry kind.
+        let w = (1.0, 0.0, 0.0, 0.03);
+        let now = 1_700_000_000;
+        let fb = semantic_blend_score(w, 0.5, 0.0, now, 0, "feedback", now);
+        let tele = semantic_blend_score(w, 0.5, 0.0, now, 0, "retrieval_feedback", now);
+        assert!((fb - tele - 0.03).abs() < 1e-12, "w_fb fires only for kind=feedback");
+    }
+
+    #[test]
     fn semantic_rank_weights_resolve() {
         // Default (no legacy, no overrides) = the owner-signed-off conservative point.
         assert_eq!(

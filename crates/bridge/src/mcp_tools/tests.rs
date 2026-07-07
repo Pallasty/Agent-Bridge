@@ -20709,6 +20709,26 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
                 0,
                 0.7,
             ),
+            // Post-re-kind telemetry row: same marker tags, new kind. The
+            // consumer must flag its target exactly like the legacy row above.
+            t4_memory_record(
+                "lesson_dup_target2",
+                "lesson",
+                "second duplicated lesson target",
+                &[],
+                &[],
+                3,
+                0.7,
+            ),
+            t4_memory_record(
+                "telemetry_duplicate",
+                "retrieval_feedback",
+                "outcome: duplicate",
+                &["retrieval_feedback", "retrieval_feedback:duplicate"],
+                &["lesson_dup_target2"],
+                0,
+                0.7,
+            ),
             t4_memory_record(
                 "stale_warning",
                 "warning",
@@ -20760,7 +20780,9 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
         );
         assert_eq!(
             t4_bucket_keys(&queue, "duplicate_lessons"),
-            vec!["lesson_dup_target"]
+            vec!["lesson_dup_target", "lesson_dup_target2"],
+            "legacy kind=feedback and post-re-kind kind=retrieval_feedback \
+             telemetry must both flag their targets"
         );
         assert_eq!(t4_bucket_keys(&queue, "stale_warnings"), vec!["stale_warning"]);
         assert_eq!(
@@ -28962,6 +28984,27 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
             trigger_pattern: None,
             superseded_by: None,
         }
+    }
+
+    #[test]
+    fn is_retrieval_feedback_telemetry_accepts_both_kinds_requires_marker_tag() {
+        let mut rec = mk_feedback("rf:probe", 0.5, 1_700_000_000);
+        // Legacy row: kind=feedback + marker tag.
+        rec.tags = vec!["retrieval_feedback".into()];
+        assert!(is_retrieval_feedback_telemetry(&rec));
+        // Post-re-kind row.
+        rec.kind = "retrieval_feedback".into();
+        assert!(is_retrieval_feedback_telemetry(&rec));
+        // Marker tag on an unrelated kind is not telemetry.
+        rec.kind = "lesson".into();
+        assert!(!is_retrieval_feedback_telemetry(&rec));
+        // Either kind WITHOUT the marker tag is not telemetry
+        // (plain corrections / owner feedback rows).
+        rec.kind = "feedback".into();
+        rec.tags = vec![];
+        assert!(!is_retrieval_feedback_telemetry(&rec));
+        rec.kind = "retrieval_feedback".into();
+        assert!(!is_retrieval_feedback_telemetry(&rec));
     }
 
     #[test]
