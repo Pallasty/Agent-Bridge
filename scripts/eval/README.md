@@ -56,6 +56,11 @@ this run writes its own file, so same-day compares diff against the committed
 state, not against themselves (v1 fix — the original ordering made every
 same-day compare a trivial +0.000 PASS).
 
+Baselines are **full-run snapshots**: a `--component` run never writes the
+default baseline path (pass `--out` explicitly to save one) — a partial file
+there blinds the next day's `--compare` (v1.1 fix, bit us 2026-07-07 when a
+`--component lint` run clobbered the day's full baseline).
+
 Only **any_mode** MRR gates the verdict. Single modes breathe on a living
 corpus (measured 2026-07-06: hybrid ±0.06 on an unchanged DB as the
 coactivation graph moves; one near-tie fts rank flip per ~10-row write day

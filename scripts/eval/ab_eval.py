@@ -260,11 +260,23 @@ def main():
         if mcp:
             mcp.close()
 
-    out = args.out or os.path.join(EVAL_DIR, "baselines", f"{result['date']}.json")
-    os.makedirs(os.path.dirname(out), exist_ok=True)
-    with open(out, "w", encoding="utf-8") as f:
-        json.dump(result, f, ensure_ascii=False, indent=1)
-    print(f"wrote {out}")
+    # Baselines are full-run snapshots. A --component run writes only to an
+    # explicit --out, never the default baselines/<date>.json — a partial
+    # file there blinds the next day's --compare (bit us 2026-07-07 when a
+    # --component lint run overwrote the day's full baseline).
+    out = args.out or (
+        None if args.component
+        else os.path.join(EVAL_DIR, "baselines", f"{result['date']}.json")
+    )
+    if out:
+        out_dir = os.path.dirname(out)
+        if out_dir:
+            os.makedirs(out_dir, exist_ok=True)
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False, indent=1)
+        print(f"wrote {out}")
+    else:
+        print(f"component run ({args.component}): baseline not written (pass --out to save)")
 
     if "retrieval" in result:
         for mode, m in result["retrieval"]["metrics"].items():
@@ -281,6 +293,9 @@ def main():
             print(f"lint suspect: {s['key']} ({s['kind']}, {s['age_days']}d)")
         for s in result["governance_lint"].get("aging_constraints", []):
             print(f"lint aging constraint (review, not stale): {s['key']} ({s['kind']}, {s['age_days']}d)")
+        if not result["governance_lint"]["suspects"] \
+                and not result["governance_lint"].get("aging_constraints"):
+            print("lint: clean (no suspects, no aging constraints)")
 
     if args.compare:
         verdict, notes = compare(baseline_data, result)
