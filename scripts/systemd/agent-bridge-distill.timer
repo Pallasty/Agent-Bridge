@@ -1,0 +1,18 @@
+# Nightly trigger for the P2 distillation draft batch. See the .service
+# file for what it does and why it is propose-only.
+
+[Unit]
+Description=Nightly trigger for agent-bridge distillation draft batch
+Requires=agent-bridge-distill.service
+
+[Timer]
+# 04:30 — after the 03:42 hygiene pass so the picker sees the cleaned
+# store, off the top-of-hour cron herd. Persistent=true: this machine is
+# a laptop and 04:30 is usually lid-closed; a missed trigger fires once
+# on the next wake so the queue never starves.
+OnCalendar=*-*-* 04:30:00
+Persistent=true
+Unit=agent-bridge-distill.service
+
+[Install]
+WantedBy=timers.target

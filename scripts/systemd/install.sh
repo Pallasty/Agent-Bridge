@@ -5,6 +5,8 @@
 #   Timers (cadenced):
 #     - agent-bridge-memory-decay-unused.timer (Phase 2.x #8 daily decay)
 #     - agent-bridge-sync.timer (D2-G1 — 15-min cross-machine sync)
+#     - agent-bridge-distill.timer (P2 — nightly propose-only distillation
+#       draft batch via claude -p; 04:30, after the hygiene pass)
 #   Services (always-on, ship 2026-05-20 #325 backlog after recurring soft-hang):
 #     - agent-bridge-daemon.service (state.db writer + P-α tick + C3 self-check)
 #     - agent-bridge-palace.service (UI on port 7979)
@@ -28,6 +30,8 @@ UNITS=(
   agent-bridge-memory-decay-unused.timer
   agent-bridge-sync.service
   agent-bridge-sync.timer
+  agent-bridge-distill.service
+  agent-bridge-distill.timer
   agent-bridge-daemon.service
   agent-bridge-palace.service
   agent-bridge-daemon-http.service
@@ -36,6 +40,7 @@ UNITS=(
 TIMERS=(
   agent-bridge-memory-decay-unused.timer
   agent-bridge-sync.timer
+  agent-bridge-distill.timer
 )
 
 DAEMON_SERVICES=(

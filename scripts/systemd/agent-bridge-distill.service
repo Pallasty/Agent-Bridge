@@ -1,0 +1,43 @@
+# systemd user unit for the P2 nightly distillation draft batch.
+#
+# `dream distill` picks the top-5 verified, still-undistilled mechanism
+# rows (the same S1 queue session_bootstrap surfaces), asks `claude -p`
+# for a distill/merge/reject verdict + pub_* draft per candidate, and
+# writes `distill_draft_*` review rows. Propose-only: it NEVER writes
+# pub_* rows; every draft goes through per-row agent review in the
+# bootstrap "Distill drafts pending review" block (the pilot measured a
+# permissive bias in the distiller — p2_distill_pilot_verdict_20260707
+# ruling #1, PR #87).
+#
+# Unlike the hygiene cycle this DOES call an LLM — the local `claude -p`
+# CLI (zero API key). Cost envelope: 62-130 s/candidate measured, so a
+# top-5 round sits well under the 3900 s timeout. A failed or timed-out
+# candidate writes no row and is retried the next night (drafted-once
+# semantics apply only to drafts actually written).
+#
+# Runs at 04:30, deliberately after the 03:42 hygiene pass, so the
+# picker sees the post-hygiene store.
+#
+# Install: ./scripts/systemd/install.sh   (or manually:)
+#   cp scripts/systemd/agent-bridge-distill.{service,timer} ~/.config/systemd/user/
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now agent-bridge-distill.timer
+# One-shot manual run (don't wait for the timer):
+#   systemctl --user start agent-bridge-distill.service
+# Logs:
+#   tail -f ~/.cache/agent-bridge/distill.log
+
+[Unit]
+Description=agent-bridge nightly distillation draft batch (P2 — propose-only, claude -p)
+
+[Service]
+Type=oneshot
+# Wrapper, not `.real`: the batch writes memory rows, so it must inherit
+# per-machine env from machine.env (embedding model etc.).
+# AGENT_BRIDGE_CLAUDE_BIN pinned explicitly: the systemd user PATH does
+# not include ~/.local/bin, where the claude CLI lives.
+Environment=AGENT_BRIDGE_CLAUDE_BIN=%h/.local/bin/claude
+ExecStart=%h/.local/bin/agent-bridge dream distill --top-n 5
+StandardOutput=append:%h/.cache/agent-bridge/distill.log
+StandardError=append:%h/.cache/agent-bridge/distill.log
+TimeoutStartSec=3900
