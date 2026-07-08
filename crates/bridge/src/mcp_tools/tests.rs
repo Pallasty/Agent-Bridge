@@ -17034,8 +17034,8 @@ print(json.dumps({"schema": "desktop_invoke/v0", "argv": sys.argv[1:]}))
                         "input_generated_by": "capability_ledger_shadow_adapter",
                         "verdict": "accepted",
                         "read_only_confirmed": true,
-                        "downstream_action": "surface_static_ledger_review_artifact",
-                        "integration_decision": "accepted_for_review_only",
+                        "downstream_action": "display_or_review_only",
+                        "integration_decision": "shadow_only_no_runtime_admission",
                         "safety": {
                             "static_artifact_only": true,
                             "memory_write_attempted": false,

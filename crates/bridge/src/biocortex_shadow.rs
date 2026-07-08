@@ -5845,6 +5845,18 @@ pub fn biocortex_retrieval_opt_in_runtime_influence_review_request(
                 .and_then(|value| value.pointer("/safety/cognition_claim_observed")),
             false,
         );
+    let capability_ledger_downstream_action_display_only = !capability_ledger_provided
+        || value_str_eq(
+            capability_ledger_ref.and_then(|value| value.pointer("/downstream_action")),
+            "display_or_review_only",
+        );
+    let capability_ledger_integration_decision_display_only = !capability_ledger_provided
+        || value_str_eq(
+            capability_ledger_ref.and_then(|value| value.pointer("/integration_decision")),
+            "shadow_only_no_runtime_admission",
+        );
+    let capability_ledger_decision_display_only = capability_ledger_downstream_action_display_only
+        && capability_ledger_integration_decision_display_only;
     let capability_ledger_safe_for_review = !capability_ledger_provided
         || (capability_ledger_schema_ok
             && capability_ledger_accepted
@@ -5858,7 +5870,8 @@ pub fn biocortex_retrieval_opt_in_runtime_influence_review_request(
             && capability_ledger_nexus_false
             && capability_ledger_aiot_false
             && capability_ledger_language_false
-            && capability_ledger_cognition_false);
+            && capability_ledger_cognition_false
+            && capability_ledger_decision_display_only);
 
     let mut blockers = Vec::new();
     push_string_blocker(&mut blockers, gate_schema_ok, "gate_schema_invalid");
@@ -6338,6 +6351,11 @@ pub fn biocortex_retrieval_opt_in_runtime_influence_review_request(
             capability_ledger_cognition_false,
             "capability_ledger_cognition_claim_observed",
         );
+        push_string_blocker(
+            &mut blockers,
+            capability_ledger_decision_display_only,
+            "capability_ledger_decision_not_display_only",
+        );
     }
 
     let request_ready = blockers.is_empty();
@@ -6512,6 +6530,8 @@ pub fn biocortex_retrieval_opt_in_runtime_influence_review_request(
             "capability_ledger_report_packet_schema_ok": capability_ledger_schema_ok,
             "capability_ledger_report_packet_safe_for_review": capability_ledger_safe_for_review,
             "capability_ledger_read_only_confirmed": capability_ledger_provided && capability_ledger_read_only,
+            "capability_ledger_decision_display_only": !capability_ledger_provided
+                || capability_ledger_decision_display_only,
         },
         "required_human_decision": {
             "decision_schema": "agent_bridge.biocortex_retrieval.opt_in_runtime_influence_review_decision.v0",
@@ -6951,6 +6971,20 @@ pub fn biocortex_retrieval_opt_in_runtime_influence_decision_packet(
             .pointer("/requested_authorization/capability_ledger_can_authorize_runtime_influence"),
         false,
     );
+    let request_capability_ledger_downstream_action_display_only = value_str_eq(
+        request.pointer("/evidence_summary/capability_ledger_downstream_action"),
+        "display_or_review_only",
+    );
+    let request_capability_ledger_integration_decision_display_only = value_str_eq(
+        request.pointer("/evidence_summary/capability_ledger_integration_decision"),
+        "shadow_only_no_runtime_admission",
+    );
+    let request_capability_ledger_decision_display_only = if request_capability_ledger_provided {
+        request_capability_ledger_downstream_action_display_only
+            && request_capability_ledger_integration_decision_display_only
+    } else {
+        true
+    };
     let request_capability_ledger_safe_for_decision = if request_capability_ledger_provided {
         request_accepts_optional_capability_ledger
             && request_capability_ledger_redacted
@@ -6958,6 +6992,7 @@ pub fn biocortex_retrieval_opt_in_runtime_influence_decision_packet(
             && request_capability_ledger_read_only
             && request_capability_ledger_boundary_safe
             && request_capability_ledger_authorizes_nothing
+            && request_capability_ledger_decision_display_only
     } else {
         true
     };
@@ -7343,6 +7378,11 @@ pub fn biocortex_retrieval_opt_in_runtime_influence_decision_packet(
             request_capability_ledger_authorizes_nothing,
             "request_capability_ledger_authorizes_runtime_influence",
         );
+        push_string_blocker(
+            &mut blockers,
+            request_capability_ledger_decision_display_only,
+            "request_capability_ledger_decision_not_display_only",
+        );
     }
 
     let runtime_influence_authorized = blockers.is_empty();
@@ -7570,6 +7610,7 @@ pub fn biocortex_retrieval_opt_in_runtime_influence_decision_packet(
                 || request_capability_ledger_accepted,
             "capability_ledger_read_only_confirmed": !request_capability_ledger_provided
                 || request_capability_ledger_read_only,
+            "capability_ledger_decision_display_only": request_capability_ledger_decision_display_only,
             "capability_ledger_authorizes_runtime_influence": request_capability_ledger_provided
                 && !request_capability_ledger_authorizes_nothing,
         },
@@ -16189,8 +16230,8 @@ mod tests {
             "input_generated_by": "capability_ledger_shadow_adapter",
             "verdict": "accepted",
             "read_only_confirmed": true,
-            "downstream_action": "surface_static_ledger_review_artifact",
-            "integration_decision": "accepted_for_review_only",
+            "downstream_action": "display_or_review_only",
+            "integration_decision": "shadow_only_no_runtime_admission",
             "safety": {
                 "static_artifact_only": true,
                 "memory_write_attempted": false,
@@ -16254,7 +16295,7 @@ mod tests {
         })
     }
 
-    fn opt_in_runtime_influence_review_request_fixture() -> Value {
+    fn opt_in_runtime_influence_review_gate_fixture() -> Value {
         let mut request = opt_in_authorization_request_fixture();
         request["opt_in_plan"]["status"] = json!("runtime_influence_review_request_implemented");
         let decision_packet = biocortex_retrieval_opt_in_authorization_decision_packet(
@@ -16269,7 +16310,7 @@ mod tests {
         );
         let mut plan = opt_in_post_implementation_review_plan_fixture();
         plan["status"] = json!("runtime_influence_review_request_implemented");
-        let gate = biocortex_retrieval_opt_in_post_implementation_review_gate(
+        biocortex_retrieval_opt_in_post_implementation_review_gate(
             BioCortexRetrievalOptInPostImplementationReviewGateOptions {
                 authorization_decision_packet: decision_packet,
                 opt_in_plan: plan,
@@ -16278,10 +16319,13 @@ mod tests {
                 forum_post_id: Some("103".to_string()),
                 memory_key: Some("review-gate-memory".to_string()),
             },
-        );
+        )
+    }
+
+    fn opt_in_runtime_influence_review_request_fixture() -> Value {
         biocortex_retrieval_opt_in_runtime_influence_review_request(
             BioCortexRetrievalOptInRuntimeInfluenceReviewRequestOptions {
-                post_implementation_review_gate: gate,
+                post_implementation_review_gate: opt_in_runtime_influence_review_gate_fixture(),
                 redacted_order_artifact: opt_in_runtime_influence_redacted_artifact_fixture(),
                 redacted_evidence_aggregate: None,
                 evidence_summary: None,
@@ -17201,6 +17245,43 @@ mod tests {
     }
 
     #[test]
+    fn opt_in_runtime_influence_review_request_rejects_capability_ledger_runtime_decision_words() {
+        let mut capability_ledger = opt_in_capability_ledger_report_packet_fixture();
+        capability_ledger["downstream_action"] = json!("enable_runtime");
+        capability_ledger["integration_decision"] = json!("runtime_admission");
+
+        let packet = biocortex_retrieval_opt_in_runtime_influence_review_request(
+            BioCortexRetrievalOptInRuntimeInfluenceReviewRequestOptions {
+                post_implementation_review_gate: opt_in_runtime_influence_review_gate_fixture(),
+                redacted_order_artifact: opt_in_runtime_influence_redacted_artifact_fixture(),
+                redacted_evidence_aggregate: None,
+                evidence_summary: None,
+                capability_ledger_report_packet: Some(capability_ledger),
+                reviewer: Some("codex".to_string()),
+                commit: Some("runtime-review-request-commit".to_string()),
+                forum_post_id: Some("103".to_string()),
+                memory_key: Some("runtime-review-request-memory".to_string()),
+            },
+        );
+
+        assert_eq!(
+            packet["boundary_check"]["runtime_influence_review_request_ready"],
+            json!(false)
+        );
+        assert_eq!(
+            packet["boundary_check"]["capability_ledger_report_packet_safe_for_review"],
+            json!(false)
+        );
+        let blockers = packet["boundary_check"]["blockers"]
+            .as_array()
+            .expect("blockers");
+        assert!(blockers.contains(&json!("capability_ledger_decision_not_display_only")));
+        assert_eq!(packet["review_request_state"], json!("blocked"));
+        assert_eq!(packet["runtime_adapter_approved"], json!(false));
+        assert_eq!(packet["changes_memory_search_order"], json!(false));
+    }
+
+    #[test]
     fn opt_in_runtime_influence_review_request_blocks_approval_claims() {
         let mut gate = json!({
             "schema": BIOCORTEX_RETRIEVAL_OPT_IN_POST_IMPLEMENTATION_REVIEW_GATE_SCHEMA,
@@ -17672,6 +17753,45 @@ mod tests {
         assert!(!serialized.contains("secret_ledger_key"));
         assert!(!serialized.contains("secret ledger content"));
         assert!(!serialized.contains("report_markdown"));
+    }
+
+    #[test]
+    fn opt_in_runtime_influence_decision_packet_rejects_capability_ledger_runtime_decision_words() {
+        let mut request =
+            opt_in_aggregate_and_ledger_backed_runtime_influence_review_request_fixture();
+        request["evidence_summary"]["capability_ledger_downstream_action"] =
+            json!("enable_runtime");
+        request["evidence_summary"]["capability_ledger_integration_decision"] =
+            json!("runtime_admission");
+
+        let packet = biocortex_retrieval_opt_in_runtime_influence_decision_packet(
+            BioCortexRetrievalOptInRuntimeInfluenceDecisionPacketOptions {
+                runtime_influence_review_request: request,
+                runtime_influence_decision: opt_in_runtime_influence_decision_fixture(),
+                reviewer: Some("codex".to_string()),
+                commit: Some("runtime-decision-commit".to_string()),
+                forum_post_id: Some("104".to_string()),
+                memory_key: Some("runtime-decision-memory".to_string()),
+            },
+        );
+
+        assert_eq!(
+            packet["boundary_check"]["runtime_influence_authorized"],
+            json!(false)
+        );
+        assert_eq!(
+            packet["boundary_check"]["capability_ledger_safe_for_decision"],
+            json!(false)
+        );
+        let blockers = packet["boundary_check"]["blockers"]
+            .as_array()
+            .expect("blockers");
+        assert!(blockers.contains(&json!(
+            "request_capability_ledger_decision_not_display_only"
+        )));
+        assert_eq!(packet["implementation_allowed"], json!(false));
+        assert_eq!(packet["runtime_adapter_approved"], json!(false));
+        assert_eq!(packet["default_search_order_change_allowed"], json!(false));
     }
 
     #[test]
