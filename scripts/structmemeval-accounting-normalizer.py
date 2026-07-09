@@ -178,6 +178,11 @@ def merge_spans(spans: list[tuple[int, int]]) -> list[tuple[int, int]]:
     return merged
 
 
+def span_overlaps(span: tuple[int, int], spans: list[tuple[int, int]]) -> bool:
+    start, end = span
+    return any(max(start, other_start) < min(end, other_end) for other_start, other_end in spans)
+
+
 def unparsed_fragment(text: str, spans: list[tuple[int, int]]) -> str:
     leftovers = []
     cursor = 0
@@ -212,6 +217,9 @@ def normalize_answer(answer: str) -> dict[str, Any]:
 
     for pattern_name, pattern in PATTERNS:
         for match in pattern.finditer(text):
+            span = match.span()
+            if span_overlaps(span, spans):
+                continue
             raw = {
                 "payer": match.group("payer"),
                 "payee": match.group("payee"),
@@ -221,7 +229,7 @@ def normalize_answer(answer: str) -> dict[str, Any]:
             payer, payee, currency, cents = canonical_transaction(raw)
             key = (payer, payee, currency)
             transactions[key] = transactions.get(key, 0) + cents
-            spans.append(match.span())
+            spans.append(span)
             matched_patterns.add(pattern_name)
 
     if not transactions:

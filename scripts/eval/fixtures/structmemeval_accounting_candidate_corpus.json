@@ -1,0 +1,248 @@
+{
+  "schema": "agent_bridge.structmemeval_accounting_candidate_corpus.v0",
+  "description": "Tiny offline candidate-answer corpus for the StructMemEval accounting normalizer. This is not a benchmark scoring corpus.",
+  "case": {
+    "case_id": "accounting_candidate_corpus_unit_1",
+    "sessions": [
+      {
+        "session_id": "session_01",
+        "topic": "",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Alice: Paid EUR 30 for dinner - split among all"
+          },
+          {
+            "role": "user",
+            "content": "Bob: Paid EUR 12 for taxi - split with Alice"
+          },
+          {
+            "role": "user",
+            "content": "Charlie: Refund EUR 3 each for all"
+          }
+        ]
+      }
+    ],
+    "queries": [
+      {
+        "question": "Calculate settlement.",
+        "reference_answer": [
+          {
+            "text": "Settlement: Charlie -> Bob : 218.33 EUR, Alice -> Bob : 24.83 EUR"
+          },
+          {
+            "text": "Charlie pays 153.67 EUR to Bob; Alice pays 28.67 EUR to Bob"
+          },
+          {
+            "text": "Alice pays Bob 141.83 EUR and Alice pays Charlie 95.33 EUR"
+          }
+        ]
+      }
+    ]
+  },
+  "accepted_candidates": [
+    {
+      "id": "exact_arrow_variant_1_reordered",
+      "class": "exact_match",
+      "answer": "Alice -> Bob : 24.83 EUR; Charlie -> Bob : 218.33 EUR",
+      "expected_exact_reference_match": true,
+      "expected_matched_reference_variant_indices": [
+        1
+      ],
+      "expected_transaction_count": 2,
+      "expected_transactions": [
+        {
+          "payer": "Alice",
+          "payee": "Bob",
+          "currency": "EUR",
+          "amount_cents": 2483,
+          "amount": "24.83"
+        },
+        {
+          "payer": "Charlie",
+          "payee": "Bob",
+          "currency": "EUR",
+          "amount_cents": 21833,
+          "amount": "218.33"
+        }
+      ]
+    },
+    {
+      "id": "exact_pays_amount_to_variant_2",
+      "class": "exact_match",
+      "answer": "Alice pays 28.67 EUR to Bob; Charlie pays 153.67 EUR to Bob",
+      "expected_exact_reference_match": true,
+      "expected_matched_reference_variant_indices": [
+        2
+      ],
+      "expected_transaction_count": 2,
+      "expected_transactions": [
+        {
+          "payer": "Alice",
+          "payee": "Bob",
+          "currency": "EUR",
+          "amount_cents": 2867,
+          "amount": "28.67"
+        },
+        {
+          "payer": "Charlie",
+          "payee": "Bob",
+          "currency": "EUR",
+          "amount_cents": 15367,
+          "amount": "153.67"
+        }
+      ]
+    },
+    {
+      "id": "exact_receives_variant_1",
+      "class": "exact_match",
+      "answer": "Bob receives 218.33 EUR from Charlie, Bob receives 24.83 EUR from Alice",
+      "expected_exact_reference_match": true,
+      "expected_matched_reference_variant_indices": [
+        1
+      ],
+      "expected_transaction_count": 2,
+      "expected_transactions": [
+        {
+          "payer": "Alice",
+          "payee": "Bob",
+          "currency": "EUR",
+          "amount_cents": 2483,
+          "amount": "24.83"
+        },
+        {
+          "payer": "Charlie",
+          "payee": "Bob",
+          "currency": "EUR",
+          "amount_cents": 21833,
+          "amount": "218.33"
+        }
+      ]
+    },
+    {
+      "id": "exact_duplicate_aggregation_variant_1",
+      "class": "duplicate_aggregation",
+      "answer": "Alice pays 10.00 EUR to Bob; Alice pays 14.83 EUR to Bob; Charlie pays 218.33 EUR to Bob",
+      "expected_exact_reference_match": true,
+      "expected_matched_reference_variant_indices": [
+        1
+      ],
+      "expected_transaction_count": 2,
+      "expected_transactions": [
+        {
+          "payer": "Alice",
+          "payee": "Bob",
+          "currency": "EUR",
+          "amount_cents": 2483,
+          "amount": "24.83"
+        },
+        {
+          "payer": "Charlie",
+          "payee": "Bob",
+          "currency": "EUR",
+          "amount_cents": 21833,
+          "amount": "218.33"
+        }
+      ]
+    },
+    {
+      "id": "exact_prefix_eur_variant_2",
+      "class": "grammar_variant",
+      "answer": "Alice pays EUR 28.67 to Bob; Charlie pays EUR 153.67 to Bob",
+      "expected_exact_reference_match": true,
+      "expected_matched_reference_variant_indices": [
+        2
+      ],
+      "expected_transaction_count": 2,
+      "expected_transactions": [
+        {
+          "payer": "Alice",
+          "payee": "Bob",
+          "currency": "EUR",
+          "amount_cents": 2867,
+          "amount": "28.67"
+        },
+        {
+          "payer": "Charlie",
+          "payee": "Bob",
+          "currency": "EUR",
+          "amount_cents": 15367,
+          "amount": "153.67"
+        }
+      ]
+    },
+    {
+      "id": "valid_mismatch_small_debt",
+      "class": "valid_mismatch",
+      "answer": "Alice owes Bob 1.00 EUR",
+      "expected_exact_reference_match": false,
+      "expected_matched_reference_variant_indices": [],
+      "expected_transaction_count": 1,
+      "expected_transactions": [
+        {
+          "payer": "Alice",
+          "payee": "Bob",
+          "currency": "EUR",
+          "amount_cents": 100,
+          "amount": "1.00"
+        }
+      ]
+    },
+    {
+      "id": "valid_mismatch_wrong_direction",
+      "class": "valid_mismatch",
+      "answer": "Bob pays 24.83 EUR to Alice; Charlie pays 218.33 EUR to Bob",
+      "expected_exact_reference_match": false,
+      "expected_matched_reference_variant_indices": [],
+      "expected_transaction_count": 2,
+      "expected_transactions": [
+        {
+          "payer": "Bob",
+          "payee": "Alice",
+          "currency": "EUR",
+          "amount_cents": 2483,
+          "amount": "24.83"
+        },
+        {
+          "payer": "Charlie",
+          "payee": "Bob",
+          "currency": "EUR",
+          "amount_cents": 21833,
+          "amount": "218.33"
+        }
+      ]
+    }
+  ],
+  "rejected_candidates": [
+    {
+      "id": "reject_no_transaction",
+      "class": "ambiguous",
+      "answer": "Alice paid something to Bob",
+      "expected_stderr_regex": "supported settlement transaction"
+    },
+    {
+      "id": "reject_unsupported_currency",
+      "class": "grammar_limit",
+      "answer": "Alice pays 24.83 USD to Bob",
+      "expected_stderr_regex": "supported settlement transaction"
+    },
+    {
+      "id": "reject_leftover_note",
+      "class": "grammar_limit",
+      "answer": "Alice pays 24.83 EUR to Bob; unrelated note",
+      "expected_stderr_regex": "unsupported leftover text"
+    },
+    {
+      "id": "reject_zero_amount",
+      "class": "amount_limit",
+      "answer": "Alice pays 0.00 EUR to Bob",
+      "expected_stderr_regex": "amount must be positive"
+    },
+    {
+      "id": "reject_self_payment",
+      "class": "semantic_limit",
+      "answer": "Alice pays 1.00 EUR to Alice",
+      "expected_stderr_regex": "payer and payee must differ"
+    }
+  ]
+}
