@@ -41,6 +41,31 @@ if command -v apt-get >/dev/null 2>&1; then
         mate-calc thunar rhythmbox xfce4-settings wmenu network-manager-gnome || true
 fi
 
+# Wired-Ethernet priority. Root cause of a real outage on this workstation: the OS
+# installer left the built-in Ethernet (enp0s31f6) at ipv4 "link-local" — no DHCP,
+# no default route — so whenever Wi-Fi dropped, all connectivity (and the WARP
+# tunnel riding on top of it) died. Pin the wired NIC to DHCP with a low
+# route-metric so it always outranks Wi-Fi and Wi-Fi becomes a pure fallback.
+# Declarative on purpose: replaying `nmcli modify` would depend on a boot-generated
+# connection UUID that does not exist on a fresh install. IPv6 is intentionally not
+# touched here — it uses SLAAC/RA (not DHCP) and NetworkManager already ranks wired
+# v6 above Wi-Fi by default; the original failure was purely the v4 link-local trap.
+if command -v netplan >/dev/null 2>&1; then
+    netplan_priority=/etc/netplan/99-ethernet-priority.yaml
+    need_sudo tee "$netplan_priority" >/dev/null <<'NETPLAN_PRIORITY'
+network:
+  version: 2
+  renderer: NetworkManager
+  ethernets:
+    enp0s31f6:
+      dhcp4: true
+      dhcp4-overrides:
+        route-metric: 100
+NETPLAN_PRIORITY
+    need_sudo chmod 600 "$netplan_priority"
+    need_sudo netplan apply || echo "warning: netplan apply failed; takes effect on next boot" >&2
+fi
+
 as_user mkdir -p "$target_home/.config/sway" "$target_home/.config/mako" "$target_home/.config/systemd/user" "$target_home/.config/Thunar" "$target_home/.local/bin"
 
 if [ -f "$target_home/.config/sway/config" ] && \
