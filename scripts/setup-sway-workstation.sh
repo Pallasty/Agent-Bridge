@@ -86,6 +86,14 @@ if command -v warp-cli >/dev/null 2>&1 && warp-cli --version >/dev/null 2>&1; th
         kuaishou.com gifshow.com yximgs.com kwimgs.com kwaicdn.com
         weixin.qq.com wx.qq.com video.qq.com wxs.qq.com qpic.cn qlogo.cn
         qq.com myqcloud.com aliyuncs.com bytedance.com volces.com
+        baidu.com baidupcs.com bcebos.com bdstatic.com aliyundrive.com alipan.com alicdn.com
+        quark.cn uc.cn 189.cn 115.com 115cdn.com anxia.com weiyun.com xunlei.com
+        wps.cn wpscdn.cn kdocs.cn ksord.com tencent.com dingtalk.com dingtalkapps.com feishu.cn feishucdn.com shimo.im
+        bilibili.com hdslb.com bilivideo.com bilivideo.cn acgvideo.com biliapi.net
+        iqiyi.com iqiyipic.com qiyipic.com youku.com ykimg.com cibntv.net mgtv.com hitv.com 163.com 126.net
+        aliyun.com huaweicloud.com hicloud.com tsinghua.edu.cn ustc.edu.cn
+        taobao.com tmall.com taobaocdn.com mmstat.com jd.com 360buyimg.com jcloudcs.com
+        pinduoduo.com yangkeduo.com pddpic.com amap.com autonavi.com
     "
     for d in $warp_exclude_domains; do
         warp-cli tunnel host add "$d"   >/dev/null 2>&1 || true
