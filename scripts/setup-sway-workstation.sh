@@ -66,6 +66,33 @@ NETPLAN_PRIORITY
     need_sudo netplan apply || echo "warning: netplan apply failed; takes effect on next boot" >&2
 fi
 
+# WARP split-tunnel: keep China-domestic services OFF the Cloudflare WARP tunnel.
+# WARP exits in the US, so routing domestic live-streaming platforms (WeChat
+# Channels, Douyin, Xiaohongshu, Kuaishou) and ModelScope model downloads through
+# it adds a US round-trip AND — worse — makes their DNS resolve to slow overseas
+# CDN nodes (e.g. modelscope.cn -> Alibaba-US 47.251.x instead of Alibaba-CN
+# 39.99.x). Excluding a host makes WARP resolve it via the LOCAL resolver (China
+# IPs) and route it direct. WARP host matching is exact-hostname, so each family
+# needs both the apex and `*.apex` (the wildcard covers dynamic CDN subdomains).
+# The shared clouds (Tencent Cloud myqcloud, Alibaba aliyuncs, ByteDance/Volcano
+# Engine) are included because the platforms' live push/pull infra lives there.
+# Idempotent: re-adding an existing host is a harmless no-op.
+if command -v warp-cli >/dev/null 2>&1 && warp-cli --version >/dev/null 2>&1; then
+    warp_exclude_domains="
+        modelscope.cn
+        douyin.com iesdouyin.com douyinpic.com douyinvod.com douyincdn.com
+        amemv.com snssdk.com byteimg.com pstatp.com bytecdn.cn ibytedapm.com
+        xiaohongshu.com xhscdn.com xhslink.com
+        kuaishou.com gifshow.com yximgs.com kwimgs.com kwaicdn.com
+        weixin.qq.com wx.qq.com video.qq.com wxs.qq.com qpic.cn qlogo.cn
+        qq.com myqcloud.com aliyuncs.com bytedance.com volces.com
+    "
+    for d in $warp_exclude_domains; do
+        warp-cli tunnel host add "$d"   >/dev/null 2>&1 || true
+        warp-cli tunnel host add "*.$d" >/dev/null 2>&1 || true
+    done
+fi
+
 as_user mkdir -p "$target_home/.config/sway" "$target_home/.config/mako" "$target_home/.config/systemd/user" "$target_home/.config/Thunar" "$target_home/.local/bin"
 
 if [ -f "$target_home/.config/sway/config" ] && \
