@@ -22,6 +22,7 @@ from typing import Any
 
 
 SCHEMA = "agent_bridge.structmemeval_accounting_normalizer.v0"
+REVIEW_SUMMARY_SCHEMA = "agent_bridge.structmemeval_accounting_normalizer_review_summary.v0"
 SOURCE_HEAD = "64d2c9b242deb394e3ef94a318868a55261e141b"
 DEFAULT_ACCOUNTING_CASE = (
     "https://raw.githubusercontent.com/yandex-research/StructMemEval/"
@@ -372,6 +373,76 @@ def no_write_packet(db_path: str | None, before: dict[str, int | None] | None) -
     }
 
 
+def compact_no_write(proof: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "checked": proof.get("checked"),
+        "passed": proof.get("passed"),
+        "memory_rows_delta": proof.get("memory_rows_delta"),
+        "memory_edges_delta": proof.get("memory_edges_delta"),
+        "semantic_events_delta": proof.get("semantic_events_delta"),
+    }
+
+
+def review_variant(variant: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "query_index": variant["query_index"],
+        "variant_index": variant["variant_index"],
+        "source_text_sha256": variant["source_text_sha256"],
+        "source_text_bytes": variant["source_text_bytes"],
+        "transaction_count": variant["transaction_count"],
+        "canonical_key_sha256": variant["canonical_key_sha256"],
+        "matched_patterns": variant["matched_patterns"],
+        "transactions": variant["transactions"],
+    }
+
+
+def review_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "candidate_index": candidate["candidate_index"],
+        "source_text_sha256": candidate["source_text_sha256"],
+        "source_text_bytes": candidate["source_text_bytes"],
+        "transaction_count": candidate["transaction_count"],
+        "canonical_key_sha256": candidate["canonical_key_sha256"],
+        "matched_patterns": candidate["matched_patterns"],
+        "transactions": candidate["transactions"],
+        "exact_reference_match": candidate["exact_reference_match"],
+        "matched_reference_variant_indices": candidate["matched_reference_variant_indices"],
+    }
+
+
+def review_summary_packet(packet: dict[str, Any]) -> dict[str, Any]:
+    case = packet["case"]
+    return {
+        "schema": REVIEW_SUMMARY_SCHEMA,
+        "source_schema": packet["schema"],
+        "source_head": packet["source_head"],
+        "family": packet["family"],
+        "official_runner_import_allowed": packet["official_runner_import_allowed"],
+        "third_party_runtime_dependencies": packet["third_party_runtime_dependencies"],
+        "api_key_required": packet["api_key_required"],
+        "private_memory_export_allowed": packet["private_memory_export_allowed"],
+        "writes_ab_store": packet["writes_ab_store"],
+        "raw_content_in_output": packet["raw_content_in_output"],
+        "comparison_mode": packet["comparison_mode"],
+        "case": {
+            "case_id": case["case_id"],
+            "source_mode": case["source_mode"],
+            "sha256": case["sha256"],
+            "bytes": case["bytes"],
+            "query_count": case["query_count"],
+            "reference_variant_count": case["reference_variant_count"],
+        },
+        "summary": packet["summary"],
+        "reference_variants": [
+            review_variant(variant) for variant in packet["reference_variants"]
+        ],
+        "candidate_reviews": [
+            review_candidate(candidate) for candidate in packet["candidate_answers"]
+        ],
+        "no_write_invariant": compact_no_write(packet["no_write_invariant"]),
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -387,6 +458,11 @@ def main() -> int:
     )
     parser.add_argument("--output", help="Write JSON packet to this path.")
     parser.add_argument("--store-db", help="Optional SQLite DB for no-write row-count proof.")
+    parser.add_argument(
+        "--review-summary",
+        action="store_true",
+        help="Emit a compact human-review summary instead of the full normalizer packet.",
+    )
     parser.add_argument(
         "--allow-other-url",
         action="store_true",
@@ -438,6 +514,9 @@ def main() -> int:
         if args.output:
             Path(args.output).write_text(json.dumps(packet, ensure_ascii=False, indent=2) + "\n")
         fail("no-write invariant failed")
+
+    if args.review_summary:
+        packet = review_summary_packet(packet)
 
     text = json.dumps(packet, ensure_ascii=False, indent=2) + "\n"
     if args.output:
