@@ -26,9 +26,12 @@ the project adheres to [Semantic Versioning](https://semver.org/).
   leakage, byte-preserving answers, blinding, review, and scoring. The successor
   protocol passed independent read-only review. Its first real read-only
   capture then passed all twelve reference-coverage cases with ten unique hits
-  each and no live-store write or model call. Generation remains unexecuted and
-  separately gated. Neither result authorizes CI, release, versioning, tagging,
-  runtime promotion, or digest writes.
+  each and no live-store write or model call. The separately authorized
+  attempt-1 generation completed all 24 fixed cells with an empty stderr, no
+  tool events, no postprocessing, no retry, and a validated blinded-artifact
+  hash chain. It is now waiting for two independent human blind reviews; no
+  reviewer/owner unblinding or score exists. Neither phase authorizes CI,
+  release, versioning, tagging, runtime promotion, or digest writes.
 - **Expanded blinded portfolio-continuity answer gate.** A backward-compatible
   v1 contract narrows the comparison to full hybrid retrieval and direct
   digest across twelve frozen prompts, six strata, explicit insufficiency
