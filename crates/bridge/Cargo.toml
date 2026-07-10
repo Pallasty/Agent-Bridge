@@ -5,12 +5,10 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-# `onnx-embed` is on by default so source builds (`cargo install --git`,
-# local `cargo build`) keep the full sentence-transformer embedding
-# backend. Prebuilt release binaries are built with `--no-default-features`
-# to ship a smaller, ONNX-free tarball that runs on any glibc and on
-# x86_64-apple-darwin (where ort-sys has no prebuilt). The hash-only
-# fallback in ab-store keeps memory/embedding APIs functional without ONNX.
+# Source builds enable `onnx-embed` by default so `cargo install --git` and
+# local `cargo build` keep the full sentence-transformer backend. Operators
+# can use `--no-default-features` for a smaller local ONNX-free build; the
+# hash-only fallback in ab-store keeps memory/embedding APIs functional.
 default = ["onnx-embed"]
 onnx-embed = ["ab-store/onnx-embed"]
 linux-native-avatar = ["dep:smithay-client-toolkit", "dep:wayland-client"]

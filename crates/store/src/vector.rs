@@ -2,8 +2,8 @@
 //!
 //! This module provides the two **built-in** embedding implementations:
 //!
-//! 1. **ONNX** (`onnx-embed` feature, default): `all-MiniLM-L6-v2` via `fastembed`.
-//!    384-dim sentence embeddings; model auto-downloads to `~/.cache/fastembed/`.
+//! 1. **ONNX** (`onnx-embed` feature, default): `gte-multilingual-base` is the
+//!    compiled 768-dim default; selected MiniLM/e5/para models remain 384-dim.
 //! 2. **Hash fallback**: FNV-1a feature hashing (unigrams + bigrams). 384-dim,
 //!    no external deps, deterministic.
 //!
@@ -345,7 +345,7 @@ pub(crate) mod onnx {
 
 // ── Public API ─────────────────────────────────────────────────────────────
 
-/// Compute a 384-dim f32 embedding for `text` using the active default backend.
+/// Compute a model-aware f32 embedding for `text` using the active default backend.
 ///
 /// The default backend is resolved once per process via
 /// [`crate::embedding::default_backend`] (selected by the

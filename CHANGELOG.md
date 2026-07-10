@@ -61,6 +61,16 @@ the project adheres to [Semantic Versioning](https://semver.org/).
   consumed history before pending evidence.
 
 ### Changed
+- **Release truth is now explicit and machine-checkable.**
+  `scripts/agent-bridge-release-truth-gate.py` compares the latest `v*` source
+  marker and CHANGELOG release with Cargo/CLI/MCP version surfaces, confirms
+  the source-only distribution policy, checks model-aware embedding docs, and
+  optionally summarizes workspace `cargo fmt --check` drift. It is read-only
+  and deliberately reports `NO_GO_VERSION_IDENTITY_DRIFT` while the release
+  marker and Cargo package version differ; choosing the next version, tagging,
+  and publication remain owner decisions. Embedding documentation now states
+  the compiled 768-dim GTE default and the supported 384-dim ONNX/hash paths
+  instead of describing every active embedding as fixed at 384 dimensions.
 - **MCP tool-surface prune** (30-day all-source telemetry driven; 294 exposed
   / 94 with traffic → standard profile 145→96, profile-all 294→~215 on a
   typical host). Three mechanisms, each with an escape hatch:

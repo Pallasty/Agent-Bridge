@@ -139,11 +139,13 @@ no TOCTOU window), and the count is reported back per import call.
 
 ### `embedding_backend`
 
-Each `memory_save` writes a 384-dim embedding alongside the row. Two
-backends ship:
+Each `memory_save` writes an embedding whose dimension matches the active
+backend. The same model-aware rule applies when import creates or re-embeds a
+row. Two local backends ship:
 
-- **ONNX** (real `all-MiniLM-L6-v2` via `fastembed`): real semantic
-  embeddings; model is ~80MB cached under `~/.cache/fastembed`.
+- **ONNX**: the compiled default is `gte-multilingual-base` at 768 dimensions.
+  `all-minilm`, `e5-small`, and `para-ml` remain supported 384-dim selections
+  through `AGENT_BRIDGE_ONNX_MODEL`.
 - **hash** (FNV-1a hash projected to 384 dims): cheap, deterministic, no
   semantic signal. Used as a fallback while ONNX init is in-flight, or as
   a fast/offline mode.
