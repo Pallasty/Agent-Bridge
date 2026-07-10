@@ -2,7 +2,8 @@
 
 Date: 2026-07-10
 
-Status: **GATE CLOSED / NOT EXECUTED**. This is a read-only decision packet.
+Status: **REVIEWED / OWNER AUTHORIZATION REQUIRED / NOT EXECUTED**. This is a
+read-only decision packet.
 It does not authorize or perform a real capture, model invocation, review,
 unblinding, scoring, runtime change, CI action, release, tag, or version change.
 
@@ -26,20 +27,23 @@ contains no copied private trial input as part of this checkpoint.
 - The complete local synthetic verifier passes v0, v1, and v2.
 - V2 adversarial coverage includes both whitespace-only private-spec changes
   and a same-commit alternate worktree; each is stopped before a model call.
-- A separate read-only audit found no remaining blocker in the worktree-binding
-  fix. That audit did not inspect `data/` and does not satisfy the required
-  external independent code review.
+- An external independent read-only review of `e5c985d4` returned `PASS` with
+  no blocker and did not inspect `data/`, perform a real trial, or invoke CI.
+- The execution commit's verifier fixture wiring is repaired in `dbf98d50`.
+  The current public verifier passes from that binding and mechanically checks
+  the frozen `e5c985d4` contract/harness bytes; the capture/generation harness
+  itself is unchanged.
 
 ## Remaining Hard Gates
 
-1. An external independent reviewer must inspect implementation commit
-   `e5c985d4` without reading private `data/`.
-2. The owner must explicitly authorize a real private capture after that review.
+1. The owner must explicitly authorize a real private capture.
    Capture reads the scoped private store but does not call an LLM.
-3. After a valid capture and its coverage gate, the owner must separately
+2. After the operator confirms the private capture coverage status is `VALID`,
+   the owner must separately
    authorize generation. Generation would invoke the fixed Codex matrix once;
-   it is not implied by capture authorization.
-4. The operator must recheck the frozen commit, all hashes, canonical-worktree
+   it is not implied by capture authorization. Invoking generation on invalid
+   coverage deliberately consumes the non-retryable attempt-1 latch.
+3. The operator must recheck the frozen commit, all hashes, canonical-worktree
    path hash, binary identities, MCP availability, disk space, process state,
    and ignored/private output paths immediately before either authorized step.
 

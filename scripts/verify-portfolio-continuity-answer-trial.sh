@@ -84,7 +84,8 @@ frozen_contract = subprocess.check_output(
 if frozen_contract != contract_path.read_bytes():
     raise SystemExit("successor contract drifted from its frozen commit")
 for anchor in (
-    "PRE-REGISTERED / IMPLEMENTATION VERIFIED / INDEPENDENT REVIEW",
+    "PRE-REGISTERED / IMPLEMENTATION VERIFIED / INDEPENDENT READ-ONLY",
+    "REVIEW PASSED",
     "NOT EXECUTED",
     "INVALID_REFERENCE_COVERAGE",
     "explicit full restart",
