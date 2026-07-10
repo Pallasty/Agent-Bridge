@@ -1,0 +1,56 @@
+{
+  "schema": "agent_bridge.portfolio_continuity_capture_spec.v0",
+  "trial_id": "synthetic_ab_surface_trial",
+  "source_commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "digest_key": "syn_digest",
+  "repo": "/synthetic/repo",
+  "thresholds": {
+    "min_supported_claim_coverage": 1.0,
+    "min_evidence_precision": 1.0,
+    "max_stale_evidence_refs": 0,
+    "max_unknown_evidence_refs": 0,
+    "max_unsupported_claims": 0,
+    "max_forbidden_claims": 0,
+    "max_unsupported_evidence_claims": 0,
+    "require_all_cases_pass": true,
+    "require_all_abstention_cases_pass": true
+  },
+  "search": {
+    "mode": "hybrid",
+    "compact": false,
+    "limit": 2,
+    "exclude_kinds": ["skill"]
+  },
+  "bootstrap": {
+    "limit": 2,
+    "frontend": "claude-code"
+  },
+  "cases": [
+    {
+      "case_id": "synthetic_status",
+      "prompt_class": "portfolio_status",
+      "prompt": "Synthetic private status prompt that must not enter redacted output.",
+      "requires_abstention": false,
+      "required_claims": [
+        { "claim_id": "current_goal", "weight": 2.0 },
+        { "claim_id": "current_problem", "weight": 1.0 },
+        { "claim_id": "next_action", "weight": 1.0 }
+      ],
+      "optional_claims": [],
+      "forbidden_claim_ids": ["false_completion"]
+    },
+    {
+      "case_id": "synthetic_retrospective",
+      "prompt_class": "retrospective",
+      "prompt": "Synthetic private retrospective prompt that must remain private.",
+      "requires_abstention": false,
+      "required_claims": [
+        { "claim_id": "current_goal", "weight": 1.0 },
+        { "claim_id": "current_problem", "weight": 1.0 },
+        { "claim_id": "next_action", "weight": 1.0 }
+      ],
+      "optional_claims": [],
+      "forbidden_claim_ids": ["false_completion"]
+    }
+  ]
+}

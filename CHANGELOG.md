@@ -8,6 +8,11 @@ the project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- **Snapshot-safe AB-native portfolio continuity trial.** A private-data
+  adapter now captures hybrid retrieval, session bootstrap, and direct digest
+  evidence against an online SQLite backup, requires complete human evidence
+  review, and assembles redacted scorer packets without writing the live AB
+  store or checking private prompts/content into git.
 - **Portfolio continuity evaluation contract.** A standalone no-write scorer
   now measures structured project-status/retrospective evidence packets by
   supported required-claim coverage, current evidence precision, stale or

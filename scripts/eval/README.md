@@ -83,6 +83,30 @@ python3 scripts/eval/portfolio_continuity_eval.py \
   --strict
 ```
 
+`portfolio_continuity_ab_trial.py` builds the private AB-native input for that
+scorer. Its `capture` command opens the source SQLite database read-only, makes
+an online backup, and launches Agent-Bridge with `AGENT_BRIDGE_DB` pointing at
+the temporary snapshot. It fails unless child stderr confirms that exact
+snapshot path. The source DB path is never passed to the child.
+
+The workflow has four explicit stages:
+
+```bash
+python3 scripts/eval/portfolio_continuity_ab_trial.py capture ...
+python3 scripts/eval/portfolio_continuity_ab_trial.py review-template ...
+python3 scripts/eval/portfolio_continuity_ab_trial.py apply-review ...
+python3 scripts/eval/portfolio_continuity_ab_trial.py assemble ...
+```
+
+Real in-repo raw captures are accepted only below `data/` after `git
+check-ignore` confirms the path; output paths may not alias the source DB.
+Repository fixtures are synthetic. The redacted capture and assembly
+summary contain hashes, labels, counts, timing, and token estimates only. The
+adapter does not call an LLM and does not claim answer quality or runtime
+promotion. It uses `subprocess` environment maps directly; do not wrap it with
+bare `env`, because this host may have a user-level `env` shim ahead of
+`/usr/bin/env`.
+
 ## Baselines
 
 First baseline per day is written to `baselines/<date>.json`; commit it with
