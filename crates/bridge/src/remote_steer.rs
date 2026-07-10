@@ -506,7 +506,8 @@ pub async fn send_profiled(
 ) -> Result<(), String> {
     if profile.mode == InjectionMode::LaunchOnly {
         return Err(
-            "backend takes its prompt only at launch; runtime steer send is unsupported".to_string(),
+            "backend takes its prompt only at launch; runtime steer send is unsupported"
+                .to_string(),
         );
     }
     if profile.mode == InjectionMode::StdinAfterStart {
@@ -525,7 +526,11 @@ pub async fn send_profiled(
         return if r.ok() {
             Ok(())
         } else {
-            Err(format!("send failed (code {}): {}", r.code, r.stderr.trim()))
+            Err(format!(
+                "send failed (code {}): {}",
+                r.code,
+                r.stderr.trim()
+            ))
         };
     }
     // Non-default submit key: type literally (no Enter), then submit separately.
@@ -536,7 +541,11 @@ pub async fn send_profiled(
     )
     .await;
     if !r.ok() {
-        return Err(format!("send failed (code {}): {}", r.code, r.stderr.trim()));
+        return Err(format!(
+            "send failed (code {}): {}",
+            r.code,
+            r.stderr.trim()
+        ));
     }
     send_key(target, mux, session, &profile.submit_key).await
 }

@@ -282,8 +282,13 @@ async fn run(store: Arc<dyn StateStore>) {
     }
 
     let actual = ab_store::vector::embed_text("embedding dim-guard probe").len();
-    let report =
-        evaluate_embedding_dims(&model_name, configured, Some(actual), &dominant, minority_mismatch);
+    let report = evaluate_embedding_dims(
+        &model_name,
+        configured,
+        Some(actual),
+        &dominant,
+        minority_mismatch,
+    );
     if report.ok() {
         info!(
             target: "embedding_dim_guard",
@@ -378,13 +383,23 @@ mod tests {
         let empty = EmbeddingProfile::default();
         // Empty store + a model that loaded fine: nothing to compare, silent.
         let healthy = evaluate_embedding_dims("gte-multilingual-base", 768, Some(768), &empty, 0);
-        assert!(healthy.ok(), "empty store + healthy model: {:?}", healthy.warnings);
+        assert!(
+            healthy.ok(),
+            "empty store + healthy model: {:?}",
+            healthy.warnings
+        );
         // A genuine silent fallback (loaded dim != configured) is store-
         // independent, so it is still flagged — but no `config vs store` /
         // `effective` / `in-store` warning is invented from an empty store.
         let fallback = evaluate_embedding_dims("gte-multilingual-base", 768, Some(384), &empty, 0);
-        assert!(fallback.warnings.iter().any(|w| w.contains("silent fallback")));
-        assert!(!fallback.warnings.iter().any(|w| w.contains("config vs store")));
+        assert!(fallback
+            .warnings
+            .iter()
+            .any(|w| w.contains("silent fallback")));
+        assert!(!fallback
+            .warnings
+            .iter()
+            .any(|w| w.contains("config vs store")));
         assert!(!fallback.warnings.iter().any(|w| w.contains("effective")));
         assert!(!fallback.warnings.iter().any(|w| w.contains("in-store")));
     }
@@ -410,7 +425,10 @@ mod tests {
             .warnings
             .into_iter()
             .find(|w| w.contains("config vs store"));
-        assert!(class1.is_some(), "class-1 mismatch should surface config-vs-store");
+        assert!(
+            class1.is_some(),
+            "class-1 mismatch should surface config-vs-store"
+        );
         assert!(class1.unwrap().contains("768d"));
     }
 
@@ -423,7 +441,10 @@ mod tests {
             .warnings
             .into_iter()
             .find(|w| w.contains("config vs store"));
-        assert!(class1.is_none(), "aligned dims must not trip the strict gate");
+        assert!(
+            class1.is_none(),
+            "aligned dims must not trip the strict gate"
+        );
     }
 
     #[test]

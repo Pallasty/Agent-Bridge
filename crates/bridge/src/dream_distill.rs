@@ -84,7 +84,9 @@ pub async fn run(top_n: usize, dry_run: bool, timeout_secs: u64) -> Result<()> {
         return Err(anyhow::anyhow!("--top-n must be ≥ 1"));
     }
     let db_path = default_db_path();
-    println!("# P2 distill draft queue  (top_n={top_n}, dry_run={dry_run}, prompt={PROMPT_VERSION})");
+    println!(
+        "# P2 distill draft queue  (top_n={top_n}, dry_run={dry_run}, prompt={PROMPT_VERSION})"
+    );
     println!("DB: {}", db_path.display());
 
     let store = SqliteStore::open(&db_path)
@@ -212,7 +214,9 @@ async fn call_claude(prompt: &str, timeout_secs: u64) -> Result<String> {
     cmd.stderr(std::process::Stdio::piped());
     // A timed-out child must not outlive the batch as an orphan LLM call.
     cmd.kill_on_drop(true);
-    let child = cmd.spawn().map_err(|e| anyhow::anyhow!("spawn {bin}: {e}"))?;
+    let child = cmd
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("spawn {bin}: {e}"))?;
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(timeout_secs),
         child.wait_with_output(),
@@ -239,7 +243,10 @@ fn strip_fences(raw: &str) -> &str {
         return raw;
     }
     let body = raw.split_once('\n').map(|(_, rest)| rest).unwrap_or("");
-    body.rsplit_once("```").map(|(inner, _)| inner).unwrap_or(body).trim()
+    body.rsplit_once("```")
+        .map(|(inner, _)| inner)
+        .unwrap_or(body)
+        .trim()
 }
 
 /// Parse + validate one `claude -p` output into a `DistillVerdict`.
@@ -268,7 +275,10 @@ pub fn parse_verdict(stdout: &str) -> Result<DistillVerdict> {
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("distill verdict without draft"))?;
             if !d.key.starts_with("pub_") {
-                return Err(anyhow::anyhow!("draft key `{}` must start with pub_", d.key));
+                return Err(anyhow::anyhow!(
+                    "draft key `{}` must start with pub_",
+                    d.key
+                ));
             }
             if d.content.trim().is_empty() {
                 return Err(anyhow::anyhow!("distill draft has empty content"));
@@ -279,7 +289,9 @@ pub fn parse_verdict(stdout: &str) -> Result<DistillVerdict> {
                 .as_deref()
                 .ok_or_else(|| anyhow::anyhow!("merge verdict without existing_key"))?;
             if !k.starts_with("pub_") {
-                return Err(anyhow::anyhow!("merge existing_key `{k}` must start with pub_"));
+                return Err(anyhow::anyhow!(
+                    "merge existing_key `{k}` must start with pub_"
+                ));
             }
         }
         _ => {}
@@ -311,7 +323,10 @@ fn parse_proposed_row(d: &serde_json::Map<String, serde_json::Value>) -> Result<
     };
     Ok(ProposedPubRow {
         key,
-        scope: d.get("scope").and_then(|x| x.as_str()).map(|s| s.to_string()),
+        scope: d
+            .get("scope")
+            .and_then(|x| x.as_str())
+            .map(|s| s.to_string()),
         content: d
             .get("content")
             .and_then(|x| x.as_str())
@@ -431,7 +446,9 @@ pub fn build_draft_record(
         related_keys.push(k.clone());
     }
     let action = match v.verdict.as_str() {
-        "distill" => "审草稿 → 通过则 memory_save 该 pub_ 行（related_keys 必须含源行 key，即出处反连接）",
+        "distill" => {
+            "审草稿 → 通过则 memory_save 该 pub_ 行（related_keys 必须含源行 key，即出处反连接）"
+        }
         "merge" => "把源行 key 并入 existing pub 行的 related_keys（+按 reasoning 酌情并增量内容）",
         _ => "认可 reject 则给源行加 tag distill:no",
     };
@@ -544,10 +561,9 @@ mod tests {
         // distill without draft
         assert!(parse_verdict(r#"{"verdict":"distill","reasoning":"x","draft":null}"#).is_err());
         // distill whose draft key is not pub_-prefixed
-        assert!(parse_verdict(
-            r#"{"verdict":"distill","draft":{"key":"x","content":"c"}}"#
-        )
-        .is_err());
+        assert!(
+            parse_verdict(r#"{"verdict":"distill","draft":{"key":"x","content":"c"}}"#).is_err()
+        );
         // merge without existing_key
         assert!(parse_verdict(r#"{"verdict":"merge","reasoning":"x"}"#).is_err());
         // unknown verdict
@@ -597,7 +613,11 @@ mod tests {
             "batch:2026-07-07",
             "proposes:pub_new",
         ] {
-            assert!(r.tags.iter().any(|x| x == t), "missing tag {t}: {:?}", r.tags);
+            assert!(
+                r.tags.iter().any(|x| x == t),
+                "missing tag {t}: {:?}",
+                r.tags
+            );
         }
         assert!(r.content.contains("propose-only"));
         assert!(r.content.contains("lesson_a_20260707"));
@@ -675,7 +695,12 @@ mod tests {
     #[test]
     fn prompt_replaces_all_placeholders() {
         let p = build_prompt("- pub_a | trigger: t | head: h", "{\"key\":\"cand\"}");
-        for leftover in ["{CORPUS_INDEX}", "{FEWSHOT_SOURCE}", "{FEWSHOT_OUTPUT}", "{CANDIDATE}"] {
+        for leftover in [
+            "{CORPUS_INDEX}",
+            "{FEWSHOT_SOURCE}",
+            "{FEWSHOT_OUTPUT}",
+            "{CANDIDATE}",
+        ] {
             assert!(!p.contains(leftover), "unreplaced {leftover}");
         }
         assert!(p.contains("- pub_a | trigger: t | head: h"));
@@ -687,7 +712,12 @@ mod tests {
 
     #[test]
     fn corpus_line_flattens_newlines_and_caps_cjk_safely() {
-        let mut r = rec("pub_z", "lesson", &["continuity_retrieval_trigger:a / b"], &[]);
+        let mut r = rec(
+            "pub_z",
+            "lesson",
+            &["continuity_retrieval_trigger:a / b"],
+            &[],
+        );
         r.content = format!("# 标题\n\n{}", "机".repeat(500));
         let line = corpus_index_line(&r);
         assert!(line.starts_with("- pub_z | trigger: a / b | head: # 标题  机"));

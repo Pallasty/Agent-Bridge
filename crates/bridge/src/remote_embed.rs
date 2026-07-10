@@ -285,7 +285,8 @@ mod tests {
 
     #[test]
     fn parse_embed_response_defaults_dim_to_vec_len() {
-        let (_, dim, vec) = parse_embed_response(r#"{"embedding":[0.1,0.2],"backend":"m"}"#).unwrap();
+        let (_, dim, vec) =
+            parse_embed_response(r#"{"embedding":[0.1,0.2],"backend":"m"}"#).unwrap();
         assert_eq!(dim, 2);
         assert_eq!(vec.len(), 2);
     }
@@ -294,7 +295,10 @@ mod tests {
     fn parse_embed_response_rejects_dim_length_mismatch() {
         // Declared dim disagrees with the actual vector length → reject (→ fallback),
         // never store a vector whose dimension is mislabeled.
-        assert!(parse_embed_response(r#"{"embedding":[0.1,0.2,0.3],"backend":"m","dim":768}"#).is_none());
+        assert!(
+            parse_embed_response(r#"{"embedding":[0.1,0.2,0.3],"backend":"m","dim":768}"#)
+                .is_none()
+        );
     }
 
     #[test]

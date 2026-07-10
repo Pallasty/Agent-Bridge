@@ -446,11 +446,7 @@ fn reaper_enabled_from(v: Option<&str>) -> bool {
 /// startup — recovering right after a daemon crash/restart is the scenario
 /// this exists for.
 pub fn reaper_tick_secs() -> u64 {
-    reaper_tick_secs_from(
-        std::env::var("AB_ORPHAN_REAPER_TICK_SECS")
-            .ok()
-            .as_deref(),
-    )
+    reaper_tick_secs_from(std::env::var("AB_ORPHAN_REAPER_TICK_SECS").ok().as_deref())
 }
 
 fn reaper_tick_secs_from(v: Option<&str>) -> u64 {
@@ -653,7 +649,9 @@ mod tests {
             .unwrap_or(0);
         // The boot fence needs stale rows that are still same-boot: skip on
         // hosts (fresh CI containers) that have not been up long enough.
-        let Some(bw) = boot_wall_secs(now) else { return };
+        let Some(bw) = boot_wall_secs(now) else {
+            return;
+        };
         if now - bw < 900 {
             eprintln!("skipping: uptime too short for a same-boot stale row");
             return;

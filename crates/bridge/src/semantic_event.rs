@@ -455,7 +455,10 @@ pub struct InertPattern {
 /// Pure + total so the distillation is unit-testable without a store.
 /// `min_count` is floored at 1; at most 3 distinct example targets are kept per
 /// pattern.
-pub fn cluster_inert_patterns(events: &[SemanticEventRecord], min_count: usize) -> Vec<InertPattern> {
+pub fn cluster_inert_patterns(
+    events: &[SemanticEventRecord],
+    min_count: usize,
+) -> Vec<InertPattern> {
     use std::collections::HashMap;
     let min_count = min_count.max(1);
     type Sig = (String, String, String);
@@ -846,7 +849,14 @@ mod tests {
 
     // ---- SSB "memory" arm: recurring inert-pattern distillation ----
 
-    fn rec(source: &str, action: &str, status: &str, method: &str, target: Option<&str>, ts: i64) -> SemanticEventRecord {
+    fn rec(
+        source: &str,
+        action: &str,
+        status: &str,
+        method: &str,
+        target: Option<&str>,
+        ts: i64,
+    ) -> SemanticEventRecord {
         SemanticEventRecord {
             ts,
             actor: "mcp".to_string(),
@@ -866,15 +876,50 @@ mod tests {
         // 3× the same failure MODE + 1 one-off. With min_count=3 only the
         // recurring mode survives — a single failure is not yet a "pattern".
         let evs = vec![
-            rec("browser", "click", "not_verified", "cdp_actionability_probe", Some("@e5"), 300),
-            rec("browser", "click", "not_verified", "cdp_actionability_probe", Some("@e9"), 200),
-            rec("browser", "click", "not_verified", "cdp_actionability_probe", Some("@e5"), 100),
-            rec("mobile", "tap", "not_verified", "no_device", Some("@n1"), 50),
+            rec(
+                "browser",
+                "click",
+                "not_verified",
+                "cdp_actionability_probe",
+                Some("@e5"),
+                300,
+            ),
+            rec(
+                "browser",
+                "click",
+                "not_verified",
+                "cdp_actionability_probe",
+                Some("@e9"),
+                200,
+            ),
+            rec(
+                "browser",
+                "click",
+                "not_verified",
+                "cdp_actionability_probe",
+                Some("@e5"),
+                100,
+            ),
+            rec(
+                "mobile",
+                "tap",
+                "not_verified",
+                "no_device",
+                Some("@n1"),
+                50,
+            ),
         ];
         let pats = cluster_inert_patterns(&evs, 3);
         assert_eq!(pats.len(), 1, "only the ≥3 mode is a pattern: {pats:?}");
         let p = &pats[0];
-        assert_eq!((p.source.as_str(), p.action.as_str(), p.verdict_method.as_str()), ("browser", "click", "cdp_actionability_probe"));
+        assert_eq!(
+            (
+                p.source.as_str(),
+                p.action.as_str(),
+                p.verdict_method.as_str()
+            ),
+            ("browser", "click", "cdp_actionability_probe")
+        );
         assert_eq!(p.count, 3);
         assert_eq!(p.last_ts, 300, "last_ts is the newest occurrence");
         // Distinct example targets only (@e5 appeared twice → once).
@@ -889,26 +934,74 @@ mod tests {
             rec("browser", "click", "verified", "ref_ok", Some("@e1"), 300),
             rec("browser", "click", "verified", "ref_ok", Some("@e2"), 200),
             rec("browser", "click", "verified", "ref_ok", Some("@e3"), 100),
-            rec("desktop", "action", "unknown", "isolated_injected_no_readback", None, 90),
-            rec("desktop", "action", "unknown", "isolated_injected_no_readback", None, 80),
-            rec("desktop", "action", "unknown", "isolated_injected_no_readback", None, 70),
+            rec(
+                "desktop",
+                "action",
+                "unknown",
+                "isolated_injected_no_readback",
+                None,
+                90,
+            ),
+            rec(
+                "desktop",
+                "action",
+                "unknown",
+                "isolated_injected_no_readback",
+                None,
+                80,
+            ),
+            rec(
+                "desktop",
+                "action",
+                "unknown",
+                "isolated_injected_no_readback",
+                None,
+                70,
+            ),
         ];
-        assert!(cluster_inert_patterns(&evs, 3).is_empty(), "no NotVerified → no pattern");
+        assert!(
+            cluster_inert_patterns(&evs, 3).is_empty(),
+            "no NotVerified → no pattern"
+        );
     }
 
     #[test]
     fn cluster_sorts_by_count_then_recency() {
         let mut evs = Vec::new();
         // mode A: 2 occurrences (older)
-        evs.push(rec("desktop", "action", "not_verified", "preflight_refusal", None, 10));
-        evs.push(rec("desktop", "action", "not_verified", "preflight_refusal", None, 20));
+        evs.push(rec(
+            "desktop",
+            "action",
+            "not_verified",
+            "preflight_refusal",
+            None,
+            10,
+        ));
+        evs.push(rec(
+            "desktop",
+            "action",
+            "not_verified",
+            "preflight_refusal",
+            None,
+            20,
+        ));
         // mode B: 4 occurrences (clearly more recurrent → must sort first)
         for ts in [100, 110, 120, 130] {
-            evs.push(rec("browser", "click", "not_verified", "css_selector_dispatch", Some("div.x"), ts));
+            evs.push(rec(
+                "browser",
+                "click",
+                "not_verified",
+                "css_selector_dispatch",
+                Some("div.x"),
+                ts,
+            ));
         }
         let pats = cluster_inert_patterns(&evs, 2);
         assert_eq!(pats.len(), 2);
-        assert_eq!(pats[0].verdict_method, "css_selector_dispatch", "higher count first");
+        assert_eq!(
+            pats[0].verdict_method, "css_selector_dispatch",
+            "higher count first"
+        );
         assert_eq!(pats[0].count, 4);
         assert_eq!(pats[1].count, 2);
     }
@@ -916,11 +1009,25 @@ mod tests {
     #[test]
     fn cluster_caps_examples_at_three_distinct() {
         let evs: Vec<_> = (0..6)
-            .map(|i| rec("browser", "click", "not_verified", "cdp_actionability_probe", Some(&format!("@e{i}")), 100 + i as i64))
+            .map(|i| {
+                rec(
+                    "browser",
+                    "click",
+                    "not_verified",
+                    "cdp_actionability_probe",
+                    Some(&format!("@e{i}")),
+                    100 + i as i64,
+                )
+            })
             .collect();
         let pats = cluster_inert_patterns(&evs, 1);
         assert_eq!(pats[0].count, 6);
-        assert_eq!(pats[0].examples.len(), 3, "examples capped at 3: {:?}", pats[0].examples);
+        assert_eq!(
+            pats[0].examples.len(),
+            3,
+            "examples capped at 3: {:?}",
+            pats[0].examples
+        );
     }
 
     #[test]

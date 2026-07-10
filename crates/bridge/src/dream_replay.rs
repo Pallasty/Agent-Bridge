@@ -586,7 +586,11 @@ fn faithfulness_verdict(summary: &[f32], members: &[Vec<f32>]) -> FaithfulnessVe
 /// store's reconsolidation vocabulary. CRUCIAL: strip `dedupe:*` tags so that
 /// saving this backup can't trigger the store's dedupe-supersession against the
 /// still-active canonical row (which shares the same `dedupe:cluster:` tag).
-fn build_clobber_backup(prior: &MemoryRecord, canonical_key: &str, today_tag: &str) -> MemoryRecord {
+fn build_clobber_backup(
+    prior: &MemoryRecord,
+    canonical_key: &str,
+    today_tag: &str,
+) -> MemoryRecord {
     let backup_key = format!(
         "{canonical_key}_superseded_{}",
         member_keys_hash(&[prior.content.clone()])
@@ -878,7 +882,11 @@ mod tests {
         let summary = vec![0.95, 0.05, 0.0]; // sits among the members
         let v = faithfulness_verdict(&summary, &members);
         assert!(v.evaluated);
-        assert!(v.accept, "faithful summary; score={} floor={}", v.score, v.floor);
+        assert!(
+            v.accept,
+            "faithful summary; score={} floor={}",
+            v.score, v.floor
+        );
     }
 
     #[test]
@@ -924,11 +932,21 @@ mod tests {
         // punctuation-only text, or a backend returning zeros) must NOT be read
         // as "maximally off-topic" and rejected — cosine() is 0.0 for it. The
         // fail-open contract has to cover zero-norm, not only the empty slice.
-        let members = vec![vec![1.0, 0.0, 0.0], vec![0.9, 0.1, 0.0], vec![1.0, 0.1, 0.0]];
+        let members = vec![
+            vec![1.0, 0.0, 0.0],
+            vec![0.9, 0.1, 0.0],
+            vec![1.0, 0.1, 0.0],
+        ];
         let summary = vec![0.0, 0.0, 0.0]; // non-empty, zero norm
         let v = faithfulness_verdict(&summary, &members);
-        assert!(!v.evaluated, "degenerate zero-norm summary must short-circuit");
-        assert!(v.accept, "must fail-open, never reject a summary we can't score");
+        assert!(
+            !v.evaluated,
+            "degenerate zero-norm summary must short-circuit"
+        );
+        assert!(
+            v.accept,
+            "must fail-open, never reject a summary we can't score"
+        );
     }
 
     #[test]
