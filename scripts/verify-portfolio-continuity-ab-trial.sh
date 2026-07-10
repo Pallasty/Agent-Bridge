@@ -484,6 +484,44 @@ python3 "$ADAPTER" apply-review \
   --output "$tmpdir/review.json" \
   >"$tmpdir/apply-review.stdout.json"
 
+for protected_name in capture template decisions; do
+  alias_path="$tmpdir/apply-review-$protected_name-output-alias.json"
+  capture_path="$tmpdir/capture.raw.json"
+  template_path="$tmpdir/review.template.json"
+  decisions_path="$tmpdir/review.decisions.json"
+  case "$protected_name" in
+    capture)
+      cp "$capture_path" "$alias_path"
+      capture_path="$alias_path"
+      ;;
+    template)
+      cp "$template_path" "$alias_path"
+      template_path="$alias_path"
+      ;;
+    decisions)
+      cp "$decisions_path" "$alias_path"
+      decisions_path="$alias_path"
+      ;;
+  esac
+  if python3 "$ADAPTER" apply-review \
+    --capture "$capture_path" \
+    --template "$template_path" \
+    --decisions "$decisions_path" \
+    --output "$alias_path" \
+    >"$tmpdir/apply-review-$protected_name-alias.stdout" \
+    2>"$tmpdir/apply-review-$protected_name-alias.stderr"; then
+    echo "expected apply-review $protected_name/output alias to fail closed" >&2
+    exit 1
+  fi
+  grep -q "must not overwrite an input file" \
+    "$tmpdir/apply-review-$protected_name-alias.stderr"
+  case "$protected_name" in
+    capture) cmp -s "$tmpdir/capture.raw.json" "$alias_path" ;;
+    template) cmp -s "$tmpdir/review.template.json" "$alias_path" ;;
+    decisions) cmp -s "$tmpdir/review.decisions.json" "$alias_path" ;;
+  esac
+done
+
 python3 - "$tmpdir" <<'PY'
 import copy
 import hashlib
@@ -685,6 +723,54 @@ python3 "$ADAPTER" assemble \
   --decisions "$tmpdir/review.decisions.json" \
   --output-dir "$tmpdir/assembled" \
   >"$tmpdir/assemble.stdout.json"
+
+for protected_name in capture review template decisions; do
+  alias_dir="$tmpdir/assemble-$protected_name-output-alias"
+  alias_path="$alias_dir/fixture.reviewed.json"
+  mkdir -p "$alias_dir"
+  capture_path="$tmpdir/capture.raw.json"
+  review_path="$tmpdir/review.json"
+  template_path="$tmpdir/review.template.json"
+  decisions_path="$tmpdir/review.decisions.json"
+  case "$protected_name" in
+    capture)
+      cp "$capture_path" "$alias_path"
+      capture_path="$alias_path"
+      ;;
+    review)
+      cp "$review_path" "$alias_path"
+      review_path="$alias_path"
+      ;;
+    template)
+      cp "$template_path" "$alias_path"
+      template_path="$alias_path"
+      ;;
+    decisions)
+      cp "$decisions_path" "$alias_path"
+      decisions_path="$alias_path"
+      ;;
+  esac
+  if python3 "$ADAPTER" assemble \
+    --capture "$capture_path" \
+    --review "$review_path" \
+    --template "$template_path" \
+    --decisions "$decisions_path" \
+    --output-dir "$alias_dir" \
+    >"$tmpdir/assemble-$protected_name-alias.stdout" \
+    2>"$tmpdir/assemble-$protected_name-alias.stderr"; then
+    echo "expected assemble $protected_name/output alias to fail closed" >&2
+    exit 1
+  fi
+  grep -q "must not overwrite an input file" \
+    "$tmpdir/assemble-$protected_name-alias.stderr"
+  case "$protected_name" in
+    capture) cmp -s "$tmpdir/capture.raw.json" "$alias_path" ;;
+    review) cmp -s "$tmpdir/review.json" "$alias_path" ;;
+    template) cmp -s "$tmpdir/review.template.json" "$alias_path" ;;
+    decisions) cmp -s "$tmpdir/review.decisions.json" "$alias_path" ;;
+  esac
+  test ! -e "$alias_dir/candidate.hybrid_retrieval.json"
+done
 
 if python3 "$ADAPTER" assemble \
   --capture "$tmpdir/capture.raw.json" \
