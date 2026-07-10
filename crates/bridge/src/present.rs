@@ -681,7 +681,10 @@ fn render_walkthrough_body(doc: &Value) -> String {
     let mut out = String::from("<section class=\"ab-walkthrough\">");
     if let Some(summary) = doc.get("summary").and_then(Value::as_str) {
         if !summary.trim().is_empty() {
-            out.push_str(&format!("<p class=\"wt-summary\">{}</p>", html_escape(summary)));
+            out.push_str(&format!(
+                "<p class=\"wt-summary\">{}</p>",
+                html_escape(summary)
+            ));
         }
     }
     if let Some(steps) = doc.get("steps").and_then(Value::as_array) {
@@ -1897,8 +1900,7 @@ mod tests {
             "steps": [{"heading": "WtWriteTestHead", "narrative": "n", "evidence": []}]
         });
         let dir = std::env::temp_dir().join(format!("ab-wt-test-{}", std::process::id()));
-        let (id1, path1) =
-            write_walkthrough_artifact(&dir, &doc, Some("t"), None).expect("write1");
+        let (id1, path1) = write_walkthrough_artifact(&dir, &doc, Some("t"), None).expect("write1");
         assert!(path1.exists());
         assert!(path1.to_string_lossy().ends_with(&format!("{id1}.html")));
         let html = std::fs::read_to_string(&path1).expect("read back");

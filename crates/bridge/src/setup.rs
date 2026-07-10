@@ -2083,9 +2083,7 @@ enabled = true
         assert!(out.contains(
             "[mcp_servers.agent-bridge.tools.memory_search]\napproval_mode = \"approve\""
         ));
-        assert!(out.contains(
-            "[mcp_servers.other.tools.external_tool]\napproval_mode = \"ask\""
-        ));
+        assert!(out.contains("[mcp_servers.other.tools.external_tool]\napproval_mode = \"ask\""));
         assert!(out.contains("[plugins.example]\nenabled = true"));
 
         fs::remove_dir_all(tmp).unwrap();

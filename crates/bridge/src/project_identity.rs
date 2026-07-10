@@ -221,8 +221,8 @@ pub fn evaluate_scope_write_shadow(
     aliases: Option<&str>,
 ) -> ScopeWriteShadowDecision {
     let requested_scope = requested_scope.trim();
-    let canonical_policy_scope =
-        canonical_policy_scope.and_then(|raw| normalize_project_id(raw).map(|id| project_id_scope(&id)));
+    let canonical_policy_scope = canonical_policy_scope
+        .and_then(|raw| normalize_project_id(raw).map(|id| project_id_scope(&id)));
     let aliases = aliases.map(str::trim).filter(|raw| !raw.is_empty());
     let explicit_canonical = canonical_project_scope(requested_scope);
     let legacy_scope = requested_scope

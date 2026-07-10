@@ -39,19 +39,19 @@
 use ab_store::{MemoryListSort, MemoryQueryRecord, MemoryRecord, StateStore};
 use anyhow::{Context, Result};
 use axum::{
-    Json, Router,
     extract::{Path, Query, State},
     http::StatusCode,
     response::{
-        Html, IntoResponse,
         sse::{Event as SseEvent, KeepAlive, Sse},
+        Html, IntoResponse,
     },
     routing::{get, post},
+    Json, Router,
 };
-use base64::{Engine as _, engine::general_purpose};
-use serde::{Deserialize, de};
-use serde_json::{Value, json};
-use std::collections::{BTreeMap, HashSet, VecDeque, hash_map::DefaultHasher};
+use base64::{engine::general_purpose, Engine as _};
+use serde::{de, Deserialize};
+use serde_json::{json, Value};
+use std::collections::{hash_map::DefaultHasher, BTreeMap, HashSet, VecDeque};
 use std::fs;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
@@ -199,7 +199,11 @@ pub fn default_markdown_dir() -> Option<PathBuf> {
         .join("projects")
         .join(encoded)
         .join("memory");
-    if path.is_dir() { Some(path) } else { None }
+    if path.is_dir() {
+        Some(path)
+    } else {
+        None
+    }
 }
 
 async fn index() -> impl IntoResponse {
@@ -2825,14 +2829,12 @@ async fn api_materialization_review_approved_plan(
         obj.insert("apply_audit_count".to_string(), json!(apply_records.len()));
         obj.insert(
             "recent_apply_audit".to_string(),
-            json!(
-                apply_records
-                    .iter()
-                    .rev()
-                    .take(5)
-                    .cloned()
-                    .collect::<Vec<_>>()
-            ),
+            json!(apply_records
+                .iter()
+                .rev()
+                .take(5)
+                .cloned()
+                .collect::<Vec<_>>()),
         );
     }
     Ok(Json(plan))
@@ -5734,11 +5736,10 @@ mod tests {
             .find(|row| row.orphan.key == "memory_orphan")
             .expect("memory_orphan row");
         assert!(row.suggestions.iter().any(|s| s.key == "memory_anchor"));
-        assert!(
-            !row.suggestions
-                .iter()
-                .any(|s| s.key == "memory_auto_target")
-        );
+        assert!(!row
+            .suggestions
+            .iter()
+            .any(|s| s.key == "memory_auto_target"));
     }
 
     #[test]
