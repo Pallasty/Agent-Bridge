@@ -28,6 +28,7 @@ import portfolio_continuity_ab_trial as surface
 
 CONTRACT_SCHEMA = "agent_bridge.portfolio_continuity_answer_contract.v0"
 CONTRACT_SCHEMA_V1 = "agent_bridge.portfolio_continuity_answer_contract.v1"
+CONTRACT_SCHEMA_V2 = "agent_bridge.portfolio_continuity_answer_contract.v2"
 SPEC_SCHEMA = "agent_bridge.portfolio_continuity_answer_spec.v0"
 SPEC_SCHEMA_V1 = "agent_bridge.portfolio_continuity_answer_spec.v1"
 CAPTURE_SCHEMA = "agent_bridge.portfolio_continuity_answer_capture.v0"
@@ -50,6 +51,9 @@ GENERATION_REDACTED_SCHEMA_V1 = (
 )
 SCORE_SCHEMA = "agent_bridge.portfolio_continuity_answer_score.v0"
 SCORE_SCHEMA_V1 = "agent_bridge.portfolio_continuity_answer_score.v1"
+FAILURE_RECEIPT_SCHEMA_V2 = (
+    "agent_bridge.portfolio_continuity_answer_generation_failure.v2"
+)
 
 CONDITIONS = (
     "hybrid_retrieval",
@@ -93,16 +97,62 @@ TOOL_EVENT_MARKERS = {
     "web_search",
     "browser_action",
 }
+SUCCESSOR_IDENTIFIER_ALIASES = {
+    "compact_then_get_top2": "rank-only compact top-2 retrieval",
+    "hybrid_retrieval": "full hybrid retrieval",
+    "portfolio_digest": "direct portfolio digest",
+    "portfolio_state_digest": "portfolio digest record",
+    "session_bootstrap": "session bootstrap",
+}
+SUCCESSOR_DROPPED_RECORD_FIELDS = ["key"]
+RETRYABLE_PRE_MODEL_ERROR_CODES = {
+    "codex_identity_unavailable",
+    "codex_spawn_failed",
+    "generation_workspace_failed",
+}
 
 TrialError = surface.TrialError
+
+
+class GenerationFailure(TrialError):
+    def __init__(
+        self,
+        error_code: str,
+        phase: str,
+        message: str,
+        *,
+        model_started: bool,
+        answer_sha256: str | None = None,
+        matched_marker_sha256: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+        self.phase = phase
+        self.model_started = model_started
+        self.answer_sha256 = answer_sha256
+        self.matched_marker_sha256 = matched_marker_sha256
 
 
 def contract_conditions(contract: dict[str, Any]) -> tuple[str, ...]:
     return tuple(row["condition_id"] for row in contract["conditions"])
 
 
+def is_expanded(contract: dict[str, Any]) -> bool:
+    return contract["version"] >= 1
+
+
+def is_successor(contract: dict[str, Any]) -> bool:
+    return contract["version"] == 2
+
+
 def versioned_schema(contract: dict[str, Any], v0: str, v1: str) -> str:
-    return v1 if contract["version"] == 1 else v0
+    if contract["version"] == 0:
+        return v0
+    if contract["version"] == 1:
+        return v1
+    if not v1.endswith(".v1"):
+        raise TrialError("v2 schema derivation requires a v1 schema")
+    return v1[:-1] + "2"
 
 
 def read_json(path: Path) -> tuple[dict[str, Any], bytes]:
@@ -124,6 +174,143 @@ def sha256_bytes(value: bytes) -> str:
 
 def sha256_text(value: str) -> str:
     return surface.sha256_text(value)
+
+
+def render_json_value(value: Any) -> str:
+    try:
+        return (
+            json.dumps(
+                value,
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+                allow_nan=False,
+            )
+            + "\n"
+        )
+    except (TypeError, ValueError) as exc:
+        raise TrialError("failed to render projected evidence") from exc
+
+
+def project_successor_strings(value: Any, aliases: dict[str, str]) -> Any:
+    if isinstance(value, str):
+        projected = value
+        for source in sorted(aliases, key=len, reverse=True):
+            projected = projected.replace(source, aliases[source])
+        return projected
+    if isinstance(value, list):
+        return [project_successor_strings(item, aliases) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: project_successor_strings(child, aliases)
+            for key, child in value.items()
+        }
+    return value
+
+
+def project_successor_record(
+    record: dict[str, Any], projection: dict[str, Any]
+) -> dict[str, Any]:
+    dropped = set(projection["drop_record_fields"])
+    aliases = projection["identifier_aliases"]
+    return {
+        key: project_successor_strings(value, aliases)
+        for key, value in record.items()
+        if key not in dropped
+    }
+
+
+def project_successor_context(
+    condition: str, raw_result: Any, projection: dict[str, Any]
+) -> str:
+    if condition == REFERENCE_CONDITION:
+        hits = require_list(raw_result, "successor hybrid raw_result")
+        projected_hits: list[dict[str, Any]] = []
+        for index, raw_hit in enumerate(hits):
+            hit = require_object(raw_hit, f"successor hybrid hit {index}")
+            reject_unknown_fields(
+                hit, {"rank", "record", "score"}, f"successor hybrid hit {index}"
+            )
+            rank = require_nonnegative_int(
+                hit.get("rank"), f"successor hybrid hit {index}.rank"
+            )
+            if rank != index + 1:
+                raise TrialError("successor hybrid ranking is not contiguous")
+            score = hit.get("score")
+            if score is not None:
+                score = surface.require_finite_number(
+                    score, f"successor hybrid hit {index}.score"
+                )
+            projected_hits.append(
+                {
+                    "record": project_successor_record(
+                        require_object(
+                            hit.get("record"), f"successor hybrid hit {index}.record"
+                        ),
+                        projection,
+                    ),
+                    "score": score,
+                }
+            )
+        projected: Any = projected_hits
+    elif condition == "portfolio_digest":
+        projected = project_successor_record(
+            require_object(raw_result, "successor digest raw_result"), projection
+        )
+    else:
+        raise TrialError("successor context projection received an unsupported condition")
+    context = render_json_value(projected)
+    if any(source in context for source in projection["identifier_aliases"]):
+        raise TrialError("successor context projection retained an internal identifier")
+    return context
+
+
+def evaluate_successor_coverage(
+    cases: list[dict[str, Any]], coverage_contract: dict[str, Any]
+) -> dict[str, Any]:
+    failed_case_ids: list[str] = []
+    rows: list[dict[str, Any]] = []
+    for case in cases:
+        raw_hits = require_list(
+            case["conditions"][REFERENCE_CONDITION]["raw_result"],
+            "successor reference raw_result",
+        )
+        keys: list[str] = []
+        for hit in raw_hits:
+            normalized_hit = require_object(hit, "successor reference hit")
+            record = require_object(
+                normalized_hit.get("record"), "successor reference record"
+            )
+            keys.append(
+                require_string(
+                    record.get("key"), "successor reference key", max_chars=256
+                )
+            )
+        if len(keys) != len(set(keys)):
+            raise TrialError("successor reference coverage contains duplicate keys")
+        minimum = (
+            coverage_contract["min_reference_hits_abstention"]
+            if case["requires_abstention"]
+            else coverage_contract["min_reference_hits_non_abstention"]
+        )
+        passed = len(keys) >= minimum
+        if not passed:
+            failed_case_ids.append(case["case_id"])
+        rows.append(
+            {
+                "case_id": case["case_id"],
+                "requires_abstention": case["requires_abstention"],
+                "reference_hit_count": len(keys),
+                "minimum_reference_hits": minimum,
+                "pass": passed,
+            }
+        )
+    return {
+        "status": "VALID" if not failed_case_ids else "INVALID_REFERENCE_COVERAGE",
+        "failed_case_ids": failed_case_ids,
+        "failed_case_count": len(failed_case_ids),
+        "cases": rows,
+    }
 
 
 def require_object(value: Any, path: str) -> dict[str, Any]:
@@ -201,11 +388,16 @@ def validate_claims(value: Any, path: str, *, allow_empty: bool = False) -> list
 
 def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
     schema = value.get("schema")
-    if schema not in {CONTRACT_SCHEMA, CONTRACT_SCHEMA_V1}:
+    if schema not in {CONTRACT_SCHEMA, CONTRACT_SCHEMA_V1, CONTRACT_SCHEMA_V2}:
         raise TrialError(
-            f"contract schema must be {CONTRACT_SCHEMA} or {CONTRACT_SCHEMA_V1}"
+            "contract schema must be one of the supported v0/v1/v2 schemas"
         )
-    version = 1 if schema == CONTRACT_SCHEMA_V1 else 0
+    version = {
+        CONTRACT_SCHEMA: 0,
+        CONTRACT_SCHEMA_V1: 1,
+        CONTRACT_SCHEMA_V2: 2,
+    }[schema]
+    expanded = version >= 1
     contract_fields = {
         "schema",
         "contract_id",
@@ -230,6 +422,10 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
                 "digest_key_sha256",
             }
         )
+    if version == 2:
+        contract_fields.update(
+            {"context_projection", "coverage", "retry_policy", "failure_receipt"}
+        )
     reject_unknown_fields(value, contract_fields, "contract")
     contract_id = require_label(value.get("contract_id"), "contract.contract_id")
     prereg_base_commit = require_commit(
@@ -241,20 +437,183 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
     harness_source_sha256: str | None = None
     surface_source_sha256: str | None = None
     digest_key_sha256: str | None = None
-    if version == 1:
+    if expanded:
         harness_source_sha256 = require_sha256(
             value.get("harness_source_sha256"), "contract.harness_source_sha256"
         )
         if surface.sha256_file(Path(__file__)) != harness_source_sha256:
-            raise TrialError("v1 harness source hash does not match the contract")
+            raise TrialError("expanded harness source hash does not match the contract")
         surface_source_sha256 = require_sha256(
             value.get("surface_source_sha256"), "contract.surface_source_sha256"
         )
         if surface.sha256_file(Path(surface.__file__)) != surface_source_sha256:
-            raise TrialError("v1 surface helper source hash does not match the contract")
+            raise TrialError(
+                "expanded surface helper source hash does not match the contract"
+            )
         digest_key_sha256 = require_sha256(
             value.get("digest_key_sha256"), "contract.digest_key_sha256"
         )
+
+    context_projection: dict[str, Any] | None = None
+    coverage_contract: dict[str, Any] | None = None
+    retry_policy: dict[str, Any] | None = None
+    failure_receipt_contract: dict[str, Any] | None = None
+    if version == 2:
+        projection_raw = require_object(
+            value.get("context_projection"), "contract.context_projection"
+        )
+        reject_unknown_fields(
+            projection_raw,
+            {
+                "drop_record_fields",
+                "identifier_aliases",
+                "answer_postprocessing_allowed",
+            },
+            "contract.context_projection",
+        )
+        dropped_fields = [
+            require_label(item, f"contract.context_projection.drop_record_fields[{index}]")
+            for index, item in enumerate(
+                require_list(
+                    projection_raw.get("drop_record_fields"),
+                    "contract.context_projection.drop_record_fields",
+                )
+            )
+        ]
+        if dropped_fields != SUCCESSOR_DROPPED_RECORD_FIELDS:
+            raise TrialError("v2 dropped record fields are not fixed")
+        aliases_raw = require_object(
+            projection_raw.get("identifier_aliases"),
+            "contract.context_projection.identifier_aliases",
+        )
+        reject_unknown_fields(
+            aliases_raw,
+            set(SUCCESSOR_IDENTIFIER_ALIASES),
+            "contract.context_projection.identifier_aliases",
+        )
+        aliases = {
+            key: require_string(
+                aliases_raw.get(key),
+                f"contract.context_projection.identifier_aliases.{key}",
+                max_chars=128,
+            )
+            for key in SUCCESSOR_IDENTIFIER_ALIASES
+        }
+        if aliases != SUCCESSOR_IDENTIFIER_ALIASES:
+            raise TrialError("v2 identifier aliases are not fixed")
+        if require_bool(
+            projection_raw.get("answer_postprocessing_allowed"),
+            "contract.context_projection.answer_postprocessing_allowed",
+        ):
+            raise TrialError("v2 answer postprocessing must remain disabled")
+        context_projection = {
+            "drop_record_fields": dropped_fields,
+            "identifier_aliases": aliases,
+            "answer_postprocessing_allowed": False,
+        }
+
+        coverage_raw = require_object(value.get("coverage"), "contract.coverage")
+        reject_unknown_fields(
+            coverage_raw,
+            {
+                "min_reference_hits_non_abstention",
+                "min_reference_hits_abstention",
+                "require_unique_reference_keys",
+                "generation_requires_status",
+            },
+            "contract.coverage",
+        )
+        coverage_contract = {
+            "min_reference_hits_non_abstention": require_nonnegative_int(
+                coverage_raw.get("min_reference_hits_non_abstention"),
+                "contract.coverage.min_reference_hits_non_abstention",
+            ),
+            "min_reference_hits_abstention": require_nonnegative_int(
+                coverage_raw.get("min_reference_hits_abstention"),
+                "contract.coverage.min_reference_hits_abstention",
+            ),
+            "require_unique_reference_keys": require_bool(
+                coverage_raw.get("require_unique_reference_keys"),
+                "contract.coverage.require_unique_reference_keys",
+            ),
+            "generation_requires_status": require_string(
+                coverage_raw.get("generation_requires_status"),
+                "contract.coverage.generation_requires_status",
+                max_chars=32,
+            ),
+        }
+        if coverage_contract != {
+            "min_reference_hits_non_abstention": 2,
+            "min_reference_hits_abstention": 0,
+            "require_unique_reference_keys": True,
+            "generation_requires_status": "VALID",
+        }:
+            raise TrialError("v2 reference coverage policy is not fixed")
+
+        retry_raw = require_object(value.get("retry_policy"), "contract.retry_policy")
+        reject_unknown_fields(
+            retry_raw,
+            {
+                "pre_model_full_restart_limit",
+                "post_model_retry_limit",
+                "semantic_retry_limit",
+                "automatic_retry",
+            },
+            "contract.retry_policy",
+        )
+        retry_policy = {
+            "pre_model_full_restart_limit": require_nonnegative_int(
+                retry_raw.get("pre_model_full_restart_limit"),
+                "contract.retry_policy.pre_model_full_restart_limit",
+            ),
+            "post_model_retry_limit": require_nonnegative_int(
+                retry_raw.get("post_model_retry_limit"),
+                "contract.retry_policy.post_model_retry_limit",
+            ),
+            "semantic_retry_limit": require_nonnegative_int(
+                retry_raw.get("semantic_retry_limit"),
+                "contract.retry_policy.semantic_retry_limit",
+            ),
+            "automatic_retry": require_bool(
+                retry_raw.get("automatic_retry"),
+                "contract.retry_policy.automatic_retry",
+            ),
+        }
+        if retry_policy != {
+            "pre_model_full_restart_limit": 1,
+            "post_model_retry_limit": 0,
+            "semantic_retry_limit": 0,
+            "automatic_retry": False,
+        }:
+            raise TrialError("v2 retry policy is not fixed")
+
+        failure_raw = require_object(
+            value.get("failure_receipt"), "contract.failure_receipt"
+        )
+        reject_unknown_fields(
+            failure_raw,
+            {"private", "atomic_write", "raw_material_allowed"},
+            "contract.failure_receipt",
+        )
+        failure_receipt_contract = {
+            "private": require_bool(
+                failure_raw.get("private"), "contract.failure_receipt.private"
+            ),
+            "atomic_write": require_bool(
+                failure_raw.get("atomic_write"),
+                "contract.failure_receipt.atomic_write",
+            ),
+            "raw_material_allowed": require_bool(
+                failure_raw.get("raw_material_allowed"),
+                "contract.failure_receipt.raw_material_allowed",
+            ),
+        }
+        if failure_receipt_contract != {
+            "private": True,
+            "atomic_write": True,
+            "raw_material_allowed": False,
+        }:
+            raise TrialError("v2 failure receipt policy is not fixed")
 
     raw_conditions = require_list(value.get("conditions"), "contract.conditions")
     condition_ids: list[str] = []
@@ -267,7 +626,7 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
         capture = require_label(row.get("capture"), f"{path}.capture")
         condition_ids.append(condition_id)
         conditions.append({"condition_id": condition_id, "capture": capture})
-    fixed_conditions = EXPANDED_CONDITIONS if version == 1 else CONDITIONS
+    fixed_conditions = EXPANDED_CONDITIONS if expanded else CONDITIONS
     if tuple(condition_ids) != fixed_conditions:
         raise TrialError("contract.conditions must match the fixed condition order")
     expected_capture = {
@@ -409,7 +768,7 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
                     "independent_reviewers",
                     "abstention_values",
                 }
-                if version == 1
+                if expanded
                 else set()
             ),
         },
@@ -444,23 +803,23 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
     if preference_tie_label != "tie":
         raise TrialError("contract.review preference tie label must be tie")
     abstention_values: list[Any] = []
-    if version == 1:
+    if expanded:
         if require_nonnegative_int(
             review.get("required_reviewer_count"),
             "contract.review.required_reviewer_count",
         ) != 2:
-            raise TrialError("v1 requires exactly two independent reviewers")
+            raise TrialError("expanded trials require exactly two independent reviewers")
         if not require_bool(
             review.get("independent_reviewers"),
             "contract.review.independent_reviewers",
         ):
-            raise TrialError("v1 reviewers must be independent")
+            raise TrialError("expanded trial reviewers must be independent")
         abstention_values = require_list(
             review.get("abstention_values"),
             "contract.review.abstention_values",
         )
         if abstention_values != [False, True]:
-            raise TrialError("v1 abstention values are not fixed")
+            raise TrialError("expanded abstention values are not fixed")
 
     thresholds = require_object(value.get("thresholds"), "contract.thresholds")
     threshold_fields = {
@@ -476,7 +835,7 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
         "candidate_conditions",
         "recommendation_scope",
     }
-    if version == 1:
+    if expanded:
         threshold_fields.update({"aggregation", "max_abstention_failures"})
     reject_unknown_fields(thresholds, threshold_fields, "contract.thresholds")
     ratio_fields = {
@@ -495,7 +854,7 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
         "max_currentness_uncertain",
         "max_unsupported_assertions",
         "min_case_usefulness",
-        *({"max_abstention_failures"} if version == 1 else set()),
+        *({"max_abstention_failures"} if expanded else set()),
     }:
         normalized_thresholds[key] = require_nonnegative_int(
             thresholds.get(key), f"contract.thresholds.{key}"
@@ -525,7 +884,7 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
     ]
     expected_candidates = (
         ["portfolio_digest"]
-        if version == 1
+        if expanded
         else [COMPACT_CONDITION, "portfolio_digest"]
     )
     if candidate_conditions != expected_candidates:
@@ -534,14 +893,14 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
         thresholds.get("recommendation_scope"),
         "contract.thresholds.recommendation_scope",
     )
-    expected_scope = "write_side_trial_only" if version == 1 else "expanded_trial_only"
+    expected_scope = "write_side_trial_only" if expanded else "expanded_trial_only"
     if recommendation_scope != expected_scope:
         raise TrialError(
             f"contract recommendation scope must remain {expected_scope}"
         )
     normalized_thresholds["candidate_conditions"] = candidate_conditions
     normalized_thresholds["recommendation_scope"] = recommendation_scope
-    if version == 1:
+    if expanded:
         aggregation = require_object(
             thresholds.get("aggregation"), "contract.thresholds.aggregation"
         )
@@ -561,10 +920,10 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
             ),
         }
         if normalized_aggregation != {"reviewer_gate": "all", "stratum_gate": "all"}:
-            raise TrialError("v1 aggregation gates must both be all")
+            raise TrialError("expanded aggregation gates must both be all")
         normalized_thresholds["aggregation"] = normalized_aggregation
         if normalized_thresholds["max_abstention_failures"] != 0:
-            raise TrialError("v1 max_abstention_failures must be zero")
+            raise TrialError("expanded max_abstention_failures must be zero")
 
     cases: list[dict[str, Any]] = []
     case_ids: set[str] = set()
@@ -581,8 +940,12 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
                 "optional_claims",
                 "forbidden_claim_ids",
                 *(
-                    {"prompt_variant", "requires_abstention"}
-                    if version == 1
+                    {
+                        "prompt_variant",
+                        "requires_abstention",
+                        *({"retrieval_query_sha256"} if version == 2 else set()),
+                    }
+                    if expanded
                     else set()
                 ),
             },
@@ -595,15 +958,23 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
         prompt_class = require_label(case.get("prompt_class"), f"{path}.prompt_class")
         prompt_variant = (
             require_label(case.get("prompt_variant"), f"{path}.prompt_variant")
-            if version == 1
+            if expanded
             else "legacy"
         )
-        if version == 1 and prompt_variant not in {"direct", "heldout"}:
-            raise TrialError("v1 prompt_variant must be direct or heldout")
+        if expanded and prompt_variant not in {"direct", "heldout"}:
+            raise TrialError("expanded prompt_variant must be direct or heldout")
         prompt_sha256 = require_sha256(case.get("prompt_sha256"), f"{path}.prompt_sha256")
+        retrieval_query_sha256 = (
+            require_sha256(
+                case.get("retrieval_query_sha256"),
+                f"{path}.retrieval_query_sha256",
+            )
+            if version == 2
+            else prompt_sha256
+        )
         requires_abstention = (
             require_bool(case.get("requires_abstention"), f"{path}.requires_abstention")
-            if version == 1
+            if expanded
             else False
         )
         required_claims = validate_claims(
@@ -611,10 +982,10 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
             f"{path}.required_claims",
             allow_empty=requires_abstention,
         )
-        if version == 1 and requires_abstention and required_claims:
-            raise TrialError("v1 abstention cases must have required_claims=[]")
-        if version == 1 and not requires_abstention and not required_claims:
-            raise TrialError("v1 non-abstention cases require claims")
+        if expanded and requires_abstention and required_claims:
+            raise TrialError("expanded abstention cases must have required_claims=[]")
+        if expanded and not requires_abstention and not required_claims:
+            raise TrialError("expanded non-abstention cases require claims")
         optional_claims = validate_claims(
             case.get("optional_claims"), f"{path}.optional_claims", allow_empty=True
         )
@@ -633,6 +1004,7 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
                 "prompt_class": prompt_class,
                 "prompt_variant": prompt_variant,
                 "prompt_sha256": prompt_sha256,
+                "retrieval_query_sha256": retrieval_query_sha256,
                 "required_claims": required_claims,
                 "optional_claims": optional_claims,
                 "forbidden_claim_ids": forbidden,
@@ -641,13 +1013,15 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
         )
     if version == 0 and len(cases) != 2:
         raise TrialError("contract must contain exactly two preregistered cases")
-    if version == 1:
+    if expanded:
         if len(cases) != 12:
-            raise TrialError("v1 contract must contain exactly 12 preregistered cases")
+            raise TrialError(
+                "expanded contract must contain exactly 12 preregistered cases"
+            )
         strata = Counter(case["prompt_class"] for case in cases)
         if set(strata) != EXPANDED_STRATA or set(strata.values()) != {2}:
             raise TrialError(
-                "v1 contract must contain the six fixed prompt strata with two cases each"
+                "expanded contract must contain six fixed prompt strata with two cases each"
             )
         variants_by_stratum = {
             stratum: {
@@ -661,7 +1035,9 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
             variants != {"direct", "heldout"}
             for variants in variants_by_stratum.values()
         ):
-            raise TrialError("v1 strata must each contain direct and heldout variants")
+            raise TrialError(
+                "expanded strata must each contain direct and heldout variants"
+            )
         if any(
             all(
                 case["requires_abstention"]
@@ -670,9 +1046,11 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
             )
             for stratum in strata
         ):
-            raise TrialError("v1 strata must retain a non-abstention completeness case")
+            raise TrialError(
+                "expanded strata must retain a non-abstention completeness case"
+            )
         if sum(case["requires_abstention"] for case in cases) != 2:
-            raise TrialError("v1 contract requires exactly two abstention cases")
+            raise TrialError("expanded contract requires exactly two abstention cases")
 
     boundaries = require_object(value.get("boundaries"), "contract.boundaries")
     expected_boundaries = {
@@ -687,7 +1065,15 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
         "version_or_tag_change_allowed": False,
         **(
             {"release_action_allowed": False, "ci_action_allowed": False}
-            if version == 1
+            if expanded
+            else {}
+        ),
+        **(
+            {
+                "answer_postprocessing_allowed": False,
+                "ad_hoc_retry_allowed": False,
+            }
+            if version == 2
             else {}
         ),
     }
@@ -708,7 +1094,7 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
                 "surface_source_sha256": surface_source_sha256,
                 "digest_key_sha256": digest_key_sha256,
             }
-            if version == 1
+            if expanded
             else {}
         ),
         "conditions": conditions,
@@ -739,14 +1125,24 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
             "preference_tie_label": preference_tie_label,
             **(
                 {"required_reviewer_count": 2, "independent_reviewers": True}
-                if version == 1
+                if expanded
                 else {}
             ),
-            **({"abstention_values": abstention_values} if version == 1 else {}),
+            **({"abstention_values": abstention_values} if expanded else {}),
         },
         "thresholds": normalized_thresholds,
         "cases": cases,
         "boundaries": expected_boundaries,
+        **(
+            {
+                "context_projection": context_projection,
+                "coverage": coverage_contract,
+                "retry_policy": retry_policy,
+                "failure_receipt": failure_receipt_contract,
+            }
+            if version == 2
+            else {}
+        ),
     }
 
 
@@ -783,10 +1179,10 @@ def validate_spec(
     if not repo.is_absolute() or not repo.is_dir():
         raise TrialError("spec.repo must be an existing absolute directory")
     digest_key = require_string(value.get("digest_key"), "spec.digest_key", max_chars=256)
-    if contract["version"] == 1 and sha256_text(digest_key) != contract[
+    if is_expanded(contract) and sha256_text(digest_key) != contract[
         "digest_key_sha256"
     ]:
-        raise TrialError("spec.digest_key does not match the v1 contract commitment")
+        raise TrialError("spec.digest_key does not match the expanded contract commitment")
     blind_seed = require_string(value.get("blind_seed"), "spec.blind_seed", max_chars=64)
     if not HEX64_RE.fullmatch(blind_seed):
         raise TrialError("spec.blind_seed must be 32 lowercase hex bytes")
@@ -800,14 +1196,30 @@ def validate_spec(
     for index, (raw, contract_case) in enumerate(zip(raw_cases, contract["cases"], strict=True)):
         path = f"spec.cases[{index}]"
         case = require_object(raw, path)
-        reject_unknown_fields(case, {"case_id", "prompt"}, path)
+        allowed_case_fields = {"case_id", "prompt"}
+        if is_successor(contract):
+            allowed_case_fields.add("retrieval_query")
+        reject_unknown_fields(case, allowed_case_fields, path)
         case_id = require_label(case.get("case_id"), f"{path}.case_id")
         if case_id != contract_case["case_id"]:
             raise TrialError("spec case order/id does not match the contract")
         prompt = require_string(case.get("prompt"), f"{path}.prompt", max_chars=16_000)
         if sha256_text(prompt) != contract_case["prompt_sha256"]:
             raise TrialError("spec prompt does not match its preregistered hash")
-        cases.append({**contract_case, "prompt": prompt})
+        retrieval_query = prompt
+        if is_successor(contract):
+            retrieval_query = require_string(
+                case.get("retrieval_query"),
+                f"{path}.retrieval_query",
+                max_chars=16_000,
+            )
+            if sha256_text(retrieval_query) != contract_case["retrieval_query_sha256"]:
+                raise TrialError(
+                    "spec retrieval query does not match its preregistered hash"
+                )
+        cases.append(
+            {**contract_case, "prompt": prompt, "retrieval_query": retrieval_query}
+        )
     return {
         "trial_id": trial_id,
         "contract_commit": contract_commit,
@@ -1078,18 +1490,21 @@ def capture_trial(
     repo: Path = spec["repo"]
     if git_head(repo) != spec["contract_commit"]:
         raise TrialError("repository HEAD does not match spec.contract_commit")
-    if contract["version"] == 1:
+    if is_expanded(contract):
         require_committed_file(
-            repo, spec["contract_commit"], contract_path, "v1 contract"
+            repo, spec["contract_commit"], contract_path, "expanded contract"
         )
         require_committed_file(
-            repo, spec["contract_commit"], Path(__file__), "v1 harness source"
+            repo,
+            spec["contract_commit"],
+            Path(__file__),
+            "expanded harness source",
         )
         require_committed_file(
             repo,
             spec["contract_commit"],
             Path(surface.__file__),
-            "v1 surface helper source",
+            "expanded surface helper source",
         )
     if not binary.is_file() or not os.access(binary, os.X_OK):
         raise TrialError("Agent-Bridge binary must be executable")
@@ -1114,6 +1529,7 @@ def capture_trial(
 
         for case_index, case in enumerate(spec["cases"], start=1):
             prompt = case["prompt"]
+            retrieval_query = case["retrieval_query"]
 
             def full_search(client: surface.McpClient) -> dict[str, Any]:
                 result, latency = client.request(
@@ -1121,7 +1537,7 @@ def capture_trial(
                     {
                         "name": "memory_search",
                         "arguments": {
-                            "query": prompt,
+                            "query": retrieval_query,
                             "mode": contract["search"]["mode"],
                             "compact": False,
                             "limit": contract["search"]["limit"],
@@ -1132,7 +1548,19 @@ def capture_trial(
                 text = surface.mcp_text(result, "full memory_search")
                 hits, _ = surface.normalize_search(text)
                 keys = [require_string(hit["record"].get("key"), "full hit key") for hit in hits]
-                return {"condition": make_context(text, latency, hits), "ranked_keys": keys}
+                context = (
+                    project_successor_context(
+                        REFERENCE_CONDITION,
+                        hits,
+                        contract["context_projection"],
+                    )
+                    if is_successor(contract)
+                    else text
+                )
+                return {
+                    "condition": make_context(context, latency, hits),
+                    "ranked_keys": keys,
+                }
 
             full_result, full_run = run_isolated_mcp(
                 base_snapshot=base_snapshot,
@@ -1266,7 +1694,16 @@ def capture_trial(
                 record, _ = surface.normalize_memory_get(text)
                 if record.get("key") != spec["digest_key"]:
                     raise TrialError("portfolio digest memory_get returned the wrong key")
-                return {"condition": make_context(text, latency, record)}
+                context = (
+                    project_successor_context(
+                        "portfolio_digest",
+                        record,
+                        contract["context_projection"],
+                    )
+                    if is_successor(contract)
+                    else text
+                )
+                return {"condition": make_context(context, latency, record)}
 
             digest_result, digest_run = run_isolated_mcp(
                 base_snapshot=base_snapshot,
@@ -1293,17 +1730,27 @@ def capture_trial(
                     "prompt_class": case["prompt_class"],
                     **(
                         {"prompt_variant": case["prompt_variant"]}
-                        if contract["version"] == 1
+                        if is_expanded(contract)
                         else {}
                     ),
                     "prompt": prompt,
                     "prompt_sha256": case["prompt_sha256"],
+                    **(
+                        {
+                            "retrieval_query": retrieval_query,
+                            "retrieval_query_sha256": case[
+                                "retrieval_query_sha256"
+                            ],
+                        }
+                        if is_successor(contract)
+                        else {}
+                    ),
                     "required_claims": case["required_claims"],
                     "optional_claims": case["optional_claims"],
                     "forbidden_claim_ids": case["forbidden_claim_ids"],
                     **(
                         {"requires_abstention": case["requires_abstention"]}
-                        if contract["version"] == 1
+                        if is_expanded(contract)
                         else {}
                     ),
                     "ranking_projection_invariant": COMPACT_CONDITION in conditions,
@@ -1313,6 +1760,11 @@ def capture_trial(
                 }
             )
 
+    coverage = (
+        evaluate_successor_coverage(cases, contract["coverage"])
+        if is_successor(contract)
+        else None
+    )
     if any(run["snapshot_sha256_before"] != base_snapshot_sha for run in runs):
         raise TrialError("an isolated condition did not start from the shared base snapshot")
     capture = {
@@ -1326,6 +1778,7 @@ def capture_trial(
         "base_snapshot_sha256": base_snapshot_sha,
         "runs": runs,
         "cases": cases,
+        **({"coverage": coverage} if is_successor(contract) else {}),
         "boundary": {
             "source_db_opened_read_only": True,
             "source_db_passed_to_child": False,
@@ -1337,6 +1790,14 @@ def capture_trial(
             "calls_llm": False,
             "raw_capture_private": True,
             "ranking_projection_invariant_required": COMPACT_CONDITION in conditions,
+            **(
+                {
+                    "pre_generation_context_projection": True,
+                    "raw_retrieval_query_private": True,
+                }
+                if is_successor(contract)
+                else {}
+            ),
         },
     }
     rendered_capture = surface.render_json(capture)
@@ -1375,10 +1836,15 @@ def capture_trial(
                 "prompt_class": case["prompt_class"],
                 **(
                     {"prompt_variant": case["prompt_variant"]}
-                    if contract["version"] == 1
+                    if is_expanded(contract)
                     else {}
                 ),
                 "prompt_sha256": case["prompt_sha256"],
+                **(
+                    {"retrieval_query_sha256": case["retrieval_query_sha256"]}
+                    if is_successor(contract)
+                    else {}
+                ),
                 "ranking_projection_invariant": COMPACT_CONDITION in conditions,
                 "conditions": condition_rows,
             }
@@ -1398,10 +1864,16 @@ def capture_trial(
         "case_count": len(cases),
         "condition_run_count": len(runs),
         "cases": redacted_cases,
+        **({"coverage": coverage} if is_successor(contract) else {}),
         "boundary": {
             "raw_prompt_in_packet": False,
             "raw_context_in_packet": False,
             "raw_memory_key_in_packet": False,
+            **(
+                {"raw_retrieval_query_in_packet": False}
+                if is_successor(contract)
+                else {}
+            ),
             "writes_live_ab_store": False,
             "calls_llm": False,
         },
@@ -1430,6 +1902,7 @@ def validate_capture(
             "base_snapshot_sha256",
             "runs",
             "cases",
+            *({"coverage"} if is_successor(contract) else set()),
             "boundary",
         },
         "capture",
@@ -1459,6 +1932,14 @@ def validate_capture(
         "calls_llm": False,
         "raw_capture_private": True,
         "ranking_projection_invariant_required": COMPACT_CONDITION in condition_ids,
+        **(
+            {
+                "pre_generation_context_projection": True,
+                "raw_retrieval_query_private": True,
+            }
+            if is_successor(contract)
+            else {}
+        ),
     }
     reject_unknown_fields(boundary, set(expected_boundary), "capture.boundary")
     if boundary != expected_boundary:
@@ -1533,8 +2014,16 @@ def validate_capture(
                 "ranking_projection_invariant",
                 "conditions",
                 *(
-                    {"prompt_variant", "requires_abstention"}
-                    if contract["version"] == 1
+                    {
+                        "prompt_variant",
+                        "requires_abstention",
+                        *(
+                            {"retrieval_query", "retrieval_query_sha256"}
+                            if is_successor(contract)
+                            else set()
+                        ),
+                    }
+                    if is_expanded(contract)
                     else set()
                 ),
             },
@@ -1546,7 +2035,7 @@ def validate_capture(
             "prompt_class"
         ]:
             raise TrialError("capture prompt class mismatch")
-        if contract["version"] == 1 and require_label(
+        if is_expanded(contract) and require_label(
             case.get("prompt_variant"), "capture prompt_variant"
         ) != contract_case["prompt_variant"]:
             raise TrialError("capture prompt variant mismatch")
@@ -1557,6 +2046,22 @@ def validate_capture(
             "prompt_sha256"
         ]:
             raise TrialError("capture stored prompt hash mismatch")
+        retrieval_query = prompt
+        if is_successor(contract):
+            retrieval_query = require_string(
+                case.get("retrieval_query"),
+                "capture retrieval_query",
+                max_chars=16_000,
+            )
+            if sha256_text(retrieval_query) != contract_case[
+                "retrieval_query_sha256"
+            ]:
+                raise TrialError("capture retrieval query hash mismatch")
+            if require_sha256(
+                case.get("retrieval_query_sha256"),
+                "capture retrieval_query_sha256",
+            ) != contract_case["retrieval_query_sha256"]:
+                raise TrialError("capture stored retrieval query hash mismatch")
         required_claims = validate_claims(
             case.get("required_claims"),
             "capture required_claims",
@@ -1577,7 +2082,7 @@ def validate_capture(
             or forbidden_claims != contract_case["forbidden_claim_ids"]
         ):
             raise TrialError("capture claim rubric does not match the contract")
-        if contract["version"] == 1 and require_bool(
+        if is_expanded(contract) and require_bool(
             case.get("requires_abstention"), "capture requires_abstention"
         ) != contract_case["requires_abstention"]:
             raise TrialError("capture abstention flag does not match the contract")
@@ -1631,9 +2136,26 @@ def validate_capture(
             }
 
         full_context = conditions[REFERENCE_CONDITION]["context"]
-        full_hits, _ = surface.normalize_search(full_context)
-        if conditions[REFERENCE_CONDITION]["raw_result"] != full_hits:
-            raise TrialError("capture full-search raw result does not match its context")
+        if is_successor(contract):
+            full_hits = require_list(
+                conditions[REFERENCE_CONDITION]["raw_result"],
+                "capture successor full-search raw_result",
+            )
+            expected_context = project_successor_context(
+                REFERENCE_CONDITION,
+                full_hits,
+                contract["context_projection"],
+            )
+            if full_context != expected_context:
+                raise TrialError(
+                    "capture successor full-search context is not the fixed projection"
+                )
+        else:
+            full_hits, _ = surface.normalize_search(full_context)
+            if conditions[REFERENCE_CONDITION]["raw_result"] != full_hits:
+                raise TrialError(
+                    "capture full-search raw result does not match its context"
+                )
         full_keys = [
             require_string(hit["record"].get("key"), "capture full-search key", max_chars=256)
             for hit in full_hits
@@ -1714,24 +2236,47 @@ def validate_capture(
             parse_nested_json(conditions["portfolio_digest"]["context"], "capture digest"),
             "capture digest context",
         )
-        if digest_raw != digest_context:
+        if is_successor(contract):
+            expected_digest_context = project_successor_context(
+                "portfolio_digest",
+                digest_raw,
+                contract["context_projection"],
+            )
+            if conditions["portfolio_digest"]["context"] != expected_digest_context:
+                raise TrialError(
+                    "capture successor digest context is not the fixed projection"
+                )
+        elif digest_raw != digest_context:
             raise TrialError("capture digest raw result does not match its context")
         digest_key = require_string(
             digest_raw.get("key"), "capture digest key", max_chars=256
         )
-        if contract["version"] == 1 and sha256_text(digest_key) != contract[
+        if is_expanded(contract) and sha256_text(digest_key) != contract[
             "digest_key_sha256"
         ]:
-            raise TrialError("capture digest key does not match the v1 commitment")
+            raise TrialError("capture digest key does not match the expanded commitment")
         require_string(digest_raw.get("content"), "capture digest content")
 
-        cases.append({**contract_case, "prompt": prompt, "conditions": conditions})
+        cases.append(
+            {
+                **contract_case,
+                "prompt": prompt,
+                "retrieval_query": retrieval_query,
+                "conditions": conditions,
+            }
+        )
+    coverage = None
+    if is_successor(contract):
+        coverage = evaluate_successor_coverage(cases, contract["coverage"])
+        if require_object(value.get("coverage"), "capture.coverage") != coverage:
+            raise TrialError("capture successor coverage summary drifted")
     return {
         "trial_id": trial_id,
         "contract_commit": contract_commit,
         "captured_at": captured_at,
         "capture_sha256": sha256_bytes(capture_bytes),
         "cases": cases,
+        **({"coverage": coverage} if is_successor(contract) else {}),
     }
 
 
@@ -1816,6 +2361,330 @@ def build_generation_prompt(contract: dict[str, Any], question: str, context: st
     )
 
 
+def validate_generation_failure_receipt(
+    value: dict[str, Any],
+    raw_bytes: bytes,
+    contract: dict[str, Any],
+    contract_sha: str,
+    spec_sha: str,
+    capture: dict[str, Any],
+) -> dict[str, Any]:
+    if not is_successor(contract):
+        raise TrialError("generation failure receipts are supported only by v2")
+    reject_unknown_fields(
+        value,
+        {
+            "schema",
+            "trial_id",
+            "contract_sha256",
+            "contract_commit",
+            "spec_sha256",
+            "capture_sha256",
+            "failed_at",
+            "attempt",
+            "prior_failure_receipt_sha256",
+            "phase",
+            "error_code",
+            "case_id",
+            "condition",
+            "invocation_index",
+            "model_started",
+            "any_model_started",
+            "answer_sha256",
+            "matched_marker_sha256",
+            "retry_authorized",
+            "retry_scope",
+            "boundary",
+        },
+        "generation failure receipt",
+    )
+    if value.get("schema") != FAILURE_RECEIPT_SCHEMA_V2:
+        raise TrialError(
+            f"generation failure receipt schema must be {FAILURE_RECEIPT_SCHEMA_V2}"
+        )
+    if require_label(
+        value.get("trial_id"), "generation failure receipt.trial_id"
+    ) != capture["trial_id"]:
+        raise TrialError("generation failure receipt trial id mismatch")
+    if require_sha256(
+        value.get("contract_sha256"),
+        "generation failure receipt.contract_sha256",
+    ) != contract_sha:
+        raise TrialError("generation failure receipt contract hash mismatch")
+    if require_commit(
+        value.get("contract_commit"),
+        "generation failure receipt.contract_commit",
+    ) != capture["contract_commit"]:
+        raise TrialError("generation failure receipt contract commit mismatch")
+    if require_sha256(
+        value.get("spec_sha256"), "generation failure receipt.spec_sha256"
+    ) != spec_sha:
+        raise TrialError("generation failure receipt spec hash mismatch")
+    if require_sha256(
+        value.get("capture_sha256"),
+        "generation failure receipt.capture_sha256",
+    ) != capture["capture_sha256"]:
+        raise TrialError("generation failure receipt capture hash mismatch")
+    failed_at = require_nonnegative_int(
+        value.get("failed_at"), "generation failure receipt.failed_at"
+    )
+    if failed_at <= 0:
+        raise TrialError("generation failure receipt timestamp is missing")
+    attempt = require_nonnegative_int(
+        value.get("attempt"), "generation failure receipt.attempt"
+    )
+    if attempt not in {1, 2}:
+        raise TrialError("generation failure receipt attempt must be one or two")
+    prior_sha = value.get("prior_failure_receipt_sha256")
+    if prior_sha is not None:
+        prior_sha = require_sha256(
+            prior_sha,
+            "generation failure receipt.prior_failure_receipt_sha256",
+        )
+    if (attempt == 1) is not (prior_sha is None):
+        raise TrialError("generation failure receipt prior-attempt binding is invalid")
+    phase = require_label(value.get("phase"), "generation failure receipt.phase")
+    error_code = require_label(
+        value.get("error_code"), "generation failure receipt.error_code"
+    )
+    case_id = value.get("case_id")
+    if case_id is not None:
+        case_id = require_label(case_id, "generation failure receipt.case_id")
+        if case_id not in {case["case_id"] for case in capture["cases"]}:
+            raise TrialError("generation failure receipt case id is unknown")
+    condition = value.get("condition")
+    if condition is not None:
+        condition = require_label(
+            condition, "generation failure receipt.condition"
+        )
+        if condition not in contract_conditions(contract):
+            raise TrialError("generation failure receipt condition is unknown")
+    invocation_index = require_nonnegative_int(
+        value.get("invocation_index"),
+        "generation failure receipt.invocation_index",
+    )
+    if (case_id is None) is not (condition is None):
+        raise TrialError("generation failure receipt coordinates are inconsistent")
+    if invocation_index > 0 and case_id is None:
+        raise TrialError("generation failure invocation is missing case coordinates")
+    model_started = require_bool(
+        value.get("model_started"),
+        "generation failure receipt.model_started",
+    )
+    any_model_started = require_bool(
+        value.get("any_model_started"),
+        "generation failure receipt.any_model_started",
+    )
+    if model_started and not any_model_started:
+        raise TrialError("generation failure receipt model state is inconsistent")
+    answer_sha = value.get("answer_sha256")
+    if answer_sha is not None:
+        answer_sha = require_sha256(
+            answer_sha, "generation failure receipt.answer_sha256"
+        )
+    marker_sha = value.get("matched_marker_sha256")
+    if marker_sha is not None:
+        marker_sha = require_sha256(
+            marker_sha,
+            "generation failure receipt.matched_marker_sha256",
+        )
+        if answer_sha is None:
+            raise TrialError("generation failure marker hash requires an answer hash")
+    retry_authorized = require_bool(
+        value.get("retry_authorized"),
+        "generation failure receipt.retry_authorized",
+    )
+    retry_scope = require_label(
+        value.get("retry_scope"), "generation failure receipt.retry_scope"
+    )
+    expected_retry = (
+        attempt == 1
+        and phase == "pre_model_infrastructure"
+        and error_code in RETRYABLE_PRE_MODEL_ERROR_CODES
+        and not model_started
+        and not any_model_started
+    )
+    if retry_authorized is not expected_retry:
+        raise TrialError("generation failure receipt retry authorization drifted")
+    expected_scope = "explicit_full_restart" if expected_retry else "none"
+    if retry_scope != expected_scope:
+        raise TrialError("generation failure receipt retry scope drifted")
+    boundary = require_object(
+        value.get("boundary"), "generation failure receipt.boundary"
+    )
+    expected_boundary = {
+        "private": True,
+        "atomic_write": True,
+        "raw_prompt_present": False,
+        "raw_retrieval_query_present": False,
+        "raw_context_present": False,
+        "raw_answer_present": False,
+        "raw_marker_present": False,
+        "automatic_retry": False,
+    }
+    reject_unknown_fields(
+        boundary,
+        set(expected_boundary),
+        "generation failure receipt.boundary",
+    )
+    if boundary != expected_boundary:
+        raise TrialError("generation failure receipt privacy boundary is incomplete")
+    return {
+        "attempt": attempt,
+        "retry_authorized": retry_authorized,
+        "receipt_sha256": sha256_bytes(raw_bytes),
+    }
+
+
+def write_generation_failure_receipt(
+    *,
+    output_path: Path,
+    contract: dict[str, Any],
+    contract_sha: str,
+    spec_sha: str,
+    capture: dict[str, Any],
+    attempt: int,
+    prior_receipt_sha: str | None,
+    failure: GenerationFailure,
+    any_model_started: bool,
+    case_id: str | None,
+    condition: str | None,
+    invocation_index: int,
+    protected_inputs: tuple[Path, ...],
+) -> dict[str, Any]:
+    retry_authorized = (
+        attempt == 1
+        and failure.phase == "pre_model_infrastructure"
+        and failure.error_code in RETRYABLE_PRE_MODEL_ERROR_CODES
+        and not failure.model_started
+        and not any_model_started
+    )
+    packet = {
+        "schema": FAILURE_RECEIPT_SCHEMA_V2,
+        "trial_id": capture["trial_id"],
+        "contract_sha256": contract_sha,
+        "contract_commit": capture["contract_commit"],
+        "spec_sha256": spec_sha,
+        "capture_sha256": capture["capture_sha256"],
+        "failed_at": int(time.time()),
+        "attempt": attempt,
+        "prior_failure_receipt_sha256": prior_receipt_sha,
+        "phase": failure.phase,
+        "error_code": failure.error_code,
+        "case_id": case_id,
+        "condition": condition,
+        "invocation_index": invocation_index,
+        "model_started": failure.model_started,
+        "any_model_started": any_model_started,
+        "answer_sha256": failure.answer_sha256,
+        "matched_marker_sha256": failure.matched_marker_sha256,
+        "retry_authorized": retry_authorized,
+        "retry_scope": "explicit_full_restart" if retry_authorized else "none",
+        "boundary": {
+            "private": True,
+            "atomic_write": True,
+            "raw_prompt_present": False,
+            "raw_retrieval_query_present": False,
+            "raw_context_present": False,
+            "raw_answer_present": False,
+            "raw_marker_present": False,
+            "automatic_retry": False,
+        },
+    }
+    rendered = surface.render_json(packet)
+    validate_generation_failure_receipt(
+        packet,
+        rendered,
+        contract,
+        contract_sha,
+        spec_sha,
+        capture,
+    )
+    written = write_json(output_path, packet, protected_paths=protected_inputs)
+    if written != rendered:
+        raise TrialError("generation failure receipt serialization drifted")
+    return packet
+
+
+def claim_generation_attempt(
+    *,
+    repo: Path,
+    contract_sha: str,
+    spec_sha: str,
+    capture_sha: str,
+    attempt: int,
+    prior_receipt_sha: str | None,
+    reserved_paths: tuple[Path, ...],
+) -> tuple[Path, ...]:
+    if attempt not in {1, 2}:
+        raise TrialError("generation attempt claim must be one or two")
+    if (attempt == 1) is not (prior_receipt_sha is None):
+        raise TrialError("generation attempt claim prior binding is invalid")
+    claim_dir = repo / "data" / "portfolio-continuity-generation-claims"
+    try:
+        claim_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if claim_dir.stat().st_mode & 0o077:
+            raise TrialError("private attempt claim directory permissions are too broad")
+    except OSError as exc:
+        raise TrialError("failed to prepare the private attempt claim directory") from exc
+    identity_sha = sha256_text(f"{contract_sha}\0{spec_sha}")
+    first_claim_path = claim_dir / f"{identity_sha}.attempt-1.json"
+    resolved_claim_dir = claim_dir.resolve(strict=False)
+    if any(
+        path.resolve(strict=False).is_relative_to(resolved_claim_dir)
+        for path in reserved_paths
+    ):
+        raise TrialError("generation outputs must not use the attempt claim directory")
+    if attempt == 2 and not first_claim_path.is_file():
+        raise TrialError("attempt two is missing the claimed first attempt")
+    claim_path = claim_dir / f"{identity_sha}.attempt-{attempt}.json"
+    require_ignored_data_path(repo, claim_path, "generation attempt claim")
+    packet = {
+        "schema": "agent_bridge.portfolio_continuity_answer_attempt_claim.v2",
+        "contract_sha256": contract_sha,
+        "spec_sha256": spec_sha,
+        "capture_sha256": capture_sha,
+        "attempt": attempt,
+        "prior_failure_receipt_sha256": prior_receipt_sha,
+        "claimed_at": int(time.time()),
+        "boundary": {
+            "private": True,
+            "single_use": True,
+            "raw_material_present": False,
+        },
+    }
+    rendered = surface.render_json(packet)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    try:
+        file_descriptor = os.open(claim_path, flags, 0o600)
+        try:
+            handle = os.fdopen(file_descriptor, "wb")
+        except (OSError, ValueError):
+            os.close(file_descriptor)
+            raise
+        with handle:
+            handle.write(rendered)
+            handle.flush()
+            os.fsync(handle.fileno())
+        directory_descriptor = os.open(
+            claim_dir,
+            os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0),
+        )
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
+    except FileExistsError as exc:
+        raise TrialError("generation attempt was already claimed") from exc
+    except OSError as exc:
+        raise TrialError("failed to atomically claim generation attempt") from exc
+    claim_paths = [claim_path]
+    if first_claim_path != claim_path:
+        claim_paths.insert(0, first_claim_path)
+    return tuple(claim_paths)
+
+
 def generate_one_answer(
     *,
     codex_binary: Path,
@@ -1831,21 +2700,31 @@ def generate_one_answer(
         tmpdir = Path(temporary)
         schema_path = tmpdir / "answer.schema.json"
         output_path = tmpdir / "answer.json"
-        write_json(
-            schema_path,
-            {
-                "type": "object",
-                "additionalProperties": False,
-                "required": ["answer_markdown"],
-                "properties": {
-                    "answer_markdown": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": generation["max_answer_chars"],
-                    }
+        try:
+            write_json(
+                schema_path,
+                {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["answer_markdown"],
+                    "properties": {
+                        "answer_markdown": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": generation["max_answer_chars"],
+                        }
+                    },
                 },
-            },
-        )
+            )
+        except TrialError as exc:
+            if not is_successor(contract):
+                raise
+            raise GenerationFailure(
+                "generation_workspace_failed",
+                "pre_model_infrastructure",
+                "failed to prepare the isolated generation workspace",
+                model_started=False,
+            ) from exc
         command = [
             str(codex_binary),
             "exec",
@@ -1882,31 +2761,99 @@ def generate_one_answer(
                 timeout=timeout,
                 check=False,
             )
-        except (OSError, subprocess.TimeoutExpired) as exc:
-            raise TrialError(f"Codex generation failed to complete: {exc}") from exc
+        except OSError as exc:
+            if not is_successor(contract):
+                raise TrialError(f"Codex generation failed to complete: {exc}") from exc
+            raise GenerationFailure(
+                "codex_spawn_failed",
+                "pre_model_infrastructure",
+                "failed to start the Codex generation process",
+                model_started=False,
+            ) from exc
+        except subprocess.TimeoutExpired as exc:
+            if not is_successor(contract):
+                raise TrialError(f"Codex generation failed to complete: {exc}") from exc
+            raise GenerationFailure(
+                "codex_timeout",
+                "model_execution",
+                "Codex generation timed out",
+                model_started=True,
+            ) from exc
         latency_ms = (time.perf_counter() - started) * 1000.0
         if completed.returncode != 0:
-            raise TrialError("Codex generation exited unsuccessfully")
+            raise GenerationFailure(
+                "codex_exit_unsuccessful",
+                "model_execution",
+                "Codex generation exited unsuccessfully",
+                model_started=True,
+            )
         if len(completed.stdout.encode("utf-8")) > 2_000_000:
-            raise TrialError("Codex JSONL event stream is unexpectedly large")
+            raise GenerationFailure(
+                "event_stream_too_large",
+                "post_model_validation",
+                "Codex JSONL event stream is unexpectedly large",
+                model_started=True,
+            )
         if len(completed.stderr.encode("utf-8")) > 256_000:
-            raise TrialError("Codex stderr is unexpectedly large")
-        event_counts = parse_codex_events(completed.stdout)
-        answer_packet, answer_bytes = read_json(output_path)
-        reject_unknown_fields(answer_packet, {"answer_markdown"}, "Codex answer")
-        answer = require_string(
-            answer_packet.get("answer_markdown"),
-            "Codex answer.answer_markdown",
-            max_chars=generation["max_answer_chars"],
-        ).strip()
+            raise GenerationFailure(
+                "stderr_too_large",
+                "post_model_validation",
+                "Codex stderr is unexpectedly large",
+                model_started=True,
+            )
+        try:
+            event_counts = parse_codex_events(completed.stdout)
+        except TrialError as exc:
+            if not is_successor(contract):
+                raise
+            error_code = (
+                "tool_use_detected"
+                if "attempted tool use" in str(exc)
+                else "event_stream_invalid"
+            )
+            raise GenerationFailure(
+                error_code,
+                "semantic_validation",
+                "Codex event stream violated the generation contract",
+                model_started=True,
+            ) from exc
+        try:
+            answer_packet, answer_bytes = read_json(output_path)
+            reject_unknown_fields(answer_packet, {"answer_markdown"}, "Codex answer")
+            raw_answer = require_string(
+                answer_packet.get("answer_markdown"),
+                "Codex answer.answer_markdown",
+                max_chars=generation["max_answer_chars"],
+            )
+        except (OSError, TrialError) as exc:
+            if not is_successor(contract):
+                raise
+            raise GenerationFailure(
+                "output_schema_invalid",
+                "semantic_validation",
+                "Codex answer packet violated the output schema",
+                model_started=True,
+            ) from exc
+        answer = raw_answer if is_successor(contract) else raw_answer.strip()
         forbidden_markers = set(CONDITIONS) | {
             "portfolio_state_digest",
             "=== EVIDENCE CONTEXT ===",
         }
         if extra_forbidden_markers is not None:
             forbidden_markers.update(extra_forbidden_markers)
-        if any(marker in answer for marker in forbidden_markers):
-            raise TrialError("Codex answer leaked a condition/evidence marker")
+        matched_marker = next(
+            (marker for marker in sorted(forbidden_markers) if marker in answer),
+            None,
+        )
+        if matched_marker is not None:
+            raise GenerationFailure(
+                "answer_marker_leak",
+                "semantic_validation",
+                "Codex answer leaked a condition/evidence marker",
+                model_started=True,
+                answer_sha256=sha256_text(answer),
+                matched_marker_sha256=sha256_text(matched_marker),
+            )
         return {
             "answer_markdown": answer,
             "answer_sha256": sha256_text(answer),
@@ -1946,6 +2893,8 @@ def generate_trial(
     review_template_output: Path,
     redacted_output: Path,
     timeout: float,
+    failure_output: Path | None = None,
+    prior_failure_receipt: Path | None = None,
 ) -> dict[str, Any]:
     protected_inputs = (
         contract_path,
@@ -1954,6 +2903,7 @@ def generate_trial(
         codex_binary,
         Path(__file__),
         Path(surface.__file__),
+        *((prior_failure_receipt,) if prior_failure_receipt is not None else ()),
     )
     output_paths = {
         "generation_output": generation_output,
@@ -1962,46 +2912,149 @@ def generate_trial(
         "review_template_output": review_template_output,
         "redacted_output": redacted_output,
     }
-    require_distinct_paths(
-        {
-            "contract": contract_path,
-            "spec": spec_path,
-            "capture": capture_path,
-            "codex_binary": codex_binary,
-            "harness_source": Path(__file__),
-            "surface_source": Path(surface.__file__),
-            **output_paths,
-        }
-    )
+    all_paths = {
+        "contract": contract_path,
+        "spec": spec_path,
+        "capture": capture_path,
+        "codex_binary": codex_binary,
+        "harness_source": Path(__file__),
+        "surface_source": Path(surface.__file__),
+        **output_paths,
+        **({"failure_output": failure_output} if failure_output is not None else {}),
+        **(
+            {"prior_failure_receipt": prior_failure_receipt}
+            if prior_failure_receipt is not None
+            else {}
+        ),
+    }
+    require_distinct_paths(all_paths)
     contract, contract_sha = load_contract(contract_path)
     conditions = contract_conditions(contract)
-    spec_raw, _ = read_json(spec_path)
+    if is_successor(contract):
+        if failure_output is None:
+            raise TrialError("v2 generation requires --failure-output")
+    elif failure_output is not None or prior_failure_receipt is not None:
+        raise TrialError("failure receipts are supported only by v2 generation")
+    spec_raw, spec_bytes = read_json(spec_path)
+    spec_sha = sha256_bytes(spec_bytes)
     spec = validate_spec(spec_raw, contract, contract_sha)
     capture_raw, capture_bytes = read_json(capture_path)
     capture = validate_capture(capture_raw, capture_bytes, contract, contract_sha)
     if capture["trial_id"] != spec["trial_id"] or capture["contract_commit"] != spec["contract_commit"]:
         raise TrialError("capture/spec trial identity mismatch")
+    attempt = 1
+    prior_receipt_sha: str | None = None
+    if prior_failure_receipt is not None:
+        prior_raw, prior_bytes = read_json(prior_failure_receipt)
+        prior = validate_generation_failure_receipt(
+            prior_raw,
+            prior_bytes,
+            contract,
+            contract_sha,
+            spec_sha,
+            capture,
+        )
+        if prior["attempt"] != 1 or not prior["retry_authorized"]:
+            raise TrialError(
+                "prior failure receipt does not authorize an explicit full restart"
+            )
+        attempt = 2
+        prior_receipt_sha = prior["receipt_sha256"]
     repo: Path = spec["repo"]
     if git_head(repo) != spec["contract_commit"]:
         raise TrialError("repository HEAD does not match the preregistered capture commit")
-    if contract["version"] == 1:
+    if is_expanded(contract):
         require_committed_file(
-            repo, spec["contract_commit"], contract_path, "v1 contract"
+            repo, spec["contract_commit"], contract_path, "expanded contract"
         )
         require_committed_file(
-            repo, spec["contract_commit"], Path(__file__), "v1 harness source"
+            repo,
+            spec["contract_commit"],
+            Path(__file__),
+            "expanded harness source",
         )
         require_committed_file(
             repo,
             spec["contract_commit"],
             Path(surface.__file__),
-            "v1 surface helper source",
+            "expanded surface helper source",
         )
-    for label, path in output_paths.items():
+    private_outputs = {
+        **output_paths,
+        **({"failure_output": failure_output} if failure_output is not None else {}),
+    }
+    for label, path in private_outputs.items():
         require_ignored_data_path(repo, path, label)
-    codex_observation = observe_codex_identity(
-        codex_binary, contract["generation"]["cli_version"], timeout
-    )
+        if is_successor(contract) and (path.exists() or path.is_symlink()):
+            raise TrialError("v2 generation requires fresh output paths")
+    if attempt == 2:
+        if prior_receipt_sha is None:
+            raise TrialError("attempt two is missing its prior failure receipt hash")
+    if is_successor(contract):
+        attempt_claim_paths = claim_generation_attempt(
+            repo=repo,
+            contract_sha=contract_sha,
+            spec_sha=spec_sha,
+            capture_sha=capture["capture_sha256"],
+            attempt=attempt,
+            prior_receipt_sha=prior_receipt_sha,
+            reserved_paths=tuple(private_outputs.values()),
+        )
+        protected_inputs += attempt_claim_paths
+    if is_successor(contract) and capture["coverage"]["status"] != contract[
+        "coverage"
+    ]["generation_requires_status"]:
+        failure = GenerationFailure(
+            "reference_coverage_invalid",
+            "pre_model_gate",
+            "successor reference coverage does not permit generation",
+            model_started=False,
+        )
+        write_generation_failure_receipt(
+            output_path=failure_output,
+            contract=contract,
+            contract_sha=contract_sha,
+            spec_sha=spec_sha,
+            capture=capture,
+            attempt=attempt,
+            prior_receipt_sha=prior_receipt_sha,
+            failure=failure,
+            any_model_started=False,
+            case_id=capture["coverage"]["failed_case_ids"][0],
+            condition=REFERENCE_CONDITION,
+            invocation_index=0,
+            protected_inputs=protected_inputs,
+        )
+        raise TrialError("successor generation stopped at the reference coverage gate")
+    try:
+        codex_observation = observe_codex_identity(
+            codex_binary, contract["generation"]["cli_version"], timeout
+        )
+    except TrialError as exc:
+        if is_successor(contract):
+            failure = GenerationFailure(
+                "codex_identity_unavailable",
+                "pre_model_infrastructure",
+                "Codex identity preflight failed",
+                model_started=False,
+            )
+            write_generation_failure_receipt(
+                output_path=failure_output,
+                contract=contract,
+                contract_sha=contract_sha,
+                spec_sha=spec_sha,
+                capture=capture,
+                attempt=attempt,
+                prior_receipt_sha=prior_receipt_sha,
+                failure=failure,
+                any_model_started=False,
+                case_id=None,
+                condition=None,
+                invocation_index=0,
+                protected_inputs=protected_inputs,
+            )
+            raise TrialError("successor generation failed Codex identity preflight") from exc
+        raise
 
     jobs = [
         (case, condition)
@@ -2012,23 +3065,79 @@ def generate_trial(
     answers_by_case: dict[str, dict[str, dict[str, Any]]] = {
         case["case_id"]: {} for case in capture["cases"]
     }
+    any_model_started = False
     for invocation_index, (case, condition) in enumerate(jobs, start=1):
-        generated = generate_one_answer(
-            codex_binary=codex_binary,
-            contract=contract,
-            question=case["prompt"],
-            context=case["conditions"][condition]["context"],
-            extra_forbidden_markers=(
-                {spec["digest_key"]} if contract["version"] == 1 else None
-            ),
-            timeout=timeout,
-        )
+        try:
+            generated = generate_one_answer(
+                codex_binary=codex_binary,
+                contract=contract,
+                question=case["prompt"],
+                context=case["conditions"][condition]["context"],
+                extra_forbidden_markers=(
+                    {spec["digest_key"]} if is_expanded(contract) else None
+                ),
+                timeout=timeout,
+            )
+        except GenerationFailure as failure:
+            any_model_started = any_model_started or failure.model_started
+            if is_successor(contract):
+                write_generation_failure_receipt(
+                    output_path=failure_output,
+                    contract=contract,
+                    contract_sha=contract_sha,
+                    spec_sha=spec_sha,
+                    capture=capture,
+                    attempt=attempt,
+                    prior_receipt_sha=prior_receipt_sha,
+                    failure=failure,
+                    any_model_started=any_model_started,
+                    case_id=case["case_id"],
+                    condition=condition,
+                    invocation_index=invocation_index,
+                    protected_inputs=protected_inputs,
+                )
+                raise TrialError(
+                    f"successor generation stopped with {failure.error_code}"
+                ) from failure
+            raise
+        any_model_started = True
         generated["invocation_index"] = invocation_index
         generated["context_sha256"] = case["conditions"][condition]["context_sha256"]
         generated["context_tokens_estimate"] = case["conditions"][condition][
             "context_tokens_estimate"
         ]
         answers_by_case[case["case_id"]][condition] = generated
+
+    def write_generation_artifact(path: Path, packet: dict[str, Any]) -> bytes:
+        try:
+            return write_json(path, packet, protected_paths=protected_inputs)
+        except TrialError as exc:
+            if is_successor(contract):
+                failure = GenerationFailure(
+                    "artifact_write_failed",
+                    "post_model_artifact",
+                    "failed to write a generation artifact",
+                    model_started=True,
+                )
+                write_generation_failure_receipt(
+                    output_path=failure_output,
+                    contract=contract,
+                    contract_sha=contract_sha,
+                    spec_sha=spec_sha,
+                    capture=capture,
+                    attempt=attempt,
+                    prior_receipt_sha=prior_receipt_sha,
+                    failure=failure,
+                    any_model_started=True,
+                    case_id=None,
+                    condition=None,
+                    invocation_index=0,
+                    protected_inputs=protected_inputs,
+                )
+                raise TrialError(
+                    "successor generation stopped with artifact_write_failed"
+                ) from exc
+            raise
 
     generated_at = int(time.time())
     generation_cases = []
@@ -2039,7 +3148,7 @@ def generate_trial(
                 "prompt_class": case["prompt_class"],
                 **(
                     {"prompt_variant": case["prompt_variant"]}
-                    if contract["version"] == 1
+                    if is_expanded(contract)
                     else {}
                 ),
                 "prompt": case["prompt"],
@@ -2053,7 +3162,7 @@ def generate_trial(
                 },
                 **(
                     {"requires_abstention": case["requires_abstention"]}
-                    if contract["version"] == 1
+                    if is_expanded(contract)
                     else {}
                 ),
             }
@@ -2064,6 +3173,14 @@ def generate_trial(
         "contract_sha256": contract_sha,
         "contract_commit": spec["contract_commit"],
         "capture_sha256": capture["capture_sha256"],
+        **(
+            {
+                "attempt": attempt,
+                "prior_failure_receipt_sha256": prior_receipt_sha,
+            }
+            if is_successor(contract)
+            else {}
+        ),
         "generated_at": generated_at,
         "codex_observation": codex_observation,
         "model": contract["generation"]["model"],
@@ -2078,12 +3195,18 @@ def generate_trial(
             "tool_events_observed": False,
             "external_facts_allowed": False,
             "raw_generation_private": True,
+            **(
+                {
+                    "answer_postprocessing_applied": False,
+                    "automatic_retry": False,
+                }
+                if is_successor(contract)
+                else {}
+            ),
         },
     }
-    generation_bytes = write_json(
-        generation_output,
-        generation_packet,
-        protected_paths=protected_inputs,
+    generation_bytes = write_generation_artifact(
+        generation_output, generation_packet
     )
     generation_sha = sha256_bytes(generation_bytes)
 
@@ -2125,7 +3248,7 @@ def generate_trial(
                     "notes": "",
                     **(
                         {"abstention_pass": None}
-                        if contract["version"] == 1 and case["requires_abstention"]
+                        if is_expanded(contract) and case["requires_abstention"]
                         else {}
                     ),
                 }
@@ -2136,7 +3259,7 @@ def generate_trial(
                 "prompt_class": case["prompt_class"],
                 **(
                     {"prompt_variant": case["prompt_variant"]}
-                    if contract["version"] == 1
+                    if is_expanded(contract)
                     else {}
                 ),
                 "question": case["prompt"],
@@ -2145,7 +3268,7 @@ def generate_trial(
                 "forbidden_claim_ids": case["forbidden_claim_ids"],
                 **(
                     {"requires_abstention": case["requires_abstention"]}
-                    if contract["version"] == 1
+                    if is_expanded(contract)
                     else {}
                 ),
                 "answers": blind_answers,
@@ -2177,15 +3300,13 @@ def generate_trial(
             "owner_review_required": True,
             **(
                 {"required_reviewer_count": contract["review"]["required_reviewer_count"]}
-                if contract["version"] == 1
+                if is_expanded(contract)
                 else {}
             ),
             "unblinding_allowed": False,
         },
     }
-    blind_bytes = write_json(
-        blind_output, blind_packet, protected_paths=protected_inputs
-    )
+    blind_bytes = write_generation_artifact(blind_output, blind_packet)
     blind_sha = sha256_bytes(blind_bytes)
     mapping_packet = {
         "schema": versioned_schema(contract, BLIND_MAP_SCHEMA, BLIND_MAP_SCHEMA_V1),
@@ -2199,9 +3320,7 @@ def generate_trial(
         "cases": mapping_cases,
         "boundary": {"mapping_private": True, "reviewer_must_not_read_before_review": True},
     }
-    mapping_bytes = write_json(
-        map_output, mapping_packet, protected_paths=protected_inputs
-    )
+    mapping_bytes = write_generation_artifact(map_output, mapping_packet)
     review_template = {
         "schema": versioned_schema(contract, REVIEW_SCHEMA, REVIEW_SCHEMA_V1),
         "trial_id": spec["trial_id"],
@@ -2210,15 +3329,13 @@ def generate_trial(
         "reviewed_at": 0,
         **(
             {"independent_review": False, "condition_blinded": False}
-            if contract["version"] == 1
+            if is_expanded(contract)
             else {}
         ),
         "cases": review_cases,
     }
-    review_bytes = write_json(
-        review_template_output,
-        review_template,
-        protected_paths=protected_inputs,
+    review_bytes = write_generation_artifact(
+        review_template_output, review_template
     )
     answer_lengths = [
         generated["answer_chars"]
@@ -2238,6 +3355,14 @@ def generate_trial(
         "contract_sha256": contract_sha,
         "contract_commit": spec["contract_commit"],
         "capture_sha256": capture["capture_sha256"],
+        **(
+            {
+                "attempt": attempt,
+                "prior_failure_receipt_sha256": prior_receipt_sha,
+            }
+            if is_successor(contract)
+            else {}
+        ),
         "generation_sha256": generation_sha,
         "blind_packet_sha256": blind_sha,
         "blind_map_sha256": sha256_bytes(mapping_bytes),
@@ -2256,7 +3381,7 @@ def generate_trial(
         "generation_latency_ms_p95": round(surface.percentile_95(generation_latencies), 3),
         "status": (
             "WAIT_TWO_BLIND_REVIEWS"
-            if contract["version"] == 1
+            if is_expanded(contract)
             else "WAIT_OWNER_BLIND_REVIEW"
         ),
         "boundary": {
@@ -2268,9 +3393,17 @@ def generate_trial(
             "tool_events_observed": False,
             "automatic_unblinding": False,
             "runtime_promotion_allowed": False,
+            **(
+                {
+                    "answer_postprocessing_applied": False,
+                    "automatic_retry": False,
+                }
+                if is_successor(contract)
+                else {}
+            ),
         },
     }
-    write_json(redacted_output, redacted, protected_paths=protected_inputs)
+    write_generation_artifact(redacted_output, redacted)
     return redacted
 
 
@@ -2293,6 +3426,11 @@ def validate_generation(
             "contract_sha256",
             "contract_commit",
             "capture_sha256",
+            *(
+                {"attempt", "prior_failure_receipt_sha256"}
+                if is_successor(contract)
+                else set()
+            ),
             "generated_at",
             "codex_observation",
             "model",
@@ -2316,6 +3454,19 @@ def validate_generation(
         value.get("capture_sha256"), "generation.capture_sha256"
     ) != capture["capture_sha256"]:
         raise TrialError("generation capture hash mismatch")
+    attempt = 1
+    prior_receipt_sha: str | None = None
+    if is_successor(contract):
+        attempt = require_nonnegative_int(value.get("attempt"), "generation.attempt")
+        if attempt not in {1, 2}:
+            raise TrialError("generation attempt must be one or two")
+        prior_receipt_sha = value.get("prior_failure_receipt_sha256")
+        if prior_receipt_sha is not None:
+            prior_receipt_sha = require_sha256(
+                prior_receipt_sha, "generation.prior_failure_receipt_sha256"
+            )
+        if (attempt == 1) is not (prior_receipt_sha is None):
+            raise TrialError("generation prior-attempt binding is invalid")
     generated_at = require_nonnegative_int(value.get("generated_at"), "generation.generated_at")
     if generated_at <= 0:
         raise TrialError("generation timestamp is missing")
@@ -2341,6 +3492,14 @@ def validate_generation(
         "tool_events_observed": False,
         "external_facts_allowed": False,
         "raw_generation_private": True,
+        **(
+            {
+                "answer_postprocessing_applied": False,
+                "automatic_retry": False,
+            }
+            if is_successor(contract)
+            else {}
+        ),
     }
     reject_unknown_fields(boundary, set(expected_boundary), "generation.boundary")
     if boundary != expected_boundary:
@@ -2366,7 +3525,7 @@ def validate_generation(
                 "answers",
                 *(
                     {"prompt_variant", "requires_abstention"}
-                    if contract["version"] == 1
+                    if is_expanded(contract)
                     else set()
                 ),
             },
@@ -2379,7 +3538,7 @@ def validate_generation(
             "prompt_class"
         ]:
             raise TrialError("generation prompt class mismatch")
-        if contract["version"] == 1 and require_label(
+        if is_expanded(contract) and require_label(
             case.get("prompt_variant"), "generation prompt_variant"
         ) != capture_case["prompt_variant"]:
             raise TrialError("generation prompt variant mismatch")
@@ -2415,7 +3574,7 @@ def validate_generation(
             != capture_case["forbidden_claim_ids"]
         ):
             raise TrialError("generation claim rubric differs from capture")
-        if contract["version"] == 1 and require_bool(
+        if is_expanded(contract) and require_bool(
             case.get("requires_abstention"), "generation requires_abstention"
         ) != capture_case["requires_abstention"]:
             raise TrialError("generation abstention flag differs from capture")
@@ -2527,6 +3686,14 @@ def validate_generation(
     return {
         "generation_sha256": sha256_bytes(raw_bytes),
         "generated_at": generated_at,
+        **(
+            {
+                "attempt": attempt,
+                "prior_failure_receipt_sha256": prior_receipt_sha,
+            }
+            if is_successor(contract)
+            else {}
+        ),
         "answers": answers,
     }
 
@@ -2588,7 +3755,7 @@ def validate_blind_packet(
         "owner_review_required": True,
         **(
             {"required_reviewer_count": contract["review"]["required_reviewer_count"]}
-            if contract["version"] == 1
+            if is_expanded(contract)
             else {}
         ),
         "unblinding_allowed": False,
@@ -2614,7 +3781,7 @@ def validate_blind_packet(
                 "answers",
                 *(
                     {"prompt_variant", "requires_abstention"}
-                    if contract["version"] == 1
+                    if is_expanded(contract)
                     else set()
                 ),
             },
@@ -2627,7 +3794,7 @@ def validate_blind_packet(
             "prompt_class"
         ]:
             raise TrialError("blind packet prompt class mismatch")
-        if contract["version"] == 1 and require_label(
+        if is_expanded(contract) and require_label(
             case.get("prompt_variant"), "blind prompt_variant"
         ) != capture_case["prompt_variant"]:
             raise TrialError("blind packet prompt variant mismatch")
@@ -2656,7 +3823,7 @@ def validate_blind_packet(
         ):
             raise TrialError("blind packet claim rubric differs from the contract/capture")
         requires_abstention = capture_case["requires_abstention"]
-        if contract["version"] == 1 and require_bool(
+        if is_expanded(contract) and require_bool(
             case.get("requires_abstention"), "blind requires_abstention"
         ) != requires_abstention:
             raise TrialError("blind packet abstention flag differs from capture")
@@ -2875,7 +4042,7 @@ def validate_review(
             "cases",
             *(
                 {"independent_review", "condition_blinded"}
-                if contract["version"] == 1
+                if is_expanded(contract)
                 else set()
             ),
         },
@@ -2893,7 +4060,7 @@ def validate_review(
         raise TrialError("review.reviewed_at must be populated")
     independent_review = False
     condition_blinded = False
-    if contract["version"] == 1:
+    if is_expanded(contract):
         independent_review = require_bool(
             value.get("independent_review"), "review.independent_review"
         )
@@ -2901,7 +4068,9 @@ def validate_review(
             value.get("condition_blinded"), "review.condition_blinded"
         )
         if not independent_review or not condition_blinded:
-            raise TrialError("v1 review independence/blinding attestations must be true")
+            raise TrialError(
+                "expanded review independence/blinding attestations must be true"
+            )
     raw_cases = require_list(value.get("cases"), "review.cases")
     if len(raw_cases) != len(blind["cases"]):
         raise TrialError("review case count mismatch")
@@ -2928,7 +4097,7 @@ def validate_review(
                     "notes",
                     *(
                         {"abstention_pass"}
-                        if contract["version"] == 1
+                        if is_expanded(contract)
                         and blind_case["requires_abstention"]
                         else set()
                     ),
@@ -2973,7 +4142,7 @@ def validate_review(
             if not isinstance(notes, str) or len(notes) > 2_000:
                 raise TrialError("review notes must be a bounded string")
             abstention_pass: bool | None = None
-            if contract["version"] == 1 and blind_case["requires_abstention"]:
+            if is_expanded(contract) and blind_case["requires_abstention"]:
                 abstention_pass = require_bool(
                     answer.get("abstention_pass"), "review abstention_pass"
                 )
@@ -3219,7 +4388,7 @@ def score_trial_v1(
         and all_abstention_pass
     )
     output = {
-        "schema": SCORE_SCHEMA_V1,
+        "schema": versioned_schema(contract, SCORE_SCHEMA, SCORE_SCHEMA_V1),
         "trial_id": capture["trial_id"],
         "contract_sha256": contract_sha,
         "contract_commit": capture["contract_commit"],
@@ -3313,7 +4482,7 @@ def _score_trial_core(
         capture,
         None,
     )
-    expected_review_count = 2 if contract["version"] == 1 else 1
+    expected_review_count = 2 if is_expanded(contract) else 1
     if len(review_paths) != expected_review_count:
         raise TrialError(
             f"score requires exactly {expected_review_count} --review argument(s)"
@@ -3358,7 +4527,7 @@ def _score_trial_core(
     )
     map_raw, _ = read_json(map_path)
     mapping = validate_mapping(map_raw, blind, contract, capture, generation)
-    if contract["version"] == 1:
+    if is_expanded(contract):
         return score_trial_v1(
             contract,
             contract_sha,
@@ -3578,6 +4747,8 @@ def build_parser() -> argparse.ArgumentParser:
     generate.add_argument("--map-output", required=True)
     generate.add_argument("--review-template-output", required=True)
     generate.add_argument("--redacted-output", required=True)
+    generate.add_argument("--failure-output")
+    generate.add_argument("--prior-failure-receipt")
     generate.add_argument("--timeout-secs", type=float, default=600.0)
 
     score = subparsers.add_parser("score")
@@ -3622,6 +4793,12 @@ def main(argv: list[str] | None = None) -> int:
                 Path(args.review_template_output),
                 Path(args.redacted_output),
                 args.timeout_secs,
+                Path(args.failure_output) if args.failure_output else None,
+                (
+                    Path(args.prior_failure_receipt)
+                    if args.prior_failure_receipt
+                    else None
+                ),
             )
         else:
             packet = score_trial(

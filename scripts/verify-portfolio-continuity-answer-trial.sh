@@ -10,8 +10,12 @@ CONTRACT="$ROOT_DIR/scripts/eval/fixtures/portfolio_continuity_answer_contract.j
 REPORT="$ROOT_DIR/docs/reports/goal-c-u/2026-07-10-portfolio-continuity-blinded-answer-trial-prereg.md"
 EXPANDED_CONTRACT="$ROOT_DIR/scripts/eval/fixtures/portfolio_continuity_expanded_answer_contract.json"
 EXPANDED_REPORT="$ROOT_DIR/docs/reports/goal-c-u/2026-07-10-portfolio-continuity-expanded-answer-trial-prereg.md"
+SUCCESSOR_CONTRACT="$ROOT_DIR/scripts/eval/fixtures/portfolio_continuity_successor_answer_contract.json"
+SUCCESSOR_REPORT="$ROOT_DIR/docs/reports/goal-c-u/2026-07-10-portfolio-continuity-successor-protocol-prereg.md"
 expanded_contract_sha_before="$(sha256sum "$EXPANDED_CONTRACT" | cut -d' ' -f1)"
 expanded_report_sha_before="$(sha256sum "$EXPANDED_REPORT" | cut -d' ' -f1)"
+successor_contract_sha_before="$(sha256sum "$SUCCESSOR_CONTRACT" | cut -d' ' -f1)"
+successor_report_sha_before="$(sha256sum "$SUCCESSOR_REPORT" | cut -d' ' -f1)"
 
 tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/ab-answer-trial-XXXXXX")"
 trap 'rm -rf "$tmpdir"' EXIT
@@ -19,8 +23,100 @@ export PYTHONPYCACHEPREFIX="$tmpdir/pycache"
 
 python3 -m py_compile "$ADAPTER"
 python3 "$ADAPTER" validate-contract --contract "$CONTRACT" >"$tmpdir/repo-contract.json"
-python3 "$ADAPTER" validate-contract --contract "$EXPANDED_CONTRACT" \
-  >"$tmpdir/repo-expanded-contract.json"
+python3 "$ADAPTER" validate-contract --contract "$SUCCESSOR_CONTRACT" \
+  >"$tmpdir/repo-successor-contract.json"
+python3 - "$SUCCESSOR_CONTRACT" "$SUCCESSOR_REPORT" \
+  "$ROOT_DIR/scripts/eval/README.md" "$ROOT_DIR/CHANGELOG.md" "$ROOT_DIR" <<'PY'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+contract_path = Path(sys.argv[1])
+report_path = Path(sys.argv[2])
+public_paths = [contract_path, report_path, Path(sys.argv[3]), Path(sys.argv[4])]
+root = Path(sys.argv[5])
+contract = json.loads(contract_path.read_text(encoding="utf-8"))
+report = report_path.read_text(encoding="utf-8")
+assert contract["schema"].endswith(".v2")
+assert len(contract["cases"]) == 12
+assert all("prompt" not in case for case in contract["cases"])
+assert all("retrieval_query" not in case for case in contract["cases"])
+assert all("retrieval_query_sha256" in case for case in contract["cases"])
+assert hashlib.sha256(contract_path.read_bytes()).hexdigest() in report
+for anchor in (
+    "PRE-REGISTERED / IMPLEMENTATION VERIFIED / INDEPENDENT REVIEW",
+    "NOT EXECUTED",
+    "INVALID_REFERENCE_COVERAGE",
+    "explicit full restart",
+    "no answer postprocessing",
+    "Automatic retry",
+):
+    assert anchor in report
+
+private_dir = (
+    root
+    / "data/eval/portfolio-continuity-successor-answer-blind-20260710"
+)
+corpus_path = private_dir / "corpus.private.json"
+seed_path = private_dir / "blind_seed.txt"
+if corpus_path.exists() and seed_path.exists():
+    corpus = json.loads(corpus_path.read_text(encoding="utf-8"))
+    private_values = [seed_path.read_text(encoding="utf-8").strip()]
+    for case in corpus["cases"]:
+        private_values.extend([case["prompt"], case["retrieval_query"]])
+    public = "\n".join(path.read_text(encoding="utf-8") for path in public_paths)
+    if any(value in public for value in private_values):
+        raise SystemExit("successor public artifacts leaked private material")
+PY
+python3 - "$ROOT_DIR" "$EXPANDED_CONTRACT" >"$tmpdir/repo-expanded-contract.json" <<'PY'
+import hashlib
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+contract_path = Path(sys.argv[2])
+frozen_commit = "f472244f2bd07c9edee6b8b34118a17c795d72a7"
+contract_bytes = contract_path.read_bytes()
+contract = json.loads(contract_bytes)
+if hashlib.sha256(contract_bytes).hexdigest() != (
+    "a02affde622ede83c52121e47dd5cb085127b1e4525427518909eb7ba43de57d"
+):
+    raise SystemExit("historical expanded contract bytes drifted")
+historical_contract = subprocess.check_output(
+    [
+        "git",
+        "show",
+        f"{frozen_commit}:scripts/eval/fixtures/portfolio_continuity_expanded_answer_contract.json",
+    ],
+    cwd=root,
+)
+if historical_contract != contract_bytes:
+    raise SystemExit("historical expanded contract no longer matches its frozen commit")
+for field, relative in {
+    "harness_source_sha256": "scripts/eval/portfolio_continuity_answer_trial.py",
+    "surface_source_sha256": "scripts/eval/portfolio_continuity_ab_trial.py",
+}.items():
+    frozen_source = subprocess.check_output(
+        ["git", "show", f"{frozen_commit}:{relative}"], cwd=root
+    )
+    if hashlib.sha256(frozen_source).hexdigest() != contract[field]:
+        raise SystemExit(f"historical expanded {field} commitment drifted")
+print(
+    json.dumps(
+        {
+            "schema": contract["schema"],
+            "contract_id": contract["contract_id"],
+            "contract_sha256": hashlib.sha256(contract_bytes).hexdigest(),
+            "frozen_commit": frozen_commit,
+            "status": "VALID_FROZEN_HISTORY",
+        },
+        sort_keys=True,
+    )
+)
+PY
 
 python3 - "$tmpdir" <<'PY'
 import hashlib
@@ -198,6 +294,11 @@ for index in range(10):
         "updated_at": 200 + index,
         "content": (f"Synthetic evidence row {index}. " + "grounded detail " * 140),
     })
+if os.environ.get("FAKE_INTERNAL_IDENTIFIERS"):
+    records[0]["content"] += (
+        " portfolio_state_digest hybrid_retrieval portfolio_digest "
+        "compact_then_get_top2 session_bootstrap"
+    )
 
 def emit(value):
     print(json.dumps(value, ensure_ascii=False), flush=True)
@@ -228,6 +329,10 @@ for line in sys.stdin:
         conn.execute("UPDATE marker SET value='snapshot-mutated'")
     if name == "memory_search":
         ordered = list(records)
+        if os.environ.get("FAKE_REQUIRE_RETRIEVAL_QUERY") and not args.get(
+            "query", ""
+        ).startswith("Synthetic retrieval query"):
+            ordered = []
         if args.get("compact") and os.environ.get("FAKE_RANK_MISMATCH"):
             ordered[0], ordered[1] = ordered[1], ordered[0]
         if not args.get("compact") and os.environ.get("FAKE_EMPTY_FULL_SEARCH"):
@@ -303,10 +408,19 @@ if sys.argv[1:] == ["--version"]:
 
 prompt = sys.stdin.read()
 output_path = Path(sys.argv[sys.argv.index("--output-last-message") + 1])
-if os.environ.get("FAKE_CODEX_DIGEST_KEY_LEAK"):
+count_path = os.environ.get("FAKE_CODEX_COUNT_FILE")
+if count_path:
+    path = Path(count_path)
+    count = int(path.read_text(encoding="utf-8")) if path.exists() else 0
+    path.write_text(str(count + 1), encoding="utf-8")
+if os.environ.get("FAKE_CODEX_MARKER_LEAK"):
+    answer = "hybrid_retrieval"
+elif os.environ.get("FAKE_CODEX_DIGEST_KEY_LEAK"):
     answer = "syn_00"
 else:
     answer = "Synthetic grounded project answer " + hashlib.sha256(prompt.encode()).hexdigest()[:12]
+if os.environ.get("FAKE_CODEX_PADDED_ANSWER"):
+    answer = "  " + answer + "  \n"
 output_path.write_text(json.dumps({"answer_markdown": answer}) + "\n", encoding="utf-8")
 print(json.dumps({"type": "thread.started", "thread_id": "synthetic"}))
 print(json.dumps({"type": "turn.started"}))
@@ -1270,11 +1384,14 @@ contract = json.loads(contract_path.read_text(encoding="utf-8"))
 report = report_path.read_text(encoding="utf-8")
 source_sha = hashlib.sha256(adapter_path.read_bytes()).hexdigest()
 contract_sha = hashlib.sha256(contract_path.read_bytes()).hexdigest()
-assert contract["harness_source_sha256"] == source_sha
+assert contract["harness_source_sha256"] == (
+    "60dd2130f6e4af976e594dec284ae38c46c63b437a7f3080d5eb5f41369973a5"
+)
+assert contract["harness_source_sha256"] != source_sha
 assert len(contract["cases"]) == 12
 assert sum(case["requires_abstention"] for case in contract["cases"]) == 2
 assert contract_sha in report
-assert source_sha in report
+assert contract["harness_source_sha256"] in report
 
 capture = json.loads((data / "capture.redacted.json").read_text(encoding="utf-8"))
 generation = json.loads(
@@ -1709,7 +1826,573 @@ for name in [
 print("Portfolio continuity expanded answer trial v1 verification passed")
 PY
 
+# Exercise the successor v2 projection, coverage, receipt, and retry protocol.
+v2repo="$tmpdir/v2repo"
+mkdir -p "$v2repo/scripts/eval" "$v2repo/data"
+cp "$ADAPTER" "$v2repo/scripts/eval/portfolio_continuity_answer_trial.py"
+cp "$ROOT_DIR/scripts/eval/portfolio_continuity_ab_trial.py" \
+  "$v2repo/scripts/eval/portfolio_continuity_ab_trial.py"
+printf 'data/\n' >"$v2repo/.gitignore"
+
+python3 - "$v2repo" <<'PY'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+repo = Path(sys.argv[1])
+adapter = repo / "scripts/eval/portfolio_continuity_answer_trial.py"
+surface = repo / "scripts/eval/portfolio_continuity_ab_trial.py"
+seed = "12" * 32
+strata = [
+    "portfolio_status",
+    "portfolio_retrospective",
+    "portfolio_planning",
+    "dependency_risk",
+    "stale_state",
+    "cross_project_conflict",
+]
+prompts = [f"Synthetic successor question {index}?" for index in range(12)]
+queries = [f"Synthetic retrieval query {index}" for index in range(12)]
+cases = []
+for index, (prompt, query) in enumerate(zip(prompts, queries, strict=True)):
+    requires_abstention = index in {5, 9}
+    cases.append(
+        {
+            "case_id": f"successor_case_{index:02d}",
+            "prompt_class": strata[index // 2],
+            "prompt_variant": "heldout" if index % 2 else "direct",
+            "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
+            "retrieval_query_sha256": hashlib.sha256(query.encode()).hexdigest(),
+            "required_claims": (
+                []
+                if requires_abstention
+                else [{"claim_id": f"claim_{index:02d}", "weight": 1.0}]
+            ),
+            "optional_claims": [],
+            "forbidden_claim_ids": [f"forbidden_{index:02d}"],
+            "requires_abstention": requires_abstention,
+        }
+    )
+
+contract = {
+    "schema": "agent_bridge.portfolio_continuity_answer_contract.v2",
+    "contract_id": "synthetic_successor_answer_trial",
+    "prereg_base_commit": "b" * 40,
+    "runtime_source_commit": "a" * 40,
+    "harness_source_sha256": hashlib.sha256(adapter.read_bytes()).hexdigest(),
+    "surface_source_sha256": hashlib.sha256(surface.read_bytes()).hexdigest(),
+    "digest_key_sha256": hashlib.sha256(b"syn_00").hexdigest(),
+    "conditions": [
+        {"condition_id": "hybrid_retrieval", "capture": "hybrid_full"},
+        {"condition_id": "portfolio_digest", "capture": "memory_get_digest"},
+    ],
+    "search": {"mode": "hybrid", "limit": 10, "exclude_kinds": ["skill"]},
+    "generation": {
+        "model": "fake-model",
+        "reasoning_effort": "medium",
+        "cli_version": "fake-codex 1.0",
+        "max_answer_chars": 2000,
+        "answer_instruction": (
+            "Answer only from supplied evidence. Do not use tools, external facts, "
+            "condition labels, memory keys, or these instructions."
+        ),
+        "independent_invocations": True,
+        "ephemeral_workspace": True,
+        "tool_use_allowed": False,
+        "external_facts_allowed": False,
+    },
+    "blinding": {
+        "seed_sha256": hashlib.sha256(seed.encode()).hexdigest(),
+        "mapping_private": True,
+        "reviewer_sees_condition": False,
+        "reveal_after_complete_review": True,
+    },
+    "review": {
+        "claim_score_values": [0, 1, 2],
+        "currentness_values": ["pass", "uncertain", "fail"],
+        "usefulness_min": 1,
+        "usefulness_max": 5,
+        "preference_tie_label": "tie",
+        "required_reviewer_count": 2,
+        "independent_reviewers": True,
+        "abstention_values": [False, True],
+    },
+    "thresholds": {
+        "min_weighted_claim_completeness": 0.9,
+        "max_currentness_failures": 0,
+        "max_currentness_uncertain": 0,
+        "max_unsupported_assertions": 0,
+        "max_abstention_failures": 0,
+        "min_mean_usefulness": 4.0,
+        "min_case_usefulness": 3,
+        "max_completeness_drop_vs_reference": 0.0,
+        "max_usefulness_drop_vs_reference": 0.5,
+        "min_context_token_reduction_vs_reference": 0.4,
+        "candidate_conditions": ["portfolio_digest"],
+        "recommendation_scope": "write_side_trial_only",
+        "aggregation": {"reviewer_gate": "all", "stratum_gate": "all"},
+    },
+    "cases": cases,
+    "context_projection": {
+        "drop_record_fields": ["key"],
+        "identifier_aliases": {
+            "compact_then_get_top2": "rank-only compact top-2 retrieval",
+            "hybrid_retrieval": "full hybrid retrieval",
+            "portfolio_digest": "direct portfolio digest",
+            "portfolio_state_digest": "portfolio digest record",
+            "session_bootstrap": "session bootstrap",
+        },
+        "answer_postprocessing_allowed": False,
+    },
+    "coverage": {
+        "min_reference_hits_non_abstention": 2,
+        "min_reference_hits_abstention": 0,
+        "require_unique_reference_keys": True,
+        "generation_requires_status": "VALID",
+    },
+    "retry_policy": {
+        "pre_model_full_restart_limit": 1,
+        "post_model_retry_limit": 0,
+        "semantic_retry_limit": 0,
+        "automatic_retry": False,
+    },
+    "failure_receipt": {
+        "private": True,
+        "atomic_write": True,
+        "raw_material_allowed": False,
+    },
+    "boundaries": {
+        "raw_artifacts_in_git": False,
+        "writes_live_ab_store": False,
+        "llm_judge": False,
+        "automatic_unblinding": False,
+        "runtime_promotion_allowed": False,
+        "automatic_digest_regeneration_allowed": False,
+        "compact_default_change_allowed": False,
+        "benchmark_claim_allowed": False,
+        "version_or_tag_change_allowed": False,
+        "release_action_allowed": False,
+        "ci_action_allowed": False,
+        "answer_postprocessing_allowed": False,
+        "ad_hoc_retry_allowed": False,
+    },
+}
+(repo / "answer-contract.json").write_text(
+    json.dumps(contract, indent=2) + "\n", encoding="utf-8"
+)
+PY
+
+git -C "$v2repo" init -q
+git -C "$v2repo" config user.email synthetic@example.invalid
+git -C "$v2repo" config user.name Synthetic
+git -C "$v2repo" add .gitignore answer-contract.json scripts/eval
+git -C "$v2repo" commit -qm 'synthetic v2 contract and harness'
+
+python3 - "$v2repo" <<'PY'
+import hashlib
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+repo = Path(sys.argv[1])
+contract_path = repo / "answer-contract.json"
+contract = json.loads(contract_path.read_text(encoding="utf-8"))
+prompts = [f"Synthetic successor question {index}?" for index in range(12)]
+queries = [f"Synthetic retrieval query {index}" for index in range(12)]
+head = subprocess.check_output(
+    ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+).strip()
+spec = {
+    "schema": "agent_bridge.portfolio_continuity_answer_spec.v2",
+    "trial_id": "synthetic_successor_run",
+    "contract_sha256": hashlib.sha256(contract_path.read_bytes()).hexdigest(),
+    "contract_commit": head,
+    "repo": str(repo),
+    "digest_key": "syn_00",
+    "blind_seed": "12" * 32,
+    "cases": [
+        {
+            "case_id": case["case_id"],
+            "prompt": prompt,
+            "retrieval_query": query,
+        }
+        for case, prompt, query in zip(
+            contract["cases"], prompts, queries, strict=True
+        )
+    ],
+}
+(repo / "data/spec.json").write_text(
+    json.dumps(spec, indent=2) + "\n", encoding="utf-8"
+)
+invalid_coverage_spec = json.loads(json.dumps(spec))
+invalid_coverage_spec["trial_id"] = "synthetic_successor_invalid_coverage"
+(repo / "data/spec.invalid-coverage.json").write_text(
+    json.dumps(invalid_coverage_spec, indent=2) + "\n", encoding="utf-8"
+)
+semantic_spec = json.loads(json.dumps(spec))
+semantic_spec["trial_id"] = "synthetic_successor_semantic_failure"
+(repo / "data/spec.semantic.json").write_text(
+    json.dumps(semantic_spec, indent=2) + "\n", encoding="utf-8"
+)
+PY
+
+v2adapter="$v2repo/scripts/eval/portfolio_continuity_answer_trial.py"
+v2data="$v2repo/data"
+python3 "$v2adapter" validate-contract \
+  --contract "$v2repo/answer-contract.json" \
+  >"$tmpdir/v2-contract.stdout.json"
+FAKE_INTERNAL_IDENTIFIERS=1 FAKE_REQUIRE_RETRIEVAL_QUERY=1 \
+  python3 "$v2adapter" capture \
+  --contract "$v2repo/answer-contract.json" \
+  --spec "$v2data/spec.json" \
+  --source-db "$tmpdir/source.db" \
+  --agent-bridge-bin "$tmpdir/fake-agent-bridge" \
+  --raw-output "$v2data/capture.raw.json" \
+  --redacted-output "$v2data/capture.redacted.json" \
+  >"$tmpdir/v2-capture.stdout.json"
+
+FAKE_INTERNAL_IDENTIFIERS=1 FAKE_REQUIRE_RETRIEVAL_QUERY=1 \
+  FAKE_EMPTY_FULL_SEARCH=1 python3 "$v2adapter" capture \
+  --contract "$v2repo/answer-contract.json" \
+  --spec "$v2data/spec.invalid-coverage.json" \
+  --source-db "$tmpdir/source.db" \
+  --agent-bridge-bin "$tmpdir/fake-agent-bridge" \
+  --raw-output "$v2data/capture.invalid-coverage.raw.json" \
+  --redacted-output "$v2data/capture.invalid-coverage.redacted.json" \
+  >"$tmpdir/v2-invalid-capture.stdout.json"
+
+FAKE_INTERNAL_IDENTIFIERS=1 FAKE_REQUIRE_RETRIEVAL_QUERY=1 \
+  python3 "$v2adapter" capture \
+  --contract "$v2repo/answer-contract.json" \
+  --spec "$v2data/spec.semantic.json" \
+  --source-db "$tmpdir/source.db" \
+  --agent-bridge-bin "$tmpdir/fake-agent-bridge" \
+  --raw-output "$v2data/capture.semantic.raw.json" \
+  --redacted-output "$v2data/capture.semantic.redacted.json" \
+  >"$tmpdir/v2-semantic-capture.stdout.json"
+
+if FAKE_CODEX_COUNT_FILE="$tmpdir/v2-coverage-count" python3 "$v2adapter" generate \
+  --contract "$v2repo/answer-contract.json" \
+  --spec "$v2data/spec.invalid-coverage.json" \
+  --capture "$v2data/capture.invalid-coverage.raw.json" \
+  --codex-bin "$tmpdir/fake-codex" \
+  --generation-output "$v2data/coverage.generation.json" \
+  --blind-output "$v2data/coverage.blind.json" \
+  --map-output "$v2data/coverage.map.json" \
+  --review-template-output "$v2data/coverage.review.json" \
+  --redacted-output "$v2data/coverage.redacted.json" \
+  --failure-output "$v2data/coverage.failure.json" \
+  >"$tmpdir/v2-coverage.stdout" 2>"$tmpdir/v2-coverage.stderr"; then
+  echo "v2 invalid coverage unexpectedly reached generation" >&2
+  exit 1
+fi
+
+if FAKE_WRONG_CODEX_VERSION=1 \
+  FAKE_CODEX_COUNT_FILE="$tmpdir/v2-identity-count" \
+  python3 "$v2adapter" generate \
+  --contract "$v2repo/answer-contract.json" \
+  --spec "$v2data/spec.json" \
+  --capture "$v2data/capture.raw.json" \
+  --codex-bin "$tmpdir/fake-codex" \
+  --generation-output "$v2data/identity.generation.json" \
+  --blind-output "$v2data/identity.blind.json" \
+  --map-output "$v2data/identity.map.json" \
+  --review-template-output "$v2data/identity.review.json" \
+  --redacted-output "$v2data/identity.redacted.json" \
+  --failure-output "$v2data/identity.failure.json" \
+  >"$tmpdir/v2-identity.stdout" 2>"$tmpdir/v2-identity.stderr"; then
+  echo "v2 wrong Codex identity unexpectedly passed" >&2
+  exit 1
+fi
+
+FAKE_CODEX_PADDED_ANSWER=1 \
+  FAKE_CODEX_COUNT_FILE="$tmpdir/v2-retry-count" \
+  python3 "$v2adapter" generate \
+  --contract "$v2repo/answer-contract.json" \
+  --spec "$v2data/spec.json" \
+  --capture "$v2data/capture.raw.json" \
+  --codex-bin "$tmpdir/fake-codex" \
+  --generation-output "$v2data/retry.generation.json" \
+  --blind-output "$v2data/retry.blind.json" \
+  --map-output "$v2data/retry.map.json" \
+  --review-template-output "$v2data/retry.review-template.json" \
+  --redacted-output "$v2data/retry.redacted.json" \
+  --failure-output "$v2data/retry.failure.json" \
+  --prior-failure-receipt "$v2data/identity.failure.json" \
+  >"$tmpdir/v2-retry.stdout.json"
+
+if FAKE_CODEX_COUNT_FILE="$tmpdir/v2-retry-count" \
+  python3 "$v2adapter" generate \
+  --contract "$v2repo/answer-contract.json" \
+  --spec "$v2data/spec.json" \
+  --capture "$v2data/capture.raw.json" \
+  --codex-bin "$tmpdir/fake-codex" \
+  --generation-output "$v2data/replay.generation.json" \
+  --blind-output "$v2data/replay.blind.json" \
+  --map-output "$v2data/replay.map.json" \
+  --review-template-output "$v2data/replay.review.json" \
+  --redacted-output "$v2data/replay.redacted.json" \
+  --failure-output "$v2data/replay.failure.json" \
+  --prior-failure-receipt "$v2data/identity.failure.json" \
+  >"$tmpdir/v2-replay.stdout" 2>"$tmpdir/v2-replay.stderr"; then
+  echo "v2 retry authorization replay unexpectedly passed" >&2
+  exit 1
+fi
+
+if FAKE_CODEX_MARKER_LEAK=1 \
+  FAKE_CODEX_COUNT_FILE="$tmpdir/v2-semantic-count" \
+  python3 "$v2adapter" generate \
+  --contract "$v2repo/answer-contract.json" \
+  --spec "$v2data/spec.semantic.json" \
+  --capture "$v2data/capture.semantic.raw.json" \
+  --codex-bin "$tmpdir/fake-codex" \
+  --generation-output "$v2data/semantic.generation.json" \
+  --blind-output "$v2data/semantic.blind.json" \
+  --map-output "$v2data/semantic.map.json" \
+  --review-template-output "$v2data/semantic.review.json" \
+  --redacted-output "$v2data/semantic.redacted.json" \
+  --failure-output "$v2data/semantic.failure.json" \
+  >"$tmpdir/v2-semantic.stdout" 2>"$tmpdir/v2-semantic.stderr"; then
+  echo "v2 marker leak unexpectedly passed" >&2
+  exit 1
+fi
+
+if FAKE_CODEX_COUNT_FILE="$tmpdir/v2-semantic-count" \
+  python3 "$v2adapter" generate \
+  --contract "$v2repo/answer-contract.json" \
+  --spec "$v2data/spec.semantic.json" \
+  --capture "$v2data/capture.semantic.raw.json" \
+  --codex-bin "$tmpdir/fake-codex" \
+  --generation-output "$v2data/semantic-fresh.generation.json" \
+  --blind-output "$v2data/semantic-fresh.blind.json" \
+  --map-output "$v2data/semantic-fresh.map.json" \
+  --review-template-output "$v2data/semantic-fresh.review.json" \
+  --redacted-output "$v2data/semantic-fresh.redacted.json" \
+  --failure-output "$v2data/semantic-fresh.failure.json" \
+  >"$tmpdir/v2-semantic-fresh.stdout" \
+  2>"$tmpdir/v2-semantic-fresh.stderr"; then
+  echo "v2 semantic failure allowed a fresh attempt one" >&2
+  exit 1
+fi
+
+if FAKE_CODEX_COUNT_FILE="$tmpdir/v2-semantic-count" \
+  python3 "$v2adapter" generate \
+  --contract "$v2repo/answer-contract.json" \
+  --spec "$v2data/spec.semantic.json" \
+  --capture "$v2data/capture.semantic.raw.json" \
+  --codex-bin "$tmpdir/fake-codex" \
+  --generation-output "$v2data/semantic-retry.generation.json" \
+  --blind-output "$v2data/semantic-retry.blind.json" \
+  --map-output "$v2data/semantic-retry.map.json" \
+  --review-template-output "$v2data/semantic-retry.review.json" \
+  --redacted-output "$v2data/semantic-retry.redacted.json" \
+  --failure-output "$v2data/semantic-retry.failure.json" \
+  --prior-failure-receipt "$v2data/semantic.failure.json" \
+  >"$tmpdir/v2-semantic-retry.stdout" \
+  2>"$tmpdir/v2-semantic-retry.stderr"; then
+  echo "v2 semantic failure unexpectedly authorized retry" >&2
+  exit 1
+fi
+
+python3 - "$v2data" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+data = Path(sys.argv[1])
+template = json.loads(
+    (data / "retry.review-template.json").read_text(encoding="utf-8")
+)
+for index, reviewer in enumerate(("reviewer-alpha", "reviewer-bravo"), start=1):
+    review = json.loads(json.dumps(template))
+    review["reviewer"] = reviewer
+    review["reviewed_at"] = 1_900_000_000 + index
+    review["independent_review"] = True
+    review["condition_blinded"] = True
+    for case in review["cases"]:
+        for answer in case["answers"]:
+            for claim in answer["claim_scores"]:
+                claim["score"] = 2
+            answer["currentness"] = "pass"
+            answer["unsupported_assertion_count"] = 0
+            answer["usefulness"] = 4
+            if "abstention_pass" in answer:
+                answer["abstention_pass"] = True
+        case["preferred_answer_id"] = "tie"
+    (data / f"retry.review-{index}.json").write_text(
+        json.dumps(review, indent=2) + "\n", encoding="utf-8"
+    )
+PY
+
+python3 "$v2adapter" score \
+  --contract "$v2repo/answer-contract.json" \
+  --capture "$v2data/capture.raw.json" \
+  --generation "$v2data/retry.generation.json" \
+  --blind-packet "$v2data/retry.blind.json" \
+  --blind-map "$v2data/retry.map.json" \
+  --review "$v2data/retry.review-1.json" \
+  --review "$v2data/retry.review-2.json" \
+  --output "$v2data/retry.score.json" \
+  >"$tmpdir/v2-score.stdout.json"
+
+python3 - "$v2data" "$tmpdir" <<'PY'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+data = Path(sys.argv[1])
+tmp = Path(sys.argv[2])
+capture = json.loads((data / "capture.raw.json").read_text(encoding="utf-8"))
+redacted = (data / "capture.redacted.json").read_text(encoding="utf-8")
+invalid_capture = json.loads(
+    (data / "capture.invalid-coverage.raw.json").read_text(encoding="utf-8")
+)
+coverage_failure = json.loads(
+    (data / "coverage.failure.json").read_text(encoding="utf-8")
+)
+identity_failure = json.loads(
+    (data / "identity.failure.json").read_text(encoding="utf-8")
+)
+generation = json.loads(
+    (data / "retry.generation.json").read_text(encoding="utf-8")
+)
+blind = json.loads((data / "retry.blind.json").read_text(encoding="utf-8"))
+semantic_failure = json.loads(
+    (data / "semantic.failure.json").read_text(encoding="utf-8")
+)
+score = json.loads((data / "retry.score.json").read_text(encoding="utf-8"))
+
+assert capture["schema"].endswith(".v2")
+assert capture["coverage"]["status"] == "VALID"
+assert all(row["pass"] for row in capture["coverage"]["cases"])
+assert all(case["retrieval_query"] != case["prompt"] for case in capture["cases"])
+sources = {
+    "compact_then_get_top2",
+    "hybrid_retrieval",
+    "portfolio_digest",
+    "portfolio_state_digest",
+    "session_bootstrap",
+}
+for case in capture["cases"]:
+    hybrid = case["conditions"]["hybrid_retrieval"]
+    digest = case["conditions"]["portfolio_digest"]
+    assert hybrid["raw_result"][0]["record"]["key"] == "syn_00"
+    assert "portfolio_state_digest" in hybrid["raw_result"][0]["record"]["content"]
+    for context in (hybrid["context"], digest["context"]):
+        assert '"key"' not in context
+        assert not any(source in context for source in sources)
+    assert "portfolio digest record" in hybrid["context"]
+assert "Synthetic successor question" not in redacted
+assert "Synthetic retrieval query" not in redacted
+assert "syn_00" not in redacted
+
+assert invalid_capture["coverage"]["status"] == "INVALID_REFERENCE_COVERAGE"
+assert invalid_capture["coverage"]["failed_case_count"] == 10
+assert coverage_failure["error_code"] == "reference_coverage_invalid"
+assert coverage_failure["retry_authorized"] is False
+assert coverage_failure["any_model_started"] is False
+assert not (tmp / "v2-coverage-count").exists()
+
+assert identity_failure["phase"] == "pre_model_infrastructure"
+assert identity_failure["error_code"] == "codex_identity_unavailable"
+assert identity_failure["retry_authorized"] is True
+assert identity_failure["retry_scope"] == "explicit_full_restart"
+assert identity_failure["any_model_started"] is False
+assert not (tmp / "v2-identity-count").exists()
+
+assert generation["schema"].endswith(".v2")
+assert generation["attempt"] == 2
+assert generation["prior_failure_receipt_sha256"] == hashlib.sha256(
+    (data / "identity.failure.json").read_bytes()
+).hexdigest()
+answers = [
+    row["answer_markdown"]
+    for case in generation["cases"]
+    for row in case["answers"].values()
+]
+assert len(answers) == 24
+assert all(answer.startswith("  ") and answer.endswith("  \n") for answer in answers)
+assert int((tmp / "v2-retry-count").read_text(encoding="utf-8")) == 24
+assert not (data / "retry.failure.json").exists()
+assert not (data / "replay.failure.json").exists()
+assert "already claimed" in (tmp / "v2-replay.stderr").read_text(encoding="utf-8")
+
+assert blind["schema"].endswith(".v2")
+assert all(
+    answer["answer_markdown"].startswith("  ")
+    for case in blind["cases"]
+    for answer in case["answers"]
+)
+assert score["schema"].endswith(".v2")
+assert score["global"]["reviewer_count"] == 2
+
+assert semantic_failure["error_code"] == "answer_marker_leak"
+assert semantic_failure["phase"] == "semantic_validation"
+assert semantic_failure["model_started"] is True
+assert semantic_failure["any_model_started"] is True
+assert semantic_failure["retry_authorized"] is False
+assert semantic_failure["answer_sha256"] == hashlib.sha256(
+    b"hybrid_retrieval"
+).hexdigest()
+assert semantic_failure["matched_marker_sha256"] == hashlib.sha256(
+    b"hybrid_retrieval"
+).hexdigest()
+assert int((tmp / "v2-semantic-count").read_text(encoding="utf-8")) == 1
+assert not (data / "semantic-fresh.failure.json").exists()
+assert "already claimed" in (
+    tmp / "v2-semantic-fresh.stderr"
+).read_text(encoding="utf-8")
+assert not (data / "semantic-retry.failure.json").exists()
+for path in (
+    data / "coverage.failure.json",
+    data / "identity.failure.json",
+    data / "semantic.failure.json",
+):
+    assert path.stat().st_mode & 0o777 == 0o600
+    text = path.read_text(encoding="utf-8")
+    for private in (
+        "Synthetic successor question",
+        "Synthetic retrieval query",
+        "Synthetic grounded project answer",
+        "syn_00",
+        "answer_markdown",
+    ):
+        assert private not in text, (path, private)
+claim_dir = data / "portfolio-continuity-generation-claims"
+assert claim_dir.stat().st_mode & 0o777 == 0o700
+claims = sorted(claim_dir.glob("*.json"))
+assert len(claims) == 4
+for path in claims:
+    assert path.stat().st_mode & 0o777 == 0o600
+    claim = json.loads(path.read_text(encoding="utf-8"))
+    assert claim["schema"].endswith("attempt_claim.v2")
+    assert claim["boundary"] == {
+        "private": True,
+        "raw_material_present": False,
+        "single_use": True,
+    }
+for prefix in (
+    "coverage",
+    "identity",
+    "semantic",
+    "semantic-fresh",
+    "semantic-retry",
+    "replay",
+):
+    for suffix in ("generation", "blind", "map", "review", "redacted"):
+        assert not (data / f"{prefix}.{suffix}.json").exists()
+
+print("Portfolio continuity successor answer trial v2 verification passed")
+PY
+
 test "$(sha256sum "$EXPANDED_CONTRACT" | cut -d' ' -f1)" = \
   "$expanded_contract_sha_before"
 test "$(sha256sum "$EXPANDED_REPORT" | cut -d' ' -f1)" = \
   "$expanded_report_sha_before"
+test "$(sha256sum "$SUCCESSOR_CONTRACT" | cut -d' ' -f1)" = \
+  "$successor_contract_sha_before"
+test "$(sha256sum "$SUCCESSOR_REPORT" | cut -d' ' -f1)" = \
+  "$successor_report_sha_before"

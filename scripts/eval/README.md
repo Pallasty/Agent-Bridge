@@ -154,27 +154,58 @@ absolute/non-inferiority/efficiency gate separately to every reviewer and
 stratum. Supply both private reviews by repeating the argument:
 
 ```bash
-python3 scripts/eval/portfolio_continuity_answer_trial.py validate-contract \
-  --contract scripts/eval/fixtures/portfolio_continuity_expanded_answer_contract.json
 python3 scripts/eval/portfolio_continuity_answer_trial.py score ... \
   --review data/eval/<trial>/review.1.json \
   --review data/eval/<trial>/review.2.json
 ```
 
-V1 refuses capture/generation unless its contract, harness, and surface-helper
-bytes are tracked at the spec's exact commit. Capture validates its canonical
-raw payload before writing either output. V1 preserves zero- or one-hit full
-hybrid results as observed retrieval outcomes; only v0's compact top-2
-projection requires at least two unique full-search hits. It validates both
-complete reviews before opening the condition-labelled generation packet or
-blind map. Even a full pass can only recommend preregistering a separate
-write-side digest trial.
+The checked-in v1 fixture is historical and source-bound to contract commit
+`f472244f`; run it only from that exact worktree. The verifier audits its bytes
+and source commitments at the frozen commit, while synthetic v1 coverage binds
+and exercises the current harness. V1 refuses capture/generation unless its
+contract, harness, and surface-helper bytes are tracked at the spec's exact
+commit. Capture validates its canonical raw payload before writing either
+output. V1 preserves zero- or one-hit full hybrid results as observed retrieval
+outcomes; only v0's compact top-2 projection requires at least two unique
+full-search hits. It validates both complete reviews before opening the
+condition-labelled generation packet or blind map. Even a full pass can only
+recommend preregistering a separate write-side digest trial.
 
-Prompts, contexts, answers, seed, condition map, and private reviews must remain
-under ignored `data/`. The v0 score can recommend only an expanded answer trial;
-the v1 score can recommend only preregistration of a separate write-side trial.
-Neither is authority for digest regeneration, a compact default,
-retrieval/runtime changes, benchmark claims, versioning, tagging, or release.
+Contract v2 is the preregistered successor protocol. Each private case freezes
+a separate retrieval query in addition to the original question. Capture keeps
+the raw MCP result private, but model context is a deterministic projection
+that drops record keys and replaces fixed internal identifiers with readable
+aliases. Non-abstention reference cases require at least two unique hits;
+abstention cases may have zero. Generation stops before model invocation unless
+the capture coverage status is `VALID`.
+
+V2 requires a fresh ignored failure path. A classified failure writes an atomic
+private receipt containing hashes and failure coordinates, never raw prompts,
+queries, contexts, answers, or markers. There is no automatic retry. Only a
+first-attempt pre-model infrastructure receipt can authorize one explicit full
+restart. Single-use attempt claims keyed by contract and private-spec identity
+prevent both a fresh attempt-1 rerun and attempt-2 receipt replay. Any
+model-started, tool, schema, marker, or other semantic failure has zero retries.
+Answers are stored and blinded exactly as returned; v2 applies no output
+postprocessing.
+
+```bash
+python3 scripts/eval/portfolio_continuity_answer_trial.py validate-contract \
+  --contract scripts/eval/fixtures/portfolio_continuity_successor_answer_contract.json
+python3 scripts/eval/portfolio_continuity_answer_trial.py generate ... \
+  --failure-output data/eval/<trial>/generation.failure.json
+# Only when the first receipt explicitly authorizes a restart:
+python3 scripts/eval/portfolio_continuity_answer_trial.py generate ... \
+  --failure-output data/eval/<trial>/generation.retry.failure.json \
+  --prior-failure-receipt data/eval/<trial>/generation.failure.json
+```
+
+Prompts, v2 retrieval queries, contexts, answers, seed, condition map, receipts,
+retry claims, and private reviews must remain under ignored `data/`. The v0
+score can recommend only an expanded answer trial; v1/v2 can recommend only
+preregistration of a separate write-side trial. None is authority for digest
+regeneration, a compact default, retrieval/runtime changes, benchmark claims,
+versioning, tagging, or release.
 
 ## Baselines
 
