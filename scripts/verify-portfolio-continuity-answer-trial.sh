@@ -946,6 +946,9 @@ contract = {
     "harness_source_sha256": hashlib.sha256(adapter.read_bytes()).hexdigest(),
     "surface_source_sha256": hashlib.sha256(surface.read_bytes()).hexdigest(),
     "digest_key_sha256": hashlib.sha256(b"syn_00").hexdigest(),
+    "execution_repo_path_sha256": hashlib.sha256(
+        str(repo.resolve()).encode("utf-8")
+    ).hexdigest(),
     "conditions": [
         {"condition_id": "hybrid_retrieval", "capture": "hybrid_full"},
         {"condition_id": "portfolio_digest", "capture": "memory_get_digest"},
@@ -2035,8 +2038,11 @@ git -C "$v2repo" config user.email synthetic@example.invalid
 git -C "$v2repo" config user.name Synthetic
 git -C "$v2repo" add .gitignore answer-contract*.json scripts/eval
 git -C "$v2repo" commit -qm 'synthetic v2 contract and harness'
+v2alternate="$tmpdir/v2alternate"
+git -C "$v2repo" worktree add --detach "$v2alternate" HEAD >/dev/null
+mkdir -p "$v2alternate/data"
 
-python3 - "$v2repo" <<'PY'
+python3 - "$v2repo" "$v2alternate" <<'PY'
 import hashlib
 import json
 import subprocess
@@ -2044,6 +2050,7 @@ import sys
 from pathlib import Path
 
 repo = Path(sys.argv[1])
+alternate = Path(sys.argv[2])
 contract_path = repo / "answer-contract.json"
 prompts = [f"Synthetic successor question {index}?" for index in range(12)]
 queries = [f"Synthetic retrieval query {index}" for index in range(12)]
@@ -2092,6 +2099,11 @@ semantic_bytes = (json.dumps(semantic_spec, indent=2) + "\n").encode("utf-8")
 (repo / "data/spec.semantic.json").write_bytes(semantic_bytes)
 # This is semantically identical JSON with only trailing JSON whitespace changed.
 (repo / "data/spec.semantic-whitespace.json").write_bytes(semantic_bytes + b" \n")
+alternate_spec = json.loads(json.dumps(semantic_spec))
+alternate_spec["repo"] = str(alternate.resolve())
+(alternate / "data/spec.semantic-alternate-worktree.json").write_text(
+    json.dumps(alternate_spec, indent=2) + "\n", encoding="utf-8"
+)
 PY
 
 v2adapter="$v2repo/scripts/eval/portfolio_continuity_answer_trial.py"
@@ -2221,6 +2233,21 @@ if FAKE_CODEX_MARKER_LEAK=1 \
   exit 1
 fi
 
+# A second worktree at the same commit cannot establish a separate claim namespace.
+if FAKE_INTERNAL_IDENTIFIERS=1 FAKE_REQUIRE_RETRIEVAL_QUERY=1 \
+  python3 "$v2alternate/scripts/eval/portfolio_continuity_answer_trial.py" capture \
+  --contract "$v2alternate/answer-contract.semantic.json" \
+  --spec "$v2alternate/data/spec.semantic-alternate-worktree.json" \
+  --source-db "$tmpdir/source.db" \
+  --agent-bridge-bin "$tmpdir/fake-agent-bridge" \
+  --raw-output "$v2alternate/data/capture.semantic-alternate.raw.json" \
+  --redacted-output "$v2alternate/data/capture.semantic-alternate.redacted.json" \
+  >"$tmpdir/v2-semantic-alternate.stdout" \
+  2>"$tmpdir/v2-semantic-alternate.stderr"; then
+  echo "v2 accepted an alternate execution worktree" >&2
+  exit 1
+fi
+
 # A byte-only private-spec edit cannot reuse a capture from the original spec.
 if FAKE_CODEX_COUNT_FILE="$tmpdir/v2-semantic-count" \
   python3 "$v2adapter" generate \
@@ -2347,7 +2374,7 @@ python3 "$v2adapter" score \
   --output "$v2data/retry.score.json" \
   >"$tmpdir/v2-score.stdout.json"
 
-python3 - "$v2data" "$tmpdir" <<'PY'
+python3 - "$v2data" "$tmpdir" "$v2alternate" <<'PY'
 import hashlib
 import json
 import sys
@@ -2355,6 +2382,7 @@ from pathlib import Path
 
 data = Path(sys.argv[1])
 tmp = Path(sys.argv[2])
+alternate = Path(sys.argv[3])
 capture = json.loads((data / "capture.raw.json").read_text(encoding="utf-8"))
 redacted = (data / "capture.redacted.json").read_text(encoding="utf-8")
 redacted_capture = json.loads(redacted)
@@ -2467,6 +2495,11 @@ assert semantic_whitespace_capture["spec_sha256"] == hashlib.sha256(
 ).hexdigest()
 assert semantic_capture["spec_sha256"] != semantic_whitespace_capture["spec_sha256"]
 assert int((tmp / "v2-semantic-count").read_text(encoding="utf-8")) == 1
+assert not (alternate / "data/capture.semantic-alternate.raw.json").exists()
+assert not (alternate / "data/capture.semantic-alternate.redacted.json").exists()
+assert "execution worktree commitment" in (
+    tmp / "v2-semantic-alternate.stderr"
+).read_text(encoding="utf-8")
 assert not (data / "semantic-byte-mismatch.failure.json").exists()
 assert "private byte identity mismatch" in (
     tmp / "v2-semantic-byte-mismatch.stderr"

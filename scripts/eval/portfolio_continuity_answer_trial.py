@@ -424,7 +424,13 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
         )
     if version == 2:
         contract_fields.update(
-            {"context_projection", "coverage", "retry_policy", "failure_receipt"}
+            {
+                "context_projection",
+                "coverage",
+                "retry_policy",
+                "failure_receipt",
+                "execution_repo_path_sha256",
+            }
         )
     reject_unknown_fields(value, contract_fields, "contract")
     contract_id = require_label(value.get("contract_id"), "contract.contract_id")
@@ -458,7 +464,12 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
     coverage_contract: dict[str, Any] | None = None
     retry_policy: dict[str, Any] | None = None
     failure_receipt_contract: dict[str, Any] | None = None
+    execution_repo_path_sha256: str | None = None
     if version == 2:
+        execution_repo_path_sha256 = require_sha256(
+            value.get("execution_repo_path_sha256"),
+            "contract.execution_repo_path_sha256",
+        )
         projection_raw = require_object(
             value.get("context_projection"), "contract.context_projection"
         )
@@ -1139,6 +1150,7 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
                 "coverage": coverage_contract,
                 "retry_policy": retry_policy,
                 "failure_receipt": failure_receipt_contract,
+                "execution_repo_path_sha256": execution_repo_path_sha256,
             }
             if version == 2
             else {}
@@ -1178,6 +1190,14 @@ def validate_spec(
     repo = Path(require_string(value.get("repo"), "spec.repo", max_chars=4096))
     if not repo.is_absolute() or not repo.is_dir():
         raise TrialError("spec.repo must be an existing absolute directory")
+    try:
+        repo = repo.resolve(strict=True)
+    except OSError as exc:
+        raise TrialError("failed to resolve spec.repo") from exc
+    if is_successor(contract) and sha256_text(str(repo)) != contract[
+        "execution_repo_path_sha256"
+    ]:
+        raise TrialError("spec.repo does not match successor execution worktree commitment")
     digest_key = require_string(value.get("digest_key"), "spec.digest_key", max_chars=256)
     if is_expanded(contract) and sha256_text(digest_key) != contract[
         "digest_key_sha256"
