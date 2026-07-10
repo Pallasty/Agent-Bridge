@@ -23,7 +23,9 @@ the latest released baseline; unreleased source builds add `git describe` and a
 short source SHA to CLI/capability output. Pin installations to a Git commit
 when exact provenance matters. Run `scripts/agent-bridge-release-truth-gate.py`
 to inspect the current state; choosing a new version or tag remains an explicit
-owner release decision.
+owner release decision. `scripts/agent-bridge-release-candidate-audit.py`
+profiles the post-tag change set, format debt, and clean-worktree evidence; it
+recommends a candidate version but never writes one or creates a tag.
 
 You need a Rust toolchain ([rustup](https://rustup.rs)) and a working C
 linker; no system libraries otherwise (`zbus` and `rusqlite` with the

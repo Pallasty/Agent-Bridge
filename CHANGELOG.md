@@ -65,6 +65,15 @@ the project adheres to [Semantic Versioning](https://semver.org/).
   consumed history before pending evidence.
 
 ### Changed
+- **Release-candidate audit is reproducible without publishing.** The new
+  `agent-bridge-release-candidate-audit.py` profiles conventional commits and
+  public-surface changes since the latest source marker, partitions workspace
+  formatting drift, validates clean-worktree execution evidence, and emits a
+  recommendation without editing Cargo or creating a tag. The first packet
+  recommends `0.15.0` from the 35 post-0.14 feature commits and schema v40/v41,
+  while holding the candidate at `NO_GO_FORMAT_DRIFT`: Linux default and
+  hash-only build/test matrices pass, but 43 Rust files need scoped formatting
+  and authenticated Linux/macOS CI remains unobserved from this host.
 - **Release truth is now explicit and machine-checkable.**
   `scripts/agent-bridge-release-truth-gate.py` compares the latest `v*` source
   marker and CHANGELOG release with Cargo/CLI/MCP version surfaces, confirms
