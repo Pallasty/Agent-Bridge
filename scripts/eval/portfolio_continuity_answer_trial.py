@@ -27,17 +27,29 @@ import portfolio_continuity_ab_trial as surface
 
 
 CONTRACT_SCHEMA = "agent_bridge.portfolio_continuity_answer_contract.v0"
+CONTRACT_SCHEMA_V1 = "agent_bridge.portfolio_continuity_answer_contract.v1"
 SPEC_SCHEMA = "agent_bridge.portfolio_continuity_answer_spec.v0"
+SPEC_SCHEMA_V1 = "agent_bridge.portfolio_continuity_answer_spec.v1"
 CAPTURE_SCHEMA = "agent_bridge.portfolio_continuity_answer_capture.v0"
+CAPTURE_SCHEMA_V1 = "agent_bridge.portfolio_continuity_answer_capture.v1"
 CAPTURE_REDACTED_SCHEMA = "agent_bridge.portfolio_continuity_answer_capture_redacted.v0"
+CAPTURE_REDACTED_SCHEMA_V1 = "agent_bridge.portfolio_continuity_answer_capture_redacted.v1"
 GENERATION_SCHEMA = "agent_bridge.portfolio_continuity_answer_generation.v0"
+GENERATION_SCHEMA_V1 = "agent_bridge.portfolio_continuity_answer_generation.v1"
 BLIND_PACKET_SCHEMA = "agent_bridge.portfolio_continuity_answer_blind_packet.v0"
+BLIND_PACKET_SCHEMA_V1 = "agent_bridge.portfolio_continuity_answer_blind_packet.v1"
 BLIND_MAP_SCHEMA = "agent_bridge.portfolio_continuity_answer_blind_map.v0"
+BLIND_MAP_SCHEMA_V1 = "agent_bridge.portfolio_continuity_answer_blind_map.v1"
 REVIEW_SCHEMA = "agent_bridge.portfolio_continuity_answer_review.v0"
+REVIEW_SCHEMA_V1 = "agent_bridge.portfolio_continuity_answer_review.v1"
 GENERATION_REDACTED_SCHEMA = (
     "agent_bridge.portfolio_continuity_answer_generation_redacted.v0"
 )
+GENERATION_REDACTED_SCHEMA_V1 = (
+    "agent_bridge.portfolio_continuity_answer_generation_redacted.v1"
+)
 SCORE_SCHEMA = "agent_bridge.portfolio_continuity_answer_score.v0"
+SCORE_SCHEMA_V1 = "agent_bridge.portfolio_continuity_answer_score.v1"
 
 CONDITIONS = (
     "hybrid_retrieval",
@@ -45,6 +57,15 @@ CONDITIONS = (
     "session_bootstrap",
     "portfolio_digest",
 )
+EXPANDED_CONDITIONS = ("hybrid_retrieval", "portfolio_digest")
+EXPANDED_STRATA = {
+    "portfolio_status",
+    "portfolio_retrospective",
+    "portfolio_planning",
+    "dependency_risk",
+    "stale_state",
+    "cross_project_conflict",
+}
 REFERENCE_CONDITION = "hybrid_retrieval"
 COMPACT_CONDITION = "compact_then_get_top2"
 LABEL_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,63}$")
@@ -76,12 +97,25 @@ TOOL_EVENT_MARKERS = {
 TrialError = surface.TrialError
 
 
+def contract_conditions(contract: dict[str, Any]) -> tuple[str, ...]:
+    return tuple(row["condition_id"] for row in contract["conditions"])
+
+
+def versioned_schema(contract: dict[str, Any], v0: str, v1: str) -> str:
+    return v1 if contract["version"] == 1 else v0
+
+
 def read_json(path: Path) -> tuple[dict[str, Any], bytes]:
     return surface.read_json(path)
 
 
-def write_json(path: Path, value: dict[str, Any]) -> bytes:
-    return surface.write_json(path, value)
+def write_json(
+    path: Path,
+    value: dict[str, Any],
+    *,
+    protected_paths: tuple[Path, ...] = (),
+) -> bytes:
+    return surface.write_json(path, value, protected_paths=protected_paths)
 
 
 def sha256_bytes(value: bytes) -> str:
@@ -166,27 +200,37 @@ def validate_claims(value: Any, path: str, *, allow_empty: bool = False) -> list
 
 
 def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
-    if value.get("schema") != CONTRACT_SCHEMA:
-        raise TrialError(f"contract schema must be {CONTRACT_SCHEMA}")
-    reject_unknown_fields(
-        value,
-        {
-            "schema",
-            "contract_id",
-            "prereg_base_commit",
-            "runtime_source_commit",
-            "conditions",
-            "search",
-            "bootstrap",
-            "generation",
-            "blinding",
-            "review",
-            "thresholds",
-            "cases",
-            "boundaries",
-        },
-        "contract",
-    )
+    schema = value.get("schema")
+    if schema not in {CONTRACT_SCHEMA, CONTRACT_SCHEMA_V1}:
+        raise TrialError(
+            f"contract schema must be {CONTRACT_SCHEMA} or {CONTRACT_SCHEMA_V1}"
+        )
+    version = 1 if schema == CONTRACT_SCHEMA_V1 else 0
+    contract_fields = {
+        "schema",
+        "contract_id",
+        "prereg_base_commit",
+        "runtime_source_commit",
+        "conditions",
+        "search",
+        "generation",
+        "blinding",
+        "review",
+        "thresholds",
+        "cases",
+        "boundaries",
+    }
+    if version == 0:
+        contract_fields.add("bootstrap")
+    else:
+        contract_fields.update(
+            {
+                "harness_source_sha256",
+                "surface_source_sha256",
+                "digest_key_sha256",
+            }
+        )
+    reject_unknown_fields(value, contract_fields, "contract")
     contract_id = require_label(value.get("contract_id"), "contract.contract_id")
     prereg_base_commit = require_commit(
         value.get("prereg_base_commit"), "contract.prereg_base_commit"
@@ -194,6 +238,23 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
     runtime_source_commit = require_commit(
         value.get("runtime_source_commit"), "contract.runtime_source_commit"
     )
+    harness_source_sha256: str | None = None
+    surface_source_sha256: str | None = None
+    digest_key_sha256: str | None = None
+    if version == 1:
+        harness_source_sha256 = require_sha256(
+            value.get("harness_source_sha256"), "contract.harness_source_sha256"
+        )
+        if surface.sha256_file(Path(__file__)) != harness_source_sha256:
+            raise TrialError("v1 harness source hash does not match the contract")
+        surface_source_sha256 = require_sha256(
+            value.get("surface_source_sha256"), "contract.surface_source_sha256"
+        )
+        if surface.sha256_file(Path(surface.__file__)) != surface_source_sha256:
+            raise TrialError("v1 surface helper source hash does not match the contract")
+        digest_key_sha256 = require_sha256(
+            value.get("digest_key_sha256"), "contract.digest_key_sha256"
+        )
 
     raw_conditions = require_list(value.get("conditions"), "contract.conditions")
     condition_ids: list[str] = []
@@ -206,7 +267,8 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
         capture = require_label(row.get("capture"), f"{path}.capture")
         condition_ids.append(condition_id)
         conditions.append({"condition_id": condition_id, "capture": capture})
-    if tuple(condition_ids) != CONDITIONS:
+    fixed_conditions = EXPANDED_CONDITIONS if version == 1 else CONDITIONS
+    if tuple(condition_ids) != fixed_conditions:
         raise TrialError("contract.conditions must match the fixed condition order")
     expected_capture = {
         "hybrid_retrieval": "hybrid_full",
@@ -218,22 +280,23 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
         raise TrialError("contract.conditions contains an unsupported capture policy")
 
     search = require_object(value.get("search"), "contract.search")
-    reject_unknown_fields(
-        search,
-        {"mode", "limit", "exclude_kinds", "compact_get_top_k"},
-        "contract.search",
-    )
+    search_fields = {"mode", "limit", "exclude_kinds"}
+    if version == 0:
+        search_fields.add("compact_get_top_k")
+    reject_unknown_fields(search, search_fields, "contract.search")
     mode = require_label(search.get("mode"), "contract.search.mode")
     if mode != "hybrid":
         raise TrialError("contract.search.mode must be hybrid")
     limit = require_nonnegative_int(search.get("limit"), "contract.search.limit")
     if not 2 <= limit <= 100:
         raise TrialError("contract.search.limit must be between 2 and 100")
-    top_k = require_nonnegative_int(
-        search.get("compact_get_top_k"), "contract.search.compact_get_top_k"
-    )
-    if top_k != 2 or top_k > limit:
-        raise TrialError("contract compact selection must be deterministic top-2")
+    top_k: int | None = None
+    if version == 0:
+        top_k = require_nonnegative_int(
+            search.get("compact_get_top_k"), "contract.search.compact_get_top_k"
+        )
+        if top_k != 2 or top_k > limit:
+            raise TrialError("contract compact selection must be deterministic top-2")
     exclude_kinds = [
         require_label(item, f"contract.search.exclude_kinds[{index}]")
         for index, item in enumerate(
@@ -243,16 +306,19 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
     if len(exclude_kinds) != len(set(exclude_kinds)):
         raise TrialError("contract.search.exclude_kinds contains duplicates")
 
-    bootstrap = require_object(value.get("bootstrap"), "contract.bootstrap")
-    reject_unknown_fields(bootstrap, {"limit", "frontend"}, "contract.bootstrap")
-    bootstrap_limit = require_nonnegative_int(
-        bootstrap.get("limit"), "contract.bootstrap.limit"
-    )
-    if not 1 <= bootstrap_limit <= 100:
-        raise TrialError("contract.bootstrap.limit must be between 1 and 100")
-    frontend = require_label(bootstrap.get("frontend"), "contract.bootstrap.frontend")
-    if frontend not in {"claude-code", "cursor", "warp"}:
-        raise TrialError("contract.bootstrap.frontend is unsupported")
+    bootstrap_limit: int | None = None
+    frontend: str | None = None
+    if version == 0:
+        bootstrap = require_object(value.get("bootstrap"), "contract.bootstrap")
+        reject_unknown_fields(bootstrap, {"limit", "frontend"}, "contract.bootstrap")
+        bootstrap_limit = require_nonnegative_int(
+            bootstrap.get("limit"), "contract.bootstrap.limit"
+        )
+        if not 1 <= bootstrap_limit <= 100:
+            raise TrialError("contract.bootstrap.limit must be between 1 and 100")
+        frontend = require_label(bootstrap.get("frontend"), "contract.bootstrap.frontend")
+        if frontend not in {"claude-code", "cursor", "warp"}:
+            raise TrialError("contract.bootstrap.frontend is unsupported")
 
     generation = require_object(value.get("generation"), "contract.generation")
     reject_unknown_fields(
@@ -337,6 +403,15 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
             "usefulness_min",
             "usefulness_max",
             "preference_tie_label",
+            *(
+                {
+                    "required_reviewer_count",
+                    "independent_reviewers",
+                    "abstention_values",
+                }
+                if version == 1
+                else set()
+            ),
         },
         "contract.review",
     )
@@ -368,6 +443,24 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
     )
     if preference_tie_label != "tie":
         raise TrialError("contract.review preference tie label must be tie")
+    abstention_values: list[Any] = []
+    if version == 1:
+        if require_nonnegative_int(
+            review.get("required_reviewer_count"),
+            "contract.review.required_reviewer_count",
+        ) != 2:
+            raise TrialError("v1 requires exactly two independent reviewers")
+        if not require_bool(
+            review.get("independent_reviewers"),
+            "contract.review.independent_reviewers",
+        ):
+            raise TrialError("v1 reviewers must be independent")
+        abstention_values = require_list(
+            review.get("abstention_values"),
+            "contract.review.abstention_values",
+        )
+        if abstention_values != [False, True]:
+            raise TrialError("v1 abstention values are not fixed")
 
     thresholds = require_object(value.get("thresholds"), "contract.thresholds")
     threshold_fields = {
@@ -383,6 +476,8 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
         "candidate_conditions",
         "recommendation_scope",
     }
+    if version == 1:
+        threshold_fields.update({"aggregation", "max_abstention_failures"})
     reject_unknown_fields(thresholds, threshold_fields, "contract.thresholds")
     ratio_fields = {
         "min_weighted_claim_completeness",
@@ -400,6 +495,7 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
         "max_currentness_uncertain",
         "max_unsupported_assertions",
         "min_case_usefulness",
+        *({"max_abstention_failures"} if version == 1 else set()),
     }:
         normalized_thresholds[key] = require_nonnegative_int(
             thresholds.get(key), f"contract.thresholds.{key}"
@@ -427,16 +523,48 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
             )
         )
     ]
-    if candidate_conditions != [COMPACT_CONDITION, "portfolio_digest"]:
+    expected_candidates = (
+        ["portfolio_digest"]
+        if version == 1
+        else [COMPACT_CONDITION, "portfolio_digest"]
+    )
+    if candidate_conditions != expected_candidates:
         raise TrialError("contract candidate conditions are not fixed")
     recommendation_scope = require_label(
         thresholds.get("recommendation_scope"),
         "contract.thresholds.recommendation_scope",
     )
-    if recommendation_scope != "expanded_trial_only":
-        raise TrialError("contract recommendation scope must remain expanded_trial_only")
+    expected_scope = "write_side_trial_only" if version == 1 else "expanded_trial_only"
+    if recommendation_scope != expected_scope:
+        raise TrialError(
+            f"contract recommendation scope must remain {expected_scope}"
+        )
     normalized_thresholds["candidate_conditions"] = candidate_conditions
     normalized_thresholds["recommendation_scope"] = recommendation_scope
+    if version == 1:
+        aggregation = require_object(
+            thresholds.get("aggregation"), "contract.thresholds.aggregation"
+        )
+        reject_unknown_fields(
+            aggregation,
+            {"reviewer_gate", "stratum_gate"},
+            "contract.thresholds.aggregation",
+        )
+        normalized_aggregation = {
+            "reviewer_gate": require_label(
+                aggregation.get("reviewer_gate"),
+                "contract.thresholds.aggregation.reviewer_gate",
+            ),
+            "stratum_gate": require_label(
+                aggregation.get("stratum_gate"),
+                "contract.thresholds.aggregation.stratum_gate",
+            ),
+        }
+        if normalized_aggregation != {"reviewer_gate": "all", "stratum_gate": "all"}:
+            raise TrialError("v1 aggregation gates must both be all")
+        normalized_thresholds["aggregation"] = normalized_aggregation
+        if normalized_thresholds["max_abstention_failures"] != 0:
+            raise TrialError("v1 max_abstention_failures must be zero")
 
     cases: list[dict[str, Any]] = []
     case_ids: set[str] = set()
@@ -452,6 +580,11 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
                 "required_claims",
                 "optional_claims",
                 "forbidden_claim_ids",
+                *(
+                    {"prompt_variant", "requires_abstention"}
+                    if version == 1
+                    else set()
+                ),
             },
             path,
         )
@@ -460,8 +593,28 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
             raise TrialError("contract contains duplicate case ids")
         case_ids.add(case_id)
         prompt_class = require_label(case.get("prompt_class"), f"{path}.prompt_class")
+        prompt_variant = (
+            require_label(case.get("prompt_variant"), f"{path}.prompt_variant")
+            if version == 1
+            else "legacy"
+        )
+        if version == 1 and prompt_variant not in {"direct", "heldout"}:
+            raise TrialError("v1 prompt_variant must be direct or heldout")
         prompt_sha256 = require_sha256(case.get("prompt_sha256"), f"{path}.prompt_sha256")
-        required_claims = validate_claims(case.get("required_claims"), f"{path}.required_claims")
+        requires_abstention = (
+            require_bool(case.get("requires_abstention"), f"{path}.requires_abstention")
+            if version == 1
+            else False
+        )
+        required_claims = validate_claims(
+            case.get("required_claims"),
+            f"{path}.required_claims",
+            allow_empty=requires_abstention,
+        )
+        if version == 1 and requires_abstention and required_claims:
+            raise TrialError("v1 abstention cases must have required_claims=[]")
+        if version == 1 and not requires_abstention and not required_claims:
+            raise TrialError("v1 non-abstention cases require claims")
         optional_claims = validate_claims(
             case.get("optional_claims"), f"{path}.optional_claims", allow_empty=True
         )
@@ -478,14 +631,48 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
             {
                 "case_id": case_id,
                 "prompt_class": prompt_class,
+                "prompt_variant": prompt_variant,
                 "prompt_sha256": prompt_sha256,
                 "required_claims": required_claims,
                 "optional_claims": optional_claims,
                 "forbidden_claim_ids": forbidden,
+                "requires_abstention": requires_abstention,
             }
         )
-    if len(cases) != 2:
+    if version == 0 and len(cases) != 2:
         raise TrialError("contract must contain exactly two preregistered cases")
+    if version == 1:
+        if len(cases) != 12:
+            raise TrialError("v1 contract must contain exactly 12 preregistered cases")
+        strata = Counter(case["prompt_class"] for case in cases)
+        if set(strata) != EXPANDED_STRATA or set(strata.values()) != {2}:
+            raise TrialError(
+                "v1 contract must contain the six fixed prompt strata with two cases each"
+            )
+        variants_by_stratum = {
+            stratum: {
+                case["prompt_variant"]
+                for case in cases
+                if case["prompt_class"] == stratum
+            }
+            for stratum in strata
+        }
+        if any(
+            variants != {"direct", "heldout"}
+            for variants in variants_by_stratum.values()
+        ):
+            raise TrialError("v1 strata must each contain direct and heldout variants")
+        if any(
+            all(
+                case["requires_abstention"]
+                for case in cases
+                if case["prompt_class"] == stratum
+            )
+            for stratum in strata
+        ):
+            raise TrialError("v1 strata must retain a non-abstention completeness case")
+        if sum(case["requires_abstention"] for case in cases) != 2:
+            raise TrialError("v1 contract requires exactly two abstention cases")
 
     boundaries = require_object(value.get("boundaries"), "contract.boundaries")
     expected_boundaries = {
@@ -498,6 +685,11 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
         "compact_default_change_allowed": False,
         "benchmark_claim_allowed": False,
         "version_or_tag_change_allowed": False,
+        **(
+            {"release_action_allowed": False, "ci_action_allowed": False}
+            if version == 1
+            else {}
+        ),
     }
     reject_unknown_fields(boundaries, set(expected_boundaries), "contract.boundaries")
     for key, expected in expected_boundaries.items():
@@ -505,17 +697,32 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
             raise TrialError(f"contract.boundaries.{key} violates the preregistration")
 
     return {
+        "version": version,
+        "schema": schema,
         "contract_id": contract_id,
         "prereg_base_commit": prereg_base_commit,
         "runtime_source_commit": runtime_source_commit,
+        **(
+            {
+                "harness_source_sha256": harness_source_sha256,
+                "surface_source_sha256": surface_source_sha256,
+                "digest_key_sha256": digest_key_sha256,
+            }
+            if version == 1
+            else {}
+        ),
         "conditions": conditions,
         "search": {
             "mode": mode,
             "limit": limit,
             "exclude_kinds": exclude_kinds,
-            "compact_get_top_k": top_k,
+            **({"compact_get_top_k": top_k} if version == 0 else {}),
         },
-        "bootstrap": {"limit": bootstrap_limit, "frontend": frontend},
+        **(
+            {"bootstrap": {"limit": bootstrap_limit, "frontend": frontend}}
+            if version == 0
+            else {}
+        ),
         "generation": {
             "model": model,
             "reasoning_effort": reasoning_effort,
@@ -530,6 +737,12 @@ def validate_contract(value: dict[str, Any]) -> dict[str, Any]:
             "usefulness_min": usefulness_min,
             "usefulness_max": usefulness_max,
             "preference_tie_label": preference_tie_label,
+            **(
+                {"required_reviewer_count": 2, "independent_reviewers": True}
+                if version == 1
+                else {}
+            ),
+            **({"abstention_values": abstention_values} if version == 1 else {}),
         },
         "thresholds": normalized_thresholds,
         "cases": cases,
@@ -545,8 +758,9 @@ def load_contract(path: Path) -> tuple[dict[str, Any], str]:
 def validate_spec(
     value: dict[str, Any], contract: dict[str, Any], contract_sha256: str
 ) -> dict[str, Any]:
-    if value.get("schema") != SPEC_SCHEMA:
-        raise TrialError(f"spec schema must be {SPEC_SCHEMA}")
+    expected_schema = versioned_schema(contract, SPEC_SCHEMA, SPEC_SCHEMA_V1)
+    if value.get("schema") != expected_schema:
+        raise TrialError(f"spec schema must be {expected_schema}")
     reject_unknown_fields(
         value,
         {
@@ -569,6 +783,10 @@ def validate_spec(
     if not repo.is_absolute() or not repo.is_dir():
         raise TrialError("spec.repo must be an existing absolute directory")
     digest_key = require_string(value.get("digest_key"), "spec.digest_key", max_chars=256)
+    if contract["version"] == 1 and sha256_text(digest_key) != contract[
+        "digest_key_sha256"
+    ]:
+        raise TrialError("spec.digest_key does not match the v1 contract commitment")
     blind_seed = require_string(value.get("blind_seed"), "spec.blind_seed", max_chars=64)
     if not HEX64_RE.fullmatch(blind_seed):
         raise TrialError("spec.blind_seed must be 32 lowercase hex bytes")
@@ -619,6 +837,30 @@ def git_head(repo: Path) -> str:
     return head
 
 
+def require_committed_file(
+    repo: Path, commit: str, path: Path, label: str
+) -> None:
+    resolved_repo = repo.resolve()
+    resolved_path = path.resolve(strict=True)
+    if not resolved_path.is_file() or not resolved_path.is_relative_to(resolved_repo):
+        raise TrialError(f"{label} must be a tracked file inside spec.repo")
+    relative = resolved_path.relative_to(resolved_repo).as_posix()
+    try:
+        completed = subprocess.run(
+            ["git", "show", f"{commit}:{relative}"],
+            cwd=resolved_repo,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise TrialError(f"failed to verify committed {label}: {exc}") from exc
+    if completed.returncode != 0:
+        raise TrialError(f"{label} is not tracked at spec.contract_commit")
+    if completed.stdout != resolved_path.read_bytes():
+        raise TrialError(f"{label} bytes differ from spec.contract_commit")
+
+
 def require_ignored_data_path(repo: Path, path: Path, label: str) -> Path:
     resolved_repo = repo.resolve()
     resolved_path = path.resolve(strict=False)
@@ -645,6 +887,18 @@ def require_distinct_paths(paths: dict[str, Path]) -> None:
     resolved = {label: path.resolve(strict=False) for label, path in paths.items()}
     if len(set(resolved.values())) != len(resolved):
         raise TrialError("trial input/output paths must be distinct")
+    identities: dict[tuple[int, int], str] = {}
+    for label, path in paths.items():
+        try:
+            stat = path.stat()
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            raise TrialError(f"failed to inspect trial path {label}: {exc}") from exc
+        identity = surface.file_identity(stat)
+        if identity in identities:
+            raise TrialError("trial input/output file identities must be distinct")
+        identities[identity] = label
 
 
 def parse_nested_json(text: str, path: str) -> Any:
@@ -797,23 +1051,50 @@ def capture_trial(
     redacted_output: Path,
     timeout: float,
 ) -> dict[str, Any]:
+    protected_inputs = (
+        contract_path,
+        spec_path,
+        source_db,
+        binary,
+        Path(__file__),
+        Path(surface.__file__),
+    )
+    require_distinct_paths(
+        {
+            "contract": contract_path,
+            "spec": spec_path,
+            "source_db": source_db,
+            "agent_bridge_binary": binary,
+            "harness_source": Path(__file__),
+            "surface_source": Path(surface.__file__),
+            "raw_output": raw_output,
+            "redacted_output": redacted_output,
+        }
+    )
     contract, contract_sha = load_contract(contract_path)
+    conditions = contract_conditions(contract)
     spec_raw, _ = read_json(spec_path)
     spec = validate_spec(spec_raw, contract, contract_sha)
     repo: Path = spec["repo"]
     if git_head(repo) != spec["contract_commit"]:
         raise TrialError("repository HEAD does not match spec.contract_commit")
+    if contract["version"] == 1:
+        require_committed_file(
+            repo, spec["contract_commit"], contract_path, "v1 contract"
+        )
+        require_committed_file(
+            repo, spec["contract_commit"], Path(__file__), "v1 harness source"
+        )
+        require_committed_file(
+            repo,
+            spec["contract_commit"],
+            Path(surface.__file__),
+            "v1 surface helper source",
+        )
     if not binary.is_file() or not os.access(binary, os.X_OK):
         raise TrialError("Agent-Bridge binary must be executable")
     if not source_db.is_file():
         raise TrialError("source SQLite database does not exist")
-    require_distinct_paths(
-        {
-            "source_db": source_db,
-            "raw_output": raw_output,
-            "redacted_output": redacted_output,
-        }
-    )
     require_ignored_data_path(repo, raw_output, "raw capture output")
     require_ignored_data_path(repo, redacted_output, "redacted capture output")
     binary_observation = surface.observe_binary_identity(
@@ -917,20 +1198,28 @@ def capture_trial(
                     "selected_keys": selected_keys,
                 }
 
-            compact_result, compact_run = run_isolated_mcp(
-                base_snapshot=base_snapshot,
-                tmpdir=tmpdir,
-                run_id=f"c{case_index}-compact-top2",
-                binary=binary,
-                repo=repo,
-                timeout=timeout,
-                operation=compact_search,
-            )
-            runs.append({"case_id": case["case_id"], "condition": CONDITIONS[1], **compact_run})
-            if full_result["ranked_keys"] != compact_result["ranked_keys"]:
-                raise TrialError("full and compact hybrid rankings differ")
-            if compact_result["selected_keys"] != full_result["ranked_keys"][:2]:
-                raise TrialError("compact follow-up selection is not full-ranking top-2")
+            compact_result: dict[str, Any] | None = None
+            if COMPACT_CONDITION in conditions:
+                compact_result, compact_run = run_isolated_mcp(
+                    base_snapshot=base_snapshot,
+                    tmpdir=tmpdir,
+                    run_id=f"c{case_index}-compact-top2",
+                    binary=binary,
+                    repo=repo,
+                    timeout=timeout,
+                    operation=compact_search,
+                )
+                runs.append(
+                    {
+                        "case_id": case["case_id"],
+                        "condition": COMPACT_CONDITION,
+                        **compact_run,
+                    }
+                )
+                if full_result["ranked_keys"] != compact_result["ranked_keys"]:
+                    raise TrialError("full and compact hybrid rankings differ")
+                if compact_result["selected_keys"] != full_result["ranked_keys"][:2]:
+                    raise TrialError("compact follow-up selection is not full-ranking top-2")
 
             def bootstrap(client: surface.McpClient) -> dict[str, Any]:
                 result, latency = client.request(
@@ -949,16 +1238,24 @@ def capture_trial(
                 blocks = surface.bootstrap_evidence(text)
                 return {"condition": make_context(text, latency, {"text": text}), "blocks": len(blocks)}
 
-            bootstrap_result, bootstrap_run = run_isolated_mcp(
-                base_snapshot=base_snapshot,
-                tmpdir=tmpdir,
-                run_id=f"c{case_index}-bootstrap",
-                binary=binary,
-                repo=repo,
-                timeout=timeout,
-                operation=bootstrap,
-            )
-            runs.append({"case_id": case["case_id"], "condition": CONDITIONS[2], **bootstrap_run})
+            bootstrap_result: dict[str, Any] | None = None
+            if "session_bootstrap" in conditions:
+                bootstrap_result, bootstrap_run = run_isolated_mcp(
+                    base_snapshot=base_snapshot,
+                    tmpdir=tmpdir,
+                    run_id=f"c{case_index}-bootstrap",
+                    binary=binary,
+                    repo=repo,
+                    timeout=timeout,
+                    operation=bootstrap,
+                )
+                runs.append(
+                    {
+                        "case_id": case["case_id"],
+                        "condition": "session_bootstrap",
+                        **bootstrap_run,
+                    }
+                )
 
             def digest(client: surface.McpClient) -> dict[str, Any]:
                 result, latency = client.request(
@@ -982,21 +1279,36 @@ def capture_trial(
             )
             runs.append({"case_id": case["case_id"], "condition": CONDITIONS[3], **digest_run})
 
+            condition_rows = {
+                REFERENCE_CONDITION: full_result["condition"],
+                "portfolio_digest": digest_result["condition"],
+            }
+            if compact_result is not None:
+                condition_rows[COMPACT_CONDITION] = compact_result["condition"]
+            if bootstrap_result is not None:
+                condition_rows["session_bootstrap"] = bootstrap_result["condition"]
             cases.append(
                 {
                     "case_id": case["case_id"],
                     "prompt_class": case["prompt_class"],
+                    **(
+                        {"prompt_variant": case["prompt_variant"]}
+                        if contract["version"] == 1
+                        else {}
+                    ),
                     "prompt": prompt,
                     "prompt_sha256": case["prompt_sha256"],
                     "required_claims": case["required_claims"],
                     "optional_claims": case["optional_claims"],
                     "forbidden_claim_ids": case["forbidden_claim_ids"],
-                    "ranking_projection_invariant": True,
+                    **(
+                        {"requires_abstention": case["requires_abstention"]}
+                        if contract["version"] == 1
+                        else {}
+                    ),
+                    "ranking_projection_invariant": COMPACT_CONDITION in conditions,
                     "conditions": {
-                        CONDITIONS[0]: full_result["condition"],
-                        CONDITIONS[1]: compact_result["condition"],
-                        CONDITIONS[2]: bootstrap_result["condition"],
-                        CONDITIONS[3]: digest_result["condition"],
+                        condition: condition_rows[condition] for condition in conditions
                     },
                 }
             )
@@ -1004,7 +1316,7 @@ def capture_trial(
     if any(run["snapshot_sha256_before"] != base_snapshot_sha for run in runs):
         raise TrialError("an isolated condition did not start from the shared base snapshot")
     capture = {
-        "schema": CAPTURE_SCHEMA,
+        "schema": versioned_schema(contract, CAPTURE_SCHEMA, CAPTURE_SCHEMA_V1),
         "trial_id": spec["trial_id"],
         "contract_sha256": contract_sha,
         "contract_commit": spec["contract_commit"],
@@ -1024,21 +1336,23 @@ def capture_trial(
             "writes_live_ab_store": False,
             "calls_llm": False,
             "raw_capture_private": True,
-            "ranking_projection_invariant_required": True,
+            "ranking_projection_invariant_required": COMPACT_CONDITION in conditions,
         },
     }
-    raw_bytes = write_json(raw_output, capture)
+    raw_bytes = write_json(
+        raw_output, capture, protected_paths=protected_inputs
+    )
     redacted_cases = []
     for case in cases:
         condition_rows = {}
-        for condition in CONDITIONS:
+        for condition in conditions:
             row = case["conditions"][condition]
             raw_result = row["raw_result"]
-            if condition == CONDITIONS[0]:
+            if condition == REFERENCE_CONDITION:
                 observed_count = len(raw_result)
-            elif condition == CONDITIONS[1]:
+            elif condition == COMPACT_CONDITION:
                 observed_count = len(raw_result["compact_hits"])
-            elif condition == CONDITIONS[2]:
+            elif condition == "session_bootstrap":
                 observed_count = len(surface.bootstrap_evidence(raw_result["text"]))
             else:
                 observed_count = 1
@@ -1057,13 +1371,20 @@ def capture_trial(
             {
                 "case_id": case["case_id"],
                 "prompt_class": case["prompt_class"],
+                **(
+                    {"prompt_variant": case["prompt_variant"]}
+                    if contract["version"] == 1
+                    else {}
+                ),
                 "prompt_sha256": case["prompt_sha256"],
-                "ranking_projection_invariant": True,
+                "ranking_projection_invariant": COMPACT_CONDITION in conditions,
                 "conditions": condition_rows,
             }
         )
     redacted = {
-        "schema": CAPTURE_REDACTED_SCHEMA,
+        "schema": versioned_schema(
+            contract, CAPTURE_REDACTED_SCHEMA, CAPTURE_REDACTED_SCHEMA_V1
+        ),
         "trial_id": spec["trial_id"],
         "contract_sha256": contract_sha,
         "contract_commit": spec["contract_commit"],
@@ -1083,15 +1404,17 @@ def capture_trial(
             "calls_llm": False,
         },
     }
-    write_json(redacted_output, redacted)
+    write_json(redacted_output, redacted, protected_paths=protected_inputs)
     return redacted
 
 
 def validate_capture(
     value: dict[str, Any], capture_bytes: bytes, contract: dict[str, Any], contract_sha: str
 ) -> dict[str, Any]:
-    if value.get("schema") != CAPTURE_SCHEMA:
-        raise TrialError(f"capture schema must be {CAPTURE_SCHEMA}")
+    expected_schema = versioned_schema(contract, CAPTURE_SCHEMA, CAPTURE_SCHEMA_V1)
+    if value.get("schema") != expected_schema:
+        raise TrialError(f"capture schema must be {expected_schema}")
+    condition_ids = contract_conditions(contract)
     reject_unknown_fields(
         value,
         {
@@ -1133,7 +1456,7 @@ def validate_capture(
         "writes_live_ab_store": False,
         "calls_llm": False,
         "raw_capture_private": True,
-        "ranking_projection_invariant_required": True,
+        "ranking_projection_invariant_required": COMPACT_CONDITION in condition_ids,
     }
     reject_unknown_fields(boundary, set(expected_boundary), "capture.boundary")
     if boundary != expected_boundary:
@@ -1142,7 +1465,7 @@ def validate_capture(
     expected_runs = {
         (case["case_id"], condition)
         for case in contract["cases"]
-        for condition in CONDITIONS
+        for condition in condition_ids
     }
     runs = require_list(value.get("runs"), "capture.runs")
     if len(runs) != len(expected_runs):
@@ -1207,6 +1530,11 @@ def validate_capture(
                 "forbidden_claim_ids",
                 "ranking_projection_invariant",
                 "conditions",
+                *(
+                    {"prompt_variant", "requires_abstention"}
+                    if contract["version"] == 1
+                    else set()
+                ),
             },
             "capture case",
         )
@@ -1216,6 +1544,10 @@ def validate_capture(
             "prompt_class"
         ]:
             raise TrialError("capture prompt class mismatch")
+        if contract["version"] == 1 and require_label(
+            case.get("prompt_variant"), "capture prompt_variant"
+        ) != contract_case["prompt_variant"]:
+            raise TrialError("capture prompt variant mismatch")
         prompt = require_string(case.get("prompt"), "capture prompt", max_chars=16_000)
         if sha256_text(prompt) != contract_case["prompt_sha256"]:
             raise TrialError("capture prompt hash mismatch")
@@ -1223,7 +1555,11 @@ def validate_capture(
             "prompt_sha256"
         ]:
             raise TrialError("capture stored prompt hash mismatch")
-        required_claims = validate_claims(case.get("required_claims"), "capture required_claims")
+        required_claims = validate_claims(
+            case.get("required_claims"),
+            "capture required_claims",
+            allow_empty=contract_case["requires_abstention"],
+        )
         optional_claims = validate_claims(
             case.get("optional_claims"), "capture optional_claims", allow_empty=True
         )
@@ -1239,13 +1575,19 @@ def validate_capture(
             or forbidden_claims != contract_case["forbidden_claim_ids"]
         ):
             raise TrialError("capture claim rubric does not match the contract")
-        if case.get("ranking_projection_invariant") is not True:
+        if contract["version"] == 1 and require_bool(
+            case.get("requires_abstention"), "capture requires_abstention"
+        ) != contract_case["requires_abstention"]:
+            raise TrialError("capture abstention flag does not match the contract")
+        if case.get("ranking_projection_invariant") is not (
+            COMPACT_CONDITION in condition_ids
+        ):
             raise TrialError("capture ranking projection invariant failed")
         condition_obj = require_object(case.get("conditions"), "capture conditions")
-        if set(condition_obj) != set(CONDITIONS):
+        if set(condition_obj) != set(condition_ids):
             raise TrialError("capture condition set mismatch")
         conditions: dict[str, dict[str, Any]] = {}
-        for condition in CONDITIONS:
+        for condition in condition_ids:
             row = require_object(condition_obj[condition], f"capture condition {condition}")
             reject_unknown_fields(
                 row,
@@ -1297,62 +1639,69 @@ def validate_capture(
         if len(full_keys) < 2 or len(full_keys) != len(set(full_keys)):
             raise TrialError("capture full-search ranking is too short or contains duplicates")
 
-        compact_row = conditions[COMPACT_CONDITION]
-        compact_raw = require_object(compact_row.get("raw_result"), "capture compact raw_result")
-        reject_unknown_fields(
-            compact_raw,
-            {"compact_hits", "selected_keys", "fetched_records", "search_latency_ms"},
-            "capture compact raw_result",
-        )
-        compact_prefix = "=== COMPACT MEMORY SEARCH ===\n"
-        if not compact_row["context"].startswith(compact_prefix):
-            raise TrialError("capture compact context framing is malformed")
-        compact_body = compact_row["context"][len(compact_prefix) :]
-        get_one_marker = "\n=== MEMORY GET RANK 1 ===\n"
-        get_two_marker = "\n=== MEMORY GET RANK 2 ===\n"
-        if get_one_marker not in compact_body or get_two_marker not in compact_body:
-            raise TrialError("capture compact context is missing top-2 follow-up sections")
-        compact_text, gets_text = compact_body.split(get_one_marker, 1)
-        get_one_text, get_two_text = gets_text.split(get_two_marker, 1)
-        compact_hits = normalize_compact_search(compact_text, contract["search"]["limit"])
-        if compact_raw.get("compact_hits") != compact_hits:
-            raise TrialError("capture compact raw hits do not match the context")
-        compact_keys = [row["key"] for row in compact_hits]
-        if compact_keys != full_keys:
-            raise TrialError("capture full and compact rankings differ")
-        selected_keys = [
-            require_string(item, f"capture compact selected_keys[{index}]", max_chars=256)
-            for index, item in enumerate(
-                require_list(compact_raw.get("selected_keys"), "capture compact selected_keys")
+        if COMPACT_CONDITION in condition_ids:
+            compact_row = conditions[COMPACT_CONDITION]
+            compact_raw = require_object(
+                compact_row.get("raw_result"), "capture compact raw_result"
             )
-        ]
-        if selected_keys != compact_keys[:2]:
-            raise TrialError("capture compact follow-up selection is not rank-only top-2")
-        fetched_records = require_list(
-            compact_raw.get("fetched_records"), "capture compact fetched_records"
-        )
-        if len(fetched_records) != 2:
-            raise TrialError("capture compact follow-up record count is not two")
-        parsed_gets = [
-            surface.normalize_memory_get(get_one_text)[0],
-            surface.normalize_memory_get(get_two_text)[0],
-        ]
-        if fetched_records != parsed_gets:
-            raise TrialError("capture compact fetched records do not match the context")
-        if [record.get("key") for record in parsed_gets] != selected_keys:
-            raise TrialError("capture compact fetched record keys do not match top-2")
-        require_finite(
-            compact_raw.get("search_latency_ms"), "capture compact search_latency_ms"
-        )
+            reject_unknown_fields(
+                compact_raw,
+                {"compact_hits", "selected_keys", "fetched_records", "search_latency_ms"},
+                "capture compact raw_result",
+            )
+            compact_prefix = "=== COMPACT MEMORY SEARCH ===\n"
+            if not compact_row["context"].startswith(compact_prefix):
+                raise TrialError("capture compact context framing is malformed")
+            compact_body = compact_row["context"][len(compact_prefix) :]
+            get_one_marker = "\n=== MEMORY GET RANK 1 ===\n"
+            get_two_marker = "\n=== MEMORY GET RANK 2 ===\n"
+            if get_one_marker not in compact_body or get_two_marker not in compact_body:
+                raise TrialError("capture compact context is missing top-2 follow-up sections")
+            compact_text, gets_text = compact_body.split(get_one_marker, 1)
+            get_one_text, get_two_text = gets_text.split(get_two_marker, 1)
+            compact_hits = normalize_compact_search(compact_text, contract["search"]["limit"])
+            if compact_raw.get("compact_hits") != compact_hits:
+                raise TrialError("capture compact raw hits do not match the context")
+            compact_keys = [row["key"] for row in compact_hits]
+            if compact_keys != full_keys:
+                raise TrialError("capture full and compact rankings differ")
+            selected_keys = [
+                require_string(item, f"capture compact selected_keys[{index}]", max_chars=256)
+                for index, item in enumerate(
+                    require_list(
+                        compact_raw.get("selected_keys"),
+                        "capture compact selected_keys",
+                    )
+                )
+            ]
+            if selected_keys != compact_keys[:2]:
+                raise TrialError("capture compact follow-up selection is not rank-only top-2")
+            fetched_records = require_list(
+                compact_raw.get("fetched_records"), "capture compact fetched_records"
+            )
+            if len(fetched_records) != 2:
+                raise TrialError("capture compact follow-up record count is not two")
+            parsed_gets = [
+                surface.normalize_memory_get(get_one_text)[0],
+                surface.normalize_memory_get(get_two_text)[0],
+            ]
+            if fetched_records != parsed_gets:
+                raise TrialError("capture compact fetched records do not match the context")
+            if [record.get("key") for record in parsed_gets] != selected_keys:
+                raise TrialError("capture compact fetched record keys do not match top-2")
+            require_finite(
+                compact_raw.get("search_latency_ms"), "capture compact search_latency_ms"
+            )
 
-        bootstrap_raw = require_object(
-            conditions["session_bootstrap"].get("raw_result"),
-            "capture bootstrap raw_result",
-        )
-        reject_unknown_fields(bootstrap_raw, {"text"}, "capture bootstrap raw_result")
-        if bootstrap_raw.get("text") != conditions["session_bootstrap"]["context"]:
-            raise TrialError("capture bootstrap raw result does not match its context")
-        surface.bootstrap_evidence(conditions["session_bootstrap"]["context"])
+        if "session_bootstrap" in condition_ids:
+            bootstrap_raw = require_object(
+                conditions["session_bootstrap"].get("raw_result"),
+                "capture bootstrap raw_result",
+            )
+            reject_unknown_fields(bootstrap_raw, {"text"}, "capture bootstrap raw_result")
+            if bootstrap_raw.get("text") != conditions["session_bootstrap"]["context"]:
+                raise TrialError("capture bootstrap raw result does not match its context")
+            surface.bootstrap_evidence(conditions["session_bootstrap"]["context"])
 
         digest_raw = require_object(
             conditions["portfolio_digest"].get("raw_result"), "capture digest raw_result"
@@ -1363,7 +1712,13 @@ def validate_capture(
         )
         if digest_raw != digest_context:
             raise TrialError("capture digest raw result does not match its context")
-        require_string(digest_raw.get("key"), "capture digest key", max_chars=256)
+        digest_key = require_string(
+            digest_raw.get("key"), "capture digest key", max_chars=256
+        )
+        if contract["version"] == 1 and sha256_text(digest_key) != contract[
+            "digest_key_sha256"
+        ]:
+            raise TrialError("capture digest key does not match the v1 commitment")
         require_string(digest_raw.get("content"), "capture digest content")
 
         cases.append({**contract_case, "prompt": prompt, "conditions": conditions})
@@ -1463,6 +1818,7 @@ def generate_one_answer(
     contract: dict[str, Any],
     question: str,
     context: str,
+    extra_forbidden_markers: set[str] | None,
     timeout: float,
 ) -> dict[str, Any]:
     generation = contract["generation"]
@@ -1543,6 +1899,8 @@ def generate_one_answer(
             "portfolio_state_digest",
             "=== EVIDENCE CONTEXT ===",
         }
+        if extra_forbidden_markers is not None:
+            forbidden_markers.update(extra_forbidden_markers)
         if any(marker in answer for marker in forbidden_markers):
             raise TrialError("Codex answer leaked a condition/evidence marker")
         return {
@@ -1585,7 +1943,34 @@ def generate_trial(
     redacted_output: Path,
     timeout: float,
 ) -> dict[str, Any]:
+    protected_inputs = (
+        contract_path,
+        spec_path,
+        capture_path,
+        codex_binary,
+        Path(__file__),
+        Path(surface.__file__),
+    )
+    output_paths = {
+        "generation_output": generation_output,
+        "blind_output": blind_output,
+        "map_output": map_output,
+        "review_template_output": review_template_output,
+        "redacted_output": redacted_output,
+    }
+    require_distinct_paths(
+        {
+            "contract": contract_path,
+            "spec": spec_path,
+            "capture": capture_path,
+            "codex_binary": codex_binary,
+            "harness_source": Path(__file__),
+            "surface_source": Path(surface.__file__),
+            **output_paths,
+        }
+    )
     contract, contract_sha = load_contract(contract_path)
+    conditions = contract_conditions(contract)
     spec_raw, _ = read_json(spec_path)
     spec = validate_spec(spec_raw, contract, contract_sha)
     capture_raw, capture_bytes = read_json(capture_path)
@@ -1595,14 +1980,19 @@ def generate_trial(
     repo: Path = spec["repo"]
     if git_head(repo) != spec["contract_commit"]:
         raise TrialError("repository HEAD does not match the preregistered capture commit")
-    output_paths = {
-        "generation_output": generation_output,
-        "blind_output": blind_output,
-        "map_output": map_output,
-        "review_template_output": review_template_output,
-        "redacted_output": redacted_output,
-    }
-    require_distinct_paths({"capture": capture_path, **output_paths})
+    if contract["version"] == 1:
+        require_committed_file(
+            repo, spec["contract_commit"], contract_path, "v1 contract"
+        )
+        require_committed_file(
+            repo, spec["contract_commit"], Path(__file__), "v1 harness source"
+        )
+        require_committed_file(
+            repo,
+            spec["contract_commit"],
+            Path(surface.__file__),
+            "v1 surface helper source",
+        )
     for label, path in output_paths.items():
         require_ignored_data_path(repo, path, label)
     codex_observation = observe_codex_identity(
@@ -1612,7 +2002,7 @@ def generate_trial(
     jobs = [
         (case, condition)
         for case in capture["cases"]
-        for condition in CONDITIONS
+        for condition in conditions
     ]
     jobs.sort(key=lambda item: generation_order(spec["blind_seed"], item[0]["case_id"], item[1]))
     answers_by_case: dict[str, dict[str, dict[str, Any]]] = {
@@ -1624,6 +2014,9 @@ def generate_trial(
             contract=contract,
             question=case["prompt"],
             context=case["conditions"][condition]["context"],
+            extra_forbidden_markers=(
+                {spec["digest_key"]} if contract["version"] == 1 else None
+            ),
             timeout=timeout,
         )
         generated["invocation_index"] = invocation_index
@@ -1640,6 +2033,11 @@ def generate_trial(
             {
                 "case_id": case["case_id"],
                 "prompt_class": case["prompt_class"],
+                **(
+                    {"prompt_variant": case["prompt_variant"]}
+                    if contract["version"] == 1
+                    else {}
+                ),
                 "prompt": case["prompt"],
                 "prompt_sha256": case["prompt_sha256"],
                 "required_claims": case["required_claims"],
@@ -1647,12 +2045,17 @@ def generate_trial(
                 "forbidden_claim_ids": case["forbidden_claim_ids"],
                 "answers": {
                     condition: answers_by_case[case["case_id"]][condition]
-                    for condition in CONDITIONS
+                    for condition in conditions
                 },
+                **(
+                    {"requires_abstention": case["requires_abstention"]}
+                    if contract["version"] == 1
+                    else {}
+                ),
             }
         )
     generation_packet = {
-        "schema": GENERATION_SCHEMA,
+        "schema": versioned_schema(contract, GENERATION_SCHEMA, GENERATION_SCHEMA_V1),
         "trial_id": spec["trial_id"],
         "contract_sha256": contract_sha,
         "contract_commit": spec["contract_commit"],
@@ -1673,7 +2076,11 @@ def generate_trial(
             "raw_generation_private": True,
         },
     }
-    generation_bytes = write_json(generation_output, generation_packet)
+    generation_bytes = write_json(
+        generation_output,
+        generation_packet,
+        protected_paths=protected_inputs,
+    )
     generation_sha = sha256_bytes(generation_bytes)
 
     blind_cases: list[dict[str, Any]] = []
@@ -1681,7 +2088,7 @@ def generate_trial(
     review_cases: list[dict[str, Any]] = []
     for case in capture["cases"]:
         ordered_conditions = sorted(
-            CONDITIONS,
+            conditions,
             key=lambda condition: blind_order(spec["blind_seed"], case["case_id"], condition),
         )
         blind_answers = []
@@ -1712,16 +2119,31 @@ def generate_trial(
                     "unsupported_assertion_count": None,
                     "usefulness": None,
                     "notes": "",
+                    **(
+                        {"abstention_pass": None}
+                        if contract["version"] == 1 and case["requires_abstention"]
+                        else {}
+                    ),
                 }
             )
         blind_cases.append(
             {
                 "case_id": case["case_id"],
                 "prompt_class": case["prompt_class"],
+                **(
+                    {"prompt_variant": case["prompt_variant"]}
+                    if contract["version"] == 1
+                    else {}
+                ),
                 "question": case["prompt"],
                 "required_claims": case["required_claims"],
                 "optional_claims": case["optional_claims"],
                 "forbidden_claim_ids": case["forbidden_claim_ids"],
+                **(
+                    {"requires_abstention": case["requires_abstention"]}
+                    if contract["version"] == 1
+                    else {}
+                ),
                 "answers": blind_answers,
             }
         )
@@ -1734,7 +2156,9 @@ def generate_trial(
             }
         )
     blind_packet = {
-        "schema": BLIND_PACKET_SCHEMA,
+        "schema": versioned_schema(
+            contract, BLIND_PACKET_SCHEMA, BLIND_PACKET_SCHEMA_V1
+        ),
         "trial_id": spec["trial_id"],
         "contract_sha256": contract_sha,
         "contract_commit": spec["contract_commit"],
@@ -1747,13 +2171,20 @@ def generate_trial(
             "condition_mapping_present": False,
             "raw_context_present": False,
             "owner_review_required": True,
+            **(
+                {"required_reviewer_count": contract["review"]["required_reviewer_count"]}
+                if contract["version"] == 1
+                else {}
+            ),
             "unblinding_allowed": False,
         },
     }
-    blind_bytes = write_json(blind_output, blind_packet)
+    blind_bytes = write_json(
+        blind_output, blind_packet, protected_paths=protected_inputs
+    )
     blind_sha = sha256_bytes(blind_bytes)
     mapping_packet = {
-        "schema": BLIND_MAP_SCHEMA,
+        "schema": versioned_schema(contract, BLIND_MAP_SCHEMA, BLIND_MAP_SCHEMA_V1),
         "trial_id": spec["trial_id"],
         "contract_sha256": contract_sha,
         "capture_sha256": capture["capture_sha256"],
@@ -1764,16 +2195,27 @@ def generate_trial(
         "cases": mapping_cases,
         "boundary": {"mapping_private": True, "reviewer_must_not_read_before_review": True},
     }
-    mapping_bytes = write_json(map_output, mapping_packet)
+    mapping_bytes = write_json(
+        map_output, mapping_packet, protected_paths=protected_inputs
+    )
     review_template = {
-        "schema": REVIEW_SCHEMA,
+        "schema": versioned_schema(contract, REVIEW_SCHEMA, REVIEW_SCHEMA_V1),
         "trial_id": spec["trial_id"],
         "blind_packet_sha256": blind_sha,
         "reviewer": "",
         "reviewed_at": 0,
+        **(
+            {"independent_review": False, "condition_blinded": False}
+            if contract["version"] == 1
+            else {}
+        ),
         "cases": review_cases,
     }
-    review_bytes = write_json(review_template_output, review_template)
+    review_bytes = write_json(
+        review_template_output,
+        review_template,
+        protected_paths=protected_inputs,
+    )
     answer_lengths = [
         generated["answer_chars"]
         for answers in answers_by_case.values()
@@ -1785,7 +2227,9 @@ def generate_trial(
         for generated in answers.values()
     ]
     redacted = {
-        "schema": GENERATION_REDACTED_SCHEMA,
+        "schema": versioned_schema(
+            contract, GENERATION_REDACTED_SCHEMA, GENERATION_REDACTED_SCHEMA_V1
+        ),
         "trial_id": spec["trial_id"],
         "contract_sha256": contract_sha,
         "contract_commit": spec["contract_commit"],
@@ -1799,14 +2243,18 @@ def generate_trial(
         "model": contract["generation"]["model"],
         "reasoning_effort": contract["generation"]["reasoning_effort"],
         "case_count": len(capture["cases"]),
-        "condition_count": len(CONDITIONS),
+        "condition_count": len(conditions),
         "answer_count": len(answer_lengths),
         "answer_chars_total": sum(answer_lengths),
         "answer_chars_min": min(answer_lengths),
         "answer_chars_max": max(answer_lengths),
         "generation_latency_ms_total": round(sum(generation_latencies), 3),
         "generation_latency_ms_p95": round(surface.percentile_95(generation_latencies), 3),
-        "status": "WAIT_OWNER_BLIND_REVIEW",
+        "status": (
+            "WAIT_TWO_BLIND_REVIEWS"
+            if contract["version"] == 1
+            else "WAIT_OWNER_BLIND_REVIEW"
+        ),
         "boundary": {
             "raw_prompt_in_packet": False,
             "raw_context_in_packet": False,
@@ -1818,7 +2266,7 @@ def generate_trial(
             "runtime_promotion_allowed": False,
         },
     }
-    write_json(redacted_output, redacted)
+    write_json(redacted_output, redacted, protected_paths=protected_inputs)
     return redacted
 
 
@@ -1829,8 +2277,10 @@ def validate_generation(
     contract_sha: str,
     capture: dict[str, Any],
 ) -> dict[str, Any]:
-    if value.get("schema") != GENERATION_SCHEMA:
-        raise TrialError(f"generation schema must be {GENERATION_SCHEMA}")
+    expected_schema = versioned_schema(contract, GENERATION_SCHEMA, GENERATION_SCHEMA_V1)
+    if value.get("schema") != expected_schema:
+        raise TrialError(f"generation schema must be {expected_schema}")
+    condition_ids = contract_conditions(contract)
     reject_unknown_fields(
         value,
         {
@@ -1910,6 +2360,11 @@ def validate_generation(
                 "optional_claims",
                 "forbidden_claim_ids",
                 "answers",
+                *(
+                    {"prompt_variant", "requires_abstention"}
+                    if contract["version"] == 1
+                    else set()
+                ),
             },
             "generation case",
         )
@@ -1920,6 +2375,10 @@ def validate_generation(
             "prompt_class"
         ]:
             raise TrialError("generation prompt class mismatch")
+        if contract["version"] == 1 and require_label(
+            case.get("prompt_variant"), "generation prompt_variant"
+        ) != capture_case["prompt_variant"]:
+            raise TrialError("generation prompt variant mismatch")
         prompt = require_string(case.get("prompt"), "generation prompt", max_chars=16_000)
         if prompt != capture_case["prompt"]:
             raise TrialError("generation prompt differs from capture")
@@ -1928,7 +2387,11 @@ def validate_generation(
         ) != capture_case["prompt_sha256"]:
             raise TrialError("generation prompt hash mismatch")
         if (
-            validate_claims(case.get("required_claims"), "generation required_claims")
+            validate_claims(
+                case.get("required_claims"),
+                "generation required_claims",
+                allow_empty=capture_case["requires_abstention"],
+            )
             != capture_case["required_claims"]
             or validate_claims(
                 case.get("optional_claims"),
@@ -1948,11 +2411,15 @@ def validate_generation(
             != capture_case["forbidden_claim_ids"]
         ):
             raise TrialError("generation claim rubric differs from capture")
+        if contract["version"] == 1 and require_bool(
+            case.get("requires_abstention"), "generation requires_abstention"
+        ) != capture_case["requires_abstention"]:
+            raise TrialError("generation abstention flag differs from capture")
         raw_answers = require_object(case.get("answers"), "generation answers")
-        if set(raw_answers) != set(CONDITIONS):
+        if set(raw_answers) != set(condition_ids):
             raise TrialError("generation condition set mismatch")
         case_answers: dict[str, dict[str, Any]] = {}
-        for condition in CONDITIONS:
+        for condition in condition_ids:
             path = f"generation answer {condition}"
             row = require_object(raw_answers[condition], path)
             reject_unknown_fields(
@@ -2037,7 +2504,7 @@ def validate_generation(
             invocation_index = require_nonnegative_int(
                 row.get("invocation_index"), f"{path}.invocation_index"
             )
-            if not 1 <= invocation_index <= len(CONDITIONS) * len(capture["cases"]):
+            if not 1 <= invocation_index <= len(condition_ids) * len(capture["cases"]):
                 raise TrialError("generation invocation index is outside the fixed matrix")
             if invocation_index in invocation_indexes:
                 raise TrialError("generation invocation index is duplicated")
@@ -2049,7 +2516,9 @@ def validate_generation(
                 "invocation_index": invocation_index,
             }
         answers[case_id] = case_answers
-    if invocation_indexes != set(range(1, len(CONDITIONS) * len(capture["cases"]) + 1)):
+    if invocation_indexes != set(
+        range(1, len(condition_ids) * len(capture["cases"]) + 1)
+    ):
         raise TrialError("generation invocation matrix is incomplete")
     return {
         "generation_sha256": sha256_bytes(raw_bytes),
@@ -2066,8 +2535,12 @@ def validate_blind_packet(
     capture: dict[str, Any],
     generation: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    if value.get("schema") != BLIND_PACKET_SCHEMA:
-        raise TrialError(f"blind packet schema must be {BLIND_PACKET_SCHEMA}")
+    expected_schema = versioned_schema(
+        contract, BLIND_PACKET_SCHEMA, BLIND_PACKET_SCHEMA_V1
+    )
+    if value.get("schema") != expected_schema:
+        raise TrialError(f"blind packet schema must be {expected_schema}")
+    condition_ids = contract_conditions(contract)
     reject_unknown_fields(
         value,
         {
@@ -2109,6 +2582,11 @@ def validate_blind_packet(
         "condition_mapping_present": False,
         "raw_context_present": False,
         "owner_review_required": True,
+        **(
+            {"required_reviewer_count": contract["review"]["required_reviewer_count"]}
+            if contract["version"] == 1
+            else {}
+        ),
         "unblinding_allowed": False,
     }
     reject_unknown_fields(boundary, set(expected_boundary), "blind.boundary")
@@ -2130,6 +2608,11 @@ def validate_blind_packet(
                 "optional_claims",
                 "forbidden_claim_ids",
                 "answers",
+                *(
+                    {"prompt_variant", "requires_abstention"}
+                    if contract["version"] == 1
+                    else set()
+                ),
             },
             "blind case",
         )
@@ -2140,11 +2623,19 @@ def validate_blind_packet(
             "prompt_class"
         ]:
             raise TrialError("blind packet prompt class mismatch")
+        if contract["version"] == 1 and require_label(
+            case.get("prompt_variant"), "blind prompt_variant"
+        ) != capture_case["prompt_variant"]:
+            raise TrialError("blind packet prompt variant mismatch")
         if require_string(case.get("question"), "blind question", max_chars=16_000) != capture_case[
             "prompt"
         ]:
             raise TrialError("blind packet question differs from capture")
-        required_claims = validate_claims(case.get("required_claims"), "blind required_claims")
+        required_claims = validate_claims(
+            case.get("required_claims"),
+            "blind required_claims",
+            allow_empty=capture_case["requires_abstention"],
+        )
         optional_claims = validate_claims(
             case.get("optional_claims"), "blind optional_claims", allow_empty=True
         )
@@ -2160,6 +2651,11 @@ def validate_blind_packet(
             or forbidden_claims != capture_case["forbidden_claim_ids"]
         ):
             raise TrialError("blind packet claim rubric differs from the contract/capture")
+        requires_abstention = capture_case["requires_abstention"]
+        if contract["version"] == 1 and require_bool(
+            case.get("requires_abstention"), "blind requires_abstention"
+        ) != requires_abstention:
+            raise TrialError("blind packet abstention flag differs from capture")
         answer_rows: list[dict[str, str]] = []
         answer_ids: set[str] = set()
         generation_hashes = (
@@ -2187,14 +2683,17 @@ def validate_blind_packet(
             ):
                 raise TrialError("blind packet answer set differs from generation")
             answer_rows.append({"answer_id": opaque_id, "answer_markdown": answer_text})
-        if len(answer_rows) != len(CONDITIONS):
+        if len(answer_rows) != len(condition_ids):
             raise TrialError("blind packet answer count mismatch")
         if generation_hashes is not None and observed_hashes != generation_hashes:
             raise TrialError("blind packet does not contain every generated answer")
         cases.append(
             {
                 "case_id": case_id,
+                "prompt_class": capture_case["prompt_class"],
+                "prompt_variant": capture_case["prompt_variant"],
                 "required_claims": required_claims,
+                "requires_abstention": requires_abstention,
                 "answers": answer_rows,
             }
         )
@@ -2215,8 +2714,10 @@ def validate_mapping(
     capture: dict[str, Any],
     generation: dict[str, Any],
 ) -> dict[str, dict[str, dict[str, str]]]:
-    if value.get("schema") != BLIND_MAP_SCHEMA:
-        raise TrialError(f"blind map schema must be {BLIND_MAP_SCHEMA}")
+    expected_schema = versioned_schema(contract, BLIND_MAP_SCHEMA, BLIND_MAP_SCHEMA_V1)
+    if value.get("schema") != expected_schema:
+        raise TrialError(f"blind map schema must be {expected_schema}")
+    condition_ids = contract_conditions(contract)
     reject_unknown_fields(
         value,
         {
@@ -2266,7 +2767,7 @@ def validate_mapping(
                 [
                     (case["case_id"], condition)
                     for case in capture["cases"]
-                    for condition in CONDITIONS
+                    for condition in condition_ids
                 ],
                 key=lambda item: generation_order(seed, item[0], item[1]),
             ),
@@ -2280,14 +2781,28 @@ def validate_mapping(
         case_id = require_label(case.get("case_id"), "map case_id")
         if case_id != blind_case["case_id"]:
             raise TrialError("blind map case id/order mismatch")
+        expected_conditions = sorted(
+            condition_ids,
+            key=lambda condition: blind_order(seed, case_id, condition),
+        )
+        expected_answer_ids = [
+            answer_id(seed, case_id, condition) for condition in expected_conditions
+        ]
+        observed_blind_ids = [row["answer_id"] for row in blind_case["answers"]]
+        if observed_blind_ids != expected_answer_ids:
+            raise TrialError(
+                "blind packet answer order does not reproduce from the committed seed"
+            )
         rows: dict[str, dict[str, str]] = {}
         seen_conditions: set[str] = set()
         blind_answers = {row["answer_id"]: row for row in blind_case["answers"]}
         raw_answers = require_list(case.get("answers"), "map answers")
-        if [row.get("answer_id") for row in raw_answers if isinstance(row, dict)] != [
-            row["answer_id"] for row in blind_case["answers"]
-        ]:
-            raise TrialError("blind map answer order differs from the blind packet")
+        if [row.get("answer_id") for row in raw_answers if isinstance(row, dict)] != (
+            expected_answer_ids
+        ):
+            raise TrialError(
+                "blind map answer order does not reproduce from the committed seed"
+            )
         for raw_answer in raw_answers:
             answer = require_object(raw_answer, "map answer")
             reject_unknown_fields(
@@ -2297,10 +2812,15 @@ def validate_mapping(
             )
             opaque_id = require_string(answer.get("answer_id"), "map answer_id", max_chars=32)
             condition = require_label(answer.get("condition"), "map condition")
-            if opaque_id not in blind_answers or condition not in CONDITIONS:
+            if opaque_id not in blind_answers or condition not in condition_ids:
                 raise TrialError("blind map contains an unknown answer/condition")
             if opaque_id in rows or condition in seen_conditions:
                 raise TrialError("blind map contains duplicate answer/condition")
+            expected_index = len(rows)
+            if condition != expected_conditions[expected_index]:
+                raise TrialError(
+                    "blind map condition order does not reproduce from the committed seed"
+                )
             answer_sha = require_sha256(answer.get("answer_sha256"), "map answer_sha256")
             generated = generation["answers"][case_id][condition]
             if (
@@ -2328,7 +2848,7 @@ def validate_mapping(
                 "context_sha256": context_sha,
             }
             seen_conditions.add(condition)
-        if set(seen_conditions) != set(CONDITIONS) or set(rows) != set(blind_answers):
+        if set(seen_conditions) != set(condition_ids) or set(rows) != set(blind_answers):
             raise TrialError("blind map is incomplete")
         mapping[case_id] = rows
     return mapping
@@ -2337,11 +2857,24 @@ def validate_mapping(
 def validate_review(
     value: dict[str, Any], blind: dict[str, Any], contract: dict[str, Any]
 ) -> dict[str, Any]:
-    if value.get("schema") != REVIEW_SCHEMA:
-        raise TrialError(f"review schema must be {REVIEW_SCHEMA}")
+    expected_schema = versioned_schema(contract, REVIEW_SCHEMA, REVIEW_SCHEMA_V1)
+    if value.get("schema") != expected_schema:
+        raise TrialError(f"review schema must be {expected_schema}")
     reject_unknown_fields(
         value,
-        {"schema", "trial_id", "blind_packet_sha256", "reviewer", "reviewed_at", "cases"},
+        {
+            "schema",
+            "trial_id",
+            "blind_packet_sha256",
+            "reviewer",
+            "reviewed_at",
+            "cases",
+            *(
+                {"independent_review", "condition_blinded"}
+                if contract["version"] == 1
+                else set()
+            ),
+        },
         "review",
     )
     if require_label(value.get("trial_id"), "review.trial_id") != blind["trial_id"]:
@@ -2354,6 +2887,17 @@ def validate_review(
     reviewed_at = require_nonnegative_int(value.get("reviewed_at"), "review.reviewed_at")
     if reviewed_at <= 0:
         raise TrialError("review.reviewed_at must be populated")
+    independent_review = False
+    condition_blinded = False
+    if contract["version"] == 1:
+        independent_review = require_bool(
+            value.get("independent_review"), "review.independent_review"
+        )
+        condition_blinded = require_bool(
+            value.get("condition_blinded"), "review.condition_blinded"
+        )
+        if not independent_review or not condition_blinded:
+            raise TrialError("v1 review independence/blinding attestations must be true")
     raw_cases = require_list(value.get("cases"), "review.cases")
     if len(raw_cases) != len(blind["cases"]):
         raise TrialError("review case count mismatch")
@@ -2378,6 +2922,12 @@ def validate_review(
                     "unsupported_assertion_count",
                     "usefulness",
                     "notes",
+                    *(
+                        {"abstention_pass"}
+                        if contract["version"] == 1
+                        and blind_case["requires_abstention"]
+                        else set()
+                    ),
                 },
                 "review answer",
             )
@@ -2418,11 +2968,17 @@ def validate_review(
             notes = answer.get("notes", "")
             if not isinstance(notes, str) or len(notes) > 2_000:
                 raise TrialError("review notes must be a bounded string")
+            abstention_pass: bool | None = None
+            if contract["version"] == 1 and blind_case["requires_abstention"]:
+                abstention_pass = require_bool(
+                    answer.get("abstention_pass"), "review abstention_pass"
+                )
             answer_reviews[opaque_id] = {
                 "claim_scores": scores,
                 "currentness": currentness,
                 "unsupported_assertion_count": unsupported,
                 "usefulness": usefulness,
+                "abstention_pass": abstention_pass,
             }
         if set(answer_reviews) != set(blind_answers):
             raise TrialError("review does not cover every blinded answer exactly once")
@@ -2431,23 +2987,316 @@ def validate_review(
         )
         if preference != contract["review"]["preference_tie_label"] and preference not in blind_answers:
             raise TrialError("review preference must name a blinded answer or tie")
-        cases[case_id] = {"answers": answer_reviews, "preference": preference}
+        cases[case_id] = {
+            "prompt_class": blind_case["prompt_class"],
+            "requires_abstention": blind_case["requires_abstention"],
+            "answers": answer_reviews,
+            "preference": preference,
+        }
     return {
         "reviewer": reviewer,
         "reviewed_at": reviewed_at,
+        "independent_review": independent_review,
+        "condition_blinded": condition_blinded,
         "cases": cases,
     }
 
 
-def score_trial(
+def score_v1_slice(
+    contract: dict[str, Any],
+    capture: dict[str, Any],
+    mapping: dict[str, dict[str, dict[str, str]]],
+    review: dict[str, Any],
+    case_ids: set[str],
+) -> dict[str, Any]:
+    condition_ids = contract_conditions(contract)
+    aggregates: dict[str, dict[str, Any]] = {
+        condition: {
+            "weighted_score": 0.0,
+            "weighted_max": 0.0,
+            "currentness_failures": 0,
+            "currentness_uncertain": 0,
+            "unsupported_assertions": 0,
+            "usefulness": [],
+            "preference_wins": 0,
+            "preference_ties": 0,
+            "context_tokens": 0,
+            "abstention_required": 0,
+            "abstention_passed": 0,
+        }
+        for condition in condition_ids
+    }
+    capture_cases = {case["case_id"]: case for case in capture["cases"]}
+    for case_id in sorted(case_ids):
+        case_review = review["cases"][case_id]
+        capture_case = capture_cases[case_id]
+        weights = {
+            row["claim_id"]: row["weight"] for row in capture_case["required_claims"]
+        }
+        for opaque_id, answer_review in case_review["answers"].items():
+            condition = mapping[case_id][opaque_id]["condition"]
+            aggregate = aggregates[condition]
+            for claim_id, claim_score in answer_review["claim_scores"].items():
+                weight = weights[claim_id]
+                aggregate["weighted_score"] += (claim_score / 2.0) * weight
+                aggregate["weighted_max"] += weight
+            aggregate["currentness_failures"] += answer_review["currentness"] == "fail"
+            aggregate["currentness_uncertain"] += (
+                answer_review["currentness"] == "uncertain"
+            )
+            aggregate["unsupported_assertions"] += answer_review[
+                "unsupported_assertion_count"
+            ]
+            aggregate["usefulness"].append(answer_review["usefulness"])
+            aggregate["context_tokens"] += capture_case["conditions"][condition][
+                "context_tokens_estimate"
+            ]
+            if case_review["requires_abstention"]:
+                aggregate["abstention_required"] += 1
+                aggregate["abstention_passed"] += answer_review["abstention_pass"] is True
+        preference = case_review["preference"]
+        if preference == contract["review"]["preference_tie_label"]:
+            for condition in condition_ids:
+                aggregates[condition]["preference_ties"] += 1
+        else:
+            preferred_condition = mapping[case_id][preference]["condition"]
+            aggregates[preferred_condition]["preference_wins"] += 1
+
+    thresholds = contract["thresholds"]
+    metrics: dict[str, dict[str, Any]] = {}
+    for condition, raw in aggregates.items():
+        completeness = (
+            raw["weighted_score"] / raw["weighted_max"]
+            if raw["weighted_max"]
+            else 1.0
+        )
+        mean_usefulness = sum(raw["usefulness"]) / len(raw["usefulness"])
+        min_usefulness = min(raw["usefulness"])
+        absolute_pass = (
+            completeness >= thresholds["min_weighted_claim_completeness"]
+            and raw["currentness_failures"] <= thresholds["max_currentness_failures"]
+            and raw["currentness_uncertain"] <= thresholds["max_currentness_uncertain"]
+            and raw["unsupported_assertions"] <= thresholds["max_unsupported_assertions"]
+            and raw["abstention_required"] - raw["abstention_passed"]
+            <= thresholds["max_abstention_failures"]
+            and mean_usefulness >= thresholds["min_mean_usefulness"]
+            and min_usefulness >= thresholds["min_case_usefulness"]
+        )
+        metrics[condition] = {
+            "weighted_claim_completeness": round(completeness, 6),
+            "currentness_failures": raw["currentness_failures"],
+            "currentness_uncertain": raw["currentness_uncertain"],
+            "unsupported_assertions": raw["unsupported_assertions"],
+            "mean_usefulness": round(mean_usefulness, 6),
+            "min_case_usefulness": min_usefulness,
+            "preference_wins": raw["preference_wins"],
+            "preference_ties": raw["preference_ties"],
+            "context_tokens_total": raw["context_tokens"],
+            "abstention_required": raw["abstention_required"],
+            "abstention_passed": raw["abstention_passed"],
+            "abstention_failures": raw["abstention_required"]
+            - raw["abstention_passed"],
+            "absolute_gate_pass": absolute_pass,
+        }
+
+    reference = metrics[REFERENCE_CONDITION]
+    candidate = metrics["portfolio_digest"]
+    completeness_drop = reference["weighted_claim_completeness"] - candidate[
+        "weighted_claim_completeness"
+    ]
+    usefulness_drop = reference["mean_usefulness"] - candidate["mean_usefulness"]
+    token_reduction = (
+        reference["context_tokens_total"] - candidate["context_tokens_total"]
+    ) / reference["context_tokens_total"]
+    absolute_pass = reference["absolute_gate_pass"] and candidate["absolute_gate_pass"]
+    noninferiority_pass = (
+        completeness_drop <= thresholds["max_completeness_drop_vs_reference"]
+        and usefulness_drop <= thresholds["max_usefulness_drop_vs_reference"]
+        and candidate["currentness_failures"] <= reference["currentness_failures"]
+        and candidate["currentness_uncertain"] <= reference["currentness_uncertain"]
+        and candidate["unsupported_assertions"] <= reference["unsupported_assertions"]
+        and candidate["abstention_failures"] <= reference["abstention_failures"]
+    )
+    efficiency_pass = token_reduction >= thresholds[
+        "min_context_token_reduction_vs_reference"
+    ]
+    abstention_required = sum(row["abstention_required"] for row in metrics.values())
+    abstention_passed = sum(row["abstention_passed"] for row in metrics.values())
+    abstention_failures = abstention_required - abstention_passed
+    abstention_pass = abstention_failures <= thresholds["max_abstention_failures"]
+    return {
+        "case_count": len(case_ids),
+        "conditions": metrics,
+        "candidate": {
+            "completeness_drop_vs_reference": round(completeness_drop, 6),
+            "usefulness_drop_vs_reference": round(usefulness_drop, 6),
+            "context_token_reduction_vs_reference": round(token_reduction, 6),
+            "absolute_gate_pass": absolute_pass,
+            "noninferiority_pass": noninferiority_pass,
+            "efficiency_pass": efficiency_pass,
+        },
+        "abstention_required": abstention_required,
+        "abstention_passed": abstention_passed,
+        "abstention_failures": abstention_failures,
+        "all_abstention_pass": abstention_pass,
+        "gate_pass": (
+            absolute_pass and noninferiority_pass and efficiency_pass and abstention_pass
+        ),
+    }
+
+
+def score_trial_v1(
+    contract: dict[str, Any],
+    contract_sha: str,
+    capture: dict[str, Any],
+    generation: dict[str, Any],
+    blind: dict[str, Any],
+    map_path: Path,
+    mapping: dict[str, dict[str, dict[str, str]]],
+    review_records: list[dict[str, Any]],
+    output_path: Path,
+    protected_inputs: tuple[Path, ...],
+) -> dict[str, Any]:
+    strata_cases = {
+        stratum: {
+            case["case_id"]
+            for case in capture["cases"]
+            if case["prompt_class"] == stratum
+        }
+        for stratum in sorted(EXPANDED_STRATA)
+    }
+    all_case_ids = {case["case_id"] for case in capture["cases"]}
+    per_reviewer: dict[str, Any] = {}
+    for index, review_record in enumerate(review_records, start=1):
+        review = review_record["review"]
+        reviewer_key = f"reviewer_{index}"
+        stratum_rows = {
+            stratum: score_v1_slice(contract, capture, mapping, review, case_ids)
+            for stratum, case_ids in strata_cases.items()
+        }
+        global_row = score_v1_slice(
+            contract, capture, mapping, review, all_case_ids
+        )
+        per_reviewer[reviewer_key] = {
+            "review_sha256": review_record["review_sha256"],
+            "per_stratum": stratum_rows,
+            "global": global_row,
+            "all_strata_gate_pass": all(
+                row["gate_pass"] for row in stratum_rows.values()
+            ),
+        }
+
+    per_stratum = {
+        stratum: {
+            "case_count": len(strata_cases[stratum]),
+            "reviewer_gates": {
+                reviewer_key: row["per_stratum"][stratum]["gate_pass"]
+                for reviewer_key, row in per_reviewer.items()
+            },
+            "all_reviewers_gate_pass": all(
+                row["per_stratum"][stratum]["gate_pass"]
+                for row in per_reviewer.values()
+            ),
+        }
+        for stratum in sorted(EXPANDED_STRATA)
+    }
+    all_reviewer_global_gates = all(
+        row["global"]["gate_pass"] for row in per_reviewer.values()
+    )
+    all_reviewer_stratum_gates = all(
+        row["all_strata_gate_pass"] for row in per_reviewer.values()
+    )
+    all_abstention_pass = all(
+        row["global"]["all_abstention_pass"] for row in per_reviewer.values()
+    )
+    advance = (
+        all_reviewer_global_gates
+        and all_reviewer_stratum_gates
+        and all_abstention_pass
+    )
+    output = {
+        "schema": SCORE_SCHEMA_V1,
+        "trial_id": capture["trial_id"],
+        "contract_sha256": contract_sha,
+        "contract_commit": capture["contract_commit"],
+        "capture_sha256": capture["capture_sha256"],
+        "generation_sha256": generation["generation_sha256"],
+        "blind_packet_sha256": blind["blind_packet_sha256"],
+        "blind_map_sha256": surface.sha256_file(map_path),
+        "harness_source_sha256": contract["harness_source_sha256"],
+        "per_reviewer": per_reviewer,
+        "per_stratum": per_stratum,
+        "global": {
+            "reviewer_count": len(review_records),
+            "stratum_count": len(per_stratum),
+            "all_reviewer_global_gates_pass": all_reviewer_global_gates,
+            "all_reviewer_stratum_gates_pass": all_reviewer_stratum_gates,
+            "all_abstention_pass": all_abstention_pass,
+            "advance": advance,
+            "recommend_write_side_preregistration": advance,
+        },
+        "status": (
+            "READY_TO_PREREGISTER_WRITE_SIDE_TRIAL" if advance else "NO_ADVANCE"
+        ),
+        "recommendation_scope": contract["thresholds"]["recommendation_scope"],
+        "boundary": {
+            "raw_prompt_in_output": False,
+            "raw_context_in_output": False,
+            "raw_answer_in_output": False,
+            "answer_id_in_output": False,
+            "reviewer_identity_in_output": False,
+            "review_notes_in_output": False,
+            "pooled_reviewer_mean_used_for_gate": False,
+            "llm_judge": False,
+            "reviews_complete": True,
+            "runtime_promotion_allowed": False,
+            "automatic_digest_regeneration_allowed": False,
+            "compact_default_change_allowed": False,
+            "version_or_tag_change_allowed": False,
+            "release_action_allowed": False,
+            "ci_action_allowed": False,
+            "write_side_trial_requires_separate_preregistration": True,
+        },
+    }
+    write_json(output_path, output, protected_paths=protected_inputs)
+    return output
+
+
+def _score_trial_core(
     contract_path: Path,
     capture_path: Path,
     generation_path: Path,
     blind_path: Path,
     map_path: Path,
-    review_path: Path,
+    review_paths: list[Path],
     output_path: Path,
 ) -> dict[str, Any]:
+    protected_inputs = (
+        contract_path,
+        capture_path,
+        generation_path,
+        blind_path,
+        map_path,
+        *review_paths,
+        Path(__file__),
+        Path(surface.__file__),
+    )
+    require_distinct_paths(
+        {
+            "contract": contract_path,
+            "capture": capture_path,
+            "generation": generation_path,
+            "blind": blind_path,
+            "map": map_path,
+            **{
+                f"review_{index}": path
+                for index, path in enumerate(review_paths, start=1)
+            },
+            "harness_source": Path(__file__),
+            "surface_source": Path(surface.__file__),
+            "output": output_path,
+        }
+    )
     contract, contract_sha = load_contract(contract_path)
     capture_raw, capture_bytes = read_json(capture_path)
     capture = validate_capture(capture_raw, capture_bytes, contract, contract_sha)
@@ -2460,17 +3309,29 @@ def score_trial(
         capture,
         None,
     )
-    review_raw, review_bytes = read_json(review_path)
-    review = validate_review(review_raw, blind, contract)
-    require_distinct_paths(
-        {
-            "capture": capture_path,
-            "generation": generation_path,
-            "blind": blind_path,
-            "map": map_path,
-            "review": review_path,
-            "output": output_path,
-        }
+    expected_review_count = 2 if contract["version"] == 1 else 1
+    if len(review_paths) != expected_review_count:
+        raise TrialError(
+            f"score requires exactly {expected_review_count} --review argument(s)"
+        )
+    reviews: list[dict[str, Any]] = []
+    review_packets: list[bytes] = []
+    for review_path in review_paths:
+        review_raw, review_bytes = read_json(review_path)
+        reviews.append(validate_review(review_raw, blind, contract))
+        review_packets.append(review_bytes)
+    if len({review["reviewer"] for review in reviews}) != len(reviews):
+        raise TrialError("score reviews must have distinct reviewer identities")
+    review_records = sorted(
+        [
+            {
+                "review": review,
+                "review_sha256": sha256_bytes(review_bytes),
+                "reviewer_sha256": sha256_text(review["reviewer"]),
+            }
+            for review, review_bytes in zip(reviews, review_packets, strict=True)
+        ],
+        key=lambda row: row["reviewer_sha256"],
     )
 
     # The generation packet and blind map both reveal condition-to-answer
@@ -2493,6 +3354,22 @@ def score_trial(
     )
     map_raw, _ = read_json(map_path)
     mapping = validate_mapping(map_raw, blind, contract, capture, generation)
+    if contract["version"] == 1:
+        return score_trial_v1(
+            contract,
+            contract_sha,
+            capture,
+            generation,
+            blind,
+            map_path,
+            mapping,
+            review_records,
+            output_path,
+            protected_inputs,
+        )
+
+    review = reviews[0]
+    review_bytes = review_packets[0]
 
     aggregates: dict[str, dict[str, Any]] = {
         condition: {
@@ -2633,14 +3510,34 @@ def score_trial(
             "compact_default_change_allowed": False,
         },
     }
-    write_json(output_path, output)
+    write_json(output_path, output, protected_paths=protected_inputs)
     return output
+
+
+def score_trial(
+    contract_path: Path,
+    capture_path: Path,
+    generation_path: Path,
+    blind_path: Path,
+    map_path: Path,
+    review_paths: list[Path],
+    output_path: Path,
+) -> dict[str, Any]:
+    return _score_trial_core(
+        contract_path,
+        capture_path,
+        generation_path,
+        blind_path,
+        map_path,
+        review_paths,
+        output_path,
+    )
 
 
 def validate_contract_command(contract_path: Path) -> dict[str, Any]:
     contract, contract_sha = load_contract(contract_path)
     return {
-        "schema": CONTRACT_SCHEMA,
+        "schema": contract["schema"],
         "contract_id": contract["contract_id"],
         "contract_sha256": contract_sha,
         "condition_count": len(contract["conditions"]),
@@ -2685,7 +3582,7 @@ def build_parser() -> argparse.ArgumentParser:
     score.add_argument("--generation", required=True)
     score.add_argument("--blind-packet", required=True)
     score.add_argument("--blind-map", required=True)
-    score.add_argument("--review", required=True)
+    score.add_argument("--review", required=True, action="append")
     score.add_argument("--output", required=True)
     return parser
 
@@ -2729,7 +3626,7 @@ def main(argv: list[str] | None = None) -> int:
                 Path(args.generation),
                 Path(args.blind_packet),
                 Path(args.blind_map),
-                Path(args.review),
+                [Path(path) for path in args.review],
                 Path(args.output),
             )
     except TrialError as exc:

@@ -146,10 +146,31 @@ python3 scripts/eval/portfolio_continuity_answer_trial.py generate ...
 python3 scripts/eval/portfolio_continuity_answer_trial.py score ...
 ```
 
-Prompts, contexts, answers, seed, condition map, and owner review must remain
-under ignored `data/`. The score can recommend only an expanded trial; it is
-not authority for digest regeneration, a compact default, retrieval/runtime
-changes, benchmark claims, versioning, tagging, or release.
+Contract v1 narrows the expanded gate to full hybrid versus direct digest over
+12 frozen prompts in six strata. It binds the exact harness, retrieval-surface
+helper, and digest-key identities, requires two distinct independently
+completed blind reviews, and applies the same
+absolute/non-inferiority/efficiency gate separately to every reviewer and
+stratum. Supply both private reviews by repeating the argument:
+
+```bash
+python3 scripts/eval/portfolio_continuity_answer_trial.py validate-contract \
+  --contract scripts/eval/fixtures/portfolio_continuity_expanded_answer_contract.json
+python3 scripts/eval/portfolio_continuity_answer_trial.py score ... \
+  --review data/eval/<trial>/review.1.json \
+  --review data/eval/<trial>/review.2.json
+```
+
+V1 refuses capture/generation unless its contract, harness, and surface-helper
+bytes are tracked at the spec's exact commit. It validates both complete reviews
+before opening the condition-labelled generation packet or blind map. Even a
+full pass can only recommend preregistering a separate write-side digest trial.
+
+Prompts, contexts, answers, seed, condition map, and private reviews must remain
+under ignored `data/`. The v0 score can recommend only an expanded answer trial;
+the v1 score can recommend only preregistration of a separate write-side trial.
+Neither is authority for digest regeneration, a compact default,
+retrieval/runtime changes, benchmark claims, versioning, tagging, or release.
 
 ## Baselines
 

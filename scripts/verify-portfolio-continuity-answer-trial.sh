@@ -8,6 +8,10 @@ ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 ADAPTER="$ROOT_DIR/scripts/eval/portfolio_continuity_answer_trial.py"
 CONTRACT="$ROOT_DIR/scripts/eval/fixtures/portfolio_continuity_answer_contract.json"
 REPORT="$ROOT_DIR/docs/reports/goal-c-u/2026-07-10-portfolio-continuity-blinded-answer-trial-prereg.md"
+EXPANDED_CONTRACT="$ROOT_DIR/scripts/eval/fixtures/portfolio_continuity_expanded_answer_contract.json"
+EXPANDED_REPORT="$ROOT_DIR/docs/reports/goal-c-u/2026-07-10-portfolio-continuity-expanded-answer-trial-prereg.md"
+expanded_contract_sha_before="$(sha256sum "$EXPANDED_CONTRACT" | cut -d' ' -f1)"
+expanded_report_sha_before="$(sha256sum "$EXPANDED_REPORT" | cut -d' ' -f1)"
 
 tmpdir="$(mktemp -d "${TMPDIR:-/tmp}/ab-answer-trial-XXXXXX")"
 trap 'rm -rf "$tmpdir"' EXIT
@@ -15,6 +19,8 @@ export PYTHONPYCACHEPREFIX="$tmpdir/pycache"
 
 python3 -m py_compile "$ADAPTER"
 python3 "$ADAPTER" validate-contract --contract "$CONTRACT" >"$tmpdir/repo-contract.json"
+python3 "$ADAPTER" validate-contract --contract "$EXPANDED_CONTRACT" \
+  >"$tmpdir/repo-expanded-contract.json"
 
 python3 - "$tmpdir" <<'PY'
 import hashlib
@@ -293,7 +299,10 @@ if sys.argv[1:] == ["--version"]:
 
 prompt = sys.stdin.read()
 output_path = Path(sys.argv[sys.argv.index("--output-last-message") + 1])
-answer = "Synthetic grounded project answer " + hashlib.sha256(prompt.encode()).hexdigest()[:12]
+if os.environ.get("FAKE_CODEX_DIGEST_KEY_LEAK"):
+    answer = "syn_00"
+else:
+    answer = "Synthetic grounded project answer " + hashlib.sha256(prompt.encode()).hexdigest()[:12]
 output_path.write_text(json.dumps({"answer_markdown": answer}) + "\n", encoding="utf-8")
 print(json.dumps({"type": "thread.started", "thread_id": "synthetic"}))
 print(json.dumps({"type": "turn.started"}))
@@ -730,3 +739,921 @@ for private in [
 
 print("Portfolio continuity blinded answer trial verification passed")
 PY
+
+# Exercise the committed v1 12-case/two-condition matrix end to end.
+v1repo="$tmpdir/v1repo"
+mkdir -p "$v1repo/scripts/eval" "$v1repo/data"
+cp "$ADAPTER" "$v1repo/scripts/eval/portfolio_continuity_answer_trial.py"
+cp "$ROOT_DIR/scripts/eval/portfolio_continuity_ab_trial.py" \
+  "$v1repo/scripts/eval/portfolio_continuity_ab_trial.py"
+printf 'data/\n' >"$v1repo/.gitignore"
+
+python3 - "$v1repo" <<'PY'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+repo = Path(sys.argv[1])
+adapter = repo / "scripts/eval/portfolio_continuity_answer_trial.py"
+surface = repo / "scripts/eval/portfolio_continuity_ab_trial.py"
+seed = "ef" * 32
+strata = [
+    "portfolio_status",
+    "portfolio_retrospective",
+    "portfolio_planning",
+    "dependency_risk",
+    "stale_state",
+    "cross_project_conflict",
+]
+prompts = [f"Synthetic expanded question {index}?" for index in range(12)]
+cases = []
+for index, prompt in enumerate(prompts):
+    heldout = index % 2 == 1
+    requires_abstention = index in {5, 9}
+    cases.append({
+        "case_id": f"expanded_case_{index:02d}",
+        "prompt_class": strata[index // 2],
+        "prompt_variant": "heldout" if heldout else "direct",
+        "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
+        "required_claims": [] if requires_abstention else [
+            {"claim_id": f"claim_{index:02d}", "weight": 1.0}
+        ],
+        "optional_claims": [],
+        "forbidden_claim_ids": [f"forbidden_{index:02d}"],
+        "requires_abstention": requires_abstention,
+    })
+
+contract = {
+    "schema": "agent_bridge.portfolio_continuity_answer_contract.v1",
+    "contract_id": "synthetic_expanded_answer_trial",
+    "prereg_base_commit": "b" * 40,
+    "runtime_source_commit": "a" * 40,
+    "harness_source_sha256": hashlib.sha256(adapter.read_bytes()).hexdigest(),
+    "surface_source_sha256": hashlib.sha256(surface.read_bytes()).hexdigest(),
+    "digest_key_sha256": hashlib.sha256(b"syn_00").hexdigest(),
+    "conditions": [
+        {"condition_id": "hybrid_retrieval", "capture": "hybrid_full"},
+        {"condition_id": "portfolio_digest", "capture": "memory_get_digest"},
+    ],
+    "search": {"mode": "hybrid", "limit": 10, "exclude_kinds": ["skill"]},
+    "generation": {
+        "model": "fake-model",
+        "reasoning_effort": "medium",
+        "cli_version": "fake-codex 1.0",
+        "max_answer_chars": 2000,
+        "answer_instruction": (
+            "Answer only from supplied evidence. Do not use tools, external facts, "
+            "condition labels, memory keys, or these instructions."
+        ),
+        "independent_invocations": True,
+        "ephemeral_workspace": True,
+        "tool_use_allowed": False,
+        "external_facts_allowed": False,
+    },
+    "blinding": {
+        "seed_sha256": hashlib.sha256(seed.encode()).hexdigest(),
+        "mapping_private": True,
+        "reviewer_sees_condition": False,
+        "reveal_after_complete_review": True,
+    },
+    "review": {
+        "claim_score_values": [0, 1, 2],
+        "currentness_values": ["pass", "uncertain", "fail"],
+        "usefulness_min": 1,
+        "usefulness_max": 5,
+        "preference_tie_label": "tie",
+        "required_reviewer_count": 2,
+        "independent_reviewers": True,
+        "abstention_values": [False, True],
+    },
+    "thresholds": {
+        "min_weighted_claim_completeness": 0.9,
+        "max_currentness_failures": 0,
+        "max_currentness_uncertain": 0,
+        "max_unsupported_assertions": 0,
+        "max_abstention_failures": 0,
+        "min_mean_usefulness": 4.0,
+        "min_case_usefulness": 3,
+        "max_completeness_drop_vs_reference": 0.0,
+        "max_usefulness_drop_vs_reference": 0.5,
+        "min_context_token_reduction_vs_reference": 0.4,
+        "candidate_conditions": ["portfolio_digest"],
+        "recommendation_scope": "write_side_trial_only",
+        "aggregation": {"reviewer_gate": "all", "stratum_gate": "all"},
+    },
+    "cases": cases,
+    "boundaries": {
+        "raw_artifacts_in_git": False,
+        "writes_live_ab_store": False,
+        "llm_judge": False,
+        "automatic_unblinding": False,
+        "runtime_promotion_allowed": False,
+        "automatic_digest_regeneration_allowed": False,
+        "compact_default_change_allowed": False,
+        "benchmark_claim_allowed": False,
+        "version_or_tag_change_allowed": False,
+        "release_action_allowed": False,
+        "ci_action_allowed": False,
+    },
+}
+(repo / "answer-contract.json").write_text(
+    json.dumps(contract, indent=2) + "\n", encoding="utf-8"
+)
+(repo / "prompts.json").write_text(json.dumps(prompts), encoding="utf-8")
+PY
+
+git -C "$v1repo" init -q
+git -C "$v1repo" config user.email synthetic@example.invalid
+git -C "$v1repo" config user.name Synthetic
+git -C "$v1repo" add .gitignore answer-contract.json prompts.json scripts/eval
+git -C "$v1repo" commit -qm 'synthetic v1 contract and harness'
+
+python3 - "$v1repo" <<'PY'
+import hashlib
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+repo = Path(sys.argv[1])
+contract_path = repo / "answer-contract.json"
+contract = json.loads(contract_path.read_text(encoding="utf-8"))
+prompts = json.loads((repo / "prompts.json").read_text(encoding="utf-8"))
+head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+spec = {
+    "schema": "agent_bridge.portfolio_continuity_answer_spec.v1",
+    "trial_id": "synthetic_expanded_run",
+    "contract_sha256": hashlib.sha256(contract_path.read_bytes()).hexdigest(),
+    "contract_commit": head,
+    "repo": str(repo),
+    "digest_key": "syn_00",
+    "blind_seed": "ef" * 32,
+    "cases": [
+        {"case_id": case["case_id"], "prompt": prompt}
+        for case, prompt in zip(contract["cases"], prompts, strict=True)
+    ],
+}
+(repo / "data/spec.json").write_text(
+    json.dumps(spec, indent=2) + "\n", encoding="utf-8"
+)
+PY
+
+v1adapter="$v1repo/scripts/eval/portfolio_continuity_answer_trial.py"
+v1surface="$v1repo/scripts/eval/portfolio_continuity_ab_trial.py"
+v1data="$v1repo/data"
+python3 "$v1adapter" capture \
+  --contract "$v1repo/answer-contract.json" \
+  --spec "$v1data/spec.json" \
+  --source-db "$tmpdir/source.db" \
+  --agent-bridge-bin "$tmpdir/fake-agent-bridge" \
+  --raw-output "$v1data/capture.raw.json" \
+  --redacted-output "$v1data/capture.redacted.json" \
+  >"$tmpdir/v1-capture.stdout.json"
+
+python3 "$v1adapter" generate \
+  --contract "$v1repo/answer-contract.json" \
+  --spec "$v1data/spec.json" \
+  --capture "$v1data/capture.raw.json" \
+  --codex-bin "$tmpdir/fake-codex" \
+  --generation-output "$v1data/generation.raw.json" \
+  --blind-output "$v1data/blind.packet.json" \
+  --map-output "$v1data/blind.map.json" \
+  --review-template-output "$v1data/review.template.json" \
+  --redacted-output "$v1data/generation.redacted.json" \
+  >"$tmpdir/v1-generate.stdout.json"
+
+if FAKE_CODEX_DIGEST_KEY_LEAK=1 python3 "$v1adapter" generate \
+  --contract "$v1repo/answer-contract.json" \
+  --spec "$v1data/spec.json" \
+  --capture "$v1data/capture.raw.json" \
+  --codex-bin "$tmpdir/fake-codex" \
+  --generation-output "$v1data/generation.key-leak.json" \
+  --blind-output "$v1data/blind.key-leak.json" \
+  --map-output "$v1data/map.key-leak.json" \
+  --review-template-output "$v1data/review.key-leak.json" \
+  --redacted-output "$v1data/generation.key-leak.redacted.json" \
+  >"$tmpdir/v1-key-leak.stdout" 2>"$tmpdir/v1-key-leak.stderr"; then
+  echo "v1 answer leaking the committed digest key unexpectedly passed" >&2
+  exit 1
+fi
+
+python3 - "$v1data" <<'PY'
+import copy
+import json
+import sys
+from pathlib import Path
+
+data = Path(sys.argv[1])
+template = json.loads((data / "review.template.json").read_text(encoding="utf-8"))
+reviews = []
+for reviewer in ["synthetic-reviewer-alpha", "synthetic-reviewer-bravo"]:
+    review = copy.deepcopy(template)
+    review.update({
+        "reviewer": reviewer,
+        "reviewed_at": 1_800_000_000,
+        "independent_review": True,
+        "condition_blinded": True,
+    })
+    for case in review["cases"]:
+        for answer in case["answers"]:
+            for claim in answer["claim_scores"]:
+                claim["score"] = 2
+            answer["currentness"] = "pass"
+            answer["unsupported_assertion_count"] = 0
+            answer["usefulness"] = 4
+            if "abstention_pass" in answer:
+                answer["abstention_pass"] = True
+        case["preferred_answer_id"] = "tie"
+    reviews.append(review)
+
+for index, review in enumerate(reviews, start=1):
+    (data / f"review.{index}.json").write_text(
+        json.dumps(review, indent=2) + "\n", encoding="utf-8"
+    )
+
+incomplete = copy.deepcopy(reviews[1])
+incomplete["cases"][0]["answers"][0]["claim_scores"][0]["score"] = None
+(data / "review.incomplete.json").write_text(
+    json.dumps(incomplete, indent=2) + "\n", encoding="utf-8"
+)
+duplicate = copy.deepcopy(reviews[1])
+duplicate["reviewer"] = reviews[0]["reviewer"]
+(data / "review.duplicate.json").write_text(
+    json.dumps(duplicate, indent=2) + "\n", encoding="utf-8"
+)
+abstention_fail = copy.deepcopy(reviews[1])
+for case in abstention_fail["cases"]:
+    for answer in case["answers"]:
+        if "abstention_pass" in answer:
+            answer["abstention_pass"] = False
+            (data / "review.abstention-fail.json").write_text(
+                json.dumps(abstention_fail, indent=2) + "\n", encoding="utf-8"
+            )
+            raise SystemExit
+PY
+
+python3 "$v1adapter" score \
+  --contract "$v1repo/answer-contract.json" \
+  --capture "$v1data/capture.raw.json" \
+  --generation "$v1data/generation.raw.json" \
+  --blind-packet "$v1data/blind.packet.json" \
+  --blind-map "$v1data/blind.map.json" \
+  --review "$v1data/review.1.json" \
+  --review "$v1data/review.2.json" \
+  --output "$v1data/score.json" \
+  >"$tmpdir/v1-score.stdout.json"
+
+python3 "$v1adapter" score \
+  --contract "$v1repo/answer-contract.json" \
+  --capture "$v1data/capture.raw.json" \
+  --generation "$v1data/generation.raw.json" \
+  --blind-packet "$v1data/blind.packet.json" \
+  --blind-map "$v1data/blind.map.json" \
+  --review "$v1data/review.2.json" \
+  --review "$v1data/review.1.json" \
+  --output "$v1data/score.swapped.json" \
+  >"$tmpdir/v1-score-swapped.stdout.json"
+
+cmp "$v1data/score.json" "$v1data/score.swapped.json"
+
+python3 - "$v1data" <<'PY'
+import copy
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+data = Path(sys.argv[1])
+review = json.loads((data / "review.2.json").read_text(encoding="utf-8"))
+mapping = json.loads((data / "blind.map.json").read_text(encoding="utf-8"))
+digest_ids = {
+    case["case_id"]: next(
+        answer["answer_id"]
+        for answer in case["answers"]
+        if answer["condition"] == "portfolio_digest"
+    )
+    for case in mapping["cases"]
+}
+disagreement = copy.deepcopy(review)
+first_case = disagreement["cases"][0]
+for answer in first_case["answers"]:
+    if answer["answer_id"] == digest_ids[first_case["case_id"]]:
+        answer["claim_scores"][0]["score"] = 0
+(data / "review.disagreement.json").write_text(
+    json.dumps(disagreement, indent=2) + "\n", encoding="utf-8"
+)
+
+bad_field = copy.deepcopy(review)
+bad_field["cases"][0]["answers"][0]["abstention_pass"] = True
+(data / "review.bad-abstention-field.json").write_text(
+    json.dumps(bad_field, indent=2) + "\n", encoding="utf-8"
+)
+
+contract = json.loads((data.parent / "answer-contract.json").read_text(encoding="utf-8"))
+bad_stratum = copy.deepcopy(contract)
+bad_stratum["cases"][0]["prompt_class"] = "stale_state"
+(data / "contract.bad-stratum.json").write_text(
+    json.dumps(bad_stratum, indent=2) + "\n", encoding="utf-8"
+)
+bad_abstention_count = copy.deepcopy(contract)
+bad_abstention_count["cases"][1]["required_claims"] = []
+bad_abstention_count["cases"][1]["requires_abstention"] = True
+(data / "contract.bad-abstention-count.json").write_text(
+    json.dumps(bad_abstention_count, indent=2) + "\n", encoding="utf-8"
+)
+bad_condition = copy.deepcopy(contract)
+bad_condition["conditions"].append(
+    {"condition_id": "session_bootstrap", "capture": "session_bootstrap"}
+)
+(data / "contract.extra-condition.json").write_text(
+    json.dumps(bad_condition, indent=2) + "\n", encoding="utf-8"
+)
+
+spec = json.loads((data / "spec.json").read_text(encoding="utf-8"))
+bad_digest_spec = copy.deepcopy(spec)
+bad_digest_spec["digest_key"] = "syn_01"
+(data / "spec.bad-digest.json").write_text(
+    json.dumps(bad_digest_spec, indent=2) + "\n", encoding="utf-8"
+)
+
+sys.path.insert(0, str(data.parent / "scripts/eval"))
+import portfolio_continuity_ab_trial as surface
+
+capture = json.loads((data / "capture.raw.json").read_text(encoding="utf-8"))
+for case in capture["cases"]:
+    row = case["conditions"]["portfolio_digest"]
+    record = copy.deepcopy(row["raw_result"])
+    record["key"] = "syn_01"
+    context = json.dumps(record, ensure_ascii=False)
+    row["raw_result"] = record
+    row["context"] = context
+    row["context_sha256"] = hashlib.sha256(context.encode()).hexdigest()
+    row["context_bytes"] = len(context.encode())
+    row["context_tokens_estimate"] = surface.estimate_tokens(context)
+(data / "capture.bad-digest.json").write_text(
+    json.dumps(capture, indent=2) + "\n", encoding="utf-8"
+)
+PY
+
+if python3 "$v1adapter" score \
+  --contract "$v1repo/answer-contract.json" \
+  --capture "$v1data/capture.raw.json" \
+  --generation "$v1data/does-not-exist-generation.json" \
+  --blind-packet "$v1data/blind.packet.json" \
+  --blind-map "$v1data/does-not-exist-map.json" \
+  --review "$v1data/review.1.json" \
+  --output "$v1data/score.missing-review.json" \
+  >"$tmpdir/v1-missing-review.stdout" 2>"$tmpdir/v1-missing-review.stderr"; then
+  echo "v1 score with one review unexpectedly passed" >&2
+  exit 1
+fi
+
+if python3 "$v1adapter" score \
+  --contract "$v1repo/answer-contract.json" \
+  --capture "$v1data/capture.raw.json" \
+  --generation "$v1data/does-not-exist-generation.json" \
+  --blind-packet "$v1data/blind.packet.json" \
+  --blind-map "$v1data/does-not-exist-map.json" \
+  --review "$v1data/review.1.json" \
+  --review "$v1data/review.incomplete.json" \
+  --output "$v1data/score.incomplete-review.json" \
+  >"$tmpdir/v1-incomplete-review.stdout" 2>"$tmpdir/v1-incomplete-review.stderr"; then
+  echo "v1 score with incomplete second review unexpectedly passed" >&2
+  exit 1
+fi
+
+if python3 "$v1adapter" score \
+  --contract "$v1repo/answer-contract.json" \
+  --capture "$v1data/capture.raw.json" \
+  --generation "$v1data/does-not-exist-generation.json" \
+  --blind-packet "$v1data/blind.packet.json" \
+  --blind-map "$v1data/does-not-exist-map.json" \
+  --review "$v1data/review.1.json" \
+  --review "$v1data/review.duplicate.json" \
+  --output "$v1data/score.duplicate-reviewer.json" \
+  >"$tmpdir/v1-duplicate.stdout" 2>"$tmpdir/v1-duplicate.stderr"; then
+  echo "v1 score with duplicate reviewer unexpectedly passed" >&2
+  exit 1
+fi
+
+if python3 "$v1adapter" score \
+  --contract "$v1repo/answer-contract.json" \
+  --capture "$v1data/capture.raw.json" \
+  --generation "$v1data/does-not-exist-generation.json" \
+  --blind-packet "$v1data/blind.packet.json" \
+  --blind-map "$v1data/does-not-exist-map.json" \
+  --review "$v1data/review.1.json" \
+  --review "$v1data/review.bad-abstention-field.json" \
+  --output "$v1data/score.bad-abstention-field.json" \
+  >"$tmpdir/v1-bad-abstention-field.stdout" \
+  2>"$tmpdir/v1-bad-abstention-field.stderr"; then
+  echo "v1 non-abstention answer with abstention_pass unexpectedly passed" >&2
+  exit 1
+fi
+
+python3 "$v1adapter" score \
+  --contract "$v1repo/answer-contract.json" \
+  --capture "$v1data/capture.raw.json" \
+  --generation "$v1data/generation.raw.json" \
+  --blind-packet "$v1data/blind.packet.json" \
+  --blind-map "$v1data/blind.map.json" \
+  --review "$v1data/review.1.json" \
+  --review "$v1data/review.abstention-fail.json" \
+  --output "$v1data/score.abstention-fail.json" \
+  >"$tmpdir/v1-abstention-fail.stdout.json"
+
+python3 "$v1adapter" score \
+  --contract "$v1repo/answer-contract.json" \
+  --capture "$v1data/capture.raw.json" \
+  --generation "$v1data/generation.raw.json" \
+  --blind-packet "$v1data/blind.packet.json" \
+  --blind-map "$v1data/blind.map.json" \
+  --review "$v1data/review.1.json" \
+  --review "$v1data/review.disagreement.json" \
+  --output "$v1data/score.disagreement.json" \
+  >"$tmpdir/v1-disagreement.stdout.json"
+
+for bad_contract in \
+  contract.bad-stratum.json \
+  contract.bad-abstention-count.json \
+  contract.extra-condition.json; do
+  if python3 "$v1adapter" validate-contract \
+    --contract "$v1data/$bad_contract" \
+    >"$tmpdir/$bad_contract.stdout" 2>"$tmpdir/$bad_contract.stderr"; then
+    echo "invalid v1 matrix contract unexpectedly passed: $bad_contract" >&2
+    exit 1
+  fi
+done
+
+if python3 "$v1adapter" capture \
+  --contract "$v1repo/answer-contract.json" \
+  --spec "$v1data/spec.bad-digest.json" \
+  --source-db "$tmpdir/source.db" \
+  --agent-bridge-bin "$tmpdir/fake-agent-bridge" \
+  --raw-output "$v1data/capture.bad-digest-spec.json" \
+  --redacted-output "$v1data/capture.bad-digest-spec.redacted.json" \
+  >"$tmpdir/v1-bad-digest-spec.stdout" 2>"$tmpdir/v1-bad-digest-spec.stderr"; then
+  echo "v1 spec with wrong digest key unexpectedly passed" >&2
+  exit 1
+fi
+
+if python3 "$v1adapter" generate \
+  --contract "$v1repo/answer-contract.json" \
+  --spec "$v1data/spec.json" \
+  --capture "$v1data/capture.bad-digest.json" \
+  --codex-bin "$tmpdir/fake-codex" \
+  --generation-output "$v1data/generation.bad-digest.json" \
+  --blind-output "$v1data/blind.bad-digest.json" \
+  --map-output "$v1data/map.bad-digest.json" \
+  --review-template-output "$v1data/review.bad-digest.json" \
+  --redacted-output "$v1data/generation.bad-digest.redacted.json" \
+  >"$tmpdir/v1-bad-digest-capture.stdout" \
+  2>"$tmpdir/v1-bad-digest-capture.stderr"; then
+  echo "v1 capture with wrong digest key unexpectedly passed" >&2
+  exit 1
+fi
+
+python3 - "$v1data" "$EXPANDED_CONTRACT" "$EXPANDED_REPORT" "$ADAPTER" "$tmpdir" <<'PY'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+data = Path(sys.argv[1])
+contract_path = Path(sys.argv[2])
+report_path = Path(sys.argv[3])
+adapter_path = Path(sys.argv[4])
+tmp = Path(sys.argv[5])
+
+contract = json.loads(contract_path.read_text(encoding="utf-8"))
+report = report_path.read_text(encoding="utf-8")
+source_sha = hashlib.sha256(adapter_path.read_bytes()).hexdigest()
+contract_sha = hashlib.sha256(contract_path.read_bytes()).hexdigest()
+assert contract["harness_source_sha256"] == source_sha
+assert len(contract["cases"]) == 12
+assert sum(case["requires_abstention"] for case in contract["cases"]) == 2
+assert contract_sha in report
+assert source_sha in report
+
+capture = json.loads((data / "capture.redacted.json").read_text(encoding="utf-8"))
+generation = json.loads(
+    (data / "generation.redacted.json").read_text(encoding="utf-8")
+)
+blind = json.loads((data / "blind.packet.json").read_text(encoding="utf-8"))
+review_template = json.loads(
+    (data / "review.template.json").read_text(encoding="utf-8")
+)
+score = json.loads((data / "score.json").read_text(encoding="utf-8"))
+abstention_fail = json.loads(
+    (data / "score.abstention-fail.json").read_text(encoding="utf-8")
+)
+disagreement = json.loads(
+    (data / "score.disagreement.json").read_text(encoding="utf-8")
+)
+
+assert capture["case_count"] == 12
+assert capture["condition_run_count"] == 24
+assert all(not case["ranking_projection_invariant"] for case in capture["cases"])
+assert generation["case_count"] == 12
+assert generation["condition_count"] == 2
+assert generation["answer_count"] == 24
+assert generation["status"] == "WAIT_TWO_BLIND_REVIEWS"
+assert blind["boundary"]["required_reviewer_count"] == 2
+assert review_template["independent_review"] is False
+assert review_template["condition_blinded"] is False
+
+assert score["status"] == "READY_TO_PREREGISTER_WRITE_SIDE_TRIAL"
+assert score["global"]["reviewer_count"] == 2
+assert score["global"]["stratum_count"] == 6
+assert score["global"]["advance"] is True
+assert score["global"]["recommend_write_side_preregistration"] is True
+assert len(score["per_reviewer"]) == 2
+assert all(row["all_strata_gate_pass"] for row in score["per_reviewer"].values())
+assert all(row["all_reviewers_gate_pass"] for row in score["per_stratum"].values())
+assert score["boundary"]["pooled_reviewer_mean_used_for_gate"] is False
+assert score["boundary"]["runtime_promotion_allowed"] is False
+assert score["boundary"]["automatic_digest_regeneration_allowed"] is False
+assert score["boundary"]["compact_default_change_allowed"] is False
+assert score["boundary"]["version_or_tag_change_allowed"] is False
+assert score["boundary"]["release_action_allowed"] is False
+assert score["boundary"]["ci_action_allowed"] is False
+
+assert abstention_fail["status"] == "NO_ADVANCE"
+assert abstention_fail["global"]["advance"] is False
+assert abstention_fail["global"]["all_abstention_pass"] is False
+assert disagreement["status"] == "NO_ADVANCE"
+assert disagreement["global"]["advance"] is False
+assert not all(
+    row["all_reviewers_gate_pass"] for row in disagreement["per_stratum"].values()
+)
+
+blind_text = (data / "blind.packet.json").read_text(encoding="utf-8")
+review_text = (data / "review.template.json").read_text(encoding="utf-8")
+for condition in ["hybrid_retrieval", "portfolio_digest"]:
+    assert condition not in blind_text
+    assert condition not in review_text
+for safe_path in [
+    data / "capture.redacted.json",
+    data / "generation.redacted.json",
+    data / "score.json",
+    tmp / "v1-capture.stdout.json",
+    tmp / "v1-generate.stdout.json",
+    tmp / "v1-score.stdout.json",
+]:
+    text = safe_path.read_text(encoding="utf-8")
+    for private in [
+        "Synthetic expanded question",
+        "Synthetic evidence row",
+        "Synthetic grounded project answer",
+        "ans_",
+        "synthetic-reviewer-alpha",
+        "synthetic-reviewer-bravo",
+    ]:
+        assert private not in text, (safe_path, private)
+
+assert "exactly 2 --review" in (tmp / "v1-missing-review.stderr").read_text(
+    encoding="utf-8"
+)
+incomplete_error = (tmp / "v1-incomplete-review.stderr").read_text(encoding="utf-8")
+assert "must be populated" in incomplete_error
+assert "does-not-exist" not in incomplete_error
+duplicate_error = (tmp / "v1-duplicate.stderr").read_text(encoding="utf-8")
+assert "distinct reviewer identities" in duplicate_error
+assert "does-not-exist" not in duplicate_error
+assert "unsupported field" in (
+    tmp / "v1-bad-abstention-field.stderr"
+).read_text(encoding="utf-8")
+assert "digest_key does not match" in (
+    tmp / "v1-bad-digest-spec.stderr"
+).read_text(encoding="utf-8")
+assert "digest key does not match" in (
+    tmp / "v1-bad-digest-capture.stderr"
+).read_text(encoding="utf-8")
+
+required_report = [
+    "# Portfolio Continuity Expanded Answer Trial Preregistration",
+    "PRE-REGISTERED AT CONTRACT COMMIT / NOT EXECUTED",
+    "case_count: 12",
+    "reviewer_count: 2",
+    "max_abstention_failures: 0",
+    "write_side_trial_only",
+    "READY_TO_PREREGISTER_WRITE_SIDE_TRIAL",
+    "WAIT_TWO_BLIND_REVIEWS",
+    "runtime_promotion_allowed: false",
+]
+missing = [needle for needle in required_report if needle not in report]
+if missing:
+    raise SystemExit("missing expanded report anchors: " + ", ".join(missing))
+
+print("Portfolio continuity expanded blinded answer trial verification passed")
+PY
+
+python3 - "$v1repo" <<'PY'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+repo = Path(sys.argv[1])
+contract_path = repo / "answer-contract.json"
+contract = json.loads(contract_path.read_text(encoding="utf-8"))
+contract["contract_id"] = "synthetic_expanded_answer_trial_dirty"
+contract_path.write_text(json.dumps(contract, indent=2) + "\n", encoding="utf-8")
+spec = json.loads((repo / "data/spec.json").read_text(encoding="utf-8"))
+spec["contract_sha256"] = hashlib.sha256(contract_path.read_bytes()).hexdigest()
+(repo / "data/spec.dirty-contract.json").write_text(
+    json.dumps(spec, indent=2) + "\n", encoding="utf-8"
+)
+PY
+
+if python3 "$v1adapter" capture \
+  --contract "$v1repo/answer-contract.json" \
+  --spec "$v1data/spec.dirty-contract.json" \
+  --source-db "$tmpdir/source.db" \
+  --agent-bridge-bin "$tmpdir/fake-agent-bridge" \
+  --raw-output "$v1data/capture.dirty-contract.json" \
+  --redacted-output "$v1data/capture.dirty-contract.redacted.json" \
+  >"$tmpdir/v1-dirty-contract.stdout" 2>"$tmpdir/v1-dirty-contract.stderr"; then
+  echo "dirty v1 contract unexpectedly passed capture" >&2
+  exit 1
+fi
+git -C "$v1repo" show HEAD:answer-contract.json >"$v1repo/answer-contract.json"
+
+cp "$v1repo/answer-contract.json" "$v1data/untracked-contract.json"
+python3 - "$v1data" <<'PY'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+data = Path(sys.argv[1])
+spec = json.loads((data / "spec.json").read_text(encoding="utf-8"))
+spec["contract_sha256"] = hashlib.sha256(
+    (data / "untracked-contract.json").read_bytes()
+).hexdigest()
+(data / "spec.untracked-contract.json").write_text(
+    json.dumps(spec, indent=2) + "\n", encoding="utf-8"
+)
+PY
+if python3 "$v1adapter" capture \
+  --contract "$v1data/untracked-contract.json" \
+  --spec "$v1data/spec.untracked-contract.json" \
+  --source-db "$tmpdir/source.db" \
+  --agent-bridge-bin "$tmpdir/fake-agent-bridge" \
+  --raw-output "$v1data/capture.untracked-contract.json" \
+  --redacted-output "$v1data/capture.untracked-contract.redacted.json" \
+  >"$tmpdir/v1-untracked-contract.stdout" \
+  2>"$tmpdir/v1-untracked-contract.stderr"; then
+  echo "untracked v1 contract unexpectedly passed capture" >&2
+  exit 1
+fi
+
+printf '\n# verifier dirty harness\n' >>"$v1adapter"
+if python3 "$v1adapter" validate-contract \
+  --contract "$v1repo/answer-contract.json" \
+  >"$tmpdir/v1-dirty-harness.stdout" 2>"$tmpdir/v1-dirty-harness.stderr"; then
+  echo "dirty v1 harness unexpectedly passed validation" >&2
+  exit 1
+fi
+git -C "$v1repo" show HEAD:scripts/eval/portfolio_continuity_answer_trial.py \
+  >"$v1adapter"
+chmod +x "$v1adapter"
+
+printf '\n# verifier dirty surface helper\n' >>"$v1surface"
+if python3 "$v1adapter" validate-contract \
+  --contract "$v1repo/answer-contract.json" \
+  >"$tmpdir/v1-dirty-surface.stdout" 2>"$tmpdir/v1-dirty-surface.stderr"; then
+  echo "dirty v1 surface helper unexpectedly passed validation" >&2
+  exit 1
+fi
+git -C "$v1repo" show HEAD:scripts/eval/portfolio_continuity_ab_trial.py \
+  >"$v1surface"
+
+python3 - "$v1data" <<'PY'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+data = Path(sys.argv[1])
+
+def render(value):
+    return (
+        json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+
+blind = json.loads((data / "blind.packet.json").read_text(encoding="utf-8"))
+blind["cases"][0]["answers"].reverse()
+blind_bytes = render(blind)
+(data / "blind.synced-reorder.json").write_bytes(blind_bytes)
+blind_sha = hashlib.sha256(blind_bytes).hexdigest()
+
+mapping = json.loads((data / "blind.map.json").read_text(encoding="utf-8"))
+mapping["blind_packet_sha256"] = blind_sha
+mapping["cases"][0]["answers"].reverse()
+(data / "map.synced-reorder.json").write_bytes(render(mapping))
+
+for index in (1, 2):
+    review = json.loads((data / f"review.{index}.json").read_text(encoding="utf-8"))
+    review["blind_packet_sha256"] = blind_sha
+    (data / f"review.synced-reorder.{index}.json").write_bytes(render(review))
+PY
+
+if python3 "$v1adapter" score \
+  --contract "$v1repo/answer-contract.json" \
+  --capture "$v1data/capture.raw.json" \
+  --generation "$v1data/generation.raw.json" \
+  --blind-packet "$v1data/blind.synced-reorder.json" \
+  --blind-map "$v1data/map.synced-reorder.json" \
+  --review "$v1data/review.synced-reorder.1.json" \
+  --review "$v1data/review.synced-reorder.2.json" \
+  --output "$v1data/score.synced-reorder.json" \
+  >"$tmpdir/v1-synced-reorder.stdout" 2>"$tmpdir/v1-synced-reorder.stderr"; then
+  echo "synchronously reordered blind packet/map unexpectedly passed" >&2
+  exit 1
+fi
+
+spec_sha_before="$(sha256sum "$v1data/spec.json" | cut -d' ' -f1)"
+ln "$v1data/spec.json" "$v1data/capture-spec-output-alias.json"
+if python3 "$v1adapter" capture \
+  --contract "$v1repo/answer-contract.json" \
+  --spec "$v1data/spec.json" \
+  --source-db "$tmpdir/source.db" \
+  --agent-bridge-bin "$tmpdir/fake-agent-bridge" \
+  --raw-output "$v1data/capture-spec-output-alias.json" \
+  --redacted-output "$v1data/capture-spec-output-alias.redacted.json" \
+  >"$tmpdir/v1-capture-spec-alias.stdout" \
+  2>"$tmpdir/v1-capture-spec-alias.stderr"; then
+  echo "capture output hardlinked to spec unexpectedly passed" >&2
+  exit 1
+fi
+rm "$v1data/capture-spec-output-alias.json"
+test "$(sha256sum "$v1data/spec.json" | cut -d' ' -f1)" = "$spec_sha_before"
+
+contract_sha_before="$(sha256sum "$v1repo/answer-contract.json" | cut -d' ' -f1)"
+ln "$v1repo/answer-contract.json" "$v1data/generation-contract-output-alias.json"
+if python3 "$v1adapter" generate \
+  --contract "$v1repo/answer-contract.json" \
+  --spec "$v1data/spec.json" \
+  --capture "$v1data/capture.raw.json" \
+  --codex-bin "$tmpdir/fake-codex" \
+  --generation-output "$v1data/generation-contract-output-alias.json" \
+  --blind-output "$v1data/blind.contract-alias.json" \
+  --map-output "$v1data/map.contract-alias.json" \
+  --review-template-output "$v1data/review.contract-alias.json" \
+  --redacted-output "$v1data/generation.contract-alias.redacted.json" \
+  >"$tmpdir/v1-generate-contract-alias.stdout" \
+  2>"$tmpdir/v1-generate-contract-alias.stderr"; then
+  echo "generation output hardlinked to contract unexpectedly passed" >&2
+  exit 1
+fi
+rm "$v1data/generation-contract-output-alias.json"
+test "$(sha256sum "$v1repo/answer-contract.json" | cut -d' ' -f1)" = "$contract_sha_before"
+
+harness_sha_before="$(sha256sum "$v1adapter" | cut -d' ' -f1)"
+ln "$v1adapter" "$v1data/score-harness-output-alias.json"
+if python3 "$v1adapter" score \
+  --contract "$v1repo/answer-contract.json" \
+  --capture "$v1data/capture.raw.json" \
+  --generation "$v1data/generation.raw.json" \
+  --blind-packet "$v1data/blind.packet.json" \
+  --blind-map "$v1data/blind.map.json" \
+  --review "$v1data/review.1.json" \
+  --review "$v1data/review.2.json" \
+  --output "$v1data/score-harness-output-alias.json" \
+  >"$tmpdir/v1-score-harness-alias.stdout" \
+  2>"$tmpdir/v1-score-harness-alias.stderr"; then
+  echo "score output hardlinked to harness unexpectedly passed" >&2
+  exit 1
+fi
+rm "$v1data/score-harness-output-alias.json"
+test "$(sha256sum "$v1adapter" | cut -d' ' -f1)" = "$harness_sha_before"
+
+python3 - "$tmpdir" <<'PY'
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+tmp = Path(sys.argv[1])
+data = tmp / "v1repo/data"
+score = json.loads((data / "score.json").read_text(encoding="utf-8"))
+abstention_fail = json.loads(
+    (data / "score.abstention-fail.json").read_text(encoding="utf-8")
+)
+disagreement = json.loads(
+    (data / "score.disagreement.json").read_text(encoding="utf-8")
+)
+
+assert score["schema"] == "agent_bridge.portfolio_continuity_answer_score.v1"
+assert score["status"] == "READY_TO_PREREGISTER_WRITE_SIDE_TRIAL"
+assert score["global"]["recommend_write_side_preregistration"] is True
+assert score["global"]["all_reviewer_global_gates_pass"] is True
+assert score["global"]["all_reviewer_stratum_gates_pass"] is True
+assert set(score["per_reviewer"]) == {"reviewer_1", "reviewer_2"}
+assert set(score["per_stratum"]) == {
+    "portfolio_status",
+    "portfolio_retrospective",
+    "portfolio_planning",
+    "dependency_risk",
+    "stale_state",
+    "cross_project_conflict",
+}
+assert all(row["case_count"] == 2 for row in score["per_stratum"].values())
+assert score["boundary"]["pooled_reviewer_mean_used_for_gate"] is False
+assert score["boundary"]["reviewer_identity_in_output"] is False
+assert score["boundary"]["release_action_allowed"] is False
+assert score["boundary"]["ci_action_allowed"] is False
+
+assert abstention_fail["status"] == "NO_ADVANCE"
+assert abstention_fail["global"]["all_abstention_pass"] is False
+assert any(
+    reviewer["global"]["abstention_failures"] > 0
+    for reviewer in abstention_fail["per_reviewer"].values()
+)
+assert disagreement["status"] == "NO_ADVANCE"
+assert disagreement["global"]["all_abstention_pass"] is True
+assert disagreement["global"]["all_reviewer_stratum_gates_pass"] is False
+
+for path in [
+    data / "score.json",
+    data / "score.swapped.json",
+    data / "score.abstention-fail.json",
+    data / "score.disagreement.json",
+    tmp / "v1-score.stdout.json",
+]:
+    text = path.read_text(encoding="utf-8")
+    for private in [
+        "Synthetic expanded question",
+        "Synthetic grounded project answer",
+        "ans_",
+        "synthetic-reviewer-alpha",
+        "synthetic-reviewer-bravo",
+        hashlib.sha256(b"synthetic-reviewer-alpha").hexdigest(),
+        hashlib.sha256(b"synthetic-reviewer-bravo").hexdigest(),
+        "reviewer_sha256",
+    ]:
+        assert private not in text, (path, private)
+
+assert "exactly 2 --review" in (
+    tmp / "v1-missing-review.stderr"
+).read_text(encoding="utf-8")
+assert "claim score must be populated" in (
+    tmp / "v1-incomplete-review.stderr"
+).read_text(encoding="utf-8")
+assert "distinct reviewer identities" in (
+    tmp / "v1-duplicate.stderr"
+).read_text(encoding="utf-8")
+assert "unsupported field" in (
+    tmp / "v1-bad-abstention-field.stderr"
+).read_text(encoding="utf-8")
+assert "leaked a condition/evidence marker" in (
+    tmp / "v1-key-leak.stderr"
+).read_text(encoding="utf-8")
+assert "fixed prompt strata" in (
+    tmp / "contract.bad-stratum.json.stderr"
+).read_text(encoding="utf-8")
+assert "exactly two abstention cases" in (
+    tmp / "contract.bad-abstention-count.json.stderr"
+).read_text(encoding="utf-8")
+assert "fixed condition order" in (
+    tmp / "contract.extra-condition.json.stderr"
+).read_text(encoding="utf-8")
+assert "digest_key" in (
+    tmp / "v1-bad-digest-spec.stderr"
+).read_text(encoding="utf-8")
+assert "digest key" in (
+    tmp / "v1-bad-digest-capture.stderr"
+).read_text(encoding="utf-8")
+assert "bytes differ" in (
+    tmp / "v1-dirty-contract.stderr"
+).read_text(encoding="utf-8")
+assert "not tracked" in (
+    tmp / "v1-untracked-contract.stderr"
+).read_text(encoding="utf-8")
+assert "harness source hash" in (
+    tmp / "v1-dirty-harness.stderr"
+).read_text(encoding="utf-8")
+assert "surface helper source hash" in (
+    tmp / "v1-dirty-surface.stderr"
+).read_text(encoding="utf-8")
+assert "committed seed" in (
+    tmp / "v1-synced-reorder.stderr"
+).read_text(encoding="utf-8")
+for name in [
+    "v1-capture-spec-alias.stderr",
+    "v1-generate-contract-alias.stderr",
+    "v1-score-harness-alias.stderr",
+]:
+    assert "file identities must be distinct" in (tmp / name).read_text(
+        encoding="utf-8"
+    )
+
+print("Portfolio continuity expanded answer trial v1 verification passed")
+PY
+
+test "$(sha256sum "$EXPANDED_CONTRACT" | cut -d' ' -f1)" = \
+  "$expanded_contract_sha_before"
+test "$(sha256sum "$EXPANDED_REPORT" | cut -d' ' -f1)" = \
+  "$expanded_report_sha_before"
