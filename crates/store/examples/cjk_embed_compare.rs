@@ -15,8 +15,8 @@
 use ab_store::vector::{cosine_similarity, embed_text, embed_text_hash};
 
 fn main() {
-    let model =
-        std::env::var("AGENT_BRIDGE_ONNX_MODEL").unwrap_or_else(|_| "all-MiniLM-L6-v2(default)".into());
+    let model = std::env::var("AGENT_BRIDGE_ONNX_MODEL")
+        .unwrap_or_else(|_| "all-MiniLM-L6-v2(default)".into());
     eprintln!("[cjk-compare] active model selection: {model}");
 
     // Init runs on a background thread; embed_text falls to the hash backend
@@ -63,8 +63,7 @@ fn main() {
         ("怎么避免旧的构建把别人刚上线的二进制覆盖掉", "deploy"),
     ];
 
-    let doc_vecs: Vec<(&str, Vec<f32>)> =
-        docs.iter().map(|(k, t)| (*k, embed_text(t))).collect();
+    let doc_vecs: Vec<(&str, Vec<f32>)> = docs.iter().map(|(k, t)| (*k, embed_text(t))).collect();
 
     let mut at1 = 0usize;
     let mut margins: Vec<f32> = Vec::new();

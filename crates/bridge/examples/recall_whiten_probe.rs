@@ -59,24 +59,102 @@ struct Case {
 // in the live store 2026-06-19). Kept in sync by hand; this probe only needs
 // (query, accept-set, tier).
 const CORPUS: &[Case] = &[
-    Case { query: "记忆系统应该追求记住更多,还是用更少上下文恢复正确状态", expect: &["ab_memory_continuity_cognitive_architecture_20260619", "curated_implicit_lessondc26f323"], tier: Tier::Hard },
-    Case { query: "工具面太多了应该按什么维度归类收口,是直接删还是重新分级", expect: &["reference_ab_tool_surface_taxonomy_8class_retier_over_delete_20260618"], tier: Tier::Hard },
-    Case { query: "某个工具 p95 延迟看着很高但调用样本很少要不要当成异常", expect: &["tool_atlas_low_sample_p95_classification_20260619"], tier: Tier::Moderate },
-    Case { query: "codex 的核心工具集和原生能力重叠,该不该因为很少用就降级", expect: &["codex_essential_native_overlap_demotion_superseded_20260618", "mcp_codex_native_overlap_surface_narrowed_deployed_20260617"], tier: Tier::Hard },
-    Case { query: "怎么查看 sibling 推到远端的文件内容又不影响我的工作树", expect: &["lesson_git_show_origin_master_read_without_pull_20260518"], tier: Tier::Hard },
-    Case { query: "memory_search 突然报数据库列不存在的错误是什么原因", expect: &["lesson_memory_search_fts5_lens_column_drift_20260518"], tier: Tier::Moderate },
-    Case { query: "多个 agent 在同一个 git 仓库一起干活 HEAD 争用怎么预防", expect: &["lesson_multi_agent_shared_git_worktree_head_contention"], tier: Tier::Hard },
-    Case { query: "怎么远程给一个正在运行的长驻 agent 会话注入指令", expect: &["agentbridge_remote_session_steer_gap_20260529"], tier: Tier::Hard },
-    Case { query: "agent-bridge 这个项目的核心愿景定位是什么", expect: &["agent_bridge_northstar_bidirectional_bridge_20260529"], tier: Tier::Hard },
-    Case { query: "EdgeRazor 那篇论文有什么值得我们借鉴的地方", expect: &["aiot_edgerazor_borrow_eval_20260526"], tier: Tier::Moderate },
-    Case { query: "kilo 和 codex 两个远程执行器一起用实测验证过吗", expect: &["kilo_codex_dual_executor_live_verified_20260531"], tier: Tier::Moderate },
-    Case { query: "skills lint 有没有规则检查严格度但缺少 preflight 的情况", expect: &["skills_lint_rigor_preflight_rule_impl_20260528"], tier: Tier::Moderate },
-    Case { query: "有没有一个全局通用的 TELLS 基线技能", expect: &["global_tells_baseline_skill_20260529"], tier: Tier::Moderate },
-    Case { query: "biocortex 影子试验是只读的吗,会不会改默认检索顺序", expect: &["ab_memory_continuity_t5_biocortex_shadow_trial_20260619"], tier: Tier::Hard },
-    Case { query: "palace 评审 artifact 从外部工具借鉴了哪些设计模式", expect: &["palace_review_artifact_external_patterns_20260618"], tier: Tier::Moderate },
-    Case { query: "自检告警把 catalog 类记忆也算进计数导致误报", expect: &["lesson_c3_s2_self_check_counts_catalog_false_positive_20260518"], tier: Tier::Moderate },
-    Case { query: "multi agent shared git worktree HEAD contention lesson", expect: &["lesson_multi_agent_shared_git_worktree_head_contention"], tier: Tier::Easy },
-    Case { query: "agent bridge northstar bidirectional bridge vision", expect: &["agent_bridge_northstar_bidirectional_bridge_20260529"], tier: Tier::Easy },
+    Case {
+        query: "记忆系统应该追求记住更多,还是用更少上下文恢复正确状态",
+        expect: &[
+            "ab_memory_continuity_cognitive_architecture_20260619",
+            "curated_implicit_lessondc26f323",
+        ],
+        tier: Tier::Hard,
+    },
+    Case {
+        query: "工具面太多了应该按什么维度归类收口,是直接删还是重新分级",
+        expect: &["reference_ab_tool_surface_taxonomy_8class_retier_over_delete_20260618"],
+        tier: Tier::Hard,
+    },
+    Case {
+        query: "某个工具 p95 延迟看着很高但调用样本很少要不要当成异常",
+        expect: &["tool_atlas_low_sample_p95_classification_20260619"],
+        tier: Tier::Moderate,
+    },
+    Case {
+        query: "codex 的核心工具集和原生能力重叠,该不该因为很少用就降级",
+        expect: &[
+            "codex_essential_native_overlap_demotion_superseded_20260618",
+            "mcp_codex_native_overlap_surface_narrowed_deployed_20260617",
+        ],
+        tier: Tier::Hard,
+    },
+    Case {
+        query: "怎么查看 sibling 推到远端的文件内容又不影响我的工作树",
+        expect: &["lesson_git_show_origin_master_read_without_pull_20260518"],
+        tier: Tier::Hard,
+    },
+    Case {
+        query: "memory_search 突然报数据库列不存在的错误是什么原因",
+        expect: &["lesson_memory_search_fts5_lens_column_drift_20260518"],
+        tier: Tier::Moderate,
+    },
+    Case {
+        query: "多个 agent 在同一个 git 仓库一起干活 HEAD 争用怎么预防",
+        expect: &["lesson_multi_agent_shared_git_worktree_head_contention"],
+        tier: Tier::Hard,
+    },
+    Case {
+        query: "怎么远程给一个正在运行的长驻 agent 会话注入指令",
+        expect: &["agentbridge_remote_session_steer_gap_20260529"],
+        tier: Tier::Hard,
+    },
+    Case {
+        query: "agent-bridge 这个项目的核心愿景定位是什么",
+        expect: &["agent_bridge_northstar_bidirectional_bridge_20260529"],
+        tier: Tier::Hard,
+    },
+    Case {
+        query: "EdgeRazor 那篇论文有什么值得我们借鉴的地方",
+        expect: &["aiot_edgerazor_borrow_eval_20260526"],
+        tier: Tier::Moderate,
+    },
+    Case {
+        query: "kilo 和 codex 两个远程执行器一起用实测验证过吗",
+        expect: &["kilo_codex_dual_executor_live_verified_20260531"],
+        tier: Tier::Moderate,
+    },
+    Case {
+        query: "skills lint 有没有规则检查严格度但缺少 preflight 的情况",
+        expect: &["skills_lint_rigor_preflight_rule_impl_20260528"],
+        tier: Tier::Moderate,
+    },
+    Case {
+        query: "有没有一个全局通用的 TELLS 基线技能",
+        expect: &["global_tells_baseline_skill_20260529"],
+        tier: Tier::Moderate,
+    },
+    Case {
+        query: "biocortex 影子试验是只读的吗,会不会改默认检索顺序",
+        expect: &["ab_memory_continuity_t5_biocortex_shadow_trial_20260619"],
+        tier: Tier::Hard,
+    },
+    Case {
+        query: "palace 评审 artifact 从外部工具借鉴了哪些设计模式",
+        expect: &["palace_review_artifact_external_patterns_20260618"],
+        tier: Tier::Moderate,
+    },
+    Case {
+        query: "自检告警把 catalog 类记忆也算进计数导致误报",
+        expect: &["lesson_c3_s2_self_check_counts_catalog_false_positive_20260518"],
+        tier: Tier::Moderate,
+    },
+    Case {
+        query: "multi agent shared git worktree HEAD contention lesson",
+        expect: &["lesson_multi_agent_shared_git_worktree_head_contention"],
+        tier: Tier::Easy,
+    },
+    Case {
+        query: "agent bridge northstar bidirectional bridge vision",
+        expect: &["agent_bridge_northstar_bidirectional_bridge_20260529"],
+        tier: Tier::Easy,
+    },
 ];
 
 const TOP_K: usize = 10;
@@ -215,7 +293,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                    AND embedding IS NOT NULL",
             )?;
             let out = stmt
-                .query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?)))?
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
+                })?
                 .collect::<Result<Vec<_>, _>>()?;
             Ok::<_, tokio_rusqlite::rusqlite::Error>(out)
         })
@@ -286,10 +366,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     println!("rank vs:       e5 subset only (isolates the transform; not the full-store recall_eval number)\n");
 
+    println!("## R@k over answerable cases (n={n_answerable}) — the load-bearing comparison");
     println!(
-        "## R@k over answerable cases (n={n_answerable}) — the load-bearing comparison"
+        "  {:<10} {:>7} {:>7} {:>7} {:>7}",
+        "transform", "R@1", "R@5", "R@10", "MRR"
     );
-    println!("  {:<10} {:>7} {:>7} {:>7} {:>7}", "transform", "R@1", "R@5", "R@10", "MRR");
 
     let mut per_case_ranks: Vec<(String, Vec<Option<usize>>)> = Vec::new();
     for (i, case) in CORPUS.iter().enumerate() {
@@ -315,7 +396,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 qraw
             };
             let rank = rank_query(&qv, &tcorpus, case.expect);
-            per_case_ranks[i].1.push(if answerable[i] { rank } else { None });
+            per_case_ranks[i]
+                .1
+                .push(if answerable[i] { rank } else { None });
             if answerable[i] {
                 agg.record(rank);
             }
@@ -356,15 +439,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    let skipped: Vec<usize> = (0..CORPUS.len()).filter(|i| !answerable[*i]).map(|i| i + 1).collect();
+    let skipped: Vec<usize> = (0..CORPUS.len())
+        .filter(|i| !answerable[*i])
+        .map(|i| i + 1)
+        .collect();
     if !skipped.is_empty() {
         println!(
             "\n  excluded (designated key not e5-indexed, needs reindex not whitening): #{}",
-            skipped.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(", #")
+            skipped
+                .iter()
+                .map(|i| i.to_string())
+                .collect::<Vec<_>>()
+                .join(", #")
         );
     }
     println!("\n## Read");
-    println!("  raw = e5 cosine over its own space (control). centered/abtt = anisotropy-corrected.");
+    println!(
+        "  raw = e5 cosine over its own space (control). centered/abtt = anisotropy-corrected."
+    );
     println!("  A rising R@k from raw→centered→abtt confirms anisotropy as the dominant cause and");
     println!("  names a cheap, embedder-preserving fix to hand to the memory-continuity lane.");
 

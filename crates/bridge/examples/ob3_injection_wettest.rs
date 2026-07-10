@@ -65,7 +65,9 @@ async fn main() {
     )
     .await;
     tokio::time::sleep(Duration::from_millis(500)).await;
-    let cap_a = capture(&target, &mux, SESSION, 40).await.unwrap_or_default();
+    let cap_a = capture(&target, &mux, SESSION, 40)
+        .await
+        .unwrap_or_default();
     if cap_a.contains("RESULTA:OB3DEFAULT") {
         println!("PASS A: default profile (Enter) submitted — executed output present");
     } else {
@@ -92,7 +94,9 @@ async fn main() {
     )
     .await;
     tokio::time::sleep(Duration::from_millis(500)).await;
-    let cap_b = capture(&target, &mux, SESSION, 40).await.unwrap_or_default();
+    let cap_b = capture(&target, &mux, SESSION, 40)
+        .await
+        .unwrap_or_default();
     if cap_b.contains("RESULTB:OB3SPLIT") {
         println!(
             "PASS B: split path (type + separate '{}') submitted",
@@ -118,7 +122,9 @@ async fn main() {
     )
     .await;
     tokio::time::sleep(Duration::from_millis(300)).await;
-    let after = capture(&target, &mux, SESSION, 40).await.unwrap_or_default();
+    let after = capture(&target, &mux, SESSION, 40)
+        .await
+        .unwrap_or_default();
     if res_c.is_err() && !after.contains("SHOULD_NOT_RUN") {
         println!(
             "PASS C: LaunchOnly refused runtime send ({})",

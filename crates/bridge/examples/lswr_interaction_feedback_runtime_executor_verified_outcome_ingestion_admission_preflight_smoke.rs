@@ -8,13 +8,13 @@
 //! ingests verified outcomes.
 
 use ab_bridge::lswr_interaction_feedback::{
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_WRITE_EVIDENCE_REVIEW_PREFLIGHT_SCHEMA,
-    LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_ADMISSION_DECISION_SCHEMA,
     build_interaction_feedback_runtime_executor_verified_outcome_ingestion_admission_preflight,
     render_interaction_feedback_runtime_executor_verified_outcome_ingestion_admission_preflight,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_WRITE_EVIDENCE_REVIEW_PREFLIGHT_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_ADMISSION_DECISION_SCHEMA,
 };
-use anyhow::{Context, Result, bail};
-use serde_json::{Value, json};
+use anyhow::{bail, Context, Result};
+use serde_json::{json, Value};
 
 fn main() -> Result<()> {
     let args = Args::parse(std::env::args().skip(1))?;
@@ -285,7 +285,8 @@ fn assert_ready_for_verified_outcome_ingestion_execution(preflight: &Value) -> R
         "next_allowed_gate",
         "verified_outcome_ingestion_execution",
     )?;
-    if preflight["verified_outcome_ingestion_admission"]["ready_for_verified_outcome_ingestion_execution"]
+    if preflight["verified_outcome_ingestion_admission"]
+        ["ready_for_verified_outcome_ingestion_execution"]
         != true
     {
         bail!("expected ready_for_verified_outcome_ingestion_execution=true");

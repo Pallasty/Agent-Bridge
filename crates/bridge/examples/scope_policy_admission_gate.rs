@@ -19,9 +19,9 @@
 //!     cargo run -p ab-bridge --example scope_policy_admission_gate
 
 use ab_bridge::project_identity::{
-    LEGACY_PROJECT_SCOPE_PREFIX, PROJECT_ID_SCOPE_PREFIX, ProjectIdentityInput,
     approved_scope_alias_canonical, legacy_project_scope, normalize_project_id, project_id_scope,
-    resolve_project_identity,
+    resolve_project_identity, ProjectIdentityInput, LEGACY_PROJECT_SCOPE_PREFIX,
+    PROJECT_ID_SCOPE_PREFIX,
 };
 use std::path::{Path, PathBuf};
 

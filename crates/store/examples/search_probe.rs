@@ -66,7 +66,10 @@ async fn main() {
             } else {
                 ""
             };
-            let cos = hh.cosine.map(|c| format!("{c:.3}")).unwrap_or_else(|| "—".into());
+            let cos = hh
+                .cosine
+                .map(|c| format!("{c:.3}"))
+                .unwrap_or_else(|| "—".into());
             println!(
                 " {:2}. cos={cos} score={:.3} {}{}",
                 i + 1,

@@ -24,7 +24,8 @@ async fn main() {
         .nth(1)
         .map(std::path::PathBuf::from)
         .unwrap_or_else(default_db_path);
-    let model = std::env::var("AGENT_BRIDGE_ONNX_MODEL").unwrap_or_else(|_| "all-MiniLM-L6-v2(default)".into());
+    let model = std::env::var("AGENT_BRIDGE_ONNX_MODEL")
+        .unwrap_or_else(|_| "all-MiniLM-L6-v2(default)".into());
     eprintln!("[reindex] db={}  model={model}", db.display());
 
     // Warm the ONNX model so reindex never trips the hash-fallback guard.

@@ -9,13 +9,13 @@
 //! verified outcomes.
 
 use ab_bridge::lswr_interaction_feedback::{
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_WRITER_EXECUTION_SCHEMA,
-    LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_PERSISTENCE_DECISION_SCHEMA,
     build_interaction_feedback_runtime_executor_verified_outcome_ingestion_persistence,
     render_interaction_feedback_runtime_executor_verified_outcome_ingestion_persistence,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_WRITER_EXECUTION_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_PERSISTENCE_DECISION_SCHEMA,
 };
-use anyhow::{Context, Result, bail};
-use serde_json::{Value, json};
+use anyhow::{bail, Context, Result};
+use serde_json::{json, Value};
 
 fn main() -> Result<()> {
     let args = Args::parse(std::env::args().skip(1))?;
@@ -236,7 +236,8 @@ fn assert_ready_for_verified_outcome_ingestion_store_write(persistence: &Value) 
         "next_allowed_gate",
         "verified_outcome_ingestion_store_write",
     )?;
-    if persistence["verified_outcome_ingestion_persistence"]["ready_for_verified_outcome_ingestion_store_write"]
+    if persistence["verified_outcome_ingestion_persistence"]
+        ["ready_for_verified_outcome_ingestion_store_write"]
         != true
     {
         bail!("expected ready_for_verified_outcome_ingestion_store_write=true");

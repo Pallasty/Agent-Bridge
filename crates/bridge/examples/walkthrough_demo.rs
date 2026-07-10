@@ -31,7 +31,10 @@ fn main() {
             let doc: Value = serde_json::from_str(&raw).expect("parse doc json");
             (doc, format!("Walkthrough — {path}"))
         }
-        None => (session_arc_demo(), "AB session walkthrough — gos_lite + present artifact".into()),
+        None => (
+            session_arc_demo(),
+            "AB session walkthrough — gos_lite + present artifact".into(),
+        ),
     };
 
     let provenance = json!({
@@ -51,23 +54,45 @@ fn main() {
     let html = std::fs::read_to_string(&path).expect("read back");
     let region = render_region(&html).expect("render region present");
     let payload = extract_ab_payload(&html).expect("ab-payload extractable");
-    let steps = doc.get("steps").and_then(Value::as_array).map_or(0, Vec::len);
+    let steps = doc
+        .get("steps")
+        .and_then(Value::as_array)
+        .map_or(0, Vec::len);
 
     let mut ok = true;
     let mut check = |name: &str, cond: bool| {
         eprintln!("[check] {name}: {}", if cond { "PASS" } else { "FAIL" });
         ok &= cond;
     };
-    check("schema tag injected", payload["schema"] == "present_walkthrough/v0");
-    check("payload step count matches doc", payload.get("steps").and_then(Value::as_array).map_or(0, Vec::len) == steps);
+    check(
+        "schema tag injected",
+        payload["schema"] == "present_walkthrough/v0",
+    );
+    check(
+        "payload step count matches doc",
+        payload
+            .get("steps")
+            .and_then(Value::as_array)
+            .map_or(0, Vec::len)
+            == steps,
+    );
     check("render region non-empty", region.trim().len() > 40);
-    check("payload lives outside verified region", !region.contains("ab-payload"));
+    check(
+        "payload lives outside verified region",
+        !region.contains("ab-payload"),
+    );
     // Evidence is actually anchored in the human render (grounded, not hidden).
     if let Some(first_ev_ref) = doc["steps"][0]["evidence"][0]["reference"].as_str() {
-        check("first evidence ref appears in render", region.contains(first_ev_ref));
+        check(
+            "first evidence ref appears in render",
+            region.contains(first_ev_ref),
+        );
     }
 
-    eprintln!("[walkthrough] self-check: {}", if ok { "ALL PASS" } else { "FAILED" });
+    eprintln!(
+        "[walkthrough] self-check: {}",
+        if ok { "ALL PASS" } else { "FAILED" }
+    );
     if !ok {
         std::process::exit(2);
     }

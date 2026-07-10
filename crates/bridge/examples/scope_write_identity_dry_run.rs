@@ -13,8 +13,8 @@
 //!     cargo run -p ab-bridge --example scope_write_identity_dry_run
 
 use ab_bridge::project_identity::{
-    LEGACY_PROJECT_SCOPE_PREFIX, PROJECT_ID_SCOPE_PREFIX, ProjectIdentity, ProjectIdentityEvidence,
-    ProjectIdentityInput, legacy_project_scope, resolve_project_identity,
+    legacy_project_scope, resolve_project_identity, ProjectIdentity, ProjectIdentityEvidence,
+    ProjectIdentityInput, LEGACY_PROJECT_SCOPE_PREFIX, PROJECT_ID_SCOPE_PREFIX,
 };
 use std::path::Path;
 

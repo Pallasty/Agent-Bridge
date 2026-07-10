@@ -50,7 +50,10 @@ fn autotune_v4_threshold_sensitivity_probe() {
     });
     files.sort(); // deterministic order
     let sample: Vec<_> = files.into_iter().take(30).collect();
-    assert!(!sample.is_empty(), "no transcripts in 30–250KB under {root:?}");
+    assert!(
+        !sample.is_empty(),
+        "no transcripts in 30–250KB under {root:?}"
+    );
 
     let thresholds = [0.30f32, 0.45, 0.60];
     // High enough not to bind for the capped ~120K-char input, so the THRESHOLD
@@ -107,7 +110,10 @@ fn autotune_v4_threshold_sensitivity_probe() {
     println!("\n=== G4 §5.V4 threshold-sensitivity probe ===");
     println!("sample sessions: {}", sample.len());
     for (i, &th) in thresholds.iter().enumerate() {
-        println!("  threshold {th:.2} → {} lessons extracted (total over sample)", totals[i]);
+        println!(
+            "  threshold {th:.2} → {} lessons extracted (total over sample)",
+            totals[i]
+        );
     }
     println!("lesson-count change 0.30→0.60: {drop_pct:.1}%");
     println!(

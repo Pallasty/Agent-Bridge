@@ -9,15 +9,15 @@
 //! outcomes.
 
 use ab_bridge::lswr_interaction_feedback::{
-    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_PERSISTENCE_SCHEMA,
-    LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_STORE_WRITE_EXECUTION_DECISION_SCHEMA,
-    LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_WRITE_EVIDENCE_SCHEMA,
     build_interaction_feedback_runtime_executor_verified_outcome_ingestion_store_write_execution_preflight,
     build_interaction_feedback_runtime_executor_verified_outcome_ingestion_write_evidence_preflight,
     render_interaction_feedback_runtime_executor_verified_outcome_ingestion_write_evidence_preflight,
+    LSWR_INTERACTION_FEEDBACK_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_PERSISTENCE_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_STORE_WRITE_EXECUTION_DECISION_SCHEMA,
+    LSWR_RUNTIME_EXECUTOR_VERIFIED_OUTCOME_INGESTION_WRITE_EVIDENCE_SCHEMA,
 };
-use anyhow::{Context, Result, bail};
-use serde_json::{Value, json};
+use anyhow::{bail, Context, Result};
+use serde_json::{json, Value};
 
 fn main() -> Result<()> {
     let args = Args::parse(std::env::args().skip(1))?;
@@ -322,7 +322,8 @@ fn assert_ready_for_verified_outcome_ingestion_write_evidence_review(
         "next_allowed_gate",
         "verified_outcome_ingestion_write_evidence_review",
     )?;
-    if preflight["verified_outcome_ingestion_write_evidence"]["ready_for_verified_outcome_ingestion_write_evidence_review"]
+    if preflight["verified_outcome_ingestion_write_evidence"]
+        ["ready_for_verified_outcome_ingestion_write_evidence_review"]
         != true
     {
         bail!("expected ready_for_verified_outcome_ingestion_write_evidence_review=true");

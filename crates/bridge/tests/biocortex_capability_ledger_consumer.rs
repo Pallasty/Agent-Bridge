@@ -60,7 +60,10 @@ fn capability_ledger_consumer_accepts_current_schema_v5() {
         summary.integration_decision,
         "shadow_only_no_runtime_admission"
     );
-    assert_eq!(check_verdict(&summary, "six_axis_ledger_contract"), "passed");
+    assert_eq!(
+        check_verdict(&summary, "six_axis_ledger_contract"),
+        "passed"
+    );
     assert!(summary.safety.static_artifact_only);
     assert!(!summary.safety.memory_write_attempted);
     assert!(!summary.safety.retrieval_order_change_attempted);

@@ -41,7 +41,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("# T0 recall baseline");
     println!("db:      {}", db_path.display());
-    println!("window:  {window_days}d  ({} rows in window)", stats.total_queries);
+    println!(
+        "window:  {window_days}d  ({} rows in window)",
+        stats.total_queries
+    );
     println!();
 
     if stats.total_queries == 0 {
@@ -95,7 +98,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .by_mode
         .iter()
         .filter(|m| m.total >= 3)
-        .min_by(|a, b| a.hit_rate.partial_cmp(&b.hit_rate).unwrap_or(std::cmp::Ordering::Equal));
+        .min_by(|a, b| {
+            a.hit_rate
+                .partial_cmp(&b.hit_rate)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
     if let Some(m) = worst {
         println!(
             "note: lowest-hit-rate mode (n≥3) = {} at {:.3}; p95={}µs",

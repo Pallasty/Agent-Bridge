@@ -18,16 +18,16 @@
 //! ```
 
 use ab_bridge::biocortex_shadow::{
-    BioCortexRetrievalCandidate, RelevanceLiftEvalOptions, RelevanceLiftQueryCase,
     biocortex_retrieval_relevance_lift_eval, run_retrieval_side_signal,
+    BioCortexRetrievalCandidate, RelevanceLiftEvalOptions, RelevanceLiftQueryCase,
 };
 use ab_store::{
-    BioCortexRetrievalOptInSideSignal, CoactivationEdge, MemoryEdge, MemoryListSort, MemoryRecord,
-    SqliteStore, StateStore, cosine_similarity, default_db_path, embed_text,
+    cosine_similarity, default_db_path, embed_text, BioCortexRetrievalOptInSideSignal,
+    CoactivationEdge, MemoryEdge, MemoryListSort, MemoryRecord, SqliteStore, StateStore,
 };
 use anyhow::{Context, Result};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
