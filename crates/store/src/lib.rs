@@ -2402,7 +2402,14 @@ pub trait StateStore: Send + Sync {
         owner_pid: i64,
         owner_start_ticks: Option<i64>,
     ) -> Result<bool> {
-        let _ = (id, proc_pid, proc_pgid, proc_start_ticks, owner_pid, owner_start_ticks);
+        let _ = (
+            id,
+            proc_pid,
+            proc_pgid,
+            proc_start_ticks,
+            owner_pid,
+            owner_start_ticks,
+        );
         Err(ab_core::Error::Backend(
             "update_session_process unsupported by this store backend".into(),
         ))

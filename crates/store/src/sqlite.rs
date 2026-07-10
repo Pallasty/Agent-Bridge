@@ -67,12 +67,11 @@ use crate::{
     McpToolCallStats, McpToolErrorRecord, McpToolSourceStats, MemoryCosineHit, MemoryEdge,
     MemoryEdgeExport, MemoryExportFilter, MemoryExportResult, MemoryListSort, MemoryLiveMeta,
     MemoryQueryRecord, MemoryQueryStats, MemoryRecord, MemorySearchHit, MemoryStats, MisrankRow,
-    ModeStats,
-    NotificationRecord, OverlapPair, PlanRecord, PlanStep, ReinforceActiveStats, ReplayAuditRow,
-    RetrievalOutcomeMemory, RetrievalOutcomeShadowRow, RetrievalOutcomeSummary,
-    ReplayAuditStats, S234Counts, SessionFilter, SignalFidelityStats, StateStore, StoredSession,
-    WaypointRow, WaypointStats, MCP_TOOL_ERROR_RING_CAP, MEMORY_CONTENT_CAP,
-    AMBIENT_SURFACING_MODE, MEMORY_QUERY_LOG_RING_CAP, RETRIEVAL_SURFACING_RING_CAP, STDIO_CAP,
+    ModeStats, NotificationRecord, OverlapPair, PlanRecord, PlanStep, ReinforceActiveStats,
+    ReplayAuditRow, ReplayAuditStats, RetrievalOutcomeMemory, RetrievalOutcomeShadowRow,
+    RetrievalOutcomeSummary, S234Counts, SessionFilter, SignalFidelityStats, StateStore,
+    StoredSession, WaypointRow, WaypointStats, AMBIENT_SURFACING_MODE, MCP_TOOL_ERROR_RING_CAP,
+    MEMORY_CONTENT_CAP, MEMORY_QUERY_LOG_RING_CAP, RETRIEVAL_SURFACING_RING_CAP, STDIO_CAP,
 };
 use tokio_rusqlite::rusqlite::OptionalExtension;
 
@@ -2529,9 +2528,7 @@ fn stabilise_sync_metadata(record: &mut MemoryRecord) {
     // importance is never re-derived there. Strip the stamp; keep the durable
     // `valence:`/`valence_class:` labels (they describe the CONTENT, not this
     // node's usage) so the receiver's own apply re-derives and re-stamps.
-    record
-        .tags
-        .retain(|t| !t.starts_with("valence_applied:"));
+    record.tags.retain(|t| !t.starts_with("valence_applied:"));
     if record.status == "archived" {
         record.status = "active".to_string();
     }
@@ -2838,7 +2835,14 @@ impl StateStore for SqliteStore {
                         SET proc_pid = ?2, proc_pgid = ?3, proc_start_ticks = ?4,
                             owner_pid = ?5, owner_start_ticks = ?6
                       WHERE id = ?1 AND ended_at IS NULL",
-                    params![key, proc_pid, proc_pgid, proc_start_ticks, owner_pid, owner_start_ticks],
+                    params![
+                        key,
+                        proc_pid,
+                        proc_pgid,
+                        proc_start_ticks,
+                        owner_pid,
+                        owner_start_ticks
+                    ],
                 )
             })
             .await
@@ -7343,15 +7347,18 @@ impl StateStore for SqliteStore {
                       LIMIT ?2",
                 )?;
                 let top_used: Vec<RetrievalOutcomeMemory> = used_stmt
-                    .query_map(rusqlite::params![window_start, top_n, AMBIENT_SURFACING_MODE], |r| {
-                        Ok(RetrievalOutcomeMemory {
-                            key: r.get(0)?,
-                            surfaced_count: r.get::<_, i64>(1)? as u64,
-                            used_count: r.get::<_, i64>(2)? as u64,
-                            avg_rank: r.get(3)?,
-                            last_surfaced_at: r.get(4)?,
-                        })
-                    })?
+                    .query_map(
+                        rusqlite::params![window_start, top_n, AMBIENT_SURFACING_MODE],
+                        |r| {
+                            Ok(RetrievalOutcomeMemory {
+                                key: r.get(0)?,
+                                surfaced_count: r.get::<_, i64>(1)? as u64,
+                                used_count: r.get::<_, i64>(2)? as u64,
+                                avg_rank: r.get(3)?,
+                                last_surfaced_at: r.get(4)?,
+                            })
+                        },
+                    )?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
 
                 // Decay candidates = surfaced ≥ 2 with ZERO used (surfaced-but-
@@ -7376,15 +7383,18 @@ impl StateStore for SqliteStore {
                       LIMIT ?2",
                 )?;
                 let top_never_used: Vec<RetrievalOutcomeMemory> = never_stmt
-                    .query_map(rusqlite::params![window_start, top_n, AMBIENT_SURFACING_MODE], |r| {
-                        Ok(RetrievalOutcomeMemory {
-                            key: r.get(0)?,
-                            surfaced_count: r.get::<_, i64>(1)? as u64,
-                            used_count: 0,
-                            avg_rank: r.get(2)?,
-                            last_surfaced_at: r.get(3)?,
-                        })
-                    })?
+                    .query_map(
+                        rusqlite::params![window_start, top_n, AMBIENT_SURFACING_MODE],
+                        |r| {
+                            Ok(RetrievalOutcomeMemory {
+                                key: r.get(0)?,
+                                surfaced_count: r.get::<_, i64>(1)? as u64,
+                                used_count: 0,
+                                avg_rank: r.get(2)?,
+                                last_surfaced_at: r.get(3)?,
+                            })
+                        },
+                    )?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
 
                 Ok(RetrievalOutcomeSummary {
@@ -7441,17 +7451,20 @@ impl StateStore for SqliteStore {
                 );
                 let mut stmt = c.prepare(&sql)?;
                 let rows: Vec<RetrievalOutcomeShadowRow> = stmt
-                    .query_map(rusqlite::params![window_start, AMBIENT_SURFACING_MODE], |r| {
-                        Ok(RetrievalOutcomeShadowRow {
-                            key: r.get(0)?,
-                            surfaced_count: r.get::<_, i64>(1)? as u64,
-                            used_count: r.get::<_, i64>(2)? as u64,
-                            avg_rank: r.get(3)?,
-                            last_surfaced_at: r.get(4)?,
-                            importance: r.get(5)?,
-                            protected: r.get::<_, i64>(6)? != 0,
-                        })
-                    })?
+                    .query_map(
+                        rusqlite::params![window_start, AMBIENT_SURFACING_MODE],
+                        |r| {
+                            Ok(RetrievalOutcomeShadowRow {
+                                key: r.get(0)?,
+                                surfaced_count: r.get::<_, i64>(1)? as u64,
+                                used_count: r.get::<_, i64>(2)? as u64,
+                                avg_rank: r.get(3)?,
+                                last_surfaced_at: r.get(4)?,
+                                importance: r.get(5)?,
+                                protected: r.get::<_, i64>(6)? != 0,
+                            })
+                        },
+                    )?
                     .collect::<std::result::Result<Vec<_>, _>>()?;
                 Ok(rows)
             })
@@ -13337,7 +13350,10 @@ mod tests {
             raw_tags.contains(&"valence_applied:+1.000".to_string()),
             "backup export keeps the stamp, got {raw_tags:?}"
         );
-        assert_eq!(raw_row["importance"], 0.9, "backup export keeps applied importance");
+        assert_eq!(
+            raw_row["importance"], 0.9,
+            "backup export keeps applied importance"
+        );
 
         let _ = tokio::fs::remove_dir_all(&temp_dir).await;
     }
@@ -18218,7 +18234,10 @@ mod tests {
             "avg_rank_when_used=6/5, got {}",
             s.avg_rank_when_used
         );
-        assert_eq!(s.by_mode, vec![("fts".to_string(), 5), ("semantic".to_string(), 3)]);
+        assert_eq!(
+            s.by_mode,
+            vec![("fts".to_string(), 5), ("semantic".to_string(), 3)]
+        );
 
         // Reinforce candidates ordered by used_count DESC: alpha (3) then delta (2).
         let used_keys: Vec<&str> = s.top_used.iter().map(|m| m.key.as_str()).collect();
@@ -18428,7 +18447,10 @@ mod tests {
             .await
             .expect("surface 1");
         assert_eq!(
-            store.attribute_retrieval_get("sh_used", 1800).await.expect("attr"),
+            store
+                .attribute_retrieval_get("sh_used", 1800)
+                .await
+                .expect("attr"),
             1
         );
         store
@@ -23546,7 +23568,10 @@ mod tests {
         let now = 1_700_000_000;
         let fb = semantic_blend_score(w, 0.5, 0.0, now, 0, "feedback", now);
         let tele = semantic_blend_score(w, 0.5, 0.0, now, 0, "retrieval_feedback", now);
-        assert!((fb - tele - 0.03).abs() < 1e-12, "w_fb fires only for kind=feedback");
+        assert!(
+            (fb - tele - 0.03).abs() < 1e-12,
+            "w_fb fires only for kind=feedback"
+        );
     }
 
     #[test]
@@ -23745,13 +23770,19 @@ mod tests {
 
         // The overlay must agree with the DB truth the warm cache is built from
         // (memory_load_embeddings) on recency/access, so re-hydration is exact.
-        let embeds = store.memory_load_embeddings().await.expect("load embeddings");
+        let embeds = store
+            .memory_load_embeddings()
+            .await
+            .expect("load embeddings");
         let keep_row = embeds
             .iter()
             .find(|(r, _)| r.key == "tests:am_keep")
             .map(|(r, _)| r)
             .expect("keep row in embeddings");
-        assert_eq!(keep.access_count, keep_row.access_count, "access_count == DB");
+        assert_eq!(
+            keep.access_count, keep_row.access_count,
+            "access_count == DB"
+        );
         assert_eq!(
             keep.last_accessed_at, keep_row.last_accessed_at,
             "last_accessed_at == DB"
