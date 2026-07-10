@@ -19,10 +19,10 @@ AB anchors:
 ```yaml
 schema: agent_bridge.portfolio_continuity_answer_contract.v1
 contract_id: portfolio_continuity_expanded_answer_blind_20260710
-contract_sha256: 66b988b0ce7f1fd0f58d8bae413578e727ed95485a63da58ea559442da169e07
+contract_sha256: f9b67382eee2f27ecf01e9cc546286efe4ff544e0125f084e8b95ff36ca0fb62
 harness_source_sha256: 3f06f1067750629bf4b227b381c8102a6a6fb12e009a2d02e2b1e3558526f7ed
 surface_source_sha256: 0ff5ab27b79d36169fee22b5de5f2c4563cb1ba0f6edebf354a17cfcb60e6311
-blind_seed_sha256: 2abe7b97e1931ea1ca0516449925fbe7930f67c84e94334e65f862d04c46d38c
+blind_seed_sha256: c63bab65c362a4370e66d45616a7d05e0add1bdaeb029274306a977517e2b083
 digest_key_sha256: a9d9842db1fe7437ce4a276ddae9a1c91d776cd75606ec2269bb50fc7df21cf1
 case_count: 12
 prompt_strata: 6
@@ -72,18 +72,18 @@ before capture.
 
 | Stratum | Variant | Case id | Prompt SHA-256 | Abstention required |
 | --- | --- | --- | --- | --- |
-| Portfolio status | Direct | `status_lane_snapshot` | `7e8a609a61c91a517b6def332c0ec6a13dc6a86966f29bf83e7824649f6736c8` | No |
-| Portfolio status | Held out | `status_decision_brief` | `33934d63f23af4993164e37d1f3d80284eb08b5a44a6801771b5f37aedf6cb72` | No |
-| Portfolio retrospective | Direct | `retrospective_evidence_changes` | `bf7681c2bebea15d168f13fcfa854782ff3bcd49adc4987f0eb581369bfe75e9` | No |
-| Portfolio retrospective | Held out | `retrospective_failure_learning` | `7397bd26a97cc57f7714d51a8779869b990acfb2744f41dca3505b104b50c00e` | No |
-| Portfolio planning | Direct | `planning_order_and_gates` | `7c0697f937be4e63ec5a1959c104e4e873bcb5894859ddb42bc554d174ac9a71` | No |
-| Portfolio planning | Held out | `planning_capacity_forecast` | `7822d0d3d73292e2a53d8b13fa857a91d093c4989dd6a8caa5c1f02b97b640c3` | Yes |
-| Dependency and risk | Direct | `dependency_owner_gates` | `969964c04fd4fad3b738c71fde04bb366191845af91013019f9973bcf79d4434` | No |
-| Dependency and risk | Held out | `dependency_credential_inventory` | `1b3ad711898b1edb84f5d957e7964af717268bdb09c93a696317ee1f80966e55` | Yes |
-| Stale state | Direct | `stale_aio2_wait_state` | `b9bd10eccf2b616858ab6db4dac33cfc3b2c0dbe085798d1010dd84f0759f078` | No |
-| Stale state | Held out | `stale_ab_review_state` | `913aaad40c7d55b33a4a5f45e0861a34c5396cc42ed3a034077880036da228e8` | No |
-| Cross-project conflict | Direct | `conflict_arrowquant_labels` | `6642f09659f33d6bdc32b5e71df46041ad6c345151e849e7383275e4b83b384f` | No |
-| Cross-project conflict | Held out | `conflict_ab_evidence_surfaces` | `e39b3b4cb0f6e0086a458bb471d38f43426e95b92b520cf410dd4f8174d96275` | No |
+| Portfolio status | Direct | `status_lane_snapshot` | `a3cd4e09208f0c1fab3a03e3d724dfe8c57992e190749c281332a66db5012fbd` | No |
+| Portfolio status | Held out | `status_decision_brief` | `90e0899d8bf437fb68a9ce97db43647dd166b38da481f1b571ac49f59d9a196c` | No |
+| Portfolio retrospective | Direct | `retrospective_evidence_changes` | `af6264062583909a58cb587085e18a58feaac11401523faa3c178fadd9e718d0` | No |
+| Portfolio retrospective | Held out | `retrospective_failure_learning` | `619f8daed410ca990081cbbb1907a94a64cc0b1870572f22e0c63e678cd05777` | No |
+| Portfolio planning | Direct | `planning_order_and_gates` | `9f33cb077719bc228d034bcfb093daeeec81d6d23bbc09b4b1ec2832879fb5c4` | No |
+| Portfolio planning | Held out | `planning_capacity_forecast` | `98214d8778b57c06520b66042983a8025f40ae7d151a5f2a8bdc4b5c546d42eb` | Yes |
+| Dependency and risk | Direct | `dependency_owner_gates` | `33fbd0683a5f64336fe70bd972e6faf9cc8df95d1dc98b6a91ea32d9b79bbc6b` | No |
+| Dependency and risk | Held out | `dependency_credential_inventory` | `da93167088ec455a7b365c491f27f7b4ff9be275015c416274623fe024f348b5` | Yes |
+| Stale state | Direct | `stale_aio2_wait_state` | `32e565f886aeb41abddc5037c3eefb077e852fe0fb5333185415190e0e95ef87` | No |
+| Stale state | Held out | `stale_ab_review_state` | `c13a5f67fab4f533cd81a3634926dbf823406c2310b740624a968e437f39a942` | No |
+| Cross-project conflict | Direct | `conflict_arrowquant_labels` | `8bac0526ca2ef0ef5a3a1359e27134ea5cb3477a7b14d409b855b088854691bf` | No |
+| Cross-project conflict | Held out | `conflict_ab_evidence_surfaces` | `4885738eb64517a650d27708caef485ce2130d727c1917a5ddd3138ef35a459a` | No |
 
 The two abstention cases intentionally request facts that the frozen evidence
 is not expected to support. Their `required_claims` arrays are empty. Each

@@ -35,7 +35,7 @@
     "external_facts_allowed": false
   },
   "blinding": {
-    "seed_sha256": "2abe7b97e1931ea1ca0516449925fbe7930f67c84e94334e65f862d04c46d38c",
+    "seed_sha256": "c63bab65c362a4370e66d45616a7d05e0add1bdaeb029274306a977517e2b083",
     "mapping_private": true,
     "reviewer_sees_condition": false,
     "reveal_after_complete_review": true
@@ -86,7 +86,7 @@
       "case_id": "status_lane_snapshot",
       "prompt_class": "portfolio_status",
       "prompt_variant": "direct",
-      "prompt_sha256": "7e8a609a61c91a517b6def332c0ec6a13dc6a86966f29bf83e7824649f6736c8",
+      "prompt_sha256": "a3cd4e09208f0c1fab3a03e3d724dfe8c57992e190749c281332a66db5012fbd",
       "required_claims": [
         {
           "claim_id": "lane_execution_state",
@@ -121,7 +121,7 @@
       "case_id": "status_decision_brief",
       "prompt_class": "portfolio_status",
       "prompt_variant": "heldout",
-      "prompt_sha256": "33934d63f23af4993164e37d1f3d80284eb08b5a44a6801771b5f37aedf6cb72",
+      "prompt_sha256": "90e0899d8bf437fb68a9ce97db43647dd166b38da481f1b571ac49f59d9a196c",
       "required_claims": [
         {
           "claim_id": "three_current_state_changes",
@@ -148,7 +148,7 @@
       "case_id": "retrospective_evidence_changes",
       "prompt_class": "portfolio_retrospective",
       "prompt_variant": "direct",
-      "prompt_sha256": "bf7681c2bebea15d168f13fcfa854782ff3bcd49adc4987f0eb581369bfe75e9",
+      "prompt_sha256": "af6264062583909a58cb587085e18a58feaac11401523faa3c178fadd9e718d0",
       "required_claims": [
         {
           "claim_id": "implemented_work",
@@ -175,7 +175,7 @@
       "case_id": "retrospective_failure_learning",
       "prompt_class": "portfolio_retrospective",
       "prompt_variant": "heldout",
-      "prompt_sha256": "7397bd26a97cc57f7714d51a8779869b990acfb2744f41dca3505b104b50c00e",
+      "prompt_sha256": "619f8daed410ca990081cbbb1907a94a64cc0b1870572f22e0c63e678cd05777",
       "required_claims": [
         {
           "claim_id": "critical_mistakes_or_gaps",
@@ -202,7 +202,7 @@
       "case_id": "planning_order_and_gates",
       "prompt_class": "portfolio_planning",
       "prompt_variant": "direct",
-      "prompt_sha256": "7c0697f937be4e63ec5a1959c104e4e873bcb5894859ddb42bc554d174ac9a71",
+      "prompt_sha256": "9f33cb077719bc228d034bcfb093daeeec81d6d23bbc09b4b1ec2832879fb5c4",
       "required_claims": [
         {
           "claim_id": "ordered_next_three_tasks",
@@ -233,7 +233,7 @@
       "case_id": "planning_capacity_forecast",
       "prompt_class": "portfolio_planning",
       "prompt_variant": "heldout",
-      "prompt_sha256": "7822d0d3d73292e2a53d8b13fa857a91d093c4989dd6a8caa5c1f02b97b640c3",
+      "prompt_sha256": "98214d8778b57c06520b66042983a8025f40ae7d151a5f2a8bdc4b5c546d42eb",
       "required_claims": [],
       "optional_claims": [],
       "forbidden_claim_ids": [
@@ -248,7 +248,7 @@
       "case_id": "dependency_owner_gates",
       "prompt_class": "dependency_risk",
       "prompt_variant": "direct",
-      "prompt_sha256": "969964c04fd4fad3b738c71fde04bb366191845af91013019f9973bcf79d4434",
+      "prompt_sha256": "33fbd0683a5f64336fe70bd972e6faf9cc8df95d1dc98b6a91ea32d9b79bbc6b",
       "required_claims": [
         {
           "claim_id": "cross_project_dependencies",
@@ -283,7 +283,7 @@
       "case_id": "dependency_credential_inventory",
       "prompt_class": "dependency_risk",
       "prompt_variant": "heldout",
-      "prompt_sha256": "1b3ad711898b1edb84f5d957e7964af717268bdb09c93a696317ee1f80966e55",
+      "prompt_sha256": "da93167088ec455a7b365c491f27f7b4ff9be275015c416274623fe024f348b5",
       "required_claims": [],
       "optional_claims": [],
       "forbidden_claim_ids": [
@@ -298,7 +298,7 @@
       "case_id": "stale_aio2_wait_state",
       "prompt_class": "stale_state",
       "prompt_variant": "direct",
-      "prompt_sha256": "b9bd10eccf2b616858ab6db4dac33cfc3b2c0dbe085798d1010dd84f0759f078",
+      "prompt_sha256": "32e565f886aeb41abddc5037c3eefb077e852fe0fb5333185415190e0e95ef87",
       "required_claims": [
         {
           "claim_id": "stale_wait_aio2_premise",
@@ -329,7 +329,7 @@
       "case_id": "stale_ab_review_state",
       "prompt_class": "stale_state",
       "prompt_variant": "heldout",
-      "prompt_sha256": "913aaad40c7d55b33a4a5f45e0861a34c5396cc42ed3a034077880036da228e8",
+      "prompt_sha256": "c13a5f67fab4f533cd81a3634926dbf823406c2310b740624a968e437f39a942",
       "required_claims": [
         {
           "claim_id": "owner_review_completed_state",
@@ -360,7 +360,7 @@
       "case_id": "conflict_arrowquant_labels",
       "prompt_class": "cross_project_conflict",
       "prompt_variant": "direct",
-      "prompt_sha256": "6642f09659f33d6bdc32b5e71df46041ad6c345151e849e7383275e4b83b384f",
+      "prompt_sha256": "8bac0526ca2ef0ef5a3a1359e27134ea5cb3477a7b14d409b855b088854691bf",
       "required_claims": [
         {
           "claim_id": "mac_m23b_full_chain_result",
@@ -391,7 +391,7 @@
       "case_id": "conflict_ab_evidence_surfaces",
       "prompt_class": "cross_project_conflict",
       "prompt_variant": "heldout",
-      "prompt_sha256": "e39b3b4cb0f6e0086a458bb471d38f43426e95b92b520cf410dd4f8174d96275",
+      "prompt_sha256": "4885738eb64517a650d27708caef485ce2130d727c1917a5ddd3138ef35a459a",
       "required_claims": [
         {
           "claim_id": "native_surface_provisional_reason",
