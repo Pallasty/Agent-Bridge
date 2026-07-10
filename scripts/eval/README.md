@@ -120,7 +120,9 @@ empty ephemeral read-only directory. User config and project rules are ignored,
 tool-call events fail the run, and the same instruction limits answers to the
 captured evidence. A committed seed hash binds the private randomization; the
 owner packet has opaque answer ids and no condition mapping. The separate map
-can be consumed only with a complete, hash-matching owner review:
+can be consumed only with a complete, hash-matching owner review. The score
+command validates that review before it opens either the condition-labeled raw
+generation packet or the blind map:
 
 ```bash
 python3 scripts/eval/portfolio_continuity_answer_trial.py validate-contract \

@@ -2064,7 +2064,7 @@ def validate_blind_packet(
     contract: dict[str, Any],
     contract_sha: str,
     capture: dict[str, Any],
-    generation: dict[str, Any],
+    generation: dict[str, Any] | None,
 ) -> dict[str, Any]:
     if value.get("schema") != BLIND_PACKET_SCHEMA:
         raise TrialError(f"blind packet schema must be {BLIND_PACKET_SCHEMA}")
@@ -2099,7 +2099,7 @@ def validate_blind_packet(
     if capture_sha != capture["capture_sha256"]:
         raise TrialError("blind packet capture hash mismatch")
     generation_sha = require_sha256(value.get("generation_sha256"), "blind.generation_sha256")
-    if generation_sha != generation["generation_sha256"]:
+    if generation is not None and generation_sha != generation["generation_sha256"]:
         raise TrialError("blind packet generation hash mismatch")
     if require_object(value.get("review_scale"), "blind.review_scale") != contract["review"]:
         raise TrialError("blind packet review scale differs from the contract")
@@ -2162,9 +2162,13 @@ def validate_blind_packet(
             raise TrialError("blind packet claim rubric differs from the contract/capture")
         answer_rows: list[dict[str, str]] = []
         answer_ids: set[str] = set()
-        generation_hashes = Counter(
-            row["answer_sha256"]
-            for row in generation["answers"][case_id].values()
+        generation_hashes = (
+            Counter(
+                row["answer_sha256"]
+                for row in generation["answers"][case_id].values()
+            )
+            if generation is not None
+            else None
         )
         observed_hashes: Counter[str] = Counter()
         for raw_answer in require_list(case.get("answers"), "blind answers"):
@@ -2177,12 +2181,15 @@ def validate_blind_packet(
             answer_text = require_string(answer.get("answer_markdown"), "blind answer text", max_chars=12_000)
             answer_hash = sha256_text(answer_text)
             observed_hashes[answer_hash] += 1
-            if observed_hashes[answer_hash] > generation_hashes[answer_hash]:
+            if (
+                generation_hashes is not None
+                and observed_hashes[answer_hash] > generation_hashes[answer_hash]
+            ):
                 raise TrialError("blind packet answer set differs from generation")
             answer_rows.append({"answer_id": opaque_id, "answer_markdown": answer_text})
         if len(answer_rows) != len(CONDITIONS):
             raise TrialError("blind packet answer count mismatch")
-        if observed_hashes != generation_hashes:
+        if generation_hashes is not None and observed_hashes != generation_hashes:
             raise TrialError("blind packet does not contain every generated answer")
         cases.append(
             {
@@ -2444,14 +2451,6 @@ def score_trial(
     contract, contract_sha = load_contract(contract_path)
     capture_raw, capture_bytes = read_json(capture_path)
     capture = validate_capture(capture_raw, capture_bytes, contract, contract_sha)
-    generation_raw, generation_bytes = read_json(generation_path)
-    generation = validate_generation(
-        generation_raw,
-        generation_bytes,
-        contract,
-        contract_sha,
-        capture,
-    )
     blind_raw, blind_bytes = read_json(blind_path)
     blind = validate_blind_packet(
         blind_raw,
@@ -2459,10 +2458,8 @@ def score_trial(
         contract,
         contract_sha,
         capture,
-        generation,
+        None,
     )
-    map_raw, _ = read_json(map_path)
-    mapping = validate_mapping(map_raw, blind, contract, capture, generation)
     review_raw, review_bytes = read_json(review_path)
     review = validate_review(review_raw, blind, contract)
     require_distinct_paths(
@@ -2475,6 +2472,27 @@ def score_trial(
             "output": output_path,
         }
     )
+
+    # The generation packet and blind map both reveal condition-to-answer
+    # identity. Do not open either until the owner review is complete.
+    generation_raw, generation_bytes = read_json(generation_path)
+    generation = validate_generation(
+        generation_raw,
+        generation_bytes,
+        contract,
+        contract_sha,
+        capture,
+    )
+    blind = validate_blind_packet(
+        blind_raw,
+        blind_bytes,
+        contract,
+        contract_sha,
+        capture,
+        generation,
+    )
+    map_raw, _ = read_json(map_path)
+    mapping = validate_mapping(map_raw, blind, contract, capture, generation)
 
     aggregates: dict[str, dict[str, Any]] = {
         condition: {

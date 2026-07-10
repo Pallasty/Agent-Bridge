@@ -439,9 +439,9 @@ python3 "$ADAPTER" score \
 if python3 "$ADAPTER" score \
   --contract "$contract" \
   --capture "$capture" \
-  --generation "$data/generation.raw.json" \
+  --generation "$data/does-not-exist-generation.json" \
   --blind-packet "$data/blind.packet.json" \
-  --blind-map "$data/blind.map.json" \
+  --blind-map "$data/does-not-exist-map.json" \
   --review "$data/review.incomplete.json" \
   --output "$data/score.incomplete.json" \
   >"$tmpdir/incomplete.stdout" 2>"$tmpdir/incomplete.stderr"; then
