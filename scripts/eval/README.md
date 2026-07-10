@@ -107,6 +107,34 @@ promotion. It uses `subprocess` environment maps directly; do not wrap it with
 bare `env`, because this host may have a user-level `env` shim ahead of
 `/usr/bin/env`.
 
+`portfolio_continuity_answer_trial.py` is the separate owner-blinded answer
+gate. Its checked-in contract fixes four conditions before collection: full
+hybrid search, S4 compact search followed by `memory_get` for exactly the first
+two unique ranked keys, session bootstrap, and direct digest. Capture clones
+one read-only online backup into a fresh SQLite file for every case/condition,
+requires every child to confirm its copy, and fails if compact projection
+changes ranking or leaks a full record.
+
+Generation invokes the preregistered Codex CLI/model once per answer in an
+empty ephemeral read-only directory. User config and project rules are ignored,
+tool-call events fail the run, and the same instruction limits answers to the
+captured evidence. A committed seed hash binds the private randomization; the
+owner packet has opaque answer ids and no condition mapping. The separate map
+can be consumed only with a complete, hash-matching owner review:
+
+```bash
+python3 scripts/eval/portfolio_continuity_answer_trial.py validate-contract \
+  --contract scripts/eval/fixtures/portfolio_continuity_answer_contract.json
+python3 scripts/eval/portfolio_continuity_answer_trial.py capture ...
+python3 scripts/eval/portfolio_continuity_answer_trial.py generate ...
+python3 scripts/eval/portfolio_continuity_answer_trial.py score ...
+```
+
+Prompts, contexts, answers, seed, condition map, and owner review must remain
+under ignored `data/`. The score can recommend only an expanded trial; it is
+not authority for digest regeneration, a compact default, retrieval/runtime
+changes, benchmark claims, versioning, tagging, or release.
+
 ## Baselines
 
 First baseline per day is written to `baselines/<date>.json`; commit it with
