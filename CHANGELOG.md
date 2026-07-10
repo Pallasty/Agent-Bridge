@@ -14,7 +14,10 @@ the project adheres to [Semantic Versioning](https://semver.org/).
   generation. Condition-isolated SQLite snapshots, committed seed blinding,
   complete owner review, hash-bound unblinding, and an expanded-trial-only
   scorer prevent answer generation or a review packet from authorizing runtime
-  behavior.
+  behavior. The first two-case owner-blinded run admits only direct digest to
+  an expanded trial: it retained full weighted claim completeness with no
+  unsupported assertions at 78.96% lower context cost. Rank-only compact
+  top-2-get did not advance; neither result authorizes a runtime change.
 - **Snapshot-safe AB-native portfolio continuity trial.** A private-data
   adapter now captures hybrid retrieval, session bootstrap, and direct digest
   evidence against an online SQLite backup, requires complete human evidence
