@@ -40,6 +40,9 @@ tracked by Git.
   `VALID` for all twelve reference-coverage cases.
 - The capture performed 24 isolated condition runs, wrote no live memory, and
   called no LLM.
+- A targeted post-capture read-only audit found no pre-generation blocker and
+  retained the frozen capture. Its finding dispositions are recorded in
+  `2026-07-10-portfolio-continuity-successor-post-capture-audit.md`.
 
 ## Remaining Hard Gates
 
@@ -56,6 +59,14 @@ managed worktree. It is not a tamper-proof multi-host ledger: an operator able
 to delete/forge local private files or move execution to another managed host
 falls outside this mechanism. A stronger guarantee would require a separately
 authorized custodian-controlled append-only ledger or atomic service.
+
+Within that boundary, two low-severity hardening limits remain: attempt 2 does
+not reparse the existing attempt-1 claim packet, and score-time generation
+validation does not repeat the generation-time forbidden-marker substring scan.
+Both require private-artifact forgery and do not weaken the frozen
+generation-time gate. A hard crash after a durable claim but before a receipt
+can also consume the contract without a restart; this fails closed and must not
+be repaired by deleting the claim.
 
 ## Explicit Non-Authorities
 

@@ -79,6 +79,17 @@ implementation. A later real execution still requires the separately recorded
 owner decisions for capture and generation. Any implementation change requires
 a new harness hash, contract hash, local verification, and independent review.
 
+A targeted post-capture read-only review at tracked head `00121439` separately
+retested the original spec-reserialization finding and two lower-severity
+hardening questions. It confirmed that the contract-scoped claim identity fully
+closes reserialization, changed-trial-id, recapture, alternate-worktree, and
+receipt-replay paths. It classified first-claim content revalidation and a
+score-time marker rescan as non-blocking local-artifact-forgery residuals, and
+the claim-before-receipt crash window as fail-closed liveness risk. The full
+disposition is recorded in
+`2026-07-10-portfolio-continuity-successor-post-capture-audit.md`; no frozen
+harness or contract change was made.
+
 ## Prior Result
 
 The expanded v1 trial remains terminal as
