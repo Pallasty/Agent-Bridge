@@ -13,9 +13,9 @@ benchmark, runtime change, version change, tag, release, or CI action.
 schema: agent_bridge.portfolio_continuity_answer_contract.v2
 contract_id: portfolio_continuity_successor_answer_blind_20260710
 preregistration_base: 768f24aca039d82cf7b6bf748216d5a45900b432
-contract_commit: 408c4f9bea73a2ff8415c071ca819dbacbded2dc
-contract_sha256: 6abd6c33979f57ada16364999b9c1d2bcacc797457e9e6aa4b7f0f33ee4ea11f
-harness_source_sha256: 36891b0a325645c31a42369febe237a5b246d2b740170d6afc885be189f0c313
+contract_commit: 28fa9c1575b0a9250fdbf7745640c2a55ed9a456
+contract_sha256: 2d8ecf1373c3f305fbe266de906493de482e52b86ff6b06b67cbb9f1c0f79f9b
+harness_source_sha256: 13e71e82801c099c2b59945112770c974ab4632c057d8d56d1989ae10c4551da
 surface_source_sha256: 0ff5ab27b79d36169fee22b5de5f2c4563cb1ba0f6edebf354a17cfcb60e6311
 runtime_source_commit: a8c6302325e27c9b5cb20f8c958ab719666de372
 blind_seed_sha256: fc4dfdc5ef8f230996583dd9a9f5c79379316e4c9a36d8c52926053863c42579
@@ -24,6 +24,8 @@ case_count: 12
 condition_count: 2
 reviewer_count: 2
 execution_status: NOT_EXECUTED
+attempt_claim_scope: frozen_contract_sha256
+capture_spec_binding: exact_private_spec_bytes
 ```
 
 The contract is frozen at the commit above. A later execution must use an
@@ -36,12 +38,16 @@ hit its usage limit, the Kilo reviewer exited without a review, and the Gemini
 reviewer remained unavailable with provider 503 responses. None produced
 findings, so none is counted as a completed review.
 
-Local adversarial review found and fixed two retry-state issues before freeze:
-a retry receipt alone did not prevent a fresh attempt-1 rerun, and internal
-claim files were not yet protected from output-path aliasing. V2 now uses
-single-use attempt-1/attempt-2 claims keyed by contract and private-spec
-identity, binds attempt 2 to the authorized receipt, applies explicit private
-permissions and fsync, and protects claim identities from output writes.
+Local adversarial review found and fixed two retry-state issues before the
+first v2 freeze: a retry receipt alone did not prevent a fresh attempt-1 rerun,
+and internal claim files were not yet protected from output-path aliasing. A
+subsequent read-only audit found one further fail-closed gap: changing only
+private-spec JSON whitespace and recapturing could previously produce a new
+claim identity. This revision supersedes that freeze. Each capture now binds
+the exact private-spec byte hash, while the single-use attempt allowance is
+scoped to the frozen public contract rather than mutable spec or capture bytes.
+Attempt 2 remains bound to its authorized receipt; claims retain explicit
+private permissions and fsync and remain protected from output-path writes.
 
 Independent code review remains mandatory before any real successor capture or
 generation. A reviewer must inspect the frozen contract commit without reading
@@ -152,13 +158,21 @@ Automatic retry is forbidden.
 | Attempt 2 failure | None |
 
 An explicit restart must present the complete first failure receipt. The
-receipt must validate against the same contract, private spec, and capture and
-must carry `retry_authorized=true`. Before either attempt, the harness creates a
-private single-use claim keyed by contract and private-spec identity with
-exclusive creation. The attempt-2 claim also binds the first receipt hash.
-Starting another attempt 1, copying or renaming a receipt, or replaying attempt
-2 fails before model invocation. Claiming consumes the allowance even if that
-attempt later fails.
+receipt must validate against the same contract, exact private-spec bytes, and
+capture and must carry `retry_authorized=true`. Each v2 capture stores the
+private spec SHA-256; generation rejects a supplied spec whose byte hash does
+not match the capture before it can create a claim or start a model.
+
+Before either attempt, the harness creates a private single-use claim with
+exclusive creation. Its allowance is scoped to the frozen public contract, not
+to mutable private-spec or capture bytes; the claim packet retains both hashes
+for provenance. Thus one contract permits exactly one attempt 1 and, only when
+the first receipt authorizes it, one attempt 2. The attempt-2 claim binds the
+first receipt hash. An unchanged receipt copied or renamed can represent only
+that same single authorized restart; it cannot create an additional claim.
+Changing a receipt breaks its hash binding. Starting another attempt 1 or
+replaying attempt 2 fails before model invocation. Claiming consumes the
+allowance even if that attempt later fails.
 
 All v2 generation outputs must be fresh paths. The harness executes the matrix
 once and has no retry loop.
@@ -193,7 +207,10 @@ retrieval default change.
 - zero model calls after coverage failure or identity failure;
 - atomic hash-only receipts for coverage, identity, and marker failures;
 - exactly one explicit full restart and receipt replay rejection;
-- zero retry after a model-started semantic failure;
+- zero retry after a model-started semantic failure, including a whitespace-only
+  private-spec edit with both the original capture and a fresh recapture;
+- report, contract, harness, and surface hashes mechanically bound to the
+  frozen contract commit;
 - byte-preserving answers with no postprocessing;
 - successful v2 generation, blinding, two-review validation, and scoring.
 

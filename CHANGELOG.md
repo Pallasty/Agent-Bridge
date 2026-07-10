@@ -15,8 +15,9 @@ the project adheres to [Semantic Versioning](https://semver.org/).
   context. Atomic private failure receipts retain only hashes and failure
   coordinates. Automatic and ad hoc retries are forbidden: only a first-attempt
   pre-model infrastructure failure can authorize one explicit full restart.
-  Single-use contract/spec attempt claims prevent both fresh attempt-1 reruns
-  and receipt replay; model-started and semantic failures receive no retry.
+  Captures bind exact private-spec bytes, while single-use frozen-contract
+  attempt claims prevent spec-formatting/recapture fresh attempt-1 reruns and
+  receipt replay; model-started and semantic failures receive no retry.
   Generated answers are never sanitized or postprocessed. Synthetic v0/v1
   regression plus v2 adversarial verification
   covers coverage failure, projection, identity restart, claim replay, marker
