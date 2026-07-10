@@ -13,7 +13,7 @@ benchmark, runtime change, version change, tag, release, or CI action.
 schema: agent_bridge.portfolio_continuity_answer_contract.v2
 contract_id: portfolio_continuity_successor_answer_blind_20260710
 preregistration_base: 768f24aca039d82cf7b6bf748216d5a45900b432
-contract_commit: bind_after_final_local_verification
+contract_commit: 408c4f9bea73a2ff8415c071ca819dbacbded2dc
 contract_sha256: 6abd6c33979f57ada16364999b9c1d2bcacc797457e9e6aa4b7f0f33ee4ea11f
 harness_source_sha256: 36891b0a325645c31a42369febe237a5b246d2b740170d6afc885be189f0c313
 surface_source_sha256: 0ff5ab27b79d36169fee22b5de5f2c4563cb1ba0f6edebf354a17cfcb60e6311
@@ -26,9 +26,8 @@ reviewer_count: 2
 execution_status: NOT_EXECUTED
 ```
 
-The exact contract commit will be recorded after final local verification. A
-later execution must use an isolated worktree at that exact commit and a
-private spec bound to it.
+The contract is frozen at the commit above. A later execution must use an
+isolated worktree at that exact commit and a private spec bound to it.
 
 ## Review Gate
 
